@@ -44,6 +44,8 @@ initFrame:SetScript("OnEvent", function(self)
         row1, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Blizzard Party Panel",
               tooltip="Hides the collapsed Blizzard party/raid sidebar panel on the side of the screen.",
+              disabled=function() return C_AddOns and C_AddOns.IsAddOnLoaded("EllesmereUIRaidFrames") end,
+              disabledTooltip="This option is now controlled by the Raid Frames addon", rawTooltip=true,
               getValue=function()
                   return EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame or false
               end,
@@ -239,7 +241,10 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 5: Show Coordinates on Map (left, with cog) | empty
+        -- Row 5: Show Coordinates on Map (left, with cog) | Suppress Lua Errors
+        -- (Suppress Lua Errors is a front-end duplicate of the toggle in
+        -- Global Settings > Developer; same EllesmereUIDB.suppressErrors key and
+        -- scriptErrors CVar, applied on login by the parent General module.)
         local coordRow
         coordRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Coordinates on Map",
@@ -253,7 +258,16 @@ initFrame:SetScript("OnEvent", function(self)
                   if EllesmereUI._applyMapCoords then EllesmereUI._applyMapCoords() end
                   EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" }
+            { type="toggle", text="Suppress Lua Errors",
+              tooltip="Hides the Lua error popup. The same setting as Global Settings > Developer.",
+              getValue=function()
+                  return not (EllesmereUIDB and EllesmereUIDB.suppressErrors == false)
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.suppressErrors = v
+                  if not InCombatLockdown() then SetCVar("scriptErrors", v and "0" or "1") end
+              end }
         );  y = y - h
 
         -- Cog on Show Coordinates on Map (left region)
@@ -503,7 +517,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if listening then return end
                 listening = true
-                kbLbl:SetText("Press a key...")
+                kbLbl:SetText(EllesmereUI.L("Press a key..."))
                 kbBtn:EnableKeyboard(true)
             end)
 
@@ -592,17 +606,46 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI:RefreshPage()
               end },
-            { type="toggle", text="Disable Right Click Enemies",
-              tooltip="Disables the default behavior of right clicking to target enemies.",
-              getValue=function()
-                return EllesmereUIDB and EllesmereUIDB.disableRightClickTarget or false
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.disableRightClickTarget = v
-                if EllesmereUI._applyRightClickTarget then EllesmereUI._applyRightClickTarget() end
-              end }
+            { type="dropdown", text="Disable Right Click",
+              tooltip="Suppresses right click targeting. Enemies applies everywhere. Allies In Combat only suppresses friendly targets while you are in combat, so you can still right click vendors and NPCs out of combat.",
+              values={ ["_placeholder"]="..." }, order={ "_placeholder" },
+              getValue=function() return "_placeholder" end,
+              setValue=function() end }
         );  y = y - h
+
+        -- Right slot: multi-select dropdown (Enemies / Allies In Combat).
+        -- The backend stays two independent booleans; the dropdown is purely a
+        -- front-end grouping, so existing disableRightClickTarget users are kept
+        -- exactly as-is and Allies is additive (defaults off).
+        do
+            local rcRgn = durWarnRow._rightRegion
+            if rcRgn._control then rcRgn._control:Hide() end
+            local rcItems = {
+                { key = "enemy", label = "Enemies" },
+                { key = "ally",  label = "Allies In Combat" },
+            }
+            local rcCB, rcCBRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rcRgn, 200, rcRgn:GetFrameLevel() + 2,
+                rcItems,
+                function(k)
+                    if not EllesmereUIDB then return false end
+                    if k == "enemy" then return EllesmereUIDB.disableRightClickTarget or false end
+                    return EllesmereUIDB.disableRightClickTargetAllyCombat or false
+                end,
+                function(k, v)
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    if k == "enemy" then
+                        EllesmereUIDB.disableRightClickTarget = v
+                    else
+                        EllesmereUIDB.disableRightClickTargetAllyCombat = v
+                    end
+                    if EllesmereUI._applyRightClickTarget then EllesmereUI._applyRightClickTarget() end
+                end)
+            PP.Point(rcCB, "RIGHT", rcRgn, "RIGHT", -20, 0)
+            rcRgn._control = rcCB
+            rcRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(rcCBRefresh)
+        end
 
         -- Inline: eyeball | cog | color swatch on the durability warning toggle
         do

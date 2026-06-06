@@ -360,6 +360,7 @@ for _, info in ipairs(BAR_CONFIG) do
         borderClassColor = false,
         borderTexture = "solid",
         borderThickness = "thin",
+        borderBehind = false,
         buttonPadding = 2,
         buttonWidth = 0,
         buttonHeight = 0,
@@ -3557,7 +3558,7 @@ local function EnsureBorders(btn)
     return fd.borders
 end
 
-local function ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
+local function ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey, behind)
     MakeButtonSquare(btn)
     local PP = EllesmereUI and EllesmereUI.PP
     local fd = EFD(btn)
@@ -3598,6 +3599,15 @@ local function ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey,
             end
         end
         EllesmereUI.ApplyBorderStyle(btn, sz, cr, cg, cb, ca, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
+        -- "Show Behind": textured border frame is a child of btn; equal level draws
+        -- in front of the icon, level-1 draws behind it. Solid borders unaffected.
+        if texKey ~= "solid" and EllesmereUI._bdBorderData then
+            local bdFrame = EllesmereUI._bdBorderData[btn]
+            if bdFrame then
+                local lvl = btn:GetFrameLevel()
+                bdFrame:SetFrameLevel(behind and math.max(0, lvl - 1) or lvl)
+            end
+        end
         if fd.borders and fd.shapeMask and fd.shapeMask:IsShown() then
             PP.HideBorder(btn)
             if EllesmereUI._bdBorderData then
@@ -3757,6 +3767,13 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
                 local sz = ResolveBorderThickness(s)
                 local thKey = s.borderThickness or "thin"
                 EllesmereUI.ApplyBorderStyle(btn, sz, c.r, c.g, c.b, c.a or 1, texKey, s.borderTextureOffset, s.borderTextureOffsetY, s.borderTextureShiftX, s.borderTextureShiftY, "actionbars", thKey)
+                if EllesmereUI._bdBorderData then
+                    local bdFrame = EllesmereUI._bdBorderData[btn]
+                    if bdFrame then
+                        local lvl = btn:GetFrameLevel()
+                        bdFrame:SetFrameLevel(s.borderBehind and math.max(0, lvl - 1) or lvl)
+                    end
+                end
             else
                 PP.ShowBorder(btn)
             end
@@ -4029,13 +4046,14 @@ function EAB:ApplyBordersForBar(barKey)
     local texShiftX = s.borderTextureShiftX
     local texShiftY = s.borderTextureShiftY
     local thicknessKey = s.borderThickness or "thin"
+    local behind = s.borderBehind
     local buttons = barButtons[barKey]
     if not buttons then return end
     for i = 1, #buttons do
         local btn = buttons[i]
         if btn then
             EFD(btn).barKey = barKey
-            ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, texShiftX, texShiftY, "actionbars", thicknessKey)
+            ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, texShiftX, texShiftY, "actionbars", thicknessKey, behind)
         end
     end
 end

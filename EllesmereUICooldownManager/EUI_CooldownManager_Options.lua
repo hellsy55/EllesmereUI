@@ -399,6 +399,12 @@ initFrame:SetScript("OnEvent", function(self)
             local pf = CreateFrame("Frame", nil, UIParent)
             pf:SetSize(260, totalH); pf:SetFrameStrata("DIALOG"); pf:SetFrameLevel(200)
             pf:EnableMouse(true); pf:Hide()
+            -- Match panel/popup scale so this cog popup renders at the same size
+            -- as the shared BuildCogPopup popups.
+            pf:SetScale((EllesmereUI.GetPopupScale and EllesmereUI.GetPopupScale()) or 1)
+            if EllesmereUI._popupFrames then
+                EllesmereUI._popupFrames[#EllesmereUI._popupFrames + 1] = { popup = pf }
+            end
             -- Bind data source before sliders are built so getValue callbacks work
             pf._getData = getDataFn
             pf._refresh = refreshFn
@@ -407,7 +413,7 @@ initFrame:SetScript("OnEvent", function(self)
             MakeBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
 
             local titleFS = MakeFont(pf, 11, "", 1, 1, 1); titleFS:SetAlpha(0.7)
-            titleFS:SetPoint("TOP", pf, "TOP", 0, -TOP_PAD); titleFS:SetText("Pixel Glow Settings")
+            titleFS:SetPoint("TOP", pf, "TOP", 0, -TOP_PAD); titleFS:SetText(EllesmereUI.L("Pixel Glow Settings"))
 
             local tmpFS = pf:CreateFontString(nil, "OVERLAY")
             tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
@@ -424,7 +430,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local r1Y = -(TOP_PAD + TITLE_H + TITLE_GAP + GAP)
             local lbl1 = MakeFont(pf, 11, nil, 1, 1, 1); lbl1:SetAlpha(0.6)
-            lbl1:SetText("Lines"); lbl1:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r1Y)
+            lbl1:SetText(EllesmereUI.L("Lines")); lbl1:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r1Y)
             local t1, v1 = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, ROW_H, 11, POPUP_INPUT_A,
                 2, 16, 1,
                 function() local d = pf._getData(); return d and d.pandemicGlowLines or 8 end,
@@ -434,7 +440,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local r2Y = r1Y - ROW_H - GAP
             local lbl2 = MakeFont(pf, 11, nil, 1, 1, 1); lbl2:SetAlpha(0.6)
-            lbl2:SetText("Thickness"); lbl2:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r2Y)
+            lbl2:SetText(EllesmereUI.L("Thickness")); lbl2:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r2Y)
             local t2, v2 = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, ROW_H, 11, POPUP_INPUT_A,
                 1, 4, 1,
                 function() local d = pf._getData(); return d and d.pandemicGlowThickness or 2 end,
@@ -444,7 +450,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local r3Y = r2Y - ROW_H - GAP
             local lbl3 = MakeFont(pf, 11, nil, 1, 1, 1); lbl3:SetAlpha(0.6)
-            lbl3:SetText("Speed"); lbl3:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r3Y)
+            lbl3:SetText(EllesmereUI.L("Speed")); lbl3:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r3Y)
             local t3, v3 = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, ROW_H, 11, POPUP_INPUT_A,
                 1, 8, 1,
                 function() local d = pf._getData(); local p = d and d.pandemicGlowSpeed or 4; return 9 - p end,
@@ -1352,7 +1358,7 @@ initFrame:SetScript("OnEvent", function(self)
             tipFS:SetFont(FONT_PATH, 11, GetCDMOptOutline())
             tipFS:SetTextColor(1, 1, 1, 0.70)
             tipFS:SetPoint("TOP", headerFrame, "TOP", 0, -(20 + DD_H + 20 + scaledBtnH + 20))
-            tipFS:SetText("Left click a button to edit its glow, right click to add a new glow")
+            tipFS:SetText(EllesmereUI.L("Left click a button to edit its glow, right click to add a new glow"))
 
             return 20 + DD_H + 20 + scaledBtnH + 20 + 14 + 15
         end
@@ -1395,7 +1401,7 @@ initFrame:SetScript("OnEvent", function(self)
             hintText:SetFont(FONT_PATH, 12, GetCDMOptOutline())
             hintText:SetTextColor(0.5, 0.5, 0.5, 1)
             hintText:SetPoint("CENTER")
-            hintText:SetText("Left click a button to edit its glow, right click to add a new glow")
+            hintText:SetText(EllesmereUI.L("Left click a button to edit its glow, right click to add a new glow"))
             y = y - 40
         else
             -- Button selected: show per-buff sections
@@ -1421,7 +1427,7 @@ initFrame:SetScript("OnEvent", function(self)
                 emptyText:SetFont(FONT_PATH, 12, GetCDMOptOutline())
                 emptyText:SetTextColor(0.5, 0.5, 0.5, 1)
                 emptyText:SetPoint("LEFT", 22, 0)
-                emptyText:SetText("No buffs assigned. Right click a button in the preview to assign buffs.")
+                emptyText:SetText(EllesmereUI.L("No buffs assigned. Right click a button in the preview to assign buffs."))
                 y = y - 30
             else
                 local glowLabels, glowOrder = GetGlowStyleValues()
@@ -1728,13 +1734,13 @@ initFrame:SetScript("OnEvent", function(self)
             title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
             title:SetPoint("TOP", popup, "TOP", 0, -18)
             title:SetTextColor(1, 1, 1, 1)
-            title:SetText("Custom Buff ID")
+            title:SetText(EllesmereUI.L("Custom Buff ID"))
 
             local sidLbl = popup:CreateFontString(nil, "OVERLAY")
             sidLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
             sidLbl:SetPoint("TOPLEFT", popup, "TOPLEFT", 24, -52)
             sidLbl:SetTextColor(0.7, 0.7, 0.7, 1)
-            sidLbl:SetText("Spell ID")
+            sidLbl:SetText(EllesmereUI.L("Spell ID"))
 
             local sidBox = CreateFrame("EditBox", nil, popup)
             sidBox:SetSize(180, 28)
@@ -1752,7 +1758,7 @@ initFrame:SetScript("OnEvent", function(self)
             sidPh:SetFont(FONT_PATH, 12, GetCDMOptOutline())
             sidPh:SetPoint("LEFT", sidBox, "LEFT", 4, 0)
             sidPh:SetTextColor(0.5, 0.5, 0.5, 0.5)
-            sidPh:SetText("e.g. 12345")
+            sidPh:SetText(EllesmereUI.L("e.g. 12345"))
             sidBox:SetScript("OnTextChanged", function(self)
                 if self:GetText() == "" then sidPh:Show() else sidPh:Hide() end
             end)
@@ -1762,7 +1768,7 @@ initFrame:SetScript("OnEvent", function(self)
             durLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
             durLbl:SetPoint("TOPLEFT", sidBox, "BOTTOMLEFT", 0, -12)
             durLbl:SetTextColor(0.7, 0.7, 0.7, 1)
-            durLbl:SetText("Duration (seconds)")
+            durLbl:SetText(EllesmereUI.L("Duration (seconds)"))
 
             local durBox = CreateFrame("EditBox", nil, popup)
             durBox:SetSize(180, 28)
@@ -1780,7 +1786,7 @@ initFrame:SetScript("OnEvent", function(self)
             durPh:SetFont(FONT_PATH, 12, GetCDMOptOutline())
             durPh:SetPoint("LEFT", durBox, "LEFT", 4, 0)
             durPh:SetTextColor(0.5, 0.5, 0.5, 0.5)
-            durPh:SetText("e.g. 30")
+            durPh:SetText(EllesmereUI.L("e.g. 30"))
             durBox:SetScript("OnTextChanged", function(self)
                 if self:GetText() == "" then durPh:Show() else durPh:Hide() end
             end)
@@ -1803,7 +1809,7 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.MakeBorder(addBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
             local addLbl = addBtn:CreateFontString(nil, "OVERLAY")
             addLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-            addLbl:SetPoint("CENTER"); addLbl:SetText("Add")
+            addLbl:SetPoint("CENTER"); addLbl:SetText(EllesmereUI.L("Add"))
             addLbl:SetTextColor(ar, ag, ab, 0.9)
             addBtn:SetScript("OnEnter", function() addLbl:SetTextColor(1, 1, 1, 1) end)
             addBtn:SetScript("OnLeave", function() addLbl:SetTextColor(ar, ag, ab, 0.9) end)
@@ -1817,7 +1823,7 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
             local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
             cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-            cLbl:SetPoint("CENTER"); cLbl:SetText("Cancel")
+            cLbl:SetPoint("CENTER"); cLbl:SetText(EllesmereUI.L("Cancel"))
             cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
             cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
             cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
@@ -1925,7 +1931,7 @@ initFrame:SetScript("OnEvent", function(self)
         csLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
         csLbl:SetPoint("LEFT", 10, 0)
         csLbl:SetJustifyH("LEFT")
-        csLbl:SetText("Custom Buff ID")
+        csLbl:SetText(EllesmereUI.L("Custom Buff ID"))
         csLbl:SetTextColor(isCustomSelected and 1 or tDimR, isCustomSelected and 1 or tDimG, isCustomSelected and 1 or tDimB, isCustomSelected and 1 or tDimA)
         csItem:SetScript("OnEnter", function() csLbl:SetTextColor(1,1,1,1); csHl:SetColorTexture(1,1,1,hlA) end)
         csItem:SetScript("OnLeave", function()
@@ -2001,7 +2007,10 @@ initFrame:SetScript("OnEvent", function(self)
 
         local _, _tbbPClass = UnitClass("player")
         for _, entry in ipairs(popular) do
-            if not entry.class or entry.class == _tbbPClass then
+            -- tbbOnly presets (e.g. debuff-driven Bloodlust) carry a sentinel
+            -- class to hide from the cooldown/utility item picker; the TBB
+            -- picker overrides that and always shows them.
+            if entry.tbbOnly or not entry.class or entry.class == _tbbPClass then
                 MakePopularItem(entry)
             end
         end
@@ -2260,9 +2269,9 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     ddLbl:SetText(label)
                 elseif #bars == 0 then
-                    ddLbl:SetText("No Bars - Click to Add")
+                    ddLbl:SetText(EllesmereUI.L("No Bars - Click to Add"))
                 else
-                    ddLbl:SetText("Select a bar")
+                    ddLbl:SetText(EllesmereUI.L("Select a bar"))
                 end
             end
             UpdateDDLabel()
@@ -2329,7 +2338,7 @@ initFrame:SetScript("OnEvent", function(self)
                         menu:Hide()
                         EllesmereUI:ShowConfirmPopup({
                             title = "Delete Bar",
-                            message = "Delete \"" .. displayName .. "\"?",
+                            message = EllesmereUI.Lf("Delete \"%1$s\"?", displayName),
                             confirmText = "Delete", cancelText = "Cancel",
                             onConfirm = function()
                                 ns.RemoveTrackedBuffBar(idx)
@@ -2365,7 +2374,7 @@ initFrame:SetScript("OnEvent", function(self)
                 addLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                 addLbl:SetPoint("LEFT", addItem, "LEFT", 10, 0)
                 addLbl:SetJustifyH("LEFT")
-                addLbl:SetText("+ Add New Bar")
+                addLbl:SetText(EllesmereUI.L("+ Add New Bar"))
                 addLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                 local addHl = addItem:CreateTexture(nil, "ARTWORK")
                 addHl:SetAllPoints(); addHl:SetColorTexture(1, 1, 1, 1); addHl:SetAlpha(0)
@@ -2684,7 +2693,7 @@ initFrame:SetScript("OnEvent", function(self)
                         nameFs:ClearAllPoints()
                         nameFs:SetPoint("CENTER", pvBar, "CENTER", 0, 0)
                         nameFs:SetJustifyH("CENTER")
-                        nameFs:SetText("Click to assign a buff")
+                        nameFs:SetText(EllesmereUI.L("Click to assign a buff"))
                         nameFs:SetTextColor(1, 1, 1, 1)
                     end
                 else
@@ -2695,7 +2704,7 @@ initFrame:SetScript("OnEvent", function(self)
                         nameFs:SetTextColor(1, 1, 1, 1)
                         nameFs:SetPoint("CENTER", pvBar, "CENTER", 0, 0)
                         nameFs:SetJustifyH("CENTER")
-                        nameFs:SetText("Click to assign a buff")
+                        nameFs:SetText(EllesmereUI.L("Click to assign a buff"))
                     end
                 end
 
@@ -2760,7 +2769,7 @@ initFrame:SetScript("OnEvent", function(self)
                 do
                     -- Border wraps bar + icon (mirrors live wrapFrame._barBorder)
                     local pvBorderFrame = CreateFrame("Frame", nil, pvContent)
-                    pvBorderFrame:SetFrameLevel(pvContent:GetFrameLevel() + 5)
+                    pvBorderFrame:SetFrameLevel(bd.borderBehind and math.max(0, pvContent:GetFrameLevel() - 1) or (pvContent:GetFrameLevel() + 5))
                     pvBorderFrame:SetSize(PREVIEW_W, PREVIEW_H)
                     pvBorderFrame:SetAllPoints(pvContent)
                     EllesmereUI.ApplyBorderStyle(pvBorderFrame, bSz,
@@ -2796,7 +2805,7 @@ initFrame:SetScript("OnEvent", function(self)
                 hint:SetFont(FONT_PATH, 12, GetCDMOptOutline())
                 hint:SetTextColor(1, 1, 1, 0.35)
                 hint:SetPoint("CENTER")
-                hint:SetText("Use the dropdown above to add a new bar")
+                hint:SetText(EllesmereUI.L("Use the dropdown above to add a new bar"))
             end
 
             -- Preview visual height = bar height, capped at scroll container max
@@ -3106,7 +3115,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetAllPoints(cogBtn); cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Name Text above None"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("This option requires a Name Text position other than None"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisName()
@@ -3178,7 +3187,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetAllPoints(cogBtn); cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Duration Text above None"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("This option requires a Duration Text position other than None"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisTimer()
@@ -3268,7 +3277,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetAllPoints(cogBtn); cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Set Stacks Text above None"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("This option requires a Stacks Text position other than None"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisStacks()
@@ -3410,7 +3419,7 @@ initFrame:SetScript("OnEvent", function(self)
             fillBlock:SetAllPoints(); fillBlock:SetFrameLevel(fillSwatch:GetFrameLevel() + 10)
             fillBlock:EnableMouse(true)
             fillBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(fillSwatch, EllesmereUI.DisabledTooltip("Set Fill Color to a Custom option"))
+                EllesmereUI.ShowWidgetTooltip(fillSwatch, EllesmereUI.DisabledTooltip("This option requires Fill Color to be set to Custom"))
             end)
             fillBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -3452,11 +3461,9 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       local bd = SelectedTBB(); if not bd then return end
                       bd.borderTexture = v; bd.borderTextureOffset = nil; bd.borderTextureOffsetY = nil; bd.borderTextureShiftX = nil; bd.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          bd.borderR = 1; bd.borderG = 1; bd.borderB = 1
-                      else
-                          bd.borderR = 0; bd.borderG = 0; bd.borderB = 0
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      bd.borderR = _bcol.r; bd.borderG = _bcol.g; bd.borderB = _bcol.b
+                      bd.borderBehind = _bbehind
                       local defSz = EllesmereUI.GetBorderDefaultSize("resourcebars", v)
                       if defSz then bd.borderSize = defSz end
                       RefreshTBB(); EllesmereUI:RefreshPage()
@@ -3539,6 +3546,14 @@ initFrame:SetScript("OnEvent", function(self)
                               local bd = SelectedTBB(); if not bd then return end
                               bd.borderTextureShiftY = v == 0 and nil or v; RefreshTBB()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function()
+                              local bd = SelectedTBB(); return bd and bd.borderBehind or false
+                          end,
+                          set = function(v)
+                              local bd = SelectedTBB(); if not bd then return end
+                              bd.borderBehind = v == false and nil or v; RefreshTBB()
+                          end },
                     },
                 })
                 local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -3610,7 +3625,7 @@ initFrame:SetScript("OnEvent", function(self)
             block:SetFrameLevel(trackFrame:GetFrameLevel() + 10)
             block:EnableMouse(true)
             block:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(trackFrame, EllesmereUI.DisabledTooltip("Enable Max Stacks"))
+                EllesmereUI.ShowWidgetTooltip(trackFrame, EllesmereUI.DisabledTooltip("Max Stacks"))
             end)
             block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateMaxSliderState()
@@ -3632,7 +3647,7 @@ initFrame:SetScript("OnEvent", function(self)
                 suffix:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
                 suffix:SetTextColor(1, 1, 1, 0.35)
                 suffix:SetPoint("LEFT", ticksLabel, "RIGHT", 5, 0)
-                suffix:SetText("(Ex: 1,5,8)")
+                suffix:SetText(EllesmereUI.L("(Ex: 1,5,8)"))
             end
         end
         -- Inline input on Ticks at Stacks (matches slider value box style)
@@ -3708,7 +3723,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Stack Threshold",
               min = 0, max = 50, step = 1,
               disabled = function() local bd = SelectedTBB(); return not bd or not bd.stackThresholdEnabled end,
-              disabledTooltip = EllesmereUI.DisabledTooltip("Enable Stack Threshold"),
+              disabledTooltip = "Stack Threshold",
               getValue = function() local bd = SelectedTBB(); return bd and bd.stackThreshold or 5 end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
@@ -3736,7 +3751,7 @@ initFrame:SetScript("OnEvent", function(self)
             threshBlock:SetAllPoints(); threshBlock:SetFrameLevel(threshSwatch:GetFrameLevel() + 10)
             threshBlock:EnableMouse(true)
             threshBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(threshSwatch, EllesmereUI.DisabledTooltip("Enable Stack Threshold"))
+                EllesmereUI.ShowWidgetTooltip(threshSwatch, EllesmereUI.DisabledTooltip("Stack Threshold"))
             end)
             threshBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateThreshSwatchState()
@@ -4369,7 +4384,7 @@ initFrame:SetScript("OnEvent", function(self)
             rmLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
             rmLbl:SetPoint("LEFT", 10, 0)
             rmLbl:SetJustifyH("LEFT")
-            rmLbl:SetText("Remove Spell")
+            rmLbl:SetText(EllesmereUI.L("Remove Spell"))
             rmLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
 
             local rmHl = rmItem:CreateTexture(nil, "ARTWORK")
@@ -4630,6 +4645,12 @@ initFrame:SetScript("OnEvent", function(self)
                         or (sd.customSpellIDs and sd.customSpellIDs[spellID])
                     local customDisabledTip = "Not available for custom injected spells"
 
+                    -- Custom-shaped bars always render Shape Glow, so the per-spell proc
+                    -- glow choice is locked (custom = any Icon Shape other than None/Cropped).
+                    local cdmBd = ns.barDataByKey and ns.barDataByKey[barKey]
+                    local barCustomShape = cdmBd and cdmBd.iconShape
+                        and cdmBd.iconShape ~= "none" and cdmBd.iconShape ~= "cropped"
+
                     -- 1. Proc Glow (default = nil)
                     local procRow = MakeSubnavRow("Proc Glow", GLOW_ITEMS,
                         function() return ss.procGlow end,
@@ -4647,11 +4668,13 @@ initFrame:SetScript("OnEvent", function(self)
                                 si:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                             end
                         end)
-                    if isCustomInjected and procRow then
+                    if procRow and (isCustomInjected or barCustomShape) then
+                        local procDisabledTip = isCustomInjected and customDisabledTip
+                            or "Custom shapes always use Shape Glow. Set the bar's Icon Shape to None or Cropped to pick a different glow."
                         procRow:SetAlpha(0.35)
                         procRow:SetScript("OnEnter", function()
                             if EllesmereUI.ShowWidgetTooltip then
-                                EllesmereUI.ShowWidgetTooltip(procRow, customDisabledTip)
+                                EllesmereUI.ShowWidgetTooltip(procRow, procDisabledTip)
                             end
                         end)
                         procRow:SetScript("OnLeave", function()
@@ -4910,7 +4933,7 @@ initFrame:SetScript("OnEvent", function(self)
                     syncLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                     syncLbl:SetPoint("LEFT", 10, 0)
                     syncLbl:SetJustifyH("LEFT")
-                    syncLbl:SetText("Sync All Bar Buttons")
+                    syncLbl:SetText(EllesmereUI.L("Sync All Bar Buttons"))
                     syncLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
 
                     local syncVal = syncRow:CreateFontString(nil, "OVERLAY")
@@ -4926,10 +4949,10 @@ initFrame:SetScript("OnEvent", function(self)
                     local function UpdateSyncLabel()
                         local acR, acG, acB = EllesmereUI.GetAccentColor()
                         if sd._syncIconSettings then
-                            syncVal:SetText("Enabled")
+                            syncVal:SetText(EllesmereUI.L("Enabled"))
                             syncVal:SetTextColor(acR, acG, acB, 1)
                         else
-                            syncVal:SetText("Disabled")
+                            syncVal:SetText(EllesmereUI.L("Disabled"))
                             syncVal:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                         end
                     end
@@ -5039,7 +5062,7 @@ initFrame:SetScript("OnEvent", function(self)
             csLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
             csLbl:SetPoint("LEFT", 10, 0)
             csLbl:SetJustifyH("LEFT")
-            csLbl:SetText("Custom Spell ID")
+            csLbl:SetText(EllesmereUI.L("Custom Spell ID"))
             csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
 
             csItem:SetScript("OnEnter", function()
@@ -5079,7 +5102,7 @@ initFrame:SetScript("OnEvent", function(self)
                     title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
                     title:SetPoint("TOP", popup, "TOP", 0, -18)
                     title:SetTextColor(1, 1, 1, 1)
-                    title:SetText("Add Custom Spell")
+                    title:SetText(EllesmereUI.L("Add Custom Spell"))
                     popup._title = title
 
                     local editBox = CreateFrame("EditBox", nil, popup)
@@ -5099,7 +5122,7 @@ initFrame:SetScript("OnEvent", function(self)
                     placeholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
                     placeholder:SetPoint("CENTER")
                     placeholder:SetTextColor(0.5, 0.5, 0.5, 0.5)
-                    placeholder:SetText("Spell ID")
+                    placeholder:SetText(EllesmereUI.L("Spell ID"))
                     editBox:SetScript("OnTextChanged", function(self)
                         if self:GetText() == "" then placeholder:Show() else placeholder:Hide() end
                     end)
@@ -5122,7 +5145,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.MakeBorder(addBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
                     local addLbl = addBtn:CreateFontString(nil, "OVERLAY")
                     addLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-                    addLbl:SetPoint("CENTER"); addLbl:SetText("Add")
+                    addLbl:SetPoint("CENTER"); addLbl:SetText(EllesmereUI.L("Add"))
                     addLbl:SetTextColor(ar, ag, ab, 0.9)
                     addBtn:SetScript("OnEnter", function() addLbl:SetTextColor(1, 1, 1, 1) end)
                     addBtn:SetScript("OnLeave", function() addLbl:SetTextColor(ar, ag, ab, 0.9) end)
@@ -5136,7 +5159,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
                     local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
                     cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
-                    cLbl:SetPoint("CENTER"); cLbl:SetText("Cancel")
+                    cLbl:SetPoint("CENTER"); cLbl:SetText(EllesmereUI.L("Cancel"))
                     cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
                     cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
                     cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
@@ -5149,7 +5172,7 @@ initFrame:SetScript("OnEvent", function(self)
                     durLabel:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                     durLabel:SetPoint("TOP", editBox, "BOTTOM", 0, -32)
                     durLabel:SetTextColor(0.7, 0.7, 0.7, 0.85)
-                    durLabel:SetText("Duration (seconds)")
+                    durLabel:SetText(EllesmereUI.L("Duration (seconds)"))
                     popup._durLabel = durLabel
 
                     local durBox = CreateFrame("EditBox", nil, popup)
@@ -5167,7 +5190,7 @@ initFrame:SetScript("OnEvent", function(self)
                     durPlaceholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
                     durPlaceholder:SetPoint("CENTER")
                     durPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.5)
-                    durPlaceholder:SetText("Required")
+                    durPlaceholder:SetText(EllesmereUI.L("Required"))
                     durBox:SetScript("OnTextChanged", function(self)
                         if self:GetText() == "" then durPlaceholder:Show() else durPlaceholder:Hide() end
                     end)
@@ -5421,7 +5444,7 @@ initFrame:SetScript("OnEvent", function(self)
             local ctLbl = ctItem:CreateFontString(nil, "OVERLAY")
             ctLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
             ctLbl:SetPoint("LEFT", 10, 0); ctLbl:SetJustifyH("LEFT")
-            ctLbl:SetText("Custom Item")
+            ctLbl:SetText(EllesmereUI.L("Custom Item"))
             ctLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
             local ctArrow = ctItem:CreateTexture(nil, "ARTWORK")
             ctArrow:SetSize(10, 10)
@@ -5778,7 +5801,7 @@ initFrame:SetScript("OnEvent", function(self)
                 potLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                 potLbl:SetPoint("LEFT", 10, 0)
                 potLbl:SetJustifyH("LEFT")
-                potLbl:SetText("Potions & Healthstone")
+                potLbl:SetText(EllesmereUI.L("Potions & Healthstone"))
                 potLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
 
                 local potArrow = potItem:CreateTexture(nil, "ARTWORK")
@@ -5941,7 +5964,9 @@ initFrame:SetScript("OnEvent", function(self)
 
             local _, _pClass = UnitClass("player")
             for _, preset in ipairs(ns.BUFF_BAR_PRESETS) do
-                if not preset.class or preset.class == _pClass then
+                -- tbbOnly presets (e.g. debuff-driven Bloodlust) are not
+                -- cooldown-trackable, so they are excluded from this picker.
+                if (not preset.class or preset.class == _pClass) and not preset.tbbOnly then
                     local primaryID = preset.spellIDs and preset.spellIDs[1]
                     local isAdded = primaryID and alreadyTracked[primaryID]
 
@@ -7288,7 +7313,15 @@ initFrame:SetScript("OnEvent", function(self)
             if numRows == 2 and bd.customTopRowEnabled and bd.topRowCount and bd.topRowCount > 0 then
                 topRowCount = math.min(bd.topRowCount, count)
                 local bottomCount = count - topRowCount
-                stride = math.max(topRowCount, bottomCount)
+                if bottomCount <= 0 then
+                    -- Match the runtime: collapse to one row until the icon count
+                    -- exceeds the top-row count and actually fills a second row.
+                    -- This also keeps the "+" button on the top row.
+                    numRows = 1
+                    stride = math.max(topRowCount, 1)
+                else
+                    stride = math.max(topRowCount, bottomCount)
+                end
             else
                 stride = math.ceil(count / numRows)
                 if stride < 1 then stride = 1 end
@@ -7581,7 +7614,7 @@ initFrame:SetScript("OnEvent", function(self)
                 clickFS:SetJustifyH("CENTER")
                 local ar, ag, ab = EllesmereUI.GetAccentColor()
                 clickFS:SetTextColor(ar, ag, ab, 1)
-                clickFS:SetText("Manage shown buffs through Blizzard CDM Settings")
+                clickFS:SetText(EllesmereUI.L("Manage shown buffs through Blizzard CDM Settings"))
                 clickBtn._fs = clickFS
                 clickBtn:SetScript("OnEnter", function() clickFS:SetTextColor(1, 1, 1, 1) end)
                 clickBtn:SetScript("OnLeave", function()
@@ -7615,7 +7648,7 @@ initFrame:SetScript("OnEvent", function(self)
                     fkFS:SetJustifyH("CENTER")
                     fkFS:SetWordWrap(true)
                     fkFS:SetTextColor(1, 1, 1, 1)
-                    fkFS:SetText("This bar will always be attached to your focus target's nameplate")
+                    fkFS:SetText(EllesmereUI.L("This bar will always be attached to your focus target's nameplate"))
                     self._focusKickInfoText = fkFS
                 end
                 local fkFS = self._focusKickInfoText
@@ -7905,7 +7938,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local delKey = b.key
                             EllesmereUI:ShowConfirmPopup({
                                 title = "Delete Bar",
-                                message = "Are you sure you want to delete \"" .. delName .. "\"?",
+                                message = EllesmereUI.Lf("Are you sure you want to delete \"%1$s\"?", delName),
                                 confirmText = "Delete",
                                 cancelText = "Cancel",
                                 onConfirm = function()
@@ -7927,7 +7960,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local oldName = b.name or b.key
                             EllesmereUI:ShowInputPopup({
                                 title = "Rename Bar",
-                                message = "Enter a new name for \"" .. oldName .. "\":",
+                                message = EllesmereUI.Lf("Enter a new name for \"%1$s\":", oldName),
                                 placeholder = oldName,
                                 confirmText = "Rename",
                                 cancelText = "Cancel",
@@ -7999,7 +8032,7 @@ initFrame:SetScript("OnEvent", function(self)
                     addLbl:SetPoint("LEFT", addItem, "LEFT", 10, 0)
                     addLbl:SetJustifyH("LEFT")
                     if atCap then
-                        addLbl:SetText(entry.label .. " (max " .. (ns.MAX_CUSTOM_BARS or 6) .. ")")
+                        addLbl:SetText(EllesmereUI.Lf("%1$s (max %2$s)", entry.label, ns.MAX_CUSTOM_BARS or 6))
                         addLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
                     else
                         addLbl:SetText(entry.label)
@@ -8298,7 +8331,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local block = CreateFrame("Frame", nil, bgSwatch)
                 block:SetAllPoints(); block:SetFrameLevel(bgSwatch:GetFrameLevel() + 10); block:EnableMouse(true)
                 block:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(bgSwatch, EllesmereUI.DisabledTooltip("Enable Bar Background"))
+                    EllesmereUI.ShowWidgetTooltip(bgSwatch, EllesmereUI.DisabledTooltip("Bar Background"))
                 end)
                 block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 EllesmereUI.RegisterWidgetRefresh(function()
@@ -8370,7 +8403,7 @@ initFrame:SetScript("OnEvent", function(self)
                       min=1, max=50, step=1,
                       tooltip="How many icons to show on the top row. The rest go on the bottom row.",
                       disabled=customTopOff,
-                      disabledTooltip="Enable Custom Top Row Count",
+                      disabledTooltip="Custom Top Row Count",
                       get=function()
                           local bd = BD()
                           if bd.topRowCount and bd.topRowCount > 0 then return bd.topRowCount end
@@ -8567,7 +8600,7 @@ initFrame:SetScript("OnEvent", function(self)
                 enableBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 20)
                 enableBlock:EnableMouse(true)
                 enableBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(customSwatch, EllesmereUI.DisabledTooltip("Enable Focus Text Reminders"))
+                    EllesmereUI.ShowWidgetTooltip(customSwatch, EllesmereUI.DisabledTooltip("Focus Text Reminders"))
                 end)
                 enableBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -8836,7 +8869,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local asbBlock = CreateFrame("Frame", nil, asbCog)
                 asbBlock:SetAllPoints(); asbBlock:SetFrameLevel(asbCog:GetFrameLevel() + 10); asbBlock:EnableMouse(true)
                 asbBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(asbCog, EllesmereUI.DisabledTooltip("Always Show Buffs must be enabled"))
+                    EllesmereUI.ShowWidgetTooltip(asbCog, EllesmereUI.DisabledTooltip("Always Show Buffs"))
                 end)
                 asbBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 if asbCogOff() then asbBlock:Show() else asbBlock:Hide() end
@@ -8914,35 +8947,24 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 glowSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
-                local glowSwatchBlock = CreateFrame("Button", nil, glowSwatch)
-                glowSwatchBlock:SetAllPoints(); glowSwatchBlock:SetFrameLevel(glowSwatch:GetFrameLevel() + 10)
-                glowSwatchBlock:EnableMouse(true)
-                glowSwatchBlock:SetScript("OnClick", function()
-                    local gt = BD().buffGlowType or 0
-                    if gt ~= 0 and BD().buffGlowClassColor then
+                -- Click the dimmed custom swatch to switch back from class color (no block overlay)
+                local origGlowClick = glowSwatch:GetScript("OnClick")
+                glowSwatch:SetScript("OnClick", function(self, ...)
+                    if BD().buffGlowClassColor then
                         BD().buffGlowClassColor = false; ns.BuildAllCDMBars()
                         Refresh(); EllesmereUI:RefreshPage()
+                        return
                     end
+                    -- No glow selected (or custom shape): allow swapping boxes but do not open the color picker
+                    if (BD().buffGlowType or 0) == 0 or IsCustomShape() then return end
+                    if origGlowClick then origGlowClick(self, ...) end
                 end)
-                glowSwatchBlock:SetScript("OnEnter", function()
-                    local gt = BD().buffGlowType or 0
-                    local reason
-                    if gt == 0 or IsCustomShape() then
-                        reason = "This option requires a buff glow to be selected"
-                    else
-                        reason = "Color is controlled by class color"
-                    end
-                    EllesmereUI.ShowWidgetTooltip(glowSwatch, EllesmereUI.DisabledTooltip(reason))
-                end)
-                glowSwatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
                 local function UpdateBuffGlowState()
                     local gt = BD().buffGlowType or 0
                     local noGlow = gt == 0 or IsCustomShape()
                     local isClassColored = BD().buffGlowClassColor
-                    local customDis = isClassColored or noGlow
-                    if customDis then glowSwatch:SetAlpha(0.3); glowSwatchBlock:Show()
-                    else glowSwatch:SetAlpha(1); glowSwatchBlock:Hide() end
+                    glowSwatch:SetAlpha((isClassColored or noGlow) and 0.3 or 1)
                     classSwatch:SetAlpha((isClassColored and not noGlow) and 1 or 0.3)
                 end
                 EllesmereUI.RegisterWidgetRefresh(function() updateGlowSwatch(); updateClassSwatch(); UpdateBuffGlowState() end)
@@ -8957,6 +8979,11 @@ initFrame:SetScript("OnEvent", function(self)
                   itemDisabled=function(val)
                       if val ~= "none" and val ~= "cropped" and (BD().borderTexture or "solid") ~= "solid" then return true end
                       return false
+                  end,
+                  itemDisabledTooltip=function(val)
+                      if val ~= "none" and val ~= "cropped" and (BD().borderTexture or "solid") ~= "solid" then
+                          return "This option requires the Border Style to be set to Solid"
+                      end
                   end,
                   getValue=function() return BD().iconShape or "none" end,
                   setValue=function(v)
@@ -9039,8 +9066,15 @@ initFrame:SetScript("OnEvent", function(self)
                 buffBsRow, h = W:DualRow(parent, y,
                     { type="dropdown", text="Border Size",
                       values=BORDER_LABELS, order=BORDER_ORDER,
-                      disabled=function() return IsCustomShape() end,
-                      disabledTooltip="This option requires a non-custom button shape",
+                      itemDisabled=function(val)
+                          if IsCustomShape() and (val == "thin" or val == "normal" or val == "heavy") then return true end
+                          return false
+                      end,
+                      itemDisabledTooltip=function(val)
+                          if IsCustomShape() and (val == "thin" or val == "normal" or val == "heavy") then
+                              return "This option requires a non-custom shape to be selected"
+                          end
+                      end,
                       getValue=function() return BD().borderThickness or "thin" end,
                       setValue=function(v)
                           BD().borderThickness = v; BD().borderSize = BORDER_SIZES[v] or 1
@@ -9054,13 +9088,10 @@ initFrame:SetScript("OnEvent", function(self)
                       setValue=function(v)
                           local bd = BD()
                           bd.borderTexture = v; bd.borderTextureOffset = nil; bd.borderTextureOffsetY = nil; bd.borderTextureShiftX = nil; bd.borderTextureShiftY = nil
-                          if v ~= "solid" then
-                              bd.borderR = 1; bd.borderG = 1; bd.borderB = 1; bd.borderA = 1
-                              bd.borderClassColor = false
-                          else
-                              bd.borderR = 0; bd.borderG = 0; bd.borderB = 0; bd.borderA = 1
-                              bd.borderClassColor = false
-                          end
+                          local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                          bd.borderR = _bcol.r; bd.borderG = _bcol.g; bd.borderB = _bcol.b; bd.borderA = 1
+                          bd.borderClassColor = false
+                          bd.borderBehind = _bbehind
                           local defTh = EllesmereUI.GetBorderDefaultSize("cdm", v)
                           if defTh then
                               bd.borderThickness = defTh; bd.borderSize = BORDER_SIZES[defTh] or 1
@@ -9130,6 +9161,12 @@ initFrame:SetScript("OnEvent", function(self)
                                   BD().borderTextureShiftY = v == 0 and nil or v
                                   ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                               end },
+                            { type = "toggle", label = "Show Behind",
+                              get = function() return BD().borderBehind or false end,
+                              set = function(v)
+                                  BD().borderBehind = v == false and nil or v
+                                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                              end },
                         },
                     })
                     local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -9180,29 +9217,25 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                     swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
-                    local swatchBlock = CreateFrame("Button", nil, swatch)
-                    swatchBlock:SetAllPoints()
-                    swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-                    swatchBlock:EnableMouse(true)
-                    swatchBlock:SetScript("OnClick", function()
+                    -- Click the dimmed custom swatch to switch back from class color (no block overlay)
+                    local origClick = swatch:GetScript("OnClick")
+                    swatch:SetScript("OnClick", function(self, ...)
                         if BD().borderClassColor then
                             BD().borderClassColor = false
                             ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
                             EllesmereUI:RefreshPage()
+                            return
                         end
+                        -- No border selected: allow swapping boxes but do not open the color picker
+                        if (BD().borderThickness or "thin") == "none" then return end
+                        if origClick then origClick(self, ...) end
                     end)
-                    swatchBlock:SetScript("OnEnter", function()
-                        EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Border color is controlled by class color"))
-                    end)
-                    swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
                     local function UpdateBorderState()
-                        local noShape = not IsCustomShape()
                         local isClassColored = BD().borderClassColor
-                        local customDis = isClassColored or not noShape
-                        if customDis then swatch:SetAlpha(0.3); swatchBlock:Show()
-                        else swatch:SetAlpha(1); swatchBlock:Hide() end
-                        classBorderSwatch:SetAlpha((isClassColored and noShape) and 1 or 0.3)
+                        local isNone = (BD().borderThickness or "thin") == "none"
+                        swatch:SetAlpha((isClassColored or isNone) and 0.3 or 1)
+                        classBorderSwatch:SetAlpha((isClassColored and not isNone) and 1 or 0.3)
                     end
                     EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderState() end)
                     UpdateBorderState()
@@ -9244,6 +9277,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local sy = bd.borderTextureShiftY
                         local th = bd.borderThickness or "thin"
                         local sz = bd.borderSize or 1
+                        local bh = bd.borderBehind
                         local br, bg, bb, ba = bd.borderR, bd.borderG, bd.borderB, bd.borderA
                         local cc = bd.borderClassColor
                         ForEachSyncBar(function(b)
@@ -9253,10 +9287,28 @@ initFrame:SetScript("OnEvent", function(self)
                             b.borderTextureShiftX = sx
                             b.borderTextureShiftY = sy
                             b.borderThickness = th; b.borderSize = sz
+                            b.borderBehind = bh
                             b.borderR = br; b.borderG = bg; b.borderB = bb; b.borderA = ba
                             b.borderClassColor = cc
                         end)
                         ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local bd = BD()
+                        local bt = bd.borderTexture or "solid"
+                        local ox = bd.borderTextureOffset
+                        local oy = bd.borderTextureOffsetY
+                        local sx = bd.borderTextureShiftX
+                        local sy = bd.borderTextureShiftY
+                        local bh = bd.borderBehind or false
+                        local synced = true
+                        ForEachSyncBar(function(b)
+                            if (b.borderTexture or "solid") ~= bt then synced = false end
+                            if b.borderTextureOffset ~= ox or b.borderTextureOffsetY ~= oy then synced = false end
+                            if b.borderTextureShiftX ~= sx or b.borderTextureShiftY ~= sy then synced = false end
+                            if (b.borderBehind or false) ~= bh then synced = false end
+                        end)
+                        return synced
                     end,
                 })
             end
@@ -9343,13 +9395,10 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       local bd = BD()
                       bd.borderTexture = v; bd.borderTextureOffset = nil; bd.borderTextureOffsetY = nil; bd.borderTextureShiftX = nil; bd.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          bd.borderR = 1; bd.borderG = 1; bd.borderB = 1; bd.borderA = 1
-                          bd.borderClassColor = false
-                      else
-                          bd.borderR = 0; bd.borderG = 0; bd.borderB = 0; bd.borderA = 1
-                          bd.borderClassColor = false
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      bd.borderR = _bcol.r; bd.borderG = _bcol.g; bd.borderB = _bcol.b; bd.borderA = 1
+                      bd.borderClassColor = false
+                      bd.borderBehind = _bbehind
                       local defTh = EllesmereUI.GetBorderDefaultSize("cdm", v)
                       if defTh then
                           bd.borderThickness = defTh; bd.borderSize = BORDER_SIZES[defTh] or 1
@@ -9359,8 +9408,15 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
                 { type="dropdown", text="Border Size",
                   values=BORDER_LABELS, order=BORDER_ORDER,
-                  disabled=function() return IsCustomShape() end,
-                  disabledTooltip="This option requires a non-custom button shape",
+                  itemDisabled=function(val)
+                      if IsCustomShape() and (val == "thin" or val == "normal" or val == "heavy") then return true end
+                      return false
+                  end,
+                  itemDisabledTooltip=function(val)
+                      if IsCustomShape() and (val == "thin" or val == "normal" or val == "heavy") then
+                          return "This option requires a non-custom shape to be selected"
+                      end
+                  end,
                   getValue=function() return BD().borderThickness or "thin" end,
                   setValue=function(v)
                       BD().borderThickness = v; BD().borderSize = BORDER_SIZES[v] or 1
@@ -9428,6 +9484,12 @@ initFrame:SetScript("OnEvent", function(self)
                               BD().borderTextureShiftY = v == 0 and nil or v
                               ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function() return BD().borderBehind or false end,
+                          set = function(v)
+                              BD().borderBehind = v == false and nil or v
+                              ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                          end },
                     },
                 })
                 local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -9451,6 +9513,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local sy = bd.borderTextureShiftY
                     local th = bd.borderThickness or "thin"
                     local sz = bd.borderSize or 1
+                    local bh = bd.borderBehind
                     local br, bg, bb, ba = bd.borderR, bd.borderG, bd.borderB, bd.borderA
                     local cc = bd.borderClassColor
                     ForEachSyncBar(function(b)
@@ -9458,6 +9521,7 @@ initFrame:SetScript("OnEvent", function(self)
                         b.borderTextureOffset = ox; b.borderTextureOffsetY = oy
                         b.borderTextureShiftX = sx; b.borderTextureShiftY = sy
                         b.borderThickness = th; b.borderSize = sz
+                        b.borderBehind = bh
                         b.borderR = br; b.borderG = bg; b.borderB = bb; b.borderA = ba
                         b.borderClassColor = cc
                     end)
@@ -9470,11 +9534,13 @@ initFrame:SetScript("OnEvent", function(self)
                     local oy = bd.borderTextureOffsetY
                     local sx = bd.borderTextureShiftX
                     local sy = bd.borderTextureShiftY
+                    local bh = bd.borderBehind or false
                     local synced = true
                     ForEachSyncBar(function(b)
                         if (b.borderTexture or "solid") ~= bt then synced = false end
                         if b.borderTextureOffset ~= ox or b.borderTextureOffsetY ~= oy then synced = false end
                         if b.borderTextureShiftX ~= sx or b.borderTextureShiftY ~= sy then synced = false end
+                        if (b.borderBehind or false) ~= bh then synced = false end
                     end)
                     return synced
                 end,
@@ -9521,31 +9587,25 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
-                -- Block overlay on custom swatch when class colored
-                local swatchBlock = CreateFrame("Button", nil, swatch)
-                swatchBlock:SetAllPoints()
-                swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-                swatchBlock:EnableMouse(true)
-                swatchBlock:SetScript("OnClick", function()
+                -- Click the dimmed custom swatch to switch back from class color (no block overlay)
+                local origClick = swatch:GetScript("OnClick")
+                swatch:SetScript("OnClick", function(self, ...)
                     if BD().borderClassColor then
                         BD().borderClassColor = false
                         ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
                         EllesmereUI:RefreshPage()
+                        return
                     end
+                    -- No border selected: allow swapping boxes but do not open the color picker
+                    if (BD().borderThickness or "thin") == "none" then return end
+                    if origClick then origClick(self, ...) end
                 end)
-                swatchBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Border color is controlled by class color"))
-                end)
-                swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
                 local function UpdateBorderSwatchState()
                     local isClassColored = BD().borderClassColor
-                    if isClassColored then
-                        swatch:SetAlpha(0.3); swatchBlock:Show()
-                    else
-                        swatch:SetAlpha(1); swatchBlock:Hide()
-                    end
-                    classBorderSwatch:SetAlpha(isClassColored and 1 or 0.3)
+                    local isNone = (BD().borderThickness or "thin") == "none"
+                    swatch:SetAlpha((isClassColored or isNone) and 0.3 or 1)
+                    classBorderSwatch:SetAlpha((isClassColored and not isNone) and 1 or 0.3)
                 end
                 EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); updateClassBorderSwatch(); UpdateBorderSwatchState() end)
                 UpdateBorderSwatchState()
@@ -9600,6 +9660,15 @@ initFrame:SetScript("OnEvent", function(self)
         shapeRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Custom Icon Shape",
                 values=SHAPE_VALUES, order=SHAPE_ORDER,
+                itemDisabled=function(val)
+                    if val ~= "none" and val ~= "cropped" and (BD().borderTexture or "solid") ~= "solid" then return true end
+                    return false
+                end,
+                itemDisabledTooltip=function(val)
+                    if val ~= "none" and val ~= "cropped" and (BD().borderTexture or "solid") ~= "solid" then
+                        return "This option requires the Border Style to be set to Solid"
+                    end
+                end,
                 getValue=function() return BD().iconShape or "none" end,
                 setValue=function(v)
                     local bd = BD()
@@ -9710,7 +9779,7 @@ initFrame:SetScript("OnEvent", function(self)
             local durBlock = CreateFrame("Frame", nil, durSwatch)
             durBlock:SetAllPoints(); durBlock:SetFrameLevel(durSwatch:GetFrameLevel() + 10); durBlock:EnableMouse(true)
             durBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(durSwatch, EllesmereUI.DisabledTooltip("Enable Duration Text"))
+                EllesmereUI.ShowWidgetTooltip(durSwatch, EllesmereUI.DisabledTooltip("Duration Text"))
             end)
             durBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()
@@ -9767,7 +9836,7 @@ initFrame:SetScript("OnEvent", function(self)
             local scBlock = CreateFrame("Frame", nil, scSwatch)
             scBlock:SetAllPoints(); scBlock:SetFrameLevel(scSwatch:GetFrameLevel() + 10); scBlock:EnableMouse(true)
             scBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(scSwatch, EllesmereUI.DisabledTooltip("Enable Item Count"))
+                EllesmereUI.ShowWidgetTooltip(scSwatch, EllesmereUI.DisabledTooltip("Item Count"))
             end)
             scBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()
@@ -9888,7 +9957,7 @@ initFrame:SetScript("OnEvent", function(self)
                 swatchBlock:SetFrameLevel(kbSwatch:GetFrameLevel() + 10)
                 swatchBlock:EnableMouse(true)
                 swatchBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(kbSwatch, EllesmereUI.DisabledTooltip("Enable Show Keybind"))
+                    EllesmereUI.ShowWidgetTooltip(kbSwatch, EllesmereUI.DisabledTooltip("Show Keybind"))
                 end)
                 swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 EllesmereUI.RegisterWidgetRefresh(function()
@@ -10085,7 +10154,7 @@ initFrame:SetScript("OnEvent", function(self)
             msg:SetWidth(TIP_W - 30)
             msg:SetJustifyH("CENTER")
             msg:SetSpacing(4)
-            msg:SetText("CDM Buttons can have all their glow and active\nstates changed on a per icon (or synced to the bar)\nbasis. Click on a button to show that button's settings.")
+            msg:SetText(EllesmereUI.L("CDM Buttons can have all their glow and active\nstates changed on a per icon (or synced to the bar)\nbasis. Click on a button to show that button's settings."))
 
             -- Okay button
             local okBtn = CreateFrame("Button", nil, tip)
@@ -10143,7 +10212,7 @@ initFrame:SetScript("OnEvent", function(self)
             label:SetFont(fontPath, 10, "")
             label:SetShadowOffset(1, -1)
             label:SetShadowColor(0, 0, 0, 0.8)
-            label:SetText("Buff Bar")
+            label:SetText(EllesmereUI.L("Buff Bar"))
             label:SetTextColor(1, 1, 1, 0.75)
             label:SetPoint("CENTER")
         end

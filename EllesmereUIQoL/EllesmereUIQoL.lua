@@ -735,61 +735,10 @@ qolFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Hide Blizzard Party / Raid Manager frame
+    --  Implementation moved to the parent (EllesmereUI_BlizzardParty.lua) so the
+    --  Raid Frames module shares the exact same logic + saved setting. The QoL
+    --  options toggle still drives it via EllesmereUI._applyHideBlizzardPartyFrame.
     ---------------------------------------------------------------------------
-    do
-        local hookedMgr = false
-
-        local _partyHiddenParent
-        local _partyOrigParent
-
-        local function ApplyHideBlizzardPartyFrame()
-            local shouldHide = EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
-            local mgr = CompactRaidFrameManager or _G["CompactRaidFrameManager"]
-            if not mgr then return end
-
-            if shouldHide then
-                if not _partyHiddenParent then
-                    _partyHiddenParent = CreateFrame("Frame")
-                    _partyHiddenParent:Hide()
-                end
-                if not _partyOrigParent then
-                    _partyOrigParent = mgr:GetParent()
-                end
-                if not InCombatLockdown() then
-                    mgr:SetParent(_partyHiddenParent)
-                end
-                if not hookedMgr then
-                    hookedMgr = true
-                    local regenFrame = CreateFrame("Frame")
-                    regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-                    regenFrame:SetScript("OnEvent", function()
-                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame then
-                            if mgr:GetParent() ~= _partyHiddenParent then
-                                mgr:SetParent(_partyHiddenParent)
-                            end
-                        end
-                    end)
-                end
-            else
-                if _partyOrigParent and not InCombatLockdown() then
-                    mgr:SetParent(_partyOrigParent)
-                    mgr:Show()
-                end
-            end
-        end
-
-        EllesmereUI._applyHideBlizzardPartyFrame = ApplyHideBlizzardPartyFrame
-
-        local initFrame = CreateFrame("Frame")
-        initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        initFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-        initFrame:SetScript("OnEvent", function(self, event)
-            if event == "PLAYER_ENTERING_WORLD" then
-                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-            end
-            ApplyHideBlizzardPartyFrame()
-        end)
-    end
 
     ---------------------------------------------------------------------------
     --  Hide Talking Head Frame
@@ -1633,9 +1582,26 @@ do
             end)
             return
         end
-        if EllesmereUIDB and EllesmereUIDB.disableRightClickTarget then
+        local db = EllesmereUIDB
+        local enemy = db and db.disableRightClickTarget
+        local allyCombat = db and db.disableRightClickTargetAllyCombat
+        if enemy or allyCombat then
+            -- Build the mouseover condition from the two independent toggles.
+            -- Enemies fire everywhere. Allies only fire while the player is in
+            -- combat (the [combat] conditional), so right clicking friendly NPCs
+            -- such as vendors and quest givers still works out of combat.
+            local macro = ""
+            if enemy then macro = macro .. "[@mouseover,harm,nodead]1;" end
+            if allyCombat then macro = macro .. "[@mouseover,help,nodead,combat]1;" end
+            macro = macro .. "0"
             SecureStateDriverManager:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
-            RegisterStateDriver(stateFrame, "mov", "[@mouseover,harm,nodead]1;0")
+            -- [combat] needs regen events so the state re-evaluates on combat
+            -- enter/exit even when the mouseover unit has not changed.
+            if allyCombat then
+                SecureStateDriverManager:RegisterEvent("PLAYER_REGEN_DISABLED")
+                SecureStateDriverManager:RegisterEvent("PLAYER_REGEN_ENABLED")
+            end
+            RegisterStateDriver(stateFrame, "mov", macro)
             stateFrame:SetAttribute("_onstate-mov", [[
                 if newstate == 1 then
                     self:SetBindingClick(1, "BUTTON2", "EUI_MouseLookBtn")

@@ -421,7 +421,7 @@ end
 
 local function RegisterEvents()
     if _eventsActive then return end
-    eventFrame:RegisterEvent("UNIT_SPELLCAST_SENT")  -- global event (provides actual spell target)
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SENT", "player")  -- player only (was global, fired for all units)
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")

@@ -92,51 +92,60 @@ end
     local _ilvlCacheTTL = 120
     local _inspectPendingGUID = nil
     local _userInspectUntil = 0
+    -- GUID the visible GameTooltip was last populated for (set by the Unit
+    -- post-call, cleared on hide). Lets the async inspect handler confirm the
+    -- tooltip still shows the inspected person before touching it.
+    local _tipShownGUID = nil
+    -- True when any left line already shows label, so an appended score/ilvl
+    -- line never duplicates an equivalent line another Unit post-call produced.
+    -- label is matched as a plain (non-pattern) substring, so "+" is literal.
+    local function _tipHasLine(tt, label)
+        local nm = tt.GetName and tt:GetName()
+        if not nm then return false end
+        local n = tt.NumLines and tt:NumLines() or 0
+        for i = 1, n do
+            local fs = _G[nm .. "TextLeft" .. i]
+            local txt = fs and fs:GetText()
+            if txt and not (_isSecret and _isSecret(txt)) and txt:find(label, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
     hooksecurefunc("InspectUnit", function()
         _userInspectUntil = GetTime() + 2
     end)
     local _inspectFrame = CreateFrame("Frame")
     _inspectFrame:SetScript("OnEvent", function(self, _, guid)
         self:UnregisterEvent("INSPECT_READY")
+        _inspectPendingGUID = nil
         if not guid or (_isSecret and _isSecret(guid)) then return end
-        -- Cache ilvl for tooltip
-        if C_PaperDollInfo and C_PaperDollInfo.GetInspectItemLevel then
-            local unit
-            if UnitExists("mouseover") then
-                local moGUID = UnitGUID("mouseover")
-                if moGUID and not (_isSecret and _isSecret(moGUID)) and moGUID == guid then
-                    unit = "mouseover"
-                end
-            end
-            if unit then
-                local val = C_PaperDollInfo.GetInspectItemLevel(unit)
-                if val and val > 0 then
+        -- Read the inspected GUID's item level through a token derived from THAT
+        -- GUID, so the value is captured even when the cursor has already left
+        -- the unit, and is always cached under the GUID we actually inspected.
+        if C_PaperDollInfo and C_PaperDollInfo.GetInspectItemLevel and _G.UnitTokenFromGUID then
+            local u = _G.UnitTokenFromGUID(guid)
+            if u and not (_isSecret and _isSecret(u)) and UnitExists(u) then
+                local val = C_PaperDollInfo.GetInspectItemLevel(u)
+                if val and not (_isSecret and _isSecret(val)) and val > 0 then
                     _ilvlCache[guid] = { ilvl = math.floor(val), time = GetTime() }
                 end
             end
         end
-        -- Update tooltip if still showing for this GUID (and ilvl not already shown)
-        if _GameTooltip:IsShown() and not _GameTooltip._euiIlvlShown and EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false then
-            local ok2, _, ttUnit = pcall(_GameTooltip.GetUnit, _GameTooltip)
-            if not ok2 or not ttUnit or (_isSecret and _isSecret(ttUnit)) then
-                ttUnit = nil
-                if UnitExists("mouseover") then ttUnit = "mouseover" end
-            end
-            if ttUnit then
-                local ttGUID = UnitGUID(ttUnit)
-                if ttGUID and not (_isSecret and _isSecret(ttGUID)) and ttGUID == guid then
-                    local cached = _ilvlCache[guid]
-                    if cached then
-                        local nBefore = _GameTooltip:NumLines() or 0
-                        _GameTooltip:AddDoubleLine("Item Level:", cached.ilvl, 1, 1, 1, 1, 1, 1)
-                        _ttFonts(_GameTooltip, nBefore + 1)
-                        _GameTooltip:Show()
-                        _GameTooltip._euiIlvlShown = true
-                    end
-                end
-            end
+        -- Append to the live tooltip only while it still shows this same GUID,
+        -- and only if our line is not already present.
+        local cached = _ilvlCache[guid]
+        local ttd = GetFFD(_GameTooltip)
+        if cached and _GameTooltip:IsShown() and _tipShownGUID == guid
+            and not ttd.ilvlShown
+            and EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false
+            and not _tipHasLine(_GameTooltip, "Item Level") then
+            local nBefore = _GameTooltip:NumLines() or 0
+            _GameTooltip:AddDoubleLine("Item Level:", cached.ilvl, 1, 1, 1, 1, 1, 1)
+            _ttFonts(_GameTooltip, nBefore + 1)
+            _GameTooltip:Show()
+            ttd.ilvlShown = true
         end
-        _inspectPendingGUID = nil
     end)
     -- Guard InspectGuildFrame_Update against nil guildName (our NotifyInspect
     -- can trigger LOD load before guild data is available from server).
@@ -144,31 +153,138 @@ end
     -- Expose for inspect sheet to use
     EllesmereUI._inspectCache = _ilvlCache
 
-    local function _ttUnitColor(tt)
-        if tt ~= _GameTooltip or tt:IsForbidden() then return end
-        local nLinesBefore = tt.NumLines and tt:NumLines() or 0
-        local ok, _, unit = pcall(tt.GetUnit, tt)
-        if not ok then return end
-        if not unit then
-            if UnitExists("mouseover") then unit = "mouseover" end
-        end
-        if not unit or (_isSecret and _isSecret(unit)) then return end
-        if not UnitIsPlayer(unit) then return end
-        local _, classFile = UnitClass(unit)
-        if not classFile or (_isSecret and _isSecret(classFile)) then return end
-        if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
-        if not _nameL1 then return end
-        -- Strip player titles (default on: tooltipPlayerTitles is opt-in)
-        local db = EllesmereUIDB
-        if not (db and db.tooltipPlayerTitles) then
-            local name = UnitName(unit)
-            if name and not (_isSecret and _isSecret(name)) then
-                local realm = select(2, UnitName(unit))
-                local display = (realm and realm ~= "") and (name .. "-" .. realm) or name
-                _nameL1:SetText(display)
+    -- Re-derive a CLEAN literal group unit token for a GUID by matching it
+    -- against tokens we build ourselves (player / raidN / partyN). On secure
+    -- raid-frame unit tooltips, GameTooltip:GetUnit() and UnitTokenFromGUID can
+    -- hand back a secret/unusable token even though the member's GUID is clean,
+    -- which starves the token-based APIs (M+ summary, inspect item level). A
+    -- literal token string we construct here is never secret, so those work.
+    local function _CleanTokenForGUID(guid)
+        if not guid or (_isSecret and _isSecret(guid)) then return nil end
+        if UnitGUID("player") == guid then return "player" end
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do
+                local tk = "raid" .. i
+                local tg = UnitGUID(tk)
+                if tg and not (_isSecret and _isSecret(tg)) and tg == guid then return tk end
+            end
+        else
+            for i = 1, GetNumSubgroupMembers() do
+                local tk = "party" .. i
+                local tg = UnitGUID(tk)
+                if tg and not (_isSecret and _isSecret(tg)) and tg == guid then return tk end
             end
         end
-        -- Class color the name line and the status bar
+        return nil
+    end
+
+    -- Resolve who this unit tooltip was populated for. GameTooltip:SetUnit(u)
+    -- drives the Unit data pass and stamps u's GUID into data.guid before this
+    -- post-call runs, so data.guid is the one authoritative identity and is
+    -- already correct on the very first hover. The cursor-focus "mouseover"
+    -- token is NOT trusted for identity: the secure focus system updates it on
+    -- its own schedule, so during fast frame movement and on the first hover it
+    -- can still point at the previously hovered frame's unit (the wrong person).
+    -- Returns (guid, token). token, when present, always maps to guid and is
+    -- only used by token-based APIs (class fallback, M+ summary, inspect).
+    -- Either may be nil, in which case callers skip our extras and leave a
+    -- stock (plus any foreign) tooltip rather than attributing the wrong unit.
+    local function _resolveTipIdentity(tt, data)
+        local guid = data and data.guid
+        if guid and _isSecret and _isSecret(guid) then guid = nil end
+        local token
+        local ok, _, u = pcall(tt.GetUnit, tt)
+        if ok and u and not (_isSecret and _isSecret(u)) and UnitExists(u) then
+            local g = UnitGUID(u)
+            if g and not (_isSecret and _isSecret(g)) then
+                if not guid then guid = g end
+                if g == guid then token = u end
+            end
+        end
+        -- Clean literal group token: covers our raid/party frames, where
+        -- GetUnit()/UnitTokenFromGUID return secret tokens but the GUID is clean.
+        if guid and not token then
+            token = _CleanTokenForGUID(guid)
+        end
+        if guid and not token and _G.UnitTokenFromGUID then
+            local tu = _G.UnitTokenFromGUID(guid)
+            if tu and not (_isSecret and _isSecret(tu)) and UnitExists(tu) then token = tu end
+        end
+        -- Last resort: accept "mouseover" ONLY when it provably maps to the same
+        -- authoritative guid. Recovers a usable token (for M+/ilvl/title) in
+        -- restricted contexts where UnitTokenFromGUID hands back a secret token,
+        -- without ever risking the cursor-lag wrong-person attribution.
+        if guid and not token and UnitExists("mouseover") then
+            local mg = UnitGUID("mouseover")
+            if mg and not (_isSecret and _isSecret(mg)) and mg == guid then
+                token = "mouseover"
+            end
+        end
+        return guid, token
+    end
+
+    local function _ttUnitColor(tt, data)
+        if tt ~= _GameTooltip or tt:IsForbidden() then return end
+        local nLinesBefore = tt.NumLines and tt:NumLines() or 0
+        -- Identity comes from the tooltip's own SetUnit data pass (data.guid),
+        -- never the cursor-focus token, so it is correct on the first hover and
+        -- never lags to the previously hovered frame.
+        local guid, unit = _resolveTipIdentity(tt, data)
+        -- Record who this render is for (so a late INSPECT_READY can confirm the
+        -- tooltip still shows this person) and start this render's ilvl marker
+        -- clean, before any early return.
+        _tipShownGUID = guid
+        local ttd = GetFFD(tt)
+        ttd.ilvlShown = false
+        if not guid then return end
+        -- Class and plain name straight from the authoritative GUID, with a
+        -- live-token fallback. Non-players get no additions, matching a stock
+        -- hover (GetPlayerInfoByGUID returns no class for non-player GUIDs).
+        local classFile, pname, prealm
+        if GetPlayerInfoByGUID then
+            local _, eClass, _, _, _, n, r = GetPlayerInfoByGUID(guid)
+            if eClass and not (_isSecret and _isSecret(eClass)) then
+                classFile, pname, prealm = eClass, n, r
+            end
+        end
+        if not classFile and unit then
+            if not UnitIsPlayer(unit) then return end
+            local _, cf = UnitClass(unit)
+            if cf and not (_isSecret and _isSecret(cf)) then
+                classFile = cf
+                pname, prealm = UnitName(unit)
+            end
+        end
+        if not classFile then return end
+        if not _nameL1 then _nameL1 = _G.GameTooltipTextLeft1 end
+        if not _nameL1 then return end
+        local db = EllesmereUIDB
+        -- Title hiding is the default (tooltipPlayerTitles is opt-in). Only
+        -- rewrite line 1 when a title is genuinely present, so the common
+        -- no-title case never clobbers name formatting Blizzard or another
+        -- addon produced on line 1.
+        if not (db and db.tooltipPlayerTitles) and pname
+            and not (_isSecret and _isSecret(pname)) then
+            local display = (prealm and prealm ~= "") and (pname .. "-" .. prealm) or pname
+            local cur = _nameL1:GetText()
+            -- Line 1 carries a title (or other decoration) when it differs from
+            -- the plain name. With a clean unit token, confirm precisely via
+            -- UnitPVPName so an equivalent plain-name form is never rewritten.
+            -- Without a token -- e.g. our raid/party frames, whose unit token is
+            -- secret in Midnight so only the GUID resolves -- fall back to the
+            -- name-difference check so titles are still stripped there.
+            if cur and not (_isSecret and _isSecret(cur)) and cur ~= display then
+                local strip
+                if unit and UnitPVPName then
+                    local titled = UnitPVPName(unit)
+                    strip = titled and not (_isSecret and _isSecret(titled)) and titled ~= pname
+                else
+                    strip = true
+                end
+                if strip then _nameL1:SetText(display) end
+            end
+        end
+        -- Recolor only (never replaces text): name line and the health bar.
         local cc = _RAID_CC and _RAID_CC[classFile]
         if cc then
             _nameL1:SetTextColor(cc.r, cc.g, cc.b)
@@ -176,12 +292,13 @@ end
                 GameTooltipStatusBar:SetStatusBarColor(cc.r, cc.g, cc.b)
             end
         end
-        -- M+ Score
-        if EllesmereUIDB and EllesmereUIDB.tooltipMythicScore ~= false
+        -- M+ Score (append-only, deduped against any equivalent foreign line).
+        if unit and db and db.tooltipMythicScore ~= false
             and C_PlayerInfo and C_PlayerInfo.GetPlayerMythicPlusRatingSummary then
             local info = C_PlayerInfo.GetPlayerMythicPlusRatingSummary(unit)
             local score = info and info.currentSeasonScore
-            if score and score > 0 then
+            if score and not (_isSecret and _isSecret(score)) and score > 0
+                and not _tipHasLine(tt, "M+ Score") then
                 local sColor = C_ChallengeMode and C_ChallengeMode.GetDungeonScoreRarityColor
                     and C_ChallengeMode.GetDungeonScoreRarityColor(score)
                 local r, g, b = 1, 1, 1
@@ -189,46 +306,41 @@ end
                 tt:AddDoubleLine("M+ Score:", score, 1, 1, 1, r, g, b)
             end
         end
-        -- Item Level (single-shot inspect, cached)
-        tt._euiIlvlShown = false
-        if EllesmereUIDB and EllesmereUIDB.tooltipItemLevel ~= false then
+        -- Item Level. Cache is keyed strictly by the authoritative GUID so a
+        -- read or write can never land under a different person than is shown.
+        if db and db.tooltipItemLevel ~= false then
             local ilvl
-            if UnitIsUnit(unit, "player") then
+            if unit and UnitIsUnit(unit, "player") then
                 local _, equipped = GetAverageItemLevel()
                 if equipped and equipped > 0 then ilvl = math.floor(equipped) end
             else
-                local guid = UnitGUID(unit)
-                if guid and not (_isSecret and _isSecret(guid)) then
-                    local cached = _ilvlCache[guid]
-                    if cached and (GetTime() - cached.time) < _ilvlCacheTTL then
-                        ilvl = cached.ilvl
-                    else
-                        -- Try already-available inspect data
-                        if C_PaperDollInfo and C_PaperDollInfo.GetInspectItemLevel then
-                            local val = C_PaperDollInfo.GetInspectItemLevel(unit)
-                            if val and val > 0 then
-                                ilvl = math.floor(val)
-                                _ilvlCache[guid] = { ilvl = ilvl, time = GetTime() }
-                            end
+                local cached = _ilvlCache[guid]
+                if cached and (GetTime() - cached.time) < _ilvlCacheTTL then
+                    ilvl = cached.ilvl
+                elseif unit then
+                    if C_PaperDollInfo and C_PaperDollInfo.GetInspectItemLevel then
+                        local val = C_PaperDollInfo.GetInspectItemLevel(unit)
+                        if val and not (_isSecret and _isSecret(val)) and val > 0 then
+                            ilvl = math.floor(val)
+                            _ilvlCache[guid] = { ilvl = ilvl, time = GetTime() }
                         end
-                        -- Request inspect if no cached data, not already pending,
-                        -- inspect frame not open, and no user-initiated inspect in flight
-                        local inspOpen = InspectFrame and InspectFrame:IsShown()
-                        if not ilvl and not inspOpen and GetTime() > _userInspectUntil and guid ~= _inspectPendingGUID and CanInspect(unit) and not InCombatLockdown() then
-                            _inspectPendingGUID = guid
-                            ClearInspectPlayer()
-                            _inspectFrame:RegisterEvent("INSPECT_READY")
-                            NotifyInspect(unit)
-                        end
+                    end
+                    local inspOpen = InspectFrame and InspectFrame:IsShown()
+                    if not ilvl and not inspOpen and GetTime() > _userInspectUntil
+                        and guid ~= _inspectPendingGUID and CanInspect(unit) and not InCombatLockdown() then
+                        _inspectPendingGUID = guid
+                        ClearInspectPlayer()
+                        _inspectFrame:RegisterEvent("INSPECT_READY")
+                        NotifyInspect(unit)
                     end
                 end
             end
-            if ilvl then
+            if ilvl and not _tipHasLine(tt, "Item Level") then
                 tt:AddDoubleLine("Item Level:", ilvl, 1, 1, 1, 1, 1, 1)
-                tt._euiIlvlShown = true
+                ttd.ilvlShown = true
             end
         end
-        -- Apply our font to lines added after the OnShow pass
+        -- Re-apply our font to lines added after the OnShow pass.
         _ttFonts(tt, nLinesBefore)
     end
 
@@ -262,6 +374,11 @@ end
             GameTooltipStatusBar:SetPoint("BOTTOMRIGHT", _GameTooltip, "BOTTOMRIGHT", -1, 1)
             GameTooltipStatusBar:SetHeight(3)
         end
+        -- Clear the recorded identity when the tooltip hides so a late inspect
+        -- result can never append to a tooltip that has since closed or switched
+        -- to non-unit content. HookScript (never SetScript) keeps the secure
+        -- OnHide handler intact.
+        _GameTooltip:HookScript("OnHide", function() _tipShownGUID = nil end)
         -- Accent-color the title line for spells/macros (not items or units)
         local function _ttAccentTitle(tt)
             if tt ~= _GameTooltip or tt:IsForbidden() or not _accentEnabled() then return end

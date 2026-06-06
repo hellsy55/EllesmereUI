@@ -162,8 +162,8 @@ local function RunMigration(spec)
     end
 end
 
--- Public: run all registered migrations. Currently called once from the
--- parent ADDON_LOADED handler after PerformResetWipe + StampResetVersion.
+-- Public: run all registered migrations. Called once from the parent
+-- ADDON_LOADED handler (the legacy beta-wipe that used to precede it is gone).
 function EllesmereUI.RunRegisteredMigrations()
     if not EllesmereUIDB then return end
     for _, spec in ipairs(_migrations) do
@@ -1805,19 +1805,6 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
-    id          = "erb_disable_expand_if_height_matched_v1",
-    scope       = "profile",
-    description = "Disable expandIfNoResource on power bar if height match is active for ERB_Power.",
-    body = function(ctx)
-        local hm = EllesmereUIDB and EllesmereUIDB.unlockHeightMatch
-        if not hm or not hm["ERB_Power"] then return end
-        local erb = ctx.profile.addons and ctx.profile.addons.EllesmereUIResourceBars
-        local pp = erb and erb.primary
-        if pp then pp.expandIfNoResource = false end
-    end,
-})
-
-EllesmereUI.RegisterMigration({
     id          = "mythic_timer_default_pos_to_otf_v2",
     scope       = "profile",
     description = "Wipe M+ Timer position if it matches the old hardcoded default (0,0) so the new OTF-based default kicks in.",
@@ -1877,6 +1864,35 @@ EllesmereUI.RegisterMigration({
                 s.portraitStyle = global
             end
         end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "uf_split_totpet_into_tot_focus_v1",
+    scope       = "profile",
+    description = "Split shared totPet unit-frame settings into independent targettarget and focustarget tables.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if type(uf) ~= "table" then return end
+        local tp = uf.totPet
+        if type(tp) ~= "table" then return end
+        -- Self-contained deep copy (do not depend on an external helper).
+        local function DCopy(t)
+            if type(t) ~= "table" then return t end
+            local c = {}
+            for k, v in pairs(t) do c[k] = DCopy(v) end
+            return c
+        end
+        -- Copy the user's old shared overrides into BOTH new tables so each
+        -- mini renders identically to before. Overwrite unconditionally:
+        -- totPet only exists on un-migrated pre-split data, so any
+        -- targettarget/focustarget already present here are default-merge
+        -- artifacts (e.g. from an import's DeepMergeDefaults), never
+        -- user-authored. Deleting totPet afterward makes this a no-op on
+        -- re-run regardless of the per-profile migration flag.
+        uf.targettarget = DCopy(tp)
+        uf.focustarget  = DCopy(tp)
+        uf.totPet = nil
     end,
 })
 
@@ -2122,6 +2138,147 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-------------------------------------------------------------------------------
+--  Bags profile migration: copy flat EllesmereUIDB root keys into each
+--  profile's addons.EllesmereUIBags so the Bags module can use NewDB().
+-------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "bags_to_profile_v1",
+    scope       = "global",
+    description = "Migrate Bags settings from EllesmereUIDB root to per-profile storage.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+
+        local function DCopy(t)
+            if type(t) ~= "table" then return t end
+            local c = {}
+            for k, v in pairs(t) do c[k] = DCopy(v) end
+            return c
+        end
+
+        local PROFILE_KEYS = {
+            "bagScale", "bagColumns", "bagCatTitleSize", "bagCountFontSize",
+            "itemlevelFontSize", "showItemlevelInBags", "showUpgradeIndicator",
+            "bagShowTrackRank", "itemlevelUseCustomColor", "itemlevelCustomColor",
+            "bagHideEmptyCategories", "bagSidebarCollapsed", "bankSidebarCollapsed",
+            "bagShowPinnedItems", "bagShowRecentItems", "bagPinnedInOneBag",
+            "bagRecentInOneBag", "bagShowPinRecentTips", "bagShowSortIcon",
+            "bagHideRandomize", "bagDefaultOneBag", "bagNestByExpansion",
+            "bagHideOneBagWarning", "bagHideAddCategory", "bagMoveNoShift",
+            "enableGoldTracking", "detachReagentBag", "enhancedBags",
+            "bagCategoryState", "bagCategoryOrder", "bagDisabledCategories",
+            "bagUserCategories", "bagsPosition", "bankPosition",
+            "bagVisualOrder", "bagHiddenInAllItems", "currencyOrder",
+        }
+
+        for profName, profData in pairs(db.profiles) do
+            if type(profData) == "table" then
+                if not profData.addons then profData.addons = {} end
+                if not profData.addons.EllesmereUIBags then
+                    local bags = {}
+                    for _, k in ipairs(PROFILE_KEYS) do
+                        local v = db[k]
+                        if v ~= nil then
+                            bags[k] = DCopy(v)
+                        end
+                    end
+                    if next(bags) then
+                        profData.addons.EllesmereUIBags = bags
+                    end
+                end
+            end
+        end
+
+        -- Auto-enable sync for Bags across all existing profiles
+        if not db.syncedModules then db.syncedModules = {} end
+        if not db.syncedModules.EllesmereUIBags then
+            db.syncedModules.EllesmereUIBags = {}
+        end
+        local sm = db.syncedModules.EllesmereUIBags
+        for profName in pairs(db.profiles) do
+            sm[profName] = true
+        end
+    end,
+})
+
+-- Guardian Druid Ironfur bar ships ON by default (DEFAULTS.secondary.guardianIronfurBar
+-- = true) so brand-new installs get it out of the box. Existing users, however,
+-- are used to Guardian having no class resource bar, so we pin every profile that
+-- already exists to OFF. This runs at parent ADDON_LOADED, BEFORE any child NewDB
+-- has populated EllesmereUIDB.profiles -- so the only profiles present here were
+-- loaded from SavedVariables (i.e. existing users). Fresh installs have no profiles
+-- yet, so nothing is pinned and they inherit the ON default. Global scope means it
+-- runs exactly once: profiles created later (including by existing users) also
+-- inherit the new ON default.
+EllesmereUI.RegisterMigration({
+    id          = "resourcebars_guardian_ironfur_existing_off_v1",
+    scope       = "global",
+    description = "Pin the Guardian Druid Ironfur bar OFF for existing users' profiles; fresh installs and future profiles inherit the new ON default.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only touch profiles that already hold real child-addon data, so a
+            -- stray empty/stub profile can't be mistaken for an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local rb = profData.addons.EllesmereUIResourceBars
+                if type(rb) ~= "table" then
+                    rb = {}
+                    profData.addons.EllesmereUIResourceBars = rb
+                end
+                if type(rb.secondary) ~= "table" then rb.secondary = {} end
+                if rb.secondary.guardianIronfurBar == nil then
+                    rb.secondary.guardianIronfurBar = false
+                end
+            end
+        end
+    end,
+})
+
+-- Unit Frame cast bars now count the spell icon as part of the bar's width by
+-- default (DEFAULTS.player.playerCastbarIconInWidth / *.castbarIconInWidth =
+-- true), so fresh installs get the icon inside the bar footprint out of the box.
+-- Existing users are used to the icon sitting to the LEFT of the bar (outside
+-- its width), so pin every already-existing profile to OFF. Same mechanism as
+-- the Guardian Ironfur migration: runs at parent ADDON_LOADED before any child
+-- NewDB populates EllesmereUIDB.profiles, so only existing users' profiles are
+-- present; fresh installs have none and inherit the ON default. Global scope =
+-- runs once; future profiles inherit ON too. Nameplates have their own cast bar
+-- settings and are intentionally NOT touched.
+EllesmereUI.RegisterMigration({
+    id          = "uf_castbar_icon_in_width_existing_off_v1",
+    scope       = "global",
+    description = "Pin cast-bar icon-in-width OFF for existing users' Unit Frames profiles; fresh installs and future profiles inherit the new ON default. Nameplates unaffected.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only touch profiles that already hold real child-addon data, so a
+            -- stray empty/stub profile can't be mistaken for an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local uf = profData.addons.EllesmereUIUnitFrames
+                if type(uf) ~= "table" then
+                    uf = {}
+                    profData.addons.EllesmereUIUnitFrames = uf
+                end
+                if type(uf.player) ~= "table" then uf.player = {} end
+                if uf.player.playerCastbarIconInWidth == nil then
+                    uf.player.playerCastbarIconInWidth = false
+                end
+                for _, unitKey in ipairs({ "target", "focus", "boss" }) do
+                    if type(uf[unitKey]) ~= "table" then uf[unitKey] = {} end
+                    if uf[unitKey].castbarIconInWidth == nil then
+                        uf[unitKey].castbarIconInWidth = false
+                    end
+                end
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)
@@ -2130,39 +2287,16 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
 
     ---------------------------------------------------------------------------
     --  Boot sequence (runs at parent ADDON_LOADED, before child addons init)
+    --  The legacy beta-wipe (PerformResetWipe/StampResetVersion) has been
+    --  removed entirely -- it was the nuclear _resetVersion purge whose
+    --  fresh-vs-old heuristic was fragile (and looped on standalone renames).
+    --  Only the registered-migration runner remains.
     --
-    --  1. Beta wipe (NUCLEAR)
-    --     For users coming from a pre-v9 SV layout that can't be safely
-    --     migrated. If this fires, every SV file is reset and there is
-    --     literally nothing left to migrate -- we early-exit so the
-    --     registered migrations don't run on already-empty data and waste
-    --     cycles attempting to bridge legacy flags that were just wiped.
-    --
-    --  2. StampResetVersion
-    --     Marks fresh installs (no _resetVersion at all) so they never see
-    --     the beta-wipe popup on a future load. No-op if already stamped.
-    --
-    --  3. RunRegisteredMigrations
-    --     Runs every migration registered via EllesmereUI.RegisterMigration.
-    --     Each migration's body sees the user's intact data because the
-    --     beta wipe (step 1) has already returned false here -- if it had
-    --     fired we'd never reach this line.
+    --  RunRegisteredMigrations: runs every migration registered via
+    --  EllesmereUI.RegisterMigration. The runner walks each migration and
+    --  iterates the appropriate scope (global/profile/specProfile),
+    --  pcall-wrapping each body and stamping per-scope flags on success.
     ---------------------------------------------------------------------------
-    if EllesmereUI.PerformResetWipe() then
-        -- Wipe fired. Stamp the new reset version and bail. There is no
-        -- user data left for migrations to operate on.
-        EllesmereUI.StampResetVersion()
-        return
-    end
-
-    -- Stamp fresh installs early (before child addons can create DBs
-    -- that would make StampResetVersion think it's an old install).
-    EllesmereUI.StampResetVersion()
-
-    -- Run all migrations registered via EllesmereUI.RegisterMigration.
-    -- The runner walks every registered migration and iterates the
-    -- appropriate scope (global/profile/specProfile), pcall-wrapping
-    -- each body and stamping per-scope flags on success.
     EllesmereUI.RunRegisteredMigrations()
 
     -- DM: fontSize was split into leftFontSize + rightFontSize.

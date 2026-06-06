@@ -2974,23 +2974,40 @@ initFrame:SetScript("OnEvent", function(self)
     ECHAT.ApplyIconFreeMove()
     ECHAT.ApplyLockChatSize()
 
-    -- Profile-swap refresh: re-read DB and refresh all chat visuals.
-    -- TODO: re-enable after taint audit is complete
-    -- _G._ECHAT_RefreshAll = function()
-    --     ECHAT.ApplySidebarVisibility()
-    --     ECHAT.ApplyBorders()
-    --     ECHAT.ApplySidebarIcons()
-    --     ECHAT.ApplySidebarPosition()
-    --     ECHAT.ApplyIconColor()
-    --     ECHAT.ApplyInputPosition()
-    --     ECHAT.ApplySidebarBackground()
-    --     ECHAT.ApplySidebarIconScale()
-    --     ECHAT.ApplyIconFreeMove()
-    --     ECHAT.ApplyLockChatSize()
-    --     ECHAT.ApplyBackground()
-    --     ECHAT.ApplyFonts()
-    --     if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
-    -- end
+    -- Profile-swap refresh: re-apply all chat visuals from the (already-swapped)
+    -- DB. ECHAT.DB() reads the live profile dynamically, so re-running the Apply
+    -- functions pulls the new profile's settings. ApplySidebarIcons() is
+    -- deliberately NOT called here -- its full ClearAllPoints/SetPoint layout
+    -- chain is taint-risky and is skipped at init too (see line ~2954); icon
+    -- visibility is refreshed with the same minimal SetShown block init uses, and
+    -- position/scale/free-move are covered by the Apply* calls below.
+    _G._ECHAT_RefreshAll = function()
+        ECHAT.ApplySidebarVisibility()
+        ECHAT.ApplyBorders()
+        do
+            local _cfg = ECHAT.DB()
+            local _cf1 = _G.ChatFrame1
+            if _cfg and _cf1 then
+                local _sbd = CFD(_cf1)
+                if _sbd.scrollBtn then _sbd.scrollBtn:SetShown(_cfg.showScroll ~= false) end
+                if _sbd.friendsBtn then _sbd.friendsBtn:SetShown(_cfg.showFriends ~= false) end
+                if _sbd.copyBtn then _sbd.copyBtn:SetShown(_cfg.showCopy ~= false) end
+                if _sbd.portalBtn then _sbd.portalBtn:SetShown(_cfg.showPortals ~= false) end
+                if _sbd.voiceBtn then _sbd.voiceBtn:SetShown(_cfg.showVoice ~= false) end
+                if _sbd.settingsBtn then _sbd.settingsBtn:SetShown(_cfg.showSettings ~= false) end
+            end
+        end
+        ECHAT.ApplySidebarPosition()
+        ECHAT.ApplyIconColor()
+        ECHAT.ApplyInputPosition()
+        ECHAT.ApplySidebarBackground()
+        ECHAT.ApplySidebarIconScale()
+        ECHAT.ApplyIconFreeMove()
+        ECHAT.ApplyLockChatSize()
+        ECHAT.ApplyBackground()
+        ECHAT.ApplyFonts()
+        if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
+    end
 
     ---------------------------------------------------------------------------
     --  9-12. Chat positioning: Blizzard / Edit Mode owns position+size.

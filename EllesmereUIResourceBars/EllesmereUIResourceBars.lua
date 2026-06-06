@@ -351,6 +351,32 @@ local function GetIcicleCount()
     return 0
 end
 
+-------------------------------------------------------------------------------
+--  Guardian Druid Ironfur tracker (bar-based, moving hash lines)
+--  Each Ironfur cast adds a "tick" that moves right -> left across the bar as
+--  its buff decays. Duration is talent-aware (Ursoc's Endurance = 9s base,
+--  otherwise 7s; Guardian of Elune adds +3s to the next cast after a Mangle).
+--  Event-driven from UNIT_SPELLCAST_SUCCEEDED so 12.x secret-value aura
+--  restrictions can't cause drift.
+-------------------------------------------------------------------------------
+local IRONFUR_SPELL       = 192081
+local URSOCS_ENDURANCE    = 393611  -- base 9s vs 7s
+local GUARDIAN_OF_ELUNE   = 155578  -- talent: Mangle -> next Ironfur +3s
+local MANGLE_SPELL        = 33917
+local FRENZIED_REGEN      = 22842
+local IRONFUR_GOE_BONUS   = 3
+local IRONFUR_GOE_WINDOW  = 15
+local ironfurTicks        = {}   -- array of { endTime=, duration= }
+local ironfurBaseDur      = 7
+local ironfurGoEUntil     = 0
+
+local function IronfurBaseDuration()
+    if C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(URSOCS_ENDURANCE) then
+        return 9
+    end
+    return 7
+end
+
 local function GetSecondaryResource()
     local _, classFile = UnitClass("player")
     local spec = GetSpecialization()
@@ -362,6 +388,15 @@ local function GetSecondaryResource()
     elseif classFile == "ROGUE" then
         local mx = UnitPowerMax("player", PT.COMBO)
         return { power = PT.COMBO, max = (not issecretvalue or not issecretvalue(mx)) and mx or 5, type = "points" }
+    elseif classFile == "DRUID" and spec == 3
+           and ERB.db and ERB.db.profile and ERB.db.profile.secondary
+           and ERB.db.profile.secondary.guardianIronfurBar then
+        -- Guardian Ironfur duration bar (moving hash lines). Checked BEFORE the
+        -- cat-form combo-points branch so entering Cat Form never swaps a
+        -- Guardian's bar to Feral combo points -- the Ironfur bar persists in
+        -- every form. max is a normalized fraction (0..1).
+        ironfurBaseDur = IronfurBaseDuration()
+        return { power = "IRONFUR_BAR", max = 1, type = "bar" }
     elseif classFile == "DRUID" and form == 1 then
         local mx = UnitPowerMax("player", PT.COMBO)
         return { power = PT.COMBO, max = (not issecretvalue or not issecretvalue(mx)) and mx or 5, type = "points" }
@@ -371,6 +406,10 @@ local function GetSecondaryResource()
         if issecretvalue and issecretvalue(mx) then mx = 100 end
         if not mx or mx <= 0 then mx = 100 end
         return { power = "LUNAR_POWER_BAR", max = mx, type = "bar" }
+    elseif classFile == "DRUID" and spec == 3 then
+        -- Guardian with the Ironfur bar disabled: no class resource (and no
+        -- cat-form combo swap, since the form==1 branch above already passed).
+        return nil
     elseif classFile == "MONK" and (spec == 3) then
         local mx = UnitPowerMax("player", PT.CHI)
         return { power = PT.CHI, max = (not issecretvalue or not issecretvalue(mx)) and mx or 5, type = "points" }
@@ -568,6 +607,11 @@ local DEFAULTS = {
             textSize    = 11,
             textXOffset = 0,
             textYOffset = 0,
+            textCustomColored = true,  -- text color: true = custom, false = class color
+            textFillR   = 1, textFillG = 1, textFillB = 1, textFillA = 1,
+            gradientEnabled = false,  -- additive: gradient fill (custom/class base -> end). Off = existing behavior.
+            gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
+            gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
             offsetX     = 0,
             offsetY     = -64,
             barAlpha    = 1.0,
@@ -599,6 +643,11 @@ local DEFAULTS = {
             textSize    = 10,
             textXOffset = 0,
             textYOffset = 0,
+            textCustomColored = true,  -- text color: true = custom, false = power-type color
+            textFillR   = 1, textFillG = 1, textFillB = 1, textFillA = 1,
+            gradientEnabled = false,  -- additive: gradient fill (custom/power base -> end). Off = existing behavior.
+            gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
+            gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
             offsetX     = 0,
             offsetY     = -54,
             barAlpha    = 1.0,
@@ -642,6 +691,8 @@ local DEFAULTS = {
             thresholdR = 0x0c/255, thresholdG = 0xd2/255, thresholdB = 0x9d/255, thresholdA = 1,
             tickValues  = "",   -- comma-separated absolute resource values for tick marks (bar-type only)
             thresholdSpecs = {},  -- per-spec threshold/hash entries: { specIDs={0}, hashValues="", thresholdCount=3, thresholdPartialOnly=false }
+            guardianIronfurBar = true,     -- Guardian Druid: show Ironfur duration bar (moving hash lines). New-user default; existing profiles pinned off via migration "resourcebars_guardian_ironfur_existing_off_v1".
+            guardianShowHashLines = true,  -- Guardian Ironfur: draw the moving per-cast hash lines
             runesSimple = false,  -- DK: treat runes as flat pips (no recharge animation/timer)
             chargedR = 0.44, chargedG = 0.77, chargedB = 1.00, chargedA = 1,
             enhanceFiveBar = true,  -- Enhance Shaman: show 5 pips with overflow coloring
@@ -655,6 +706,9 @@ local DEFAULTS = {
             oocAlpha    = 1.0,
             offsetX     = 0,
             offsetY     = -38,
+            -- Shift elements anchored to the class resource bar when the spec
+            -- has no class resource. "None" / "Up" / "Down". Visual-only.
+            shiftElementsIfNoResource = "None",
         },
         castBar = {
             enabled       = true,
@@ -664,7 +718,7 @@ local DEFAULTS = {
             anchorX       = 0,
             anchorY       = -54,
             classColored  = false,
-            fillR         = CUSTOM_FILL_DEFAULT[1], fillG = CUSTOM_FILL_DEFAULT[2], fillB = CUSTOM_FILL_DEFAULT[3], fillA = 1,
+            fillR         = 0.898, fillG = 0.729, fillB = 0.267, fillA = 1,
             gradientEnabled = false,
             gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
             gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
@@ -779,6 +833,26 @@ local cachedStageThresholds
 -- Reusable CreateColor objects for gradient (avoids per-frame allocation)
 local empowerColorA = CreateColor(1, 0, 0, 1)
 local empowerColorB = CreateColor(1, 0, 0, 1)
+
+-- Additive bar gradients use two REUSED color objects so applying the gradient
+-- allocates nothing (CreateColor would allocate two tables per call). The gradient
+-- is re-issued on every color update -- that is cheap (same order as SetVertexColor,
+-- which flat bars already call each tick) and is never skipped or cached, so it can
+-- never go stale.
+local _gradColorA = CreateColor(1, 1, 1, 1)
+local _gradColorB = CreateColor(1, 1, 1, 1)
+
+local function ApplyBarGradient(ft, dir, br, bg, bb, ba, er, eg, eb, ea)
+    ft:SetVertexColor(1, 1, 1, 1)
+    _gradColorA:SetRGBA(br, bg, bb, ba)
+    _gradColorB:SetRGBA(er, eg, eb, ea)
+    ft:SetGradient(dir, _gradColorA, _gradColorB)
+end
+
+-- Flat-color a bar fill (no gradient).
+local function ApplyBarFlat(ft, r, g, b, a)
+    ft:SetVertexColor(r, g, b, a or 1)
+end
 
 -- Returns the current empowered stage (0-based) based on progress and cached thresholds
 local function GetCurrentEmpowerStage(progress, numStages)
@@ -956,7 +1030,13 @@ local function CreateStatusBar(parent, name, w, h, borderSize, borderR, borderG,
     local bSz = borderSize or 1
     bar._border = MakePixelBorder(bar, borderR or 0, borderG or 0, borderB or 0, borderA or 1, bSz)
 
-    function bar:ApplyBorder(sz, r, g, b, a, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
+    function bar:ApplyBorder(sz, r, g, b, a, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey, behind)
+        -- "Show Behind": set the border frame level before styling so the textured
+        -- backdrop inherits it. +1 draws in front of the fill, level-1 behind it.
+        if self._border._frame then
+            local pl = self:GetFrameLevel()
+            self._border._frame:SetFrameLevel(behind and math.max(0, pl - 1) or (pl + 1))
+        end
         self._border:ApplyStyle(sz, r, g, b, a, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
     end
 
@@ -1372,6 +1452,43 @@ local function NormalizeAnchorKey(anchorKey)
     return "none"
 end
 
+-- Vertical "effective Y" of a resource bar read from STORED config (screen up =
+-- +y). Used by the expand-direction detection below: when the spec has no class
+-- resource the class resource frame is never laid out, so live bounds (GetTop /
+-- GetCenter) are unavailable and direction must come from config. Dragged bars
+-- store unlockPos as CENTER/CENTER; free bars use offsetY relative to the
+-- screen-centered mainFrame -- both are CENTER-relative and comparable.
+local function BarEffectiveY(cfg)
+    if cfg and cfg.unlockPos and cfg.unlockPos.point and cfg.unlockPos.y then
+        return cfg.unlockPos.y
+    end
+    return (cfg and cfg.offsetY) or 0
+end
+
+-- "Expand Power Bar if No Resource" direction. The power bar fills the area the
+-- (absent) class resource bar would occupy, so it grows TOWARD the class
+-- resource: +1 = class resource sits ABOVE the power bar -> grow up; -1 = below
+-- -> grow down. Pure read of stored config (no writes, no live bounds). Falls
+-- back to +1 (grow up -- the default layout has the class resource above) when
+-- the class resource is disabled or the two bars are co-located.
+local function ResolveExpandDirSign(pp, sp)
+    if not sp or sp.enabled == false then return 1 end
+    -- Anchored: class resource pinned relative to the power bar.
+    if NormalizeAnchorKey(sp.anchorTo) == "erb_powerbar" then
+        if sp.anchorPosition == "bottom" then return -1 end
+        if sp.anchorPosition == "top" then return 1 end
+    end
+    -- Anchored the other way: power bar pinned relative to the class resource.
+    if NormalizeAnchorKey(pp.anchorTo) == "erb_classresource" then
+        if pp.anchorPosition == "top" then return -1 end     -- power above CR -> CR below -> grow down
+        if pp.anchorPosition == "bottom" then return 1 end   -- power below CR -> CR above -> grow up
+    end
+    -- Free / dragged: compare stored vertical positions.
+    local sy, py = BarEffectiveY(sp), BarEffectiveY(pp)
+    if sy > py then return 1 elseif sy < py then return -1 end
+    return 1
+end
+
 -- Apply anchor-based positioning for a bar frame.
 -- anchorKey: the anchorTo setting value
 -- anchorPos: "left"/"right"/"top"/"bottom"
@@ -1656,6 +1773,20 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
     end
 end
 
+-- Moving-hash overlay for the Guardian Ironfur bar. Lives above the inner
+-- StatusBar fill so the tick textures are never covered. Tick textures are
+-- pooled in ironfurTickTex (secondaryBar is a singleton).
+local ironfurTickTex = {}
+local function EnsureIronfurOverlay(sb)
+    if sb._ifOverlay then return sb._ifOverlay end
+    local ov = CreateFrame("Frame", nil, sb)
+    ov:SetAllPoints()
+    local innerSb = sb._sb
+    if innerSb then ov:SetFrameLevel(innerSb:GetFrameLevel() + 2) end
+    sb._ifOverlay = ov
+    return ov
+end
+
 -------------------------------------------------------------------------------
 --  BuildBars -- applies per-element scale, border, colors, text positioning
 -------------------------------------------------------------------------------
@@ -1764,25 +1895,33 @@ local function BuildBars()
                 SmoothBarAnimate(healthBar, "h", hpHeight, function() ApplyHealthBarTransform() end)
             end
         end
-        healthBar:ApplyBorder(hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA, hp.borderTexture, hp.borderTextureOffset, hp.borderTextureOffsetY, hp.borderTextureShiftX, hp.borderTextureShiftY, "resourcebars", hp.borderSize)
+        healthBar:ApplyBorder(hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA, hp.borderTexture, hp.borderTextureOffset, hp.borderTextureOffsetY, hp.borderTextureShiftX, hp.borderTextureShiftY, "resourcebars", hp.borderSize, hp.borderBehind)
 
         -- Bar texture (must be applied before colors since SetStatusBarTexture resets vertex color)
         ApplyBarTexture(healthBar, g.barTexture or "none")
 
-        -- Colors: dark theme > custom colored > class color
+        -- Colors: dark theme > custom colored > class color.
+        -- Gradient is additive: when enabled it fills from the resolved custom/class
+        -- base color to the gradient end color. Dark theme ignores gradient.
+        local hft = healthBar:GetStatusBarTexture()
         if hp.darkTheme then
-            healthBar:GetStatusBarTexture():SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
+            hft:SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
             healthBar._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A)
-        elseif hp.customColored then
-            healthBar:GetStatusBarTexture():SetVertexColor(hp.fillR, hp.fillG, hp.fillB, hp.fillA)
-            healthBar._bg:SetColorTexture(hp.bgR, hp.bgG, hp.bgB, hp.bgA)
         else
-            -- Class color
-            local cc = CLASS_COLORS[cachedClass]
-            if cc then
-                healthBar:GetStatusBarTexture():SetVertexColor(cc[1], cc[2], cc[3], 1)
+            local fR, fG, fB, fA
+            if hp.customColored then
+                fR, fG, fB, fA = hp.fillR, hp.fillG, hp.fillB, hp.fillA
             else
-                healthBar:GetStatusBarTexture():SetVertexColor(0.15, 0.75, 0.30, 1)
+                local cc = CLASS_COLORS[cachedClass]
+                if cc then fR, fG, fB, fA = cc[1], cc[2], cc[3], 1
+                else fR, fG, fB, fA = 0.15, 0.75, 0.30, 1 end
+            end
+            if hp.gradientEnabled then
+                ApplyBarGradient(hft, hp.gradientDir or "HORIZONTAL",
+                    fR, fG, fB, fA,
+                    hp.gradientR, hp.gradientG, hp.gradientB, hp.gradientA)
+            else
+                ApplyBarFlat(hft, fR, fG, fB, fA)
             end
             healthBar._bg:SetColorTexture(hp.bgR, hp.bgG, hp.bgB, hp.bgA)
         end
@@ -1791,6 +1930,17 @@ local function BuildBars()
         healthBar._text:ClearAllPoints()
         healthBar._text:SetPoint("CENTER", healthBar, "CENTER", hp.textXOffset, hp.textYOffset)
         SetRBFont(healthBar._text, GetRBFont(), hp.textSize)
+        -- Text color: class color when textCustomColored == false, else custom (default custom)
+        if hp.textCustomColored == false then
+            local tcc = CLASS_COLORS[cachedClass]
+            if tcc then
+                healthBar._text:SetTextColor(tcc[1], tcc[2], tcc[3], 1)
+            else
+                healthBar._text:SetTextColor(1, 1, 1, 1)
+            end
+        else
+            healthBar._text:SetTextColor(hp.textFillR or 1, hp.textFillG or 1, hp.textFillB or 1, hp.textFillA or 1)
+        end
         healthBar:Show()
         healthBar:SetAlpha(hp.barAlpha or 1)
         ApplyBarOrientation(healthBar, hpOri)
@@ -1808,13 +1958,19 @@ local function BuildBars()
     -- the mover/getSize reflects the real stored height, not the expanded one.
     local ppHeight = pp.height or 14
     local ppExpandDelta = 0
+    local ppDirSign = 1  -- expand direction: +1 grow up (class resource above), -1 grow down (below)
     local _heightMatched = EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power")
-    if pp.expandIfNoResource and not _heightMatched then
+    -- Runtime suppression: regular size while unlock mode or the EUI options
+    -- panel is open (mover/getSize must see the true stored height). Never reads
+    -- or writes the saved setting -- see _ERB_SuppressExpand in OnInitialize.
+    if pp.expandIfNoResource and not _heightMatched
+       and not EllesmereUI._erbExpandSuppressed and not EllesmereUI._unlockActive then
         local secRes = GetSecondaryResource()
         if not secRes then
             local sp2 = p.secondary or FALLBACK.secondary
             ppExpandDelta = sp2.pipHeight or 20
             ppHeight = ppHeight + ppExpandDelta
+            ppDirSign = ResolveExpandDirSign(pp, sp2)
         end
     end
     -- Clean stale key from old suppress/restore system
@@ -1865,6 +2021,13 @@ local function BuildBars()
             if not EllesmereUI._unlockActive then
                 if not EllesmereUI.IsUnlockAnchored("ERB_Power") or not primaryBar:GetLeft() then
                     local sx, sy = SnapXY(pp.unlockPos.x, pp.unlockPos.y, primaryBar, pp.unlockPos)
+                    -- Dragged bars store the UNexpanded CENTER (expand is
+                    -- suppressed during unlock capture), so SetSize alone would
+                    -- grow them symmetrically. Shift the center toward the class
+                    -- resource (ppDirSign) so the bar grows that direction.
+                    if ppExpandDelta > 0 and pp.unlockPos.point == "CENTER" then
+                        sy = sy + ppDirSign * ppExpandDelta * 0.5
+                    end
                     primaryBar:ClearAllPoints()
                     primaryBar:SetPoint(pp.unlockPos.point, UIParent, rp, sx, sy)
                 end
@@ -1884,8 +2047,14 @@ local function BuildBars()
                     local h2 = primaryBar["_barAnim_h"] or ppHeight
                     local ow, oh = OrientedSize(w, h2, ppOri)
                     primaryBar:ClearAllPoints()
-                    -- Internal layout: shift up by half expand delta within mainFrame
-                    primaryBar:SetPoint("CENTER", mainFrame, "CENTER", ox, oy + ppExpandDelta * 0.5)
+                    -- Expand toward the class resource: keep the edge facing AWAY
+                    -- from the class resource fixed and grow toward it (ppDirSign
+                    -- +1 = grow up, -1 = grow down). Derive the shift from the
+                    -- ANIMATED height (h2), not the full final delta, so the fixed
+                    -- edge stays put for the whole tween (no mid-animation float).
+                    local base = ppHeight - ppExpandDelta
+                    local extra = (ppExpandDelta > 0) and (ppDirSign * (h2 - base) * 0.5) or 0
+                    primaryBar:SetPoint("CENTER", mainFrame, "CENTER", ox, oy + extra)
                     primaryBar:SetSize(ow, oh)
                 end
                 SmoothBarAnimate(primaryBar, "ox", pp.offsetX or 0, function() ApplyPowerBarTransform() end)
@@ -1894,26 +2063,37 @@ local function BuildBars()
                 SmoothBarAnimate(primaryBar, "h", ppHeight, function() ApplyPowerBarTransform() end)
             end
         end
-        -- expandIfNoResource: nudge position so extra height appears on the
-        -- correct side. Default = grow up. Anchored to top of CR = grow down.
-        primaryBar:ApplyBorder(pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA, pp.borderTexture, pp.borderTextureOffset, pp.borderTextureOffsetY, pp.borderTextureShiftX, pp.borderTextureShiftY, "resourcebars", pp.borderSize)
+        -- expandIfNoResource grows the power bar toward where the class resource
+        -- bar sits (above -> up, below -> down) via ppDirSign / ResolveExpandDirSign.
+        -- Implemented for the free + dragged (unlockPos) branches above; the
+        -- anchorTo and unlock-anchored branches grow per their own anchor edge.
+        primaryBar:ApplyBorder(pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA, pp.borderTexture, pp.borderTextureOffset, pp.borderTextureOffsetY, pp.borderTextureShiftX, pp.borderTextureShiftY, "resourcebars", pp.borderSize, pp.borderBehind)
 
         -- Bar texture (must be applied before colors since SetStatusBarTexture resets vertex color)
         ApplyBarTexture(primaryBar, g.barTexture or "none")
 
-        -- Colors: dark theme > custom colored > power type color
+        -- Colors: dark theme > custom colored > power type color.
+        -- Gradient is additive: when enabled it fills from the resolved custom/power
+        -- base color to the gradient end color. Dark theme ignores gradient.
+        local pft = primaryBar:GetStatusBarTexture()
         if pp.darkTheme then
-            primaryBar:GetStatusBarTexture():SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
+            pft:SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
             primaryBar._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A)
-        elseif pp.customColored then
-            primaryBar:GetStatusBarTexture():SetVertexColor(pp.fillR, pp.fillG, pp.fillB, pp.fillA)
-            primaryBar._bg:SetColorTexture(pp.bgR, pp.bgG, pp.bgB, pp.bgA)
         else
-            local pc = POWER_COLORS[cachedPrimary]
-            if pc then
-                primaryBar:GetStatusBarTexture():SetVertexColor(pc[1], pc[2], pc[3], 1)
+            local fR, fG, fB, fA
+            if pp.customColored then
+                fR, fG, fB, fA = pp.fillR, pp.fillG, pp.fillB, pp.fillA
             else
-                primaryBar:GetStatusBarTexture():SetVertexColor(1, 1, 1, 1)
+                local pc = POWER_COLORS[cachedPrimary]
+                if pc then fR, fG, fB, fA = pc[1], pc[2], pc[3], 1
+                else fR, fG, fB, fA = 1, 1, 1, 1 end
+            end
+            if pp.gradientEnabled then
+                ApplyBarGradient(pft, pp.gradientDir or "HORIZONTAL",
+                    fR, fG, fB, fA,
+                    pp.gradientR, pp.gradientG, pp.gradientB, pp.gradientA)
+            else
+                ApplyBarFlat(pft, fR, fG, fB, fA)
             end
             primaryBar._bg:SetColorTexture(pp.bgR, pp.bgG, pp.bgB, pp.bgA)
         end
@@ -1922,6 +2102,17 @@ local function BuildBars()
         primaryBar._text:ClearAllPoints()
         primaryBar._text:SetPoint("CENTER", primaryBar, "CENTER", pp.textXOffset, pp.textYOffset)
         SetRBFont(primaryBar._text, GetRBFont(), pp.textSize)
+        -- Text color: power-type color when textCustomColored == false, else custom (default custom)
+        if pp.textCustomColored == false then
+            local tpc = POWER_COLORS[cachedPrimary]
+            if tpc then
+                primaryBar._text:SetTextColor(tpc[1], tpc[2], tpc[3], 1)
+            else
+                primaryBar._text:SetTextColor(1, 1, 1, 1)
+            end
+        else
+            primaryBar._text:SetTextColor(pp.textFillR or 1, pp.textFillG or 1, pp.textFillB or 1, pp.textFillA or 1)
+        end
         primaryBar:Show()
         local hidePower = p.secondary and p.secondary.hidePowerIfResource and cachedSecondary
         if hidePower then
@@ -2131,15 +2322,22 @@ local function BuildBars()
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             end
             secondaryBar:ApplyBorder(0, 0, 0, 0, 0)
-            -- Resolve hash lines from thresholdSpecs entry (falls back to legacy tickValues)
-            local _buildTsEntry = ResolveThresholdSpecEntry(sp)
-            local _buildTickStr = (_buildTsEntry and _buildTsEntry.hashValues ~= "") and _buildTsEntry.hashValues or sp.tickValues
-            local _buildHW = _buildTsEntry and _buildTsEntry.hashWidth or 1
-            local _buildHR = _buildTsEntry and _buildTsEntry.hashColorR or 1
-            local _buildHG = _buildTsEntry and _buildTsEntry.hashColorG or 1
-            local _buildHB = _buildTsEntry and _buildTsEntry.hashColorB or 1
-            local _buildHA = _buildTsEntry and _buildTsEntry.hashColorA or 0.7
-            ApplyResourceBarTicks(secondaryBar, maxPts, _buildTickStr, secondaryBarTicks, _buildHW, _buildHR, _buildHG, _buildHB, _buildHA)
+            if cachedSecondary.power == "IRONFUR_BAR" then
+                -- Guardian Ironfur: no static threshold hash lines; the moving
+                -- per-cast hash lines are drawn live in UpdateIronfurBar.
+                for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
+                EnsureIronfurOverlay(secondaryBar)
+            else
+                -- Resolve hash lines from thresholdSpecs entry (falls back to legacy tickValues)
+                local _buildTsEntry = ResolveThresholdSpecEntry(sp)
+                local _buildTickStr = (_buildTsEntry and _buildTsEntry.hashValues ~= "") and _buildTsEntry.hashValues or sp.tickValues
+                local _buildHW = _buildTsEntry and _buildTsEntry.hashWidth or 1
+                local _buildHR = _buildTsEntry and _buildTsEntry.hashColorR or 1
+                local _buildHG = _buildTsEntry and _buildTsEntry.hashColorG or 1
+                local _buildHB = _buildTsEntry and _buildTsEntry.hashColorB or 1
+                local _buildHA = _buildTsEntry and _buildTsEntry.hashColorA or 0.7
+                ApplyResourceBarTicks(secondaryBar, maxPts, _buildTickStr, secondaryBarTicks, _buildHW, _buildHR, _buildHG, _buildHB, _buildHA)
+            end
             secondaryBar:Show()
         elseif cachedSecondary.type == "runes" then
             local numPips = 6
@@ -2277,22 +2475,32 @@ local function BuildBars()
         if not secondaryFrame._barBorder then
             secondaryFrame._barBorder = MakePixelBorder(secondaryFrame,
                 sp.borderR, sp.borderG, sp.borderB, sp.borderA, sp.borderSize, sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY)
-            -- Ensure border frame is above bar-type secondaries (Brewmaster/Elemental)
-            if secondaryFrame._barBorder._frame then
-                secondaryFrame._barBorder._frame:SetFrameLevel(secondaryFrame:GetFrameLevel() + 5)
-            end
+        end
+        -- "Show Behind": set level before ApplyStyle so the textured backdrop
+        -- inherits it. +5 in front (above bar-type secondaries), level-1 behind.
+        if secondaryFrame._barBorder._frame then
+            local pl = secondaryFrame:GetFrameLevel()
+            secondaryFrame._barBorder._frame:SetFrameLevel(sp.borderBehind and math.max(0, pl - 1) or (pl + 5))
         end
         secondaryFrame._barBorder:ApplyStyle(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
             sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
             sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
 
-        -- Full-bar background (behind all pips)
+        -- Full-bar background (behind all pips) -- this is what shows through
+        -- the pip spacing/gaps. In dark theme the inactive pips are opaque gray
+        -- (DARK_BG, alpha 1), so a semi-transparent gap reads as "no background"
+        -- next to them. Force the gap to an opaque black so it stays a solid
+        -- dark separator, cohesive with the opaque pips.
         if not secondaryFrame._barBg then
             secondaryFrame._barBg = secondaryFrame:CreateTexture(nil, "BACKGROUND", nil, -1)
         end
         secondaryFrame._barBg:ClearAllPoints()
         secondaryFrame._barBg:SetAllPoints(secondaryFrame)
-        secondaryFrame._barBg:SetColorTexture(sp.barBgR or 0, sp.barBgG or 0, sp.barBgB or 0, sp.barBgA or 0.5)
+        if sp.darkTheme then
+            secondaryFrame._barBg:SetColorTexture(0, 0, 0, 1)
+        else
+            secondaryFrame._barBg:SetColorTexture(sp.barBgR or 0, sp.barBgG or 0, sp.barBgB or 0, sp.barBgA or 0.5)
+        end
 
         -- Count text
         if sp.showText then
@@ -2343,6 +2551,25 @@ local function BuildBars()
     end
 
     ReapplyInternalBarAnchors()
+
+    -- "Shift Elements if No Resource": re-cascade the class resource bar so any
+    -- elements anchored to it pick up (or drop) the temporary shift. The
+    -- resource-present/absent transition keeps the frame at the same size, so
+    -- neither OnSizeChanged nor the SetPoint move-hook fires automatically -- we
+    -- must trigger the cascade explicitly. Gated so a None-forever profile
+    -- schedules ZERO anchor work, and never fired during unlock mode (unlock
+    -- entry/exit manage the shift separately).
+    do
+        local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
+        local active = sp ~= nil and (sp.shiftElementsIfNoResource == "Up"
+            or sp.shiftElementsIfNoResource == "Down")
+        if (active or ERB._shiftWasActive)
+           and not EllesmereUI._unlockActive
+           and EllesmereUI.PropagateAnchorChain then
+            ERB._shiftWasActive = active
+            EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+        end
+    end
 end
 
 
@@ -2402,7 +2629,13 @@ local function UpdateHealthBar()
         local r, g, b
         local cc = CLASS_COLORS[cachedClass]
         if cc then r, g, b = cc[1], cc[2], cc[3] else r, g, b = 0.15, 0.75, 0.30 end
-        ft:SetVertexColor(r, g, b, 1)
+        if hp.gradientEnabled then
+            ApplyBarGradient(ft, hp.gradientDir or "HORIZONTAL",
+                r, g, b, 1,
+                hp.gradientR, hp.gradientG, hp.gradientB, hp.gradientA)
+        else
+            ApplyBarFlat(ft, r, g, b, 1)
+        end
     end
 
     -- Smooth animation
@@ -2460,8 +2693,14 @@ local function UpdatePrimaryBar()
         local ft = primaryBar:GetStatusBarTexture()
         if not pp.darkTheme and not pp.customColored then
             local pc = POWER_COLORS["EBON_MIGHT"]
-            if pc then ft:SetVertexColor(pc[1], pc[2], pc[3], 1)
-            else ft:SetVertexColor(1, 1, 1, 1) end
+            local r, g, b = 1, 1, 1
+            if pc then r, g, b = pc[1], pc[2], pc[3] end
+            if pp.gradientEnabled then
+                ApplyBarGradient(ft, pp.gradientDir or "HORIZONTAL", r, g, b, 1,
+                    pp.gradientR, pp.gradientG, pp.gradientB, pp.gradientA)
+            else
+                ApplyBarFlat(ft, r, g, b, 1)
+            end
         end
         -- Text
         if pp.textFormat and pp.textFormat ~= "none" then
@@ -2529,7 +2768,13 @@ local function UpdatePrimaryBar()
         local r, g, b
         local pc = POWER_COLORS[cachedPrimary]
         if pc then r, g, b = pc[1], pc[2], pc[3] else r, g, b = 1, 1, 1 end
-        ft:SetVertexColor(r, g, b, 1)
+        if pp.gradientEnabled then
+            ApplyBarGradient(ft, pp.gradientDir or "HORIZONTAL",
+                r, g, b, 1,
+                pp.gradientR, pp.gradientG, pp.gradientB, pp.gradientA)
+        else
+            ApplyBarFlat(ft, r, g, b, 1)
+        end
     end
 
     -- Smooth animation
@@ -2578,12 +2823,129 @@ local _essenceNextTick = nil   -- GetTime() when the next pip will be ready
 local _essenceLastCount = nil  -- last known whole-pip count
 local _essenceTickDur = 0      -- seconds per pip recharge
 
+-- Cast handler for the Guardian Ironfur bar. Only tracks while the Ironfur
+-- bar is the active class resource so the tick list can't grow unbounded.
+local function HandleIronfurCast(spellID)
+    if not (cachedSecondary and cachedSecondary.power == "IRONFUR_BAR") then return end
+    local now = GetTime()
+    if spellID == IRONFUR_SPELL then
+        ironfurBaseDur = IronfurBaseDuration()
+        local hasGoE = ironfurGoEUntil > 0 and now < ironfurGoEUntil
+            and C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(GUARDIAN_OF_ELUNE)
+        local dur = ironfurBaseDur + (hasGoE and IRONFUR_GOE_BONUS or 0)
+        ironfurTicks[#ironfurTicks + 1] = { endTime = now + dur, duration = dur }
+        if hasGoE then ironfurGoEUntil = 0 end
+    elseif spellID == MANGLE_SPELL then
+        if C_SpellBook and C_SpellBook.IsSpellKnown and C_SpellBook.IsSpellKnown(GUARDIAN_OF_ELUNE) then
+            ironfurGoEUntil = now + IRONFUR_GOE_WINDOW
+        end
+    elseif spellID == FRENZIED_REGEN then
+        ironfurGoEUntil = 0
+    end
+end
+
+-- Per-frame render for the Guardian Ironfur bar: prune expired ticks, position
+-- the moving hash lines (right -> left as each cast decays), and drive the fill
+-- to the longest-remaining fraction.
+local function UpdateIronfurBar()
+    if not (secondaryBar and secondaryBar:IsShown()) then return end
+    local sp = ERB.db.profile.secondary
+    local now = GetTime()
+
+    -- Prune expired casts
+    for i = #ironfurTicks, 1, -1 do
+        if ironfurTicks[i].endTime <= now then
+            table.remove(ironfurTicks, i)
+        end
+    end
+
+    local count = #ironfurTicks
+    local barW = secondaryBar:GetWidth() or 0
+    local barH = secondaryBar:GetHeight() or 0
+    local overlay = secondaryBar._ifOverlay
+    local showHash = sp.guardianShowHashLines ~= false
+    local PP = EllesmereUI and EllesmereUI.PP
+    local tickW = PP and (2 * PP.mult) or 2
+    local maxFrac = 0
+    local shown = 0
+
+    for i = 1, count do
+        local t = ironfurTicks[i]
+        local frac = (t.duration > 0) and ((t.endTime - now) / t.duration) or 0
+        if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+        if frac > maxFrac then maxFrac = frac end
+        if showHash and overlay and barW > 0 then
+            shown = shown + 1
+            local tex = ironfurTickTex[shown]
+            if not tex then
+                tex = overlay:CreateTexture(nil, "OVERLAY", nil, 7)
+                tex:SetSnapToPixelGrid(false)
+                tex:SetTexelSnappingBias(0)
+                ironfurTickTex[shown] = tex
+            end
+            tex:SetColorTexture(1, 1, 1, 0.9)
+            local x = frac * barW
+            if x > barW - tickW then x = barW - tickW end
+            if x < 0 then x = 0 end
+            tex:ClearAllPoints()
+            tex:SetSize(tickW, barH)
+            tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+            tex:Show()
+        end
+    end
+
+    -- Hide any leftover pooled tick textures
+    for i = shown + 1, #ironfurTickTex do ironfurTickTex[i]:Hide() end
+
+    -- Fill color: class/custom/dark base, swapped to the per-spec threshold
+    -- color while the active Ironfur stack count is at or above the threshold.
+    local r, g, b, a
+    if sp.darkTheme then
+        r, g, b, a = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, sp.fillA or 1
+    elseif sp.classColored ~= false then
+        local cc = CLASS_COLORS[cachedClass]
+        if cc then r, g, b = cc[1], cc[2], cc[3] else r, g, b = 1, 1, 1 end
+        a = sp.fillA or 1
+    else
+        r, g, b, a = sp.fillR, sp.fillG, sp.fillB, sp.fillA or 1
+    end
+    local tsEntry = ResolveThresholdSpecEntry(sp)
+    if tsEntry and tsEntry.thresholdEnabled ~= false then
+        local threshCount = tsEntry.thresholdCount or sp.thresholdCount or 3
+        if count >= threshCount then
+            r = tsEntry.thresholdR or sp.thresholdR or r
+            g = tsEntry.thresholdG or sp.thresholdG or g
+            b = tsEntry.thresholdB or sp.thresholdB or b
+            a = tsEntry.thresholdA or sp.thresholdA or a
+        end
+    end
+    local ft = secondaryBar:GetStatusBarTexture()
+    if ft then ft:SetVertexColor(r, g, b, a) end
+
+    -- Fill = longest remaining fraction (min/max is 0..1 for this bar), so the
+    -- bar depletes with the longest-lived Ironfur stack. Set directly (no
+    -- smoothing) and keep the smoother in sync so the generic secondaryBar
+    -- lerp can't fight it.
+    secondaryBar:SetValue(maxFrac)
+    secondaryBar._smoothTarget = maxFrac
+    secondaryBar._smoothCurrent = maxFrac
+
+    if sp.showText and secondaryFrame and secondaryFrame._countText then
+        secondaryFrame._countText:SetText(count > 0 and tostring(count) or "")
+    end
+end
+
 local function UpdateSecondaryResource()
     if not secondaryFrame or not secondaryFrame:IsShown() then return end
     if not cachedSecondary then return end
 
     local powerType = cachedSecondary.power
     local maxPts = cachedSecondary.max or 5
+
+    if powerType == "IRONFUR_BAR" then
+        UpdateIronfurBar()
+        return
+    end
 
     local sp = ERB.db.profile.secondary
     -- Resolve per-spec threshold entry once per update
@@ -3414,8 +3776,13 @@ local function OnUpdate(self, dt)
         end
     end
 
+    -- Guardian Ironfur bar: drive moving hash lines + fill every frame for
+    -- smooth right-to-left motion (the 0.1s throttle below would look choppy).
+    if cachedSecondary and cachedSecondary.power == "IRONFUR_BAR"
+       and secondaryBar and secondaryBar:IsShown() then
+        UpdateIronfurBar()
     -- Smooth bar animation (bar-style secondary, e.g. Devourer / Elemental maelstrom)
-    if secondaryBar and secondaryBar:IsShown() then
+    elseif secondaryBar and secondaryBar:IsShown() then
         local tgt = secondaryBar._smoothTarget
         if issecretvalue and issecretvalue(tgt) then
             secondaryBar:SetValue(tgt)
@@ -3744,6 +4111,9 @@ BuildCastBar = function()
     if castBarFrame._border then
         local bs = cb.borderSize or 0
         local texKey = cb.borderTexture or "solid"
+        -- "Show Behind": +5 in front of the bar, level-1 behind it.
+        local pl = castBarFrame:GetFrameLevel()
+        castBarFrame._border:SetFrameLevel(cb.borderBehind and math.max(0, pl - 1) or (pl + 5))
         EllesmereUI.ApplyBorderStyle(castBarFrame._border, bs,
             cb.borderR or 0, cb.borderG or 0, cb.borderB or 0, cb.borderA or 1,
             texKey, cb.borderTextureOffset, cb.borderTextureOffsetY,
@@ -4625,7 +4995,8 @@ local function LayoutTotemBar()
             overlay = CreateFrame("Frame", nil, btn)
             _totemBorderOverlays[btn] = overlay
         end
-        overlay:SetFrameLevel(btn:GetFrameLevel() + 3)
+        -- "Show Behind": +3 in front of the icon, level-1 behind it.
+        overlay:SetFrameLevel(tb.borderBehind and math.max(0, btn:GetFrameLevel() - 1) or (btn:GetFrameLevel() + 3))
         overlay:ClearAllPoints()
         overlay:SetAllPoints(btn.Icon or btn)
         overlay:Show()
@@ -4885,6 +5256,9 @@ local function OnEvent(self, event, ...)
         _essenceTickDur = 0
         _ebonMightExpiry = 0
         _ebonMightThrottle = 0
+        wipe(ironfurTicks)
+        ironfurGoEUntil = 0
+        ironfurBaseDur = IronfurBaseDuration()
         cachedPrimary = GetPrimaryPowerType()
         cachedSecondary = GetSecondaryResource()
         BuildBars()
@@ -4910,19 +5284,25 @@ local function OnEvent(self, event, ...)
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- Route to manual resource trackers (12.0+ secret-value safe)
         local unit, castGUID, spellID = ...
-        if unit == "player" and EllesmereUI then
-            if EllesmereUI.HandleTipOfTheSpear then
-                EllesmereUI.HandleTipOfTheSpear(event, unit, castGUID, spellID)
+        if unit == "player" then
+            HandleIronfurCast(spellID)
+            if EllesmereUI then
+                if EllesmereUI.HandleTipOfTheSpear then
+                    EllesmereUI.HandleTipOfTheSpear(event, unit, castGUID, spellID)
+                end
+                if EllesmereUI.HandleWhirlwindStacks then
+                    EllesmereUI.HandleWhirlwindStacks(event, unit, castGUID, spellID)
+                end
             end
-            if EllesmereUI.HandleWhirlwindStacks then
-                EllesmereUI.HandleWhirlwindStacks(event, unit, castGUID, spellID)
-            end
-            if cachedSecondary and cachedSecondary.type == "custom" then
+            if cachedSecondary and (cachedSecondary.type == "custom"
+               or cachedSecondary.power == "IRONFUR_BAR") then
                 UpdateSecondaryResource()
             end
         end
     elseif event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
         -- Reset manual trackers on death/resurrect
+        wipe(ironfurTicks)
+        ironfurGoEUntil = 0
         if EllesmereUI then
             if EllesmereUI.HandleTipOfTheSpear then
                 EllesmereUI.HandleTipOfTheSpear(event)
@@ -4984,31 +5364,65 @@ function ERB:OnInitialize()
 
     _G._ERB_AceDB = self.db
     _G._ERB_Apply = function() ERB:ApplyAll() end
-    -- Unlock mode: disable expandIfNoResource before positions are captured,
-    -- restore on close. Prevents expanded height from corrupting saved state.
-    -- Session-local flag so stale SavedVariables can't force the setting back on
-    local _expandSuppressedThisSession = false
+    -- Unlock mode / EUI options panel: temporarily render the power bar at its
+    -- true stored height (no expand) so movers and getSize see the real size.
+    -- RUNTIME-ONLY suppression via EllesmereUI._erbExpandSuppressed -- it NEVER
+    -- writes the saved primary.expandIfNoResource setting.
+    --
+    -- The old version mutated the saved bool, which the toggle's getValue reads
+    -- and the Lite DB persists verbatim: opening the panel made the toggle read
+    -- OFF, a missed restore on /reload or logout stranded the setting false on
+    -- disk (no recovery without a manual re-toggle), and profile swaps wrote the
+    -- flag onto the wrong profile. This mirrors the shift provider below, which
+    -- computes its effect from live state and never writes the saved value.
+    --
+    -- The ApplyAll gate also checks EllesmereUI._unlockActive directly, so the
+    -- panel->unlock transition stays suppressed even if this flag races (e.g. the
+    -- unlock-open animation fires the panel OnHide and clears the flag while
+    -- _unlockActive is still true).
     _G._ERB_SuppressExpand = function()
-        local p = self.db and self.db.profile and self.db.profile.primary
-        if p and p.expandIfNoResource then
-            _expandSuppressedThisSession = true
-            p.expandIfNoResource = false
-            ERB:ApplyAll()
-        end
+        EllesmereUI._erbExpandSuppressed = true
+        ERB:ApplyAll()
     end
     _G._ERB_RestoreExpand = function()
-        if not _expandSuppressedThisSession then return end
-        _expandSuppressedThisSession = false
-        local p = self.db and self.db.profile and self.db.profile.primary
-        if p then
-            p.expandIfNoResource = true
-            ERB:ApplyAll()
-        end
+        EllesmereUI._erbExpandSuppressed = false
+        ERB:ApplyAll()
     end
     _G._ERB_GetSecondaryResource = GetSecondaryResource
     _G._ERB_CalcPipGeometry = CalcPipGeometry
     _G._ERB_GetPrimaryPowerType = GetPrimaryPowerType
     _G._ERB_PowerColors = POWER_COLORS
+
+    -- "Shift Elements if No Resource": a direction signal the shared anchor
+    -- engine consults to temporarily move elements anchored to the class
+    -- resource bar when the spec has no class resource. Visual-only; never
+    -- written to saved positions. Direction the shift WOULD apply (ignores
+    -- unlock state): +1 = Up, -1 = Down, 0 = none.
+    local function ResolveShiftDir()
+        local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
+        if not sp or not sp.enabled then return 0 end
+        local mode = sp.shiftElementsIfNoResource
+        if mode ~= "Up" and mode ~= "Down" then return 0 end
+        if GetSecondaryResource() then return 0 end
+        return (mode == "Up") and 1 or -1
+    end
+    -- Consulted inside ApplyAnchorPosition. Returns 0 while unlock mode is
+    -- active so the layout shows normal (and movers capture true positions).
+    EllesmereUI._GetAnchorTargetShiftDir = function(targetKey, childKey)
+        if targetKey ~= "ERB_ClassResource" then return 0 end
+        if EllesmereUI._unlockActive then return 0 end
+        return ResolveShiftDir()
+    end
+    -- Whether a shift WOULD apply outside unlock mode (unlock entry uses this to
+    -- decide whether to un-shift before snapshotting positions). None = false.
+    _G._ERB_ShiftWantsApply = function() return ResolveShiftDir() ~= 0 end
+    -- Re-apply the shift after unlock mode closes (PropagateAnchorChain is a
+    -- no-op while unlocked, so this runs on exit). Gated so None = zero work.
+    _G._ERB_RestoreShift = function()
+        if ResolveShiftDir() ~= 0 and EllesmereUI.PropagateAnchorChain then
+            EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+        end
+    end
 
     BuildBarTypeSpecMap()
 

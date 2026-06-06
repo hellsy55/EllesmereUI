@@ -98,6 +98,10 @@ function ns._appendDisplayPresetKeys(t)
         "textSlotTopColor", "textSlotRightColor", "textSlotLeftColor", "textSlotCenterColor",
         "tankHasAggroEnabled", "tankHasAggro", "classicTankAggro",
         "dpsHasAggro", "dpsNearAggro", "offTankAggroEnabled", "offTankAggro",
+        "targetArrowDouble", "targetArrowStyle", "targetArrowColor", "targetArrowClassColor",
+        "auraStackTextSize", "auraStackTextColor",
+        "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
+        "raidMarkerPos", "classificationSlot",
     }) do t[#t + 1] = k end
 end
 
@@ -151,7 +155,10 @@ local defaults = {
     textSlotLeft = "none",
     textSlotCenter = "none",
     showTargetArrows = false,
+    targetArrowDouble = false,
     targetArrowScale = 1.0,
+    targetArrowColor = { r = 1, g = 1, b = 1 },
+    targetArrowClassColor = false,
     showClassPower = false,
     classPowerPos = "bottom",
     classPowerYOffset = 1,
@@ -236,8 +243,11 @@ local defaults = {
     questMobColor = { r = 0.157, g = 0.855, b = 0.475 },
     showCastIcon = true,
     castIconScale = 1,
+    castbarIconInWidth = false,
     bgAlpha = 1.0,
     bgColor = { r = 0.12, g = 0.12, b = 0.12 },
+    hoverColor = { r = 1, g = 1, b = 1 },
+    hoverAlpha = 0.3,
     castBgAlpha = 0.9,
     castBgColor = { r = 0.1, g = 0.1, b = 0.1 },
     hashLineEnabled = false,
@@ -364,7 +374,6 @@ function ns.ApplyAbsorbStyleAll()
     end
 end
 
-local HOVER_ALPHA = 0.3
 local function GetNameplateYOffset()
     return (p and p.nameplateYOffset) or defaults.nameplateYOffset
 end
@@ -583,6 +592,29 @@ local function GetCastIconScale()
     return (p and p.castIconScale) or defaults.castIconScale
 end
 ns.GetCastIconScale = GetCastIconScale
+-- "Make Icon Part of the Bar": when true (and the icon is shown), the spell
+-- icon is counted inside the cast bar's width -- the bar is shifted right and
+-- narrowed by the icon width so the icon (anchored to the bar's left edge)
+-- sits inside the footprint. Default false (off for everyone, no migration).
+function ns.GetCastIconInWidth()
+    if p and p.castbarIconInWidth ~= nil then return p.castbarIconInWidth end
+    return defaults.castbarIconInWidth
+end
+
+-- Position + size the cast bar within `footprintW`, accounting for the
+-- icon-in-width setting. The icon (castIconFrame) is anchored TOPRIGHT -> cast
+-- TOPLEFT, so shifting the bar right by the icon width lands the icon inside
+-- the footprint's left edge automatically. iconW uses the icon's rendered size
+-- (castH * icon scale) so a scaled icon reserves the right amount of space.
+function ns.LayoutCastBar(plate, footprintW, castH)
+    local iconW = 0
+    if GetShowCastIcon() and ns.GetCastIconInWidth() then
+        iconW = castH * (GetCastIconScale() or 1)
+    end
+    plate.cast:ClearAllPoints()
+    plate.cast:SetSize(math.max(1, footprintW - iconW), castH)
+    plate.cast:SetPoint("TOPLEFT", plate.health, "BOTTOMLEFT", iconW, 0)
+end
 local function GetKickTickEnabled()
     if p and p.kickTickEnabled ~= nil then return p.kickTickEnabled end
     return true
@@ -1330,14 +1362,63 @@ local function EnsureGlow(plate)
     plate.glowFrame:Hide()
 end
 
+-- Target arrow styles: key -> { l=left texture, r=right texture, w=drawn width at
+-- height 16 (scale 1), label }. All source art is 66px tall; width preserves the
+-- original 36px art = 11px drawn, i.e. w = round(nativeWidth * 11/36): 36->11,
+-- 72->22, 90->28. Height is always 16. Shared by enemy/friendly plates + options.
+ns.TARGET_ARROW_DIR = "Interface\\AddOns\\EllesmereUINameplates\\Media\\Arrows\\"
+ns.TARGET_ARROW_STYLES = {
+    simple    = { l = "arrow_left",      r = "arrow_right",      w = 11, label = "Simple Arrows" },
+    double    = { l = "arrow_leftx2",    r = "arrow_rightx2",    w = 22, label = "Double Arrows" },
+    barbed    = { l = "barbed-left",     r = "barbed-right",     w = 28, label = "Barbed" },
+    bracket   = { l = "bracket-left",    r = "bracket-right",    w = 22, label = "Bracket" },
+    celestial = { l = "celestial-left",  r = "celestial-right",  w = 28, label = "Celestial" },
+    classic   = { l = "classic-left",    r = "classic-right",    w = 22, label = "Classic" },
+    crystal   = { l = "crystal-left",    r = "crystal-right",    w = 22, label = "Crystal" },
+    curved    = { l = "curved-left",     r = "curved-right",     w = 22, label = "Curved" },
+    demon     = { l = "demon-left",      r = "demon-right",      w = 28, label = "Demon" },
+    diamond   = { l = "diamond-left",    r = "diamond-right",    w = 28, label = "Diamond" },
+    feathered = { l = "feathered-left",  r = "feathered-right",  w = 22, label = "Feathered" },
+    halo      = { l = "halo-left",       r = "halo-right",       w = 22, label = "Halo" },
+    holyspear = { l = "holy-spear-left", r = "holy-spear-right", w = 28, label = "Holy Spear" },
+    rune      = { l = "rune-left",       r = "rune-right",       w = 22, label = "Rune" },
+    split     = { l = "split-left",      r = "split-right",      w = 22, label = "Split" },
+    winged    = { l = "winged-left",     r = "winged-right",     w = 28, label = "Winged" },
+}
+ns.TARGET_ARROW_ORDER = {
+    "simple", "double", "winged", "feathered", "split", "celestial", "rune", "demon",
+    "halo", "curved", "barbed", "holyspear", "bracket", "diamond", "crystal", "classic",
+}
+
+-- Resolve a profile to its arrow style table. targetArrowStyle is the current key;
+-- legacy profiles fall back to the old targetArrowDouble boolean (then Simple).
+function ns.ResolveTargetArrowStyle(prof)
+    local key = prof and (prof.targetArrowStyle or (prof.targetArrowDouble and "double")) or nil
+    return ns.TARGET_ARROW_STYLES[key] or ns.TARGET_ARROW_STYLES.simple
+end
+
+-- Target arrow tint: the player's class color when targetArrowClassColor is on,
+-- otherwise the custom targetArrowColor (default white).
+function ns.GetTargetArrowColor(prof)
+    if prof and prof.targetArrowClassColor then
+        local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[PLAYER_CLASS]
+        if cc then return cc.r, cc.g, cc.b end
+        return 1, 1, 1
+    end
+    local c = prof and prof.targetArrowColor
+    if c then return c.r, c.g, c.b end
+    return 1, 1, 1
+end
+
 local function EnsureArrows(plate)
     if plate.leftArrow then return end
-    plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
-    plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
+    local st = ns.ResolveTargetArrowStyle(p)
     local sc = (p and p.targetArrowScale) or 1.0
-    local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
+    local aw, ah = math.floor(st.w * sc + 0.5), math.floor(16 * sc + 0.5)
+    plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
+    plate.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.l .. ".png")
+    plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
+    plate.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.r .. ".png")
     PP.Size(plate.leftArrow, aw, ah)
     PP.Point(plate.leftArrow, "RIGHT", plate.health, "LEFT", -8, 0)
     plate.leftArrow:Hide()
@@ -1524,9 +1605,14 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     SetFSFont(plate.hpNumber, 10, GetNPOutline())
     plate.hpNumber:SetPoint("CENTER", plate.health, "CENTER", 0, 0)
     plate.hpNumber:Hide()
-    plate.highlight = plate.healthTextFrame:CreateTexture(nil, "OVERLAY", nil, 6)
-    plate.highlight:SetAllPoints()
-    plate.highlight:SetColorTexture(1, 1, 1, HOVER_ALPHA)
+    -- Mouseover highlight: parented to the health bar (not the higher-level
+    -- text frame) so it renders BEHIND the border, which lives on a child
+    -- frame at health level + 1.
+    plate.highlight = plate.health:CreateTexture(nil, "OVERLAY", nil, 6)
+    plate.highlight:SetAllPoints(plate.health)
+    local _hc = (p and p.hoverColor) or defaults.hoverColor
+    local _ha = (p and p.hoverAlpha) or defaults.hoverAlpha
+    plate.highlight:SetColorTexture(_hc.r, _hc.g, _hc.b, _ha)
     plate.highlight:Hide()
     -- Top text overlay: renders above health bar + borders so top-slot text is never hidden
     plate.topTextFrame = CreateFrame("Frame", nil, plate)
@@ -1555,9 +1641,11 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.class = plate.classFrame:CreateTexture(nil, "ARTWORK")
     plate.class:SetAllPoints()
     plate.cast = CreateFrame("StatusBar", nil, plate)
-    -- Cast bar is full health bar width; icon hangs outside to the left
-    plate.cast:SetSize(GetHealthBarWidth(), CAST_H)
-    plate.cast:SetPoint("TOPLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    -- Cast bar spans the health bar width. By default the icon hangs outside to
+    -- the left; with "Make Icon Part of the Bar" the bar shrinks so the icon
+    -- sits inside the width. LayoutCastBar handles both (must run after
+    -- plate.health exists, which it does here).
+    ns.LayoutCastBar(plate, ns.GetHealthBarWidth(), CAST_H)
     plate.cast:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.cast:SetMinMaxValues(0, 1)
     plate.cast:Hide()
@@ -1979,6 +2067,23 @@ function ns.RefreshAllSettings()
     end
     if ns.ApplyClassPowerSetting then ns.ApplyClassPowerSetting() end
 end
+
+-- Recolor the mouseover highlight on every live plate (enemy + friendly).
+function ns.RefreshHoverEffect()
+    local c = (p and p.hoverColor) or defaults.hoverColor
+    local a = (p and p.hoverAlpha) or defaults.hoverAlpha
+    for _, plate in pairs(ns.plates) do
+        if plate.highlight then
+            plate.highlight:SetColorTexture(c.r, c.g, c.b, a)
+        end
+    end
+    for _, plate in pairs(ns.friendlyPlates or {}) do
+        if plate.highlight then
+            plate.highlight:SetColorTexture(c.r, c.g, c.b, a)
+        end
+    end
+end
+
 local kickWatcher = CreateFrame("Frame")
 kickWatcher:RegisterEvent("PLAYER_LOGIN")
 kickWatcher:RegisterEvent("SPELLS_CHANGED")
@@ -3328,9 +3433,7 @@ function NameplateFrame:ApplyAppearance()
     self.health:SetPoint("CENTER", self, "CENTER", 0, GetNameplateYOffset())
     self.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     self.absorb:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
-    self.cast:SetSize(GetHealthBarWidth(), castH)
-    self.cast:ClearAllPoints()
-    self.cast:SetPoint("TOPLEFT", self.health, "BOTTOMLEFT", 0, 0)
+    ns.LayoutCastBar(self, ns.GetHealthBarWidth(), castH)
     self.castIconFrame:SetSize(castH, castH)
     self.castIconFrame:ClearAllPoints()
     self.castIconFrame:SetPoint("TOPRIGHT", self.cast, "TOPLEFT", 0, 0)
@@ -3630,7 +3733,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
                 local pct = GetFocusCastHeight()
                 if pct ~= 100 then
                     local castH = math.floor(GetCastBarHeight() * pct / 100 + 0.5)
-                    self.cast:SetSize(GetHealthBarWidth(), castH)
+                    ns.LayoutCastBar(self, ns.GetHealthBarWidth(), castH)
                     self.castIconFrame:SetSize(castH, castH)
                     self.castSpark:SetHeight(castH)
                     self.kickMarker:SetSize(GetHealthBarWidth(), castH)
@@ -4201,7 +4304,13 @@ function NameplateFrame:ApplyTarget()
         if isTarget then
             EnsureArrows(self)
             local sc = p.targetArrowScale or 1.0
-            local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
+            local st = ns.ResolveTargetArrowStyle(p)
+            self.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.l .. ".png")
+            self.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.r .. ".png")
+            local acr, acg, acb = ns.GetTargetArrowColor(p)
+            self.leftArrow:SetVertexColor(acr, acg, acb)
+            self.rightArrow:SetVertexColor(acr, acg, acb)
+            local aw, ah = math.floor(st.w * sc + 0.5), math.floor(16 * sc + 0.5)
             PP.Size(self.leftArrow,  aw, ah)
             PP.Size(self.rightArrow, aw, ah)
             self.leftArrow:Show()
@@ -5564,7 +5673,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
                 if UnitIsUnit(plate.unit, "focus") then
                     castH = math.floor(castH * focusPct / 100 + 0.5)
                 end
-                plate.cast:SetHeight(castH)
+                ns.LayoutCastBar(plate, ns.GetHealthBarWidth(), castH)
                 plate.castIconFrame:SetSize(castH, castH)
                 plate.castSpark:SetHeight(castH)
                 plate.kickMarker:SetHeight(castH)
@@ -5703,9 +5812,6 @@ do
         "debuffYOffset", "sideAuraXOffset", "auraSpacing",
         "debuffTimerPosition", "buffTimerPosition", "ccTimerPosition",
         "auraDurationTextSize", "auraDurationTextColor",
-        "auraStackTextSize", "auraStackTextColor",
-        "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
-        "raidMarkerPos", "classificationSlot",
     }
     ns._appendDisplayPresetKeys(ns._displayPresetKeys)
 

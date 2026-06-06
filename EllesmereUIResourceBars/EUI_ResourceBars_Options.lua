@@ -89,6 +89,9 @@ initFrame:SetScript("OnEvent", function(self)
     IsBarTypeSecondary = function()
         local _, cf = UnitClass("player")
         local spec = GetSpecialization()
+        local gsr = _G._ERB_GetSecondaryResource
+        local info = gsr and gsr()
+        if info and info.power == "IRONFUR_BAR" then return true end -- Guardian Ironfur bar
         if cf == "DRUID" and spec == 1 then return true end -- Balance (Astral Power bar)
         if cf == "SHAMAN" and spec == 1 then return true end -- Elemental
         if cf == "PRIEST" and spec == 3 then return true end -- Shadow
@@ -488,9 +491,9 @@ initFrame:SetScript("OnEvent", function(self)
             if not pc._barBorderFrame then
                 local bf = CreateFrame("Frame", nil, pc)
                 bf:SetAllPoints(pc)
-                bf:SetFrameLevel(pc:GetFrameLevel() + 2)
                 pc._barBorderFrame = bf
             end
+            pc._barBorderFrame:SetFrameLevel(sp.borderBehind and math.max(0, pc:GetFrameLevel() - 1) or (pc:GetFrameLevel() + 2))
             EllesmereUI.ApplyBorderStyle(pc._barBorderFrame, sp.borderSize or 1,
                 sp.borderR or 0, sp.borderG or 0, sp.borderB or 0, sp.borderA or 1,
                 sp.borderTexture or "solid", sp.borderTextureOffset, sp.borderTextureOffsetY,
@@ -716,7 +719,7 @@ initFrame:SetScript("OnEvent", function(self)
                 hintHost:SetAllPoints(hdr)
                 _previewHintFS = EllesmereUI.MakeFont(hintHost, 11, nil, 1, 1, 1)
                 _previewHintFS:SetAlpha(0.45)
-                _previewHintFS:SetText("Click elements to scroll to and highlight their options")
+                _previewHintFS:SetText(EllesmereUI.L("Click elements to scroll to and highlight their options"))
             end
             _previewHintFS:GetParent():SetParent(hdr)
             _previewHintFS:GetParent():Show()
@@ -977,7 +980,7 @@ initFrame:SetScript("OnEvent", function(self)
         local btnLbl = EllesmereUI.MakeFont(settingsBtn, 13, nil, 1, 1, 1)
         btnLbl:SetAlpha(EllesmereUI.DD_TXT_A)
         btnLbl:SetPoint("CENTER")
-        btnLbl:SetText("Settings")
+        btnLbl:SetText(EllesmereUI.L("Settings"))
         settingsBtn:SetScript("OnEnter", function(self)
             btnBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
             if self._border and self._border.SetColor then self._border:SetColor(1, 1, 1, 0.3) end
@@ -992,11 +995,20 @@ initFrame:SetScript("OnEvent", function(self)
         btnDis:SetFrameLevel(settingsBtn:GetFrameLevel() + 5)
         btnDis:EnableMouse(true)
         btnDis:SetScript("OnEnter", function()
-            EllesmereUI.ShowWidgetTooltip(settingsBtn, EllesmereUI.DisabledTooltip(cfg.disabledTip or "Enable this bar"))
+            EllesmereUI.ShowWidgetTooltip(settingsBtn, EllesmereUI.DisabledTooltip(cfg.disabledTip or "this bar"))
         end)
         btnDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         local function UpdateBtnDis()
-            if cfg.disabledFn and cfg.disabledFn() then btnDis:Show() else btnDis:Hide() end
+            local off = cfg.disabledFn and cfg.disabledFn()
+            if off then
+                btnDis:Show()
+                settingsBtn:SetAlpha(0.3)
+                if parentRgn._label then parentRgn._label:SetAlpha(0.3) end
+            else
+                btnDis:Hide()
+                settingsBtn:SetAlpha(1)
+                if parentRgn._label then parentRgn._label:SetAlpha(1) end
+            end
         end
         settingsBtn:HookScript("OnShow", UpdateBtnDis)
         EllesmereUI.RegisterWidgetRefresh(UpdateBtnDis)
@@ -1115,7 +1127,7 @@ initFrame:SetScript("OnEvent", function(self)
             local titleFS = EllesmereUI.MakeFont(popup, 13, nil, 1, 1, 1)
             titleFS:SetAlpha(0.55)
             titleFS:SetPoint("TOP", popup, "TOP", 0, curY)
-            titleFS:SetText(cfg.popupTitle or "Threshold Settings")
+            titleFS:SetText(cfg.popupTitle or EllesmereUI.L("Threshold Settings"))
             curY = curY - 25
 
             -- Centered dropdown + Add button
@@ -1181,8 +1193,8 @@ initFrame:SetScript("OnEvent", function(self)
                 _origRefresh()
                 local regions = { cbDD:GetRegions() }
                 for _, rgn2 in ipairs(regions) do
-                    if rgn2.GetText and rgn2:GetText() == "None" then
-                        rgn2:SetText("Select a Spec..."); break
+                    if rgn2.GetText and EllesmereUI.EnKey(rgn2:GetText()) == "None" then
+                        rgn2:SetText(EllesmereUI.L("Select a Spec...")); break
                     end
                 end
             end
@@ -1199,7 +1211,7 @@ initFrame:SetScript("OnEvent", function(self)
             local addLbl = EllesmereUI.MakeFont(addBtn, 11, nil, 1, 1, 1)
             addLbl:SetAlpha(0.5)
             addLbl:SetPoint("CENTER")
-            addLbl:SetText("Add Specs")
+            addLbl:SetText(EllesmereUI.L("Add Specs"))
             addBtn:SetScript("OnEnter", function()
                 addLbl:SetAlpha(0.7)
                 if addBtn._border and addBtn._border.SetColor then addBtn._border:SetColor(1, 1, 1, 0.6) end
@@ -1433,7 +1445,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local threshLbl2 = EllesmereUI.MakeFont(ef, 13, nil, 1, 1, 1)
                     threshLbl2:SetAlpha(0.6)
                     threshLbl2:SetPoint("TOPLEFT", ef, "TOPLEFT", 8, threshY)
-                    threshLbl2:SetText(cfg.thresholdLabel or "Threshold")
+                    threshLbl2:SetText(cfg.thresholdLabel or EllesmereUI.L("Threshold"))
                     ef._threshLbl = threshLbl2
 
                     local threshInput = CreateFrame("EditBox", nil, ef)
@@ -1579,8 +1591,8 @@ initFrame:SetScript("OnEvent", function(self)
                 if cfg.showHash and ef._hashLbl then
                     local isBar = IsEntryBarType_L(entry)
                     local hashWord = isBar and "Percent" or "Stack"
-                    ef._hashLbl:SetText("Hash at " .. hashWord)
-                    ef._hashHint:SetText(isBar and "(Ex: 25,50,75)" or "(Ex: 2,4)")
+                    ef._hashLbl:SetText(EllesmereUI.Lf("Hash at %1$s", hashWord))
+                    ef._hashHint:SetText(isBar and EllesmereUI.L("(Ex: 25,50,75)") or EllesmereUI.L("(Ex: 2,4)"))
                     ef._hashInput:SetText(entry.hashValues or "")
                     ef._hashInput:SetScript("OnEnterPressed", function(self)
                         local bd2 = cfg.getBarData(); if not bd2 then return end
@@ -1798,7 +1810,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "colorpicker", text = "Background", hasAlpha = true,
               disabled = function() local p = DB(); return p and p.health.darkTheme end,
-              disabledTooltip = "Disable Dark Theme first",
+              disabledTooltip = "Dark Theme", requireState = "disabled",
               getValue = function()
                   local p = DB()
                   if not p then return 0x11/255, 0x11/255, 0x11/255, 0.75 end
@@ -1844,6 +1856,78 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row 4: Shift Elements if No Resource | Expand Power Bar if No Resource
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Shift Elements if No Resource",
+              tooltip = "Shifts any elements anchored to the class resource bar up or down to offset the missing class resource.",
+              -- Mutually exclusive with "Expand Power Bar if No Resource": grey this
+              -- while expand is on, but only when it is itself OFF (== "None") so a
+              -- legacy profile that has both on can still turn this off (no deadlock).
+              disabled = function()
+                  local p = DB(); if not p then return false end
+                  if not p.secondary.enabled then return true end
+                  -- Expand only blocks shift when it is EFFECTIVELY on (power bar
+                  -- enabled and not height-matched -- otherwise expand shows/acts off).
+                  local heightMatched = EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power")
+                  local expandOn = p.primary.enabled and p.primary.expandIfNoResource and not heightMatched
+                  local shiftOff = (p.secondary.shiftElementsIfNoResource or "None") == "None"
+                  return expandOn and shiftOff and true or false
+              end,
+              disabledTooltip = function()
+                  local p = DB()
+                  if p and not p.secondary.enabled then return "Class Resource" end
+                  return "This option can't be used while Expand Power Bar if No Resource is enabled."
+              end,
+              values = { None = "None", Up = "Up", Down = "Down" },
+              order = { "None", "Up", "Down" },
+              getValue = function() local p = DB(); return (p and p.secondary.shiftElementsIfNoResource) or "None" end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.secondary.shiftElementsIfNoResource = v
+                  -- Enabling shift turns off the mutually-exclusive expand option.
+                  if v ~= "None" then p.primary.expandIfNoResource = false end
+                  RebuildClass()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "toggle", text = "Expand Power Bar if No Resource",
+              tooltip = "When your spec has no class resource, automatically adds the class resource height to the power bar. Automatically disabled when Power Bar height is matched to another element.",
+              -- Mutually exclusive with "Shift Elements if No Resource": grey this
+              -- while shift is set, but only when it is itself OFF so a legacy profile
+              -- that has both on can still turn this off (no deadlock).
+              disabled = function()
+                  local p = DB(); if not p then return false end
+                  if not p.primary.enabled then return true end
+                  -- Shift only blocks expand when it is EFFECTIVELY on (class
+                  -- resource bar enabled and the dropdown set to Up/Down).
+                  local shiftOn = p.secondary.enabled and (p.secondary.shiftElementsIfNoResource or "None") ~= "None"
+                  return shiftOn and not p.primary.expandIfNoResource and true or false
+              end,
+              disabledTooltip = function()
+                  local p = DB()
+                  if p and not p.primary.enabled then return "Power Bar" end
+                  return "This option can't be used while Shift Elements if No Resource is enabled."
+              end,
+              getValue = function()
+                  -- Force off when height matched
+                  if EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power") then
+                      return false
+                  end
+                  local p = DB(); return p and p.primary.expandIfNoResource
+              end,
+              setValue = function(v)
+                  -- Block enable when height matched
+                  if v and EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power") then
+                      return
+                  end
+                  local p = DB(); if not p then return end
+                  p.primary.expandIfNoResource = v
+                  -- Enabling expand turns off the mutually-exclusive shift option.
+                  if v then p.secondary.shiftElementsIfNoResource = "None" end
+                  Refresh()
+                  EllesmereUI:RefreshPage()
+              end }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -1853,6 +1937,39 @@ initFrame:SetScript("OnEvent", function(self)
         classSection, h = W:SectionHeader(parent, "CLASS RESOURCE BAR", y);  y = y - h
 
         local classOff = function() local p = DB(); return p and not p.secondary.enabled end
+
+        -- Guardian Druid Ironfur bar: a special bar-based class resource that
+        -- shows Ironfur stacks as hash lines moving right -> left by remaining
+        -- duration. Only surfaced when the player is currently a Guardian Druid.
+        local function _IsGuardianDruid()
+            local _, cf = UnitClass("player")
+            if cf ~= "DRUID" then return false end
+            local s = GetSpecialization()
+            local sid = s and GetSpecializationInfo(s)
+            return sid == 104
+        end
+        if _IsGuardianDruid() then
+            local _ifOff = function() local p = DB(); return p and not p.secondary.guardianIronfurBar end
+            local _, hh = W:DualRow(parent, y,
+                { type = "toggle", text = "Guardian Druid Ironfur Bar",
+                  tooltip = "Replaces the class resource bar with an Ironfur tracker. Each Ironfur cast adds a hash line that slides from right to left as its buff decays. Duration is talent-aware (Ursoc's Endurance and Guardian of Elune).",
+                  getValue = function() local p = DB(); return p and p.secondary.guardianIronfurBar end,
+                  setValue = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.guardianIronfurBar = v; RebuildClass()
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type = "toggle", text = "Show Hash Lines",
+                  disabled = _ifOff,
+                  disabledTooltip = "Guardian Druid Ironfur Bar",
+                  getValue = function() local p = DB(); return p and p.secondary.guardianShowHashLines ~= false end,
+                  setValue = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.guardianShowHashLines = v; SmoothRefresh()
+                      EllesmereUI:RefreshPage()
+                  end }
+            );  y = y - hh
+        end
 
         -- Row 1: Show Class Resource (inline cog: Spacing) | Orientation
         local classEnableRow
@@ -1866,7 +1983,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "dropdown", text = "Orientation",
               disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
+              disabledTooltip = "Class Resource",
               values = { HORIZONTAL = "Horizontal", VERTICAL_UP = "Vertical Up", VERTICAL_DOWN = "Vertical Down" },
               order  = { "HORIZONTAL", "VERTICAL_UP", "VERTICAL_DOWN" },
               getValue = function()
@@ -1907,7 +2024,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Class Resource"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Class Resource"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateClassCogDis()
@@ -1921,8 +2038,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: (Sync) Height | (Sync) Width
         local classSizeRow
-        local chDis, chTip, chRaw = EllesmereUI.MatchGuard("ERB_ClassResource", "Height", classOff, "Enable Class Resource")
-        local cwDis, cwTip, cwRaw = EllesmereUI.MatchGuard("ERB_ClassResource", "Width", classOff, "Enable Class Resource")
+        local chDis, chTip, chRaw = EllesmereUI.MatchGuard("ERB_ClassResource", "Height", classOff, "Class Resource")
+        local cwDis, cwTip, cwRaw = EllesmereUI.MatchGuard("ERB_ClassResource", "Width", classOff, "Class Resource")
         classSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 60, step = 1,
@@ -1991,17 +2108,15 @@ initFrame:SetScript("OnEvent", function(self)
             classBsRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Border Style",
                   disabled = classOff,
-                  disabledTooltip = "Enable Class Resource",
+                  disabledTooltip = "Class Resource",
                   values=texValues, order=texOrder,
                   getValue=function() local p = DB(); return p and p.secondary.borderTexture or "solid" end,
                   setValue=function(v)
                       local p = DB(); if not p then return end
                       p.secondary.borderTexture = v; p.secondary.borderTextureOffset = nil; p.secondary.borderTextureOffsetY = nil; p.secondary.borderTextureShiftX = nil; p.secondary.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          p.secondary.borderR = 1; p.secondary.borderG = 1; p.secondary.borderB = 1; p.secondary.borderA = 1
-                      else
-                          p.secondary.borderR = 0; p.secondary.borderG = 0; p.secondary.borderB = 0; p.secondary.borderA = 1
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      p.secondary.borderR = _bcol.r; p.secondary.borderG = _bcol.g; p.secondary.borderB = _bcol.b; p.secondary.borderA = 1
+                      p.secondary.borderBehind = _bbehind
                       local defSz = EllesmereUI.GetBorderDefaultSize("resourcebars", v)
                       if defSz then p.secondary.borderSize = defSz end
                       RebuildClass(); EllesmereUI:RefreshPage()
@@ -2009,7 +2124,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type = "slider", text = "Border Size",
                   min = 0, max = 4, step = 1,
                   disabled = classOff,
-                  disabledTooltip = "Enable Class Resource",
+                  disabledTooltip = "Class Resource",
                   getValue = function() local p = DB(); return p and p.secondary.borderSize or 1 end,
                   setValue = function(v)
                       local p = DB(); if not p then return end
@@ -2090,6 +2205,12 @@ initFrame:SetScript("OnEvent", function(self)
                               local p = DB(); if not p then return end
                               p.secondary.borderTextureShiftY = v == 0 and nil or v; RebuildClass(); EllesmereUI:RefreshPage()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function() local p = DB(); return p and p.secondary.borderBehind or false end,
+                          set = function(v)
+                              local p = DB(); if not p then return end
+                              p.secondary.borderBehind = v == false and nil or v; RebuildClass(); EllesmereUI:RefreshPage()
+                          end },
                     },
                 })
                 local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -2114,6 +2235,7 @@ initFrame:SetScript("OnEvent", function(self)
                         t.borderTextureShiftX = s.borderTextureShiftX; t.borderTextureShiftY = s.borderTextureShiftY
                         t.borderR = s.borderR; t.borderG = s.borderG; t.borderB = s.borderB; t.borderA = s.borderA
                         t.borderSize = s.borderSize
+                        t.borderBehind = s.borderBehind
                     end
                     apply(p.primary); apply(p.health)
                     SmoothRefresh(); EllesmereUI:RefreshPage()
@@ -2121,7 +2243,9 @@ initFrame:SetScript("OnEvent", function(self)
                 isSynced = function()
                     local p = DB(); if not p then return false end
                     local bt = p.secondary.borderTexture or "solid"
+                    local bh = p.secondary.borderBehind or false
                     return (p.primary.borderTexture or "solid") == bt and (p.health.borderTexture or "solid") == bt
+                        and (p.primary.borderBehind or false) == bh and (p.health.borderBehind or false) == bh
                 end,
                 flashTargets = function() return { classBsRow._leftRegion } end,
             })
@@ -2157,7 +2281,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Opacity",
               min = 0, max = 100, step = 5,
               disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
+              disabledTooltip = "Class Resource",
               getValue = function() local p = DB(); return math.floor((p and p.secondary.barAlpha or 1) * 100 + 0.5) end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -2166,7 +2290,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "multiSwatch", text = "Fill Color",
               disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
+              disabledTooltip = "Class Resource",
               swatches = {
                 { tooltip = "Custom Colored",
                   hasAlpha = true,
@@ -2241,7 +2365,7 @@ initFrame:SetScript("OnEvent", function(self)
         classColorRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Resource Text",
               disabled = classOff,
-              disabledTooltip = "Enable Class Resource",
+              disabledTooltip = "Class Resource",
               getValue = function() local p = DB(); return p and p.secondary.showText end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -2278,7 +2402,7 @@ initFrame:SetScript("OnEvent", function(self)
             chargedCogDis:SetFrameLevel(chargedCog:GetFrameLevel() + 5)
             chargedCogDis:EnableMouse(true)
             chargedCogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(chargedCog, EllesmereUI.DisabledTooltip("Enable Class Resource"))
+                EllesmereUI.ShowWidgetTooltip(chargedCog, EllesmereUI.DisabledTooltip("Class Resource"))
             end)
             chargedCogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateChargedCogDis()
@@ -2315,7 +2439,7 @@ initFrame:SetScript("OnEvent", function(self)
             local swatchDis = CreateFrame("Frame", nil, swatch)
             swatchDis:SetAllPoints(); swatchDis:SetFrameLevel(swatch:GetFrameLevel() + 10); swatchDis:EnableMouse(true)
             swatchDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Enable Resource Text"))
+                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Resource Text"))
             end)
             swatchDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateSwatchDis()
@@ -2360,7 +2484,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Resource Text"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Resource Text"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisCount()
@@ -2421,7 +2545,7 @@ initFrame:SetScript("OnEvent", function(self)
             local btnLbl = EllesmereUI.MakeFont(settingsBtn, 13, nil, 1, 1, 1)
             btnLbl:SetAlpha(EllesmereUI.DD_TXT_A)
             btnLbl:SetPoint("CENTER")
-            btnLbl:SetText("Settings")
+            btnLbl:SetText(EllesmereUI.L("Settings"))
             settingsBtn:SetScript("OnEnter", function(self)
                 btnBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
                 if self._border and self._border.SetColor then self._border:SetColor(1, 1, 1, 0.3) end
@@ -2436,7 +2560,7 @@ initFrame:SetScript("OnEvent", function(self)
             btnDis:SetFrameLevel(settingsBtn:GetFrameLevel() + 5)
             btnDis:EnableMouse(true)
             btnDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(settingsBtn, EllesmereUI.DisabledTooltip("Enable Class Resource"))
+                EllesmereUI.ShowWidgetTooltip(settingsBtn, EllesmereUI.DisabledTooltip("Class Resource"))
             end)
             btnDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateBtnDis()
@@ -2579,7 +2703,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local titleFS = EllesmereUI.MakeFont(popup, 13, nil, 1, 1, 1)
                 titleFS:SetAlpha(0.55)
                 titleFS:SetPoint("TOP", popup, "TOP", 0, curY)
-                titleFS:SetText("Threshold & Hash Lines")
+                titleFS:SetText(EllesmereUI.L("Threshold & Hash Lines"))
                 curY = curY - 25
 
                 -- Centered container for dropdown + Add button
@@ -2645,8 +2769,8 @@ initFrame:SetScript("OnEvent", function(self)
                     _origRefresh()
                     local regions = { cbDD:GetRegions() }
                     for _, rgn2 in ipairs(regions) do
-                        if rgn2.GetText and rgn2:GetText() == "None" then
-                            rgn2:SetText("Select a Spec...")
+                        if rgn2.GetText and EllesmereUI.EnKey(rgn2:GetText()) == "None" then
+                            rgn2:SetText(EllesmereUI.L("Select a Spec..."))
                             break
                         end
                     end
@@ -2665,7 +2789,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local addLbl = EllesmereUI.MakeFont(addBtn, 11, nil, 1, 1, 1)
                 addLbl:SetAlpha(0.5)
                 addLbl:SetPoint("CENTER")
-                addLbl:SetText("Add Specs")
+                addLbl:SetText(EllesmereUI.L("Add Specs"))
                 addBtn:SetScript("OnEnter", function()
                     addLbl:SetAlpha(0.7)
                     if addBtn._border and addBtn._border.SetColor then addBtn._border:SetColor(1, 1, 1, 0.6) end
@@ -2913,7 +3037,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local threshLbl2 = EllesmereUI.MakeFont(ef, 13, nil, 1, 1, 1)
                         threshLbl2:SetAlpha(0.6)
                         threshLbl2:SetPoint("TOPLEFT", ef, "TOPLEFT", 8, -61)
-                        threshLbl2:SetText("Threshold")
+                        threshLbl2:SetText(EllesmereUI.L("Threshold"))
                         ef._threshLbl = threshLbl2
 
                         local threshInput = CreateFrame("EditBox", nil, ef)
@@ -3032,11 +3156,34 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Position and populate entry
                     local isBar = IsEntryBarType(entry)
-                    local ENTRY_H = 89
+                    -- Guardian Druid's class resource is the Ironfur duration bar,
+                    -- which draws its own moving hash lines -- so the static
+                    -- "Hash at Stack" row is meaningless on its tile. Hide that row
+                    -- and slide the threshold row up into its place (shorter tile).
+                    local isGuardianEntry = false
+                    if entry.specIDs then
+                        for _, sid in ipairs(entry.specIDs) do
+                            if sid == 104 then isGuardianEntry = true; break end
+                        end
+                    end
+                    local ENTRY_H = isGuardianEntry and 61 or 89
                     ef:SetSize(ENTRY_W, ENTRY_H)
                     ef:ClearAllPoints()
                     ef:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", POPUP_PAD, curY)
                     ef._entryIdx = idx
+
+                    -- Hash row visibility + threshold row anchor (frames are pooled,
+                    -- so set both states explicitly).
+                    ef._threshLbl:ClearAllPoints()
+                    if isGuardianEntry then
+                        ef._hashLbl:Hide(); ef._hashHint:Hide()
+                        ef._hashInput:Hide(); ef._hashCogBtn:Hide()
+                        ef._threshLbl:SetPoint("TOPLEFT", ef, "TOPLEFT", 8, -33)
+                    else
+                        ef._hashLbl:Show(); ef._hashHint:Show()
+                        ef._hashInput:Show(); ef._hashCogBtn:Show()
+                        ef._threshLbl:SetPoint("TOPLEFT", ef, "TOPLEFT", 8, -61)
+                    end
 
                     -- spec label
                     ef._specLbl:SetText(EntryLabel(entry))
@@ -3069,8 +3216,8 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- hash label + hint + input
                     local hashWord = isBar and "Percent" or "Stack"
-                    ef._hashLbl:SetText("Hash at " .. hashWord)
-                    ef._hashHint:SetText(isBar and "(Ex: 25,50,75)" or "(Ex: 2,4)")
+                    ef._hashLbl:SetText(EllesmereUI.Lf("Hash at %1$s", hashWord))
+                    ef._hashHint:SetText(isBar and EllesmereUI.L("(Ex: 25,50,75)") or EllesmereUI.L("(Ex: 2,4)"))
                     ef._hashInput:SetText(entry.hashValues or "")
                     ef._hashInput:SetScript("OnEnterPressed", function(self)
                         local p2 = DB(); if not p2 then return end
@@ -3171,7 +3318,7 @@ initFrame:SetScript("OnEvent", function(self)
                 onApply = function() RebuildClass(); SmoothRefresh() end,
                 makeCogBtn = MakeCogBtn,
                 disabledFn = function() local p = DB(); return p and not p.secondary.enabled end,
-                disabledTip = "Enable Class Resource",
+                disabledTip = "Class Resource",
             })
             y = y - cursorH
         end
@@ -3184,7 +3331,7 @@ initFrame:SetScript("OnEvent", function(self)
                 simpleRuneRow, h = W:DualRow(parent, y,
                     { type = "toggle", text = "Simple Runes",
                       disabled = function() local p = DB(); return p and not p.secondary.enabled end,
-                      disabledTooltip = "Enable Class Resource",
+                      disabledTooltip = "Class Resource",
                       getValue = function() local p = DB(); return p and p.secondary.runesSimple end,
                       setValue = function(v)
                           local p = DB(); if not p then return end
@@ -3217,7 +3364,7 @@ initFrame:SetScript("OnEvent", function(self)
                           local p = DB()
                           return (p and not p.secondary.enabled) or GetSpecialization() ~= 2
                       end,
-                      disabledTooltip = "Enhancement Shaman with Class Resource enabled",
+                      disabledTooltip = "Requires Enhancement Shaman with Class Resource enabled.", rawTooltip = true,
                       getValue = function() local p = DB(); return p and p.secondary.enhanceFiveBar end,
                       setValue = function(v)
                           local p = DB(); if not p then return end
@@ -3266,7 +3413,7 @@ initFrame:SetScript("OnEvent", function(self)
         local powerOff = function()
             local p = DB(); return p and not p.primary.enabled
         end
-        local powerDisTip = "Enable Power Bar"
+        local powerDisTip = "Power Bar"
 
         -- Row 1: Show Power Bar | Orientation
         local powerEnableRow
@@ -3292,37 +3439,16 @@ initFrame:SetScript("OnEvent", function(self)
                   p.primary.orientation = v; Refresh()
               end }
         );  y = y - h
-        -- Inline cog on Show Power Bar: Expand if No Resource
+        -- Inline spec-picker button on Show Power Bar (per-spec enable/disable).
+        -- (Expand if No Resource moved to the new BAR DISPLAY row, so the cog is
+        -- gone; the spec button takes the cog's old slot.)
         do
             local rgn = powerEnableRow._leftRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Power Bar",
-                rows = {
-                    { type = "toggle", label = "Expand Bar if No Resource",
-                      tooltip = "When your spec has no class resource, automatically adds the class resource height to the power bar. Automatically disabled when Power Bar height is matched to another element.",
-                      get = function()
-                          -- Force off when height matched
-                          if EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power") then
-                              return false
-                          end
-                          local p = DB(); return p and p.primary.expandIfNoResource
-                      end,
-                      set = function(v)
-                          -- Block enable when height matched
-                          if v and EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power") then
-                              return
-                          end
-                          local p = DB(); if not p then return end
-                          p.primary.expandIfNoResource = v; Refresh()
-                      end },
-                },
-            })
-            local cogBtn = MakeCogBtn(rgn, cogShow)
 
             -- Inline spec-picker button for per-spec enable/disable
             local specBtn = CreateFrame("Button", nil, rgn)
             specBtn:SetSize(26, 26)
-            specBtn:SetPoint("RIGHT", cogBtn, "LEFT", -4, 0)
+            specBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = specBtn
             specBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             specBtn:SetAlpha(0.4)
@@ -3384,21 +3510,6 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 })
             end)
-            local cogDis = CreateFrame("Frame", nil, rgn)
-            cogDis:SetAllPoints(cogBtn)
-            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
-            cogDis:EnableMouse(true)
-            cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(powerDisTip))
-            end)
-            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdatePowerCogDis()
-                local off = powerOff()
-                if off then cogDis:Show() else cogDis:Hide() end
-            end
-            cogBtn:HookScript("OnShow", UpdatePowerCogDis)
-            EllesmereUI.RegisterWidgetRefresh(UpdatePowerCogDis)
-            UpdatePowerCogDis()
         end
 
         -- Row 2: (Sync) Height | (Sync) Width
@@ -3480,11 +3591,9 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       local p = DB(); if not p then return end
                       p.primary.borderTexture = v; p.primary.borderTextureOffset = nil; p.primary.borderTextureOffsetY = nil; p.primary.borderTextureShiftX = nil; p.primary.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          p.primary.borderR = 1; p.primary.borderG = 1; p.primary.borderB = 1; p.primary.borderA = 1
-                      else
-                          p.primary.borderR = 0; p.primary.borderG = 0; p.primary.borderB = 0; p.primary.borderA = 1
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      p.primary.borderR = _bcol.r; p.primary.borderG = _bcol.g; p.primary.borderB = _bcol.b; p.primary.borderA = 1
+                      p.primary.borderBehind = _bbehind
                       local defSz = EllesmereUI.GetBorderDefaultSize("resourcebars", v)
                       if defSz then p.primary.borderSize = defSz end
                       RebuildPower(); EllesmereUI:RefreshPage()
@@ -3519,6 +3628,19 @@ initFrame:SetScript("OnEvent", function(self)
                     true, 20)
                 PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
                 EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
+                -- Disabled overlay: grey + block when Power Bar is off
+                local swBlock = CreateFrame("Frame", nil, borderSwatch)
+                swBlock:SetAllPoints()
+                swBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
+                swBlock:EnableMouse(true)
+                swBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip(powerDisTip)) end)
+                swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function UpdateBorderSwDis()
+                    if powerOff() then borderSwatch:SetAlpha(0.3); swBlock:Show()
+                    else borderSwatch:SetAlpha(1); swBlock:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateBorderSwDis)
+                UpdateBorderSwDis()
             end
             do
                 local rgn = pwrBsRow._leftRegion
@@ -3573,6 +3695,12 @@ initFrame:SetScript("OnEvent", function(self)
                               local p = DB(); if not p then return end
                               p.primary.borderTextureShiftY = v == 0 and nil or v; RebuildPower(); EllesmereUI:RefreshPage()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function() local p = DB(); return p and p.primary.borderBehind or false end,
+                          set = function(v)
+                              local p = DB(); if not p then return end
+                              p.primary.borderBehind = v == false and nil or v; RebuildPower(); EllesmereUI:RefreshPage()
+                          end },
                     },
                 })
                 local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -3597,6 +3725,7 @@ initFrame:SetScript("OnEvent", function(self)
                         t.borderTextureShiftX = s.borderTextureShiftX; t.borderTextureShiftY = s.borderTextureShiftY
                         t.borderR = s.borderR; t.borderG = s.borderG; t.borderB = s.borderB; t.borderA = s.borderA
                         t.borderSize = s.borderSize
+                        t.borderBehind = s.borderBehind
                     end
                     apply(p.secondary); apply(p.health)
                     SmoothRefresh(); EllesmereUI:RefreshPage()
@@ -3604,7 +3733,9 @@ initFrame:SetScript("OnEvent", function(self)
                 isSynced = function()
                     local p = DB(); if not p then return false end
                     local bt = p.primary.borderTexture or "solid"
+                    local bh = p.primary.borderBehind or false
                     return (p.secondary.borderTexture or "solid") == bt and (p.health.borderTexture or "solid") == bt
+                        and (p.secondary.borderBehind or false) == bh and (p.health.borderBehind or false) == bh
                 end,
                 flashTargets = function() return { pwrBsRow._leftRegion } end,
             })
@@ -3651,6 +3782,31 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = powerOff,
               disabledTooltip = powerDisTip,
               swatches = {
+                { tooltip = "Gradient End Color", hasAlpha = true,
+                  disabled = function()
+                      local p = DB(); if not p then return true end
+                      if not p.primary.enabled then return true end
+                      local tse = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(p.primary)
+                      if tse and (tse.thresholdEnabled ~= false) then return true end
+                      return not p.primary.gradientEnabled
+                  end,
+                  disabledTooltip = function()
+                      local p = DB()
+                      if not p or not p.primary.enabled then return powerDisTip end
+                      local tse = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(p.primary)
+                      if tse and (tse.thresholdEnabled ~= false) then return "This option requires Threshold Settings to be disabled" end
+                      return "Gradient"
+                  end,
+                  getValue = function()
+                      local p = DB()
+                      if not p then return 0.20, 0.20, 0.80, 1 end
+                      return p.primary.gradientR, p.primary.gradientG, p.primary.gradientB, p.primary.gradientA
+                  end,
+                  setValue = function(r, g, b, a)
+                      local p = DB(); if not p then return end
+                      p.primary.gradientR, p.primary.gradientG, p.primary.gradientB, p.primary.gradientA = r, g, b, a
+                      SmoothRefresh()
+                  end },
                 { tooltip = "Custom Colored",
                   hasAlpha = true,
                   getValue = function()
@@ -3718,10 +3874,63 @@ initFrame:SetScript("OnEvent", function(self)
                 flashTargets = function() return { _syncRows.powerOpacity, _syncRows.classOpacity, _syncRows.healthOpacity } end,
             })
         end
+        -- Inline cog on Fill Color for gradient settings
+        do
+            local rgn = powerBorderRow._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Gradient Settings",
+                rows = {
+                    { type = "toggle", label = "Enable Gradient",
+                      get = function() local p = DB(); return p and p.primary.gradientEnabled end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.primary.gradientEnabled = v; RebuildPower()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type = "dropdown", label = "Gradient Direction",
+                      values = { HORIZONTAL = "Horizontal", VERTICAL = "Vertical" },
+                      order = { "HORIZONTAL", "VERTICAL" },
+                      get = function() local p = DB(); return p and p.primary.gradientDir or "HORIZONTAL" end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.primary.gradientDir = v; RebuildPower()
+                      end },
+                },
+            })
+            local cogBtn = MakeCogBtn(rgn, cogShow)
+            local cogDis = CreateFrame("Frame", nil, rgn)
+            cogDis:SetAllPoints(cogBtn)
+            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
+            cogDis:EnableMouse(true)
+            cogDis:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(powerDisTip))
+            end)
+            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateCogDisGrad()
+                local p = DB()
+                if p and not p.primary.enabled then cogDis:Show() else cogDis:Hide() end
+            end
+            cogBtn:HookScript("OnShow", UpdateCogDisGrad)
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogDisGrad)
+            UpdateCogDisGrad()
+        end
 
-        -- Row 5: Power Text | Threshold Settings
-        local powerColorRow
-        powerColorRow, h = W:DualRow(parent, y,
+        -- Text Size / Text Color disable: bar off OR Power Text is None
+        local function powerTextDis()
+            local p = DB()
+            if not p then return false end
+            if not p.primary.enabled then return true end
+            return p.primary.textFormat == "none"
+        end
+        local function powerTextDisTip()
+            local p = DB()
+            if p and not p.primary.enabled then return powerDisTip end
+            return "This option requires a Power Text format other than None"
+        end
+
+        -- Row: Power Text | Text Color
+        local powerTextSizeRow
+        powerTextSizeRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Power Text",
               disabled = powerOff,
               disabledTooltip = powerDisTip,
@@ -3730,13 +3939,75 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() local p = DB(); return p and p.primary.textFormat or "none" end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.primary.textFormat = v; RefreshPower()
+                  p.primary.textFormat = v; RefreshPower(); EllesmereUI:RefreshPage()
+              end },
+            { type = "multiSwatch", text = "Text Color",
+              disabled = powerTextDis,
+              disabledTooltip = powerTextDisTip,
+              swatches = {
+                { tooltip = "Custom Colored",
+                  hasAlpha = true,
+                  getValue = function()
+                      local p = DB()
+                      if not p then return 1, 1, 1, 1 end
+                      return p.primary.textFillR, p.primary.textFillG, p.primary.textFillB, p.primary.textFillA
+                  end,
+                  setValue = function(r, g, b, a)
+                      local p = DB(); if not p then return end
+                      p.primary.textFillR, p.primary.textFillG, p.primary.textFillB, p.primary.textFillA = r, g, b, a
+                      RebuildPower(); SmoothRefresh()
+                  end,
+                  onClick = function(self)
+                      local p = DB(); if not p then return end
+                      if p.primary.textCustomColored == false then
+                          p.primary.textCustomColored = true; RebuildPower()
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      local p = DB()
+                      local isPowerColored = p and p.primary.textCustomColored == false
+                      return isPowerColored and 0.3 or 1
+                  end },
+                { tooltip = "Power Colored",
+                  getValue = function()
+                      local gpp = _G._ERB_GetPrimaryPowerType
+                      local pc = gpp and _G._ERB_PowerColors and _G._ERB_PowerColors[gpp()]
+                      if pc then return pc[1], pc[2], pc[3], 1 end
+                      return 0x23/255, 0x8F/255, 0xE7/255, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      local p = DB(); if not p then return end
+                      p.primary.textCustomColored = false; RebuildPower()
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local p = DB()
+                      local isPowerColored = p and p.primary.textCustomColored == false
+                      return isPowerColored and 1 or 0.3
+                  end },
+              } }
+        );  y = y - h
+
+        -- Row 5: Text Size | Threshold Settings
+        local powerColorRow
+        powerColorRow, h = W:DualRow(parent, y,
+            { type = "slider", text = "Text Size", min = 8, max = 24, step = 1,
+              disabled = powerTextDis,
+              disabledTooltip = powerTextDisTip,
+              getValue = function() local p = DB(); return p and p.primary.textSize or 11 end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.primary.textSize = v; RefreshPower()
               end },
             { type = "label", text = "Threshold Settings" }
         );  y = y - h
-        -- Inline cog (RESIZE) on Power Text for percent sign + text size + x/y offsets
+        -- Inline cog (RESIZE) on Power Text for percent sign + x/y offsets
         do
-            local rgn = powerColorRow._leftRegion
+            local rgn = powerTextSizeRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Power Text",
                 rows = {
@@ -3748,12 +4019,6 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           local p = DB(); if not p then return end
                           p.primary.showPercent = v; RefreshPower()
-                      end },
-                    { type = "slider", label = "Size", min = 8, max = 24, step = 1,
-                      get = function() local p = DB(); return p and p.primary.textSize or 11 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.primary.textSize = v; RefreshPower()
                       end },
                     { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
                       get = function() local p = DB(); return p and p.primary.textXOffset or 0 end,
@@ -3775,7 +4040,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Power Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Power Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisP2()
@@ -3794,7 +4059,7 @@ initFrame:SetScript("OnEvent", function(self)
             refreshFn = function() RefreshPower(); SmoothRefresh() end,
             rebuildFn = function() RebuildPower() end,
             disabledFn = powerOff,
-            disabledTip = "Enable Power Bar",
+            disabledTip = "Power Bar",
             showHash = false,
             showPartialCog = true,
             thresholdLabel = "Threshold %",
@@ -3813,7 +4078,7 @@ initFrame:SetScript("OnEvent", function(self)
                 disabledFn = function()
                       local p = DB(); return p and not p.primary.enabled
                 end,
-                disabledTip = "Enable Power Bar",
+                disabledTip = "Power Bar",
             })
             y = y - cursorH
         end
@@ -3898,7 +4163,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "dropdown", text = "Orientation",
               disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
+              disabledTooltip = "Health Bar",
               values = { HORIZONTAL = "Horizontal", VERTICAL_UP = "Vertical Up", VERTICAL_DOWN = "Vertical Down" },
               order = { "HORIZONTAL", "VERTICAL_UP", "VERTICAL_DOWN" },
               getValue = function()
@@ -3981,8 +4246,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: (Sync) Height | (Sync) Width
         local healthSizeRow
-        local hhDis, hhTip, hhRaw = EllesmereUI.MatchGuard("ERB_Health", "Height", healthOff, "Enable Health Bar")
-        local hwDis, hwTip, hwRaw = EllesmereUI.MatchGuard("ERB_Health", "Width", healthOff, "Enable Health Bar")
+        local hhDis, hhTip, hhRaw = EllesmereUI.MatchGuard("ERB_Health", "Height", healthOff, "Health Bar")
+        local hwDis, hwTip, hwRaw = EllesmereUI.MatchGuard("ERB_Health", "Width", healthOff, "Health Bar")
         healthSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 40, step = 1,
@@ -4052,17 +4317,15 @@ initFrame:SetScript("OnEvent", function(self)
             hpBsRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Border Style",
                   disabled = healthOff,
-                  disabledTooltip = "Enable Health Bar",
+                  disabledTooltip = "Health Bar",
                   values=texValues, order=texOrder,
                   getValue=function() local p = DB(); return p and p.health.borderTexture or "solid" end,
                   setValue=function(v)
                       local p = DB(); if not p then return end
                       p.health.borderTexture = v; p.health.borderTextureOffset = nil; p.health.borderTextureOffsetY = nil; p.health.borderTextureShiftX = nil; p.health.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          p.health.borderR = 1; p.health.borderG = 1; p.health.borderB = 1; p.health.borderA = 1
-                      else
-                          p.health.borderR = 0; p.health.borderG = 0; p.health.borderB = 0; p.health.borderA = 1
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      p.health.borderR = _bcol.r; p.health.borderG = _bcol.g; p.health.borderB = _bcol.b; p.health.borderA = 1
+                      p.health.borderBehind = _bbehind
                       local defSz = EllesmereUI.GetBorderDefaultSize("resourcebars", v)
                       if defSz then p.health.borderSize = defSz end
                       RebuildHealth(); EllesmereUI:RefreshPage()
@@ -4070,7 +4333,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type = "slider", text = "Border Size",
                   min = 0, max = 4, step = 1,
                   disabled = healthOff,
-                  disabledTooltip = "Enable Health Bar",
+                  disabledTooltip = "Health Bar",
                   getValue = function() local p = DB(); return p and p.health.borderSize or 1 end,
                   setValue = function(v)
                       local p = DB(); if not p then return end
@@ -4097,6 +4360,19 @@ initFrame:SetScript("OnEvent", function(self)
                     true, 20)
                 PP.Point(borderSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
                 EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
+                -- Disabled overlay: grey + block when Health Bar is off
+                local swBlock = CreateFrame("Frame", nil, borderSwatch)
+                swBlock:SetAllPoints()
+                swBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
+                swBlock:EnableMouse(true)
+                swBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("Health Bar")) end)
+                swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function UpdateBorderSwDis()
+                    if healthOff() then borderSwatch:SetAlpha(0.3); swBlock:Show()
+                    else borderSwatch:SetAlpha(1); swBlock:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateBorderSwDis)
+                UpdateBorderSwDis()
             end
             do
                 local rgn = hpBsRow._leftRegion
@@ -4151,6 +4427,12 @@ initFrame:SetScript("OnEvent", function(self)
                               local p = DB(); if not p then return end
                               p.health.borderTextureShiftY = v == 0 and nil or v; RebuildHealth(); EllesmereUI:RefreshPage()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function() local p = DB(); return p and p.health.borderBehind or false end,
+                          set = function(v)
+                              local p = DB(); if not p then return end
+                              p.health.borderBehind = v == false and nil or v; RebuildHealth(); EllesmereUI:RefreshPage()
+                          end },
                     },
                 })
                 local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -4175,6 +4457,7 @@ initFrame:SetScript("OnEvent", function(self)
                         t.borderTextureShiftX = s.borderTextureShiftX; t.borderTextureShiftY = s.borderTextureShiftY
                         t.borderR = s.borderR; t.borderG = s.borderG; t.borderB = s.borderB; t.borderA = s.borderA
                         t.borderSize = s.borderSize
+                        t.borderBehind = s.borderBehind
                     end
                     apply(p.secondary); apply(p.primary)
                     SmoothRefresh(); EllesmereUI:RefreshPage()
@@ -4182,7 +4465,9 @@ initFrame:SetScript("OnEvent", function(self)
                 isSynced = function()
                     local p = DB(); if not p then return false end
                     local bt = p.health.borderTexture or "solid"
+                    local bh = p.health.borderBehind or false
                     return (p.secondary.borderTexture or "solid") == bt and (p.primary.borderTexture or "solid") == bt
+                        and (p.secondary.borderBehind or false) == bh and (p.primary.borderBehind or false) == bh
                 end,
                 flashTargets = function() return { hpBsRow._leftRegion } end,
             })
@@ -4218,7 +4503,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Opacity",
               min = 0, max = 100, step = 5,
               disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
+              disabledTooltip = "Health Bar",
               getValue = function() local p = DB(); return math.floor((p and p.health.barAlpha or 1) * 100 + 0.5) end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -4227,8 +4512,33 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "multiSwatch", text = "Fill Color",
               disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
+              disabledTooltip = "Health Bar",
               swatches = {
+                { tooltip = "Gradient End Color", hasAlpha = true,
+                  disabled = function()
+                      local p = DB(); if not p then return true end
+                      if not p.health.enabled then return true end
+                      local tse = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(p.health)
+                      if tse and (tse.thresholdEnabled ~= false) then return true end
+                      return not p.health.gradientEnabled
+                  end,
+                  disabledTooltip = function()
+                      local p = DB()
+                      if not p or not p.health.enabled then return "Health Bar" end
+                      local tse = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(p.health)
+                      if tse and (tse.thresholdEnabled ~= false) then return "This option requires Threshold Settings to be disabled" end
+                      return "Gradient"
+                  end,
+                  getValue = function()
+                      local p = DB()
+                      if not p then return 0.20, 0.20, 0.80, 1 end
+                      return p.health.gradientR, p.health.gradientG, p.health.gradientB, p.health.gradientA
+                  end,
+                  setValue = function(r, g, b, a)
+                      local p = DB(); if not p then return end
+                      p.health.gradientR, p.health.gradientG, p.health.gradientB, p.health.gradientA = r, g, b, a
+                      SmoothRefresh()
+                  end },
                 { tooltip = "Custom Colored",
                   hasAlpha = true,
                   getValue = function()
@@ -4300,34 +4610,143 @@ initFrame:SetScript("OnEvent", function(self)
                 flashTargets = function() return { _syncRows.healthOpacity, _syncRows.classOpacity, _syncRows.powerOpacity } end,
             })
         end
+        -- Inline cog on Fill Color for gradient settings
+        do
+            local rgn = healthBorderRow._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Gradient Settings",
+                rows = {
+                    { type = "toggle", label = "Enable Gradient",
+                      get = function() local p = DB(); return p and p.health.gradientEnabled end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.health.gradientEnabled = v; RebuildHealth()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type = "dropdown", label = "Gradient Direction",
+                      values = { HORIZONTAL = "Horizontal", VERTICAL = "Vertical" },
+                      order = { "HORIZONTAL", "VERTICAL" },
+                      get = function() local p = DB(); return p and p.health.gradientDir or "HORIZONTAL" end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.health.gradientDir = v; RebuildHealth()
+                      end },
+                },
+            })
+            local cogBtn = MakeCogBtn(rgn, cogShow)
+            local cogDis = CreateFrame("Frame", nil, rgn)
+            cogDis:SetAllPoints(cogBtn)
+            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
+            cogDis:EnableMouse(true)
+            cogDis:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Health Bar"))
+            end)
+            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateCogDisGrad()
+                local p = DB()
+                if p and not p.health.enabled then cogDis:Show() else cogDis:Hide() end
+            end
+            cogBtn:HookScript("OnShow", UpdateCogDisGrad)
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogDisGrad)
+            UpdateCogDisGrad()
+        end
 
-        -- Row 5: Health Text | Threshold Settings
-        local healthColorRow
-        healthColorRow, h = W:DualRow(parent, y,
+        -- Text Size / Text Color disable: bar off OR Health Text is None
+        local function healthTextDis()
+            local p = DB()
+            if not p then return false end
+            if not p.health.enabled then return true end
+            return p.health.textFormat == "none"
+        end
+        local function healthTextDisTip()
+            local p = DB()
+            if p and not p.health.enabled then return "Health Bar" end
+            return "This option requires a Health Text format other than None"
+        end
+
+        -- Row: Health Text | Text Color
+        local healthTextSizeRow
+        healthTextSizeRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Health Text",
               disabled = healthOff,
-              disabledTooltip = "Enable Health Bar",
+              disabledTooltip = "Health Bar",
               values = { none = "None", perhp = "Health %", perhpnosign = "Health % (No Sign)", curhpshort = "Health #", perhpnum = "Health % | #", both = "Health # | %" },
               order = { "none", "---", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both" },
               getValue = function() local p = DB(); return p and p.health.textFormat or "none" end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.health.textFormat = v; RefreshHealth()
+                  p.health.textFormat = v; RefreshHealth(); EllesmereUI:RefreshPage()
+              end },
+            { type = "multiSwatch", text = "Text Color",
+              disabled = healthTextDis,
+              disabledTooltip = healthTextDisTip,
+              swatches = {
+                { tooltip = "Custom Colored",
+                  hasAlpha = true,
+                  getValue = function()
+                      local p = DB()
+                      if not p then return 1, 1, 1, 1 end
+                      return p.health.textFillR, p.health.textFillG, p.health.textFillB, p.health.textFillA
+                  end,
+                  setValue = function(r, g, b, a)
+                      local p = DB(); if not p then return end
+                      p.health.textFillR, p.health.textFillG, p.health.textFillB, p.health.textFillA = r, g, b, a
+                      RebuildHealth(); SmoothRefresh()
+                  end,
+                  onClick = function(self)
+                      local p = DB(); if not p then return end
+                      if p.health.textCustomColored == false then
+                          p.health.textCustomColored = true; RebuildHealth()
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      local p = DB()
+                      local isClassColored = p and p.health.textCustomColored == false
+                      return isClassColored and 0.3 or 1
+                  end },
+                { tooltip = "Class Colored",
+                  getValue = function()
+                      local _, classFile = UnitClass("player")
+                      local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+                      if cc then return cc.r, cc.g, cc.b, 1 end
+                      return 1, 1, 1, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      local p = DB(); if not p then return end
+                      p.health.textCustomColored = false; RebuildHealth()
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local p = DB()
+                      local isClassColored = p and p.health.textCustomColored == false
+                      return isClassColored and 1 or 0.3
+                  end },
+              } }
+        );  y = y - h
+
+        -- Row 5: Text Size | Threshold Settings
+        local healthColorRow
+        healthColorRow, h = W:DualRow(parent, y,
+            { type = "slider", text = "Text Size", min = 8, max = 24, step = 1,
+              disabled = healthTextDis,
+              disabledTooltip = healthTextDisTip,
+              getValue = function() local p = DB(); return p and p.health.textSize or 11 end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.health.textSize = v; RefreshHealth()
               end },
             { type = "label", text = "Threshold Settings" }
         );  y = y - h
-        -- Inline cog (RESIZE) on Health Text for text size + x/y offsets
+        -- Inline cog (RESIZE) on Health Text for x/y offsets
         do
-            local rgn = healthColorRow._leftRegion
+            local rgn = healthTextSizeRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Health Text",
                 rows = {
-                    { type = "slider", label = "Size", min = 8, max = 24, step = 1,
-                      get = function() local p = DB(); return p and p.health.textSize or 11 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.health.textSize = v; RefreshHealth()
-                      end },
                     { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
                       get = function() local p = DB(); return p and p.health.textXOffset or 0 end,
                       set = function(v)
@@ -4348,7 +4767,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Health Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Health Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisH2()
@@ -4367,7 +4786,7 @@ initFrame:SetScript("OnEvent", function(self)
             refreshFn = function() RefreshHealth(); SmoothRefresh() end,
             rebuildFn = function() RebuildHealth() end,
             disabledFn = healthOff,
-            disabledTip = "Enable Health Bar",
+            disabledTip = "Health Bar",
             showHash = false,
             showPartialCog = false,
             thresholdLabel = "Threshold %",
@@ -4384,7 +4803,7 @@ initFrame:SetScript("OnEvent", function(self)
                 onApply = function() RebuildHealth(); SmoothRefresh() end,
                 makeCogBtn = MakeCogBtn,
                 disabledFn = function() local p = DB(); return p and not p.health.enabled end,
-                disabledTip = "Enable Health Bar",
+                disabledTip = "Health Bar",
             })
             y = y - cursorH
         end
@@ -4520,6 +4939,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Border wraps container (bar + icon) - PP or textured via ApplyBorderStyle
         if pf.container._border then
+            pf.container._border:SetFrameLevel(cb.borderBehind and math.max(0, pf.container:GetFrameLevel() - 1) or (pf.container:GetFrameLevel() + 5))
             EllesmereUI.ApplyBorderStyle(pf.container._border, cb.borderSize or 0,
                 cb.borderR or 0, cb.borderG or 0, cb.borderB or 0, cb.borderA or 1,
                 cb.borderTexture or "solid", cb.borderTextureOffset, cb.borderTextureOffsetY,
@@ -4594,7 +5014,7 @@ initFrame:SetScript("OnEvent", function(self)
             SetPVFont(pf.spellText, FONT_PATH, cb.spellTextSize or 11)
             pf.spellText:ClearAllPoints()
             pf.spellText:SetPoint("LEFT", pf.bar, "LEFT", 4 + (cb.spellTextX or 0), cb.spellTextY or 0)
-            pf.spellText:SetText("Spell Name")
+            pf.spellText:SetText(EllesmereUI.L("Spell Name"))
             pf.spellText:Show()
         else
             pf.spellText:Hide()
@@ -4734,7 +5154,7 @@ initFrame:SetScript("OnEvent", function(self)
         spellText:SetPoint("LEFT", bar, "LEFT", 4 + (cb.spellTextX or 0), cb.spellTextY or 0)
         spellText:SetJustifyH("LEFT")
         if cb.showSpellText then
-            spellText:SetText("Spell Name")
+            spellText:SetText(EllesmereUI.L("Spell Name"))
         else
             spellText:Hide()
         end
@@ -4768,7 +5188,7 @@ initFrame:SetScript("OnEvent", function(self)
                 hintHost:SetAllPoints(hdr)
                 _previewHintFS = EllesmereUI.MakeFont(hintHost, 11, nil, 1, 1, 1)
                 _previewHintFS:SetAlpha(0.45)
-                _previewHintFS:SetText("Click elements to scroll to and highlight their options")
+                _previewHintFS:SetText(EllesmereUI.L("Click elements to scroll to and highlight their options"))
             end
             _previewHintFS:GetParent():SetParent(hdr)
             _previewHintFS:GetParent():Show()
@@ -4855,7 +5275,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "toggle", text = "Show Spell Icon",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.showIcon ~= false end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -4890,7 +5310,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Player Cast Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Player Cast Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisCB1()
@@ -4904,8 +5324,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 2: Height | Width (sync icons push to power + health bars)
         local classSizeRow
-        local cbhDis, cbhTip, cbhRaw = EllesmereUI.MatchGuard("ERB_CastBar", "Height", castOff, "Enable Player Cast Bar")
-        local cbwDis, cbwTip, cbwRaw = EllesmereUI.MatchGuard("ERB_CastBar", "Width", castOff, "Enable Player Cast Bar")
+        local cbhDis, cbhTip, cbhRaw = EllesmereUI.MatchGuard("ERB_CastBar", "Height", castOff, "Player Cast Bar")
+        local cbwDis, cbwTip, cbwRaw = EllesmereUI.MatchGuard("ERB_CastBar", "Width", castOff, "Player Cast Bar")
         classSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
               min = 1, max = 60, step = 1,
@@ -4932,7 +5352,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "dropdown", text = "Frame Strata",
               tooltip = "Controls the order that overlapping elements display in. Set higher to show above other elements.",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               values = cbStrataValues, order = cbStrataOrder,
               getValue = function()
                   local p = DB(); return p and p.castBar.frameStrata or "MEDIUM"
@@ -4957,17 +5377,15 @@ initFrame:SetScript("OnEvent", function(self)
             cbBsRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Border Style",
                   disabled = castOff,
-                  disabledTooltip = "Enable Player Cast Bar",
+                  disabledTooltip = "Player Cast Bar",
                   values=texValues, order=texOrder,
                   getValue=function() local p = DB(); return p and p.castBar.borderTexture or "solid" end,
                   setValue=function(v)
                       local p = DB(); if not p then return end
                       p.castBar.borderTexture = v; p.castBar.borderTextureOffset = nil; p.castBar.borderTextureOffsetY = nil; p.castBar.borderTextureShiftX = nil; p.castBar.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          p.castBar.borderR = 1; p.castBar.borderG = 1; p.castBar.borderB = 1; p.castBar.borderA = 1
-                      else
-                          p.castBar.borderR = 0; p.castBar.borderG = 0; p.castBar.borderB = 0; p.castBar.borderA = 1
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      p.castBar.borderR = _bcol.r; p.castBar.borderG = _bcol.g; p.castBar.borderB = _bcol.b; p.castBar.borderA = 1
+                      p.castBar.borderBehind = _bbehind
                       local defSz = EllesmereUI.GetBorderDefaultSize("resourcebars", v)
                       if defSz then p.castBar.borderSize = defSz end
                       RefreshCast(); EllesmereUI:RefreshPage()
@@ -4975,7 +5393,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type = "slider", text = "Border Size",
                   min = 0, max = 4, step = 1,
                   disabled = castOff,
-                  disabledTooltip = "Enable Player Cast Bar",
+                  disabledTooltip = "Player Cast Bar",
                   getValue = function()
                       local p = DB(); return p and (p.castBar.borderSize or 0) or 0
                   end,
@@ -5007,7 +5425,7 @@ initFrame:SetScript("OnEvent", function(self)
                 borderSwatchBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
                 borderSwatchBlock:EnableMouse(true)
                 borderSwatchBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("Set Border above 0"))
+                    EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("This option requires a Border Size above 0."))
                 end)
                 borderSwatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 local function UpdateBorderSwatchState()
@@ -5072,6 +5490,12 @@ initFrame:SetScript("OnEvent", function(self)
                               local p = DB(); if not p then return end
                               p.castBar.borderTextureShiftY = v == 0 and nil or v; RefreshCast(); EllesmereUI:RefreshPage()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function() local p = DB(); return p and p.castBar.borderBehind or false end,
+                          set = function(v)
+                              local p = DB(); if not p then return end
+                              p.castBar.borderBehind = v == false and nil or v; RefreshCast(); EllesmereUI:RefreshPage()
+                          end },
                     },
                 })
                 local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -5090,7 +5514,7 @@ initFrame:SetScript("OnEvent", function(self)
         castColorRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Show Spark",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.showSpark end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5098,7 +5522,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "multiSwatch", text = "Color",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               swatches = {
                   { tooltip = "Gradient End Color", hasAlpha = true,
                     getValue = function()
@@ -5188,7 +5612,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Player Cast Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Player Cast Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisGrad()
@@ -5207,10 +5631,10 @@ initFrame:SetScript("OnEvent", function(self)
                 local p = DB()
                 if not p or not p.castBar.enabled then
                     swatch:SetAlpha(0.15); swatch:Disable()
-                    swatch._disabledTooltip = "Enable Player Cast Bar"
+                    swatch._disabledTooltip = "Player Cast Bar"
                 elseif not p.castBar.gradientEnabled then
                     swatch:SetAlpha(0.15); swatch:Disable()
-                    swatch._disabledTooltip = "Enable Gradient"
+                    swatch._disabledTooltip = "Gradient"
                 else
                     swatch:SetAlpha(1); swatch:Enable()
                     swatch._disabledTooltip = nil
@@ -5225,7 +5649,7 @@ initFrame:SetScript("OnEvent", function(self)
         textRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Bar Texture",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               values = texValues, order = texOrder,
               getValue = function() local p = DB(); return p and p.castBar.texture or "none" end,
               setValue = function(v)
@@ -5234,7 +5658,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "toggle", text = "Spell Text",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.showSpellText end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5273,7 +5697,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Player Cast Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Player Cast Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisSpellText()
@@ -5289,7 +5713,7 @@ initFrame:SetScript("OnEvent", function(self)
         timerRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Duration Text",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.showTimer end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5301,7 +5725,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local p = DB()
                   return castOff() or not (p and p.castBar.showTimer)
               end,
-              disabledTooltip = "Enable Duration Text",
+              disabledTooltip = "Duration Text",
               getValue = function() local p = DB(); return p and p.castBar.showTotalDuration end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5340,7 +5764,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Enable Player Cast Bar"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Player Cast Bar"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCogDisTimer()
@@ -5390,7 +5814,7 @@ initFrame:SetScript("OnEvent", function(self)
         marksRow1, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Tick Markers",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.showChannelTicks end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5404,7 +5828,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Channel Ticks",
               tooltip = "Shows tick marks on channeled spells. Only supported spells are shown, request missing spells on Discord.",
               disabled = marksOff,
-              disabledTooltip = "Enable Tick Markers",
+              disabledTooltip = "Tick Markers",
               getValue = function() local p = DB(); return p and p.castBar.showTickMarks end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5426,7 +5850,7 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshCast()
             end,
             function() return marksOff() or not (DB() and DB().castBar.showTickMarks) end,
-            "Enable Channel Ticks"
+            "Channel Ticks"
         )
 
         -- Marks Row 2: Last Tick (+ color) | Colored Empowered Stages
@@ -5435,7 +5859,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Last Tick",
               tooltip = "Highlights the final damage tick. Requires a supported channeled spell.",
               disabled = marksOff,
-              disabledTooltip = "Enable Tick Markers",
+              disabledTooltip = "Tick Markers",
               getValue = function() local p = DB(); return p and p.castBar.showLastTick end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5445,7 +5869,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Colored Empowered Stages",
               tooltip = "Changes the cast bar color based on the current empower stage. Colors transition from red (stage 1) through yellow to green (max stage).",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.coloredEmpowerStages end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5466,7 +5890,7 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshCast()
             end,
             function() return marksOff() or not (DB() and DB().castBar.showLastTick) end,
-            "Enable Last Tick"
+            "Last Tick"
         )
 
         -- ── LATENCY section ─────────────────────────────────────────
@@ -5483,7 +5907,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Enable Latency Overlay",
               tooltip = "Shows a colored overlay at the end of the cast bar representing your network latency for each spell. Helps you time spell queuing.",
               disabled = castOff,
-              disabledTooltip = "Enable Player Cast Bar",
+              disabledTooltip = "Player Cast Bar",
               getValue = function() local p = DB(); return p and p.castBar.latencyEnabled end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5493,7 +5917,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "toggle", text = "Show Latency Text",
               tooltip = "Appends your latency in milliseconds to the cast timer, e.g. 1.8 (42ms).",
               disabled = latOff,
-              disabledTooltip = "Enable Latency Overlay",
+              disabledTooltip = "Latency Overlay",
               getValue = function() local p = DB(); return p and p.castBar.latencyShowText end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5514,7 +5938,7 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshCast()
             end,
             latOff,
-            "Enable Latency Overlay"
+            "Latency Overlay"
         )
 
         -- Wire up click mappings for cast bar preview hit overlays
@@ -5586,7 +6010,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type = "slider", text = "Icon Size",
                   min = 16, max = 60, step = 1,
                   disabled = totemOff,
-                  disabledTooltip = "Select a class above",
+                  disabledTooltip = "Select a class above", rawTooltip = true,
                   getValue = function() local p = DB(); return p and (p.totemBar.iconSize or 30) end,
                   setValue = function(v)
                       local p = DB(); if not p then return end
@@ -5660,7 +6084,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = "Timer Size",
               min = 6, max = 24, step = 1,
               disabled = timerOff,
-              disabledTooltip = "Enable Show Timer",
+              disabledTooltip = "Show Timer",
               getValue = function() local p = DB(); return p and (p.totemBar.timerSize or 11) end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5668,7 +6092,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "toggle", text = "Show Timer",
               disabled = totemOff,
-              disabledTooltip = "Select a class above",
+              disabledTooltip = "Select a class above", rawTooltip = true,
               getValue = function() local p = DB(); return p and p.totemBar.showTimer ~= false end,
               setValue = function(v)
                   local p = DB(); if not p then return end
@@ -5684,7 +6108,7 @@ initFrame:SetScript("OnEvent", function(self)
             bsRow, h = W:DualRow(parent, y,
                 { type = "dropdown", text = "Border Style",
                   disabled = totemOff,
-                  disabledTooltip = "Enable Totem Bar",
+                  disabledTooltip = "Select a class above", rawTooltip = true,
                   values = texValues, order = texOrder,
                   getValue = function() local p = DB(); return p and (p.totemBar.borderTexture or "solid") end,
                   setValue = function(v)
@@ -5692,11 +6116,9 @@ initFrame:SetScript("OnEvent", function(self)
                       p.totemBar.borderTexture = v
                       p.totemBar.borderTextureOffset = nil; p.totemBar.borderTextureOffsetY = nil
                       p.totemBar.borderTextureShiftX = nil; p.totemBar.borderTextureShiftY = nil
-                      if v ~= "solid" then
-                          p.totemBar.borderR = 1; p.totemBar.borderG = 1; p.totemBar.borderB = 1; p.totemBar.borderA = 1
-                      else
-                          p.totemBar.borderR = 0; p.totemBar.borderG = 0; p.totemBar.borderB = 0; p.totemBar.borderA = 1
-                      end
+                      local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                      p.totemBar.borderR = _bcol.r; p.totemBar.borderG = _bcol.g; p.totemBar.borderB = _bcol.b; p.totemBar.borderA = 1
+                      p.totemBar.borderBehind = _bbehind
                       local defSz = EllesmereUI.GetBorderDefaultSize("resourcebars", v)
                       if defSz then p.totemBar.borderSize = defSz end
                       RefreshTotem(); EllesmereUI:RefreshPage()
@@ -5704,7 +6126,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type = "slider", text = "Border Size",
                   min = 0, max = 4, step = 1,
                   disabled = totemOff,
-                  disabledTooltip = "Enable Totem Bar",
+                  disabledTooltip = "Select a class above", rawTooltip = true,
                   getValue = function()
                       local p = DB(); return p and (p.totemBar.borderSize or 0) or 0
                   end,
@@ -5739,7 +6161,7 @@ initFrame:SetScript("OnEvent", function(self)
                 borderSwatchBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
                 borderSwatchBlock:EnableMouse(true)
                 borderSwatchBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("Set Border above 0"))
+                    EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("This option requires a Border Size above 0."))
                 end)
                 borderSwatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 local function UpdateBorderSwatchState()
@@ -5806,6 +6228,12 @@ initFrame:SetScript("OnEvent", function(self)
                               local p = DB(); if not p then return end
                               p.totemBar.borderTextureShiftY = v == 0 and nil or v; RefreshTotem(); EllesmereUI:RefreshPage()
                           end },
+                        { type = "toggle", label = "Show Behind",
+                          get = function() local p = DB(); return p and p.totemBar.borderBehind or false end,
+                          set = function(v)
+                              local p = DB(); if not p then return end
+                              p.totemBar.borderBehind = v == false and nil or v; RefreshTotem(); EllesmereUI:RefreshPage()
+                          end },
                     },
                 }, rgn, totemOff)
             end
@@ -5818,7 +6246,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "dropdown", text = "Frame Strata",
               tooltip = "Controls the order that overlapping elements display in. Set higher to show above other elements.",
               disabled = totemOff,
-              disabledTooltip = "Select a class above",
+              disabledTooltip = "Select a class above", rawTooltip = true,
               values = tmStrataValues, order = tmStrataOrder,
               getValue = function()
                   local p = DB(); return p and p.totemBar.frameStrata or "MEDIUM"

@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Quality of Life
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Quality of Life features and Cursor skinning
+## Notes: Lightweight quality of life tools and enhancements.
 ## Author: Ellesmere
-## Version: 7.9.5
+## Version: 8.0
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQoLDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
@@ -13,6 +13,7 @@
 EllesmereUIQoL.lua
 EllesmereUIQoL_Cursor.lua
 EllesmereUIQoL_BattleRes.lua
+EllesmereUIQoL_Bloodlust.lua
 EllesmereUIQoL_AutoLogging.lua
 EllesmereUIQoL_Keys.lua
 EllesmereUIQoL_Shifter.lua

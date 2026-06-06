@@ -4,6 +4,12 @@
 --  Meant to be shared across the entire EllesmereUI addon suite.
 -------------------------------------------------------------------------------
 local EUI_HOST_ADDON = ...
+-- IS_STANDALONE: true only when this core is running inside a standalone build.
+-- The build renames "EllesmereUI" -> "EUICoreStandalone<Module>" but NEVER the
+-- word "Standalone", so the host addon name contains "Standalone" iff standalone.
+-- In the full suite EUI_HOST_ADDON == "EllesmereUI" (no match) -> always false,
+-- so every IS_STANDALONE-gated branch below is inert in the suite.
+local IS_STANDALONE = type(EUI_HOST_ADDON) == "string" and EUI_HOST_ADDON:find("Standalone") ~= nil
 -------------------------------------------------------------------------------
 --  Constants & Colours (BURNE STAY AWAY FROM THIS SECTION)
 -------------------------------------------------------------------------------
@@ -256,18 +262,11 @@ local CLASS_COLOR_MAP = {
 local EXPRESSWAY = MEDIA_PATH .. "fonts\\Expressway.ttf"
 
 -- Locale-specific system font fallback for clients whose language requires
--- glyphs not present in our custom fonts (CJK, Cyrillic, etc.)
-local LOCALE_FONT_FALLBACK
-do
-    local _locale = GetLocale()
-    if _locale == "zhCN" or _locale == "zhTW" then
-        LOCALE_FONT_FALLBACK = "Fonts\\ARKai_T.ttf"
-    elseif _locale == "koKR" then
-        LOCALE_FONT_FALLBACK = "Fonts\\2002.TTF"
-    elseif _locale == "ruRU" then
-        LOCALE_FONT_FALLBACK = "Fonts\\FRIZQT___CYR.TTF"
-    end
-end
+-- glyphs not present in our custom fonts (CJK, Cyrillic, etc.). Resolved by
+-- EllesmereUI_Locale.lua from the effective display locale (the client locale,
+-- or the user's manual language override) so the override drives glyph fonts
+-- too. nil on Western Latin locales -> callers keep the bundled Expressway.
+local LOCALE_FONT_FALLBACK = _G.EllesmereUI and _G.EllesmereUI._localeFont or nil
 -------------------------------------------------------------------------------
 --  Addon Roster  --  per-addon icon on/off from EllesmereUI/media
 -------------------------------------------------------------------------------
@@ -277,7 +276,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIActionBars",        display = "Action Bars",        search_name = "EllesmereUI Action Bars",        icon_on = ICONS_PATH .. "sidebar\\actionbars-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\actionbars-ig.png"      },
     { folder = "EllesmereUINameplates",        display = "Nameplates",         search_name = "EllesmereUI Nameplates",         icon_on = ICONS_PATH .. "sidebar\\nameplates-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\nameplates-ig.png"      },
     { folder = "EllesmereUIUnitFrames",        display = "Unit Frames",        search_name = "EllesmereUI Unit Frames",        icon_on = ICONS_PATH .. "sidebar\\unitframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\unitframes-ig.png"      },
-    { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png",      comingSoon = true },
+    { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png"      },
     { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
     { folder = "EllesmereUIResourceBars",      display = "Resource & Cast Bars", search_name = "EllesmereUI Resource Bars Cast Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
     { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png" },
@@ -318,7 +317,7 @@ EllesmereUI.ADDON_GROUPS = {
             "EllesmereUIUnitFrames",
             "EllesmereUICooldownManager",
             "EllesmereUIResourceBars",
-            "EllesmereUIRaidFrames",     -- comingSoon
+            "EllesmereUIRaidFrames",
         },
     },
     {
@@ -350,6 +349,44 @@ EllesmereUI.ADDON_GROUPS = {
     },
 }
 
+-- STANDALONE override: a standalone build bundles exactly one module, and its
+-- folder is the only roster entry whose name contains "Standalone" (the build's
+-- EllesmereUI->EUICoreStandalone<X> rename turns every roster/group reference
+-- into that token, but the actual installed module folder is "EUIStandalone<X>").
+-- We KEEP the full sidebar (so users still see everything the suite offers) but
+-- PREPEND a "Standalone" category above Core Addons containing this build's
+-- module, and REMOVE that module from its normal category so it isn't listed
+-- twice. Inert in the suite (IS_STANDALONE false).
+if IS_STANDALONE then
+    local selfFolder
+    for _, info in ipairs(ADDON_ROSTER) do
+        -- The module's own folder keeps the "Standalone" word; the renamed core
+        -- token is "EUICoreStandalone<X>", so exclude "Core" to find the module.
+        if info.folder:find("Standalone") and not info.folder:find("Core") then
+            selfFolder = info.folder
+            break
+        end
+    end
+    if selfFolder then
+        -- Drop the module from whatever group currently lists it.
+        for _, group in ipairs(EllesmereUI.ADDON_GROUPS) do
+            for mi = #group.members, 1, -1 do
+                if group.members[mi] == selfFolder then
+                    table.remove(group.members, mi)
+                end
+            end
+        end
+        -- Prepend the Standalone group above the rest.
+        table.insert(EllesmereUI.ADDON_GROUPS, 1, {
+            key     = "standalone",
+            label   = "Standalone",
+            icon_on  = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",
+            icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",
+            members = { selfFolder },
+        })
+    end
+end
+
 -- Flat folder -> roster-info lookup used by the grouped sidebar builder.
 -- Stored on EllesmereUI (not a file-level local) to avoid adding a new
 -- upvalue to CreateMainFrame, which is up against Lua 5.1's 60-upvalue limit.
@@ -365,86 +402,249 @@ local function IsAddonLoaded(name)
 end
 
 -------------------------------------------------------------------------------
---  Profile Sync for UI Reskin Addons
---  Synced modules have their settings copied to all profiles on logout.
+--  Profile Sync System
+--  Per-module, per-profile sync. Synced profiles receive a selective copy of
+--  the active profile's addon data on sync click and on every logout.
+--
+--  Storage: EllesmereUIDB.syncedModules = { [folder] = { [profileName] = true } }
+--  Exclusions: EllesmereUI._syncExclusions[folder] = { key = true, ... }
+--  Nested exclusions use dot notation: "bars.*.growDirection" means skip
+--  growDirection inside any sub-table of bars.
 -------------------------------------------------------------------------------
 do
-    -- Build reskin module set from ADDON_GROUPS
-    local reskinSet = {}
-    for _, group in ipairs(EllesmereUI.ADDON_GROUPS) do
-        if group.key == "reskin" then
-            for _, m in ipairs(group.members) do reskinSet[m] = true end
-            break
+    -- Modules that should NOT get a sync icon (no per-profile settings)
+    local SYNC_EXEMPT = { EllesmereUIPartyMode = true }
+    EllesmereUI._syncExempt = SYNC_EXEMPT
+
+    -- Modules that show a sync icon but have no per-profile data (always "synced")
+    local SYNC_GLOBAL_ONLY = { EllesmereUIBlizzardSkin = true }
+    EllesmereUI._syncGlobalOnly = SYNC_GLOBAL_ONLY
+
+    -- Exclusion registry: keys that should NOT be copied during sync
+    -- Flat keys: "barPositions" = skip top-level key
+    -- Wildcard nested: "bars.*.growDirection" = skip growDirection in any bars sub-table
+    local syncExclusions = {}
+    EllesmereUI._syncExclusions = syncExclusions
+
+    function EllesmereUI.RegisterSyncExclusions(folder, keys)
+        if not syncExclusions[folder] then syncExclusions[folder] = {} end
+        local ex = syncExclusions[folder]
+        for _, k in ipairs(keys) do
+            ex[k] = true
         end
     end
-    EllesmereUI._reskinModules = reskinSet
 
-    -- On first login, if only the Default profile exists (new user),
-    -- stamp all reskin modules as synced. This runs once and writes
-    -- explicit values so adding profiles later doesn't change them.
-    function EllesmereUI._initSyncDefaults()
-        if not EllesmereUIDB then return end
-        if EllesmereUIDB._syncDefaultsStamped then return end
-        EllesmereUIDB._syncDefaultsStamped = true
-        local profiles = EllesmereUIDB.profiles
-        if not profiles then return end
-        local count = 0
-        for _ in pairs(profiles) do
-            count = count + 1
-            if count > 1 then return end
-        end
-        -- Single profile: default all reskin modules to synced
-        if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
-        for folder in pairs(reskinSet) do
-            if EllesmereUIDB.syncedModules[folder] == nil then
-                EllesmereUIDB.syncedModules[folder] = true
+    -- Selective deep-copy: copies src but skips excluded keys.
+    -- exclusions is a set of strings. Flat keys ("barPositions") skip that key.
+    -- Wildcard keys ("bars.*.growDirection") skip growDirection inside any
+    -- sub-table of the "bars" key.
+    local function SelectiveCopy(src, exclusions, parentPath)
+        if type(src) ~= "table" then return src end
+        local copy = {}
+        for k, v in pairs(src) do
+            local keyStr = tostring(k)
+            local fullKey = parentPath and (parentPath .. "." .. keyStr) or keyStr
+            -- Check flat exclusion
+            if not exclusions[fullKey] then
+                if type(v) == "table" then
+                    -- Check if this is a wildcard parent (e.g. "bars" in "bars.*.X")
+                    local isWildcardParent = false
+                    local childExclusions = nil
+                    for exKey in pairs(exclusions) do
+                        local prefix, childKey = exKey:match("^(.-)%.%*%.(.+)$")
+                        if prefix and (fullKey == prefix or keyStr == prefix) then
+                            isWildcardParent = true
+                            if not childExclusions then childExclusions = {} end
+                            childExclusions[childKey] = true
+                        end
+                    end
+                    if isWildcardParent and childExclusions then
+                        -- Copy the container but apply child exclusions to each sub-table
+                        local containerCopy = {}
+                        for ck, cv in pairs(v) do
+                            if type(cv) == "table" then
+                                local subCopy = {}
+                                for sk, sv in pairs(cv) do
+                                    if not childExclusions[tostring(sk)] then
+                                        if type(sv) == "table" then
+                                            subCopy[sk] = SelectiveCopy(sv, {})
+                                        else
+                                            subCopy[sk] = sv
+                                        end
+                                    end
+                                end
+                                containerCopy[ck] = subCopy
+                            else
+                                containerCopy[ck] = cv
+                            end
+                        end
+                        copy[k] = containerCopy
+                    else
+                        copy[k] = SelectiveCopy(v, exclusions, fullKey)
+                    end
+                else
+                    copy[k] = v
+                end
             end
         end
+        return copy
     end
+    EllesmereUI._SelectiveCopy = SelectiveCopy
 
-    function EllesmereUI.IsModuleSynced(folder)
+    -- Check if a specific profile is synced for a module
+    function EllesmereUI.IsProfileSynced(folder, profileName)
         if not EllesmereUIDB then return false end
         local sm = EllesmereUIDB.syncedModules
-        if sm and sm[folder] then return true end
-        return false
+        if not sm or not sm[folder] then return false end
+        local targets = sm[folder]
+        if type(targets) == "table" then return targets[profileName] == true end
+        -- Legacy compat: old format was {[folder] = true}
+        return targets == true
     end
 
-    function EllesmereUI.SyncModuleToAllProfiles(folder)
+    -- Get the set of synced profiles for a module
+    function EllesmereUI.GetSyncedProfiles(folder)
+        if not EllesmereUIDB or not EllesmereUIDB.syncedModules then return {} end
+        local targets = EllesmereUIDB.syncedModules[folder]
+        if type(targets) == "table" then return targets end
+        return {}
+    end
+
+    -- Check if a module is fully synced across all profiles.
+    -- The configuring (source) profile is never written into the target set
+    -- (the sync popup only offers NON-active profiles), so a genuinely
+    -- fully-synced module has exactly one profile absent from the set: the
+    -- source. This MUST be computed active-INDEPENDENTLY -- the old version
+    -- keyed off EllesmereUIDB.activeProfile, which is resolved per character/
+    -- spec, so the icon only read as synced on the character whose active
+    -- profile happened to equal the source. Instead: fully synced when at most
+    -- one profile is missing and at least two profiles exist (same result on
+    -- every character).
+    function EllesmereUI.IsModuleFullySynced(folder)
+        if not EllesmereUIDB or not EllesmereUIDB.syncedModules or not EllesmereUIDB.profiles then return false end
+        local targets = EllesmereUIDB.syncedModules[folder]
+        if type(targets) ~= "table" then return false end
+        local total, missing = 0, 0
+        for name in pairs(EllesmereUIDB.profiles) do
+            total = total + 1
+            if not targets[name] then missing = missing + 1 end
+        end
+        if total <= 1 then return false end
+        return missing <= 1
+    end
+
+    -- Check if ANY profile is synced for a module (for icon state)
+    function EllesmereUI.IsModuleSynced(folder)
+        if not EllesmereUIDB or not EllesmereUIDB.syncedModules then return false end
+        local targets = EllesmereUIDB.syncedModules[folder]
+        if type(targets) == "table" then
+            for _, v in pairs(targets) do if v then return true end end
+            return false
+        end
+        return targets == true
+    end
+
+    -- Sync one module from active profile to specific target profiles
+    function EllesmereUI.SyncModuleToProfiles(folder, targetProfiles)
         if not EllesmereUIDB or not EllesmereUIDB.profiles then return end
         local active = EllesmereUIDB.activeProfile or "Default"
         local src = EllesmereUIDB.profiles[active]
         if not src or not src.addons or not src.addons[folder] then return end
         local DeepCopy = EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy
         if not DeepCopy then return end
-        local copy = DeepCopy(src.addons[folder])
-        for name, prof in pairs(EllesmereUIDB.profiles) do
-            if name ~= active and prof.addons then
-                prof.addons[folder] = DeepCopy(copy)
+
+        local exclusions = syncExclusions[folder]
+        for profName in pairs(targetProfiles) do
+            if profName ~= active then
+                local prof = EllesmereUIDB.profiles[profName]
+                if prof then
+                    if not prof.addons then prof.addons = {} end
+                    if exclusions and next(exclusions) then
+                        -- Selective copy: merge non-excluded keys, preserve excluded keys
+                        local srcCopy = SelectiveCopy(src.addons[folder], exclusions)
+                        local dst = prof.addons[folder]
+                        if not dst then
+                            prof.addons[folder] = srcCopy
+                        else
+                            -- Overlay: copy synced keys, keep excluded keys from dest
+                            for k, v in pairs(srcCopy) do
+                                dst[k] = type(v) == "table" and DeepCopy(v) or v
+                            end
+                        end
+                    else
+                        -- Full blob copy (no exclusions)
+                        prof.addons[folder] = DeepCopy(src.addons[folder])
+                    end
+                end
             end
         end
     end
 
+    -- Legacy compat wrapper
+    function EllesmereUI.SyncModuleToAllProfiles(folder)
+        if not EllesmereUIDB or not EllesmereUIDB.profiles then return end
+        local active = EllesmereUIDB.activeProfile or "Default"
+        local allProfiles = {}
+        for name in pairs(EllesmereUIDB.profiles) do
+            if name ~= active then allProfiles[name] = true end
+        end
+        EllesmereUI.SyncModuleToProfiles(folder, allProfiles)
+    end
+
+    -- Set synced profiles for a module and execute sync
+    function EllesmereUI.SetModuleSyncTargets(folder, targetProfiles)
+        if not EllesmereUIDB then return end
+        if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
+        EllesmereUIDB.syncedModules[folder] = targetProfiles
+        EllesmereUI.SyncModuleToProfiles(folder, targetProfiles)
+    end
+
+    -- Legacy compat
     function EllesmereUI.SetModuleSynced(folder, synced)
         if not EllesmereUIDB then return end
         if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
-        EllesmereUIDB.syncedModules[folder] = synced and true or false
         if synced then
-            EllesmereUI.SyncModuleToAllProfiles(folder)
+            local active = EllesmereUIDB.activeProfile or "Default"
+            local allProfiles = {}
+            for name in pairs(EllesmereUIDB.profiles or {}) do
+                if name ~= active then allProfiles[name] = true end
+            end
+            EllesmereUIDB.syncedModules[folder] = allProfiles
+            EllesmereUI.SyncModuleToProfiles(folder, allProfiles)
+        else
+            EllesmereUIDB.syncedModules[folder] = {}
         end
     end
 
-    -- Pre-logout: copy synced module data to all profiles
+    -- Migrate legacy syncedModules format ({[folder]=true} -> {[folder]={profiles}})
+    local function MigrateLegacySyncFormat()
+        if not EllesmereUIDB or not EllesmereUIDB.syncedModules then return end
+        local active = EllesmereUIDB.activeProfile or "Default"
+        for folder, val in pairs(EllesmereUIDB.syncedModules) do
+            if val == true then
+                local allProfiles = {}
+                for name in pairs(EllesmereUIDB.profiles or {}) do
+                    if name ~= active then allProfiles[name] = true end
+                end
+                EllesmereUIDB.syncedModules[folder] = allProfiles
+            elseif val == false then
+                EllesmereUIDB.syncedModules[folder] = {}
+            end
+        end
+    end
+
+    -- Pre-logout: copy synced module data to target profiles
     local initFrame = CreateFrame("Frame")
     initFrame:RegisterEvent("PLAYER_LOGIN")
     initFrame:SetScript("OnEvent", function(self)
         self:UnregisterAllEvents()
-        EllesmereUI._initSyncDefaults()
+        MigrateLegacySyncFormat()
         if EllesmereUI.Lite and EllesmereUI.Lite.RegisterPreLogout then
             EllesmereUI.Lite.RegisterPreLogout(function()
                 if not EllesmereUIDB or not EllesmereUIDB.syncedModules then return end
-                for folder, synced in pairs(EllesmereUIDB.syncedModules) do
-                    if synced then
-                        EllesmereUI.SyncModuleToAllProfiles(folder)
+                for folder, targets in pairs(EllesmereUIDB.syncedModules) do
+                    if type(targets) == "table" and next(targets) then
+                        EllesmereUI.SyncModuleToProfiles(folder, targets)
                     end
                 end
             end)
@@ -452,6 +652,356 @@ do
     end)
 end
 
+
+-------------------------------------------------------------------------------
+--  Sync Exclusions per Module
+--  Keys listed here are NOT copied when syncing a module between profiles.
+--  Wildcard "parent.*.key" skips that key inside every sub-table of parent.
+-------------------------------------------------------------------------------
+EllesmereUI.RegisterSyncExclusions("EllesmereUIActionBars", {
+    "barPositions",
+    "bars.*.growDirection",
+    "bars.*.orientation",
+    "bars.*.buttonWidth",
+    "bars.*.buttonHeight",
+    "bars.*.targetWidth",
+    "bars.*.targetHeight",
+    "bars.*.width",
+    "bars.*.height",
+    "bars.*.overrideNumIcons",
+    "bars.*.overrideNumRows",
+    "bars.*.numIcons",
+    "bars.*.numRows",
+})
+
+EllesmereUI.RegisterSyncExclusions("EllesmereUIUnitFrames", {
+    "positions",
+    "player.frameWidth", "player.healthHeight",
+    "target.frameWidth", "target.healthHeight",
+    "playerTarget.frameWidth", "playerTarget.healthHeight",
+    "targettarget.frameWidth", "targettarget.healthHeight",
+    "focustarget.frameWidth", "focustarget.healthHeight",
+    "pet.frameWidth", "pet.healthHeight",
+    "focus.frameWidth", "focus.healthHeight",
+    "boss.frameWidth", "boss.healthHeight",
+})
+
+EllesmereUI.RegisterSyncExclusions("EllesmereUICooldownManager", {
+    "cdmBarPositions",
+    "cdmBars.bars.*.iconSize",
+    "cdmBars.bars.*.numRows",
+    "cdmBars.bars.*.spacing",
+    "cdmBars.bars.*.verticalOrientation",
+    "cdmBars.bars.*.anchorTo",
+    "cdmBars.bars.*.anchorPosition",
+    "cdmBars.bars.*.anchorOffsetX",
+    "cdmBars.bars.*.anchorOffsetY",
+    "cdmBars.bars.*.keybindOffsetX",
+    "cdmBars.bars.*.keybindOffsetY",
+})
+
+EllesmereUI.RegisterSyncExclusions("EllesmereUIResourceBars", {
+    "health.width", "health.height", "health.offsetX", "health.offsetY", "health.orientation",
+    "primary.width", "primary.height", "primary.offsetX", "primary.offsetY", "primary.orientation",
+    "secondary.pipWidth", "secondary.pipHeight", "secondary.pipSpacing", "secondary.pipOrientation",
+    "secondary.offsetX", "secondary.offsetY",
+    "castBar.width", "castBar.height", "castBar.anchorX", "castBar.anchorY", "castBar.unlockPos",
+    "totemBar.iconSize", "totemBar.spacing", "totemBar.unlockPos",
+    "general.anchorX", "general.anchorY", "general.orientation",
+})
+
+EllesmereUI.RegisterSyncExclusions("EllesmereUIAuraBuffReminders", {
+    "unlockPos",
+    "display.xOffset", "display.yOffset",
+})
+
+EllesmereUI.RegisterSyncExclusions("EllesmereUIRaidFrames", {
+    "unlockPos",
+})
+
+-------------------------------------------------------------------------------
+--  Sync Popup
+--  Anchored flush to the right edge of the sidebar, centered vertically on
+--  the sync icon that was clicked, clamped to the EUI window bottom.
+-------------------------------------------------------------------------------
+do
+    local _syncPopup = nil
+
+    function EllesmereUI.CloseSyncPopup()
+        if _syncPopup then _syncPopup:Hide() end
+    end
+
+    function EllesmereUI.OpenSyncPopup(folder, displayName, anchorBtn)
+        -- Toggle off if already open for this module
+        if _syncPopup and _syncPopup:IsShown() and _syncPopup._folder == folder then
+            _syncPopup:Hide()
+            return
+        end
+
+        if not EllesmereUIDB or not EllesmereUIDB.profiles then return end
+        local active = EllesmereUIDB.activeProfile or "Default"
+        local profileOrder = EllesmereUIDB.profileOrder or {}
+
+        -- Count non-active profiles
+        local otherProfiles = {}
+        for _, name in ipairs(profileOrder) do
+            if name ~= active and EllesmereUIDB.profiles[name] then
+                otherProfiles[#otherProfiles + 1] = name
+            end
+        end
+        -- Also catch profiles not in profileOrder
+        for name in pairs(EllesmereUIDB.profiles) do
+            if name ~= active then
+                local found = false
+                for _, n in ipairs(otherProfiles) do if n == name then found = true; break end end
+                if not found then otherProfiles[#otherProfiles + 1] = name end
+            end
+        end
+
+        if #otherProfiles == 0 then
+            if EllesmereUI.ShowWidgetTooltip then
+                EllesmereUI.ShowWidgetTooltip(anchorBtn, "No other profiles to sync to")
+                C_Timer.After(1.5, function() EllesmereUI.HideWidgetTooltip() end)
+            end
+            return
+        end
+
+        local MEDIA_PATH = "Interface\\AddOns\\EllesmereUI\\media\\"
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local accentColor = EllesmereUI.ACCENT_COLOR or EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local PP = EllesmereUI.PanelPP or EllesmereUI.PP
+
+        local POPUP_W = 260
+        local PAD = 16
+        local ROW_H = 32
+        local HEADER_H = 20
+        local WARN_MODULES = {
+            EllesmereUIActionBars = true,
+            EllesmereUIUnitFrames = true,
+            EllesmereUICooldownManager = true,
+            EllesmereUIResourceBars = true,
+            EllesmereUIMythicTimer = true,
+            EllesmereUIRaidFrames = true,
+        }
+        local hasWarning = WARN_MODULES[folder]
+        local popupH = PAD + HEADER_H + 8 + 16 + 16
+            + #otherProfiles * ROW_H + 16 + 26
+            + (hasWarning and 50 or 0) + PAD
+
+        -- Create or recycle popup frame
+        if not _syncPopup then
+            _syncPopup = CreateFrame("Frame", nil, UIParent)
+            _syncPopup:SetFrameStrata("FULLSCREEN_DIALOG")
+            _syncPopup:SetFrameLevel(200)
+            _syncPopup:EnableMouse(true)
+            local bg = _syncPopup:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints(); bg:SetColorTexture(15/255, 17/255, 22/255, 0.95)
+            _syncPopup._bg = bg
+        end
+        local popup = _syncPopup
+        popup._folder = folder
+
+        -- Clean old children
+        for _, c in ipairs({popup:GetChildren()}) do c:Hide(); c:SetParent(nil) end
+        for _, r in ipairs({popup:GetRegions()}) do
+            if r ~= popup._bg then r:Hide(); r:SetParent(nil) end
+        end
+
+        popup:SetSize(POPUP_W, popupH)
+        if PP then
+            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, PP)
+        end
+
+        -- Position: flush right of sidebar, centered on the sync icon, clamped
+        local sidebar = EllesmereUI._sidebar
+        local root = EllesmereUI._mainFrame
+        if sidebar and anchorBtn then
+            local btnMidY = select(2, anchorBtn:GetCenter()) or 0
+            local sidebarMidY = select(2, sidebar:GetCenter()) or 0
+            local offsetY = btnMidY - sidebarMidY
+            -- Clamp to EUI window bottom
+            if root then
+                local rootBot = root:GetBottom() or 0
+                local popupBot = btnMidY - popupH / 2
+                if popupBot < rootBot then offsetY = offsetY + (rootBot - popupBot) end
+            end
+            popup:ClearAllPoints()
+            popup:SetPoint("LEFT", sidebar, "RIGHT", 0, offsetY)
+        else
+            popup:ClearAllPoints()
+            popup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        end
+
+        local function MakeFont(parent, size, r, g, b, a)
+            local fs = parent:CreateFontString(nil, "OVERLAY")
+            fs:SetFont(fontPath, size, "")
+            fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
+            fs:SetTextColor(r or 1, g or 1, b or 1, a or 1)
+            return fs
+        end
+
+        local cy = -PAD
+
+        -- Title (centered)
+        local title = MakeFont(popup, 14, 1, 1, 1, 0.9)
+        title:SetPoint("TOP", popup, "TOP", 0, cy)
+        title:SetText(EllesmereUI.Lf("%1$s Sync", EllesmereUI.L(displayName)))
+        cy = cy - HEADER_H - 8
+
+        -- Active profile callout (group-centered, shifted up 5px)
+        cy = cy + 5
+        local activeContainer = CreateFrame("Frame", nil, popup)
+        activeContainer:SetHeight(16)
+        activeContainer:SetPoint("TOP", popup, "TOP", 0, cy)
+        local activeLbl = MakeFont(activeContainer, 11, 1, 1, 1, 0.5)
+        activeLbl:SetPoint("LEFT", activeContainer, "LEFT", 0, 0)
+        activeLbl:SetText("Active Profile: ")
+        local activeVal = MakeFont(activeContainer, 13, accentColor.r, accentColor.g, accentColor.b, 1)
+        activeVal:SetPoint("LEFT", activeLbl, "RIGHT", 0, 0)
+        activeVal:SetText(active)
+        local totalW = (activeLbl:GetStringWidth() or 0) + (activeVal:GetStringWidth() or 0)
+        activeContainer:SetWidth(totalW)
+        cy = cy - 16 - 10
+
+        -- Divider line (1px physical pixel at UIParent scale)
+        local RealPP = EllesmereUI.PP
+        local divider = popup:CreateTexture(nil, "ARTWORK")
+        local pxMult = (RealPP and RealPP.mult) or 1
+        divider:SetHeight(pxMult)
+        divider:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, cy)
+        divider:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -PAD, cy)
+        divider:SetColorTexture(1, 1, 1, 0.15)
+        cy = cy - 10
+
+        -- Toggle rows for each non-active profile
+        local currentSynced = EllesmereUI.GetSyncedProfiles(folder)
+        local toggleState = {}
+
+        local BuildToggleControl = EllesmereUI.BuildToggleControl
+        for _, profName in ipairs(otherProfiles) do
+            local row = CreateFrame("Frame", nil, popup)
+            row:SetSize(POPUP_W - PAD * 2, ROW_H)
+            row:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, cy)
+            row:SetFrameLevel(popup:GetFrameLevel() + 1)
+
+            local isSynced = currentSynced[profName] == true
+            toggleState[profName] = isSynced
+
+            local tg, _, tgSnap = BuildToggleControl(row, row:GetFrameLevel() + 1,
+                function() return toggleState[profName] end,
+                function(v) toggleState[profName] = v end,
+                { sizeRatio = 0.85 })
+            tg:SetPoint("LEFT", row, "LEFT", 0, 0)
+
+            local lblBtn = CreateFrame("Button", nil, row)
+            lblBtn:SetPoint("LEFT", tg, "RIGHT", 8, 0)
+            lblBtn:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            lblBtn:SetHeight(ROW_H)
+            lblBtn:SetScript("OnClick", function()
+                toggleState[profName] = not toggleState[profName]
+                tgSnap(toggleState[profName])
+            end)
+            local lblText = MakeFont(lblBtn, 12, 1, 1, 1, 0.85)
+            lblText:SetPoint("LEFT"); lblText:SetText(profName)
+
+            cy = cy - ROW_H
+        end
+
+        cy = cy - 16
+
+        -- Sync button (BM "Add New" style)
+        local syncBtnW = math.floor(POPUP_W * 0.53)
+        local syncBtn = CreateFrame("Button", nil, popup)
+        syncBtn:SetSize(syncBtnW, 26)
+        syncBtn:SetPoint("TOP", popup, "TOP", 0, cy)
+        syncBtn:SetFrameLevel(popup:GetFrameLevel() + 1)
+        local sBg = syncBtn:CreateTexture(nil, "BACKGROUND")
+        sBg:SetAllPoints()
+        sBg:SetColorTexture(0.05, 0.52, 0.39, 0.8)
+        local sLbl = syncBtn:CreateFontString(nil, "OVERLAY")
+        sLbl:SetFont(fontPath, 10, "")
+        sLbl:SetShadowOffset(0, 0)
+        sLbl:SetTextColor(1, 1, 1, 1)
+        sLbl:SetPoint("CENTER"); sLbl:SetText("Okay")
+        syncBtn:SetScript("OnEnter", function()
+            sBg:SetColorTexture(0.07, 0.62, 0.49, 1)
+        end)
+        syncBtn:SetScript("OnLeave", function()
+            sBg:SetColorTexture(0.05, 0.52, 0.39, 0.8)
+        end)
+        local function RefreshSidebarSyncIcon()
+            local sidebarBtns = EllesmereUI._sidebarButtons
+            if sidebarBtns and sidebarBtns[folder] and sidebarBtns[folder]._syncBtn then
+                local sb = sidebarBtns[folder]._syncBtn
+                if sb._refreshAlpha then sb._refreshAlpha() end
+            end
+        end
+        syncBtn:SetScript("OnClick", function()
+            -- Build targets from toggled-on profiles
+            local targets = {}
+            local anyNew = false
+            for profName, checked in pairs(toggleState) do
+                if checked then
+                    targets[profName] = true
+                    -- Check if this is a newly added sync target
+                    if not currentSynced[profName] then anyNew = true end
+                end
+            end
+            if not anyNew then
+                -- No new profiles being synced: just save the updated targets
+                -- (handles unchecking without needing confirmation)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
+                EllesmereUIDB.syncedModules[folder] = targets
+                popup:Hide()
+                RefreshSidebarSyncIcon()
+                return
+            end
+            -- New profiles being synced: confirm before overwriting their data
+            popup:SetFrameLevel(90)
+            popup:SetScript("OnUpdate", nil)
+            EllesmereUI:ShowConfirmPopup({
+                title = "Confirm Sync",
+                message = EllesmereUI.Lf("This will overwrite %1$s settings on the selected profiles with your current settings. Continue?", EllesmereUI.L(displayName)),
+                confirmText = "Sync",
+                cancelText = "Cancel",
+                onConfirm = function()
+                    EllesmereUI.SetModuleSyncTargets(folder, targets)
+                    popup:Hide()
+                    RefreshSidebarSyncIcon()
+                end,
+                onCancel = function()
+                    popup:Hide()
+                end,
+            })
+        end)
+
+        -- Warning for modules with layout exclusions
+        if hasWarning then
+            local warn = MakeFont(popup, 9, 1, 1, 1, 0.35)
+            warn:SetPoint("TOP", syncBtn, "BOTTOM", 0, -10)
+            warn:SetWidth(POPUP_W - PAD * 2)
+            warn:SetJustifyH("CENTER")
+            warn:SetText("Position/size data cannot be synced across profiles due to Unlock Mode systems like anchoring, width/height matching and growth direction. This addon's sync is purely for settings that do not impact position, sizing or anchors.")
+        end
+
+        -- Click-off to close (OnUpdate poll like CC popups)
+        popup:SetScript("OnShow", function(self)
+            self:SetScript("OnUpdate", function(self2)
+                if IsMouseButtonDown("LeftButton") then
+                    if not self2:IsMouseOver() and not (anchorBtn and anchorBtn:IsMouseOver()) then
+                        self2:Hide()
+                    end
+                end
+            end)
+        end)
+        popup:SetScript("OnHide", function(self)
+            self:SetScript("OnUpdate", nil)
+        end)
+
+        popup:Show()
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Forward declarations
@@ -530,6 +1080,10 @@ do
         for i = 1, n do
             if not (keepSet and keepSet[_hideAllScratch[i]]) then _hideAllScratch[i]:Hide() end
             _hideAllScratch[i] = nil
+        end
+        -- Also hide custom root frames parented to scrollFrame (bypass scroll child)
+        if EllesmereUI._hideScrollFrameRoots then
+            EllesmereUI._hideScrollFrameRoots()
         end
     end
 end
@@ -1564,6 +2118,7 @@ do
     --- Get per-addon border defaults for a texture+size combo.
     --- Returns offsetX, offsetY, shiftX, shiftY (all 0 if not registered).
     function EllesmereUI.GetBorderDefaults(addonKey, textureKey, sizeKey)
+        if textureKey == "shadow" then textureKey = "glow" end  -- Shadow shares Glow's defaults
         local addon = _borderDefaults[addonKey]
         if not addon then return 0, 0, 0, 0 end
         local tex = addon[textureKey]
@@ -1576,6 +2131,7 @@ do
     --- Get the default size key for a texture in a specific addon.
     --- Returns nil if not registered (caller keeps current size).
     function EllesmereUI.GetBorderDefaultSize(addonKey, textureKey)
+        if textureKey == "shadow" then textureKey = "glow" end  -- Shadow shares Glow's defaults
         local addon = _borderDefaults[addonKey]
         if not addon then return nil end
         local tex = addon[textureKey]
@@ -1588,6 +2144,11 @@ do
     EllesmereUI._builtinBorderTextures = {
         { key = "solid",   name = "Solid" },
         { key = "glow",    name = "Glow",            path = "Interface\\AddOns\\EllesmereUI\\media\\borders\\glow-border",  defaultOffset = 0, defaultOffsetY = 0, scaleOffset = true, defaultThickness = "normal" },
+        -- Shadow = the Glow texture rendered behind the frame in black. Shares all
+        -- of Glow's defaults; the "behind + black" behavior is applied on select
+        -- via EllesmereUI.GetBorderStyleSelectDefaults, and shadow aliases to glow
+        -- in the per-addon default lookups below.
+        { key = "shadow",  name = "Shadow",          path = "Interface\\AddOns\\EllesmereUI\\media\\borders\\glow-border",  defaultOffset = 0, defaultOffsetY = 0, scaleOffset = true, defaultThickness = "normal" },
         { key = "blizz",   name = "Blizzard",        path = "Interface\\AddOns\\EllesmereUI\\media\\borders\\blizz-border", defaultOffset = 3, defaultOffsetY = 2, scaleOffset = true, defaultThickness = "heavy" },
         { key = "dialog",  name = "Blizzard Dialog",  path = "Interface\\DialogFrame\\UI-DialogBox-Border",                 defaultOffset = 4, defaultOffsetY = 4, defaultThickness = "normal" },
     }
@@ -1686,6 +2247,18 @@ do
             if entry.key == key then return entry.scaleOffset == true end
         end
         return false
+    end
+
+    --- Border color + Show Behind to apply when the user picks a border style.
+    --- Shadow -> black + behind on; everything else -> behind off (Shadow is the
+    --- only style that renders behind). Solid/Shadow default to black, other
+    --- textured styles default to white. Returns (colorTable, behindBool).
+    function EllesmereUI.GetBorderStyleSelectDefaults(textureKey)
+        if textureKey == "shadow" then return { r = 0, g = 0, b = 0 }, true end
+        if not textureKey or textureKey == "" or textureKey == "solid" then
+            return { r = 0, g = 0, b = 0 }, false
+        end
+        return { r = 1, g = 1, b = 1 }, false
     end
 
     --- Resolve a border texture key to a file path.
@@ -2640,7 +3213,10 @@ EllesmereUI.THEME_PRESETS   = THEME_PRESETS
 EllesmereUI.THEME_ORDER     = THEME_ORDER
 
 -- Path strings
-EllesmereUI.EXPRESSWAY = EXPRESSWAY
+-- Keep the locale glyph-font fallback (matches the canonical line above where
+-- EllesmereUI.EXPRESSWAY is first set). Plain EXPRESSWAY here would drop the
+-- fallback and render CJK/Cyrillic clients as boxes for every later consumer.
+EllesmereUI.EXPRESSWAY = LOCALE_FONT_FALLBACK or EXPRESSWAY
 EllesmereUI.MEDIA_PATH = MEDIA_PATH
 EllesmereUI.ICONS_PATH = ICONS_PATH
 
@@ -2891,6 +3467,44 @@ if not EllesmereUI.ResolveThemeColor then
             if preset then return preset.r, preset.g, preset.b end
             return DEFAULT_ACCENT_R, DEFAULT_ACCENT_G, DEFAULT_ACCENT_B
         end
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Lazy-load stub: ResolveActiveAccent
+--  Minimal version used by PLAYER_LOGIN before the (deferred) Widgets file
+--  initializes. The whole Widgets body runs only on EnsureLoaded(), so the
+--  real ResolveActiveAccent (and its ResolveProfileAccent/GetActiveProfileData
+--  helpers) don't exist yet at login -- the same reason the ResolveThemeColor
+--  stub above exists. Mirrors ResolveProfileAccent's resolution order on file-
+--  scope locals so the login accent matches; the full version replaces this
+--  once EnsureLoaded runs.
+-------------------------------------------------------------------------------
+if not EllesmereUI.ResolveActiveAccent then
+    EllesmereUI.ResolveActiveAccent = function()
+        local theme = (EllesmereUIDB and EllesmereUIDB.activeTheme) or "EllesmereUI"
+        local themeR, themeG, themeB = EllesmereUI.ResolveThemeColor(theme)
+        local db = EllesmereUIDB
+        local p = db and db.profiles and db.profiles[db.activeProfile or "Default"]
+        local acc = p and p.euiAccent
+        -- 1) per-profile euiAccent
+        if acc and acc.useClass then
+            local c = CLASS_COLOR_MAP[playerClass]
+            if c then return c.r, c.g, c.b end
+        end
+        if acc and acc.custom then
+            local ca = acc.custom
+            return ca.r or themeR, ca.g or themeG, ca.b or themeB
+        end
+        -- 2) frozen global root (only when no explicit per-profile euiAccent)
+        if (not acc) and db and db.useClassAccentColor then
+            local c = CLASS_COLOR_MAP[playerClass]
+            if c then return c.r, c.g, c.b end
+        end
+        local gca = db and db.customAccentColor
+        if gca then return gca.r or themeR, gca.g or themeG, gca.b or themeB end
+        -- 3) theme color
+        return themeR, themeG, themeB
     end
 end
 
@@ -3183,7 +3797,7 @@ local function CreateConfirmPopup()
 
     -- Disclaimer (smaller, italic, below message)
     local disc = popup:CreateFontString(nil, "OVERLAY")
-    disc:SetFont(EXPRESSWAY, 11, "")
+    disc:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
     disc:SetTextColor(TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a * 0.7)
     disc:SetPoint("TOP", msg, "BOTTOM", 0, -8)
     disc:SetWidth(POPUP_W - 60)
@@ -3344,10 +3958,10 @@ function EllesmereUI:ShowConfirmPopup(opts)
     popup._popBgAtlas:SetShown(modern == true)
     popup._popBgOverlay:SetShown(modern == true)
 
-    popup._title:SetText(opts.title or "Confirm")
-    popup._msg:SetText(opts.message or "Are you sure?")
+    popup._title:SetText(EllesmereUI.L(opts.title or "Confirm"))
+    popup._msg:SetText(EllesmereUI.L(opts.message or "Are you sure?"))
     if opts.disclaimer then
-        popup._disclaimer:SetText(opts.disclaimer)
+        popup._disclaimer:SetText(EllesmereUI.L(opts.disclaimer))
         popup._disclaimer:Show()
     else
         popup._disclaimer:SetText("")
@@ -3363,7 +3977,7 @@ function EllesmereUI:ShowConfirmPopup(opts)
         else
             popup._scaleWarnLabel:SetPoint("TOP", popup._msg, "BOTTOM", 0, -14)
         end
-        popup._scaleWarnLabel:SetText(opts.scaleWarning)
+        popup._scaleWarnLabel:SetText(EllesmereUI.L(opts.scaleWarning))
         popup._scaleWarnLabel:Show()
         scaleWarnH = 16
     else
@@ -3375,7 +3989,7 @@ function EllesmereUI:ShowConfirmPopup(opts)
     if opts.checkbox then
         popup._cbChecked = false
         popup._cbCheck:Hide()
-        popup._cbLabel:SetText(opts.checkbox)
+        popup._cbLabel:SetText(EllesmereUI.L(opts.checkbox))
         local rowW = 14 + 6 + popup._cbLabel:GetStringWidth()
         popup._cbRow:SetWidth(rowW)
         popup._cbRow:ClearAllPoints()
@@ -3387,11 +4001,22 @@ function EllesmereUI:ShowConfirmPopup(opts)
     end
 
     popup:SetHeight((popup._baseH or 176) + scaleWarnH + cbH)
-    popup._cancelBtn._lbl:SetText(opts.cancelText or "Cancel")
-    popup._confirmBtn._lbl:SetText(opts.confirmText or "Confirm")
+    popup._cancelBtn._lbl:SetText(EllesmereUI.L(opts.cancelText or "Cancel"))
+    popup._confirmBtn._lbl:SetText(EllesmereUI.L(opts.confirmText or "Confirm"))
     -- onDismiss: called on escape/click-outside. Falls back to onCancel if not provided.
     popup._onCancel = opts.onDismiss or opts.onCancel or nil
     popup._modal = opts.modal and true or false
+
+    -- Single-button mode: hide cancel, center confirm
+    if opts.hideCancel then
+        popup._cancelBtn:Hide()
+        popup._confirmBtn:ClearAllPoints()
+        popup._confirmBtn:SetPoint("BOTTOM", popup, "BOTTOM", 0, 13)
+    else
+        popup._cancelBtn:Show()
+        popup._confirmBtn:ClearAllPoints()
+        popup._confirmBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", 8, 13)
+    end
 
     -- Reset hover states
     popup._cancelBtn._resetAnim()
@@ -3450,225 +4075,9 @@ function EllesmereUI:ShowConfirmPopup(opts)
     popup._dimmer:Show()
 end
 
-do
--------------------------------------------------------------------------------
---  Reset Gate
---  Bump REQUIRED_RESET_VERSION whenever a breaking SavedVariables purge
---  is released. Users whose stored _resetVersion is below this number get
---  an automatic full wipe at ADDON_LOADED time (before child addons init).
---  Fresh installs are stamped immediately and never see the popup.
--------------------------------------------------------------------------------
-local REQUIRED_RESET_VERSION = 9
-
-function EllesmereUI.NeedsBetaReset()
-    if not EllesmereUIDB then return false end
-    return (EllesmereUIDB._resetVersion or 0) < REQUIRED_RESET_VERSION
-end
-
--- Stamp fresh installs so they never see the reset popup.
--- A fresh install has no _resetVersion at all. By PLAYER_LOGIN, child addons
--- have already populated EllesmereUIDB so key counting is unreliable. Instead,
--- check if _resetVersion has never been set (nil) AND no child addon SVs exist.
-function EllesmereUI.StampResetVersion()
-    if not EllesmereUIDB then EllesmereUIDB = {} end
-    if (EllesmereUIDB._resetVersion or 0) >= REQUIRED_RESET_VERSION then return end
-    -- If _resetVersion is nil, this is either a fresh install or a very old install.
-    -- Fresh installs have no child addon SavedVariables. Old installs that need
-    -- the reset will have at least one child DB populated.
-    if EllesmereUIDB._resetVersion == nil then
-        local hasChildDB = _G.EllesmereUIActionBarsDB
-            or _G.EllesmereUIUnitFramesDB
-            or _G.EllesmereUINameplatesDB
-            or _G.EllesmereUIResourceBarsDB
-        if not hasChildDB then
-            EllesmereUIDB._resetVersion = REQUIRED_RESET_VERSION
-        end
-    end
-end
-
--- Perform the full wipe at ADDON_LOADED time, before child addons init.
--- Called from EllesmereUI_Migration.lua (which fires on parent ADDON_LOADED).
-function EllesmereUI.PerformResetWipe()
-    if not EllesmereUI.NeedsBetaReset() then return false end
-    -- Safety: log the wipe to help diagnose unexpected triggers
-    local ver = EllesmereUIDB and EllesmereUIDB._resetVersion
-    EllesmereUI.Print("|cffff0000[EllesmereUI]|r Reset wipe triggered. _resetVersion=" .. tostring(ver))
-    -- Extra guard: if the DB has real user data (profiles, positions, etc.)
-    -- but _resetVersion is somehow missing, do NOT wipe. Only wipe if
-    -- _resetVersion is genuinely below threshold (old beta data).
-    if EllesmereUIDB and EllesmereUIDB.profiles and not EllesmereUIDB._resetVersion then
-        -- User has profiles but no reset stamp -- could be a load race.
-        -- Stamp and skip rather than wipe their data.
-        EllesmereUIDB._resetVersion = 9
-        return false
-    end
-    -- Wipe all child addon SVs
-    local svNames = {
-        "EllesmereUIActionBarsDB",
-        "EllesmereUIAuraBuffRemindersDB",
-        "EllesmereUIBasicsDB",
-        "EllesmereUICooldownManagerDB",
-        "EllesmereUINameplatesDB",
-        "EllesmereUIResourceBarsDB",
-        "EllesmereUIUnitFramesDB",
-    }
-    for _, name in ipairs(svNames) do
-        if _G[name] then _G[name] = {} end
-    end
-    -- Wipe the central DB and stamp the new version
-    local oldScale = EllesmereUIDB and EllesmereUIDB.ppUIScale
-    local oldScaleAuto = EllesmereUIDB and EllesmereUIDB.ppUIScaleAuto
-    _G["EllesmereUIDB"] = { _resetVersion = REQUIRED_RESET_VERSION }
-    EllesmereUIDB = _G["EllesmereUIDB"]
-    -- Preserve UI scale so the popup renders at the right size
-    if oldScale then EllesmereUIDB.ppUIScale = oldScale end
-    if oldScaleAuto ~= nil then EllesmereUIDB.ppUIScaleAuto = oldScaleAuto end
-    -- Flag so the popup shows at PLAYER_LOGIN
-    EllesmereUI._showResetPopup = true
-    return true
-end
-end
-
-do
-    local welcomePopup, welcomeDimmer
-
-    local function CreateWelcomePopup()
-        if welcomePopup then return welcomePopup, welcomeDimmer end
-
-        local POPUP_W = 525
-        local POPUP_PAD_TOP = 22
-        local POPUP_PAD_BOTTOM = 29
-        local BTN_H = 32
-        local BTN_GAP = 16
-
-        -- Dimmer
-        welcomeDimmer = CreateFrame("Frame", "EUIWelcomeDimmer", UIParent)
-        welcomeDimmer:SetFrameStrata("FULLSCREEN_DIALOG")
-        welcomeDimmer:SetFrameLevel(100)
-        welcomeDimmer:SetAllPoints(UIParent)
-        welcomeDimmer:EnableMouse(true)
-        welcomeDimmer:EnableMouseWheel(true)
-        welcomeDimmer:SetScript("OnMouseWheel", function() end)
-        welcomeDimmer:EnableKeyboard(true)
-        welcomeDimmer:SetScript("OnKeyDown", function(self, key)
-            if key == "ESCAPE" then
-                self:SetPropagateKeyboardInput(false)
-            else
-                self:SetPropagateKeyboardInput(true)
-            end
-        end)
-        welcomeDimmer:Hide()
-
-        local dimTex = SolidTex(welcomeDimmer, "BACKGROUND", 0, 0, 0, 0.25)
-        dimTex:SetAllPoints()
-
-        -- Popup frame (height set dynamically after text layout)
-        welcomePopup = CreateFrame("Frame", "EUIWelcomePopup", welcomeDimmer)
-        welcomePopup:SetWidth(POPUP_W)
-        welcomePopup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
-        welcomePopup:SetFrameStrata("FULLSCREEN_DIALOG")
-        welcomePopup:SetFrameLevel(welcomeDimmer:GetFrameLevel() + 10)
-        welcomePopup:EnableMouse(true)
-
-        local bg = SolidTex(welcomePopup, "BACKGROUND", 0.06, 0.08, 0.10, 0.95)
-        bg:SetAllPoints()
-        MakeBorder(welcomePopup, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
-
-        -- Title
-        local EG = ELLESMERE_GREEN
-        local title = MakeFont(welcomePopup, 22, "", EG.r, EG.g, EG.b)
-        title:SetPoint("TOP", welcomePopup, "TOP", 0, -22)
-        title:SetText("EllesmereUI Beta Complete")
-
-        -- Message
-        local msg = MakeFont(welcomePopup, 12, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
-        msg:SetPoint("TOP", title, "BOTTOM", 0, -12)
-        msg:SetWidth(POPUP_W - 60)
-        msg:SetJustifyH("CENTER")
-        msg:SetWordWrap(true)
-        msg:SetSpacing(4)
-        msg:SetText("Thank you for helping test EllesmereUI during beta! During testing, many systemic changes were made to build the foundation for a stable, flexible addon going forward.\n\nTo ensure a clean experience for everyone, all settings have been automatically reset. You will need to reconfigure your UI. We apologize for the inconvenience, and appreciate your patience.\n\nPrevious profile exports are no longer compatible and will need to be re-created.")
-
-        -- Disclaimer
-        local disc = welcomePopup:CreateFontString(nil, "OVERLAY")
-        disc:SetFont(EXPRESSWAY, 14, "")
-        disc:SetTextColor(1, 0.35, 0.35, 0.8)
-        disc:SetPoint("TOP", msg, "BOTTOM", 0, -16)
-        disc:SetWidth(POPUP_W - 60)
-        disc:SetJustifyH("CENTER")
-        disc:SetWordWrap(true)
-        disc:SetText("All EllesmereUI settings have been reset to defaults.")
-
-        -- Reset & Reload button (accent-colored, centered)
-        local closeBtn = CreateFrame("Button", nil, welcomePopup)
-        closeBtn:SetSize(180, 32)
-        closeBtn:SetFrameLevel(welcomePopup:GetFrameLevel() + 2)
-        do
-            local eg = ELLESMERE_GREEN
-            local cbg = SolidTex(closeBtn, "BACKGROUND", BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_A)
-            cbg:SetAllPoints()
-            local cbrd = MakeBorder(closeBtn, eg.r, eg.g, eg.b, 0.8)
-            local clbl = MakeFont(closeBtn, 13, nil, eg.r, eg.g, eg.b)
-            clbl:SetAlpha(0.8)
-            clbl:SetPoint("CENTER")
-            clbl:SetText("Reset & Reload")
-            closeBtn:SetScript("OnEnter", function()
-                clbl:SetAlpha(1)
-                cbrd:SetColor(eg.r, eg.g, eg.b, 1)
-                cbg:SetColorTexture(BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_HA)
-            end)
-            closeBtn:SetScript("OnLeave", function()
-                clbl:SetAlpha(0.8)
-                cbrd:SetColor(eg.r, eg.g, eg.b, 0.8)
-                cbg:SetColorTexture(BTN_BG_R, BTN_BG_G, BTN_BG_B, BTN_BG_A)
-            end)
-            closeBtn:SetScript("OnClick", function()
-                -- Nuclear wipe: nuke ALL child SV globals so WoW saves
-                -- clean files to disk during the PLAYER_LOGOUT that
-                -- ReloadUI triggers.
-                local svNames = {
-                    "EllesmereUIActionBarsDB",
-                    "EllesmereUIAuraBuffRemindersDB",
-                    "EllesmereUIBasicsDB",
-                    "EllesmereUICooldownManagerDB",
-                    "EllesmereUINameplatesDB",
-                    "EllesmereUIResourceBarsDB",
-                    "EllesmereUIUnitFramesDB",
-                    -- Legacy globals (merged into BasicsDB, clean up stale files)
-                    "EllesmereUICursorDB",
-                    "EllesmereUIQuestTrackerDB",
-                }
-                for _, name in ipairs(svNames) do
-                    _G[name] = {}
-                end
-                -- Re-wipe central store (preserving reset stamp + scale)
-                local oldScale = EllesmereUIDB and EllesmereUIDB.ppUIScale
-                local oldScaleAuto = EllesmereUIDB and EllesmereUIDB.ppUIScaleAuto
-                local resetVer = EllesmereUIDB and EllesmereUIDB._resetVersion
-                _G["EllesmereUIDB"] = { _resetVersion = resetVer }
-                EllesmereUIDB = _G["EllesmereUIDB"]
-                if oldScale then EllesmereUIDB.ppUIScale = oldScale end
-                if oldScaleAuto ~= nil then EllesmereUIDB.ppUIScaleAuto = oldScaleAuto end
-                ReloadUI()
-            end)
-        end
-        closeBtn:SetPoint("BOTTOM", welcomePopup, "BOTTOM", 0, POPUP_PAD_BOTTOM)
-
-        -- Calculate dynamic height: title + gap + msg + gap + disc + gap + btn + padding
-        local titleH = title:GetStringHeight()
-        local msgH = msg:GetStringHeight()
-        local discH = disc:GetStringHeight()
-        local totalH = POPUP_PAD_TOP + titleH + 12 + msgH + 16 + discH + BTN_GAP + BTN_H + POPUP_PAD_BOTTOM
-        welcomePopup:SetHeight(totalH)
-
-        return welcomePopup, welcomeDimmer
-    end
-
-    function EllesmereUI:ShowWelcomePopup()
-        local popup, dimmer = CreateWelcomePopup()
-        dimmer:Show()
-    end
-end
+-- BETA-WIPE REMOVED: the beta-reset welcome popup + its wipe logic were deleted
+-- (the entire reset gate is gone). Migrations are unaffected; manual reset lives
+-- in Global Settings > Reset. EllesmereUI:ShowWelcomePopup no longer exists.
 
 -------------------------------------------------------------------------------
 --  Scrollable Info Popup  (read-only content with custom scroll + close button)
@@ -3727,7 +4136,7 @@ local function CreateInfoPopup()
 
     -- Content FontString
     local contentFS = sc:CreateFontString(nil, "OVERLAY")
-    contentFS:SetFont(EXPRESSWAY, 11, "")
+    contentFS:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
     contentFS:SetTextColor(TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.80)
     contentFS:SetPoint("TOPLEFT", sc, "TOPLEFT", 0, 0)
     contentFS:SetWidth((POPUP_W - 48) - 10)
@@ -3886,7 +4295,7 @@ function EllesmereUI:ShowInfoPopup(opts)
     if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
     local popup = CreateInfoPopup()
 
-    popup._title:SetText(opts.title or "Information")
+    popup._title:SetText(EllesmereUI.L(opts.title or "Information"))
     popup._contentFS:SetText(opts.content or "")
 
     -- Resize scroll child to fit content after a frame
@@ -3996,13 +4405,13 @@ function EllesmereUI:ShowInputPopup(opts)
         local editBox = CreateFrame("EditBox", nil, inputFrame)
         editBox:SetPoint("TOPLEFT", 12, -1)
         editBox:SetPoint("BOTTOMRIGHT", -12, 1)
-        editBox:SetFont(EXPRESSWAY, 11, "")
+        editBox:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
         editBox:SetTextColor(1, 1, 1, 0.9)
         editBox:SetAutoFocus(false)
         editBox:SetMaxLetters(30)
 
         local placeholder = editBox:CreateFontString(nil, "ARTWORK")
-        placeholder:SetFont(EXPRESSWAY, 11, "")
+        placeholder:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
         placeholder:SetTextColor(TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a * 0.5)
         placeholder:SetPoint("LEFT", editBox, "LEFT", 0, 0)
         popup._placeholder = placeholder
@@ -4154,11 +4563,11 @@ function EllesmereUI:ShowInputPopup(opts)
     popup._popBgAtlas:SetShown(modern == true)
     popup._popBgOverlay:SetShown(modern == true)
 
-    popup._title:SetText(opts.title or "Enter Name")
-    popup._msg:SetText(opts.message or "")
+    popup._title:SetText(EllesmereUI.L(opts.title or "Enter Name"))
+    popup._msg:SetText(EllesmereUI.L(opts.message or ""))
     popup._placeholder:SetText(opts.placeholder or "Enter name...")
-    popup._cancelBtn._lbl:SetText(opts.cancelText or "Cancel")
-    popup._confirmBtn._lbl:SetText(opts.confirmText or "Save")
+    popup._cancelBtn._lbl:SetText(EllesmereUI.L(opts.cancelText or "Cancel"))
+    popup._confirmBtn._lbl:SetText(EllesmereUI.L(opts.confirmText or "Save"))
     popup._onCancel = opts.onDismiss or opts.onCancel or nil
     popup._onConfirmCb = opts.onConfirm or nil
 
@@ -4206,7 +4615,7 @@ function EllesmereUI:ShowInputPopup(opts)
         else
             popup._scaleWarnLabel:SetPoint("TOP", popup._inputFrame, "BOTTOM", 0, -18)
         end
-        popup._scaleWarnLabel:SetText(opts.scaleWarning)
+        popup._scaleWarnLabel:SetText(EllesmereUI.L(opts.scaleWarning))
         popup._scaleWarnLabel:Show()
         scaleWarnH = 30
     else
@@ -4458,6 +4867,7 @@ local function CreateMainFrame()
     sidebar:SetSize(SIDEBAR_W, CLICK_H)
     sidebar:SetPoint("TOPLEFT", clickArea, "TOPLEFT", 0, 0)
     sidebar:SetFrameLevel(clickArea:GetFrameLevel() + 2)
+    EllesmereUI._sidebar = sidebar
 
     -- Nav buttons -- start below the logo area with proper spacing
     local NAV_TOP     = -128   -- distance from sidebar top to first nav item
@@ -4953,7 +5363,7 @@ local function CreateMainFrame()
 
         local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", btn, "LEFT", CHILD_INDENT_X, 0)
-        label:SetText(info.display)
+        label:SetText(EllesmereUI.L(info.display))
         btn._label = label
 
         -- Download icon (shown for uninstalled addons)
@@ -4966,8 +5376,10 @@ local function CreateMainFrame()
         dlIcon:Hide()
         btn._dlIcon = dlIcon
 
-        -- Power toggle button (hidden for comingSoon, maintenance, or alwaysLoaded entries)
-        if not info.comingSoon and not info.maintenance and not info.alwaysLoaded then
+        -- Power toggle button (hidden for comingSoon, maintenance, or alwaysLoaded entries).
+        -- Also hidden entirely in standalone builds: there is only one module and
+        -- it can't be toggled off from within itself.
+        if not IS_STANDALONE and not info.comingSoon and not info.maintenance and not info.alwaysLoaded then
             local pwrBtn = CreateFrame("Button", nil, btn)
             pwrBtn:SetSize(13, 13)
             pwrBtn:SetPoint("RIGHT", btn, "RIGHT", -18, 0)
@@ -4999,8 +5411,8 @@ local function CreateMainFrame()
                 local action = enabled and "disable" or "enable"
                 local folder = self._folder
                 EllesmereUI:ShowConfirmPopup({
-                    title       = (enabled and "Disable" or "Enable") .. " Module",
-                    message     = "Are you sure you want to " .. action .. " " .. self._display .. "?",
+                    title       = EllesmereUI.Lf("%1$s Module", enabled and EllesmereUI.L("Disable") or EllesmereUI.L("Enable")),
+                    message     = EllesmereUI.Lf("Are you sure you want to %1$s %2$s?", EllesmereUI.L(action), EllesmereUI.L(self._display)),
                     confirmText = enabled and "Disable & Reload" or "Enable & Reload",
                     cancelText  = "Cancel",
                     onConfirm   = function()
@@ -5017,6 +5429,106 @@ local function CreateMainFrame()
                 })
             end)
             btn._pwrBtn = pwrBtn
+        end
+
+        -- Sync icon (to the left of power button, hidden for exempt/single-profile).
+        -- Also hidden entirely in standalone builds (no cross-module sync surface).
+        if not IS_STANDALONE and not info.comingSoon and not info.maintenance and not EllesmereUI._syncExempt[info.folder] then
+            local syncBtn = CreateFrame("Button", nil, btn)
+            syncBtn:SetSize(15, 15)
+            if btn._pwrBtn then
+                syncBtn:SetPoint("RIGHT", btn._pwrBtn, "LEFT", -8, 0)
+            else
+                syncBtn:SetPoint("RIGHT", btn, "RIGHT", -20, 0)
+            end
+            syncBtn:SetFrameLevel(btn:GetFrameLevel() + 5)
+            local syncTex = syncBtn:CreateTexture(nil, "ARTWORK")
+            syncTex:SetAllPoints()
+            syncTex:SetTexture(EllesmereUI.SYNC_ICON)
+            syncTex:SetVertexColor(1, 1, 1, 1)
+            syncBtn._tex = syncTex
+            syncBtn._folder = info.folder
+            syncBtn._display = info.display
+            local SYNC_ON_R, SYNC_ON_G, SYNC_ON_B = 0x32/255, 0xbc/255, 0x53/255
+            local SYNC_HOVER_R = math.min(1, SYNC_ON_R * 1.25)
+            local SYNC_HOVER_G = math.min(1, SYNC_ON_G * 1.25)
+            local SYNC_HOVER_B = math.min(1, SYNC_ON_B * 1.25)
+            local isGlobalOnly = EllesmereUI._syncGlobalOnly and EllesmereUI._syncGlobalOnly[info.folder]
+            local function RefreshSyncState()
+                -- Hide if only one profile exists
+                local profCount = 0
+                if EllesmereUIDB and EllesmereUIDB.profiles then
+                    for _ in pairs(EllesmereUIDB.profiles) do
+                        profCount = profCount + 1
+                        if profCount > 1 then break end
+                    end
+                end
+                if profCount <= 1 then syncBtn:Hide(); return end
+                -- Check global hide settings
+                local fullySynced = isGlobalOnly or EllesmereUI.IsModuleFullySynced(info.folder)
+                if EllesmereUIDB then
+                    if EllesmereUIDB.hideSyncIcons then
+                        if EllesmereUIDB.hideSyncIconsOnlyFull then
+                            if fullySynced then syncBtn:Hide(); return end
+                        else
+                            syncBtn:Hide(); return
+                        end
+                    end
+                end
+                syncBtn:Show()
+                if fullySynced then
+                    syncTex:SetVertexColor(SYNC_ON_R, SYNC_ON_G, SYNC_ON_B, 1)
+                else
+                    syncTex:SetVertexColor(1, 1, 1, 0.5)
+                end
+            end
+            RefreshSyncState()
+            syncBtn._refreshAlpha = RefreshSyncState
+            -- Register for bulk refresh (e.g. after profile deletion)
+            if not EllesmereUI._syncRefreshFns then EllesmereUI._syncRefreshFns = {} end
+            EllesmereUI._syncRefreshFns[#EllesmereUI._syncRefreshFns + 1] = RefreshSyncState
+            syncBtn:SetScript("OnEnter", function(self)
+                if isGlobalOnly then
+                    self._tex:SetVertexColor(SYNC_HOVER_R, SYNC_HOVER_G, SYNC_HOVER_B, 1)
+                    if EllesmereUI.ShowWidgetTooltip then
+                        EllesmereUI.ShowWidgetTooltip(self, "No Profile Level Customizations")
+                    end
+                    return
+                end
+                if EllesmereUI.IsModuleFullySynced(info.folder) then
+                    self._tex:SetVertexColor(SYNC_HOVER_R, SYNC_HOVER_G, SYNC_HOVER_B, 1)
+                else
+                    self._tex:SetVertexColor(1, 1, 1, 1)
+                end
+                if EllesmereUI.ShowWidgetTooltip then
+                    local tip = EllesmereUI.IsModuleFullySynced(info.folder) and "Profiles Synced" or "Sync " .. self._display
+                    EllesmereUI.ShowWidgetTooltip(self, tip)
+                end
+            end)
+            syncBtn:SetScript("OnLeave", function(self)
+                RefreshSyncState()
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            end)
+            syncBtn:SetScript("OnClick", function(self)
+                if isGlobalOnly then return end
+                if EllesmereUI.OpenSyncPopup then
+                    EllesmereUI.OpenSyncPopup(self._folder, self._display, self)
+                end
+            end)
+            btn._syncBtn = syncBtn
+        end
+
+        -- Bound the label to the leftmost right-side icon so long (translated)
+        -- module names truncate with an ellipsis instead of overlapping the
+        -- sync/power icons. The download icon always exists, so there is always
+        -- a right anchor; its fixed position reserves the cluster's space even
+        -- when an icon is currently hidden.
+        label:SetJustifyH("LEFT")
+        label:SetWordWrap(false)
+        label:SetMaxLines(1)
+        local rightEdge = btn._syncBtn or btn._pwrBtn or btn._dlIcon
+        if rightEdge then
+            label:SetPoint("RIGHT", rightEdge, "LEFT", -6, 0)
         end
 
         -- Default to unloaded appearance (refreshed each time panel opens)
@@ -5104,6 +5616,15 @@ local function CreateMainFrame()
                 btn:SetPoint("TOPLEFT", addonScrollChild, "TOPLEFT", 0, -_y)
                 sidebarButtons[info.folder] = btn
                 _y = _y + CHILD_ROW_H
+            end
+        end
+    end
+    EllesmereUI._sidebarButtons = sidebarButtons
+    -- Refresh all sync icons (called from global settings toggle)
+    EllesmereUI._refreshAllSyncIcons = function()
+        for _, btn in pairs(sidebarButtons) do
+            if btn._syncBtn and btn._syncBtn._refreshAlpha then
+                btn._syncBtn._refreshAlpha()
             end
         end
     end
@@ -5370,6 +5891,7 @@ local function CreateMainFrame()
     tabBar:SetFrameLevel(clickArea:GetFrameLevel() + 4)
 
     tabBar._tabButtons = {}
+    EllesmereUI._tabBar = tabBar
 
     -----------------------------------------------------------------------
     --  Content header  (optional non-scrolling region above the scroll area)
@@ -5889,13 +6411,13 @@ local function CreateMainFrame()
             if not activeModule or not modules[activeModule] or not modules[activeModule].onReset then return end
             local config = modules[activeModule]
             local addonTitle = config.title or activeModule
-            local msg = "Are you sure you want to reset all " .. addonTitle .. " settings to their defaults? This will reload your UI."
+            local msg = EllesmereUI.Lf("Are you sure you want to reset all %1$s settings to their defaults? This will reload your UI.", EllesmereUI.L(addonTitle))
             local disclaimer
             if activeModule == (EllesmereUI.GLOBAL_KEY or "_EUIGlobal") then
                 disclaimer = "This will not reset addon-specific Quick Setup."
             end
             EllesmereUI:ShowConfirmPopup({
-                title       = "Reset " .. addonTitle,
+                title       = EllesmereUI.Lf("Reset %1$s", EllesmereUI.L(addonTitle)),
                 message     = msg,
                 disclaimer  = disclaimer,
                 confirmText = "Reset & Reload",
@@ -5989,9 +6511,10 @@ local function CreateMainFrame()
         end
 
         local socialDefs = {
-            { icon = ICONS_PATH .. "twitch-2.png",  url = "https://www.twitch.tv/ellesmere_gaming" },
-            { icon = ICONS_PATH .. "discord-2.png", url = "https://discord.gg/FtCsUSC" },
-            { icon = ICONS_PATH .. "donate-3.png",  url = "https://www.patreon.com/ellesmere" },
+            { icon = ICONS_PATH .. "twitch-2.png",  url = "https://www.twitch.tv/ellesmere_gaming", tooltip = "Twitch" },
+            { icon = ICONS_PATH .. "discord-2.png", url = "https://discord.gg/FtCsUSC",             tooltip = "Discord" },
+            { icon = ICONS_PATH .. "donate-3.png",  url = "https://www.patreon.com/ellesmere",       tooltip = "Patreon" },
+            { icon = ICONS_PATH .. "paypal.png",    url = "https://www.paypal.biz/ellesmeregaming",  tooltip = "PayPal" },
         }
 
         -- Anchor: rightmost icon sits SOCIAL_GAP to the left of where Done starts
@@ -6029,8 +6552,16 @@ local function CreateMainFrame()
                 end
                 Apply(progress)
             end
-            btn:SetScript("OnEnter", function(self) target = 1; self:SetScript("OnUpdate", OnUpdate) end)
-            btn:SetScript("OnLeave", function(self) target = 0; self:SetScript("OnUpdate", OnUpdate) end)
+            btn:SetScript("OnEnter", function(self)
+                target = 1; self:SetScript("OnUpdate", OnUpdate)
+                if def.tooltip and EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, def.tooltip)
+                end
+            end)
+            btn:SetScript("OnLeave", function(self)
+                target = 0; self:SetScript("OnUpdate", OnUpdate)
+                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            end)
             btn:SetScript("OnClick", function() ShowLinkPopup(def.url, btn) end)
         end
     end
@@ -6090,7 +6621,7 @@ CreateTabButton = function(index, name)
 
     local label = MakeFont(btn, 16, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
     label:SetPoint("CENTER", 0, 0)
-    label:SetText(name)
+    label:SetText(EllesmereUI.L(name))
     btn._label = label
     btn._name  = name
 
@@ -6166,14 +6697,14 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
         local editBox = CreateFrame("EditBox", nil, searchFrame)
         editBox:SetAllPoints()
         editBox:SetAutoFocus(false)
-        editBox:SetFont(EXPRESSWAY, 13, "")
+        editBox:SetFont(EllesmereUI.EXPRESSWAY, 13, "")
         editBox:SetTextColor(TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B, 1)
         editBox:SetTextInsets(10, 24, 0, 0)
         editBox:SetMaxLetters(40)
 
         local placeholder = MakeFont(searchFrame, 12, nil, TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, 0.3)
         placeholder:SetPoint("LEFT", searchFrame, "LEFT", 10, 0)
-        placeholder:SetText("Search Module Settings...")
+        placeholder:SetText(EllesmereUI.L("Search Module Settings..."))
 
         -- Clear button (X) on right side — frame level above editBox so clicks register
         local clearBtn = CreateFrame("Button", nil, searchFrame)
@@ -6353,17 +6884,21 @@ local function CollectAllChildren(wrapper)
         if child._leftCol or child._rightCol then
             if not child._splitSearchLabels then
                 local labels = {}
+                local labelsLoc = {}
                 local function GatherLabels(col)
                     if not col then return end
                     local subs = { col:GetChildren() }
                     for _, sub in ipairs(subs) do
-                        if sub._sectionName then labels[#labels + 1] = sub._sectionName end
-                        if sub._labelText then labels[#labels + 1] = sub._labelText end
+                        if sub._sectionName then labels[#labels + 1] = sub._sectionName; labelsLoc[#labelsLoc + 1] = sub._sectionNameLoc or sub._sectionName end
+                        if sub._labelText then labels[#labels + 1] = sub._labelText; labelsLoc[#labelsLoc + 1] = sub._labelTextLoc or sub._labelText end
                     end
                 end
                 GatherLabels(child._leftCol)
                 GatherLabels(child._rightCol)
                 child._splitSearchLabels = table.concat(labels, " ")
+                -- Bilingual search: localized variant, only stored when it differs (nil on English).
+                local _loc = table.concat(labelsLoc, " ")
+                if _loc ~= child._splitSearchLabels then child._splitSearchLabelsLoc = _loc end
             end
         end
     end
@@ -6378,7 +6913,10 @@ local function CollectAllChildren(wrapper)
     local current  = nil      -- current section entry
 
     for _, child in ipairs(children) do
-        if child._isSectionHeader then
+        if child._searchIgnore then
+            -- Managed outside the inline search (e.g. party sync overlays); never
+            -- collect it so the search can't re-anchor or hide/show it.
+        elseif child._isSectionHeader then
             current = { header = child, members = {} }
             sections[#sections + 1] = current
         elseif current then
@@ -6420,7 +6958,8 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
                 local target = sec.header
                 if highlightText then
                     for _, m in ipairs(sec.members) do
-                        if m._labelText and m._labelText:find(highlightText, 1, true) then
+                        if (m._labelText and m._labelText:find(highlightText, 1, true))
+                           or (m._labelTextLoc and m._labelTextLoc:find(highlightText, 1, true)) then
                             target = m
                             break
                         end
@@ -6442,12 +6981,15 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
     end)
 end
 
--- Get a searchable label for any child frame (tagged or not)
+-- Get a searchable label for any child frame (tagged or not). On translated
+-- clients the localized variant is appended so search matches either language;
+-- on English the *Loc fields are nil and this returns the English label as before.
 local function GetSearchLabel(child)
-    if child._labelText then return child._labelText end
-    if child._sectionName then return child._sectionName end
-    if child._splitSearchLabels then return child._splitSearchLabels end
-    return ""
+    local en = child._labelText or child._sectionName or child._splitSearchLabels
+    if not en then return "" end
+    local loc = child._labelTextLoc or child._sectionNameLoc or child._splitSearchLabelsLoc
+    if loc then return en .. " " .. loc end
+    return en
 end
 
 -- Resolve the current display text of a dropdown on a region (if any)
@@ -6466,6 +7008,10 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     local cacheKey = activeModule .. "::" .. activePage
     local cached = _pageCache[cacheKey]
     if not cached or not cached.wrapper then return end
+
+    -- Per-page search-state hook (e.g. the party tab hides its sync overlays
+    -- while a search is active). Fires for both filtering and restore.
+    if EllesmereUI._onInlineSearch then EllesmereUI._onInlineSearch(query or "") end
 
     RecycleAllSearchHighlights()
 
@@ -6506,6 +7052,7 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
             scrollFrame:SetVerticalScroll(0)
             UpdateScrollThumb()
         end
+        cached._searchFiltered = nil
         return
     end
 
@@ -6516,6 +7063,14 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     for _, sec in ipairs(sections) do
         local sectionName = sec.header._sectionName or ""
         local sectionMatch = sectionName:lower():find(queryLower, 1, true)
+        -- Bilingual: also match the localized section name on translated clients.
+        if not sectionMatch and sec.header._sectionNameLoc then
+            sectionMatch = sec.header._sectionNameLoc:lower():find(queryLower, 1, true)
+        end
+        -- Per-page section exclusion hook (e.g. the party tab hides sections that
+        -- are synced with raid settings). Only consulted during a live search.
+        local excluded = EllesmereUI._searchExcludeSection
+            and EllesmereUI._searchExcludeSection(sectionName)
 
         local anyMemberMatch = false
         local matchingMembers = {}
@@ -6539,7 +7094,7 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
             end
         end
 
-        if sectionMatch or anyMemberMatch then
+        if (sectionMatch or anyMemberMatch) and not excluded then
             visibleSections[#visibleSections + 1] = {
                 sec = sec,
                 sectionMatch = sectionMatch,
@@ -6677,6 +7232,9 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
         scrollFrame:SetVerticalScroll(0)
         UpdateScrollThumb()
     end
+    -- Mark this page as currently search-filtered so it is reliably restored when
+    -- shown again, even if the search box was cleared on a tab/module switch.
+    cached._searchFiltered = true
 end
 
 -------------------------------------------------------------------------------
@@ -6915,6 +7473,15 @@ function EllesmereUI:SelectPage(pageName)
         return
     end
 
+    -- Restore the current page's inline-search filter and clear the search box
+    -- BEFORE switching activePage. SetText("") fires ApplyInlineSearch("") via
+    -- OnTextChanged, which keys off activePage -- so this must run while it still
+    -- points to the filtered page. Otherwise that page stays stuck in its
+    -- filtered layout (looks "searched" with an empty box) until you re-search.
+    if tabBar and tabBar._searchBox and tabBar._searchBox:GetText() ~= "" then
+        tabBar._searchBox:SetText("")
+    end
+
     -- Save current page's refresh list before switching
     if activePage then
         local oldKey = activeModule .. "::" .. activePage
@@ -6935,37 +7502,48 @@ function EllesmereUI:SelectPage(pageName)
     _lastPagePerModule[activeModule] = pageName
     UpdateTabHighlight(pageName)
 
-    -- Clear inline search when switching tabs
-    if tabBar and tabBar._searchBox and tabBar._searchBox:GetText() ~= "" then
-        tabBar._searchBox:SetText("")
-    end
-
     local cacheKey = activeModule .. "::" .. pageName
     local cached = _pageCache[cacheKey]
 
+    -- Reconcile the two independent caches before taking the fast path. The page
+    -- wrapper (_pageCache) and the content-header PREVIEW (_contentHeaderCache) are
+    -- cached separately, but the preview's interactive "hit overlays" are created
+    -- ONLY by buildPage and parented into the preview. If another module's control
+    -- globally invalidated the content-header cache (InvalidateContentHeaderCache)
+    -- while this page's wrapper stayed cached, a header-only SetContentHeader
+    -- rebuild would recreate the preview with NO hit overlays -- visible but dead
+    -- to hover/click until a /reload. So when a page that HAS a preview misses its
+    -- content-header cache, discard the stale wrapper (same teardown as RefreshPage)
+    -- and fall through to a full cold rebuild, which recreates the preview AND its
+    -- overlays together. Pages with no preview (no headerBuilder) miss the
+    -- content-header cache harmlessly and stay on the fast path.
     if cached and cached.wrapper then
-        -- Fast path: re-show cached page
         HideAllChildren(scrollChild)
-
-        -- Restore content header from cache; fall back to rebuild if not cached
         if not EllesmereUI:RestoreContentHeaderFromCache(cacheKey) then
             if cached.headerBuilder then
-                EllesmereUI:SetContentHeader(cached.headerBuilder)
-            else
-                if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
+                cached.wrapper:Hide()
+                cached.wrapper:SetParent(nil)
+                _pageCache[cacheKey] = nil
+                cached = nil
+            elseif EllesmereUI.ClearContentHeader then
+                EllesmereUI:ClearContentHeader()
             end
         end
+    end
 
+    if cached and cached.wrapper then
+        -- Fast path: re-show cached page (both caches in sync)
         -- Show the cached wrapper and set scroll child height
         cached.wrapper:Show()
         _activePageWrapper = cached.wrapper
         contentFrame:SetHeight(cached.totalH + 30)
 
-        -- Restore any elements hidden by a previous inline search.
-        -- Skip if the search box is already empty -- ApplyInlineSearch("")
-        -- calls CollectAllChildren which sorts + re-anchors every widget.
-        local searchText = tabBar and tabBar._searchBox and tabBar._searchBox:GetText() or ""
-        if searchText ~= "" then
+        -- Restore any elements hidden by a previous inline search. Key off the
+        -- page's own filtered flag, NOT the search box -- clearing the box on a
+        -- tab/module switch does not reliably restore the page being left, so a
+        -- cached page can stay filtered while the box reads empty. The flag tracks
+        -- the real state, so a stuck-filtered page is always restored on show.
+        if cached._searchFiltered then
             EllesmereUI:ApplyInlineSearch("")
         end
 
@@ -7004,106 +7582,6 @@ function EllesmereUI:SelectPage(pageName)
         local totalH = 0
         if config.buildPage then
             local startY = -6
-
-            -- Inject Sync Profile Settings button for UI Reskin modules
-            if EllesmereUI._reskinModules and EllesmereUI._reskinModules[activeModule] then
-                local W = EllesmereUI.Widgets
-                if W and W.WideButton then
-                    startY = startY - 5
-                    local synced = EllesmereUI.IsModuleSynced(activeModule)
-                    local syncLabel = synced and "Settings are Cross-Profile. Click to Desync" or "Settings are Per-Profile. Click to Sync"
-                    local syncFolder = activeModule
-                    local syncBtnFrame, syncH
-                    local syncBtnLbl
-                    local syncBtnObj
-                    local syncLocked = false
-                    syncBtnFrame, syncH = W:WideButton(wrapper, syncLabel, startY, function()
-                        if syncLocked then return end
-                        local nowSynced = EllesmereUI.IsModuleSynced(syncFolder)
-                        EllesmereUI.SetModuleSynced(syncFolder, not nowSynced)
-                        if not nowSynced and syncBtnLbl then
-                            -- Was off, now synced: show "Synced" confirmation
-                            syncLocked = true
-                            if syncBtnObj then syncBtnObj:Disable() end
-                            local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
-                            syncBtnLbl:SetText("Synced")
-                            syncBtnLbl:SetTextColor(eg.r, eg.g, eg.b, 1)
-                            C_Timer.After(1.2, function()
-                                if syncBtnLbl then
-                                    syncBtnLbl:SetText("Settings are Cross-Profile. Click to Desync")
-                                    syncBtnLbl:SetTextColor(1, 1, 1, 1)
-                                end
-                                syncLocked = false
-                                if syncBtnObj then
-                                    syncBtnObj:Enable()
-                                    syncBtnObj:SetAlpha(0.5)
-                                end
-                            end)
-                        elseif syncBtnLbl then
-                            -- Was on, now desynced: show "Desynced" confirmation
-                            syncLocked = true
-                            if syncBtnObj then syncBtnObj:Disable() end
-                            syncBtnLbl:SetText("Desynced")
-                            syncBtnLbl:SetTextColor(1, 0.4, 0.4, 1)
-                            C_Timer.After(1.2, function()
-                                if syncBtnLbl then
-                                    syncBtnLbl:SetText("Settings are Per-Profile. Click to Sync")
-                                    syncBtnLbl:SetTextColor(1, 1, 1, 1)
-                                end
-                                syncLocked = false
-                                if syncBtnObj then
-                                    syncBtnObj:Enable()
-                                    syncBtnObj:SetAlpha(1)
-                                end
-                            end)
-                        end
-                    end)
-                    do
-                        local btn = select(1, syncBtnFrame:GetChildren())
-                        if btn then
-                            syncBtnObj = btn
-                            for i = 1, btn:GetNumRegions() do
-                                local rgn = select(i, btn:GetRegions())
-                                if rgn and rgn.GetText and rgn:GetText() then
-                                    syncBtnLbl = rgn; break
-                                end
-                            end
-                            -- Tooltip explaining both states
-                            btn:HookScript("OnEnter", function(self)
-                                local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.61 }
-                                local hex = string.format("|cff%02x%02x%02x", eg.r * 255, eg.g * 255, eg.b * 255)
-                                if EllesmereUI.IsModuleSynced(syncFolder) then
-                                    self:SetAlpha(0.75)
-                                    EllesmereUI.ShowWidgetTooltip(self, hex .. "Settings are Cross-Profile:|r Changes to this module apply to all profiles. Click to desync and use separate settings per profile.")
-                                else
-                                    EllesmereUI.ShowWidgetTooltip(self, hex .. "Settings are Per-Profile:|r Each profile has its own settings for this module. Click to sync and copy the current settings to all profiles.")
-                                end
-                            end)
-                            btn:HookScript("OnLeave", function(self)
-                                if EllesmereUI.IsModuleSynced(syncFolder) then
-                                    self:SetAlpha(0.5)
-                                end
-                                EllesmereUI.HideWidgetTooltip()
-                            end)
-                            -- Desync state: dimmed at 50%
-                            if synced then
-                                btn:SetAlpha(0.5)
-                            end
-                        end
-                    end
-                    syncBtnFrame:SetScale(0.9)
-                    -- Re-center: scale shrinks from TOPLEFT, shift right to compensate
-                    local frameW = syncBtnFrame:GetWidth()
-                    if frameW and frameW > 0 then
-                        local offset = frameW * (1 - 0.9) / 2
-                        local pt, rel, relPt, px, py = syncBtnFrame:GetPoint(1)
-                        if pt then
-                            syncBtnFrame:SetPoint(pt, rel, relPt, (px or 0) + offset, py or 0)
-                        end
-                    end
-                    startY = startY - syncH * 0.9 + 5
-                end
-            end
 
             totalH = config.buildPage(pageName, wrapper, startY) or 600
             contentFrame:SetHeight(totalH + 30)
@@ -7261,22 +7739,31 @@ function EllesmereUI:SelectModule(folderName)
         EllesmereUI:SaveContentHeaderToCache(oldKey)
     end
 
+    -- Restore the old module page's inline-search filter and clear the search
+    -- box BEFORE switching modules, while activeModule/activePage still point to
+    -- the filtered page. SetText("") fires ApplyInlineSearch("") via OnTextChanged;
+    -- doing this after the switch would target the new module and leave the old
+    -- page stuck in its filtered layout.
+    if tabBar and tabBar._searchBox and tabBar._searchBox:GetText() ~= "" then
+        tabBar._searchBox:SetText("")
+    end
+
     activeModule = folderName
     local config = modules[folderName]
     UpdateSidebarHighlight(folderName)
-    headerFrame._title:SetText(config.title or folderName)
+    headerFrame._title:SetText(EllesmereUI.L(config.title or folderName))
     local rb = footerFrame and footerFrame._resetBtn
     if rb and rb._label then
         local displayName = config.title or folderName
         for _, entry in ipairs(ADDON_ROSTER) do
             if entry.folder == folderName then displayName = entry.display; break end
         end
-        rb._label:SetText("Reset " .. displayName)
+        rb._label:SetText(EllesmereUI.Lf("Reset %1$s", EllesmereUI.L(displayName)))
         rb._label:SetWidth(rb:GetWidth() * 0.85)
         rb._label:SetWordWrap(false)
         rb._label:SetMaxLines(1)
     end
-    headerFrame._desc:SetText(config.description or "")
+    headerFrame._desc:SetText(EllesmereUI.L(config.description or ""))
     BuildTabs(config.pages, config.disabledPages, config.disabledPageTooltips)
     local savedPage = _lastPagePerModule[folderName]
     -- Validate saved page still exists in this module's page list
@@ -7322,10 +7809,16 @@ function EllesmereUI._applySidebarSearch(text)
     local function childMatches(info)
         if #queryWords == 0 then return true end
         local parts = { (info.display or ""):lower() }
+        -- Bilingual: index localized module/page names too (only when they differ,
+        -- so the English haystack is byte-identical on English clients).
+        local dispLoc = EllesmereUI.L(info.display or "")
+        if dispLoc ~= (info.display or "") then parts[#parts + 1] = dispLoc:lower() end
         local mod = modules[info.folder]
         if mod and mod.pages then
             for _, p in ipairs(mod.pages) do
                 parts[#parts + 1] = tostring(p):lower()
+                local pLoc = EllesmereUI.L(p)
+                if pLoc ~= p then parts[#parts + 1] = tostring(pLoc):lower() end
             end
         end
         if mod and mod.searchTerms then
@@ -7451,6 +7944,11 @@ local function RefreshSidebarStates()
                 btn._loaded = effectiveLoaded
                 btn._notEnabled = (not loaded) and (not isSpecial)
                 btn._dlIcon:Hide()
+
+                -- Refresh sync icon state
+                if btn._syncBtn and btn._syncBtn._refreshAlpha then
+                    btn._syncBtn._refreshAlpha()
+                end
 
                 if effectiveLoaded and folder == activeModule then
                     btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
@@ -7602,7 +8100,6 @@ function EllesmereUI:Show()
 end
 function EllesmereUI:Hide()   if mainFrame then mainFrame:Hide() end end
 function EllesmereUI:Toggle()
-    if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
     self:EnsureLoaded()
     CreateMainFrame()
     if mainFrame:IsShown() then
@@ -7668,7 +8165,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "7.9.5"
+EllesmereUI.VERSION = "8.0"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -7836,6 +8333,9 @@ EllesmereUI._RunConflictCheck = function()
         end
         local conflicts = {
             { addon = "ElvUI",                    label = "ElvUI",                      targets = "all",                              message = "Many of ElvUI's modules are incompatible with EllesmereUI. Make sure to disable any conflicting modules." },
+            { addon = "DandersFrames",            label = "Danders Frames",             targets = { "EllesmereUIRaidFrames" } },
+            { addon = "HarreksAdvancedRaidFrames", label = "Harreks Advanced Raid Frames", targets = { "EllesmereUIRaidFrames" } },
+            { addon = "Grid2",                    label = "Grid2",                      targets = { "EllesmereUIRaidFrames" } },
             { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. If you ONLY use for sound alerts it should be okay but may still cause issues." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
             { addon = "Dominos",                  label = "Dominos",                    targets = { "EllesmereUIActionBars" } },
@@ -7990,6 +8490,9 @@ end
 -- the user closes it (with no reload needed).
 C_Timer.After(2, function()
     if EllesmereUIDB and EllesmereUIDB.firstInstallPopupShown then
+        -- Defer while the Raid Frames intro popup is still pending/open; it runs
+        -- the conflict check itself when dismissed (EllesmereUI_RaidFramesPopup).
+        if EllesmereUI._raidFramesIntroPending then return end
         if EllesmereUI._RunConflictCheck then EllesmereUI._RunConflictCheck() end
     end
 end)
@@ -8123,7 +8626,6 @@ SlashCmdList.EUIUNLOCK = function()
             EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
             return
         end
-        if EllesmereUI.NeedsBetaReset() then EllesmereUI:ShowWelcomePopup(); return end
         EllesmereUI:EnsureLoaded()
         if EllesmereUI._openUnlockMode then
             EllesmereUI._openUnlockMode()
@@ -8133,18 +8635,14 @@ SlashCmdList.EUIUNLOCK = function()
     end)
 end
 
--- Test: /euipopup shows the welcome popup without wiping anything
-SLASH_EUIPOPUP1 = "/euipopup"
-SlashCmdList.EUIPOPUP = function()
-    C_Timer.After(0, function() EllesmereUI:ShowWelcomePopup() end)
-end
-
 SlashCmdList.EUIRESETHINT = function()
     C_Timer.After(0, function()
         if EllesmereUIDB then
             EllesmereUIDB.previewHintDismissed = nil
             EllesmereUIDB.unlockTipSeen = nil
             EllesmereUIDB.sidebarUnlockTipSeen = nil
+            EllesmereUIDB.rfEyeHintSeen = nil
+            EllesmereUIDB.bmIconHintDismissed = nil
         end
         EllesmereUI.Print("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again.")
     end)
@@ -8162,13 +8660,31 @@ SlashCmdList.EUIRESETSCALE = function()
     end)
 end
 
+SLASH_EUIDEV1 = "/euidev"
+SlashCmdList.EUIDEV = function()
+    local cvars = {
+        "addonChallengeModeRestrictionsForced",
+        "addonChatRestrictionsForced",
+        "addonCombatRestrictionsForced",
+        "addonEncounterRestrictionsForced",
+        "addonMapRestrictionsForced",
+        "addonPvPMatchRestrictionsForced",
+    }
+    local current = GetCVar(cvars[1])
+    local newVal = (current == "1") and "0" or "1"
+    for _, cv in ipairs(cvars) do
+        SetCVar(cv, newVal)
+    end
+    local state = newVal == "1" and "ON" or "OFF"
+    EllesmereUI.Print("|cff00ff00[EllesmereUI]|r Dev mode: all addon restriction CVars " .. state .. ".")
+end
+
 -- Open the panel with a specific addon's tab selected
 function EllesmereUI:ShowModule(folderName)
     if InCombatLockdown() then
         EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
         return
     end
-    if self.NeedsBetaReset() then self:ShowWelcomePopup(); return end
     self:EnsureLoaded()
     CreateMainFrame()
     RefreshSidebarStates()
@@ -8342,16 +8858,6 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     -- PLAYER_LOGIN: register demo modules (UI is built lazily on first open)
     self:UnregisterEvent("PLAYER_LOGIN")
-
-
-    -- Stamp fresh installs so they never see the reset popup
-    EllesmereUI.StampResetVersion()
-
-    -- Show reset notification if the wipe just happened
-    if EllesmereUI._showResetPopup then
-        EllesmereUI._showResetPopup = nil
-        C_Timer.After(1.5, function() EllesmereUI:ShowWelcomePopup() end)
-    end
 
     ---------------------------------------------------------------------------
     --  Escape proxy: single UISpecialFrames entry for all EUI frames.
@@ -8580,24 +9086,16 @@ initFrame:SetScript("OnEvent", function(self, event)
         local theme = EllesmereUIDB.activeTheme or "EllesmereUI"
         ELLESMERE_GREEN._themeEnabled = true
         local themeR, themeG, themeB = EllesmereUI.ResolveThemeColor(theme)
-        -- Apply theme color to window background only
+        -- Apply theme color to the window background only. The EUI Options Theme
+        -- is a SEPARATE, global control from the UI accent color (per-profile).
         if EllesmereUI._applyBgTint then
             EllesmereUI._applyBgTint(themeR, themeG, themeB)
         end
-        -- Accent color priority: class color (if enabled) > custom override > theme
-        if EllesmereUIDB.useClassAccentColor then
-            local clr = CLASS_COLOR_MAP[playerClass]
-            if clr then
-                ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = clr.r, clr.g, clr.b
-            end
-        else
-            local ca = EllesmereUIDB.customAccentColor
-            if ca then
-                ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = ca.r or themeR, ca.g or themeG, ca.b or themeB
-            else
-                ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = themeR, themeG, themeB
-            end
-        end
+        -- UI accent: authoritative login resolution for the active profile
+        -- (per-profile euiAccent -> frozen global root -> theme color). When a
+        -- profile has no per-profile accent this reproduces the legacy behavior
+        -- exactly, so existing users see zero change.
+        ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = EllesmereUI.ResolveActiveAccent()
     end
 
     -- Spell ID / Item ID + Icon ID on Tooltip (developer option)

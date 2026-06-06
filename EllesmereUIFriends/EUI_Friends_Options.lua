@@ -245,7 +245,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local f = FriendsDB()
                 return not f or (f.borderSize or 0) == 0
               end,
-              disabledTooltip="Set Border Size above 0",
+              disabledTooltip="Set Border Size above 0", rawTooltip=true,
               swatches = {
                 { tooltip = "Custom Color",
                   hasAlpha = false,

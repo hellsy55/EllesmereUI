@@ -560,7 +560,8 @@ local function DecorateFrame(frame, barData)
             barData.borderTextureShiftX, barData.borderTextureShiftY,
             "cdm", barData.borderThickness or "thin")
     end
-    fd.borderFrame:SetFrameLevel(baseLvl + 13)
+    -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
+    fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
 
     fd.procGlowActive = false
 
@@ -2280,6 +2281,13 @@ local function CollectAndReanchor()
             end
             if EllesmereUI.ReapplyAllUnlockAnchorsForced then
                 EllesmereUI.ReapplyAllUnlockAnchorsForced()
+            end
+            -- Arm the settle debounce so any further late resizes (the refresh
+            -- ladder / trinket retries) get one more forced re-apply once they
+            -- quiesce -- guarantees a first debounce window even if the initial
+            -- build's resizes fired before the OnSizeChanged hook was installed.
+            if EllesmereUI.ScheduleSettleReapply then
+                EllesmereUI.ScheduleSettleReapply()
             end
         end)
     else

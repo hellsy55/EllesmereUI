@@ -233,7 +233,8 @@ initFrame:SetScript("OnEvent", function(self)
         h = BuildVisibilityRow(W, parent, y, MinimapDB, RefreshMinimap);  y = y - h
 
         -- Shape | Border Thickness
-        _, h = W:DualRow(parent, y,
+        local shapeRow
+        shapeRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Shape",
               values = { square = "Square", circle = "Circle", textured_circle = "Textured Circle" },
               order  = { "square", "circle", "textured_circle" },
@@ -251,6 +252,36 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshMinimap()
               end }
         );  y = y - h
+
+        -- Inline cog on Shape for the Rotate Minimap toggle. Off (default) keeps
+        -- the rotateMinimap CVar at 0; on sets it to 1 (enforced in ApplyMinimap).
+        do
+            local rgn = shapeRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Shape Settings",
+                rows = {
+                    { type = "toggle", label = "Rotate Minimap",
+                      get = function() local m = MinimapDB(); return m and m.rotateMinimap or false end,
+                      set = function(v)
+                          local m = MinimapDB(); if not m then return end
+                          m.rotateMinimap = v
+                          RefreshMinimap()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
 
         y = y - 10
 
@@ -417,7 +448,7 @@ initFrame:SetScript("OnEvent", function(self)
             local resetFS = rgn:CreateFontString(nil, "OVERLAY")
             resetFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 12, "")
             resetFS:SetTextColor(1, 1, 1, 0.8)
-            resetFS:SetText("Reset")
+            resetFS:SetText(EllesmereUI.L("Reset"))
             resetFS:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
             local hitBtn = CreateFrame("Button", nil, rgn)
             hitBtn:SetAllPoints(resetFS)
@@ -446,7 +477,10 @@ initFrame:SetScript("OnEvent", function(self)
               values = { __placeholder = "..." }, order = { "__placeholder" },
               getValue = function() return "__placeholder" end,
               setValue = function() end },
-            { type="label", text="" }
+            { type="toggle", text="Mouseover Extra Buttons",
+              tooltip="When enabled, the extra buttons (Great Vault, M+ Portals, Friends Online, Group Button) and any ungrouped minimap buttons only show while the mouse is over the minimap. The M+ Portals flyout keeps them shown until it closes.",
+              getValue = function() local m = MinimapDB(); return m and m.mouseoverExtraBtns or false end,
+              setValue = function(v) local m = MinimapDB(); if m then m.mouseoverExtraBtns = v; RefreshMinimap() end end }
         );  y = y - h
 
         -- Replace placeholder with checkbox dropdown
@@ -550,7 +584,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Zone Inside",
               tooltip="Display the zone text inside the minimap instead of below it",
               disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
-              disabledTooltip="Enable Zone in Show Blizzard Elements",
+              disabledTooltip="Zone in Show Blizzard Elements",
               getValue=function() local m = MinimapDB(); return m and m.zoneInside end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -559,7 +593,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="slider", text="Location Scale", min=0.5, max=2.0, step=0.01,
               disabled=function() local m = MinimapDB(); return m and (m.hideZoneText) end,
-              disabledTooltip="Enable Zone in Show Blizzard Elements",
+              disabledTooltip="Zone in Show Blizzard Elements",
               getValue=function() local m = MinimapDB(); return m and m.locationScale or 1.15 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -634,7 +668,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Clock Inside",
               tooltip="Display the clock inside the minimap instead of above it",
               disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
-              disabledTooltip="Enable Clock in Show Blizzard Elements",
+              disabledTooltip="Clock in Show Blizzard Elements",
               getValue=function() local m = MinimapDB(); return m and m.clockInside end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -643,7 +677,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="slider", text="Clock Scale", min=0.5, max=2.0, step=0.01,
               disabled=function() local m = MinimapDB(); return m and (not m.showClock) end,
-              disabledTooltip="Enable Clock in Show Blizzard Elements",
+              disabledTooltip="Clock in Show Blizzard Elements",
               getValue=function() local m = MinimapDB(); return m and m.clockScale or 1.15 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
@@ -724,7 +758,13 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshMinimap()
                 EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" }
+            { type="toggle", text="Open Micro Menu on Middle Click",
+              tooltip="Middle-click the minimap to open the EllesmereUI micro menu. When off, middle-click does nothing.",
+              getValue=function() local m = MinimapDB(); return m and m.openMicroMenuOnMiddleClick ~= false end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.openMicroMenuOnMiddleClick = v
+              end }
         );  y = y - h
         -- Inline cog on Coordinates for X/Y offset
         do

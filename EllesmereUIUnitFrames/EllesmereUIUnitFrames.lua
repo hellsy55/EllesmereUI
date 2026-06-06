@@ -183,6 +183,7 @@ local defaults = {
             absorbCleanAlpha = 30,
             showPlayerCastbar = false,
             showPlayerCastIcon = true,
+            playerCastbarIconInWidth = true,
             castReverseFill = false,
             castbarHideWhenInactive = true,
             lockCastbarToFrame = true,
@@ -274,6 +275,7 @@ local defaults = {
             castbarWidth = 181,
             showCastbar = true,
             showCastIcon = true,
+            castbarIconInWidth = true,
             castReverseFill = false,
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
@@ -445,7 +447,40 @@ local defaults = {
             healthReverseFill = false,
             powerReverseFill = false,
         },
-        totPet = {
+        targettarget = {
+            frameWidth = 101,
+            healthHeight = 25,
+            healthClassColored = false,
+            customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
+            showPortrait = false,
+            portraitSide = "left",
+            portraitMode = "2d",
+            healthBarOpacity = 90,
+            textSize = 12,
+            leftTextContent = "name",
+            leftTextClassColor = false,
+            leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
+            leftTextX = 0, leftTextY = 0,
+            rightTextContent = "none",
+            rightTextClassColor = false,
+            rightTextColorR = 1, rightTextColorG = 1, rightTextColorB = 1,
+            rightTextX = 0, rightTextY = 0,
+            centerTextContent = "none",
+            centerTextClassColor = false,
+            centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
+            centerTextX = 0, centerTextY = 0,
+            borderSize = 1,
+            borderColor = { r = 0, g = 0, b = 0 },
+            borderTexture = "solid",
+            highlightColor = { r = 1, g = 1, b = 1 },
+            powerPosition = "none",
+            healthReverseFill = false,
+        },
+        -- Focus Target: independent clone of Target of Target defaults.
+        -- MUST stay byte-identical to the targettarget block above so existing
+        -- users (whose old shared totPet is migrated into BOTH tables) render
+        -- identically; StripDefaults/DeepMergeDefaults rely on the match.
+        focustarget = {
             frameWidth = 101,
             healthHeight = 25,
             healthClassColored = false,
@@ -525,6 +560,7 @@ local defaults = {
             castbarWidth = 160,
             showCastbar = true,
             showCastIcon = true,
+            castbarIconInWidth = true,
             castReverseFill = false,
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
@@ -665,6 +701,7 @@ local defaults = {
             castbarHeight = 14,
             showCastbar = true,
             showCastIcon = true,
+            castbarIconInWidth = true,
             castReverseFill = false,
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
@@ -766,6 +803,23 @@ local function GetCastbarColor()
     end
     return CASTBAR_COLOR
 end
+
+-- Additive bar gradients use two REUSED color objects so re-applying the gradient
+-- allocates nothing (CreateColor would allocate two tables per call). oUF re-flattens
+-- the bar color on every health/power event, so the gradient must be repainted in
+-- PostUpdateColor each event -- this keeps that correct while removing the per-event
+-- garbage. SetGradient copies the color values at call time, so one shared pair is
+-- safe across every frame (player/target/focus/party/boss).
+local _gradColorA = CreateColor(1, 1, 1, 1)
+local _gradColorB = CreateColor(1, 1, 1, 1)
+
+local function ApplyBarGradient(ft, dir, br, bg, bb, ba, er, eg, eb, ea)
+    ft:SetVertexColor(1, 1, 1, 1)
+    _gradColorA:SetRGBA(br, bg, bb, ba)
+    _gradColorB:SetRGBA(er, eg, eb, ea)
+    ft:SetGradient(dir, _gradColorA, _gradColorB)
+end
+
 local SOLID_BACKDROP = { bgFile = "Interface\\Buttons\\WHITE8X8" }
 
 -- Locale system font override: for CJK/Cyrillic clients, bypass all custom
@@ -779,7 +833,7 @@ local function ResolveFontPath(unitKey)
     -- Locale override takes absolute priority ? no custom font can render CJK/Cyrillic
     if LOCALE_FONT_OVERRIDE then
         cachedFontPath = LOCALE_FONT_OVERRIDE
-        for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "totPet"}) do
+        for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "targettarget", "focustarget"}) do
             cachedFontPaths[uKey] = LOCALE_FONT_OVERRIDE
         end
         return
@@ -788,7 +842,7 @@ local function ResolveFontPath(unitKey)
     local gPath = EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")
         or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
     cachedFontPath = gPath
-    for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "totPet"}) do
+    for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "targettarget", "focustarget"}) do
         cachedFontPaths[uKey] = gPath
     end
 end
@@ -881,7 +935,6 @@ ns.healthBarTextureNames = healthBarTextureNames
 local function UnitToSettingsKey(unit)
     if not unit then return nil end
     if unit:match("^boss%d$") then return "boss" end
-    if unit == "targettarget" or unit == "focustarget" then return "totPet" end
     if unit == "pet" then return "pet" end
     if db.profile[unit] then return unit end
     return nil
@@ -914,6 +967,23 @@ local function ApplyHealthBarTexture(health, unitKey)
     end
 end
 
+-- Cast bars reuse the unit's health bar texture so every bar matches. The cast
+-- bar stacks three textures over the fill bounds (base StatusBar fill + cast
+-- tint + shielded tint), all defaulting to WHITE8X8, so apply the texture to
+-- each. Attached to ns (not a file local) to avoid the Lua 200-local cap.
+ns.ApplyCastBarTexture = function(castbar, texKey)
+    if not castbar then return end
+    local path = EllesmereUI.ResolveTexturePath(healthBarTextures, texKey or "none", "Interface\\Buttons\\WHITE8X8")
+    castbar:SetStatusBarTexture(path)
+    local fill = castbar:GetStatusBarTexture()
+    if fill then
+        fill:SetHorizTile(false)
+        UnsnapTex(fill)
+    end
+    if castbar.castTintLayer then castbar.castTintLayer:SetTexture(path) end
+    if castbar._shieldedTint then castbar._shieldedTint:SetTexture(path) end
+end
+
 -------------------------------------------------------------------------------
 --  Health Bar Opacity ? controls the overall alpha of the health bar fill
 -------------------------------------------------------------------------------
@@ -925,8 +995,10 @@ local function ApplyHealthBarAlpha(health, unitKey)
     if opacity <= 1.0 then opacity = opacity * 100 end
     local fillA = opacity / 100
     local fillTex = health:GetStatusBarTexture()
-    if fillTex then fillTex:SetAlpha(fillA) end
-    if health.bg then health.bg:SetAlpha(fillA) end
+    -- When a gradient is active the opacity is baked into the gradient endpoints,
+    -- so the texture region alpha must stay 1 to avoid double-dimming.
+    if fillTex then fillTex:SetAlpha((s and s.gradientEnabled) and 1 or fillA) end
+    if health.bg then health.bg:SetAlpha((s and (s.customBgAlpha or 100) or 100) / 100) end
 end
 
 -------------------------------------------------------------------------------
@@ -940,15 +1012,15 @@ local function ApplyPowerBarAlpha(power, unitKey)
     if opacity <= 1.0 then opacity = opacity * 100 end
     local fillA = opacity / 100
     local fillTex = power:GetStatusBarTexture()
-    if fillTex then fillTex:SetAlpha(fillA) end
-    if power.bg then power.bg:SetAlpha(fillA) end
+    -- Gradient bakes opacity into its endpoints, so keep region alpha at 1 then.
+    if fillTex then fillTex:SetAlpha((s and s.powerGradientEnabled) and 1 or fillA) end
+    if power.bg then power.bg:SetAlpha((s and (s.customPowerBgAlpha or 100) or 100) / 100) end
 end
 
 -------------------------------------------------------------------------------
 --  Dark Mode ? flat dark health bar with gray background
 -------------------------------------------------------------------------------
 local DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B = 0x11/255, 0x11/255, 0x11/255  -- #111111
-local DARK_HEALTH_A = 1.0
 local DARK_BG_R, DARK_BG_G, DARK_BG_B = 0x4f/255, 0x4f/255, 0x4f/255  -- #4f4f4f
 
 local function ApplyDarkTheme(health)
@@ -959,7 +1031,7 @@ local function ApplyDarkTheme(health)
         health.colorReaction = false
         health.colorTapped = false
         health.colorDisconnected = false
-        health:SetStatusBarColor(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B, DARK_HEALTH_A)
+        health:SetStatusBarColor(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B)
         local darkFillTex = health:GetStatusBarTexture()
         if darkFillTex then darkFillTex:SetAlpha(0.9) end
         if health.bg then
@@ -977,7 +1049,7 @@ local function ApplyDarkTheme(health)
         -- preserves existing texture alpha, so the alpha set by
         -- ApplyHealthBarAlpha persists through oUF recolors.
         health.PostUpdateColor = function(self)
-            self:SetStatusBarColor(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B, DARK_HEALTH_A)
+            self:SetStatusBarColor(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B)
             if self.bg then
                 self.bg:ClearAllPoints()
                 self.bg:SetPoint("TOPLEFT", self:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
@@ -1013,7 +1085,24 @@ local function ApplyDarkTheme(health)
             local cFill = uSettings and uSettings.customFillColor
             local cBg   = uSettings and uSettings.customBgColor
             local classColored = uSettings and uSettings.healthClassColored
+            -- Resolve base fill color (custom, or oUF's class/reaction color), then apply
+            -- gradient additively when enabled; otherwise the existing flat behavior.
+            local bR, bG, bB
             if cFill and not classColored then
+                bR, bG, bB = cFill.r, cFill.g, cFill.b
+            elseif color and color.GetRGB then
+                bR, bG, bB = color:GetRGB()
+            end
+            if uSettings and uSettings.gradientEnabled and bR then
+                local gc = uSettings.gradientColor
+                -- A gradient overrides the texture's region alpha, so Bar Opacity
+                -- is baked into the gradient endpoint alphas instead of SetAlpha.
+                local ga = uSettings.healthBarOpacity or 90
+                if ga > 1.0 then ga = ga / 100 end
+                ApplyBarGradient(self:GetStatusBarTexture(), uSettings.gradientDir or "HORIZONTAL",
+                    bR, bG, bB, ga,
+                    gc and gc.r or 0.20, gc and gc.g or 0.20, gc and gc.b or 0.80, ga)
+            elseif cFill and not classColored then
                 self:SetStatusBarColor(cFill.r, cFill.g, cFill.b)
             end
             if self.bg then
@@ -1148,16 +1237,67 @@ local function GetSettingsForUnit(unit)
         unitSettingsMap = {
             player = db.profile.player,
             target = db.profile.target,
-            targettarget = db.profile.totPet,
+            targettarget = db.profile.targettarget,
             pet = db.profile.pet,
             focus = db.profile.focus,
-            focustarget = db.profile.totPet,
+            focustarget = db.profile.focustarget,
         }
         for i = 1, 5 do
             unitSettingsMap["boss" .. i] = db.profile.boss
         end
     end
     return unitSettingsMap[unit] or db.profile.player
+end
+
+-- Cast-bar icon "part of the bar" resolver. Returns true when the spell icon
+-- should be counted inside the cast bar's width (icon sits inside the footprint
+-- and the fill is inset to its right -- the same way the Resource Bars cast bar
+-- works). False = legacy behavior (icon placed to the left, outside the width).
+-- Requires the icon to actually be shown; a hidden icon is never "in width".
+local function CastIconInWidth(unit, s)
+    s = s or GetSettingsForUnit(unit)
+    if not s then return true end
+    if unit == "player" then
+        return s.showPlayerCastIcon ~= false and s.playerCastbarIconInWidth ~= false
+    end
+    return s.showCastIcon ~= false and s.castbarIconInWidth ~= false
+end
+
+-- Anchor the cast spell icon and inset the fill based on whether the icon is
+-- part of the bar width. inWidth=true -> icon at the bar's left edge, fill
+-- inset by the icon width (castbarBg becomes the full footprint, so unlock
+-- mode / width matching count the icon for free). inWidth=false -> icon hangs
+-- to the left of the bar (outside its width), fill fills the whole bar.
+--
+-- The icon HEIGHT is anchored to the bar background's top AND bottom, so it
+-- always equals the bar height exactly. A live bg:GetHeight() read was
+-- unreliable during initial frame creation/login (the bar background was not
+-- yet at its final height/scale), so the icon was sized wrong -- usually too
+-- big -- until a later refresh happened to re-run with the correct value. With
+-- top+bottom anchored, height tracks the bar no matter the layout timing.
+-- iconH is the configured cast bar height (castbarHeight / playerCastbarHeight),
+-- used only for the square WIDTH and the matching fill inset so those are
+-- deterministic too; it falls back to bg:GetHeight() when omitted.
+local function LayoutCastbarIcon(castbar, inWidth, iconH)
+    if not castbar then return end
+    local bg = castbar:GetParent()
+    if not bg then return end
+    local side = iconH or bg:GetHeight()
+    local iconFrame = castbar._iconFrame
+    if iconFrame then
+        iconFrame:ClearAllPoints()
+        if inWidth then
+            PP.Point(iconFrame, "TOPLEFT", bg, "TOPLEFT", 0, 0)
+            PP.Point(iconFrame, "BOTTOMLEFT", bg, "BOTTOMLEFT", 0, 0)
+        else
+            PP.Point(iconFrame, "TOPRIGHT", bg, "TOPLEFT", 0, 0)
+            PP.Point(iconFrame, "BOTTOMRIGHT", bg, "BOTTOMLEFT", 0, 0)
+        end
+        iconFrame:SetWidth(side)
+    end
+    castbar:ClearAllPoints()
+    PP.Point(castbar, "TOPLEFT", bg, "TOPLEFT", inWidth and side or 0, 0)
+    PP.Point(castbar, "BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
 end
 
 -- Returns the donor settings table for mini frames (focus ? target ? player)
@@ -1478,7 +1618,42 @@ local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
     end
 
     -- === MASK ===
-    local maskPath = PORTRAIT_MASKS[shape]
+    local maskPath = shape ~= "none" and PORTRAIT_MASKS[shape] or nil
+    if shape == "none" then
+        -- "None": remove mask, border, and background
+        if backdrop._bg then backdrop._bg:Hide() end
+        if backdrop._shapeMask then
+            if backdrop._2d then pcall(backdrop._2d.RemoveMaskTexture, backdrop._2d, backdrop._shapeMask) end
+            if backdrop._class then pcall(backdrop._class.RemoveMaskTexture, backdrop._class, backdrop._shapeMask) end
+            if backdrop._bg then pcall(backdrop._bg.RemoveMaskTexture, backdrop._bg, backdrop._shapeMask) end
+            backdrop._shapeMask:Hide()
+        end
+        if backdrop._shapeBorderTex then backdrop._shapeBorderTex:Hide() end
+        if backdrop._sqBorderTexs then
+            for _, t in ipairs(backdrop._sqBorderTexs) do t:Hide() end
+        end
+        -- Reset content to fill backdrop
+        if backdrop._2d then
+            backdrop._2d:ClearAllPoints()
+            PP.Point(backdrop._2d, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
+            PP.Point(backdrop._2d, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
+        end
+        if backdrop._class then
+            backdrop._class:ClearAllPoints()
+            local bh2 = backdrop:GetHeight()
+            if bh2 < 1 then bh2 = 46 end
+            local classInset = math.floor(bh2 * 0.08)
+            PP.Point(backdrop._class, "TOPLEFT", backdrop, "TOPLEFT", classInset, -classInset)
+            PP.Point(backdrop._class, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", -classInset, classInset)
+        end
+        if backdrop._3d then
+            backdrop._3d:ClearAllPoints()
+            PP.Point(backdrop._3d, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
+            PP.Point(backdrop._3d, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
+        end
+        return
+    end
+    if backdrop._bg then backdrop._bg:Show() end
     if maskPath then
         if not backdrop._shapeMask then
             backdrop._shapeMask = backdrop:CreateMaskTexture()
@@ -1577,6 +1752,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
 
     local btb = CreateFrame("Frame", nil, frame)
     PP.Size(btb, totalWidth, btbH)
+    btb._isDetached = isDetached
 
     if btbPos == "top" then
         PP.Point(btb, "BOTTOMLEFT", frame.Health or anchorFrame, "TOPLEFT", xOffset or 0, 0)
@@ -1673,8 +1849,10 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         local function ApplyBTBPowerColor(fs, contentKey, usePowerColor)
             if not fs or not usePowerColor then return end
             if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-                local pType = UnitPowerType(unit)
-                local info = PowerBarColor[pType]
+                -- EUI's global power color override (matches the power bar fill),
+                -- NOT Blizzard's PowerBarColor table.
+                local _, pToken = UnitPowerType(unit)
+                local info = EllesmereUI.GetPowerColor(pToken or "MANA")
                 if info then
                     fs:SetTextColor(info.r, info.g, info.b)
                 end
@@ -1801,6 +1979,7 @@ local function ReparentBarsToClip(frame, powerPosition)
     end
 end
 
+
 -- Recalculate all element sizes after frame scale changes so everything remains
 -- pixel-perfect within the border.  PixelUtil rounds each element independently,
 -- which can cause their sum to exceed the frame's snapped total by 1px at certain
@@ -1855,8 +2034,10 @@ local function UpdateBordersForScale(frame, unit)
 
     local barHeight = settings.healthHeight + powerH + cpAboveH
     local expectedFrameH = barHeight + btbH
+    local pSideSnap = settings.portraitSide or "left"
+    local isInsideSnap = pSideSnap == "insideleft" or pSideSnap == "insideright" or pSideSnap == "insidecenter"
     local pSizeAdj = settings.portraitSize or 0
-    if not isAttached then pSizeAdj = pSizeAdj + 10 end
+    if not isAttached and not isInsideSnap then pSizeAdj = pSizeAdj + 10 end
     local adjPortraitH = barHeight + pSizeAdj
     if adjPortraitH < 8 then adjPortraitH = 8 end
 
@@ -1874,7 +2055,7 @@ local function UpdateBordersForScale(frame, unit)
 
     -- 4) Re-snap portrait and health bar (width axis)
     local healthTargetW = settings.frameWidth
-    if frame.Portrait and frame.Portrait.backdrop and showPortrait and isAttached then
+    if frame.Portrait and frame.Portrait.backdrop and showPortrait and isAttached and not isInsideSnap then
         PP.Size(frame.Portrait.backdrop, adjPortraitH, adjPortraitH)
         local snappedPortW = frame.Portrait.backdrop:GetWidth()
         local snappedPortH = frame.Portrait.backdrop:GetHeight()
@@ -2445,10 +2626,12 @@ local function CreatePowerBar(frame, unit, settings)
     local power = CreateFrame("StatusBar", nil, frame)
     local isDetached = (powerPos == "detached_top" or powerPos == "detached_bottom")
     if isDetached then
-        -- Bump strata so the detached power bar renders above the border
-        -- regardless of frame level. Frame level within the same strata is
-        -- fragile (oUF and absorb bar code can reset it).
-        power:SetFrameStrata("MEDIUM")
+        -- Custom strata if user has enabled it, otherwise default MEDIUM
+        if db.profile.enableCustomBarStratas then
+            power:SetFrameStrata(db.profile.detachedPowerStrata or "HIGH")
+        else
+            power:SetFrameStrata("MEDIUM")
+        end
     else
         power:SetFrameStrata(frame:GetFrameStrata())
     end
@@ -2496,25 +2679,43 @@ local function CreatePowerBar(frame, unit, settings)
     UnsnapTex(bg)
     power.bg = bg
 
-    -- Power bar fill color: controlled by powerPercentPowerColor toggle
+    -- Power bar fill color: controlled by powerPercentPowerColor toggle.
+    -- Gradient (additive) layers on top of the resolved custom/power-type color.
     local usePowerColor = settings.powerPercentPowerColor ~= false
-    if usePowerColor then
-        power.colorPower = true
-    else
-        power.colorPower = false
+    power.colorPower = usePowerColor
+    if not usePowerColor then
         local customFill = settings.customPowerFillColor
         if customFill then
             power:SetStatusBarColor(customFill.r, customFill.g, customFill.b)
-            power.PostUpdateColor = function(self)
-                local s2 = GetSettingsForUnit(unit)
-                local cf = s2 and s2.customPowerFillColor
-                if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) end
-            end
         else
             power:SetStatusBarColor(0, 0, 1)
-            power.PostUpdateColor = function(self)
-                self:SetStatusBarColor(0, 0, 1)
-            end
+        end
+    end
+    power.PostUpdateColor = function(self)
+        local s2 = GetSettingsForUnit(unit)
+        if not s2 then return end
+        local useP = s2.powerPercentPowerColor ~= false
+        local bR, bG, bB
+        if not useP then
+            local cf = s2.customPowerFillColor
+            if cf then bR, bG, bB = cf.r, cf.g, cf.b else bR, bG, bB = 0, 0, 1 end
+        else
+            local _, pToken = UnitPowerType(unit)
+            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+            if info then bR, bG, bB = info.r, info.g, info.b end
+        end
+        if s2.powerGradientEnabled and bR then
+            local gc = s2.powerGradientColor
+            -- Bake Bar Opacity into the gradient endpoint alphas (a gradient
+            -- overrides the texture's region alpha).
+            local ga = s2.powerBarOpacity or 100
+            if ga > 1.0 then ga = ga / 100 end
+            ApplyBarGradient(self:GetStatusBarTexture(), s2.powerGradientDir or "HORIZONTAL",
+                bR, bG, bB, ga,
+                gc and gc.r or 0.20, gc and gc.g or 0.20, gc and gc.b or 0.80, ga)
+        elseif not useP then
+            local cf = s2.customPowerFillColor
+            if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) else self:SetStatusBarColor(0, 0, 1) end
         end
     end
 
@@ -2585,8 +2786,10 @@ local function CreatePowerBar(frame, unit, settings)
 
         -- Text color: power-colored > custom color > white
         if s.powerPercentTextPowerColor then
-            local pType = UnitPowerType(unit)
-            local info = PowerBarColor[pType]
+            -- Use EUI's global power color override (matches the options swatch
+            -- and the power bar fill), NOT Blizzard's PowerBarColor table.
+            local _, pToken = UnitPowerType(unit)
+            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
             if info then ppFS:SetTextColor(info.r, info.g, info.b)
             else ppFS:SetTextColor(1, 1, 1) end
         elseif s.powerTextColor then
@@ -2691,6 +2894,24 @@ local function CreatePowerBar(frame, unit, settings)
         end
     end
 
+    -- Power bar border (only when detached)
+    if isDetached then
+        local pbBorder = CreateFrame("Frame", nil, power)
+        PP.Point(pbBorder, "TOPLEFT", power, "TOPLEFT", 0, 0)
+        PP.Point(pbBorder, "BOTTOMRIGHT", power, "BOTTOMRIGHT", 0, 0)
+        local pbBehind = settings.powerBorderBehind
+        pbBorder:SetFrameLevel(pbBehind and math.max(0, power:GetFrameLevel() - 1) or (power:GetFrameLevel() + 5))
+        local pbTexKey = settings.powerBorderStyle or "solid"
+        local pbSize = settings.powerBorderSize or 0
+        local pbColor = settings.powerBorderColor or { r = 0, g = 0, b = 0 }
+        local pbAlpha = settings.powerBorderAlpha or 1
+        EllesmereUI.ApplyBorderStyle(pbBorder, pbSize, pbColor.r, pbColor.g, pbColor.b, pbAlpha,
+            pbTexKey, settings.powerBorderOffsetX, settings.powerBorderOffsetY,
+            settings.powerBorderShiftX, settings.powerBorderShiftY, "unitframes", pbSize)
+        if pbSize == 0 then pbBorder:Hide() end
+        power._pbBorder = pbBorder
+    end
+
     return power
 end
 
@@ -2709,32 +2930,46 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     local pXOff = (uSettings and uSettings.portraitX) or 0
     local pYOff = (uSettings and uSettings.portraitY) or 0
     local baseHeight = portraitHeight
-    if not isAttached and portraitStyle ~= "none" then pSizeAdj = pSizeAdj + 10; pYOff = pYOff + 5 end
+    if not isAttached and not isInside and portraitStyle ~= "none" then pSizeAdj = pSizeAdj + 10; pYOff = pYOff + 5 end
     local adjustedHeight = baseHeight + pSizeAdj
     if adjustedHeight < 8 then adjustedHeight = 8 end
 
-    -- For attached, "top" falls back to default side
+    -- For attached, "top" and "inside*" fall back to default side
     local effectiveSide = side
-    if isAttached and side == "top" then
+    local isInside = (side == "insideleft" or side == "insideright" or side == "insidecenter")
+    if isAttached and (side == "top" or isInside) then
         effectiveSide = (unit == "player") and "left" or "right"
+        isInside = false
     end
 
     local backdrop = CreateFrame("Frame", nil, frame)
     backdrop:SetFrameStrata(frame:GetFrameStrata())
     backdrop:SetFrameLevel(frame:GetFrameLevel() + 1)
-    PP.Size(backdrop, adjustedHeight, adjustedHeight)
+    if isInside then
+        -- Inside mode: portrait fills the frame height, width = adjusted portrait size
+        PP.Size(backdrop, adjustedHeight, portraitHeight)
+    else
+        PP.Size(backdrop, adjustedHeight, adjustedHeight)
+    end
     backdrop:SetClipsChildren(false)
 
     local bgTex = backdrop:CreateTexture(nil, "BACKGROUND")
     PP.Point(bgTex, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
     PP.Point(bgTex, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
     bgTex:SetColorTexture(0.1, 0.1, 0.1, 1)
+    if isInside then bgTex:Hide() end
     backdrop._bg = bgTex
 
     if portraitStyle == "none" then
         -- Portrait disabled: anchor backdrop to frame corner (it stays hidden).
         -- Avoids any dependency on frame.Health which may not exist yet.
         PP.Point(backdrop, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+    elseif isInside then
+        -- Inside: portrait overlays the health bar. Anchor to frame initially;
+        -- ReloadFrames re-anchors to frame.Health after layout resolves.
+        backdrop._isInside = true
+        backdrop:SetFrameLevel(frame:GetFrameLevel() + 3)
+        PP.Point(backdrop, "TOPLEFT", frame, "TOPLEFT", pXOff, pYOff)
     elseif isAttached then
         if effectiveSide == "left" then
             PP.Point(backdrop, "TOPLEFT", frame, "TOPLEFT", 0, 0)
@@ -2764,6 +2999,17 @@ local function CreatePortrait(frame, side, frameHeight, unit)
         PP.Point(model3D, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
         PP.Point(model3D, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
         model3D:SetCamera(0)
+        local camScale = ((uSettings and uSettings.portrait3dZoom) or 100) / 100
+        model3D:SetCamDistanceScale(camScale)
+        -- PostUpdate: re-apply zoom after oUF calls SetUnit (which resets camera)
+        model3D.PostUpdate = function(self)
+            local u = self.__owner and self.__owner.unit
+            if not u then return end
+            local uk = UnitToSettingsKey(u)
+            local us = uk and db.profile[uk]
+            local cs = ((us and us.portrait3dZoom) or 100) / 100
+            self:SetCamDistanceScale(cs)
+        end
         model3D:Hide()
         backdrop._3d = model3D
         return model3D
@@ -3028,6 +3274,9 @@ local function CreateCastBar(frame, unit, settings)
     shieldedTint:SetAlpha(0)
     castbar._shieldedTint = shieldedTint
 
+    -- Cast bar reuses the unit's health bar texture (overridden donor-aware in ReloadFrames).
+    ns.ApplyCastBarTexture(castbar, (settings and settings.healthBarTexture) or db.profile.healthBarTexture or "none")
+
     castbar.PostCastStart = function(self)
         if self.castTintLayer then
             self.castTintLayer:SetAlpha(1)
@@ -3074,9 +3323,11 @@ local function CreateCastBar(frame, unit, settings)
     end
     castbar.CustomDelayText = castbar.CustomTimeText
 
-    -- Cast spell icon (oUF sets castbar.Icon texture automatically)
-    local cbH = castbarBg:GetHeight()
-    local iconSize = cbH
+    -- Cast spell icon (oUF sets castbar.Icon texture automatically).
+    -- Size from the CONFIGURED height (cbHeight), not a live castbarBg:GetHeight()
+    -- which is unreliable this early in layout; LayoutCastbarIcon anchors the
+    -- height to the bar regardless, this is just the initial square.
+    local iconSize = cbHeight
     local iconFrame = CreateFrame("Frame", nil, castbarBg)
     iconFrame:SetSize(iconSize, iconSize)
     PP.Point(iconFrame, "TOPRIGHT", castbarBg, "TOPLEFT", 0, 0)
@@ -3091,6 +3342,10 @@ local function CreateCastBar(frame, unit, settings)
     iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     castbar.Icon = iconTex
     castbar._iconFrame = iconFrame
+
+    -- Initial icon/fill layout (re-applied on every reload by the per-unit
+    -- update paths and whenever the cast-bar height changes).
+    LayoutCastbarIcon(castbar, CastIconInWidth(unit, settings), cbHeight)
 
     return castbar
 end
@@ -3268,7 +3523,8 @@ local function CreateUnifiedBorder(frame, unit)
     local border = CreateFrame("Frame", nil, frame)
     PP.Point(border, "TOPLEFT", frame, "TOPLEFT", 0, 0)
     PP.Point(border, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-    border:SetFrameLevel(frame:GetFrameLevel() + 10)
+    local borderBehind = settings.borderBehind
+    border:SetFrameLevel(borderBehind and math.max(0, frame:GetFrameLevel() - 1) or (frame:GetFrameLevel() + 10))
 
     EllesmereUI.ApplyBorderStyle(border, size, bc.r, bc.g, bc.b, settings.borderAlpha or 1, textureKey, settings.borderTextureOffset, settings.borderTextureOffsetY, settings.borderTextureShiftX, settings.borderTextureShiftY, "unitframes", size)
 
@@ -3681,51 +3937,48 @@ local function StyleFullFrame(frame, unit)
         local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 181
 
-        -- Center text: if active, hide left/right
+        -- Each text position renders independently; Center no longer hides Left/Right.
+        SetFSFont(centerText, csz)
+        centerText:ClearAllPoints()
         if cc ~= "none" then
-            leftText:Hide()
-            rightText:Hide()
-            SetFSFont(centerText, csz)
-            centerText:ClearAllPoints()
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             centerText:SetWidth(0)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
-        else
-            centerText:Hide()
-            SetFSFont(leftText, lsz)
-            leftText:ClearAllPoints()
-            if lc ~= "none" then
-                leftText:SetJustifyH("LEFT")
-                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
-                -- Constrain width when opposing right text exists
-                if rc ~= "none" then
-                    local rightUsed = EstimateUFTextWidth(rc)
-                    PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
-                else
-                    leftText:SetWidth(0)
-                end
-                leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
-            else leftText:Hide() end
+        else centerText:Hide() end
 
-            SetFSFont(rightText, rsz)
-            rightText:ClearAllPoints()
+        SetFSFont(leftText, lsz)
+        leftText:ClearAllPoints()
+        if lc ~= "none" then
+            leftText:SetJustifyH("LEFT")
+            PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
+            -- Constrain width when opposing right text exists
             if rc ~= "none" then
-                rightText:SetJustifyH("RIGHT")
-                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                -- Constrain width when opposing left text exists
-                if lc ~= "none" then
-                    local leftUsed = EstimateUFTextWidth(lc)
-                    PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
-                else
-                    rightText:SetWidth(0)
-                end
-                rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
-            else rightText:Hide() end
-        end
+                local rightUsed = EstimateUFTextWidth(rc)
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+            else
+                leftText:SetWidth(0)
+            end
+            leftText:Show()
+            ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+        else leftText:Hide() end
+
+        SetFSFont(rightText, rsz)
+        rightText:ClearAllPoints()
+        if rc ~= "none" then
+            rightText:SetJustifyH("RIGHT")
+            PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
+            -- Constrain width when opposing left text exists
+            if lc ~= "none" then
+                local leftUsed = EstimateUFTextWidth(lc)
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+            else
+                rightText:SetWidth(0)
+            end
+            rightText:Show()
+            ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+        else rightText:Hide() end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -3920,49 +4173,46 @@ local function StyleFocusFrame(frame, unit)
         local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 181
 
-        -- Center text: if active, hide left/right
+        -- Each text position renders independently; Center no longer hides Left/Right.
+        SetFSFont(centerText, csz)
+        centerText:ClearAllPoints()
         if cc ~= "none" then
-            leftText:Hide()
-            rightText:Hide()
-            SetFSFont(centerText, csz)
-            centerText:ClearAllPoints()
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             centerText:SetWidth(0)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
-        else
-            centerText:Hide()
-            SetFSFont(leftText, lsz)
-            leftText:ClearAllPoints()
-            if lc ~= "none" then
-                leftText:SetJustifyH("LEFT")
-                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
-                if rc ~= "none" then
-                    local rightUsed = EstimateUFTextWidth(rc)
-                    PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
-                else
-                    leftText:SetWidth(0)
-                end
-                leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
-            else leftText:Hide() end
+        else centerText:Hide() end
 
-            SetFSFont(rightText, rsz)
-            rightText:ClearAllPoints()
+        SetFSFont(leftText, lsz)
+        leftText:ClearAllPoints()
+        if lc ~= "none" then
+            leftText:SetJustifyH("LEFT")
+            PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
-                rightText:SetJustifyH("RIGHT")
-                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                if lc ~= "none" then
-                    local leftUsed = EstimateUFTextWidth(lc)
-                    PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
-                else
-                    rightText:SetWidth(0)
-                end
-                rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
-            else rightText:Hide() end
-        end
+                local rightUsed = EstimateUFTextWidth(rc)
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+            else
+                leftText:SetWidth(0)
+            end
+            leftText:Show()
+            ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+        else leftText:Hide() end
+
+        SetFSFont(rightText, rsz)
+        rightText:ClearAllPoints()
+        if rc ~= "none" then
+            rightText:SetJustifyH("RIGHT")
+            PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
+            if lc ~= "none" then
+                local leftUsed = EstimateUFTextWidth(lc)
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+            else
+                rightText:SetWidth(0)
+            end
+            rightText:Show()
+            ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+        else rightText:Hide() end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -4124,46 +4374,45 @@ local function StyleSimpleFrame(frame, unit)
         local cxo = s.centerTextX or 0
         local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 100
+        -- Each text position renders independently; Center no longer hides Left/Right.
+        SetFSFont(centerText, csz)
+        centerText:ClearAllPoints()
         if cc ~= "none" then
-            SetFSFont(centerText, csz)
-            centerText:ClearAllPoints()
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             PP.Width(centerText, barW * 0.9)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
-            leftText:Hide(); rightText:Hide()
-        else
-            centerText:Hide()
-            SetFSFont(leftText, lsz)
-            if lc ~= "none" then
-                leftText:ClearAllPoints()
-                leftText:SetJustifyH("LEFT")
-                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
-                if rc ~= "none" then
-                    local rightUsed = EstimateUFTextWidth(rc)
-                    PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
-                else
-                    PP.Width(leftText, barW * 0.9)
-                end
-                leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
-            else leftText:Hide() end
-            SetFSFont(rightText, rsz)
+        else centerText:Hide() end
+
+        SetFSFont(leftText, lsz)
+        if lc ~= "none" then
+            leftText:ClearAllPoints()
+            leftText:SetJustifyH("LEFT")
+            PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
-                rightText:ClearAllPoints()
-                rightText:SetJustifyH("RIGHT")
-                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                if lc ~= "none" then
-                    local leftUsed = EstimateUFTextWidth(lc)
-                    PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
-                else
-                    PP.Width(rightText, barW * 0.9)
-                end
-                rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
-            else rightText:Hide() end
-        end
+                local rightUsed = EstimateUFTextWidth(rc)
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+            else
+                PP.Width(leftText, barW * 0.9)
+            end
+            leftText:Show()
+            ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+        else leftText:Hide() end
+        SetFSFont(rightText, rsz)
+        if rc ~= "none" then
+            rightText:ClearAllPoints()
+            rightText:SetJustifyH("RIGHT")
+            PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
+            if lc ~= "none" then
+                local leftUsed = EstimateUFTextWidth(lc)
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+            else
+                PP.Width(rightText, barW * 0.9)
+            end
+            rightText:Show()
+            ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+        else rightText:Hide() end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -4312,46 +4561,45 @@ local function StylePetFrame(frame, unit)
         local cxo = s.centerTextX or 0
         local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 100
+        -- Each text position renders independently; Center no longer hides Left/Right.
+        SetFSFont(centerText, csz)
+        centerText:ClearAllPoints()
         if cc ~= "none" then
-            SetFSFont(centerText, csz)
-            centerText:ClearAllPoints()
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             PP.Width(centerText, barW * 0.9)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
-            leftText:Hide(); rightText:Hide()
-        else
-            centerText:Hide()
-            SetFSFont(leftText, lsz)
-            if lc ~= "none" then
-                leftText:ClearAllPoints()
-                leftText:SetJustifyH("LEFT")
-                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
-                if rc ~= "none" then
-                    local rightUsed = EstimateUFTextWidth(rc)
-                    PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
-                else
-                    PP.Width(leftText, barW * 0.9)
-                end
-                leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
-            else leftText:Hide() end
-            SetFSFont(rightText, rsz)
+        else centerText:Hide() end
+
+        SetFSFont(leftText, lsz)
+        if lc ~= "none" then
+            leftText:ClearAllPoints()
+            leftText:SetJustifyH("LEFT")
+            PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
-                rightText:ClearAllPoints()
-                rightText:SetJustifyH("RIGHT")
-                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                if lc ~= "none" then
-                    local leftUsed = EstimateUFTextWidth(lc)
-                    PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
-                else
-                    PP.Width(rightText, barW * 0.9)
-                end
-                rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
-            else rightText:Hide() end
-        end
+                local rightUsed = EstimateUFTextWidth(rc)
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+            else
+                PP.Width(leftText, barW * 0.9)
+            end
+            leftText:Show()
+            ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+        else leftText:Hide() end
+        SetFSFont(rightText, rsz)
+        if rc ~= "none" then
+            rightText:ClearAllPoints()
+            rightText:SetJustifyH("RIGHT")
+            PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
+            if lc ~= "none" then
+                local leftUsed = EstimateUFTextWidth(lc)
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+            else
+                PP.Width(rightText, barW * 0.9)
+            end
+            rightText:Show()
+            ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+        else rightText:Hide() end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -4504,46 +4752,45 @@ local function StyleBossFrame(frame, unit)
         local cxo = s.centerTextX or 0
         local cyo = s.centerTextY or 0
         local barW = s.frameWidth or 100
+        -- Each text position renders independently; Center no longer hides Left/Right.
+        SetFSFont(centerText, csz)
+        centerText:ClearAllPoints()
         if cc ~= "none" then
-            SetFSFont(centerText, csz)
-            centerText:ClearAllPoints()
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
             PP.Width(centerText, barW * 0.9)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
-            leftText:Hide(); rightText:Hide()
-        else
-            centerText:Hide()
-            SetFSFont(leftText, lsz)
-            if lc ~= "none" then
-                leftText:ClearAllPoints()
-                leftText:SetJustifyH("LEFT")
-                PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
-                if rc ~= "none" then
-                    local rightUsed = EstimateUFTextWidth(rc)
-                    PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
-                else
-                    PP.Width(leftText, barW * 0.9)
-                end
-                leftText:Show()
-                ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
-            else leftText:Hide() end
-            SetFSFont(rightText, rsz)
+        else centerText:Hide() end
+
+        SetFSFont(leftText, lsz)
+        if lc ~= "none" then
+            leftText:ClearAllPoints()
+            leftText:SetJustifyH("LEFT")
+            PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
-                rightText:ClearAllPoints()
-                rightText:SetJustifyH("RIGHT")
-                PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                if lc ~= "none" then
-                    local leftUsed = EstimateUFTextWidth(lc)
-                    PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
-                else
-                    PP.Width(rightText, barW * 0.9)
-                end
-                rightText:Show()
-                ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
-            else rightText:Hide() end
-        end
+                local rightUsed = EstimateUFTextWidth(rc)
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+            else
+                PP.Width(leftText, barW * 0.9)
+            end
+            leftText:Show()
+            ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+        else leftText:Hide() end
+        SetFSFont(rightText, rsz)
+        if rc ~= "none" then
+            rightText:ClearAllPoints()
+            rightText:SetJustifyH("RIGHT")
+            PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
+            if lc ~= "none" then
+                local leftUsed = EstimateUFTextWidth(lc)
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+            else
+                PP.Width(rightText, barW * 0.9)
+            end
+            rightText:Show()
+            ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+        else rightText:Hide() end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -4587,10 +4834,13 @@ local function RegisterStylesOnce()
                     element:ClearModel()
                     element:SetModel([[Interface\Buttons\TalkToMeQuestionMark.m2]])
                 else
-                    element:SetCamDistanceScale(1)
+                    local uKey3d = UnitToSettingsKey(u)
+                    local uS3d = uKey3d and db.profile[uKey3d]
+                    local camScale = ((uS3d and uS3d.portrait3dZoom) or 100) / 100
+                    element:SetUnit(u)
                     element:SetPortraitZoom(1)
                     element:SetPosition(0, 0, 0)
-                    element:SetUnit(u)
+                    element:SetCamDistanceScale(camScale)
                 end
             else
                 if isAvailable then
@@ -5250,7 +5500,7 @@ local function ReloadFrames()
     -- Normalize opacity values: old profiles stored 0-1 floats, new format is 0-100 integers
     do
         local prof = db.profile
-        local UNITS = { "player", "target", "focus", "boss", "pet", "totPet" }
+        local UNITS = { "player", "target", "focus", "boss", "pet", "targettarget", "focustarget" }
         if prof.healthBarOpacity and prof.healthBarOpacity <= 1.0 then
             prof.healthBarOpacity = math.floor(prof.healthBarOpacity * 100 + 0.5)
         end
@@ -5280,6 +5530,14 @@ local function ReloadFrames()
     for _, frame in pairs(frames) do
         if type(frame) == "table" and frame.SetFrameStrata then
             frame:SetFrameStrata(ufStrata)
+            -- Re-apply or reset custom strata for detached bars
+            if frame.BottomTextBar and frame.BottomTextBar._isDetached then
+                if profile.enableCustomBarStratas then
+                    frame.BottomTextBar:SetFrameStrata(profile.detachedTextBarStrata or "DIALOG")
+                else
+                    frame.BottomTextBar:SetFrameStrata(ufStrata)
+                end
+            end
         end
     end
 
@@ -5394,23 +5652,65 @@ local function ReloadFrames()
                 EllesmereUI._ufPortraitSide[frame] = settings.portraitSide
             end
 
-            -- Re-anchor the attached-mode portrait backdrop when the side
-            -- flips. Detached mode is re-anchored further below.
-            if frame.Portrait and frame.Portrait.backdrop
-               and pStyle == "attached"
-               and settings.portraitSide then
+            -- Re-anchor portrait backdrop based on style + side.
+            if frame.Portrait and frame.Portrait.backdrop and settings.portraitSide then
                 local bd = frame.Portrait.backdrop
-                bd:ClearAllPoints()
-                if settings.portraitSide == "left" then
-                    PP.Point(bd, "TOPLEFT", frame, "TOPLEFT", 0, 0)
-                else
-                    PP.Point(bd, "TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+                local pSide = settings.portraitSide
+                local isInsideNow = pSide == "insideleft" or pSide == "insideright" or pSide == "insidecenter"
+                bd._isInside = isInsideNow
+                if isInsideNow then
+                    if bd._bg then bd._bg:Hide() end
+                    local healthAnchor = frame.Health or frame
+                    local pXO = settings.portraitX or 0
+                    local pYO = settings.portraitY or 0
+                    local pSizeAdj = settings.portraitSize or 0
+                    local frameH = frame:GetHeight()
+                    if frameH < 1 then frameH = 46 end
+                    local pDim = frameH + pSizeAdj
+                    if pDim < 8 then pDim = 8 end
+                    bd:SetClipsChildren(true)
+                    bd:SetFrameLevel(frame:GetFrameLevel() + 3)
+                    -- Raise border above 3D model (PlayerModel ignores frame level)
+                    local is3d = (settings.portraitMode or "2d") == "3d"
+                    if is3d and frame.unifiedBorder and not settings.borderBehind then
+                        frame.unifiedBorder:SetFrameLevel(frame:GetFrameLevel() + 20)
+                    end
+                    bd:ClearAllPoints()
+                    bd:SetWidth(pDim)
+                    if pSide == "insideleft" then
+                        bd:SetPoint("TOPLEFT", healthAnchor, "TOPLEFT", pXO, pYO)
+                        bd:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", pXO, 0)
+                    elseif pSide == "insideright" then
+                        bd:SetPoint("TOPRIGHT", healthAnchor, "TOPRIGHT", pXO, pYO)
+                        bd:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", pXO, 0)
+                    else
+                        bd:SetPoint("TOP", healthAnchor, "TOP", pXO, pYO)
+                        bd:SetPoint("BOTTOM", frame, "BOTTOM", pXO, 0)
+                    end
+                elseif pStyle == "attached" then
+                    if bd._bg then bd._bg:Show() end
+                    bd:SetClipsChildren(false)
+                    bd:ClearAllPoints()
+                    if pSide == "left" then
+                        PP.Point(bd, "TOPLEFT", frame, "TOPLEFT", 0, 0)
+                    else
+                        PP.Point(bd, "TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+                    end
+                end
+                -- Restore border level when not inside+3D
+                if not isInsideNow and frame.unifiedBorder then
+                    local bBehind = settings.borderBehind
+                    frame.unifiedBorder:SetFrameLevel(bBehind and math.max(0, frame:GetFrameLevel() - 1) or (frame:GetFrameLevel() + 10))
                 end
             end
 
             -- Swap 2D/3D portrait mode if changed (no reload needed)
             if frame.Portrait then
                 SwapPortraitMode(frame)
+                -- Always ForceUpdate so zoom/camDistanceScale applies even without mode change
+                if frame:IsElementEnabled("Portrait") and frame.Portrait.ForceUpdate then
+                    frame.Portrait:ForceUpdate()
+                end
             end
 
             -- Refresh class art style texture (may have changed without mode change)
@@ -5509,7 +5809,7 @@ local function ReloadFrames()
 
                     PP.Size(frame, totalWidth, playerTargetHeightWithCp + btbExtra)
 
-                    if frame.Portrait and frame.Portrait.backdrop then
+                    if frame.Portrait and frame.Portrait.backdrop and not frame.Portrait.backdrop._isInside then
                         PP.Size(frame.Portrait.backdrop, adjPortraitH, adjPortraitH)
                         -- Reposition portrait for attached/detached
                         frame.Portrait.backdrop:ClearAllPoints()
@@ -5560,6 +5860,12 @@ local function ReloadFrames()
                             pw = settings.powerWidth
                         end
                         PP.Size(frame.Power, pw, settings.powerHeight)
+                        -- Apply custom strata for detached power bar
+                        if ppIsDetached and db.profile.enableCustomBarStratas then
+                            frame.Power:SetFrameStrata(db.profile.detachedPowerStrata or "HIGH")
+                        elseif ppIsDetached then
+                            frame.Power:SetFrameStrata("MEDIUM")
+                        end
                         frame.Power:ClearAllPoints()
                         if ppPos == "none" then
                             frame.Power:Hide()
@@ -5579,6 +5885,25 @@ local function ReloadFrames()
                             frame.Power:Show()
                         end
                         if frame.Power._applyPowerPercentText then frame.Power._applyPowerPercentText(settings) end
+
+                        -- Update power bar border (detached only)
+                        if frame.Power._pbBorder then
+                            local pbTexKey = settings.powerBorderStyle or "solid"
+                            local pbSize = settings.powerBorderSize or 0
+                            local pbColor = settings.powerBorderColor or { r = 0, g = 0, b = 0 }
+                            local pbAlpha = settings.powerBorderAlpha or 1
+                            EllesmereUI.ApplyBorderStyle(frame.Power._pbBorder, pbSize,
+                                pbColor.r, pbColor.g, pbColor.b, pbAlpha,
+                                pbTexKey, settings.powerBorderOffsetX, settings.powerBorderOffsetY,
+                                settings.powerBorderShiftX, settings.powerBorderShiftY, "unitframes", pbSize)
+                            local pbBehind = settings.powerBorderBehind
+                            frame.Power._pbBorder:SetFrameLevel(pbBehind and math.max(0, frame.Power:GetFrameLevel() - 1) or (frame.Power:GetFrameLevel() + 5))
+                            if pbSize > 0 and ppIsDetached then
+                                frame.Power._pbBorder:Show()
+                            else
+                                frame.Power._pbBorder:Hide()
+                            end
+                        end
 
                         -- Gray out power bar background for generic melee NPCs
                         if ppPos ~= "none" and (ppPos == "below" or ppPos == "above") then
@@ -5616,6 +5941,7 @@ local function ReloadFrames()
                                 local cbW = db.profile.player.playerCastbarWidth or 181
                                 local cbH = db.profile.player.playerCastbarHeight or 14
                                 castbarBg:SetSize(cbW, cbH)
+                                LayoutCastbarIcon(frame.Castbar, CastIconInWidth("player", settings))
                                 -- Resize cast icon to match castbar height
                                 if frame.Castbar._iconFrame then
                                     frame.Castbar._iconFrame:SetSize(cbH, cbH)
@@ -5883,7 +6209,7 @@ local function ReloadFrames()
 
                     PP.Size(frame, totalWidth, targetFrameHeight)
 
-                    if frame.Portrait and frame.Portrait.backdrop then
+                    if frame.Portrait and frame.Portrait.backdrop and not frame.Portrait.backdrop._isInside then
                         PP.Size(frame.Portrait.backdrop, adjPortraitH, adjPortraitH)
                         frame.Portrait.backdrop:ClearAllPoints()
                         local btbTopOff = (btbPos == "top" and settings.bottomTextBar) and (settings.bottomTextBarHeight or 16) or 0
@@ -5953,6 +6279,25 @@ local function ReloadFrames()
                             frame.Power:Show()
                         end
                         if frame.Power._applyPowerPercentText then frame.Power._applyPowerPercentText(settings) end
+
+                        -- Update power bar border (detached only)
+                        if frame.Power._pbBorder then
+                            local pbTexKey = settings.powerBorderStyle or "solid"
+                            local pbSize = settings.powerBorderSize or 0
+                            local pbColor = settings.powerBorderColor or { r = 0, g = 0, b = 0 }
+                            local pbAlpha = settings.powerBorderAlpha or 1
+                            EllesmereUI.ApplyBorderStyle(frame.Power._pbBorder, pbSize,
+                                pbColor.r, pbColor.g, pbColor.b, pbAlpha,
+                                pbTexKey, settings.powerBorderOffsetX, settings.powerBorderOffsetY,
+                                settings.powerBorderShiftX, settings.powerBorderShiftY, "unitframes", pbSize)
+                            local pbBehind = settings.powerBorderBehind
+                            frame.Power._pbBorder:SetFrameLevel(pbBehind and math.max(0, frame.Power:GetFrameLevel() - 1) or (frame.Power:GetFrameLevel() + 5))
+                            if pbSize > 0 and ppIsDetached then
+                                frame.Power._pbBorder:Show()
+                            else
+                                frame.Power._pbBorder:Hide()
+                            end
+                        end
 
                         -- Gray out power bar background for generic melee NPCs
                         if ppPos ~= "none" and (ppPos == "below" or ppPos == "above") then
@@ -6046,6 +6391,7 @@ local function ReloadFrames()
                                 local cbW2 = settings.castbarWidth or 181
                                 local cbH2 = settings.castbarHeight or 14
                                 castbarBg:SetSize(cbW2, cbH2)
+                                LayoutCastbarIcon(frame.Castbar, CastIconInWidth("target", settings))
                                 if frame.Castbar._iconFrame then
                                     frame.Castbar._iconFrame:SetSize(cbH2, cbH2)
                                     if not frame.Castbar:IsShown() then
@@ -6240,7 +6586,7 @@ local function ReloadFrames()
 
                 PP.Size(frame, totalWidth, focusBarHeight + fBtbExtra)
 
-                if frame.Portrait and frame.Portrait.backdrop then
+                if frame.Portrait and frame.Portrait.backdrop and not frame.Portrait.backdrop._isInside then
                     PP.Size(frame.Portrait.backdrop, adjPortraitH, adjPortraitH)
                     -- Trim portrait to stay within frame bounds
                     if showPortrait and isAttached then
@@ -6392,6 +6738,7 @@ local function ReloadFrames()
                             local cbW3 = settings.castbarWidth or 181
                             local cbH3 = settings.castbarHeight or 14
                             castbarBg:SetSize(cbW3, cbH3)
+                            LayoutCastbarIcon(frame.Castbar, CastIconInWidth("focus", settings))
                             if frame.Castbar._iconFrame then
                                 frame.Castbar._iconFrame:SetSize(cbH3, cbH3)
                                 if not frame.Castbar:IsShown() then
@@ -6698,6 +7045,7 @@ local function ReloadFrames()
                                 castBarOffset = (bossBarHeight / 2)
                             end
                             castbarBg:SetSize(totalWidth, settings.castbarHeight or 14)
+                            LayoutCastbarIcon(frame.Castbar, CastIconInWidth("boss1", settings))
                             if frame.Castbar._iconFrame then
                                 local cbH = settings.castbarHeight or 14
                                 frame.Castbar._iconFrame:SetSize(cbH, cbH)
@@ -6905,6 +7253,11 @@ local function ReloadFrames()
                 ApplyHealthBarTexture(frame.Health, UnitToSettingsKey(unit))
                 ApplyHealthBarAlpha(frame.Health, UnitToSettingsKey(unit))
             end
+            -- Cast bar reuses the same bar texture as the health bar (donor texture for mini frames).
+            if frame.Castbar then
+                local cbTexKey = (isMiniFrame and donorSettings.healthBarTexture) or settings.healthBarTexture or db.profile.healthBarTexture or "none"
+                ns.ApplyCastBarTexture(frame.Castbar, cbTexKey)
+            end
             ApplyDarkTheme(frame.Health)
             frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
             UpdateAbsorbBarReverseFill(frame, settings.healthReverseFill and true or false)
@@ -6916,26 +7269,41 @@ local function ReloadFrames()
             if frame.Power then
                 ApplyPowerBarAlpha(frame.Power, UnitToSettingsKey(unit))
 
-                -- Re-apply power bar fill color based on powerPercentPowerColor toggle
+                -- Re-apply power bar fill color based on powerPercentPowerColor toggle.
+                -- Gradient (additive) layers on top of the resolved custom/power-type color.
                 local usePowerColor = settings.powerPercentPowerColor ~= false
-                if usePowerColor then
-                    frame.Power.colorPower = true
-                    frame.Power.PostUpdateColor = nil
-                else
+                frame.Power.colorPower = usePowerColor
+                if not usePowerColor then
                     local customFill = settings.customPowerFillColor
-                    frame.Power.colorPower = false
                     if customFill then
                         frame.Power:SetStatusBarColor(customFill.r, customFill.g, customFill.b)
-                        frame.Power.PostUpdateColor = function(self)
-                            local s2 = GetSettingsForUnit(unit)
-                            local cf = s2 and s2.customPowerFillColor
-                            if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) end
-                        end
                     else
                         frame.Power:SetStatusBarColor(0, 0, 1)
-                        frame.Power.PostUpdateColor = function(self)
-                            self:SetStatusBarColor(0, 0, 1)
-                        end
+                    end
+                end
+                frame.Power.PostUpdateColor = function(self)
+                    local s2 = GetSettingsForUnit(unit)
+                    if not s2 then return end
+                    local useP = s2.powerPercentPowerColor ~= false
+                    local bR, bG, bB
+                    if not useP then
+                        local cf = s2.customPowerFillColor
+                        if cf then bR, bG, bB = cf.r, cf.g, cf.b else bR, bG, bB = 0, 0, 1 end
+                    else
+                        local _, pToken = UnitPowerType(unit)
+                        local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                        if info then bR, bG, bB = info.r, info.g, info.b end
+                    end
+                    if s2.powerGradientEnabled and bR then
+                        local gc = s2.powerGradientColor
+                        local ga = s2.powerBarOpacity or 100
+                        if ga > 1.0 then ga = ga / 100 end
+                        ApplyBarGradient(self:GetStatusBarTexture(), s2.powerGradientDir or "HORIZONTAL",
+                            bR, bG, bB, ga,
+                            gc and gc.r or 0.20, gc and gc.g or 0.20, gc and gc.b or 0.80, ga)
+                    elseif not useP then
+                        local cf = s2.customPowerFillColor
+                        if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) else self:SetStatusBarColor(0, 0, 1) end
                     end
                 end
                 local customBg = settings.customPowerBgColor
@@ -7092,18 +7460,6 @@ local function ApplyBlizzCastbarState()
     end
 end
 
--- Helper function based on the Blizzard UnitFrame_UpdateTooltip method
--- without the Right-Click instruction line
-local function UnitFrame_CustomUpdateTooltip(self)
-    GameTooltip_SetDefaultAnchor(GameTooltip, self)
-    if GameTooltip:SetUnit(self.unit) then
-        GameTooltip:Show()
-        self.UpdateTooltip = UnitFrame_CustomUpdateTooltip
-    else
-        self.UpdateTooltip = nil
-    end
-end
-
 local function UnitFrame_OnEnter(self)
     local unit = self.unit
     if not unit then return end
@@ -7115,7 +7471,21 @@ local function UnitFrame_OnEnter(self)
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
         local showTooltip = not s or s.showUnitTooltip ~= false
         if showTooltip then
-            UnitFrame_CustomUpdateTooltip(self)
+            GameTooltip_SetDefaultAnchor(GameTooltip, self)
+            if GameTooltip:SetUnit(unit) then
+                GameTooltip:Show()
+            end
+            if self._tooltipTicker then self._tooltipTicker:Cancel() end
+            self._tooltipTicker = C_Timer.NewTicker(0.5, function()
+                if not self:IsMouseOver() then
+                    if self._tooltipTicker then self._tooltipTicker:Cancel(); self._tooltipTicker = nil end
+                    return
+                end
+                GameTooltip_SetDefaultAnchor(GameTooltip, self)
+                if GameTooltip:SetUnit(self.unit) then
+                    GameTooltip:Show()
+                end
+            end)
         end
     end
 end
@@ -7139,6 +7509,7 @@ local function UnitFrame_OnLeave(self)
         local keepShown = (not hiddenByOpts) and hasAnyHideOpt
         ;(self._visWrap or self):SetAlpha(keepShown and 1 or 0)
     end
+    if self._tooltipTicker then self._tooltipTicker:Cancel(); self._tooltipTicker = nil end
     if GameTooltip and GameTooltip:IsOwned(self) then
         GameTooltip:Hide()
     end
@@ -7443,7 +7814,7 @@ function InitializeFrames()
             frame.Health._rightInset = newRightInset
         end
 
-        if frame.Portrait and frame.Portrait.backdrop and showPortrait then
+        if frame.Portrait and frame.Portrait.backdrop and showPortrait and not frame.Portrait.backdrop._isInside then
             PP.Size(frame.Portrait.backdrop, adjPortraitH, adjPortraitH)
             frame.Portrait.backdrop:ClearAllPoints()
             if isAttached then
@@ -7919,6 +8290,13 @@ function InitializeFrames()
     for _, frame in pairs(frames) do
         if type(frame) == "table" and frame.SetFrameStrata then
             frame:SetFrameStrata(ufStrata)
+            if frame.BottomTextBar and frame.BottomTextBar._isDetached then
+                if db.profile.enableCustomBarStratas then
+                    frame.BottomTextBar:SetFrameStrata(db.profile.detachedTextBarStrata or "DIALOG")
+                else
+                    frame.BottomTextBar:SetFrameStrata(ufStrata)
+                end
+            end
         end
     end
 
@@ -8510,7 +8888,7 @@ function SetupOptionsPanel()
             pet = "Pet", targettarget = "Target of Target",
             focustarget = "Focus Target", boss = "Boss Frames",
             classPower = "Class Resource",
-            playerCastbar = "Player Cast Bar",
+            playerCastbar = "Player Frame Mini Cast Bar",
             targetCastbar = "Target Cast Bar",
             focusCastbar = "Focus Cast Bar",
         }
@@ -8723,6 +9101,16 @@ function SetupOptionsPanel()
                 group = "Unit Frames",
                 order = orderBase + order,
                 getFrame = function() return GetCBFrame() end,
+                isHidden = function()
+                    -- Live show/hide: mirror the per-unit cast bar enable setting
+                    -- (player defaults off; target/focus default on). The mover is
+                    -- gated on each unlock-mode open, so toggling the setting takes
+                    -- effect without a /reload.
+                    local s = GetCBSettings()
+                    if not s then return true end
+                    if unitKey == "player" then return not s.showPlayerCastbar end
+                    return s.showCastbar == false
+                end,
                 getSize = function()
                     -- Return stored DB values so cog menu shows what the
                     -- user typed, not the pixel-snapped frame size.
@@ -8796,15 +9184,12 @@ function SetupOptionsPanel()
             })
         end
 
-        if db.profile.player.showPlayerCastbar then
-            elements[#elements + 1] = MakeCastBarElement("playerCastbar", "player", 10)
-        end
-        if db.profile.target and db.profile.target.showCastbar ~= false then
-            elements[#elements + 1] = MakeCastBarElement("targetCastbar", "target", 11)
-        end
-        if db.profile.focus and db.profile.focus.showCastbar ~= false then
-            elements[#elements + 1] = MakeCastBarElement("focusCastbar", "focus", 12)
-        end
+        -- Always register all three cast bars; visibility is gated live via each
+        -- element's isHidden (mirrors the show setting), so toggling a cast bar
+        -- on/off takes effect on the next unlock-mode open -- no /reload needed.
+        elements[#elements + 1] = MakeCastBarElement("playerCastbar", "player", 10)
+        elements[#elements + 1] = MakeCastBarElement("targetCastbar", "target", 11)
+        elements[#elements + 1] = MakeCastBarElement("focusCastbar", "focus", 12)
 
         EllesmereUI:RegisterUnlockElements(elements)
 

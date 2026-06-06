@@ -301,9 +301,23 @@ local _myRacialsSet = {}
 -- Custom Aura Bar presets (potions with hardcoded durations).
 -- Detection: SPELL_UPDATE_COOLDOWN (spell goes on CD = just used).
 -- Display: reverse cooldown swipe for the duration.
--- Bloodlust/Time Spiral/warlock pets removed — they can't be tracked
--- via cooldown detection (they're cast by OTHER players or have no CD).
+-- Bloodlust/Heroism is the exception below: it is debuff-driven (see the TBB
+-- tick special-case for popularKey == "bloodlust") rather than cooldown-
+-- detected, because the lust buff is cast by others and is secret. It starts a
+-- 40s bar off the player's Sated/Exhaustion debuff edge. Time Spiral / warlock
+-- pets stay out (no usable detection).
 local BUFF_BAR_PRESETS = {
+    {
+        -- Faction label: Horde = Bloodlust (2825), Alliance = Heroism (32182).
+        key      = "bloodlust",
+        name     = (UnitFactionGroup("player") == "Horde") and "Bloodlust" or "Heroism",
+        icon     = (UnitFactionGroup("player") == "Horde")
+                       and "Interface\\Icons\\spell_nature_bloodlust"
+                       or  "Interface\\Icons\\ability_shaman_heroism",
+        spellIDs = { (UnitFactionGroup("player") == "Horde") and 2825 or 32182 },
+        duration = 40,
+        tbbOnly  = true,  -- TBB-only; debuff-driven, not a cooldown-usable preset
+    },
     {
         key      = "lights_potential",
         name     = "Light's Potential",
@@ -1362,11 +1376,11 @@ local function ShowProcGlow(icon, cr, cg, cb)
     if fd and fd.procGlowActive then return end
 
     -- Per-spell proc glow settings
-    -- Force Custom Shape Glow (style 2) for custom-shaped icons
-    local shapeName = fc and fc.shapeName
-    local isCustomShape = shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none"
-    local style = isCustomShape and 2 or PROC_GLOW_STYLE
     local fc = _ecmeFC[icon]
+    -- Force Custom Shape Glow (style 2) for custom-shaped icons (any shape but none/cropped)
+    local shapeName = (fc and fc.shapeApplied) and fc.shapeName or nil
+    local isCustomShape = shapeName and shapeName ~= "none" and shapeName ~= "cropped"
+    local style = isCustomShape and 2 or PROC_GLOW_STYLE
     local sid = fc and fc.spellID
     if sid then
         local bk = fc and fc.barKey
@@ -1392,8 +1406,13 @@ local function ShowProcGlow(icon, cr, cg, cb)
             end
         end
         if ss then
-            if ss.procGlow == 0 then return end -- proc glow disabled
-            if not isCustomShape and ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
+            -- Custom shapes are locked to Shape Glow: ignore the per-spell glow type
+            -- (including "None") so a custom-shaped icon always shows Shape Glow. The
+            -- per-spell glow COLOR below still applies.
+            if not isCustomShape then
+                if ss.procGlow == 0 then return end -- proc glow disabled
+                if ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
+            end
             -- Unified glow color takes priority over per-type settings
             local ur, ug, ub = ResolveGlowColor(ss)
             if ur then
@@ -1743,7 +1762,14 @@ local function EnforceCooldownViewerEditModeSettings()
     local buffIconIdx = Enum.EditModeCooldownViewerSystemIndices.BuffIcon
     local buffBarIdx  = Enum.EditModeCooldownViewerSystemIndices.BuffBar
 
-    local function UpsertSetting(settings, settingEnum, desiredValue)
+    -- Returns changed(bool). A layout stores a CooldownViewer setting ONLY when
+    -- it's been changed away from Blizzard's default, so an absent entry means
+    -- "running at the default." defaultValue is that default: when it already
+    -- equals what we want we leave the entry absent (no change, no forced reload) --
+    -- the effective value is already correct. We only add an explicit entry when
+    -- the default differs from desired (e.g. BuffIcon HideWhenInactive 0 when
+    -- "Always Show Buffs" is on).
+    local function UpsertSetting(settings, settingEnum, desiredValue, defaultValue)
         for _, s in ipairs(settings) do
             if s.setting == settingEnum then
                 if s.value ~= desiredValue then
@@ -1753,28 +1779,33 @@ local function EnforceCooldownViewerEditModeSettings()
                 return false
             end
         end
+        -- Absent: at the Blizzard default. Nothing to do if that already matches.
+        if desiredValue == defaultValue then
+            return false
+        end
         settings[#settings + 1] = { setting = settingEnum, value = desiredValue }
         return true
     end
 
     for _, sysInfo in ipairs(activeLayout.systems) do
         if sysInfo.system == cooldownSystem and type(sysInfo.settings) == "table" then
-            -- VisibleSetting=Always on ALL viewers
-            if UpsertSetting(sysInfo.settings, visSetting, visAlways) then
+            -- VisibleSetting=Always on ALL viewers. Default is Always, so an absent
+            -- entry is already correct and is left alone.
+            if UpsertSetting(sysInfo.settings, visSetting, visAlways, visAlways) then
                 changed = true
             end
             -- HideWhenInactive on buff icon viewer: 0 if user wants
             -- always-visible buff icons, 1 otherwise. BuffBar viewer
             -- (tracked bars) always stays at 1 -- "Always Show Buffs"
-            -- only applies to icon-based buff bars.
+            -- only applies to icon-based buff bars. Blizzard default is 1.
             if sysInfo.systemIndex == buffIconIdx then
                 local p = ECME.db and ECME.db.profile
                 local hideVal = (p and p.cdmBars and p.cdmBars.showInactiveBuffIcons) and 0 or 1
-                if UpsertSetting(sysInfo.settings, hideEnum, hideVal) then
+                if UpsertSetting(sysInfo.settings, hideEnum, hideVal, 1) then
                     changed = true
                 end
             elseif sysInfo.systemIndex == buffBarIdx then
-                if UpsertSetting(sysInfo.settings, hideEnum, 1) then
+                if UpsertSetting(sysInfo.settings, hideEnum, 1, 1) then
                     changed = true
                 end
             end
@@ -2302,17 +2333,14 @@ BuildCDMBar = function(barIndex)
             end
         end
     elseif anchorKey == "playerframe" then
-        -- Anchor to the player's unit frame.
-        -- WoW's layout engine does not reliably propagate position changes
-        -- through native SetPoint anchors when the parent frame is repositioned
-        -- via ClearAllPoints + SetPoint (e.g. by the unlock anchor cascade).
-        -- Instead, we compute absolute UIParent coordinates from the player
-        -- frame's current bounds and hook its SetPoint to re-anchor when it moves.
+        -- Anchor to the player's unit frame
         local playerFrame = EllesmereUI.FindPlayerUnitFrame()
         if playerFrame then
+            frame:ClearAllPoints()
             local side = barData.playerFrameSide or "LEFT"
             local oX = barData.playerFrameOffsetX or 0
             local oY = barData.playerFrameOffsetY or 0
+            -- Snap offsets to physical pixel grid
             local PPa = EllesmereUI and EllesmereUI.PP
             if PPa and PPa.SnapForES then
                 local es = frame:GetEffectiveScale()
@@ -2436,7 +2464,6 @@ BuildCDMBar = function(barIndex)
     -- Always Show() so layout/children work.
     -- _CDMApplyVisibility is the single authority for alpha/hiding.
     frame:Show()
-
 end
 
 -- Compute stride respecting topRowCount override (only for numRows == 2)
@@ -2446,6 +2473,13 @@ local function ComputeTopRowStride(barData, count)
     if numRows == 2 and barData.customTopRowEnabled and barData.topRowCount and barData.topRowCount > 0 then
         local topCount = math.min(barData.topRowCount, count)
         local bottomCount = count - topCount
+        -- Custom top-row mode only spills into a second row once the icon count
+        -- actually exceeds the top-row count. Until then, report ONE effective
+        -- row so the bar doesn't reserve space for (or lay out) an empty second
+        -- row. The second row appears the moment a bottom-row icon exists.
+        if bottomCount <= 0 then
+            return topCount, 1, topCount
+        end
         return math.max(topCount, bottomCount), numRows, topCount
     end
     local stride = math.ceil(count / numRows)
@@ -2480,9 +2514,11 @@ local function ComputeCDMBarSize(barData, count)
         iH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
     end
     local sp = barData.spacing or 2
-    local rows = barData.numRows or 1
+    -- Use the EFFECTIVE row count from ComputeTopRowStride: it collapses to 1
+    -- when a custom top-row split has no icons in its second row yet, so the
+    -- footprint doesn't reserve an empty second row.
+    local stride, rows = ComputeTopRowStride(barData, count)
     if rows < 1 then rows = 1 end
-    local stride = ComputeTopRowStride(barData, count)
     local grow = barData.growDirection or "CENTER"
     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
     if isH then
@@ -2509,6 +2545,16 @@ local function GetStableCDMBarSize(barKey, frame, barData)
         return ComputeCDMBarSize(barData, count)
     end
 
+    -- Buff-family / custom-buff bars have no assigned spells (their icons are
+    -- auras added live), so before the first aura the frame is empty and the
+    -- spell count is 0. Size from the configured icon dimensions (one icon) so
+    -- the empty frame -- and the unlock overlay that mirrors it -- reflect the
+    -- icon size, instead of the generic placeholder that otherwise persisted
+    -- until a buff was acquired once.
+    if barData and ((ns.IsBarBuffFamily and ns.IsBarBuffFamily(barData)) or barData.barType == "custom_buff") then
+        return ComputeCDMBarSize(barData, 1)
+    end
+
     return EMPTY_CDM_BAR_SIZE[1], EMPTY_CDM_BAR_SIZE[2]
 end
 
@@ -2524,8 +2570,9 @@ LayoutCDMBar = function(barKey)
     if not barData or not barData.enabled then return end
 
     local grow = frame._mouseGrow or barData.growDirection or "CENTER"
-    local numRows = barData.numRows or 1
-    if numRows < 1 then numRows = 1 end
+    -- Row count is taken from ComputeTopRowStride's EFFECTIVE rows (effRows,
+    -- computed once the icon count is known below), which collapses a custom
+    -- top-row split to a single row until its second row is actually populated.
     local isHoriz = (grow == "RIGHT" or grow == "LEFT" or (grow == "CENTER" and not barData.verticalOrientation))
     -- spacing is a raw coord value; the per-frame pixel conversion below
     -- (spacingPx = floor(spacing / onePx + 0.5)) rounds to nearest whole
@@ -2548,13 +2595,26 @@ LayoutCDMBar = function(barKey)
     local PP = EllesmereUI.PP
     local onePx = PP.mult
     local iconW
-    -- Width-axis dim (icons spanning the width)
+    -- Set true ONLY when the width-match math below actually produces an iconW.
+    -- Gates the cropped-height-from-matched-width fix so non-matched and
+    -- height-matched bars stay byte-identical.
+    local widthMatchApplied = false
+    -- Set (to the matched cropped height in physical px) ONLY when the
+    -- height-match math below succeeds. Lets a cropped height-matched bar's
+    -- per-icon height use the matched height the branch already computed,
+    -- instead of the stored iconSize, so icons stay in lockstep with the
+    -- container's extraPixelsH leftover distribution.
+    local heightMatchIconHPx = nil
+    -- Width-axis dim (icons spanning the width). Use the effective row count
+    -- so a not-yet-populated second row doesn't widen the match math.
     local function CurWidthDim()
-        return isHoriz and ComputeTopRowStride(barData, #icons) or numRows
+        local s, r = ComputeTopRowStride(barData, #icons)
+        return isHoriz and s or r
     end
     -- Height-axis dim (icons spanning the height)
     local function CurHeightDim()
-        return isHoriz and numRows or ComputeTopRowStride(barData, #icons)
+        local s, r = ComputeTopRowStride(barData, #icons)
+        return isHoriz and r or s
     end
     -- Resolve a width/height match target unlock key to a live frame.
     -- The match DB stores keys like "CDM_cooldowns" or "MainBar"; the
@@ -2577,6 +2637,7 @@ LayoutCDMBar = function(barKey)
             if rawPhysIcon < 8 then rawPhysIcon = 8 end
             local basePhysIcon = math.floor(rawPhysIcon)
             iconW = basePhysIcon * onePx
+            widthMatchApplied = true
             local idealPhys = curDim * basePhysIcon + (curDim - 1) * physSp
             local extra = physTarget - idealPhys
             if extra > 0 and extra <= curDim then extraPixels = extra end
@@ -2595,6 +2656,7 @@ LayoutCDMBar = function(barKey)
             local basePhysIcon = math.floor(rawPhysIcon)
             iconW = basePhysIcon * onePx
             local basePhysIconH = math.floor(basePhysIcon * cropFactor)
+            heightMatchIconHPx = basePhysIconH
             local idealPhys = curDim * basePhysIconH + (curDim - 1) * physSp
             local extra = physTarget - idealPhys
             if extra > 0 and extra <= curDim then extraPixelsH = extra end
@@ -2612,7 +2674,25 @@ LayoutCDMBar = function(barKey)
     local iconH = iconW
     local shape = barData.iconShape or "none"
     if shape == "cropped" then
-        iconH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
+        if widthMatchApplied then
+            -- Width-matched: derive cropped height from the MATCHED icon width
+            -- so the icon keeps the same ~0.80 aspect ratio as the non-matched
+            -- path. Computed in physical pixels to stay on the pixel grid (the
+            -- matched iconW is already a clean pixel multiple). This matches the
+            -- non-matched path's aspect-ratio intent, not its exact value -- the
+            -- non-matched else branch rounds 0.80 in coord space, so the two can
+            -- differ by up to 1px at non-perfect UI scales.
+            local wPx = math.floor(iconW / onePx + 0.5)
+            iconH = math.floor(wPx * 0.80 + 0.5) * onePx
+        elseif heightMatchIconHPx then
+            -- Height-matched: use the EXACT cropped height the height-match math
+            -- already computed (basePhysIconH). Must match that value precisely
+            -- so per-icon height stays in lockstep with the container's
+            -- extraPixelsH leftover distribution, which was sized around it.
+            iconH = heightMatchIconHPx * onePx
+        else
+            iconH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
+        end
     end
 
     -- Use ALL icons in the array (not just IsShown). CollectAndReanchor
@@ -2648,7 +2728,9 @@ LayoutCDMBar = function(barKey)
     end
 
     -- Bar has visible icons -- ensure it is visible (unless visibility is "never")
-    local stride, _, customTopCount = ComputeTopRowStride(barData, sizeCount)
+    -- effRows is the EFFECTIVE row count: 1 when a custom top-row split has no
+    -- icons in its second row yet, so the container doesn't grow a blank row.
+    local stride, effRows, customTopCount = ComputeTopRowStride(barData, sizeCount)
 
     -- Container size -- compute everything in integer physical pixels first,
     -- then convert back to coord at the end. Doing the multiplications in
@@ -2672,9 +2754,9 @@ LayoutCDMBar = function(barKey)
     local totalWPx, totalHPx
     if isHoriz then
         totalWPx = stride  * iconWPx + (stride  - 1) * spacingPx + extraPixels
-        totalHPx = numRows * iconHPx + (numRows - 1) * spacingPx + extraPixelsH
+        totalHPx = effRows * iconHPx + (effRows - 1) * spacingPx + extraPixelsH
     else
-        totalWPx = numRows * iconWPx + (numRows - 1) * spacingPx + extraPixels
+        totalWPx = effRows * iconWPx + (effRows - 1) * spacingPx + extraPixels
         totalHPx = stride  * iconHPx + (stride  - 1) * spacingPx + extraPixelsH
     end
 
@@ -2761,7 +2843,7 @@ LayoutCDMBar = function(barKey)
 
         -- Map sequential index to bottom-up grid position.
         -- Icon 1..topRowCount fill the top row (visual row 0).
-        -- Remaining icons fill rows 1..numRows-1 (bottom rows).
+        -- Remaining icons fill rows 1..effRows-1 (bottom rows).
         local col, row
         if i <= topRowCount then
             col = i - 1
@@ -3015,6 +3097,11 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         local bdrTarget = (fd and fd.borderFrame) or icon
         if fd and fd.borderFrame or EllesmereUI.PP.GetBorders(icon) then
             local texKey = barData.borderTexture or "solid"
+            -- "Show Behind": set the border frame's level before styling so the
+            -- textured backdrop inherits it. +13 in front of the icon, level-1 behind.
+            if fd and fd.borderFrame then
+                fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, icon:GetFrameLevel() - 1) or (icon:GetFrameLevel() + 13))
+            end
             EllesmereUI.ApplyBorderStyle(bdrTarget, borderSz, brdR, brdG, brdB, brdA, texKey, barData.borderTextureOffset, barData.borderTextureOffsetY, barData.borderTextureShiftX, barData.borderTextureShiftY, "cdm", barData.borderThickness or "thin")
         end
 
@@ -5048,7 +5135,17 @@ RegisterCDMUnlockElements = function()
                             storeY = y - fh / 2
                         end
                     end
-                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY }
+                    -- Phase 2 follow baseline: capture the anchor target's center
+                    -- (UIParent space) at save time so ApplyAnchorPosition can later
+                    -- shift the absolute saved edge by the target's displacement.
+                    -- Only for growth bars; nil for unanchored/CENTER bars -> follow
+                    -- stays off (pure absolute pin). require-re-save: existing bars
+                    -- pick this up only when next dragged + Save & Exit.
+                    local tgtx, tgty
+                    if grow and grow ~= "CENTER" and EllesmereUI.GetAnchorTargetCenterUI then
+                        tgtx, tgty = EllesmereUI.GetAnchorTargetCenterUI("CDM_" .. key)
+                    end
+                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY, tgtx = tgtx, tgty = tgty }
                     -- Skip rebuild when called from anchor propagation or while
                     -- unlock mode is active (unlock mode owns positioning then).
                     if not EllesmereUI._propagatingSave and not EllesmereUI._unlockActive then
@@ -5337,9 +5434,10 @@ function ECME:CDMFinishSetup()
                             end
                             local spacing = barData.spacing or 2
                             local grow = barData.growDirection or "CENTER"
-                            local numRows = barData.numRows or 1
+                            -- Effective row count: collapses to 1 when a custom
+                            -- top-row split has no icons in its second row yet.
+                            local stride, numRows = ComputeTopRowStride(barData, cachedCount)
                             if numRows < 1 then numRows = 1 end
-                            local stride = ComputeTopRowStride(barData, cachedCount)
                             local isHoriz = (grow == "RIGHT" or grow == "LEFT" or (grow == "CENTER" and not barData.verticalOrientation))
                             -- Compute total in integer phys px to avoid PP.Scale floor
                             -- losing 1 px to floating-point dust on the multiply.

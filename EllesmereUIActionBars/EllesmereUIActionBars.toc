@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Action Bars
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Custom Action Bars
+## Notes: Modern action bars built for performance and clarity.
 ## Author: Ellesmere
-## Version: 7.9.5
+## Version: 8.0
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIActionBarsDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

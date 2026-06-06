@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Mythic+ Timer
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: A modern, light Mythic+ timer reskin with improved functionality
+## Notes: A simple Mythic+ timer with full tracking customizations.
 ## Author: Ellesmere
-## Version: 7.9.5
+## Version: 8.0
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIMythicTimerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
