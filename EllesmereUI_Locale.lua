@@ -94,7 +94,12 @@ end
 --  Resolve + activate the effective locale
 --------------------------------------------------------------------------------
 local function GlyphFont(locale)
-    if locale == "zhCN" or locale == "zhTW" then return "Fonts\\ARKai_T.ttf"
+    -- Simplified Chinese and Traditional Chinese use different system fonts:
+    -- zhCN renders with the Simplified glyph set (ARKai_T), zhTW with the
+    -- Traditional glyph set (bLEI00D). Routing zhTW to ARKai_T would show
+    -- Simplified glyph forms to a Traditional reader, so keep them separate.
+    if locale == "zhCN" then return "Fonts\\ARKai_T.ttf"
+    elseif locale == "zhTW" then return "Fonts\\bLEI00D.ttf"
     elseif locale == "koKR" then return "Fonts\\2002.TTF"
     elseif locale == "ruRU" then return "Fonts\\FRIZQT___CYR.TTF" end
     return nil

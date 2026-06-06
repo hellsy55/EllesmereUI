@@ -6705,22 +6705,10 @@ ns._pvBuffAssignments = {}
 
 local function GetConfiguredBuffSpells()
     if not db or not db.profile or not db.profile.bmIndicators then return {} end
-    -- BM indicators are keyed by "CLASS_SPEC" strings (e.g. "PALADIN_HOLY")
-    local _, classToken = UnitClass("player")
-    local specIdx = GetSpecialization and GetSpecialization()
-    local specName = specIdx and select(2, GetSpecializationInfo(specIdx))
-    if not classToken or not specName then return {} end
-    -- Match against BM healer spec keys
-    local specKey
-    local healerSpecs = ns.BM_HEALER_SPECS
-    if healerSpecs then
-        local specLower = specName:lower()
-        for _, spec in ipairs(healerSpecs) do
-            if spec.classToken == classToken and spec.name:lower():find(specLower) then
-                specKey = spec.key; break
-            end
-        end
-    end
+    -- BM indicators are keyed by "CLASS_SPEC" strings (e.g. "PALADIN_HOLY").
+    -- Resolve the player's spec via the shared, locale-independent helper (matches
+    -- by spec ID, not the localized spec name) so indicators show on every client.
+    local specKey = ns.BM_CurrentSpecKey and ns.BM_CurrentSpecKey()
     if not specKey then return {} end
     local indicators = db.profile.bmIndicators[specKey]
     if not indicators then return {} end

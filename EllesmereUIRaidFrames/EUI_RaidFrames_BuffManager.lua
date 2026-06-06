@@ -101,6 +101,7 @@ local SHOW_WHEN_ORDER = { "present", "missing" }
 local HEALER_SPECS = {
     {
         key = "DRUID_RESTORATION",
+        specID = 105,
         name = "Restoration Druid",
         classToken = "DRUID",
         spells = {
@@ -115,6 +116,7 @@ local HEALER_SPECS = {
     },
     {
         key = "PRIEST_DISCIPLINE",
+        specID = 256,
         name = "Discipline Priest",
         classToken = "PRIEST",
         spells = {
@@ -128,6 +130,7 @@ local HEALER_SPECS = {
     },
     {
         key = "PRIEST_HOLY",
+        specID = 257,
         name = "Holy Priest",
         classToken = "PRIEST",
         spells = {
@@ -140,6 +143,7 @@ local HEALER_SPECS = {
     },
     {
         key = "MONK_MISTWEAVER",
+        specID = 270,
         name = "Mistweaver Monk",
         classToken = "MONK",
         spells = {
@@ -153,6 +157,7 @@ local HEALER_SPECS = {
     },
     {
         key = "SHAMAN_RESTORATION",
+        specID = 264,
         name = "Restoration Shaman",
         classToken = "SHAMAN",
         spells = {
@@ -166,6 +171,7 @@ local HEALER_SPECS = {
     },
     {
         key = "PALADIN_HOLY",
+        specID = 65,
         name = "Holy Paladin",
         classToken = "PALADIN",
         spells = {
@@ -183,6 +189,7 @@ local HEALER_SPECS = {
     },
     {
         key = "EVOKER_PRESERVATION",
+        specID = 1468,
         name = "Preservation Evoker",
         classToken = "EVOKER",
         spells = {
@@ -199,6 +206,7 @@ local HEALER_SPECS = {
     },
     {
         key = "EVOKER_AUGMENTATION",
+        specID = 1473,
         name = "Augmentation Evoker",
         classToken = "EVOKER",
         spells = {
@@ -215,11 +223,29 @@ local HEALER_SPECS = {
 
 ns.BM_HEALER_SPECS = HEALER_SPECS
 
--- Spec lookup by key
+-- Spec lookup by key, and by spec ID (the locale-independent identifier).
 local SPEC_BY_KEY = {}
+local SPEC_BY_ID  = {}
 for _, spec in ipairs(HEALER_SPECS) do
     SPEC_BY_KEY[spec.key] = spec
+    if spec.specID then SPEC_BY_ID[spec.specID] = spec end
 end
+
+-- Resolve the player's CURRENT spec to a BM spec key. This MUST be done by spec
+-- ID, never by spec name: GetSpecializationInfo() returns the spec ID (a stable,
+-- non-localized number) as its first value and the LOCALIZED display name as its
+-- second. Earlier code matched the localized name against the English spec.name,
+-- which never matched on non-English clients -- so no spec key resolved and every
+-- HoT indicator (and the simple grid, and secret-aura tracking) silently failed.
+-- Returns nil when the current spec is not a tracked healer/support spec.
+local function CurrentSpecKey()
+    local specIdx = GetSpecialization and GetSpecialization()
+    if not specIdx then return nil end
+    local specID = GetSpecializationInfo and GetSpecializationInfo(specIdx)
+    local spec = specID and SPEC_BY_ID[specID]
+    return spec and spec.key or nil
+end
+ns.BM_CurrentSpecKey = CurrentSpecKey
 
 -- Flat spell name lookup
 local SPELL_NAME_BY_ID = {}
@@ -318,20 +344,9 @@ end
 local activeSpecKey_BM = nil
 
 local function DetectActiveSpecKey()
-    local _, classToken = UnitClass("player")
-    local specIdx = GetSpecialization and GetSpecialization()
-    local specName = specIdx and select(2, GetSpecializationInfo(specIdx))
-    if classToken and specName then
-        local specLower = specName:lower()
-        for _, spec in ipairs(HEALER_SPECS) do
-            if spec.classToken == classToken and spec.name:lower():find(specLower) then
-                activeSpecKey_BM = spec.key
-                return
-            end
-        end
-    end
-    -- Non-healer spec: clear so nothing is tracked
-    activeSpecKey_BM = nil
+    -- Locale-independent: resolve by spec ID. nil for any non-tracked spec, which
+    -- clears tracking so nothing is shown for non-healer/support specs.
+    activeSpecKey_BM = CurrentSpecKey()
 end
 
 DetectActiveSpecKey()
@@ -2086,20 +2101,13 @@ local selectedSpells = {}      -- temp table for creation spell selection
 local selectedType = "icon"
 
 local function AutoDetectSpec()
-    local _, classToken = UnitClass("player")
-    local specIdx = GetSpecialization and GetSpecialization()
-    local specName = specIdx and select(2, GetSpecializationInfo(specIdx))
+    -- Exact spec match (locale-independent, by spec ID).
+    local key = CurrentSpecKey()
+    if key then return key end
 
-    -- Try exact spec match
-    if classToken and specName then
-        local specLower = specName:lower()
-        for _, spec in ipairs(HEALER_SPECS) do
-            if spec.classToken == classToken and spec.name:lower():find(specLower) then
-                return spec.key
-            end
-        end
-    end
-    -- Try class match (pick first spec for that class)
+    -- Fallback for the options UI: pick the first tracked spec for the player's
+    -- class so a non-tracked spec (e.g. a DPS spec) still opens on something sane.
+    local _, classToken = UnitClass("player")
     if classToken then
         for _, spec in ipairs(HEALER_SPECS) do
             if spec.classToken == classToken then
