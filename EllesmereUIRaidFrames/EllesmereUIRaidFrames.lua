@@ -2312,10 +2312,21 @@ local function StyleButton(button)
     -- header's own attribute handlers; the helpers are referenced through ns
     -- because they are defined later in the file.
     button:HookScript("OnAttributeChanged", function(self, name)
-        if name ~= "unit" or not C_UnitAuras_AddPrivateAuraAnchor then return end
+        if name ~= "unit" then return end
         local u = self:GetAttribute("unit")
         if u and UnitExists(u) then
-            if ns._RegisterPrivateAuras then ns._RegisterPrivateAuras(self, u) end
+            -- Repaint + remap the instant the secure header (re)assigns this
+            -- button. OnAttributeChanged is the reliable per-button signal
+            -- (RebuildUnitMap is not -- see above), so a late assignment that
+            -- lands after the roster-timer rebuild already read the buttons can
+            -- never leave this one blank, nor route its live events to a stale
+            -- button, until the next roster change. Only fires for buttons whose
+            -- unit actually changed, so it stays bounded to the units that moved.
+            local d = GetFFD(self)
+            if d._isParty then ns._partyUnitToButton[u] = self else unitToButton[u] = self end
+            if ns._RefreshAssignedButton then ns._RefreshAssignedButton(self, u) end
+            if ns._UpdateButtonRange then ns._UpdateButtonRange(u, self) end
+            if C_UnitAuras_AddPrivateAuraAnchor and ns._RegisterPrivateAuras then ns._RegisterPrivateAuras(self, u) end
         elseif ns._UnregisterPrivateAuras then
             ns._UnregisterPrivateAuras(self)
         end
@@ -3723,6 +3734,22 @@ local function UpdateAllButtons()
     ns.ProfEnd("UpdateAllButtons", t0)
 end
 
+-- Full per-button refresh for a freshly (re)assigned unit. Mirrors the
+-- per-button work in UpdateAllButtons. Exposed on ns so the per-button
+-- OnAttributeChanged("unit") watch in StyleButton (created before these locals
+-- exist) can repaint a button the instant the secure header assigns it.
+ns._RefreshAssignedButton = function(button, unit)
+    if not GetFFD(button).styled then return end  -- not built yet; init paint handles it
+    UpdateButton(button)
+    UpdateDebuffs(button, unit)
+    UpdateDefensives(button, unit)
+    UpdateDispelBorder(button, unit)
+    UpdateReadyCheck(button, unit)
+    if ns.BM_UpdateIndicators then
+        ns.BM_UpdateIndicators(button, unit, db)
+    end
+end
+
 function ERF:UpdateAllFrames()
     UpdateAllButtons()
 end
@@ -4978,13 +5005,24 @@ local function UpdateVisibility()
     else
         visible = s.showWhenSolo
     end
+    local wasVisible = framesVisible
     framesVisible = visible
 
-    -- Update showSolo attribute on all headers
+    -- Update showSolo attribute on all headers, but ONLY when it actually
+    -- differs from the header's current value. Re-setting a SecureGroupHeader
+    -- attribute re-triggers Blizzard's full child re-process (re-sort/re-assign)
+    -- even when unchanged, so doing it every combat exit / visibility recompute
+    -- was a large needless secure-header spike. showWhenSolo is a static setting;
+    -- mirrors the needsHideShow guard in ApplySortToHeaders.
+    local wantSolo = s.showWhenSolo or false
     for _, hdr in ipairs(separatedHdrs) do
-        if hdr then hdr:SetAttribute("showSolo", s.showWhenSolo) end
+        if hdr and hdr:GetAttribute("showSolo") ~= wantSolo then
+            hdr:SetAttribute("showSolo", wantSolo)
+        end
     end
-    if ns._flatHeader then ns._flatHeader:SetAttribute("showSolo", s.showWhenSolo) end
+    if ns._flatHeader and ns._flatHeader:GetAttribute("showSolo") ~= wantSolo then
+        ns._flatHeader:SetAttribute("showSolo", wantSolo)
+    end
 
     if visible then
         containerFrame:Show()
@@ -4996,9 +5034,17 @@ local function UpdateVisibility()
         -- Per-unit events (UNIT_HEALTH, UNIT_AURA, etc.) kept buttons in
         -- sync during combat, so a full rebuild is only needed when the
         -- roster changed or we transition from hidden to visible.
-        local lightweight = ns._regenLightweight
-        ns._regenLightweight = nil
-        if not lightweight then
+        -- Heavy content rebuild ONLY when it could actually be stale: a real
+        -- hidden->visible transition (unitToButton was wiped on hide) or a
+        -- caller that flagged a roster/size change. Re-checking visibility while
+        -- already shown and unchanged skips the 40-button rebuild -- the live
+        -- per-unit events kept every button current the whole time. This
+        -- generalizes the old combat-exit "lightweight" skip to every caller
+        -- (preview restore, EnsureRealFramesRestored, etc.) so a redundant
+        -- visibility recompute can never trigger a full refresh spike.
+        local forceRebuild = ns._visForceRebuild
+        ns._visForceRebuild = nil
+        if (not wasVisible) or forceRebuild then
             RebuildUnitMap()
             if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
             UpdateAllButtons()
@@ -5020,6 +5066,51 @@ local function UpdateVisibility()
     end
 end
 ns.UpdateVisibility = UpdateVisibility
+
+-------------------------------------------------------------------------------
+--  Aura-storm throttle (UNIT_AURA only). Steady-state events process
+--  immediately; only a genuine single-frame flood (the pull-start/-end aura
+--  storm or a raid-wide aura event) spills the overflow into a drain ticker
+--  that processes a bounded number of units per frame, draining ~40 units in
+--  ~4 frames. The deferred path does a FULL current-state rescan (nil
+--  updateInfo), so it never replays a stale delta -- nothing is ever wrong or
+--  dropped, only shown a few frames later. Health, power, and the dispel
+--  border are NEVER throttled (own immediate paths), so death and dispel
+--  signals stay instant; only informational aura icons can briefly lag. State
+--  lives on ns (not file locals) to respect this file's Lua 5.1 local cap.
+-------------------------------------------------------------------------------
+ns._auraBudget = 10       -- units processed immediately per frame before spilling
+ns._auraFrameStamp = 0    -- GetTime() of the frame the immediate budget last reset
+ns._auraFrameN = 0        -- units processed immediately this frame
+ns._auraDirty = {}        -- [unit] = true: deferred, awaiting a full rescan
+ns._auraDirtyN = 0
+
+-- Full current-state aura refresh for one unit (deferred drain path; lossless
+-- because nil updateInfo forces each consumer's full-scan branch).
+ns._FlushUnitAuras = function(unit)
+    local btn = unitToButton[unit] or ns._partyUnitToButton[unit]
+    if not btn then return end
+    UpdateDebuffs(btn, unit)
+    UpdateDefensives(btn, unit)
+    UpdateAbsorb(btn, unit)
+    if ns.BM_UpdateIndicators then ns.BM_UpdateIndicators(btn, unit, db) end
+end
+
+ns._auraDrainFrame = CreateFrame("Frame")
+ns._auraDrainFrame:Hide()
+ns._auraDrainFrame:SetScript("OnUpdate", function(self)
+    local n = 0
+    for unit in pairs(ns._auraDirty) do
+        ns._auraDirty[unit] = nil
+        ns._auraDirtyN = ns._auraDirtyN - 1
+        ns._FlushUnitAuras(unit)
+        n = n + 1
+        if n >= ns._auraBudget then break end
+    end
+    -- Authoritative empty check (not the counter) so the OnUpdate always hides
+    -- when the backlog is drained, even if the count ever drifts.
+    if next(ns._auraDirty) == nil then ns._auraDirtyN = 0; self:Hide() end
+end)
 
 -------------------------------------------------------------------------------
 --  Event handlers
@@ -5050,9 +5141,11 @@ local function OnEvent(self, event, arg1, ...)
         end
         local rosterDirty = ns._rosterDirtyInCombat
         local sizeTierDirty = ns._sizeTierDirtyInCombat
-        -- Skip heavy refresh if roster didn't change during combat
-        if not rosterDirty and not sizeTierDirty then
-            ns._regenLightweight = true
+        -- Force the heavy refresh ONLY if the roster/size changed during combat.
+        -- Otherwise the live per-unit events kept buttons current and the
+        -- transition gate in UpdateVisibility skips the rebuild.
+        if rosterDirty or sizeTierDirty then
+            ns._visForceRebuild = true
         end
         ns._rosterDirtyInCombat = nil
         ns._sizeTierDirtyInCombat = nil
@@ -5156,17 +5249,39 @@ local function OnEvent(self, event, arg1, ...)
         end
         ns._rosterUpdateTimer = C_Timer.NewTimer(0, function()
             ns._rosterUpdateTimer = nil
+            -- Roster changed (out of combat). We never force UpdateVisibility's
+            -- full 40-button rebuild here. The per-button OnAttributeChanged hook
+            -- already fully repainted (incl. auras) every button whose unit was
+            -- (re)assigned, so a blanket aura re-scan x40 is redundant. React 
+            -- per-unit instead of rebuilding all. We still UpdateButton each visible
+            -- button (no aura rescan) so leader/role/marker/health for
+            -- UNCHANGED-token units stay correct -- e.g. a new leader after the
+            -- old one left, which keeps its token so the hook won't fire.
+            local numMembers = GetNumGroupMembers()
+            local newW, newH = ns._GetRaidSizeFrameDimensions(numMembers > 0 and numMembers or 1)
+            local tierChanged = (newW ~= ns._activeSizeW or newH ~= ns._activeSizeH)
+            local wasVis = framesVisible
+            ns._visForceRebuild = nil
             local t0 = ns.ProfBegin("Visibility:ROSTER"); UpdateVisibility(); ns.ProfEnd("Visibility:ROSTER", t0)
             ns._UpdatePartyVisibility()
             if framesVisible then
-                -- Check if group size crossed a tier boundary requiring resize
-                local numMembers = GetNumGroupMembers()
-                local newW, newH = ns._GetRaidSizeFrameDimensions(numMembers > 0 and numMembers or 1)
-                local oldW, oldH = ns._activeSizeW, ns._activeSizeH
-                if newW ~= oldW or newH ~= oldH then
-                    -- Tier changed: full reload (recalculates _activeSizeW/H)
+                if tierChanged then
+                    -- Tier changed: full reload (recalculates _activeSizeW/H, restyles).
                     ReloadFrames()
+                    if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
+                elseif not wasVis then
+                    -- Hidden->visible transition: UpdateVisibility already ran the
+                    -- full rebuild (RebuildUnitMap + UpdateAllButtons); just lay out.
+                    t0 = ns.ProfBegin("LayoutGroups:ROSTER"); LayoutGroups(); ns.ProfEnd("LayoutGroups:ROSTER", t0)
                 else
+                    -- Already visible, same tier: light refresh only. Aura
+                    -- full-rescans are intentionally skipped (hook + UNIT_AURA
+                    -- keep them current); UpdateButton keeps leader/role/health.
+                    RebuildUnitMap()
+                    if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
+                    for _, btn in ipairs(allButtons) do
+                        if btn:IsVisible() and btn:GetAttribute("unit") then UpdateButton(btn) end
+                    end
                     t0 = ns.ProfBegin("LayoutGroups:ROSTER"); LayoutGroups(); ns.ProfEnd("LayoutGroups:ROSTER", t0)
                 end
             end
@@ -5211,12 +5326,26 @@ local function OnEvent(self, event, arg1, ...)
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then
             local updateInfo = ...
-            local t0 = ns.ProfBegin("UpdateDebuffs"); UpdateDebuffs(btn, arg1, updateInfo); ns.ProfEnd("UpdateDebuffs", t0)
-            t0 = ns.ProfBegin("UpdateDefensives"); UpdateDefensives(btn, arg1, updateInfo); ns.ProfEnd("UpdateDefensives", t0)
-            t0 = ns.ProfBegin("UpdateDispelBorder"); UpdateDispelBorder(btn, arg1, updateInfo); ns.ProfEnd("UpdateDispelBorder", t0)
-            t0 = ns.ProfBegin("UpdateAbsorb:AURA"); UpdateAbsorb(btn, arg1); ns.ProfEnd("UpdateAbsorb:AURA", t0)
-            if ns.BM_UpdateIndicators then
-                t0 = ns.ProfBegin("BM_UpdateIndicators"); ns.BM_UpdateIndicators(btn, arg1, db, updateInfo); ns.ProfEnd("BM_UpdateIndicators", t0)
+            -- Dispel border is the dispel signal: never throttled, always now.
+            local t0 = ns.ProfBegin("UpdateDispelBorder"); UpdateDispelBorder(btn, arg1, updateInfo); ns.ProfEnd("UpdateDispelBorder", t0)
+            -- Informational aura icons: immediate under the per-frame budget; a
+            -- single-frame flood spills the overflow to the drain ticker, which
+            -- full-rescans current state a few frames later (lossless).
+            local now = GetTime()
+            if now ~= ns._auraFrameStamp then ns._auraFrameStamp = now; ns._auraFrameN = 0 end
+            if ns._auraFrameN < ns._auraBudget then
+                ns._auraFrameN = ns._auraFrameN + 1
+                if ns._auraDirty[arg1] then ns._auraDirty[arg1] = nil; ns._auraDirtyN = ns._auraDirtyN - 1 end
+                t0 = ns.ProfBegin("UpdateDebuffs"); UpdateDebuffs(btn, arg1, updateInfo); ns.ProfEnd("UpdateDebuffs", t0)
+                t0 = ns.ProfBegin("UpdateDefensives"); UpdateDefensives(btn, arg1, updateInfo); ns.ProfEnd("UpdateDefensives", t0)
+                t0 = ns.ProfBegin("UpdateAbsorb:AURA"); UpdateAbsorb(btn, arg1); ns.ProfEnd("UpdateAbsorb:AURA", t0)
+                if ns.BM_UpdateIndicators then
+                    t0 = ns.ProfBegin("BM_UpdateIndicators"); ns.BM_UpdateIndicators(btn, arg1, db, updateInfo); ns.ProfEnd("BM_UpdateIndicators", t0)
+                end
+            elseif not ns._auraDirty[arg1] then
+                ns._auraDirty[arg1] = true
+                ns._auraDirtyN = ns._auraDirtyN + 1
+                ns._auraDrainFrame:Show()
             end
         end
     elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" or event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED"
@@ -5848,8 +5977,13 @@ ns._UpdatePartyVisibility = function()
     ns._partyFramesVisible = visible
     if ns._NotifyTrackerProviders then ns._NotifyTrackerProviders() end
 
-    -- Update showSolo attribute
-    ns._partyHeader:SetAttribute("showSolo", s.partyShowWhenSolo or false)
+    -- Update showSolo attribute, but only when it changed -- re-setting a
+    -- SecureGroupHeader attribute re-triggers a full child re-process even when
+    -- unchanged (see UpdateVisibility's showSolo guard).
+    local wantPartySolo = s.partyShowWhenSolo or false
+    if ns._partyHeader and ns._partyHeader:GetAttribute("showSolo") ~= wantPartySolo then
+        ns._partyHeader:SetAttribute("showSolo", wantPartySolo)
+    end
 
     if visible then
         ns._partyHeader:Show()
