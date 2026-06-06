@@ -317,7 +317,7 @@ local playerRezSpell = REZ_SPELL_BY_CLASS[playerClassToken]
 -- Classes that use IsSpellInRange instead of UnitInRange for living units.
 -- These classes have shorter effective ranges that 43yd UnitInRange misrepresents.
 local FRIENDLY_SPELL_BY_CLASS = {
-    EVOKER = 355913,  -- Emerald Blossom (25yd)
+    EVOKER = 361469,  -- Living Flame (baseline all specs, unit-targeted friendly -> IsSpellInRange returns a real boolean; ~25yd, 30 talented). Emerald Blossom (355913) is a location/smart-heal whose IsSpellInRange can stay nil, which stranded Evoker frames at full alpha.
     ROGUE  = 36554,   -- Shadowstep (25yd)
 }
 local playerFriendlySpell = FRIENDLY_SPELL_BY_CLASS[playerClassToken]
@@ -4793,11 +4793,23 @@ local function UpdateButtonRange(unit, btn)
         ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
     elseif usesSpellRange then
         local r = C_Spell_IsSpellInRange(playerFriendlySpell, unit)
-        if r == true then ApplyRangeAlpha(btn, 1)
-        elseif r == false then ApplyRangeAlpha(btn, oorAlpha) end
-        -- r == nil: spell-range indeterminate; hold the last alpha rather than
-        -- falling back to the wider ~40yd UnitInRange, which would contradict
-        -- the 25yd spell range and flip the alpha (the old flicker source).
+        local d = GetFFD(btn)
+        if r == true then
+            ApplyRangeAlpha(btn, 1); d._rangeResolvedOnce = true
+        elseif r == false then
+            ApplyRangeAlpha(btn, oorAlpha); d._rangeResolvedOnce = true
+        elseif not d._rangeResolvedOnce then
+            -- First-ever eval is indeterminate (unit briefly untargetable / LOS,
+            -- or a client build where this spell can't be range-probed). Resolve
+            -- ONCE via the secret-safe ~40yd UnitInRange so the frame can never
+            -- strand at its seeded full alpha when the spell check never returns a
+            -- usable boolean.
+            d._rangeResolvedOnce = true
+            ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
+        end
+        -- r == nil after a prior resolution: hold the last alpha rather than
+        -- re-consulting the wider ~40yd UnitInRange every tick, which would
+        -- contradict the spell range and flip the alpha (the old flicker source).
     else
         ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
     end
@@ -4818,6 +4830,7 @@ local function RefineButtonRange(unit, btn)
         UpdateButtonRange(unit, btn)
     elseif d._rangeWasDead then
         d._rangeWasDead = nil
+        d._rangeResolvedOnce = nil   -- re-resolve cleanly after a revive
         UpdateButtonRange(unit, btn)
     elseif usesSpellRange then
         UpdateButtonRange(unit, btn)

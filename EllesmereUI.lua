@@ -3471,6 +3471,20 @@ if not EllesmereUI.ResolveThemeColor then
 end
 
 -------------------------------------------------------------------------------
+--  Lazy-load stub: GetActiveTheme
+--  Same reason as the ResolveThemeColor stub above: the real GetActiveTheme
+--  lives in the deferred Widgets body (runs only on EnsureLoaded), so any caller
+--  before options are first opened -- e.g. raid-frame health-text accent color on
+--  the post-login party/raid update -- would call a nil value. Identical body to
+--  the Widgets version; the full version harmlessly replaces this on EnsureLoaded.
+-------------------------------------------------------------------------------
+if not EllesmereUI.GetActiveTheme then
+    EllesmereUI.GetActiveTheme = function()
+        return EllesmereUIDB and EllesmereUIDB.activeTheme or "EllesmereUI"
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Lazy-load stub: ResolveActiveAccent
 --  Minimal version used by PLAYER_LOGIN before the (deferred) Widgets file
 --  initializes. The whole Widgets body runs only on EnsureLoaded(), so the
@@ -8165,7 +8179,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.0.3"
+EllesmereUI.VERSION = "8.0.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

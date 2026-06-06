@@ -266,12 +266,33 @@ ns.CC_ParseKeyString = ParseKeyString
 -- bindings don't consume keypresses while dragonriding or in vehicles.
 local MOUNT_GUARD = ",nomounted,noflying"
 
+-- Resolve a spell binding to its BASE spell NAME so the cast survives talent /
+-- hero-talent / proc overrides. Example: a Chronowarden binds "Chrono Flames"
+-- (a hero-talent override of Living Flame). Casting the BASE "Living Flame"
+-- works in every spec -- the game auto-resolves it to whatever override is
+-- currently active (Chrono Flames here) -- whereas "/cast Chrono Flames" fails
+-- in a spec that lacks that override. Same for proc overrides (a spell bound
+-- while a proc like Mathias's Blessing is up captures the proc form). Resolution
+-- is by the stored spellID, so it repairs both existing and new bindings without
+-- rewriting saved data. The binding still DISPLAYS the name the user picked.
+local function ResolveCastSpellName(binding)
+    local id = binding.spellID
+    if type(id) == "number" and id > 0 and C_Spell and C_Spell.GetBaseSpell then
+        local baseId = C_Spell.GetBaseSpell(id)
+        if type(baseId) == "number" and baseId > 0 and baseId ~= id then
+            local n = C_Spell.GetSpellName and C_Spell.GetSpellName(baseId)
+            if n then return n end
+        end
+    end
+    return binding.spell
+end
+
 local function BuildMacroText(binding)
     local isHC = binding.hovercast
     local guard = isHC and MOUNT_GUARD or ""
 
     if binding.type == "spell" then
-        local name = binding.spell
+        local name = ResolveCastSpellName(binding)
         if not name then return nil end
         local conds = {}
         if isHC then
@@ -670,7 +691,7 @@ local function ResolveBinding(b)
     end
 
     if b.type == "spell" then
-        return "spell", b.spell, nil
+        return "spell", ResolveCastSpellName(b), nil
     elseif b.type == "macro" then
         local macroName = b.macroName
         if macroName then
