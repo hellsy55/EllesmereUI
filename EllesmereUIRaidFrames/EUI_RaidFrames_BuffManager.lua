@@ -26,6 +26,7 @@ local issecretvalue = issecretvalue
 local C_UnitAuras   = C_UnitAuras
 local C_Spell       = C_Spell
 local UnitExists    = UnitExists
+local UnitIsUnit    = UnitIsUnit
 
 local MAX_PER_SPEC = 20
 
@@ -217,6 +218,7 @@ local HEALER_SPECS = {
             { id = 410686, name = "Symbiotic Bloom" },
             { id = 395152, name = "Ebon Might" },
             { id = 369459, name = "Source of Magic" },
+            { id = 361022, name = "Sense Power", secret = true, sig = "0:1:0:0" },
         },
     },
 }
@@ -231,6 +233,17 @@ for _, spec in ipairs(HEALER_SPECS) do
     if spec.specID then SPEC_BY_ID[spec.specID] = spec end
 end
 
+-- Non-healer specs that can still cast a tracked buff. They reuse another spec's
+-- indicator placements (source) but only ever display the listed spells. Earth
+-- Shield is castable by every Shaman spec, so Enhancement and Elemental borrow
+-- Restoration's setup and show only Earth Shield -- exactly where the player
+-- positioned Restoration's Earth Shield indicator. Keyed by spec ID; spells is a
+-- set keyed by the primary spell ID indicators reference (974).
+local BORROW_SPECS = {
+    [262] = { source = "SHAMAN_RESTORATION", spells = { [974] = true } }, -- Elemental
+    [263] = { source = "SHAMAN_RESTORATION", spells = { [974] = true } }, -- Enhancement
+}
+
 -- Resolve the player's CURRENT spec to a BM spec key. This MUST be done by spec
 -- ID, never by spec name: GetSpecializationInfo() returns the spec ID (a stable,
 -- non-localized number) as its first value and the LOCALIZED display name as its
@@ -242,7 +255,12 @@ local function CurrentSpecKey()
     local specIdx = GetSpecialization and GetSpecialization()
     if not specIdx then return nil end
     local specID = GetSpecializationInfo and GetSpecializationInfo(specIdx)
-    local spec = specID and SPEC_BY_ID[specID]
+    if not specID then return nil end
+    -- Borrow specs (Enh/Ele) resolve to the spec whose indicators they reuse, so
+    -- the options page and lookup tables operate on that shared configuration.
+    local borrow = BORROW_SPECS[specID]
+    if borrow then return borrow.source end
+    local spec = SPEC_BY_ID[specID]
     return spec and spec.key or nil
 end
 ns.BM_CurrentSpecKey = CurrentSpecKey
@@ -342,11 +360,20 @@ end
 -- same class causes cross-spec bleed (e.g. Disc seeing Holy indicators).
 -- Also prevents cross-class signature collisions for secret aura fingerprinting.
 local activeSpecKey_BM = nil
+-- When the active spec borrows another's indicators (Enh/Ele -> Resto), this
+-- holds that borrow config so tracking can be restricted to the borrowed spells.
+local activeBorrow_BM = nil
 
 local function DetectActiveSpecKey()
     -- Locale-independent: resolve by spec ID. nil for any non-tracked spec, which
     -- clears tracking so nothing is shown for non-healer/support specs.
     activeSpecKey_BM = CurrentSpecKey()
+    -- Resolve the borrow config (Enh/Ele Shaman) so RebuildLookup can limit the
+    -- borrowed spec's indicators to the spells this spec can actually cast.
+    activeBorrow_BM = nil
+    local specIdx = GetSpecialization and GetSpecialization()
+    local specID  = specIdx and GetSpecializationInfo and GetSpecializationInfo(specIdx)
+    if specID then activeBorrow_BM = BORROW_SPECS[specID] end
 end
 
 DetectActiveSpecKey()
@@ -358,6 +385,10 @@ local function MatchSecretAura(unit, instanceID)
     local sigs = GetSpecSignatures(activeSpecKey_BM)
     local sid = sigs[sig]
     if sid and trackedSpellIDs[sid] then
+        -- Sense Power (361022) and the Evoker's own Ebon Might self-buff share
+        -- the 0:1:0:0 fingerprint. Sense Power only lands on allies, never the
+        -- caster, so never report it on the player's own frame.
+        if sid == 361022 and UnitIsUnit(unit, "player") then return nil end
         return sid
     end
     return nil
@@ -372,6 +403,7 @@ local function MatchSecretAuraSimple(unit, instanceID)
     local sigs = GetSpecSignatures(activeSpecKey_BM)
     local sid = sigs[sig]
     if sid and simpleTrackedSpellIDs[sid] then
+        if sid == 361022 and UnitIsUnit(unit, "player") then return nil end
         return sid
     end
     return nil
@@ -392,6 +424,7 @@ local SECRET_SPELL_ICONS = {
     [431381] = 5927633,  -- Dawnlight
     [357170] = 4630500,  -- Time Dilation
     [363534] = 4630498,  -- Rewind
+    [361022] = 132160,   -- Sense Power
 
 }
 
@@ -526,7 +559,7 @@ local DEFAULT_INDICATORS = {
     },
     EVOKER_AUGMENTATION = {
         { pos = "TOPLEFT",  spells = { 410089, 360827, 369459 } },             -- Prescience, Blistering Scales, Source of Magic
-        { pos = "TOPRIGHT", spells = { 413984, 410263, 410686, 395152 } },     -- Shifting Sands, Infernos Blessing, Symbiotic Bloom, Ebon Might
+        { pos = "TOPRIGHT", spells = { 413984, 410263, 410686, 395152, 361022 } }, -- Shifting Sands, Infernos Blessing, Symbiotic Bloom, Ebon Might, Sense Power
     },
 }
 
@@ -585,11 +618,16 @@ local function RebuildLookup(db)
                 if ind.enabled and ind.spells then
                     allActiveIndicators[#allActiveIndicators + 1] = ind
                     for _, sid in ipairs(ind.spells) do
-                        trackedSpellIDs[sid] = true
-                        if not spellToIndicators[sid] then
-                            spellToIndicators[sid] = {}
+                        -- Borrow specs (Enh/Ele) only track the spells they can
+                        -- cast; the borrowed spec's other indicators stay inert
+                        -- (never match an aura) so nothing else shows.
+                        if (not activeBorrow_BM) or activeBorrow_BM.spells[sid] then
+                            trackedSpellIDs[sid] = true
+                            if not spellToIndicators[sid] then
+                                spellToIndicators[sid] = {}
+                            end
+                            tinsert(spellToIndicators[sid], ind)
                         end
-                        tinsert(spellToIndicators[sid], ind)
                     end
                 end
             end
@@ -606,9 +644,13 @@ local function RebuildLookup(db)
 
     -- Simple Setup whitelist: every non-hidden spell of the active spec,
     -- regardless of indicators (hidden entries are alternate IDs resolved via
-    -- PRIMARY_BY_ALT during the scan).
+    -- PRIMARY_BY_ALT during the scan). Borrow specs show only the borrowed spells.
     wipe(simpleTrackedSpellIDs)
-    if activeSpecKey_BM then
+    if activeBorrow_BM then
+        for sid in pairs(activeBorrow_BM.spells) do
+            simpleTrackedSpellIDs[sid] = true
+        end
+    elseif activeSpecKey_BM then
         local spec = SPEC_BY_KEY[activeSpecKey_BM]
         if spec then
             for _, spell in ipairs(spec.spells) do
@@ -1842,7 +1884,9 @@ local previewSpellIcons = {}
 local function GetSpellIcon(spellID)
     if previewSpellIcons[spellID] then return previewSpellIcons[spellID] end
     local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellID)
-    local icon = info and info.iconID or 136243
+    -- Secret auras (e.g. Sense Power) often have no resolvable spell-info icon;
+    -- fall back to the known fingerprint icon before the generic question mark.
+    local icon = (info and info.iconID) or SECRET_SPELL_ICONS[spellID] or 136243
     previewSpellIcons[spellID] = icon
     return icon
 end
