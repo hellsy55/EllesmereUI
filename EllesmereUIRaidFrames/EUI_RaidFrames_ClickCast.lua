@@ -156,6 +156,14 @@ local function GetClickCastDB()
     return cc
 end
 
+-- Exposed for the suite conflict check (EllesmereUI._RunConflictCheck): true when
+-- HoverCast / click-casting is currently enabled. Read on demand (the conflict
+-- check runs once at login); not relied on to update dynamically.
+_G._ERF_IsHoverCastEnabled = function()
+    local cc = GetClickCastDB()
+    return (cc and cc.enabled) or false
+end
+
 local function GetCurrentSpecID()
     local idx = GetSpecialization()
     return idx and (GetSpecializationInfo(idx)) or nil
@@ -718,6 +726,25 @@ end
 -------------------------------------------------------------------------------
 local wrappedFrames = {}
 local externalFrames = {}
+local ccHookInstalled = false
+
+-- Clique interop. When EUI click-casting is OFF we hand our frames to Clique (or
+-- any other ClickCastFrames consumer) by adding them to the global table, and we
+-- never touch the frame's own click attributes -- so the right-click context menu
+-- stays exactly as Blizzard set it (Clique only rebinds clicks the user bound in
+-- their own Clique profile). These are no-ops once OUR proxy owns the global table
+-- (click-casting enabled), because then EUI manages these frames itself.
+local function AddFrameToClickCast(frame)
+    if ccHookInstalled or not frame then return end
+    if type(ClickCastFrames) ~= "table" then ClickCastFrames = {} end
+    if ClickCastFrames[frame] == nil then ClickCastFrames[frame] = true end
+end
+local function RemoveFrameFromClickCast(frame)
+    if ccHookInstalled or not frame then return end
+    if type(ClickCastFrames) == "table" and ClickCastFrames[frame] then
+        ClickCastFrames[frame] = nil  -- tells Clique to drop its bindings
+    end
+end
 
 local function GetClickDirection()
     local cc = GetClickCastDB()
@@ -807,7 +834,15 @@ function ns.CC_RegisterFrame(frame)
     -- not touch the frame's click behavior while disabled.
     ownedFrames[frame] = true
     local cc = GetClickCastDB()
-    if not (cc and cc.enabled) then return end
+    if not (cc and cc.enabled) then
+        -- EUI click-casting is OFF: defer to Clique by registering the frame in
+        -- the global ClickCastFrames table. We do NOT alter the frame's own click
+        -- attributes here, so the right-click context menu stays Blizzard-default
+        -- unless the user's Clique profile rebinds it. (Restores Clique support
+        -- that the "touch zero frames while disabled" guard removed.)
+        AddFrameToClickCast(frame)
+        return
+    end
     if not ccInitialized then tinsert(regQueue, frame); return end
     if InCombatLockdown() then tinsert(regQueue, frame); return end
     DoRegisterFrame(frame)
@@ -875,7 +910,6 @@ end
 -------------------------------------------------------------------------------
 --  ClickCastFrames hook
 -------------------------------------------------------------------------------
-local ccHookInstalled = false
 local function SetupClickCastFramesHook()
     -- Install exactly once, and only after the user enables click-casting (see
     -- CC_Init / CC_SetEnabled). A never-enabled install would leave a fresh
@@ -1226,6 +1260,10 @@ function ns.CC_SetEnabled(enabled)
     if not ccInitialized then return end
     if InCombatLockdown() then pendingSetEnabled = enabled; pendingApply = true; return end
     if enabled then
+        -- Hand our frames back from Clique before we take them over, so Clique
+        -- drops its bindings and we do not double-bind. Must run BEFORE the proxy
+        -- replaces the global table (RemoveFrameFromClickCast no-ops once it has).
+        for frame in pairs(ownedFrames) do RemoveFrameFromClickCast(frame) end
         SetupClickCastFramesHook()
         -- Register owned EUI frames.
         for frame in pairs(ownedFrames) do
@@ -2813,13 +2851,26 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
         centerY = centerY - secH
     end
 
-    -- Row 1: Enable Click Casting (always interactive -- everything else gates on it)
+    -- Row 1: Enable Click Casting (everything else gates on it). Disabled while the
+    -- Clique addon is loaded -- Clique and HoverCast both bind click-casting on the
+    -- same frames and cannot coexist. Clique's loaded state cannot change without a
+    -- /reload, so this one-time check is authoritative for the whole session.
     do
         local row = MakeRow(centerY)
-        RowLabel(row, "Enable Click Casting")
-        RowToggle(row,
+        local lbl = RowLabel(row, "Enable Click Casting")
+        local pill = RowToggle(row,
             function() return cc.enabled end,
             function(v) ns.CC_SetEnabled(v); EllesmereUI:RefreshPage(true) end)
+        local cliqueLoaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("Clique")
+        if cliqueLoaded then
+            lbl:SetAlpha(0.4)
+            pill:SetAlpha(0.3)
+            pill:SetScript("OnClick", nil)  -- non-interactive while Clique owns clicks
+            pill:SetScript("OnEnter", function(self)
+                EllesmereUI.ShowWidgetTooltip(self, 'Please disable the addon "Clique" to use this feature.')
+            end)
+            pill:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+        end
         centerY = centerY - ROW_H
     end
 

@@ -8165,7 +8165,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.0"
+EllesmereUI.VERSION = "8.0.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -8336,6 +8336,13 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "DandersFrames",            label = "Danders Frames",             targets = { "EllesmereUIRaidFrames" } },
             { addon = "HarreksAdvancedRaidFrames", label = "Harreks Advanced Raid Frames", targets = { "EllesmereUIRaidFrames" } },
             { addon = "Grid2",                    label = "Grid2",                      targets = { "EllesmereUIRaidFrames" } },
+            -- Clique is special: it only conflicts when Raid Frames is enabled AND
+            -- HoverCast (click-casting) is turned on -- with HoverCast off, Clique
+            -- coexists fine (it owns the frames). targets handles the RF-enabled
+            -- check; moduleCheck adds the HoverCast-enabled check.
+            { addon = "Clique",                   label = "Clique",                     targets = { "EllesmereUIRaidFrames" },
+              moduleCheck = function() return _G._ERF_IsHoverCastEnabled and _G._ERF_IsHoverCastEnabled() end,
+              message = "Clique controls click-casting on the same Raid Frames as EllesmereUI's HoverCast, so they conflict. Disable the Clique addon to use HoverCast." },
             { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. If you ONLY use for sound alerts it should be okay but may still cause issues." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
             { addon = "Dominos",                  label = "Dominos",                    targets = { "EllesmereUIActionBars" } },
