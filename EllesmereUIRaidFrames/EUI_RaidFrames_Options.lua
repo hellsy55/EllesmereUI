@@ -1868,7 +1868,13 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="slider", text="Out of Range Alpha", min=10, max=100, step=1,
               getValue=function() return floor((SVal("oorAlpha", 0.4)) * 100) end,
-              setValue=function(v) SSet("oorAlpha", v / 100) end },
+              setValue=function(v)
+                  SSet("oorAlpha", v / 100)
+                  -- Re-apply range alpha live: SetAlphaFromBoolean bakes the value
+                  -- in at call time, so already-OOR units keep the old alpha until
+                  -- a range re-eval. Seed all buttons so the slider takes effect now.
+                  if ns._RangeSeedAll then ns._RangeSeedAll() end
+              end },
             { type="toggle", text="Show Tooltip",
               getValue=function() return SVal("showTooltip", true) end,
               setValue=function(v) SSet("showTooltip", v) end });  y = y - h

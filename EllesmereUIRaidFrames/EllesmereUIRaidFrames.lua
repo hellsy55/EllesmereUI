@@ -1019,7 +1019,8 @@ local function GetHealthColor(unit, s)
         return c.r, c.g, c.b
     else -- "class"
         local _, classToken = UnitClass(unit)
-        if classToken then
+        -- Secret-safe: a secret classToken would throw on GetClassColor's table index.
+        if classToken and not issecretvalue(classToken) then
             local cc = EllesmereUI.GetClassColor(classToken)
             if cc then return cc.r, cc.g, cc.b end
         end
@@ -2440,9 +2441,15 @@ local function UpdateButton(button)
             d.bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
             d.bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
         else
-            -- Full bar background
+            -- BG only covers the missing-health portion (anchored to the fill's
+            -- right edge), never behind the fill. A full-width bg behind the fill
+            -- bleeds through when the range fade's secret alpha under-renders the
+            -- fill -> the OOR "blend". This matches oUF/ElvUI and EUI's Dark mode,
+            -- so OOR fades cleanly to the world like ElvUI (in and out of combat).
+            -- For an opaque fill this is visually identical in range.
             d.bg:ClearAllPoints()
-            d.bg:SetAllPoints()
+            d.bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+            d.bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
             local bgc = s.customBgColor
             d.bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
         end
@@ -4806,7 +4813,11 @@ end
 -- UNIT_IN_RANGE_UPDATE event, the refiner poll, the seed pass, and roster
 -- assignment. Standard living units take the secret-safe UnitInRange path.
 local function UpdateButtonRange(unit, btn)
-    local oorAlpha = db.profile.oorAlpha or 0.4
+    -- Read oorAlpha through the party-aware proxy so a custom party_oorAlpha
+    -- actually applies to party frames (was reading the raid value directly).
+    local rd = GetFFD(btn)
+    local rs = rd._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local oorAlpha = rs.oorAlpha or 0.4
     if UnitIsUnit(unit, "player") or not UnitExists(unit) then
         ApplyRangeAlpha(btn, 1)
     elseif UnitPhaseReason and UnitPhaseReason(unit) then
