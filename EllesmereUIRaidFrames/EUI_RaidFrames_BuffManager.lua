@@ -467,6 +467,7 @@ local function NewIndicator(indType, spells)
         ind.iconOpacity      = 100
         ind.indBorderSize    = 1
         ind.indBorderColor   = { r = 0, g = 0, b = 0 }
+        ind.hideIcon         = false
         ind.growDirection    = "RIGHT"
         ind.spacing          = 0
     elseif indType == "square" then
@@ -741,13 +742,13 @@ function ns.BM_CreateIndicators(button, health, d, PP)
 
         local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1, -1)
-        countFS:SetFont(fontPath, 8, "OUTLINE")
+        countFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
         countFS:SetTextColor(1, 1, 1)
         f._count = countFS
 
         local durFS = textCarrier:CreateFontString(nil, "OVERLAY")
         durFS:SetPoint("CENTER", f, "CENTER", 0, 0)
-        durFS:SetFont(fontPath, 8, "OUTLINE")
+        durFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
         durFS:SetTextColor(1, 1, 1)
         durFS:Hide()
         f._durText = durFS
@@ -1185,7 +1186,7 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
                         local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                         if cdText then
                             local dtc = bs.durTextColor or { r = 1, g = 1, b = 1 }
-                            cdText:SetFont(fp, bs.durTextSize or 8, "OUTLINE")
+                            cdText:SetFont(fp, bs.durTextSize or 8, "OUTLINE, SLUG")
                             cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                             cdText:ClearAllPoints()
                             cdText:SetPoint("CENTER", icon, "CENTER", bs.durTextOffsetX or 0, bs.durTextOffsetY or 0)
@@ -1518,14 +1519,19 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 local sOX = (ind.stacksOffsetX or 0) * iscale
                                 local sOY = (ind.stacksOffsetY or 0) * iscale
                                 local fontPath3 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                f._count:SetFont(fontPath3, sSz, "OUTLINE")
+                                f._count:SetFont(fontPath3, sSz, "OUTLINE, SLUG")
                                 f._count:SetTextColor(sc2.r, sc2.g, sc2.b)
                                 f._count:ClearAllPoints()
                                 f._count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1 + sOX, -1 + sOY)
                             end
 
+                            -- "Hide Icons" (icon type only) forces the icon
+                            -- texture, border, and duration swipe off, leaving
+                            -- just the stack count. Overrides the per-indicator
+                            -- opacity/border/swipe inputs below.
+                            local hideIcon = (indType == "icon") and ind.hideIcon == true
                             -- Icon opacity (affects texture + swipe, not text)
-                            local iconAlpha = (ind.iconOpacity or 100) / 100
+                            local iconAlpha = hideIcon and 0 or (ind.iconOpacity or 100) / 100
 
                             if indType == "icon" then
                                 local icon = aura.icon
@@ -1537,7 +1543,10 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 f._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                                 f._tex:SetVertexColor(1, 1, 1, iconAlpha)
                             else -- square
-                                local c = ind.color or { r=0, g=1, b=0 }
+                                -- Per-ability color: this spell's own color, falling
+                                -- back to the legacy single ind.color, then default.
+                                local c = (ind.spellColors and ind.spellColors[sid])
+                                    or ind.color or { r=0, g=1, b=0 }
                                 f._tex:SetColorTexture(c.r, c.g, c.b, iconAlpha)
                                 f._tex:SetTexCoord(0, 1, 0, 1)
                             end
@@ -1554,7 +1563,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
 
                             -- Indicator border
                             if f._bdr and PP then
-                                local ibs = ind.indBorderSize or 1
+                                local ibs = hideIcon and 0 or (ind.indBorderSize or 1)
                                 if ibs > 0 then
                                     local ibc = ind.indBorderColor or { r=0, g=0, b=0 }
                                     PP.UpdateBorder(f._bdr, ibs, ibc.r, ibc.g, ibc.b, 1)
@@ -1566,8 +1575,11 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
 
                             -- Duration swipe + text (secret-safe via DurationObject + GetCountdownFontString)
                             if f._cooldown then
-                                f._cooldown:SetAlpha(iconAlpha)
-                                local wantSwipe = ind.showDuration ~= false
+                                -- Hide Icons zeroes the icon texture but keeps the
+                                -- cooldown layer at full alpha so the duration text
+                                -- still shows; only the swipe is forced off below.
+                                f._cooldown:SetAlpha(hideIcon and 1 or iconAlpha)
+                                local wantSwipe = (not hideIcon) and (ind.showDuration ~= false)
                                 local wantDurText = ind.showDurationText
                                 if wantSwipe or wantDurText then
                                     local iid = aura.auraInstanceID
@@ -1592,7 +1604,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                         if cdText then
                                             local tc = ind.durationTextColor or { r=1, g=1, b=1 }
                                             local fontPath2 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                            cdText:SetFont(fontPath2, ind.durationTextSize or 8, "OUTLINE")
+                                            cdText:SetFont(fontPath2, ind.durationTextSize or 8, "OUTLINE, SLUG")
                                             cdText:SetTextColor(tc.r, tc.g, tc.b)
                                             cdText:ClearAllPoints()
                                             cdText:SetPoint("CENTER", f, "CENTER", ind.durationTextOffsetX or 0, ind.durationTextOffsetY or 0)
@@ -1817,13 +1829,13 @@ function ns.BM_CreatePreviewIndicators(f, health, PP)
         local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", fr, "BOTTOMRIGHT", 1, -1)
         local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-        countFS:SetFont(fontPath, 8, "OUTLINE")
+        countFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
         countFS:SetTextColor(1, 1, 1)
         fr._count = countFS
 
         local durFS = textCarrier:CreateFontString(nil, "OVERLAY")
         durFS:SetPoint("CENTER", fr, "CENTER", 0, 0)
-        durFS:SetFont(fontPath, 8, "OUTLINE")
+        durFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
         durFS:SetTextColor(1, 1, 1)
         durFS:Hide()
         fr._durText = durFS
@@ -2044,7 +2056,11 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                     end
                                     fr:SetPoint(ind.position or "TOPLEFT", health, ind.position or "TOPLEFT",
                                                 (ind.offsetX or 0) * iscale + gx, (ind.offsetY or 0) * iscale + gy)
-                                    local pvAlpha = (ind.iconOpacity or 100) / 100
+                                    -- "Hide Icons" (icon type only): keep the frame
+                                    -- alpha (so the stack count still previews) but
+                                    -- zero the icon texture, swipe, and border below.
+                                    local pvHideIcon = (indType == "icon") and ind.hideIcon == true
+                                    local pvAlpha = pvHideIcon and 1 or (ind.iconOpacity or 100) / 100
                                     if ns._bmAllIndicatorsVisible then
                                         pvAlpha = 1
                                     elseif not isSelected then
@@ -2054,9 +2070,12 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                     if indType == "icon" then
                                         fr._tex:SetTexture(GetSpellIcon(sid))
                                         fr._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                                        fr._tex:SetVertexColor(1, 1, 1)
+                                        fr._tex:SetVertexColor(1, 1, 1, pvHideIcon and 0 or 1)
                                     else
-                                        local c = ind.color or { r=0, g=1, b=0 }
+                                        -- Per-ability color (preview): this spell's
+                                        -- color, then legacy ind.color, then default.
+                                        local c = (ind.spellColors and ind.spellColors[sid])
+                                            or ind.color or { r=0, g=1, b=0 }
                                         fr._tex:SetColorTexture(c.r, c.g, c.b, 1)
                                         fr._tex:SetTexCoord(0, 1, 0, 1)
                                     end
@@ -2068,7 +2087,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                         local sOX = (ind.stacksOffsetX or 0) * iscale
                                         local sOY = (ind.stacksOffsetY or 0) * iscale
                                         local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                        fr._count:SetFont(fp, sSz, "OUTLINE")
+                                        fr._count:SetFont(fp, sSz, "OUTLINE, SLUG")
                                         fr._count:SetTextColor(sc.r, sc.g, sc.b)
                                         fr._count:ClearAllPoints()
                                         fr._count:SetPoint("BOTTOMRIGHT", fr, "BOTTOMRIGHT", 1 + sOX, -1 + sOY)
@@ -2090,13 +2109,15 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                             local dur = 3600
                                             local elapsed = dur * (1 - seed)
                                             fr._cooldown:SetCooldown(now - elapsed, dur)
-                                            fr._cooldown:SetDrawSwipe(ind.showDuration ~= false)
+                                            fr._cooldown:SetDrawSwipe((not pvHideIcon) and (ind.showDuration ~= false))
                                             fr._cooldown:SetHideCountdownNumbers(true)
-                                            -- Manual duration text (static, not countdown)
+                                            -- Manual duration text (static, not countdown).
+                                            -- Stays visible under Hide Icons (frame alpha is
+                                            -- kept; only the icon texture/swipe are zeroed).
                                             if ind.showDurationText and fr._durText then
                                                 local dtc = ind.durationTextColor or { r=1, g=1, b=1 }
                                                 local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                                fr._durText:SetFont(fp, ind.durationTextSize or 8, "OUTLINE")
+                                                fr._durText:SetFont(fp, ind.durationTextSize or 8, "OUTLINE, SLUG")
                                                 fr._durText:SetTextColor(dtc.r, dtc.g, dtc.b)
                                                 fr._durText:ClearAllPoints()
                                                 fr._durText:SetPoint("CENTER", fr, "CENTER",
@@ -2113,7 +2134,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                         end
                                     end
                                     if fr._bdr and PP then
-                                        local ibs = ind.indBorderSize or 1
+                                        local ibs = pvHideIcon and 0 or (ind.indBorderSize or 1)
                                         if ibs > 0 then
                                             local ibc = ind.indBorderColor or { r=0, g=0, b=0 }
                                             PP.UpdateBorder(fr._bdr, ibs, ibc.r, ibc.g, ibc.b, 1)
@@ -2450,7 +2471,7 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
                         local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                         if cdText then
                             local dtc = bs.durTextColor or { r=1, g=1, b=1 }
-                            cdText:SetFont(fontPath, bs.durTextSize or 8, "OUTLINE")
+                            cdText:SetFont(fontPath, bs.durTextSize or 8, "OUTLINE, SLUG")
                             cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                             cdText:ClearAllPoints()
                             cdText:SetPoint("CENTER", icon, "CENTER", bs.durTextOffsetX or 0, bs.durTextOffsetY or 0)
@@ -4118,11 +4139,14 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                   setValue=function(v) ind.spacing = v; ReloadAndUpdate() end })
 
             -- Row 2: Opacity | Border (+ inline color swatch)
+            local IconHidden = function() return indType == "icon" and ind.hideIcon == true end
             local bdrRow = SettingsRow(
                 { type="slider", text="Opacity", min=0, max=100, step=1, trackWidth=120,
+                  disabled=IconHidden, disabledTooltip="Hide Icons",
                   getValue=function() return ind.iconOpacity or 100 end,
                   setValue=function(v) ind.iconOpacity = v; ReloadAndUpdate() end },
                 { type="slider", text="Border", min=0, max=4, step=1, trackWidth=120,
+                  disabled=IconHidden, disabledTooltip="Hide Icons",
                   getValue=function() return ind.indBorderSize or 1 end,
                   setValue=function(v) ind.indBorderSize = v; ReloadAndUpdate() end })
             -- Inline swatch for border color
@@ -4145,6 +4169,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             -- Duration Swipe | Duration Text (+ swatch + cog)
             local durRow = SettingsRow(
                 { type="toggle", text="Duration Swipe",
+                  disabled=IconHidden, disabledTooltip="Hide Icons",
                   getValue=function() return ind.showDuration ~= false end,
                   setValue=function(v) ind.showDuration = v; ReloadAndUpdate() end },
                 { type="toggle", text="Duration Text",
@@ -4193,12 +4218,16 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
             end
 
-            -- Row 4: Show Stacks (+ swatch + cog) | Color (square only)
+            -- Row 4: Show Stacks (+ swatch + cog) | Color (square only) / Hide Icons (icon only)
             local stacksRow = SettingsRow(
                 { type="toggle", text="Show Stacks",
                   getValue=function() return ind.showStacks ~= false end,
                   setValue=function(v) ind.showStacks = v; ReloadAndUpdate() end },
-                (indType == "square") and { type="label", text="Color" } or { type="label", text="" })
+                (indType == "square") and { type="label", text="Colors" }
+                  or { type="toggle", text="Hide Icons",
+                       tooltip="Hide the icon texture, border, and duration swipe, leaving only the stack count. Forces icon opacity, border, and duration swipe off.",
+                       getValue=function() return ind.hideIcon == true end,
+                       setValue=function(v) ind.hideIcon = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end })
             -- Inline swatch for stacks color
             do
                 local rgn = stacksRow._leftRegion
@@ -4252,21 +4281,43 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 EllesmereUI.RegisterWidgetRefresh(UpdateStacksCog)
                 UpdateStacksCog()
             end
-            -- Color swatch in the right slot of the Show Stacks row (square only)
+            -- Per-ability color swatches in the right slot (square only). Each
+            -- ability in the group gets its own swatch (tooltip = ability name).
+            -- Abilities without a per-spell color fall back to the legacy single
+            -- ind.color, then the default. Laid out right-to-left like every other
+            -- inline swatch row; the first ability's swatch sits at the right edge.
             if indType == "square" then
                 local rgn = stacksRow._rightRegion
-                local swatch = EllesmereUI.BuildColorSwatch(
-                    rgn, stacksRow:GetFrameLevel() + 3,
-                    function()
-                        local c = ind.color or { r=0.05, g=0.82, b=0.62 }
-                        return c.r, c.g, c.b, 1
-                    end,
-                    function(r, g, b)
-                        ind.color = { r=r, g=g, b=b }
-                        ReloadAndUpdate()
-                    end, false, 20)
-                swatch:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
-                rgn._lastInline = swatch
+                local DEFAULT_SQ = { r=0.05, g=0.82, b=0.62 }
+                local prev = nil
+                for _, sid in ipairs(ind.spells or {}) do
+                    local mySid = sid
+                    local swatch = EllesmereUI.BuildColorSwatch(
+                        rgn, stacksRow:GetFrameLevel() + 3,
+                        function()
+                            local c = (ind.spellColors and ind.spellColors[mySid])
+                                or ind.color or DEFAULT_SQ
+                            return c.r, c.g, c.b, 1
+                        end,
+                        function(r, g, b)
+                            if not ind.spellColors then ind.spellColors = {} end
+                            ind.spellColors[mySid] = { r=r, g=g, b=b }
+                            ReloadAndUpdate()
+                        end, false, 20)
+                    if prev then
+                        swatch:SetPoint("RIGHT", prev, "LEFT", -8, 0)
+                    else
+                        swatch:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
+                    end
+                    prev = swatch
+                    -- Tooltip: ability name so each swatch is identifiable.
+                    local nm = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(mySid)
+                    if nm then
+                        swatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(swatch, nm) end)
+                        swatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    end
+                end
+                rgn._lastInline = prev
             end
 
         elseif typeInfo and typeInfo.placed then

@@ -195,8 +195,6 @@ local RAID_CLASS_COLORS     = RAID_CLASS_COLORS
 -- Private aura container API (12.0.5+)
 local C_UnitAuras_AddPrivateAuraAnchor    = C_UnitAuras and C_UnitAuras.AddPrivateAuraAnchor
 local C_UnitAuras_RemovePrivateAuraAnchor = C_UnitAuras and C_UnitAuras.RemovePrivateAuraAnchor
-local C_UnitAuras_AddBlockedAura          = C_UnitAuras and C_UnitAuras.AddBlockedAura
-local C_UnitAuras_ClearBlockedAuras       = C_UnitAuras and C_UnitAuras.ClearBlockedAuras
 
 -- Strata bump for private aura container frames (workaround for 12.0.5
 -- bug where container icons render behind the parent frame)
@@ -254,8 +252,11 @@ local ROLE_ICON_STYLES = {
     },
 }
 
-local function ApplyRoleIcon(texture, role)
-    local style = db and db.profile.roleIconStyle or "modern"
+local function ApplyRoleIcon(texture, role, style)
+    -- style is supplied by the caller from its own settings context (the party
+    -- proxy / preview override), so party frames honor their unsynced
+    -- roleIconStyle. Fall back to the raid profile only if a caller omits it.
+    style = style or (db and db.profile.roleIconStyle) or "modern"
     local map = ROLE_ICON_STYLES[style]
     if not map then return false end
     local icon = map[role]
@@ -1028,6 +1029,27 @@ local function GetHealthColor(unit, s)
     end
 end
 
+-- Resolve the display name for a unit. When Northern Sky Raid Tools (NSAPI) is
+-- present, returns the NSRT nickname; otherwise the short character name. We pass
+-- our addon key "EUI" (NSRT added a dedicated per-addon setting + EUI_NICKNAME_TOGGLE
+-- callback for us): NSAPI:GetName self-gates on NSRT's Global Nicknames AND its EUI
+-- checkbox, so the user controls nicknames entirely through NSRT (no EUI-side toggle).
+-- GetName returns the short name when no nickname is set and guards secret values
+-- itself, so the plain UnitName path (with Ambiguate) only runs as a fallback. pcall
+-- keeps a misbehaving external API from ever breaking name rendering.
+local function ResolveDisplayName(unit)
+    local name = UnitName(unit) or ""
+    if NSAPI and NSAPI.GetName then
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        if ok and type(dn) == "string"
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+            return dn
+        end
+    end
+    if Ambiguate then name = Ambiguate(name, "short") end
+    return name
+end
+
 local function GetNameColor(unit, s)
     s = s or db.profile
     local mode = s.nameColorMode or "class"
@@ -1046,6 +1068,23 @@ local function GetNameColor(unit, s)
         end
         return 1, 1, 1
     end
+end
+
+-- Live name refresh for every raid + party button. Fired by the NSRT nickname
+-- callback so added/removed nicknames apply instantly without a /reload.
+function ns.RefreshAllNames()
+    local s = db and db.profile
+    if not s then return end
+    local function refresh(unit, btn)
+        local d = GetFFD(btn)
+        if d and d.nameText then
+            d.nameText:SetText(ResolveDisplayName(unit))
+            local nr, ng, nb = GetNameColor(unit, s)
+            d.nameText:SetTextColor(nr, ng, nb)
+        end
+    end
+    for unit, btn in pairs(unitToButton) do refresh(unit, btn) end
+    for unit, btn in pairs(ns._partyUnitToButton) do refresh(unit, btn) end
 end
 
 -- Health text color (mirrors GetNameColor). Default mode "custom" with white
@@ -2444,9 +2483,8 @@ local function UpdateButton(button)
             -- BG only covers the missing-health portion (anchored to the fill's
             -- right edge), never behind the fill. A full-width bg behind the fill
             -- bleeds through when the range fade's secret alpha under-renders the
-            -- fill -> the OOR "blend". This matches oUF/ElvUI and EUI's Dark mode,
-            -- so OOR fades cleanly to the world like ElvUI (in and out of combat).
-            -- For an opaque fill this is visually identical in range.
+            -- fill -> the OOR "blend". This matches EUI's Dark mode and ouF based
+            -- Unit Frame addons so behavior is familiar to users.
             d.bg:ClearAllPoints()
             d.bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
             d.bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
@@ -2516,9 +2554,7 @@ local function UpdateButton(button)
 
     -- Name
     if d.nameText then
-        local name = UnitName(unit) or ""
-        if Ambiguate then name = Ambiguate(name, "short") end
-        d.nameText:SetText(name)
+        d.nameText:SetText(ResolveDisplayName(unit))
         local nr, ng, nb = GetNameColor(unit, s)
         d.nameText:SetTextColor(nr, ng, nb)
     end
@@ -2526,7 +2562,13 @@ local function UpdateButton(button)
     -- Health text
     if d.healthText then
         local mode = s.healthTextMode or "none"
-        if mode == "percent" then
+        -- Hide the health %/value while the unit is dead or offline -- the status
+        -- text shows DEAD/OFFLINE there instead. UnitIsDeadOrGhost/UnitIsConnected
+        -- return clean booleans for group units in Midnight (only UnitIsAFK can be secret),
+        -- so they're safe in a conditional with no issecretvalue guard.
+        if UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit) then
+            d.healthText:SetText("")
+        elseif mode == "percent" then
             local pct = GetSafeHealthPercent(unit)
             d.healthText:SetFormattedText("%.0f%%", pct)
             local htr, htg, htb = GetHealthTextColor(unit, s)
@@ -2602,7 +2644,7 @@ local function UpdateButton(button)
                 local showForRole = (role == "TANK" and s.showRoleForTank)
                     or (role == "HEALER" and s.showRoleForHealer)
                     or (role == "DAMAGER" and s.showRoleForDPS)
-                if showForRole and ApplyRoleIcon(d.roleIcon, role) then
+                if showForRole and ApplyRoleIcon(d.roleIcon, role, style) then
                     d.roleIcon:Show()
                 else
                     d.roleIcon:Hide()
@@ -2706,31 +2748,6 @@ end
 -------------------------------------------------------------------------------
 local C_UnitAuras_GetAuraDataByAuraInstanceID = C_UnitAuras.GetAuraDataByAuraInstanceID
 local C_UnitAuras_IsAuraFilteredOutByInstanceID = C_UnitAuras.IsAuraFilteredOutByInstanceID
-
--------------------------------------------------------------------------------
---  AddBlockedAura deduplication (12.0.5+)
---  When our frames are showing debuffs/buffs, block those aura instances
---  from Blizzard's default frames to prevent duplicate display.
---  Defined here (before RenderDebuffs) to avoid forward-reference errors.
--------------------------------------------------------------------------------
-local blockedAuraUnits = {}  -- [unit] = { [instanceID] = true }
-
-local function BlockAuraOnDefaultFrames(unit, auraInstanceID)
-    if not C_UnitAuras_AddBlockedAura then return end
-    if not auraInstanceID or issecretvalue(auraInstanceID) then return end
-    if auraInstanceID > 2147483647 or auraInstanceID < -2147483648 then return end
-    C_UnitAuras_AddBlockedAura(unit, auraInstanceID)
-    if not blockedAuraUnits[unit] then blockedAuraUnits[unit] = {} end
-    blockedAuraUnits[unit][auraInstanceID] = true
-end
-
-local function ClearBlockedAurasForUnit(unit)
-    if not C_UnitAuras_ClearBlockedAuras then return end
-    if blockedAuraUnits[unit] then
-        C_UnitAuras_ClearBlockedAuras(unit)
-        wipe(blockedAuraUnits[unit])
-    end
-end
 
 -- Sated/Exhaustion spell IDs (lust debuff variants)
 local SATED_DEBUFFS = {
@@ -2878,9 +2895,6 @@ local function RenderDebuffs(d, s, unit)
         end
     end
 
-    -- Clear previous blocks for this unit before re-blocking visible ones
-    ClearBlockedAurasForUnit(unit)
-
     if debuffCache then
         for _, auraData in ipairs(debuffCache) do
             if shown >= cap then break end
@@ -2888,8 +2902,6 @@ local function RenderDebuffs(d, s, unit)
             local icon = d.debuffIcons[shown]
             if icon then
                 ApplyDebuffIcon(icon, auraData, unit, s)
-                -- Block this aura from Blizzard default frames (deduplication)
-                BlockAuraOnDefaultFrames(unit, auraData.auraInstanceID)
             end
         end
     end
@@ -3126,9 +3138,6 @@ local function UpdateDefensives(button, unit, updateInfo)
                         icon._borderFrame:Hide()
                     end
                 end
-
-                -- Block on Blizzard default frames
-                BlockAuraOnDefaultFrames(unit, iid)
 
                 icon:Show()
             end
@@ -3610,7 +3619,6 @@ local function UpdateDispelBorder(button, unit, updateInfo)
             d.dispelIcon:Hide()
         end
         UpdateDispelContainerVisibility(button)
-        BlockAuraOnDefaultFrames(unit, auraData.auraInstanceID)
     end
 
     -- Scan HARMFUL auras for the dispel highlight/icon.
@@ -3847,7 +3855,10 @@ ns._UpdateButtonHealth = function(button)
     -- Health text
     if d.healthText then
         local mode = s.healthTextMode or "none"
-        if mode == "percent" then
+        -- Hide health text while dead/offline (see UpdateButton; matches preview).
+        if UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit) then
+            d.healthText:SetText("")
+        elseif mode == "percent" then
             d.healthText:SetFormattedText("%.0f%%", pct)
             local htr, htg, htb = GetHealthTextColor(unit, s)
             d.healthText:SetTextColor(htr, htg, htb, 0.9)
@@ -4831,23 +4842,24 @@ local function UpdateButtonRange(unit, btn)
         ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
     elseif usesSpellRange then
         local r = C_Spell_IsSpellInRange(playerFriendlySpell, unit)
-        local d = GetFFD(btn)
         if r == true then
-            ApplyRangeAlpha(btn, 1); d._rangeResolvedOnce = true
+            ApplyRangeAlpha(btn, 1)
         elseif r == false then
-            ApplyRangeAlpha(btn, oorAlpha); d._rangeResolvedOnce = true
-        elseif not d._rangeResolvedOnce then
-            -- First-ever eval is indeterminate (unit briefly untargetable / LOS,
-            -- or a client build where this spell can't be range-probed). Resolve
-            -- ONCE via the secret-safe ~40yd UnitInRange so the frame can never
-            -- strand at its seeded full alpha when the spell check never returns a
-            -- usable boolean.
-            d._rangeResolvedOnce = true
+            ApplyRangeAlpha(btn, oorAlpha)
+        else
+            -- r == nil: the friendly spell has NO range relationship to this unit.
+            -- Because this spell is unit-targeted, a same-zone out-of-range target
+            -- still returns false (handled above), so nil means the unit is
+            -- genuinely unreachable -- almost always a DIFFERENT ZONE (or a brief
+            -- untargetable / LOS blip). Resolve it via the secret-safe ~40yd
+            -- UnitInRange (false for a different-zone unit -> faded) instead of
+            -- holding the last alpha: holding left a unit that moved to another
+            -- zone stuck at the in-range alpha it had before leaving. This cannot
+            -- reintroduce the 25-vs-40yd boundary flicker -- that needed the spell
+            -- check to return nil AT the boundary, which it does not for a valid
+            -- same-zone target (UnitInRange here is stable because the unit is far).
             ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
         end
-        -- r == nil after a prior resolution: hold the last alpha rather than
-        -- re-consulting the wider ~40yd UnitInRange every tick, which would
-        -- contradict the spell range and flip the alpha (the old flicker source).
     else
         ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
     end
@@ -4868,7 +4880,6 @@ local function RefineButtonRange(unit, btn)
         UpdateButtonRange(unit, btn)
     elseif d._rangeWasDead then
         d._rangeWasDead = nil
-        d._rangeResolvedOnce = nil   -- re-resolve cleanly after a revive
         UpdateButtonRange(unit, btn)
     elseif usesSpellRange then
         UpdateButtonRange(unit, btn)
@@ -4951,7 +4962,6 @@ local function GhostAuraCheck()
                 if ns.BM_ClearIndicators then
                     ns.BM_ClearIndicators(btn)
                 end
-                ClearBlockedAurasForUnit(unit)
             end
         else
             if d.ghostCleared then
@@ -5068,10 +5078,9 @@ local function UpdateVisibility()
         containerFrame:Hide()
         StopRangeTicker()
         StopGhostTicker()
-        -- Clean up private aura anchors + blocked auras when hiding
+        -- Clean up private aura anchors when hiding
         for unit, btn in pairs(unitToButton) do
             UnregisterPrivateAuras(btn)
-            ClearBlockedAurasForUnit(unit)
         end
         wipe(unitToButton)
     end
@@ -5904,7 +5913,7 @@ ns._LayoutPartyFrames = function()
         local wantSortMethod = sortByRole and "NAME" or "INDEX"
         local wantGroupingOrder = ""
         if sortByRole then
-            local ro = s.roleOrder or { "TANK", "HEALER", "DAMAGER" }
+            local ro = s.partyRoleOrder or s.roleOrder or { "TANK", "HEALER", "DAMAGER" }
             wantGroupingOrder = table.concat(ro, ",") .. ",NONE"
         end
         -- showPlayer is false when the self button owns the player (useSelf) or
@@ -6025,7 +6034,6 @@ ns._UpdatePartyVisibility = function()
 
         for unit, btn in pairs(ns._partyUnitToButton) do
             UnregisterPrivateAuras(btn)
-            ClearBlockedAurasForUnit(unit)
         end
         wipe(ns._partyUnitToButton)
     end
@@ -7893,8 +7901,12 @@ local function ApplyPreviewData(f, index)
             f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
             f._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
         else
+            -- BG covers the missing-health portion only (never behind the fill),
+            -- matching the real-frame themed branch + Dark mode. Keeps the preview
+            -- a 1:1 replica for reduced-fill-opacity setups.
             f._bg:ClearAllPoints()
-            f._bg:SetAllPoints()
+            f._bg:SetPoint("TOPLEFT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+            f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
             local bgc = s.customBgColor
             f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
         end
@@ -8465,6 +8477,9 @@ local function ApplyPreviewData(f, index)
     -- Dead/offline/AFK states (only when indicators eyeball is on)
     local isDead    = indVis and index == previewRoles._deadSlot
     local isOffline = indVis and index == previewRoles._offlineSlot
+    -- Mark dead/offline preview frames so the animated-preview ticker skips them
+    -- (their health bar is emptied and health text hidden -- never animated).
+    f._pvHideHealthText = (isDead or isOffline) or nil
     local isAfk     = indVis and index == previewRoles._afkSlot
 
     -- Health text
@@ -8525,24 +8540,24 @@ local function ApplyPreviewData(f, index)
             local c = s.healthTextCustomColor
             if c then htr, htg, htb = c.r, c.g, c.b end
         end
-        if mode == "percent" and not isDead then
+        if mode == "percent" and not isDead and not isOffline then
             f._healthText:SetFormattedText("%d%%", healthPct)
             f._healthText:SetTextColor(htr, htg, htb, 0.9)
-        elseif mode == "percentNoSign" and not isDead then
+        elseif mode == "percentNoSign" and not isDead and not isOffline then
             f._healthText:SetFormattedText("%d", healthPct)
             f._healthText:SetTextColor(htr, htg, htb, 0.9)
-        elseif mode == "number" and not isDead then
+        elseif mode == "number" and not isDead and not isOffline then
             local fakeHP = healthPct * 12000
             if AbbreviateNumbers then
                 f._healthText:SetText(AbbreviateNumbers(fakeHP))
             end
             f._healthText:SetTextColor(htr, htg, htb, 0.9)
-        elseif mode == "numberPercent" and not isDead then
+        elseif mode == "numberPercent" and not isDead and not isOffline then
             local fakeHP = healthPct * 12000
             local numStr = AbbreviateNumbers and AbbreviateNumbers(fakeHP) or tostring(fakeHP)
             f._healthText:SetFormattedText("%s | %d%%", numStr, healthPct)
             f._healthText:SetTextColor(htr, htg, htb, 0.9)
-        elseif mode == "percentNumber" and not isDead then
+        elseif mode == "percentNumber" and not isDead and not isOffline then
             local fakeHP = healthPct * 12000
             local numStr = AbbreviateNumbers and AbbreviateNumbers(fakeHP) or tostring(fakeHP)
             f._healthText:SetFormattedText("%d%% | %s", healthPct, numStr)
@@ -8622,7 +8637,7 @@ local function ApplyPreviewData(f, index)
             local showForRole = (role == "TANK" and s.showRoleForTank)
                 or (role == "HEALER" and s.showRoleForHealer)
                 or (role == "DAMAGER" and s.showRoleForDPS)
-            if showForRole ~= false and ApplyRoleIcon(f._roleIcon, role) then
+            if showForRole ~= false and ApplyRoleIcon(f._roleIcon, role, style) then
                 local riSz = PixelSnap(s.roleIconSize or 14)
                 f._roleIcon:SetSize(riSz, riSz)
                 f._roleIcon:ClearAllPoints()
@@ -9454,7 +9469,7 @@ ns._ShowSizePreview = function(tier)
             local showForRole = (role == "TANK" and showRoleTank)
                 or (role == "HEALER" and showRoleHealer)
                 or (role == "DAMAGER" and showRoleDPS)
-            if riStyle ~= "none" and showForRole and ApplyRoleIcon(f._roleIcon, role) then
+            if riStyle ~= "none" and showForRole and ApplyRoleIcon(f._roleIcon, role, riStyle) then
                 f._roleIcon:SetSize(riSize, riSize)
                 f._roleIcon:ClearAllPoints()
                 f._roleIcon:SetPoint(riPos:upper(), f._health, riPos:upper(), 0, 0)
@@ -9597,7 +9612,7 @@ local function BuildPartyPreviewRoles()
             }
         end
         if sortMode == "ROLE" then
-            local roleOrder = db.profile.roleOrder or { "TANK", "HEALER", "DAMAGER" }
+            local roleOrder = db.profile.partyRoleOrder or db.profile.roleOrder or { "TANK", "HEALER", "DAMAGER" }
             local tmpGroup = {}
             for _, role in ipairs(roleOrder) do
                 for _, entry in ipairs(group) do
@@ -10308,6 +10323,32 @@ function ERF:OnEnable()
             ns._LayoutPartyFrames()
         end
     end)
+
+    -- Northern Sky Raid Tools (NSRT) nickname integration. When NSAPI is present
+    -- the raid + party names use NSRT nicknames (see ResolveDisplayName). Two
+    -- callbacks refresh names instantly without a /reload: NSRT_NICKNAME_UPDATED
+    -- fires when a nickname is added/removed, and EUI_NICKNAME_TOGGLE fires when the
+    -- user flips NSRT's dedicated EllesmereUI nicknames checkbox. NSRT may load after
+    -- us, so registration retries on PLAYER_LOGIN / PLAYER_ENTERING_WORLD until it sticks.
+    local function RegisterNSRTNicknames()
+        if ns._nsrtNickHooked then return true end
+        if NSAPI and NSAPI.RegisterCallback then
+            local function onChange() if ns.RefreshAllNames then ns.RefreshAllNames() end end
+            NSAPI:RegisterCallback("NSRT_NICKNAME_UPDATED", onChange, "EllesmereUI")
+            NSAPI:RegisterCallback("EUI_NICKNAME_TOGGLE", onChange, "EllesmereUI")
+            ns._nsrtNickHooked = true
+            return true
+        end
+        return false
+    end
+    if not RegisterNSRTNicknames() then
+        local nsrtFrame = CreateFrame("Frame")
+        nsrtFrame:RegisterEvent("PLAYER_LOGIN")
+        nsrtFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        nsrtFrame:SetScript("OnEvent", function(self)
+            if RegisterNSRTNicknames() then self:UnregisterAllEvents() end
+        end)
+    end
 
     -- Init options module if it loaded before us
     if ns._InitEUIModule then
