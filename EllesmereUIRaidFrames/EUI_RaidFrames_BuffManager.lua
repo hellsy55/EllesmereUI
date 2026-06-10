@@ -1380,14 +1380,33 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
             local cd = icon._cooldown
             if cd then
                 if wantSwipe or wantDurText then
+                    -- Permanent auras return a degenerate 0,0 duration object
+                    -- whose armed cooldown strobes via an internal client
+                    -- show/self-hide cycle; mask with alpha via durObj:IsZero()
+                    -- (secret-safe, see custom-indicator path).
+                    local applied = false
                     if C_UnitAuras.GetAuraDuration and cd.SetCooldownFromDurationObject then
                         local durObj = C_UnitAuras.GetAuraDuration(unit, iid)
-                        if durObj then cd:SetCooldownFromDurationObject(durObj) else cd:Clear() end
+                        if durObj then
+                            cd:SetCooldownFromDurationObject(durObj)
+                            if durObj.IsZero and cd.SetAlphaFromBoolean then
+                                cd:SetAlphaFromBoolean(durObj:IsZero(), 0, 1)
+                            else
+                                cd:SetAlpha(1)
+                            end
+                            applied = true
+                        else
+                            cd:Clear()
+                        end
                     end
-                    cd:SetDrawSwipe(wantSwipe)
-                    cd:SetHideCountdownNumbers(not wantDurText)
-                    cd:Show()
-                    if wantDurText then
+                    if applied then
+                        cd:SetDrawSwipe(wantSwipe)
+                        cd:SetHideCountdownNumbers(not wantDurText)
+                        cd:Show()
+                    else
+                        cd:Hide()
+                    end
+                    if applied and wantDurText then
                         local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                         if cdText then
                             local dtc = bs.durTextColor or { r = 1, g = 1, b = 1 }
@@ -1823,24 +1842,52 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 local wantSwipe = (not hideIcon) and (ind.showDuration ~= false)
                                 local wantDurText = ind.showDurationText
                                 if wantSwipe or wantDurText then
+                                    -- Only Show the cooldown when a cooldown was actually
+                                    -- applied. A no-duration aura (e.g. a beacon) has nothing
+                                    -- to set; showing the empty cooldown anyway draws its full
+                                    -- reversed swipe for a frame or two before the frame
+                                    -- self-hides, strobing the icon dark on every rescan.
+                                    -- Clear() also wipes any stale swipe a reused pool frame
+                                    -- inherited from its previous occupant.
+                                    -- Permanent auras return a degenerate 0,0 duration object;
+                                    -- a cooldown armed from one strobes -- the CLIENT shows the
+                                    -- full reversed swipe then self-hides, an internal cycle
+                                    -- that Lua-side show/hide gating cannot stop. Mask with
+                                    -- ALPHA instead: durObj:IsZero() -> alpha 0. Secret-safe
+                                    -- and orthogonal to the client's internal show/hide.
+                                    local applied = false
                                     local iid = aura.auraInstanceID
+                                    local cdBaseA = hideIcon and 1 or iconAlpha
                                     if iid and not issecretvalue(iid) and C_UnitAuras.GetAuraDuration then
                                         local durObj = C_UnitAuras.GetAuraDuration(unit, iid)
                                         if durObj then
                                             f._cooldown:SetCooldownFromDurationObject(durObj)
+                                            if durObj.IsZero and f._cooldown.SetAlphaFromBoolean then
+                                                f._cooldown:SetAlphaFromBoolean(durObj:IsZero(), 0, cdBaseA)
+                                            else
+                                                f._cooldown:SetAlpha(cdBaseA)
+                                            end
+                                            applied = true
                                         end
                                     else
                                         local dur = aura.duration
                                         local exp = aura.expirationTime
                                         if dur and exp and not issecretvalue(dur) and not issecretvalue(exp) and dur > 0 then
                                             f._cooldown:SetCooldown(exp - dur, dur)
+                                            f._cooldown:SetAlpha(cdBaseA)
+                                            applied = true
                                         end
                                     end
-                                    f._cooldown:SetDrawSwipe(wantSwipe)
-                                    f._cooldown:SetHideCountdownNumbers(not wantDurText)
-                                    f._cooldown:Show()
+                                    if applied then
+                                        f._cooldown:SetDrawSwipe(wantSwipe)
+                                        f._cooldown:SetHideCountdownNumbers(not wantDurText)
+                                        f._cooldown:Show()
+                                    else
+                                        f._cooldown:Clear()
+                                        f._cooldown:Hide()
+                                    end
                                     -- Style the built-in countdown text via GetCountdownFontString
-                                    if wantDurText then
+                                    if applied and wantDurText then
                                         local cdText = f._cooldown.GetCountdownFontString and f._cooldown:GetCountdownFontString()
                                         if cdText then
                                             local tc = ind.durationTextColor or { r=1, g=1, b=1 }

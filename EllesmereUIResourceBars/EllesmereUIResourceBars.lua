@@ -473,6 +473,17 @@ local function GetSecondaryResource()
         if issecretvalue and issecretvalue(mx) then mx = 100 end
         if not mx or mx <= 0 then mx = 100 end
         return { power = "FOCUS_BAR", max = mx, type = "bar" }
+    elseif classFile == "WARRIOR" and spec == 3
+           and ERB.db and ERB.db.profile and ERB.db.profile.secondary
+           and ERB.db.profile.secondary.protIgnorePainBar then
+        -- Protection Ignore Pain absorb bar: fill = the player's current total
+        -- absorbs scaled against max health (same scale as Brewmaster Stagger).
+        -- Toggle-gated; existing users are pinned OFF via migration
+        -- "resourcebars_protwar_ignorepain_existing_off_v1".
+        local mx = UnitHealthMax("player") or 1
+        if issecretvalue and issecretvalue(mx) then mx = 1 end
+        if mx <= 0 then mx = 1 end
+        return { power = "IGNOREPAIN_BAR", max = mx, type = "bar" }
     elseif classFile == "WARRIOR" and spec == 2 then
         return { power = "WHIRLWIND_STACKS", max = 4, type = "custom" }
     end
@@ -693,6 +704,7 @@ local DEFAULTS = {
             thresholdSpecs = {},  -- per-spec threshold/hash entries: { specIDs={0}, hashValues="", thresholdCount=3, thresholdPartialOnly=false }
             guardianIronfurBar = true,     -- Guardian Druid: show Ironfur duration bar (moving hash lines). New-user default; existing profiles pinned off via migration "resourcebars_guardian_ironfur_existing_off_v1".
             guardianShowHashLines = true,  -- Guardian Ironfur: draw the moving per-cast hash lines
+            protIgnorePainBar = true,      -- Prot Warrior: show Ignore Pain absorb bar (current absorbs vs max health). New-user default; existing profiles pinned off via migration "resourcebars_protwar_ignorepain_existing_off_v1".
             runesSimple = false,  -- DK: treat runes as flat pips (no recharge animation/timer)
             chargedR = 0.44, chargedG = 0.77, chargedB = 1.00, chargedA = 1,
             enhanceFiveBar = true,  -- Enhance Shaman: show 5 pips with overflow coloring
@@ -2273,7 +2285,8 @@ local function BuildBars()
             else
                 -- For existing bars, only update min/max if needed (don't reset value to 0)
                 local actualMax = maxPts
-                if cachedSecondary.power == "BREWMASTER_STAGGER" then
+                if cachedSecondary.power == "BREWMASTER_STAGGER"
+                or cachedSecondary.power == "IGNOREPAIN_BAR" then
                     actualMax = UnitHealthMax("player") or 1
                     if actualMax <= 0 then actualMax = 1 end
                 end
@@ -3224,6 +3237,15 @@ local function UpdateSecondaryResource()
                 end
                 if maxTainted then maxC = maxPts end
                 if not maxTainted and maxC <= 0 then maxC = 1 end
+            elseif powerType == "IGNOREPAIN_BAR" then
+                -- Prot Ignore Pain: current total absorbs vs max health. The
+                -- absorb amount can be SECRET in instanced content; it flows
+                -- straight into SetValue below (the C widget handles it).
+                cur = UnitGetTotalAbsorbs("player") or 0
+                maxC = UnitHealthMax("player") or 1
+                local maxTainted = issecretvalue and issecretvalue(maxC)
+                if maxTainted then maxC = maxPts end
+                if not maxTainted and maxC <= 0 then maxC = 1 end
             end
             -- Only call SetMinMaxValues if max actually changed (prevents flicker)
             local maxChanged = secondaryBar._lastMaxC ~= maxC
@@ -3302,6 +3324,13 @@ local function UpdateSecondaryResource()
                         -- Show stagger as percentage of max health
                         local pct = maxC > 0 and (cur / maxC * 100) or 0
                         secondaryFrame._countText:SetText(format("%d", pct) .. "%")
+                    elseif powerType == "IGNOREPAIN_BAR" then
+                        -- Show the absorb amount itself (abbreviated); hide at 0
+                        if cur > 0 then
+                            secondaryFrame._countText:SetText(AbbreviateNumbers and AbbreviateNumbers(cur) or tostring(cur))
+                        else
+                            secondaryFrame._countText:SetText("")
+                        end
                     else
                         secondaryFrame._countText:SetText(tostring(cur) .. " / " .. tostring(maxC))
                     end
@@ -3335,6 +3364,10 @@ local function UpdateSecondaryResource()
                         else
                             secondaryFrame._countText:SetText(tostring(cur))
                         end
+                    elseif powerType == "IGNOREPAIN_BAR" then
+                        -- Absorb amount is secret here; show nothing rather
+                        -- than a meaningless tostring.
+                        secondaryFrame._countText:SetText("")
                     else
                         secondaryFrame._countText:SetText(tostring(cur))
                     end
@@ -5201,8 +5234,9 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "UNIT_MAXHEALTH" then
         UpdateHealthBar()
-        -- Stagger max is player max health, so rebuild if needed
-        if cachedSecondary and cachedSecondary.power == "BREWMASTER_STAGGER" then
+        -- Stagger / Ignore Pain max is player max health, so rebuild if needed
+        if cachedSecondary and (cachedSecondary.power == "BREWMASTER_STAGGER"
+           or cachedSecondary.power == "IGNOREPAIN_BAR") then
             local newMax = UnitHealthMax("player") or 1
             if not issecretvalue or not issecretvalue(newMax) then
                 if newMax > 0 and newMax ~= cachedSecondary.max then
@@ -5210,6 +5244,11 @@ local function OnEvent(self, event, ...)
                     BuildBars()
                 end
             end
+            UpdateSecondaryResource()
+        end
+    elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" then
+        -- Drives the Prot Ignore Pain bar; no-op for everyone else.
+        if cachedSecondary and cachedSecondary.power == "IGNOREPAIN_BAR" then
             UpdateSecondaryResource()
         end
     elseif event == "UNIT_MAXPOWER" then
@@ -5440,6 +5479,7 @@ function ERB:OnEnable()
     _erbEventFrame = eventFrame
     eventFrame:RegisterUnitEvent("UNIT_HEALTH", "player")
     eventFrame:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
+    eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", "player")
     eventFrame:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
     eventFrame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     eventFrame:RegisterUnitEvent("UNIT_MAXPOWER", "player")

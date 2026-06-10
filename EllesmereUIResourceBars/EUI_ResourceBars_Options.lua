@@ -92,6 +92,7 @@ initFrame:SetScript("OnEvent", function(self)
         local gsr = _G._ERB_GetSecondaryResource
         local info = gsr and gsr()
         if info and info.power == "IRONFUR_BAR" then return true end -- Guardian Ironfur bar
+        if info and info.power == "IGNOREPAIN_BAR" then return true end -- Prot Warrior Ignore Pain bar
         if cf == "DRUID" and spec == 1 then return true end -- Balance (Astral Power bar)
         if cf == "SHAMAN" and spec == 1 then return true end -- Elemental
         if cf == "PRIEST" and spec == 3 then return true end -- Shadow
@@ -1968,6 +1969,30 @@ initFrame:SetScript("OnEvent", function(self)
                       p.secondary.guardianShowHashLines = v; SmoothRefresh()
                       EllesmereUI:RefreshPage()
                   end }
+            );  y = y - hh
+        end
+
+        -- Protection Warrior Ignore Pain bar: shows the player's current absorb
+        -- amount as a bar scaled against max health. Only surfaced when the
+        -- player is currently a Protection Warrior.
+        local function _IsProtWarrior()
+            local _, cf = UnitClass("player")
+            if cf ~= "WARRIOR" then return false end
+            local s = GetSpecialization()
+            local sid = s and GetSpecializationInfo(s)
+            return sid == 73
+        end
+        if _IsProtWarrior() then
+            local _, hh = W:DualRow(parent, y,
+                { type = "toggle", text = "Prot Warrior Ignore Pain Bar",
+                  tooltip = "Replaces the class resource bar with an Ignore Pain tracker: the fill shows your current absorb amount scaled against your maximum health, and the bar text shows the absorb value.",
+                  getValue = function() local p = DB(); return p and p.secondary.protIgnorePainBar end,
+                  setValue = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.protIgnorePainBar = v; RebuildClass()
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type = "label", text = "" }
             );  y = y - hh
         end
 

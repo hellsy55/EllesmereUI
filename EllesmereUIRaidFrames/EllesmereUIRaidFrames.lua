@@ -2585,7 +2585,16 @@ local function StyleButton(button)
             if d._isParty then ns._partyUnitToButton[u] = self else unitToButton[u] = self end
             if ns._RefreshAssignedButton then ns._RefreshAssignedButton(self, u) end
             if ns._UpdateButtonRange then ns._UpdateButtonRange(u, self) end
-            if C_UnitAuras_AddPrivateAuraAnchor and ns._RegisterPrivateAuras then ns._RegisterPrivateAuras(self, u) end
+            -- Only re-register private aura anchors when the unit actually
+            -- changed (same guard as RebuildUnitMap). OnAttributeChanged fires
+            -- even when the header re-sets the SAME unit, which it does on
+            -- every roster re-process -- an unguarded re-register tears down
+            -- and recreates Blizzard's private aura anchors each time, making
+            -- the Blizzard-rendered icons visibly blink.
+            if C_UnitAuras_AddPrivateAuraAnchor and ns._RegisterPrivateAuras
+                and (d.dispelContainerUnit ~= u or d.privateAuraUnit ~= u) then
+                ns._RegisterPrivateAuras(self, u)
+            end
         elseif ns._UnregisterPrivateAuras then
             ns._UnregisterPrivateAuras(self)
         end
@@ -3031,24 +3040,45 @@ local function ApplyDebuffIcon(icon, auraData, unit, s)
         local wantSwipe = s.debuffShowSwipe
         local wantDurText = s.debuffShowDurText
         if wantSwipe or wantDurText then
+            -- Permanent auras return a degenerate 0,0 duration object; a
+            -- cooldown armed from one strobes -- the CLIENT shows the full
+            -- reversed swipe then self-hides, an internal cycle that Lua-side
+            -- show/hide gating cannot stop. Mask with ALPHA instead:
+            -- durObj:IsZero() -> alpha 0. Secret-safe (works on other
+            -- players' debuffs in instances) and orthogonal to the client's
+            -- internal show/hide. Clear()+Hide() wipes stale reused frames.
+            local applied = false
             local iid = auraData.auraInstanceID
             if iid and not issecretvalue(iid) and C_UnitAuras.GetAuraDuration then
                 local durObj = C_UnitAuras.GetAuraDuration(unit, iid)
                 if durObj then
                     icon._cooldown:SetCooldownFromDurationObject(durObj)
+                    if durObj.IsZero and icon._cooldown.SetAlphaFromBoolean then
+                        icon._cooldown:SetAlphaFromBoolean(durObj:IsZero(), 0, 1)
+                    else
+                        icon._cooldown:SetAlpha(1)
+                    end
+                    applied = true
                 end
             else
                 local dur = auraData.duration
                 local exp = auraData.expirationTime
                 if dur and exp and not issecretvalue(dur) and not issecretvalue(exp) and dur > 0 then
                     icon._cooldown:SetCooldown(exp - dur, dur)
+                    icon._cooldown:SetAlpha(1)
+                    applied = true
                 end
             end
-            icon._cooldown:SetDrawSwipe(wantSwipe)
-            icon._cooldown:SetHideCountdownNumbers(not wantDurText)
-            icon._cooldown:Show()
+            if applied then
+                icon._cooldown:SetDrawSwipe(wantSwipe)
+                icon._cooldown:SetHideCountdownNumbers(not wantDurText)
+                icon._cooldown:Show()
+            else
+                icon._cooldown:Clear()
+                icon._cooldown:Hide()
+            end
             -- Style the built-in countdown text via GetCountdownFontString
-            if wantDurText then
+            if applied and wantDurText then
                 local cdText = icon._cooldown.GetCountdownFontString and icon._cooldown:GetCountdownFontString()
                 if cdText then
                     local dtc = s.debuffDurTextColor or { r = 1, g = 1, b = 1 }
@@ -3320,19 +3350,34 @@ local function UpdateDefensives(button, unit, updateInfo)
                     local wantSwipe = s.defShowSwipe ~= false
                     local wantDurText = s.defShowDurText
                     if wantSwipe or wantDurText then
+                        -- Permanent auras return a degenerate 0,0 duration object
+                        -- whose armed cooldown strobes via an internal client
+                        -- show/self-hide cycle; mask with alpha via durObj:IsZero()
+                        -- (secret-safe, see ApplyDebuffIcon).
+                        local applied = false
                         if C_UnitAuras_GetAuraDuration and cd.SetCooldownFromDurationObject then
                             local durObj = C_UnitAuras_GetAuraDuration(unit, iid)
                             if durObj then
                                 cd:SetCooldownFromDurationObject(durObj)
+                                if durObj.IsZero and cd.SetAlphaFromBoolean then
+                                    cd:SetAlphaFromBoolean(durObj:IsZero(), 0, 1)
+                                else
+                                    cd:SetAlpha(1)
+                                end
+                                applied = true
                             else
                                 cd:Clear()
                             end
                         end
-                        cd:SetDrawSwipe(wantSwipe)
-                        cd:SetHideCountdownNumbers(not wantDurText)
-                        cd:Show()
+                        if applied then
+                            cd:SetDrawSwipe(wantSwipe)
+                            cd:SetHideCountdownNumbers(not wantDurText)
+                            cd:Show()
+                        else
+                            cd:Hide()
+                        end
                         -- Style the built-in countdown text via GetCountdownFontString
-                        if wantDurText then
+                        if applied and wantDurText then
                             local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                             if cdText then
                                 local dtc = s.defDurTextColor or { r = 1, g = 1, b = 1 }

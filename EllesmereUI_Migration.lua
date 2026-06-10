@@ -2330,6 +2330,40 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- Prot Warrior Ignore Pain bar ships ON by default (DEFAULTS.secondary.
+-- protIgnorePainBar = true) so brand-new installs get it out of the box.
+-- Existing users are used to Prot having no class resource bar, so pin every
+-- profile that already exists to OFF. Same mechanism as the Guardian Ironfur
+-- migration above: runs at parent ADDON_LOADED before any child NewDB populates
+-- EllesmereUIDB.profiles, so only existing users' profiles are present; fresh
+-- installs have none and inherit the ON default. Global scope = runs once;
+-- future profiles inherit ON too.
+EllesmereUI.RegisterMigration({
+    id          = "resourcebars_protwar_ignorepain_existing_off_v1",
+    scope       = "global",
+    description = "Pin the Prot Warrior Ignore Pain bar OFF for existing users' profiles; fresh installs and future profiles inherit the new ON default.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only touch profiles that already hold real child-addon data, so a
+            -- stray empty/stub profile can't be mistaken for an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local rb = profData.addons.EllesmereUIResourceBars
+                if type(rb) ~= "table" then
+                    rb = {}
+                    profData.addons.EllesmereUIResourceBars = rb
+                end
+                if type(rb.secondary) ~= "table" then rb.secondary = {} end
+                if rb.secondary.protIgnorePainBar == nil then
+                    rb.secondary.protIgnorePainBar = false
+                end
+            end
+        end
+    end,
+})
+
 -- Unit Frame cast bars now count the spell icon as part of the bar's width by
 -- default (DEFAULTS.player.playerCastbarIconInWidth / *.castbarIconInWidth =
 -- true), so fresh installs get the icon inside the bar footprint out of the box.
