@@ -364,6 +364,19 @@ local defaults = {
             freePos  = { x = 100, y = 0 },
             freeHorizontal = false,
             healthColor = { r = 23/255, g = 172/255, b = 49/255 },
+            extraWidth  = 0,      -- size offset on top of the raid frame size
+            extraHeight = 0,
+        },
+
+        -- Extra Frames (duplicates of chosen raid members, raid only)
+        extraFrames = {
+            showTanks = false,    -- auto-include the raid's tanks
+            position  = "right",  -- "left" | "right" | "free"
+            freePos   = { x = 100, y = -120 },
+            freeHorizontal = false,
+            players   = {},       -- manually added names (hotkey toggle)
+            extraWidth  = 0,      -- size offset on top of the raid frame size
+            extraHeight = 0,
         },
 
         -- Position (saved by unlock mode)
@@ -619,6 +632,7 @@ local defaults = {
         partyShowSelfFirst = true,
         partySelfLast      = false,
         partyHorizontal   = false,
+        partyFlipGrowth   = false,  -- DOWN->UP / RIGHT->LEFT growth flip
         partyHideSelf     = false,
         partyUnlockPos    = nil,
     }
@@ -629,6 +643,8 @@ local defaults = {
 -------------------------------------------------------------------------------
 local allButtons     = {}   -- flat list of all created buttons
 local unitToButton   = {}   -- unitToken -> button map (rebuilt on roster change)
+ns._xfUnitToButton   = {}   -- unitToken -> Extra Frames duplicate (max 5; owned
+                            -- by XF_Apply, never written by the rebuild paths)
 local separatedHdrs  = {}   -- [1..8] group headers
 local containerFrame = nil  -- top-level positioning frame
 ns._flatButtons      = {}   -- buttons owned by the flat (merged) header
@@ -1597,7 +1613,7 @@ local function UpdateAbsorb(button, unit)
     local calc = ab._hpCalculator
     if not hp then return end
 
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     local topBar = ab._topBar
     local barOn = topBar and s.absorbBarEnabled
     local styleOn = s.absorbStyle and s.absorbStyle ~= "none"
@@ -2561,7 +2577,7 @@ local function StyleButton(button)
         -- raw db.profile -- otherwise party_<key> overrides written by a custom
         -- party "Range & Tooltip" section are never seen and the toggle (and its
         -- in-combat sub-toggle) appear to do nothing on party frames.
-        local s = fd._isParty and ns._scaledPartyProxy or ns._scaledProfile
+        local s = fd._isParty and ns._scaledPartyProxy or (fd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
         if not s.showTooltip then return end
         if inCombat and not s.tooltipInCombat then return end
         local u = self:GetAttribute("unit")
@@ -2638,7 +2654,13 @@ local function StyleButton(button)
             -- button, until the next roster change. Only fires for buttons whose
             -- unit actually changed, so it stays bounded to the units that moved.
             local d = GetFFD(self)
-            if d._isParty then ns._partyUnitToButton[u] = self else unitToButton[u] = self end
+            -- Extra Frames duplicates never enter the real routing maps (one
+            -- button per unit); XF_Apply owns ns._xfUnitToButton instead. The
+            -- repaint/range/private-aura work below applies to them 1:1.
+            if d._isExtra then
+                -- map owned by XF_Apply
+            elseif d._isParty then ns._partyUnitToButton[u] = self
+            else unitToButton[u] = self end
             if ns._RefreshAssignedButton then ns._RefreshAssignedButton(self, u) end
             if ns._UpdateButtonRange then ns._UpdateButtonRange(u, self) end
             -- Only re-register private aura anchors when the unit actually
@@ -2719,7 +2741,7 @@ local function UpdateButton(button)
     local d = GetFFD(button)
     if not d.styled then return end
 
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     -- Restore alpha respecting BM frame alpha + range alpha.
     -- If rangeAlpha is nil, it's managed by the secret-safe SetAlphaFromBoolean
     -- path -- don't override it here or we'd flash full alpha until the next
@@ -2778,18 +2800,23 @@ local function UpdateButton(button)
         -- set by LayoutTopNameBar); subtract it here so this per-unit power
         -- show/hide doesn't expand health back over the bar.
         local tnbH = (s.topNameBarEnabled and PixelSnap(s.topNameBarHeight or 20)) or 0
+        -- Extra Frames duplicates carry a per-group size offset (Extra Height);
+        -- their authoritative height is the button itself, not the shared
+        -- setting -- the base value here would shrink health back and leave a
+        -- gap under the bar on every update.
+        local frameH = d._isExtra and button:GetHeight() or (s.frameHeight or 46)
         if hidePower then
             power:Hide()
             if d.powerBorderFrame then d.powerBorderFrame:Hide() end
             -- Expand health bar to full frame height (minus the Top Name Bar)
             if d.health then
-                d.health:SetHeight(PixelSnap((s.frameHeight or 46) - tnbH))
+                d.health:SetHeight(PixelSnap(frameH - tnbH))
             end
         else
             -- Restore health bar height with power bar space (and Top Name Bar)
             local powerH = PixelSnap(s.powerHeight or 4)
             if d.health then
-                d.health:SetHeight(PixelSnap((s.frameHeight or 46) - powerH - tnbH))
+                d.health:SetHeight(PixelSnap(frameH - powerH - tnbH))
             end
             -- Was the bar already visible before this update? Smooth
             -- interpolation only animates correctly on a bar that was already
@@ -3232,7 +3259,7 @@ end
 local function UpdateDebuffs(button, unit, updateInfo)
     local d = GetFFD(button)
     if not d.debuffIcons then return end
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
 
     if s.debuffFilter == "none" then
         for _, icon in ipairs(d.debuffIcons) do icon:Hide() end
@@ -3311,7 +3338,7 @@ local C_UnitAuras_GetAuraDuration = C_UnitAuras and C_UnitAuras.GetAuraDuration
 local function UpdateDefensives(button, unit, updateInfo)
     local d = GetFFD(button)
     if not d.defIcons then return end
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
 
     local showDef = s.showDefensives
     local showExt = s.showExternals
@@ -3683,7 +3710,7 @@ local function RegisterPrivateAuraSlots(button, unit)
         wipe(d.privateAuraAnchorIDs)
     end
 
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     local health = d.health
     if not health then return end
     local sz = s.paSize or 18
@@ -3908,7 +3935,7 @@ end
 
 local function UpdateDispelBorder(button, unit, updateInfo)
     local d = GetFFD(button)
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     local borderSize  = s.dispelBorderSize or 2
     if not ns._dispelCurve then ns._RebuildDispelCurves() end
     local wantBorder  = borderSize > 0
@@ -4086,9 +4113,12 @@ local function RebuildUnitMap()
         if btn:IsVisible() then
             local u = btn:GetAttribute("unit")
             if u then
-                unitToButton[u] = btn
-                -- Cache class token for power border (avoids UnitClass in hot path)
                 local d = GetFFD(btn)
+                -- Extra Frames duplicates stay out of the routing map (one
+                -- button per unit; the real frame owns the slot). Everything
+                -- else here -- class cache, private auras -- applies to them.
+                if not d._isExtra then unitToButton[u] = btn end
+                -- Cache class token for power border (avoids UnitClass in hot path)
                 local _, classToken = UnitClass(u)
                 d.classToken = classToken
                 -- Re-register private aura anchors if unit token changed
@@ -4153,7 +4183,7 @@ end
 ns._UpdateRaidMarkers = function()
     local function updateMarker(unit, btn)
         local d = GetFFD(btn)
-        local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+        local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
         if not s.showRaidMarker then
             if d.raidMarker then d.raidMarker:Hide() end
             return
@@ -4181,6 +4211,7 @@ ns._UpdateRaidMarkers = function()
     end
     for unit, btn in pairs(unitToButton) do updateMarker(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do updateMarker(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do updateMarker(unit, btn) end
 end
 
 -- Lightweight: only toggle target border on each button (for PLAYER_TARGET_CHANGED)
@@ -4193,6 +4224,7 @@ ns._UpdateTargetBorders = function()
     end
     for unit, btn in pairs(unitToButton) do updateTarget(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do updateTarget(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do updateTarget(unit, btn) end
 end
 
 -- Lightweight: health-only update for UNIT_HEALTH / UNIT_MAXHEALTH.
@@ -4203,7 +4235,7 @@ ns._UpdateButtonHealth = function(button)
     if not unit or not UnitExists(unit) then return end
     local d = GetFFD(button)
     if not d.styled then return end
-    local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
 
     local health = d.health
     local pct = GetSafeHealthPercent(unit)
@@ -4696,17 +4728,23 @@ FB.EnsureBuilt = function()
 end
 
 -- Re-apply all setting-derived properties (size, slots, texture, fonts,
--- text anchors). Out-of-combat only; callers gate.
-FB.ApplyStyle = function()
-    if not FB.built then return end
+-- text anchors). Out-of-combat only; callers gate. The owner parameter lets
+-- the Extra Frames duplicates (ns._XF) share this verbatim: an owner carries
+-- buttons/container/Settings and defaults to FB itself.
+FB.ApplyStyle = function(owner)
+    owner = owner or FB
+    if not owner.built then return end
     local s = ns._scaledProfile or db.profile
-    local w = PixelSnap(s.frameWidth or 125)
-    local h = PixelSnap(s.frameHeight or 60)
+    local fbset = owner.Settings()
+    -- Per-group size offset on top of the shared raid frame size (Extra
+    -- Width/Height sliders; clamped so a negative offset can't invert a
+    -- small frame).
+    local w = PixelSnap(math.max(10, (s.frameWidth or 125) + ((fbset and fbset.extraWidth) or 0)))
+    local h = PixelSnap(math.max(10, (s.frameHeight or 60) + ((fbset and fbset.extraHeight) or 0)))
     local sp = s.cellSpacing or -1
     -- Free Move ignores the raid growth settings entirely: simple vertical
     -- stack by default, horizontal via the Horizontal Frames cog toggle.
     -- Attached modes keep stacking like a real group (unitGrowth).
-    local fbset = FB.Settings()
     local grow
     if fbset and fbset.position == "free" then
         grow = fbset.freeHorizontal and "RIGHT" or "DOWN"
@@ -4718,25 +4756,25 @@ FB.ApplyStyle = function()
 
     local stepW, stepH = 0, 0
     if grow == "DOWN" or grow == "UP" then
-        FB.container:SetSize(w, h * 5 + sp * 4)
+        owner.container:SetSize(w, h * 5 + sp * 4)
         stepH = h + sp
     else
-        FB.container:SetSize(w * 5 + sp * 4, h)
+        owner.container:SetSize(w * 5 + sp * 4, h)
         stepW = w + sp
     end
 
-    for i, b in ipairs(FB.buttons) do
+    for i, b in ipairs(owner.buttons) do
         b:SetSize(w, h)
         b:ClearAllPoints()
         local off = i - 1
         if grow == "UP" then
-            b:SetPoint("BOTTOMLEFT", FB.container, "BOTTOMLEFT", 0, off * stepH)
+            b:SetPoint("BOTTOMLEFT", owner.container, "BOTTOMLEFT", 0, off * stepH)
         elseif grow == "LEFT" then
-            b:SetPoint("TOPRIGHT", FB.container, "TOPRIGHT", -off * stepW, 0)
+            b:SetPoint("TOPRIGHT", owner.container, "TOPRIGHT", -off * stepW, 0)
         elseif grow == "RIGHT" then
-            b:SetPoint("TOPLEFT", FB.container, "TOPLEFT", off * stepW, 0)
+            b:SetPoint("TOPLEFT", owner.container, "TOPLEFT", off * stepW, 0)
         else -- DOWN
-            b:SetPoint("TOPLEFT", FB.container, "TOPLEFT", 0, -off * stepH)
+            b:SetPoint("TOPLEFT", owner.container, "TOPLEFT", 0, -off * stepH)
         end
 
         b._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
@@ -4767,19 +4805,36 @@ end
 
 -- Position the container per the position setting. The container effectively
 -- inherits protection from its secure children, so SetPoint is OOC-only.
-FB.Anchor = function()
-    if not FB.built then return end
-    if InCombatLockdown() then FB.anchorDirty = true; return end
+-- Owner-parameterized like ApplyStyle (Extra Frames share the exact
+-- left/right/free slotting behavior).
+FB.Anchor = function(owner)
+    owner = owner or FB
+    if not owner.built then return end
+    if InCombatLockdown() then owner.anchorDirty = true; return end
     local s = db.profile
-    local fb = FB.Settings()
-    local c = FB.container
+    local fb = owner.Settings()
+    local c = owner.container
     c:ClearAllPoints()
 
     if fb.position ~= "free" then
         local anchorHdr
-        if s.mergeGroups then
+        -- Chain rule: when the boss group (owner == FB) and the Extra Frames
+        -- group are attached to the SAME side, the boss group anchors to the
+        -- extra container instead of the raid -- order along the growth axis
+        -- is raid -> extra frames -> boss frames (mirrored on "left").
+        -- Extra Frames always anchor to the raid itself; ns.XF_Apply re-runs
+        -- this anchor whenever that container shows, hides or moves.
+        if owner == FB then
+            local xf = ns._XF
+            local xs = xf and xf.Settings and xf.Settings()
+            if xs and xs.position == fb.position and xf.built
+               and xf.container and xf.container:IsShown() then
+                anchorHdr = xf.container
+            end
+        end
+        if not anchorHdr and s.mergeGroups then
             anchorHdr = ns._flatHeader
-        else
+        elseif not anchorHdr then
             -- The boss group behaves like one more raid group: it slots in
             -- before the first / after the last group that is BOTH enabled
             -- in Show Groups AND currently has players in it. When no group
@@ -4905,19 +4960,23 @@ end
 
 -- Free Move drag overlay (unlock-mode look, TOOLTIP strata so it floats
 -- above the options panel). Deliberately independent of unlock mode.
-function ns.FB_SetMoverShown(show)
+-- Owner-parameterized: the Extra Frames group builds its own mover through
+-- this exact code with its own name/label (mover stored at owner.mover).
+FB.SetMoverShown = function(owner, show, frameName, labelText)
     if not show then
-        if FB.mover then FB.mover:Hide() end
+        if owner.mover then owner.mover:Hide() end
         return
     end
-    local fb = FB.Settings()
+    local fb = owner.Settings()
     if not fb or fb.position ~= "free" then return end
-    FB.EnsureBuilt()
-    FB.ApplyStyle()
-    FB.Anchor()
+    owner.EnsureBuilt()
+    -- Owners with their own geometry pass (Extra Frames) restyle through it;
+    -- FB-built buttons go through the FB styler.
+    if owner.Layout then owner.Layout() else FB.ApplyStyle(owner) end
+    FB.Anchor(owner)
 
-    if not FB.mover then
-        local m = CreateFrame("Frame", "ERFFriendlyBossMover", UIParent)
+    if not owner.mover then
+        local m = CreateFrame("Frame", frameName, UIParent)
         m:SetFrameStrata("TOOLTIP")
         m:SetClampedToScreen(true)
         m:SetMovable(true)
@@ -4937,14 +4996,14 @@ function ns.FB_SetMoverShown(show)
         lbl:SetTextColor(1, 1, 1, 0.75)
         lbl:SetPoint("CENTER", m, "CENTER")
         lbl:SetWordWrap(false)
-        lbl:SetText("Friendly Boss Frames")
+        lbl:SetText(labelText)
         m:SetScript("OnDragStart", function(self) self:StartMoving() end)
         m:SetScript("OnDragStop", function(self)
             self:StopMovingOrSizing()
             local cx, cy = self:GetCenter()
             local ux, uy = UIParent:GetCenter()
             if cx and ux then
-                local set = FB.Settings()
+                local set = owner.Settings()
                 if set then
                     set.freePos = {
                         x = math.floor(cx - ux + 0.5),
@@ -4952,23 +5011,24 @@ function ns.FB_SetMoverShown(show)
                     }
                 end
             end
-            FB.Anchor()
+            FB.Anchor(owner)
         end)
-        FB.mover = m
+        owner.mover = m
         -- Close the mover with the options panel so it can't be stranded.
-        if EllesmereUI._mainFrame and not FB._panelHooked then
-            FB._panelHooked = true
-            EllesmereUI._mainFrame:HookScript("OnHide", function()
-                if FB.mover then FB.mover:Hide() end
-            end)
+        if EllesmereUI._mainFrame then
+            EllesmereUI._mainFrame:HookScript("OnHide", function() m:Hide() end)
         end
     end
 
-    FB.mover:SetSize(FB.container:GetWidth(), FB.container:GetHeight())
-    FB.mover:ClearAllPoints()
-    local p = (FB.Settings() or {}).freePos or {}
-    FB.mover:SetPoint("CENTER", UIParent, "CENTER", p.x or 100, p.y or 0)
-    FB.mover:Show()
+    owner.mover:SetSize(owner.container:GetWidth(), owner.container:GetHeight())
+    owner.mover:ClearAllPoints()
+    local p = (owner.Settings() or {}).freePos or {}
+    owner.mover:SetPoint("CENTER", UIParent, "CENTER", p.x or 100, p.y or 0)
+    owner.mover:Show()
+end
+
+function ns.FB_SetMoverShown(show)
+    FB.SetMoverShown(FB, show, "ERFFriendlyBossMover", "Friendly Boss Frames")
 end
 
 -- Standing event frame: exists even while the feature is inactive so a spec
@@ -5030,6 +5090,462 @@ SlashCmdList.EUIFB = function()
     end
 end
 end -- FB scope block
+
+-------------------------------------------------------------------------------
+--  Extra Frames (raid only)
+--  Up to five 1:1 duplicate frames for chosen raid members: the raid's tanks
+--  (Show Tanks toggle) plus players toggled in with a hotkey while hovering
+--  their raid frame. Each duplicate is built through the SAME StyleButton
+--  pipeline as the real header children -- power bar, absorbs, auras,
+--  defensives, dispel visuals, private auras, BM indicators, role/leader/
+--  marker icons, click-cast, ping -- and joins allButtons so every bulk
+--  restyle/update pass (ReloadFrames, UpdateAllButtons, ready checks, the
+--  in-combat roster repaint, BM spec rescans) covers it automatically.
+--
+--  Event routing: duplicates must NOT enter unitToButton (one button per
+--  unit; the real frame owns the slot -- d._isExtra guards every rebuild).
+--  Instead each slot has a tracker frame with RegisterUnitEvent for its
+--  assigned unit, mirroring the central hub's per-unit reactions, and the
+--  duplicates live in ns._xfUnitToButton which the broadcast passes (target
+--  border, raid markers, range seed/refine, ghost-aura sweep) also iterate.
+--  Cost is bounded to the <=5 duplicated units and is zero when inactive
+--  (no registrations, empty map). Container position via the shared
+--  FB.Anchor; unit assignment is OOC attribute writes, dirty-deferred
+--  through combat. Excluded from preview and unlock mode like FB.
+-------------------------------------------------------------------------------
+-- Scope block: the file is at Lua 5.1's 200-local cap for the main chunk
+-- (see the FB block above for the full rationale).
+do
+local XF = { buttons = {}, trackers = {} }
+ns._XF = XF
+local FB = ns._FB
+
+XF.Settings = function()
+    return db and db.profile and db.profile.extraFrames
+end
+
+XF.ShouldBeActive = function()
+    local set = XF.Settings()
+    if not set then return false end
+    return set.showTanks or #(set.players or {}) > 0
+end
+
+-- Ordered raid units to duplicate (max 5): tanks in roster order first (when
+-- Show Tanks is on), then the manually added names that are currently in the
+-- raid. Names are stored and matched in GetRaidRosterInfo's format on both
+-- sides so realm suffixes always agree; names not in the roster are skipped
+-- but kept in the list (they reappear when that player rejoins).
+XF.ResolveUnits = function()
+    local set = XF.Settings()
+    local units = {}
+    if not set or not IsInRaid() then return units end
+    local seen = {}
+    local n = GetNumGroupMembers() or 0
+    if set.showTanks then
+        for i = 1, n do
+            if #units >= 5 then break end
+            local name = GetRaidRosterInfo(i)
+            if name and not seen[name]
+               and UnitGroupRolesAssigned("raid" .. i) == "TANK" then
+                seen[name] = true
+                units[#units + 1] = "raid" .. i
+            end
+        end
+    end
+    for _, mname in ipairs(set.players or {}) do
+        if #units >= 5 then break end
+        if not seen[mname] then
+            for i = 1, n do
+                if (GetRaidRosterInfo(i)) == mname then
+                    seen[mname] = true
+                    units[#units + 1] = "raid" .. i
+                    break
+                end
+            end
+        end
+    end
+    return units
+end
+
+-- Geometry only: container size, button stacking, per-button size including
+-- the Extra Width/Height offsets, and the height-derived inner corrections
+-- (mirrors ns._ResizeButtons). All VISUALS come from the shared StyleButton /
+-- ReloadFrames pipeline -- the buttons are in allButtons and restyle with
+-- everything else; ReloadFrames tail-calls XF_Apply so this offset pass
+-- always runs after the bulk base-size pass.
+XF.Layout = function()
+    if not XF.built then return end
+    local s = ns._scaledProfile or db.profile
+    local set = XF.Settings()
+    local w = PixelSnap(math.max(10, (ns._activeSizeW or s.frameWidth or 72)
+        + ((set and set.extraWidth) or 0)))
+    local h = PixelSnap(math.max(10, (ns._activeSizeH or s.frameHeight or 46)
+        + ((set and set.extraHeight) or 0)))
+    -- Indicator/aura/BM auto-resize: ratio of the custom size to what the
+    -- real frames currently render at (clamped like the tier scales). The
+    -- extra proxy and ns._xfBmScale pick this up everywhere a duplicate
+    -- renders, composing with the raid tier scales.
+    local aw = PixelSnap(ns._activeSizeW or s.frameWidth or 72)
+    local ah = PixelSnap(ns._activeSizeH or s.frameHeight or 46)
+    local ratio = 1
+    if aw > 0 and ah > 0 then
+        ratio = math.max(math.min(math.min(w / aw, h / ah), 1.3), 0.7)
+    end
+    ns._xfExtraRatio = ratio
+    ns._xfBmScale = (ns._bmScale or 1) * ratio
+    local sp = s.cellSpacing or 2
+    -- Free Move ignores the raid growth settings entirely (Horizontal cog);
+    -- attached modes stack like a real group (unitGrowth).
+    local grow
+    if set and set.position == "free" then
+        grow = set.freeHorizontal and "RIGHT" or "DOWN"
+    else
+        grow = s.unitGrowth or "DOWN"
+    end
+
+    local stepW, stepH = 0, 0
+    if grow == "DOWN" or grow == "UP" then
+        XF.container:SetSize(w, h * 5 + sp * 4)
+        stepH = h + sp
+    else
+        XF.container:SetSize(w * 5 + sp * 4, h)
+        stepW = w + sp
+    end
+
+    local powerH = IsPowerBarEnabled(s) and PixelSnap(s.powerHeight or 4) or 0
+    local topBarH = (s.topNameBarEnabled and PixelSnap(s.topNameBarHeight or 20)) or 0
+    for i, b in ipairs(XF.buttons) do
+        b:SetSize(w, h)
+        b:ClearAllPoints()
+        local off = i - 1
+        if grow == "UP" then
+            b:SetPoint("BOTTOMLEFT", XF.container, "BOTTOMLEFT", 0, off * stepH)
+        elseif grow == "LEFT" then
+            b:SetPoint("TOPRIGHT", XF.container, "TOPRIGHT", -off * stepW, 0)
+        elseif grow == "RIGHT" then
+            b:SetPoint("TOPLEFT", XF.container, "TOPLEFT", off * stepW, 0)
+        else -- DOWN
+            b:SetPoint("TOPLEFT", XF.container, "TOPLEFT", 0, -off * stepH)
+        end
+        -- The bulk passes size inner elements for the BASE frame size;
+        -- correct the height/width-derived pieces for the offset size.
+        local d = GetFFD(b)
+        if d.health then
+            d.health:SetHeight(((d.power and d.power:IsShown()) and PixelSnap(h - powerH) or h) - topBarH)
+        end
+
+        -- Scaled visual pass: re-apply every ratio-affected element through
+        -- the extra proxy (mirrors the ReloadFrames per-button styling, so
+        -- texts, indicators, auras and BM buffs auto-resize with the custom
+        -- size). Bounded to five buttons; runs after the bulk base pass.
+        local xs = ns._scaledExtraProxy
+        if d.nameText then
+            ApplyFont(d.nameText, xs.nameSize or 10)
+            if d.AnchorNameText then d.AnchorNameText() end
+            -- AnchorNameText derives width from the BASE frame width; the
+            -- offset width is authoritative here.
+            d.nameText:SetWidth(w * 0.75)
+        end
+        if d.healthText then
+            ApplyFont(d.healthText, xs.healthTextSize or 9)
+            if d.AnchorHealthText then d.AnchorHealthText() end
+        end
+        if d.statusText then
+            ApplyFont(d.statusText, xs.statusTextSize or 14)
+            if d.AnchorStatusText then d.AnchorStatusText() end
+        end
+        if d.roleIcon then
+            local riSz = PixelSnap(xs.roleIconSize or 14)
+            d.roleIcon:SetSize(riSz, riSz)
+            if d.AnchorRoleIcon then d.AnchorRoleIcon() end
+        end
+        if d.leaderIcon then
+            local liSz = PixelSnap(xs.leaderIconSize or 14)
+            d.leaderIcon:SetSize(liSz, liSz)
+            d.leaderIcon:ClearAllPoints()
+            local liPos = (xs.leaderIconPosition or "top"):upper()
+            d.leaderIcon:SetPoint(liPos, d.health, liPos, xs.leaderIconOffsetX or 0, xs.leaderIconOffsetY or 0)
+        end
+        if d.raidMarker then
+            local rmSz = PixelSnap(xs.raidMarkerSize or 16)
+            d.raidMarker:SetSize(rmSz, rmSz)
+            if d.AnchorRaidMarker then d.AnchorRaidMarker() end
+        end
+        if d.debuffIcons then
+            for _, icon in ipairs(d.debuffIcons) do
+                icon:SetSize(xs.debuffSize or 18, xs.debuffSize or 18)
+            end
+            if d.AnchorDebuffs then d.AnchorDebuffs() end
+        end
+        if d.defIcons then
+            for _, icon in ipairs(d.defIcons) do
+                icon:SetSize(xs.defSize or 22, xs.defSize or 22)
+            end
+            if d.AnchorDefensives then d.AnchorDefensives() end
+        end
+        if d.AnchorDispelIcon then d.AnchorDispelIcon() end
+        if d.privateAuraFrames then
+            for _, paFrame in ipairs(d.privateAuraFrames) do
+                paFrame:SetSize(xs.debuffSize or 18, xs.debuffSize or 18)
+            end
+        end
+        if d.bmIconPool and d.health and ns.BM_AnchorIndicators then
+            ns.BM_AnchorIndicators(d, d.health, xs)
+        end
+    end
+end
+
+-- Per-unit events mirrored from the central hub for one duplicate's unit.
+-- UNIT_* only (safe for RegisterUnitEvent's C-side filter); the two
+-- unit-payload broadcast events (READY_CHECK_CONFIRM, PLAYER_FLAGS_CHANGED)
+-- are plain registrations filtered in the handler.
+XF.EVENTS = {
+    "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_AURA", "UNIT_POWER_UPDATE",
+    "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED",
+    "UNIT_HEAL_PREDICTION", "UNIT_MAX_HEALTH_MODIFIERS_CHANGED",
+    "UNIT_THREAT_LIST_UPDATE", "UNIT_THREAT_SITUATION_UPDATE",
+    "UNIT_NAME_UPDATE", "UNIT_CONNECTION", "UNIT_IN_RANGE_UPDATE",
+}
+
+-- One-time construction: container + five buttons through the full real-frame
+-- StyleButton pipeline (every visual element, hover, tooltip, click-cast,
+-- ping, BM indicators). d._isExtra is set BEFORE StyleButton so the
+-- OnAttributeChanged hook it installs never writes the real routing maps.
+-- Buttons join allButtons so every bulk restyle/update pass covers them.
+XF.EnsureBuilt = function()
+    if XF.built then return end
+    XF.built = true
+
+    local container = CreateFrame("Frame", "ERFExtraFramesContainer", UIParent)
+    container:Hide()
+    XF.container = container
+
+    for i = 1, 5 do
+        local b = CreateFrame("Button", "ERFExtraFrame" .. i, container, "SecureUnitButtonTemplate")
+        b:Hide()
+        GetFFD(b)._isExtra = true
+        StyleButton(b)
+        allButtons[#allButtons + 1] = b
+
+        -- Per-slot tracker: (re)registered for the assigned unit in XF_Apply,
+        -- mirroring the central hub's per-unit reactions for this duplicate.
+        -- Bounded to five units; zero registrations while the slot is empty.
+        local t = CreateFrame("Frame")
+        t:SetScript("OnEvent", function(_, event, unit, updateInfo)
+            if not b:IsVisible() then return end
+            if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
+                ns._UpdateButtonHealth(b)
+            elseif event == "UNIT_AURA" then
+                -- Mirror of the hub's UNIT_AURA branch without the budget
+                -- spill: at most five duplicated units, work stays bounded.
+                UpdateDispelBorder(b, unit, updateInfo)
+                UpdateDebuffs(b, unit, updateInfo)
+                UpdateDefensives(b, unit, updateInfo)
+                UpdateAbsorb(b, unit)
+                if ns.BM_UpdateIndicators then
+                    ns.BM_UpdateIndicators(b, unit, db, updateInfo)
+                end
+            elseif event == "UNIT_POWER_UPDATE" then
+                local d = GetFFD(b)
+                if d.power and d.power:IsShown() then
+                    local pType = UnitPowerType(unit) or 0
+                    d.power:SetMinMaxValues(0, 100)
+                    d.power:SetValue(UnitPowerPercent(unit, pType, true, CurveConstants.ScaleTo100))
+                    local pr, pg, pb = GetPowerColor(unit)
+                    d.power:SetStatusBarColor(pr, pg, pb, 1)
+                end
+            elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" or event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED"
+                or event == "UNIT_HEAL_PREDICTION" or event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
+                UpdateAbsorb(b, unit)
+            elseif event == "UNIT_THREAT_LIST_UPDATE" or event == "UNIT_THREAT_SITUATION_UPDATE" then
+                local d = GetFFD(b)
+                if d.threatFrame then
+                    local bs = db.profile.threatBorderSize or 0
+                    if bs > 0 then
+                        local status = UnitThreatSituation(unit)
+                        if status and THREAT_ACTIVE[status] and PP then
+                            PP.UpdateBorder(d.threatFrame, bs, 1, 0, 0, 1)
+                            d.threatFrame:Show()
+                        else
+                            d.threatFrame:Hide()
+                        end
+                    else
+                        d.threatFrame:Hide()
+                    end
+                end
+            elseif event == "UNIT_IN_RANGE_UPDATE" then
+                ns._UpdateButtonRange(unit, b)
+            elseif event == "READY_CHECK_CONFIRM" then
+                -- Plain registration; filter to this slot's unit here
+                if unit and unit == b:GetAttribute("unit") then
+                    UpdateReadyCheck(b, unit)
+                end
+            elseif event == "PLAYER_FLAGS_CHANGED" then
+                if unit and unit == b:GetAttribute("unit") then
+                    UpdateButton(b)
+                end
+            else -- UNIT_NAME_UPDATE / UNIT_CONNECTION
+                UpdateButton(b)
+                if event == "UNIT_CONNECTION" then ns._UpdateButtonRange(unit, b) end
+            end
+        end)
+        XF.trackers[i] = t
+
+        XF.buttons[i] = b
+    end
+end
+
+-- Master apply: resolves the selection and assigns units to the five fixed
+-- slots. Out-of-combat only (unit attributes and Show/Hide on protected
+-- buttons); combat callers land on the dirty flag and replay on regen.
+-- Called from OnEnable, the options widgets, the hotkey toggle, roster/role
+-- events, ReloadFrames and profile swaps (_ERF_RefreshAll). The SetAttribute
+-- write triggers the StyleButton OnAttributeChanged hook, which repaints the
+-- button in full (UpdateButton + auras + dispel + BM), seeds range and
+-- re-registers private auras -- the same path a real header assignment takes.
+function ns.XF_Apply()
+    if not db or not db.profile then return end
+    local set = XF.Settings()
+    if not set then return end
+    if InCombatLockdown() then XF.applyDirty = true; return end
+
+    local units = XF.ShouldBeActive() and XF.ResolveUnits() or {}
+    if #units == 0 then
+        if XF.built then
+            for _, b in ipairs(XF.buttons) do b:Hide() end
+            XF.container:Hide()
+            for i = 1, 5 do XF.trackers[i]:UnregisterAllEvents() end
+        end
+        if XF.mover then XF.mover:Hide() end
+        wipe(ns._xfUnitToButton)
+        -- The boss group may have been chained behind this container;
+        -- re-anchor it back onto the raid (no-op when FB is not built).
+        FB.Anchor()
+        return
+    end
+
+    XF.EnsureBuilt()
+    XF.Layout()
+    FB.Anchor(XF)
+    XF.container:Show()
+    wipe(ns._xfUnitToButton)
+    for i = 1, 5 do
+        local b = XF.buttons[i]
+        local unit = units[i]
+        local t = XF.trackers[i]
+        t:UnregisterAllEvents()
+        if unit then
+            -- Class token cache for the power border (mirrors RebuildUnitMap)
+            local d = GetFFD(b)
+            local _, classToken = UnitClass(unit)
+            d.classToken = classToken
+            b:SetAttribute("unit", unit)
+            ns._xfUnitToButton[unit] = b
+            for _, ev in ipairs(XF.EVENTS) do
+                t:RegisterUnitEvent(ev, unit)
+            end
+            t:RegisterEvent("READY_CHECK_CONFIRM")
+            t:RegisterEvent("PLAYER_FLAGS_CHANGED")
+            b:Show()
+        else
+            b:Hide()
+        end
+    end
+    -- Re-evaluate the boss group's chain now that this container is shown
+    -- and (re)positioned: same-side boss frames hop behind it.
+    FB.Anchor()
+end
+
+function ns.XF_IsMoverShown()
+    return XF.mover and XF.mover:IsShown() or false
+end
+
+function ns.XF_SetMoverShown(show)
+    FB.SetMoverShown(XF, show, "ERFExtraFramesMover", "Extra Frames")
+end
+
+-- Hidden bind target (pure Lua keybinding, no Bindings.xml -- same pattern
+-- as the Party Mode toggle key). The options panel binds the saved key to
+-- click this button; the click toggles the raid member under the mouse in
+-- or out of the extra group.
+local bindBtn = CreateFrame("Button", "ERFExtraFramesBindBtn", UIParent)
+bindBtn:Hide()
+
+XF.ToggleHovered = function()
+    if not db or not db.profile then return end
+    if not IsInRaid() then return end
+    local set = XF.Settings()
+    if not set then return end
+    -- The real raid frame under the mouse, or one of our own duplicates
+    -- (pressing the hotkey on a duplicate removes that player too).
+    local unit
+    for u, btn in pairs(unitToButton) do
+        if btn:IsShown() and btn:IsMouseOver() then unit = u; break end
+    end
+    if not unit then
+        for _, b in ipairs(XF.buttons) do
+            if b:IsShown() and b:IsMouseOver() then unit = b:GetAttribute("unit"); break end
+        end
+    end
+    if not unit then return end
+    local idx = tonumber(unit:match("^raid(%d+)$"))
+    local name = idx and GetRaidRosterInfo(idx)
+    if not name then return end
+
+    local players = set.players or {}
+    set.players = players
+    for k, v in ipairs(players) do
+        if v == name then
+            table.remove(players, k)
+            ns.XF_Apply()
+            return
+        end
+    end
+    -- Already covered by Show Tanks: adding would be an invisible duplicate
+    if set.showTanks and UnitGroupRolesAssigned(unit) == "TANK" then
+        return
+    end
+    if #XF.ResolveUnits() >= 5 then
+        return
+    end
+    players[#players + 1] = name
+    ns.XF_Apply()
+end
+
+bindBtn:SetScript("OnClick", function() XF.ToggleHovered() end)
+
+-- Standing event frame: exists even while inactive so the tanks toggle or a
+-- first hotkey add can activate the feature without a /reload, and so the
+-- saved hotkey is re-bound every login.
+do
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:RegisterEvent("GROUP_ROSTER_UPDATE")
+    ev:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    -- No PLAYER_TARGET_CHANGED / RAID_TARGET_UPDATE here: the duplicates ride
+    -- the central broadcast closures via ns._xfUnitToButton.
+    ev:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_LOGIN" then
+            local key = EllesmereUIDB and EllesmereUIDB.extraFramesKey
+            if key then
+                ClearOverrideBindings(bindBtn)
+                SetOverrideBindingClick(bindBtn, true, key, "ERFExtraFramesBindBtn")
+            end
+            return
+        end
+        if not db then return end
+        if event == "PLAYER_REGEN_ENABLED" then
+            if XF.applyDirty then XF.applyDirty = nil; ns.XF_Apply() end
+            if XF.anchorDirty then XF.anchorDirty = nil; FB.Anchor(XF) end
+        else -- GROUP_ROSTER_UPDATE / PLAYER_ROLES_ASSIGNED
+            -- Raid indices and the tank set both shift with the roster
+            if XF.ShouldBeActive() or XF.built then ns.XF_Apply() end
+        end
+    end)
+    XF.eventFrame = ev
+end
+end -- XF scope block
 
 -------------------------------------------------------------------------------
 --  Show Self First (raid, out-of-combat only)
@@ -5853,10 +6369,11 @@ local function ReloadFrames()
         RegisterPrivateAuras(btn, unit)
     end
 
-    -- Friendly Boss Frames inherit size/growth/spacing/border/text settings;
-    -- restyle + re-anchor them with everything else (growth changes move the
-    -- anchor points, not just the anchored-to header).
+    -- Friendly Boss Frames and Extra Frames inherit size/growth/spacing/
+    -- border/text settings; restyle + re-anchor them with everything else
+    -- (growth changes move the anchor points, not just the anchored-to header).
     if ns.FB_Apply then ns.FB_Apply() end
+    if ns.XF_Apply then ns.XF_Apply() end
 end
 
 ns.ReloadFrames = ReloadFrames
@@ -5873,19 +6390,28 @@ ns._ResizeButtons = function(w, h)
     local powerH = IsPowerBarEnabled(s) and PixelSnap(s.powerHeight or 4) or 0
     local healthH = PixelSnap(bh - powerH)
     local topBarH = (s.topNameBarEnabled and PixelSnap(s.topNameBarHeight or 20)) or 0
+    local xfset = s.extraFrames
     for _, btn in ipairs(allButtons) do
         local d = GetFFD(btn)
         if d.styled then
-            btn:SetSize(bw, bh)
+            local xbw, xbh, xhealthH = bw, bh, healthH
+            -- Extra Frames duplicates carry their size offset through the
+            -- live slider path too (XF.Layout re-applies it on full reloads).
+            if d._isExtra and xfset then
+                xbw = PixelSnap(math.max(10, w + (xfset.extraWidth or 0)))
+                xbh = PixelSnap(math.max(10, h + (xfset.extraHeight or 0)))
+                xhealthH = PixelSnap(xbh - powerH)
+            end
+            btn:SetSize(xbw, xbh)
             -- Full height when the power bar is hidden for this button's role
             -- (mirrors _ResizePartyButtons); avoids a dark strip on OFF-role units
             -- now that d.power always exists. Top Name Bar always reserves its
             -- height from the top (the health top anchor is kept at -topBarH by the
             -- full refresh, so here we only correct the height).
             if d.health then
-                d.health:SetHeight(((d.power and d.power:IsShown()) and healthH or bh) - topBarH)
+                d.health:SetHeight(((d.power and d.power:IsShown()) and xhealthH or xbh) - topBarH)
             end
-            if d.nameText then d.nameText:SetWidth(bw * 0.75) end
+            if d.nameText then d.nameText:SetWidth(xbw * 0.75) end
         end
     end
     ns._activeSizeW = w
@@ -5969,13 +6495,98 @@ ns._ResizePartyButtons = function(w, h)
     -- anchor tracking -- no secure re-process, no blink.
     if ns._PositionPartySlots then
         local cs2 = PixelSnap(s.partyCellSpacing or s.cellSpacing or 2)
-        local growth2 = s.partyHorizontal and "RIGHT" or "DOWN"
+        local growth2 = s.partyHorizontal and (s.partyFlipGrowth and "LEFT" or "RIGHT")
+            or (s.partyFlipGrowth and "UP" or "DOWN")
         ns._PositionPartySlots(bw, bh, cs2, growth2)
     end
 end
 
+-- Convert a saved (point, relPoint, x, y) UIParent anchor to the TOPLEFT
+-- screen coords (UIParent bottom-left space, same space GetLeft/GetTop use)
+-- the frame would occupy at the given size.
+ns._RFPosTopLeft = function(pos, w, h)
+    local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
+    local function frac(p)
+        p = p or "CENTER"
+        local fx = (p:find("LEFT") and 0) or (p:find("RIGHT") and 1) or 0.5
+        local fy = (p:find("BOTTOM") and 0) or (p:find("TOP") and 1) or 0.5
+        return fx, fy
+    end
+    local rfx, rfy = frac(pos.relPoint)
+    local pfx, pfy = frac(pos.point)
+    local ax = uw * rfx + (pos.x or 0)
+    local ay = uh * rfy + (pos.y or 0)
+    return ax - pfx * w, ay + (1 - pfy) * h
+end
+
+-- Footprint of the 4-group mover box for a frame size and growth pair.
+ns._RFFootprint = function(bw, bh, unitGrowth, groupGrowth, cs, gs)
+    bw, bh = PixelSnap(bw), PixelSnap(bh)
+    local groupW, groupH
+    if unitGrowth == "RIGHT" or unitGrowth == "LEFT" then
+        groupW = 5 * bw + 4 * cs
+        groupH = bh
+    else
+        groupW = bw
+        groupH = 5 * bh + 4 * cs
+    end
+    if groupGrowth == "DOWN" or groupGrowth == "UP" then
+        return PixelSnap(groupW), PixelSnap(MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs)
+    end
+    return PixelSnap(MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs), PixelSnap(groupH)
+end
+
+-- TOPLEFT of the BASE (20-man) footprint at the saved unlock position: the
+-- shared growth origin for every size tier and the previews. Returns nil
+-- when no position has been saved yet.
+ns._RFBaseTopLeft = function()
+    local s = db.profile
+    local pos = s.unlockPos
+    if not pos then return nil end
+    local cs = PixelSnap(s.cellSpacing or 2)
+    local gs = PixelSnap(s.groupSpacing or 8)
+    local w, h = ns._RFFootprint(s.frameWidth or 72, s.frameHeight or 46,
+        s.unitGrowth or "DOWN", s.groupGrowth or "RIGHT", cs, gs)
+    return ns._RFPosTopLeft(pos, w, h)
+end
+
+-- One-time conversion (the marker travels INSIDE raidSizeOverrides, so
+-- imported/swapped profiles self-convert -- no migration-flag inheritance
+-- trap): tier offsets saved under the old "re-anchor the container at
+-- unlockPos.point" scheme are rebased to the top-left growth-origin scheme,
+-- preserving each tier's CURRENT on-screen position exactly.
+ns._NormalizeTierOffsetAnchors = function()
+    local s = db and db.profile
+    if not s then return end
+    local ov = s.raidSizeOverrides
+    if not ov or ov._topLeftAnchored then return end
+    ov._topLeftAnchored = true
+    local pos = s.unlockPos
+    if not pos then return end
+    local cs = PixelSnap(s.cellSpacing or 2)
+    local gs = PixelSnap(s.groupSpacing or 8)
+    local bl, bt = ns._RFBaseTopLeft()
+    if not bl then return end
+    for _, o in pairs(ov) do
+        if type(o) == "table" then
+            local tw, th = ns._RFFootprint(
+                o.width or s.frameWidth or 72, o.height or s.frameHeight or 46,
+                o.unitGrowth or s.unitGrowth or "DOWN",
+                o.groupGrowth or s.groupGrowth or "RIGHT", cs, gs)
+            local tl, tt = ns._RFPosTopLeft(pos, tw, th)
+            o.offsetX = math.floor((o.offsetX or 0) + (tl - bl) + 0.5)
+            o.offsetY = math.floor((o.offsetY or 0) + (tt - bt) + 0.5)
+        end
+    end
+end
+
 -- Apply tier-based position offset to the container frame.
--- Adds the active tier's offsetX/Y on top of the saved unlock position.
+-- The container's TOPLEFT anchors at the BASE (20-man) footprint's top-left
+-- plus the tier offset, so every size tier grows down/right from the same
+-- origin as the base layout -- matching how the base width/height sliders
+-- behave -- instead of re-centering on the saved anchor point. unlockPos
+-- itself is untouched (only the growth-origin derivation changed; old saved
+-- tier offsets were rebased once by _NormalizeTierOffsetAnchors).
 ns._ApplyTierOffset = function()
     if not containerFrame or InCombatLockdown() then return end
     local pos = db.profile.unlockPos
@@ -6008,8 +6619,10 @@ ns._ApplyTierOffset = function()
             end
         end
     end
+    local bl, bt = ns._RFBaseTopLeft()
+    if not bl then return end
     containerFrame:ClearAllPoints()
-    containerFrame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x + ox, pos.y + oy)
+    containerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", PixelSnap(bl + ox), PixelSnap(bt + oy))
 end
 
 -------------------------------------------------------------------------------
@@ -6067,7 +6680,7 @@ local function UpdateButtonRange(unit, btn)
     -- Read oorAlpha through the party-aware proxy so a custom party_oorAlpha
     -- actually applies to party frames (was reading the raid value directly).
     local rd = GetFFD(btn)
-    local rs = rd._isParty and ns._scaledPartyProxy or ns._scaledProfile
+    local rs = rd._isParty and ns._scaledPartyProxy or (rd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     local oorAlpha = rs.oorAlpha or 0.4
     if UnitIsUnit(unit, "player") or not UnitExists(unit) then
         ApplyRangeAlpha(btn, 1)
@@ -6137,6 +6750,7 @@ RangeUpdate = function()
     local t0 = ns.ProfBegin("RangeUpdate")
     for unit, btn in pairs(unitToButton) do UpdateButtonRange(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do UpdateButtonRange(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do UpdateButtonRange(unit, btn) end
     ns.ProfEnd("RangeUpdate", t0)
 end
 ns._RangeSeedAll = RangeUpdate
@@ -6145,6 +6759,7 @@ local function RangeRefineAll()
     local t0 = ns.ProfBegin("RangeRefine")
     for unit, btn in pairs(unitToButton) do RefineButtonRange(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do RefineButtonRange(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do RefineButtonRange(unit, btn) end
     ns.ProfEnd("RangeRefine", t0)
 end
 
@@ -6166,6 +6781,7 @@ function StopRangeTicker()
     -- Reset range alpha, respect BM frame alpha
     for _, btn in pairs(unitToButton) do ApplyRangeAlpha(btn, 1) end
     for _, btn in pairs(ns._partyUnitToButton) do ApplyRangeAlpha(btn, 1) end
+    for _, btn in pairs(ns._xfUnitToButton) do ApplyRangeAlpha(btn, 1) end
 end
 end  -- range fading section (do-block keeps its locals out of the 200-cap)
 
@@ -6216,6 +6832,7 @@ local function GhostAuraCheck()
     end
     for unit, btn in pairs(unitToButton) do checkUnit(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do checkUnit(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do checkUnit(unit, btn) end
     ns.ProfEnd("GhostAuraCheck", t0)
 end
 
@@ -6236,6 +6853,10 @@ local function StopGhostTicker()
         d.ghostCleared = nil
     end
     for _, btn in pairs(ns._partyUnitToButton) do
+        local d = GetFFD(btn)
+        d.ghostCleared = nil
+    end
+    for _, btn in pairs(ns._xfUnitToButton) do
         local d = GetFFD(btn)
         d.ghostCleared = nil
     end
@@ -6461,8 +7082,9 @@ local function OnEvent(self, event, arg1, ...)
                     if btn:IsVisible() then
                         local u = btn:GetAttribute("unit")
                         if u then
-                            unitToButton[u] = btn
                             local d = GetFFD(btn)
+                            -- Extra Frames duplicates never own a map slot
+                            if not d._isExtra then unitToButton[u] = btn end
                             local _, classToken = UnitClass(u)
                             d.classToken = classToken
                         end
@@ -6943,6 +7565,14 @@ ns._partyIndicatorScale = 1
 -- toggles -- BM indicators always track frame size (raid tier / party size).
 ns._bmScale = 1
 ns._partyBmScale = 1
+-- Extra Frames duplicates: scale ratio from the Extra Width/Height offsets,
+-- relative to the size the real raid frames currently render at. ALWAYS on
+-- (not gated by Auto Resize): a custom-sized duplicate scales its texts,
+-- indicators, auras and BM buffs to match. Composes with the raid tier
+-- scales -- the extra proxy chains through ns._scaledProfile, and the BM
+-- scale multiplies ns._bmScale. Both set by XF.Layout.
+ns._xfExtraRatio = 1
+ns._xfBmScale = 1
 
 local INDICATOR_SCALE_KEYS = {}
 for _, k in ipairs({
@@ -6975,6 +7605,18 @@ ns._scaledProfile = setmetatable({}, { __index = function(_, key)
     local val = db and db.profile and db.profile[key]
     if INDICATOR_SCALE_KEYS[key] and type(val) == "number" and ns._indicatorScale ~= 1 then
         return val * ns._indicatorScale
+    end
+    return val
+end })
+
+-- Extra Frames proxy: chains through ns._scaledProfile (so the raid tier
+-- indicator scale still applies) and multiplies the scale keys by the Extra
+-- Width/Height offset ratio on top. Selected wherever rendering picks a
+-- settings source for a d._isExtra button.
+ns._scaledExtraProxy = setmetatable({}, { __index = function(_, key)
+    local val = ns._scaledProfile[key]
+    if INDICATOR_SCALE_KEYS[key] and type(val) == "number" and ns._xfExtraRatio ~= 1 then
+        return val * ns._xfExtraRatio
     end
     return val
 end })
@@ -7156,9 +7798,21 @@ ns._PositionPartySlots = function(bw, bh, cs, unitGrowth)
     -- The header re-derives the same size on its next natural child pass.
     ns._partyHeader:SetSize(bw, bh)
 
-    -- Step between adjacent unit slots along the growth axis (party = DOWN/RIGHT)
+    -- Step between adjacent unit slots along the growth axis. Slot 0 sits at
+    -- the container corner the growth direction moves AWAY from (Flip Frame
+    -- Growth turns DOWN into UP and RIGHT into LEFT), so the container always
+    -- bounds the visual stack.
     local slotStepX, slotStepY = 0, 0
-    if unitGrowth == "RIGHT" then slotStepX = bw + cs else slotStepY = -(bh + cs) end
+    local basePoint = "TOPLEFT"
+    if unitGrowth == "RIGHT" then
+        slotStepX = bw + cs
+    elseif unitGrowth == "LEFT" then
+        slotStepX = -(bw + cs); basePoint = "TOPRIGHT"
+    elseif unitGrowth == "UP" then
+        slotStepY = bh + cs; basePoint = "BOTTOMLEFT"
+    else -- DOWN
+        slotStepY = -(bh + cs)
+    end
 
     local sb = ns._partySelfButton
     if useSelf then
@@ -7171,24 +7825,24 @@ ns._PositionPartySlots = function(bw, bh, cs, unitGrowth)
         if sb then
             sb:SetSize(bw, bh)
             sb:ClearAllPoints()
-            sb:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(slotStepX * selfSlot), PixelSnap(slotStepY * selfSlot))
+            sb:SetPoint(basePoint, ns._partyContainerFrame, basePoint, PixelSnap(slotStepX * selfSlot), PixelSnap(slotStepY * selfSlot))
             if not InCombatLockdown() then sb:Show() end
         end
         ns._partyHeader:ClearAllPoints()
-        ns._partyHeader:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(slotStepX * hdrSlot), PixelSnap(slotStepY * hdrSlot))
+        ns._partyHeader:SetPoint(basePoint, ns._partyContainerFrame, basePoint, PixelSnap(slotStepX * hdrSlot), PixelSnap(slotStepY * hdrSlot))
     else
         if sb and not InCombatLockdown() then sb:Hide() end
         ns._partyHeader:ClearAllPoints()
         -- Center When Solo: when not in a group, center the lone player frame in
         -- the container by offsetting the header 2 slots along the growth axis
         -- ((5-1)/2 = 2). The container is always sized for 5 slots, so a single
-        -- frame at slot 2 sits centered. Only DOWN/RIGHT growth for party.
+        -- frame at slot 2 sits centered.
         local cOffX, cOffY = 0, 0
         if s.partyCenterWhenSolo and not IsInGroup() then
             cOffX = slotStepX * 2
             cOffY = slotStepY * 2
         end
-        ns._partyHeader:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(cOffX), PixelSnap(cOffY))
+        ns._partyHeader:SetPoint(basePoint, ns._partyContainerFrame, basePoint, PixelSnap(cOffX), PixelSnap(cOffY))
     end
     return useSelf
 end
@@ -7202,7 +7856,8 @@ ns._LayoutPartyFrames = function()
     local bw = PixelSnap(s.partyFrameWidth or s.frameWidth or 125)
     local bh = PixelSnap(s.partyFrameHeight or s.frameHeight or 60)
     local cs = PixelSnap(s.partyCellSpacing or s.cellSpacing or 2)
-    local unitGrowth = s.partyHorizontal and "RIGHT" or "DOWN"
+    local unitGrowth = s.partyHorizontal and (s.partyFlipGrowth and "LEFT" or "RIGHT")
+        or (s.partyFlipGrowth and "UP" or "DOWN")
 
     local hdrPoint, hdrXOff, hdrYOff
     if unitGrowth == "DOWN" then
@@ -10401,6 +11056,19 @@ local function RefreshPreview()
     local snapH = PixelSnap(max(totalH, 1))
     if previewContainer then
         previewContainer:SetSize(snapW, snapH)
+        -- Re-anchor from the saved position on EVERY refresh (mirrors the
+        -- real container and the size preview; preserving a stale TOPLEFT
+        -- here left the real-mode preview stranded after a growth change
+        -- until the panel reopened). Anchored at the base footprint's
+        -- top-left so size changes grow down/right exactly like the real
+        -- container's _ApplyTierOffset scheme.
+        local bl, bt = ns._RFBaseTopLeft()
+        previewContainer:ClearAllPoints()
+        if bl then
+            previewContainer:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", PixelSnap(bl), PixelSnap(bt))
+        else
+            previewContainer:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        end
         -- Snap TOPLEFT to pixel grid (same fix as containerFrame in LayoutGroups)
         local l = previewContainer:GetLeft()
         local t = previewContainer:GetTop()
@@ -10765,10 +11433,12 @@ ns._ShowSizePreview = function(tier)
     if container._bg then container._bg:Hide() end
     container:SetFrameStrata("HIGH")
     container:ClearAllPoints()
-    local unlockPos = s.unlockPos
-    if unlockPos then
-        container:SetPoint(unlockPos.point, UIParent, unlockPos.relPoint,
-            unlockPos.x + tierOX, unlockPos.y + tierOY)
+    -- Same growth origin as the real container (_ApplyTierOffset): tiers
+    -- grow down/right from the base footprint's top-left + tier offset.
+    local bl, bt = ns._RFBaseTopLeft()
+    if bl then
+        container:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT",
+            PixelSnap(bl + tierOX), PixelSnap(bt + tierOY))
     else
         container:SetPoint("CENTER", UIParent, "CENTER", tierOX, tierOY)
     end
@@ -11366,7 +12036,8 @@ local function RefreshPartyPreview()
     local isOverlay = (mode == "overlay")
     local anchorPad = isOverlay and 10 or 0
     local topExtra = isOverlay and 25 or 0   -- top space for the centered "Preview" title
-    local unitGrowth = s.partyHorizontal and "RIGHT" or "DOWN"
+    local unitGrowth = s.partyHorizontal and (s.partyFlipGrowth and "LEFT" or "RIGHT")
+        or (s.partyFlipGrowth and "UP" or "DOWN")
     local isVert = (unitGrowth == "DOWN" or unitGrowth == "UP")
     local totalW, totalH
     if isVert then
@@ -11398,12 +12069,12 @@ local function RefreshPartyPreview()
             f:ClearAllPoints()
             if isVert then
                 local yOff = slot * (h + spacing)
-                if unitGrowth == "UP" then yOff = -yOff end
                 if unitGrowth == "DOWN" then
                     f:SetPoint("TOPLEFT", parentFrame, "TOPLEFT", anchorPad, -anchorPad - topExtra - yOff)
                 else
-                    -- UP grows from the bottom; the container's extra top height
-                    -- creates the title gap, so no per-frame offset is needed here.
+                    -- UP fills the same box from the bottom upward (positive
+                    -- offsets); the container's extra top height creates the
+                    -- title gap, so no per-frame correction is needed here.
                     f:SetPoint("BOTTOMLEFT", parentFrame, "BOTTOMLEFT", anchorPad, anchorPad + yOff)
                 end
             else
@@ -11709,6 +12380,9 @@ function ERF:OnEnable()
     -- profiles saved before the section split (must precede any proxy reads).
     ns._NormalizePartySyncSections()
 
+    -- Rebase pre-top-left-anchor tier offsets (marker travels in the data)
+    ns._NormalizeTierOffsetAnchors()
+
     -- Initialize click-cast engine (before CreateHeaders so ClickCastFrames hook is active)
     if ns.CC_Init then ns.CC_Init() end
 
@@ -11746,6 +12420,8 @@ function ERF:OnEnable()
 
     -- Friendly Boss Frames: initial activation (raid-only boss1-5 frames)
     if ns.FB_Apply then ns.FB_Apply() end
+    -- Extra Frames: initial activation (raid-only member duplicates)
+    if ns.XF_Apply then ns.XF_Apply() end
 
     -- Profile-swap refresh: EllesmereUI.RefreshAllAddons calls this on a profile
     -- change so raid + party frames re-read the (now-swapped) profile live,
@@ -11755,6 +12431,9 @@ function ERF:OnEnable()
         -- Absorbs sync-state inheritance for swapped/imported profiles saved
         -- before the Absorbs section split (must precede party proxy reads).
         ns._NormalizePartySyncSections()
+        -- Rebase old-scheme tier offsets on swapped/imported profiles too
+        -- (the marker lives inside raidSizeOverrides, so this self-detects).
+        ns._NormalizeTierOffsetAnchors()
         -- Rebuild the buff-manager spell lookup for the new profile's per-spec
         -- indicators (and the Simple Setup whitelist) before frames re-render.
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(ns.db) end
@@ -11781,8 +12460,9 @@ function ERF:OnEnable()
         if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
         -- Re-apply click-cast / hovercast bindings for the new profile.
         if ns.CC_ApplyBindings then ns.CC_ApplyBindings() end
-        -- Friendly Boss Frames re-read the swapped profile.
+        -- Friendly Boss Frames and Extra Frames re-read the swapped profile.
         if ns.FB_Apply then ns.FB_Apply() end
+        if ns.XF_Apply then ns.XF_Apply() end
     end
 
 

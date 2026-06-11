@@ -2488,6 +2488,11 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 return p.friendlyBoss
             end
+            -- Everything below the display dropdown is inert while "Never"
+            local function FBEnabled()
+                return (FBSet().display or "never") ~= "never"
+            end
+            local FB_DISABLED_TIP = "This option requires Add Friendly Boss Group to be set to Healers or Always."
 
             row, h = W:DualRow(parent, y,
                 { type="dropdown", text="Add Friendly Boss Group",
@@ -2502,6 +2507,8 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="dropdown", text="Position",
                   values = { left="Before First Group", right="After Last Group", free="Free Move" },
                   order  = { "left", "right", "free" },
+                  disabled = function() return not FBEnabled() end,
+                  disabledTooltip = FB_DISABLED_TIP,
                   getValue = function() return FBSet().position or "right" end,
                   setValue = function(v)
                       FBSet().position = v
@@ -2566,19 +2573,29 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 cogBtn:SetScript("OnClick", function(self) fmCogShow(self) end)
 
+                -- Capture the region now: the shared `row` local is reused by
+                -- later rows, so closures must not read it at refresh time.
+                local fmRegion = row._leftRegion
                 local function MoveAllowed()
-                    return (FBSet().position == "free") and not InCombatLockdown()
+                    return FBEnabled() and (FBSet().position == "free")
+                        and not InCombatLockdown()
                 end
                 local function UpdateMoveBtn()
                     local active = ns.FB_IsMoverShown and ns.FB_IsMoverShown()
                     lbl:SetText(active and "Stop Moving" or "Move Frames")
                     btn:SetAlpha(MoveAllowed() and 1 or 0.35)
-                    local freeOn = FBSet().position == "free"
+                    local freeOn = FBEnabled() and FBSet().position == "free"
                     cogBtn:SetAlpha(freeOn and 0.4 or 0.15)
                     cogBtn:EnableMouse(freeOn)
+                    -- Plain-label slots have no native disabled handling
+                    if fmRegion._label then
+                        fmRegion._label:SetAlpha(FBEnabled() and 1 or 0.3)
+                    end
                 end
                 btn:SetScript("OnEnter", function(self)
-                    if not MoveAllowed() then
+                    if not FBEnabled() then
+                        EllesmereUI.ShowWidgetTooltip(self, FB_DISABLED_TIP)
+                    elseif not MoveAllowed() then
                         EllesmereUI.ShowWidgetTooltip(self,
                             EllesmereUI.DisabledTooltip("Position must be set to Free Move"))
                     else
@@ -2612,14 +2629,350 @@ initFrame:SetScript("OnEvent", function(self)
                     end, false, 20)
                 swatch:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
                 rgn._lastInline = swatch
+                -- Blocking overlay: the dim alone left the swatch clickable
+                local swatchBlock = CreateFrame("Frame", nil, swatch)
+                swatchBlock:SetAllPoints()
+                swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                swatchBlock:EnableMouse(true)
+                swatchBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(swatch, FB_DISABLED_TIP)
+                end)
+                swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 local function UpdateFBSwatch()
-                    swatch:SetAlpha((FBSet().display or "never") ~= "never" and 1 or 0.3)
+                    local on = FBEnabled()
+                    swatch:SetAlpha(on and 1 or 0.3)
+                    swatchBlock:SetShown(not on)
+                    if rgn._label then rgn._label:SetAlpha(on and 1 or 0.3) end
                 end
                 EllesmereUI.RegisterWidgetRefresh(UpdateFBSwatch)
                 UpdateFBSwatch()
             end
 
+            -- Row 3: size offset on top of the shared raid frame size
+            row, h = W:DualRow(parent, y,
+                { type="slider", text="Extra Width", min=-50, max=100, step=1,
+                  tooltip="Widens or narrows the boss frames relative to the raid frame size.",
+                  disabled = function() return not FBEnabled() end,
+                  disabledTooltip = FB_DISABLED_TIP,
+                  getValue = function() return FBSet().extraWidth or 0 end,
+                  setValue = function(v)
+                      FBSet().extraWidth = v
+                      if ns.FB_Apply then ns.FB_Apply() end
+                      if ns.FB_IsMoverShown and ns.FB_IsMoverShown()
+                         and ns.FB_SetMoverShown then
+                          ns.FB_SetMoverShown(true)
+                      end
+                  end },
+                { type="slider", text="Extra Height", min=-50, max=100, step=1,
+                  tooltip="Makes the boss frames taller or shorter relative to the raid frame size.",
+                  disabled = function() return not FBEnabled() end,
+                  disabledTooltip = FB_DISABLED_TIP,
+                  getValue = function() return FBSet().extraHeight or 0 end,
+                  setValue = function(v)
+                      FBSet().extraHeight = v
+                      if ns.FB_Apply then ns.FB_Apply() end
+                      if ns.FB_IsMoverShown and ns.FB_IsMoverShown()
+                         and ns.FB_SetMoverShown then
+                          ns.FB_SetMoverShown(true)
+                      end
+                  end }); y = y - h
+
             if onSection then onSection("friendlyBossFrames", _secY, y) end; _secY = y
+
+            -------------------------------------------------------------------
+            --  EXTRA FRAMES (raid tab only)
+            -------------------------------------------------------------------
+            _, h = W:SectionHeader(parent, "EXTRA FRAMES", y); y = y - h
+
+            local function XFSet()
+                local p = db.profile
+                if not p.extraFrames then
+                    p.extraFrames = { showTanks = false, position = "right", players = {} }
+                end
+                return p.extraFrames
+            end
+            -- Position settings only matter once something can feed the
+            -- group: the tanks toggle or a bound hotkey.
+            local function XFConfigured()
+                return XFSet().showTanks == true
+                    or (EllesmereUIDB and EllesmereUIDB.extraFramesKey) ~= nil
+            end
+            local XF_DISABLED_TIP = "This option requires Show Tanks in Extra Group or a bound hotkey."
+
+            -- Row 1: Show Tanks toggle | Add to Extra Group Hotkey (capture)
+            row, h = W:DualRow(parent, y,
+                { type="toggle", text="Show Tanks in Extra Group",
+                  tooltip="Automatically duplicates the raid's tanks into the Extra Frames group. Shares the 5-frame cap with hotkey picks.",
+                  getValue = function() return XFSet().showTanks == true end,
+                  setValue = function(v)
+                      XFSet().showTanks = v
+                      if ns.XF_Apply then ns.XF_Apply() end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="label", text="Add to Extra Group Hotkey" }); y = y - h
+            do
+                local rgn = row._rightRegion
+                local kbBtn = CreateFrame("Button", nil, row)
+                kbBtn:SetSize(140, 26)
+                kbBtn:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
+                kbBtn:SetFrameLevel(row:GetFrameLevel() + 5)
+                kbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                local kbBg = kbBtn:CreateTexture(nil, "BACKGROUND")
+                kbBg:SetAllPoints()
+                kbBg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+                if EllesmereUI.MakeBorder then
+                    EllesmereUI.MakeBorder(kbBtn, 1, 1, 1, 0.25)
+                end
+                local kbLbl = kbBtn:CreateFontString(nil, "OVERLAY")
+                kbLbl:SetFont(EllesmereUI.GetFontPath(), 13, GetOutline())
+                if GetUseShadow() then
+                    kbLbl:SetShadowOffset(1, -1); kbLbl:SetShadowColor(0, 0, 0, 0.8)
+                else
+                    kbLbl:SetShadowOffset(0, 0)
+                end
+                kbLbl:SetPoint("CENTER")
+
+                local function FormatKey(key)
+                    if not key then return "Not Bound" end
+                    local parts = {}
+                    for mod in key:gmatch("(%u+)%-") do
+                        parts[#parts + 1] = mod:sub(1, 1) .. mod:sub(2):lower()
+                    end
+                    local actualKey = key:match("[^%-]+$") or key
+                    parts[#parts + 1] = actualKey
+                    return table.concat(parts, " + ")
+                end
+
+                local function RefreshLabel()
+                    kbLbl:SetText(FormatKey(EllesmereUIDB and EllesmereUIDB.extraFramesKey))
+                end
+                RefreshLabel()
+
+                local listening = false
+
+                kbBtn:SetScript("OnClick", function(self, button)
+                    if button == "RightButton" then
+                        if listening then
+                            listening = false
+                            self:EnableKeyboard(false)
+                        end
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        if EllesmereUIDB.extraFramesKey and _G["ERFExtraFramesBindBtn"] then
+                            ClearOverrideBindings(_G["ERFExtraFramesBindBtn"])
+                        end
+                        EllesmereUIDB.extraFramesKey = nil
+                        RefreshLabel()
+                        -- Position settings gate on tanks-toggle/hotkey; the
+                        -- mover can't stay up if the feature just went dark.
+                        if not XFConfigured() and ns.XF_SetMoverShown then
+                            ns.XF_SetMoverShown(false)
+                        end
+                        EllesmereUI:RefreshPage()
+                        return
+                    end
+                    if listening then return end
+                    listening = true
+                    kbLbl:SetText(EllesmereUI.L("Press a key..."))
+                    kbBtn:EnableKeyboard(true)
+                end)
+
+                kbBtn:SetScript("OnKeyDown", function(self, key)
+                    if not listening then
+                        self:SetPropagateKeyboardInput(true)
+                        return
+                    end
+                    if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
+                       or key == "LALT" or key == "RALT" then
+                        self:SetPropagateKeyboardInput(true)
+                        return
+                    end
+                    self:SetPropagateKeyboardInput(false)
+                    if key == "ESCAPE" then
+                        listening = false
+                        self:EnableKeyboard(false)
+                        RefreshLabel()
+                        return
+                    end
+                    local mods = ""
+                    if IsShiftKeyDown() then mods = mods .. "SHIFT-" end
+                    if IsControlKeyDown() then mods = mods .. "CTRL-" end
+                    if IsAltKeyDown() then mods = mods .. "ALT-" end
+                    local fullKey = mods .. key
+
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    local bindBtn = _G["ERFExtraFramesBindBtn"]
+                    if bindBtn then
+                        if InCombatLockdown() then
+                            listening = false
+                            self:EnableKeyboard(false)
+                            RefreshLabel()
+                            return
+                        end
+                        ClearOverrideBindings(bindBtn)
+                        SetOverrideBindingClick(bindBtn, true, fullKey, "ERFExtraFramesBindBtn")
+                    end
+                    EllesmereUIDB.extraFramesKey = fullKey
+
+                    listening = false
+                    self:EnableKeyboard(false)
+                    RefreshLabel()
+                    EllesmereUI:RefreshPage()
+                end)
+
+                kbBtn:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self,
+                        "Left-click to set a keybind. Right-click to unbind.\nPress the key while hovering a raid frame to add or remove that player from the Extra Frames group.")
+                end)
+                kbBtn:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                EllesmereUI.RegisterWidgetRefresh(RefreshLabel)
+
+                rgn:SetScript("OnHide", function()
+                    if listening then
+                        listening = false
+                        kbBtn:EnableKeyboard(false)
+                        RefreshLabel()
+                    end
+                end)
+            end
+
+            -- Row 2: Position | Free Move Position (Move Frames + cog)
+            row, h = W:DualRow(parent, y,
+                { type="dropdown", text="Position",
+                  values = { left="Before First Group", right="After Last Group", free="Free Move" },
+                  order  = { "left", "right", "free" },
+                  disabled = function() return not XFConfigured() end,
+                  disabledTooltip = XF_DISABLED_TIP,
+                  getValue = function() return XFSet().position or "right" end,
+                  setValue = function(v)
+                      XFSet().position = v
+                      if v ~= "free" and ns.XF_SetMoverShown then ns.XF_SetMoverShown(false) end
+                      if ns.XF_Apply then ns.XF_Apply() end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="label", text="Free Move Position" }); y = y - h
+            do
+                local rgn = row._rightRegion
+                local btn = CreateFrame("Button", nil, row)
+                btn:SetSize(140, 26)
+                btn:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
+                btn:SetFrameLevel(row:GetFrameLevel() + 5)
+                local bbg = btn:CreateTexture(nil, "BACKGROUND")
+                bbg:SetAllPoints()
+                bbg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+                if EllesmereUI.MakeBorder then
+                    EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.25)
+                end
+                local lbl = btn:CreateFontString(nil, "OVERLAY")
+                lbl:SetFont(EllesmereUI.GetFontPath(), 13, GetOutline())
+                if GetUseShadow() then
+                    lbl:SetShadowOffset(1, -1); lbl:SetShadowColor(0, 0, 0, 0.8)
+                else
+                    lbl:SetShadowOffset(0, 0)
+                end
+                lbl:SetPoint("CENTER", btn, "CENTER", 0, 0)
+                lbl:SetText("Move Frames")
+
+                -- Inline cog: Free Move layout options (created before
+                -- UpdateMoveBtn so its closure captures the local)
+                local _, xfCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Free Move Options",
+                    rows = {
+                        { type="toggle", label="Horizontal Frames",
+                          get=function() return XFSet().freeHorizontal == true end,
+                          set=function(v)
+                              XFSet().freeHorizontal = v
+                              if ns.XF_Apply then ns.XF_Apply() end
+                              -- Resize/reposition the drag overlay if it is up
+                              if ns.XF_IsMoverShown and ns.XF_IsMoverShown()
+                                 and ns.XF_SetMoverShown then
+                                  ns.XF_SetMoverShown(true)
+                              end
+                          end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, row)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", btn, "LEFT", -8, 0)
+                cogBtn:SetFrameLevel(row:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self)
+                    self:SetAlpha(XFSet().position == "free" and 0.4 or 0.15)
+                end)
+                cogBtn:SetScript("OnClick", function(self) xfCogShow(self) end)
+
+                local function MoveAllowed()
+                    return XFConfigured() and (XFSet().position == "free")
+                        and not InCombatLockdown()
+                end
+                local function UpdateMoveBtn()
+                    local active = ns.XF_IsMoverShown and ns.XF_IsMoverShown()
+                    lbl:SetText(active and "Stop Moving" or "Move Frames")
+                    btn:SetAlpha(MoveAllowed() and 1 or 0.35)
+                    local freeOn = XFConfigured() and XFSet().position == "free"
+                    cogBtn:SetAlpha(freeOn and 0.4 or 0.15)
+                    cogBtn:EnableMouse(freeOn)
+                    -- Plain-label slots have no native disabled handling; dim
+                    -- the "Free Move Position" label with the rest of the row
+                    if rgn._label then
+                        rgn._label:SetAlpha(XFConfigured() and 1 or 0.3)
+                    end
+                end
+                btn:SetScript("OnEnter", function(self)
+                    if not XFConfigured() then
+                        EllesmereUI.ShowWidgetTooltip(self, XF_DISABLED_TIP)
+                    elseif not MoveAllowed() then
+                        EllesmereUI.ShowWidgetTooltip(self,
+                            EllesmereUI.DisabledTooltip("Position must be set to Free Move"))
+                    else
+                        EllesmereUI.ShowWidgetTooltip(self,
+                            "Drag the overlay to position the frames, then click again to lock")
+                    end
+                end)
+                btn:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                btn:SetScript("OnClick", function()
+                    if not MoveAllowed() then return end
+                    local active = ns.XF_IsMoverShown and ns.XF_IsMoverShown()
+                    if ns.XF_SetMoverShown then ns.XF_SetMoverShown(not active) end
+                    UpdateMoveBtn()
+                end)
+                EllesmereUI.RegisterWidgetRefresh(UpdateMoveBtn)
+                UpdateMoveBtn()
+            end
+
+            -- Row 3: size offset on top of the shared raid frame size
+            row, h = W:DualRow(parent, y,
+                { type="slider", text="Extra Width", min=-50, max=100, step=1,
+                  tooltip="Widens or narrows the extra frames relative to the raid frame size.",
+                  disabled = function() return not XFConfigured() end,
+                  disabledTooltip = XF_DISABLED_TIP,
+                  getValue = function() return XFSet().extraWidth or 0 end,
+                  setValue = function(v)
+                      XFSet().extraWidth = v
+                      if ns.XF_Apply then ns.XF_Apply() end
+                      if ns.XF_IsMoverShown and ns.XF_IsMoverShown()
+                         and ns.XF_SetMoverShown then
+                          ns.XF_SetMoverShown(true)
+                      end
+                  end },
+                { type="slider", text="Extra Height", min=-50, max=100, step=1,
+                  tooltip="Makes the extra frames taller or shorter relative to the raid frame size.",
+                  disabled = function() return not XFConfigured() end,
+                  disabledTooltip = XF_DISABLED_TIP,
+                  getValue = function() return XFSet().extraHeight or 0 end,
+                  setValue = function(v)
+                      XFSet().extraHeight = v
+                      if ns.XF_Apply then ns.XF_Apply() end
+                      if ns.XF_IsMoverShown and ns.XF_IsMoverShown()
+                         and ns.XF_SetMoverShown then
+                          ns.XF_SetMoverShown(true)
+                      end
+                  end }); y = y - h
+
+            if onSection then onSection("extraFrames", _secY, y) end; _secY = y
         end
 
         -------------------------------------------------------------------
@@ -3682,6 +4035,14 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Frame Spacing", min=-1, max=15, step=1,
               getValue=function() return SVal("partyCellSpacing", db.profile.cellSpacing or 2) end,
               setValue=function(v) PSSet("partyCellSpacing", v) end });  y = y - h
+
+        -- Row 6: Flip Frame Growth
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Flip Frame Growth",
+              tooltip="Flips the direction the frames grow in: vertical frames grow up instead of down, horizontal frames grow left instead of right.",
+              getValue=function() return db.profile.partyFlipGrowth or false end,
+              setValue=function(v) db.profile.partyFlipGrowth = v; PartyReloadAndUpdate() end },
+            { type="label", text="" });  y = y - h
 
         -------------------------------------------------------------------
         --  ALL VISUAL SECTIONS

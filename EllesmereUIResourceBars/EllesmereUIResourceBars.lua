@@ -319,6 +319,24 @@ local EBON_MIGHT_DURATION = 20
 --Function to get Icicles for Frost
 local ICICLES_SPELL_ID = 205473
 
+-- Prot Warrior Ignore Pain (Midnight): stacking buff 190456 (0-100 stacks),
+-- but ALL player aura fields are SECRET (field-confirmed: spellId, name and
+-- applications return secrets even out of combat), so stacks cannot be read
+-- from aura APIs. The absorb amount IS readable: IP caps at 30% of max
+-- health (CAP), so total absorbs vs that cap gives the same 0-100% fullness
+-- (100 stacks = cap = full bar). DURATION drives the moving hash line
+-- (reset on cast -- aura expiry is secret, same approach as Ironfur ticks).
+-- ONE namespace table for the whole feature: the file's main chunk is at
+-- Lua 5.1's 200-local cap, so the feature occupies a single local slot.
+local IP = {
+    SPELL = 190456,
+    CAP = 0.30,
+    DURATION = 12,
+    hashEndTime = 0,
+    hookedFS = {},
+    nextScan = 0,
+}
+
 local function GetIcicleCount()
     local _, classFile = UnitClass("player")
     local spec = GetSpecialization()
@@ -476,14 +494,15 @@ local function GetSecondaryResource()
     elseif classFile == "WARRIOR" and spec == 3
            and ERB.db and ERB.db.profile and ERB.db.profile.secondary
            and ERB.db.profile.secondary.protIgnorePainBar then
-        -- Protection Ignore Pain absorb bar: fill = the player's current total
-        -- absorbs scaled against max health (same scale as Brewmaster Stagger).
+        -- Protection Ignore Pain bar: total absorbs vs the IP absorb cap
+        -- (30% of max health), so 100 stacks = full bar. Stacks are not
+        -- readable (aura data is fully secret); see the IP table (IP.CAP).
         -- Toggle-gated; existing users are pinned OFF via migration
         -- "resourcebars_protwar_ignorepain_existing_off_v1".
         local mx = UnitHealthMax("player") or 1
         if issecretvalue and issecretvalue(mx) then mx = 1 end
         if mx <= 0 then mx = 1 end
-        return { power = "IGNOREPAIN_BAR", max = mx, type = "bar" }
+        return { power = "IGNOREPAIN_BAR", max = mx * IP.CAP, type = "bar" }
     elseif classFile == "WARRIOR" and spec == 2 then
         return { power = "WHIRLWIND_STACKS", max = 4, type = "custom" }
     end
@@ -704,7 +723,8 @@ local DEFAULTS = {
             thresholdSpecs = {},  -- per-spec threshold/hash entries: { specIDs={0}, hashValues="", thresholdCount=3, thresholdPartialOnly=false }
             guardianIronfurBar = true,     -- Guardian Druid: show Ironfur duration bar (moving hash lines). New-user default; existing profiles pinned off via migration "resourcebars_guardian_ironfur_existing_off_v1".
             guardianShowHashLines = true,  -- Guardian Ironfur: draw the moving per-cast hash lines
-            protIgnorePainBar = true,      -- Prot Warrior: show Ignore Pain absorb bar (current absorbs vs max health). New-user default; existing profiles pinned off via migration "resourcebars_protwar_ignorepain_existing_off_v1".
+            protIgnorePainBar = true,      -- Prot Warrior: show Ignore Pain bar (total absorbs vs the IP cap = 30% max health; aura stacks are secret). New-user default; existing profiles pinned off via migration "resourcebars_protwar_ignorepain_existing_off_v1".
+            protIgnorePainHashLine = true, -- Prot Ignore Pain: draw the moving duration hash line (resets on cast)
             runesSimple = false,  -- DK: treat runes as flat pips (no recharge animation/timer)
             chargedR = 0.44, chargedG = 0.77, chargedB = 1.00, chargedA = 1,
             enhanceFiveBar = true,  -- Enhance Shaman: show 5 pips with overflow coloring
@@ -2285,10 +2305,14 @@ local function BuildBars()
             else
                 -- For existing bars, only update min/max if needed (don't reset value to 0)
                 local actualMax = maxPts
-                if cachedSecondary.power == "BREWMASTER_STAGGER"
-                or cachedSecondary.power == "IGNOREPAIN_BAR" then
+                if cachedSecondary.power == "BREWMASTER_STAGGER" then
                     actualMax = UnitHealthMax("player") or 1
                     if actualMax <= 0 then actualMax = 1 end
+                elseif cachedSecondary.power == "IGNOREPAIN_BAR" then
+                    local hm = UnitHealthMax("player")
+                    if hm and not (issecretvalue and issecretvalue(hm)) and hm > 0 then
+                        actualMax = hm * IP.CAP
+                    end
                 end
                 if secondaryBar._lastMaxC ~= actualMax then
                     secondaryBar._lastMaxC = actualMax
@@ -2842,6 +2866,14 @@ local _essenceNextTick = nil   -- GetTime() when the next pip will be ready
 local _essenceLastCount = nil  -- last known whole-pip count
 local _essenceTickDur = 0      -- seconds per pip recharge
 
+-- Cast handler for the Prot Ignore Pain bar's moving hash line: each cast
+-- refreshes the buff, so the line resets to the right edge and slides left.
+IP.HandleCast = function(spellID)
+    if spellID ~= IP.SPELL then return end
+    if not (cachedSecondary and cachedSecondary.power == "IGNOREPAIN_BAR") then return end
+    IP.hashEndTime = GetTime() + IP.DURATION
+end
+
 -- Cast handler for the Guardian Ironfur bar. Only tracks while the Ironfur
 -- bar is the active class resource so the tick list can't grow unbounded.
 local function HandleIronfurCast(spellID)
@@ -2952,6 +2984,186 @@ local function UpdateIronfurBar()
     if sp.showText and secondaryFrame and secondaryFrame._countText then
         secondaryFrame._countText:SetText(count > 0 and tostring(count) or "")
     end
+end
+
+-- Single moving hash line for the Prot Ignore Pain bar (Ironfur-style):
+-- resets to the right edge on each Ignore Pain cast and slides left as the
+-- buff duration decays. Reuses the Ironfur overlay host; one pooled texture.
+-- Driven every frame from the main OnUpdate while the bar is shown.
+IP.UpdateHash = function()
+    local sp = ERB.db.profile.secondary
+    local remain = IP.hashEndTime - GetTime()
+    if sp.protIgnorePainHashLine == false or remain <= 0 then
+        if IP.hashTex then IP.hashTex:Hide() end
+        return
+    end
+    local barW = secondaryBar:GetWidth() or 0
+    local barH = secondaryBar:GetHeight() or 0
+    if barW <= 0 then return end
+    local overlay = EnsureIronfurOverlay(secondaryBar)
+    if not IP.hashTex then
+        IP.hashTex = overlay:CreateTexture(nil, "OVERLAY", nil, 7)
+        IP.hashTex:SetSnapToPixelGrid(false)
+        IP.hashTex:SetTexelSnappingBias(0)
+        IP.hashTex:SetColorTexture(1, 1, 1, 0.9)
+    end
+    local PP = EllesmereUI and EllesmereUI.PP
+    local tickW = PP and (2 * PP.mult) or 2
+    local frac = remain / IP.DURATION
+    if frac > 1 then frac = 1 end
+    local x = frac * barW
+    if x > barW - tickW then x = barW - tickW end
+    if x < 0 then x = 0 end
+    IP.hashTex:ClearAllPoints()
+    IP.hashTex:SetSize(tickW, barH)
+    IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+    IP.hashTex:Show()
+end
+
+-- In-combat text source: the ONLY clean stack number available in combat is
+-- the one Blizzard's own tracked-buff (cooldown viewer) Ignore Pain icon
+-- displays -- Blizzard code reads the real aura and passes a plain value to
+-- the icon's stack FontString, observable via hooksecurefunc. Every direct
+-- read is secret (field-confirmed: absorbs, aura data, bar value AND the
+-- rendered fill rect). Self-contained: no dependency on the EUI CDM module
+-- (it keeps these Blizzard frames alive as data truth anyway). Graceful:
+-- viewer hidden / IP untracked -> no viewer value, the text falls back to
+-- the fill-width readback (works where values are clean) or stays blank.
+IP.FrameSpellID = function(frame)
+    if frame.GetSpellID then
+        local ok, sid = pcall(frame.GetSpellID, frame)
+        if ok and sid and not (issecretvalue and issecretvalue(sid)) then return sid end
+    end
+    local cdID = frame.cooldownID or (frame.cooldownInfo and frame.cooldownInfo.cooldownID)
+    if cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+        local ok, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+        if ok and info then
+            local sid = info.spellID
+            if sid and not (issecretvalue and issecretvalue(sid)) then return sid end
+        end
+    end
+end
+
+IP.HookViewerFS = function(frame, appFS)
+    IP.viewerFrame = frame
+    IP.viewerFS = appFS
+    if not IP.hookedFS[appFS] then
+        IP.hookedFS[appFS] = true
+        hooksecurefunc(appFS, "SetText", function(_, val)
+            if IP.viewerFS ~= appFS then return end
+            -- Pool recycling: this frame may now show another buff
+            if IP.FrameSpellID(frame) ~= IP.SPELL then
+                IP.viewerFrame = nil
+                IP.viewerFS = nil
+                IP.value = nil
+                return
+            end
+            -- Secrets pass through raw (SetText renders them);
+            -- clean strings normalize to numbers.
+            if issecretvalue and issecretvalue(val) then
+                IP.value = val
+            elseif type(val) == "number" then
+                IP.value = val
+            elseif type(val) == "string" then
+                IP.value = tonumber(val)
+            else
+                IP.value = nil
+            end
+        end)
+    end
+    -- Seed from whatever the icon currently shows
+    local ok, cur = pcall(appFS.GetText, appFS)
+    if ok then
+        if issecretvalue and issecretvalue(cur) then
+            IP.value = cur
+        elseif type(cur) == "string" then
+            IP.value = tonumber(cur)
+        end
+    end
+end
+
+-- Scan BOTH Blizzard viewers for the Ignore Pain entry. Tracked Buffs icons
+-- carry the stack FontString at frame.Applications.Applications; Tracked
+-- Bars carry it at frame.Icon.Applications (the same child the EUI CDM
+-- buff bars read stacks from). Whichever has IP wins.
+IP.ScanViewer = function()
+    if IP.viewerFrame then return end
+    local function scanPool(viewer, resolve)
+        if not viewer or not viewer.itemFramePool then return end
+        for frame in viewer.itemFramePool:EnumerateActive() do
+            if IP.FrameSpellID(frame) == IP.SPELL then
+                local fs = resolve(frame)
+                if fs then IP.HookViewerFS(frame, fs) end
+                return
+            end
+        end
+    end
+    scanPool(_G.BuffIconCooldownViewer, function(f)
+        return f.Applications and f.Applications.Applications
+    end)
+    if not IP.viewerFrame then
+        scanPool(_G.BuffBarCooldownViewer, function(f)
+            return f.Icon and f.Icon.Applications
+        end)
+    end
+end
+
+-- Per-frame stack text for the IP bar. Preferred source: the exact stack
+-- number captured from Blizzard's tracked-buff icon (above). Fallback: the
+-- rendered fill width (fill/bar = percent of cap = stacks) for contexts
+-- where values read clean but the viewer is unavailable. Change-detected;
+-- blank when no clean source exists, the bar is empty, or text is disabled.
+IP.UpdateText = function()
+    if not (secondaryFrame and secondaryFrame._countText) then return end
+    local sp = ERB.db.profile.secondary
+    if not sp.showText then
+        if IP.lastTextStacks then
+            secondaryFrame._countText:SetText("")
+            IP.lastTextStacks = nil
+        end
+        return
+    end
+    -- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle)
+    if not IP.viewerFrame and GetTime() >= IP.nextScan then
+        IP.nextScan = GetTime() + 2
+        IP.ScanViewer()
+    end
+    -- The captured viewer value is usually a SECRET number (type() says
+    -- "number" and truthiness works, but comparisons/format error). SetText
+    -- renders secret numbers natively -- it is exactly what Blizzard's own
+    -- icon does with this same value -- so pass it through UNTOUCHED: no
+    -- clamp, no change-detection, no tostring.
+    if issecretvalue and issecretvalue(IP.value) then
+        if IP.viewerFS and IP.viewerFS:IsVisible() then
+            secondaryFrame._countText:SetText(IP.value)
+            IP.lastTextStacks = nil  -- secrets cannot be change-detected
+        elseif IP.lastTextStacks ~= 0 then
+            IP.lastTextStacks = 0
+            secondaryFrame._countText:SetText("")
+        end
+        return
+    end
+    local stacks = 0
+    if IP.value and IP.viewerFS and IP.viewerFS:IsVisible() then
+        stacks = IP.value
+        if stacks > 100 then stacks = 100 end
+        if stacks < 0 then stacks = 0 end
+    else
+        local ft = secondaryBar.GetStatusBarTexture and secondaryBar:GetStatusBarTexture()
+        if ft then
+            local okW, fw = pcall(ft.GetWidth, ft)
+            local okB, bw = pcall(secondaryBar.GetWidth, secondaryBar)
+            if okW and okB and fw and bw
+               and not (issecretvalue and (issecretvalue(fw) or issecretvalue(bw)))
+               and bw > 0 then
+                stacks = math.floor(fw / bw * 100 + 0.5)
+                if stacks > 100 then stacks = 100 end
+            end
+        end
+    end
+    if stacks == IP.lastTextStacks then return end
+    IP.lastTextStacks = stacks
+    secondaryFrame._countText:SetText(stacks > 0 and tostring(stacks) or "")
 end
 
 local function UpdateSecondaryResource()
@@ -3238,14 +3450,17 @@ local function UpdateSecondaryResource()
                 if maxTainted then maxC = maxPts end
                 if not maxTainted and maxC <= 0 then maxC = 1 end
             elseif powerType == "IGNOREPAIN_BAR" then
-                -- Prot Ignore Pain: current total absorbs vs max health. The
-                -- absorb amount can be SECRET in instanced content; it flows
-                -- straight into SetValue below (the C widget handles it).
+                -- Prot Ignore Pain: total absorbs vs the IP cap (30% max
+                -- health) -- the only readable source; aura stack data is
+                -- fully secret in Midnight. A secret absorb value flows into
+                -- SetValue via the always-updated smooth target.
                 cur = UnitGetTotalAbsorbs("player") or 0
-                maxC = UnitHealthMax("player") or 1
-                local maxTainted = issecretvalue and issecretvalue(maxC)
-                if maxTainted then maxC = maxPts end
-                if not maxTainted and maxC <= 0 then maxC = 1 end
+                maxC = UnitHealthMax("player")
+                if (issecretvalue and issecretvalue(maxC)) or not maxC or maxC <= 0 then
+                    maxC = maxPts
+                else
+                    maxC = maxC * IP.CAP
+                end
             end
             -- Only call SetMinMaxValues if max actually changed (prevents flicker)
             local maxChanged = secondaryBar._lastMaxC ~= maxC
@@ -3310,11 +3525,15 @@ local function UpdateSecondaryResource()
             end
             -- Secret-aware update: pass secret values directly to the
             -- StatusBar (the C widget handles them natively).  Only use
-            -- smooth animation for clean numeric values.
+            -- smooth animation for clean numeric values. The smooth target
+            -- must ALWAYS be updated -- the OnUpdate smoother runs every
+            -- frame, and a stale clean target left from before combat would
+            -- lerp the bar right back over the direct secret SetValue (the
+            -- "bar never fills in combat" bug). The smoother already passes
+            -- a secret target straight through to SetValue.
             local tainted = issecretvalue and issecretvalue(cur)
-            if not tainted then
-                secondaryBar._smoothTarget = cur
-            else
+            secondaryBar._smoothTarget = cur
+            if tainted then
                 secondaryBar:SetValue(cur)
             end
             -- Count text
@@ -3325,12 +3544,8 @@ local function UpdateSecondaryResource()
                         local pct = maxC > 0 and (cur / maxC * 100) or 0
                         secondaryFrame._countText:SetText(format("%d", pct) .. "%")
                     elseif powerType == "IGNOREPAIN_BAR" then
-                        -- Show the absorb amount itself (abbreviated); hide at 0
-                        if cur > 0 then
-                            secondaryFrame._countText:SetText(AbbreviateNumbers and AbbreviateNumbers(cur) or tostring(cur))
-                        else
-                            secondaryFrame._countText:SetText("")
-                        end
+                        -- Text is driven per-frame by IP.UpdateText (viewer
+                        -- capture preferred, fill-width fallback). No-op here.
                     else
                         secondaryFrame._countText:SetText(tostring(cur) .. " / " .. tostring(maxC))
                     end
@@ -3365,9 +3580,7 @@ local function UpdateSecondaryResource()
                             secondaryFrame._countText:SetText(tostring(cur))
                         end
                     elseif powerType == "IGNOREPAIN_BAR" then
-                        -- Absorb amount is secret here; show nothing rather
-                        -- than a meaningless tostring.
-                        secondaryFrame._countText:SetText("")
+                        -- Text is driven per-frame by IP.UpdateText. No-op here.
                     else
                         secondaryFrame._countText:SetText(tostring(cur))
                     end
@@ -3833,6 +4046,14 @@ local function OnUpdate(self, dt)
                 secondaryBar:SetValue(cur)
             end
         end
+    end
+
+    -- Prot Ignore Pain: drive the single moving duration hash + the
+    -- fill-width-derived stack text every frame (both cheap + change-gated)
+    if cachedSecondary and cachedSecondary.power == "IGNOREPAIN_BAR"
+       and secondaryBar and secondaryBar:IsShown() then
+        IP.UpdateHash()
+        IP.UpdateText()
     end
 
     -- DK rune updates (throttled to ~10 fps) -- calls the full sorted
@@ -5234,11 +5455,14 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "UNIT_MAXHEALTH" then
         UpdateHealthBar()
-        -- Stagger / Ignore Pain max is player max health, so rebuild if needed
+        -- Stagger / Ignore Pain max derives from player max health
         if cachedSecondary and (cachedSecondary.power == "BREWMASTER_STAGGER"
            or cachedSecondary.power == "IGNOREPAIN_BAR") then
             local newMax = UnitHealthMax("player") or 1
             if not issecretvalue or not issecretvalue(newMax) then
+                if cachedSecondary.power == "IGNOREPAIN_BAR" then
+                    newMax = newMax * IP.CAP
+                end
                 if newMax > 0 and newMax ~= cachedSecondary.max then
                     cachedSecondary.max = newMax
                     BuildBars()
@@ -5304,6 +5528,7 @@ local function OnEvent(self, event, ...)
         wipe(ironfurTicks)
         ironfurGoEUntil = 0
         ironfurBaseDur = IronfurBaseDuration()
+        IP.hashEndTime = 0
         cachedPrimary = GetPrimaryPowerType()
         cachedSecondary = GetSecondaryResource()
         BuildBars()
@@ -5331,6 +5556,7 @@ local function OnEvent(self, event, ...)
         local unit, castGUID, spellID = ...
         if unit == "player" then
             HandleIronfurCast(spellID)
+            IP.HandleCast(spellID)
             if EllesmereUI then
                 if EllesmereUI.HandleTipOfTheSpear then
                     EllesmereUI.HandleTipOfTheSpear(event, unit, castGUID, spellID)
@@ -5348,6 +5574,7 @@ local function OnEvent(self, event, ...)
         -- Reset manual trackers on death/resurrect
         wipe(ironfurTicks)
         ironfurGoEUntil = 0
+        IP.hashEndTime = 0
         if EllesmereUI then
             if EllesmereUI.HandleTipOfTheSpear then
                 EllesmereUI.HandleTipOfTheSpear(event)
@@ -5479,7 +5706,6 @@ function ERB:OnEnable()
     _erbEventFrame = eventFrame
     eventFrame:RegisterUnitEvent("UNIT_HEALTH", "player")
     eventFrame:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
-    eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", "player")
     eventFrame:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
     eventFrame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     eventFrame:RegisterUnitEvent("UNIT_MAXPOWER", "player")
@@ -5495,6 +5721,7 @@ function ERB:OnEnable()
     eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
     eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
+    eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", "player")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")

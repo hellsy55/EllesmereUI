@@ -1972,9 +1972,9 @@ initFrame:SetScript("OnEvent", function(self)
             );  y = y - hh
         end
 
-        -- Protection Warrior Ignore Pain bar: shows the player's current absorb
-        -- amount as a bar scaled against max health. Only surfaced when the
-        -- player is currently a Protection Warrior.
+        -- Protection Warrior Ignore Pain bar: total absorbs against the IP cap
+        -- (30% max health), plus a moving duration hash line that resets on
+        -- cast. Only surfaced when the player is currently a Protection Warrior.
         local function _IsProtWarrior()
             local _, cf = UnitClass("player")
             if cf ~= "WARRIOR" then return false end
@@ -1983,17 +1983,41 @@ initFrame:SetScript("OnEvent", function(self)
             return sid == 73
         end
         if _IsProtWarrior() then
-            local _, hh = W:DualRow(parent, y,
+            local ipBarTip = "Creates a class resource bar for Ignore Pain tracking. To see stack text, you must have Ignore Pain tracked in your Blizzard CDM \"Tracked Buffs\" or \"Tracked Bars\" section."
+            local ipHashTip = "Draws a hash line that resets to the right edge when you cast Ignore Pain and slides left as the buff runs out."
+            local ipRow
+            ipRow, h = W:DualRow(parent, y,
                 { type = "toggle", text = "Prot Warrior Ignore Pain Bar",
-                  tooltip = "Replaces the class resource bar with an Ignore Pain tracker: the fill shows your current absorb amount scaled against your maximum health, and the bar text shows the absorb value.",
+                  tooltip = ipBarTip,
                   getValue = function() local p = DB(); return p and p.secondary.protIgnorePainBar end,
                   setValue = function(v)
                       local p = DB(); if not p then return end
                       p.secondary.protIgnorePainBar = v; RebuildClass()
                       EllesmereUI:RefreshPage()
                   end },
-                { type = "label", text = "" }
-            );  y = y - hh
+                { type = "toggle", text = "Show Hash Line",
+                  tooltip = ipHashTip,
+                  disabled = function() local p = DB(); return not (p and p.secondary.protIgnorePainBar) end,
+                  disabledTooltip = "Prot Warrior Ignore Pain Bar",
+                  getValue = function() local p = DB(); return p and p.secondary.protIgnorePainHashLine ~= false end,
+                  setValue = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.protIgnorePainHashLine = v
+                      EllesmereUI:RefreshPage()
+                  end }
+            );  y = y - h
+            -- The widget factory only shows tooltips on the LABEL hit area;
+            -- mirror them onto the toggle controls themselves.
+            local function IPControlTip(rgn, tip)
+                local c = rgn and rgn._control
+                if not c or not c.HookScript then return end
+                c:HookScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, tip)
+                end)
+                c:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            end
+            IPControlTip(ipRow._leftRegion, ipBarTip)
+            IPControlTip(ipRow._rightRegion, ipHashTip)
         end
 
         -- Row 1: Show Class Resource (inline cog: Spacing) | Orientation
