@@ -357,6 +357,15 @@ local defaults = {
         showWhenGroup    = false,
         showWhenRaid     = true,
 
+        -- Friendly Boss Frames (boss1-5 healable NPC frames, raid only)
+        friendlyBoss = {
+            display  = "never",   -- "never" | "healers" | "always"
+            position = "right",   -- "left" | "right" | "free"
+            freePos  = { x = 100, y = 0 },
+            freeHorizontal = false,
+            healthColor = { r = 23/255, g = 172/255, b = 49/255 },
+        },
+
         -- Position (saved by unlock mode)
         unlockPos        = nil,
 
@@ -438,6 +447,10 @@ local defaults = {
         -- shared absorbFromRightEdge boolean.)
         absorbEdgeMode     = "overlay",
         healAbsorbEdgeMode = "overlay",
+        -- Absorb Bar: solid bar above the frame, fills from the right edge
+        absorbBarEnabled = false,
+        absorbBarHeight  = 4,
+        absorbBarColor   = { r = 1, g = 1, b = 1 },
 
         -- Indicators
         roleIconStyle    = "modern",  -- "none", "modern", "modernCircle", "styled", "classicCircle", "classic"
@@ -509,6 +522,7 @@ local defaults = {
         -- Private Auras (Blizzard-rendered boss debuff icons)
         paSize           = 20,
         paShowCountdown  = false,
+        paHideTooltip    = false,
         paPosition       = "center",
         paOffsetX        = 0,
         paOffsetY        = 0,
@@ -1407,6 +1421,19 @@ local function CreateAbsorbBar(button, healthBar)
     forwardBar:SetFrameLevel(healthBar:GetFrameLevel() + 3)
     forwardBar:Hide()
 
+    -- Absorb Bar: solid bar above the frame showing the shield amount,
+    -- filling from the right edge. Always created (hidden) so toggling the
+    -- setting on later needs no rebuild; UpdateAbsorb drives it.
+    local topBar = CreateFrame("StatusBar", nil, button)
+    topBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    topBar:SetStatusBarColor(1, 1, 1, 1)
+    topBar:SetReverseFill(true)
+    topBar:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 0)
+    topBar:SetPoint("BOTTOMRIGHT", button, "TOPRIGHT", 0, 0)
+    topBar:SetHeight(4)
+    topBar:SetFrameLevel(healthBar:GetFrameLevel() + 3)
+    topBar:Hide()
+
     -- Forward-declared so ReanchorAbsorbToFill (defined just below) captures
     -- these as upvalues. The bars are created further down; until then the
     -- nil guards inside ReanchorAbsorbToFill simply skip them. Without this,
@@ -1541,6 +1568,7 @@ local function CreateAbsorbBar(button, healthBar)
 
     -- Store references in FFD (never on the Blizzard-owned button)
     backfillBar._forward      = forwardBar
+    backfillBar._topBar       = topBar
     backfillBar._healAbsorb   = healAbsorbBar
     backfillBar._healPred     = healPredBar
     backfillBar._reducedMax   = reducedBar
@@ -1570,10 +1598,14 @@ local function UpdateAbsorb(button, unit)
     if not hp then return end
 
     local s = d._isParty and ns._scaledPartyProxy or ns._scaledProfile
-    if not s.absorbStyle or s.absorbStyle == "none" then
+    local topBar = ab._topBar
+    local barOn = topBar and s.absorbBarEnabled
+    local styleOn = s.absorbStyle and s.absorbStyle ~= "none"
+    if not styleOn and not barOn then
         ab:Hide()
         if fw then fw:Hide() end
         if ha then ha:Hide() end
+        if topBar then topBar:Hide() end
         return
     end
 
@@ -1586,6 +1618,30 @@ local function UpdateAbsorb(button, unit)
     else
         maxHealth = UnitHealthMax(unit) or 0
         absorbAmt = (UnitGetTotalAbsorbs and UnitGetTotalAbsorbs(unit)) or 0
+    end
+
+    -- Absorb Bar: solid bar above the frame, fills from the right edge.
+    -- Fed raw values (secret-safe); a zero absorb renders as an empty bar.
+    if topBar then
+        if barOn then
+            local bc = s.absorbBarColor or { r = 1, g = 1, b = 1 }
+            topBar:SetHeight(PixelSnap(s.absorbBarHeight or 4))
+            topBar:SetStatusBarColor(bc.r, bc.g, bc.b, 1)
+            topBar:SetMinMaxValues(0, maxHealth)
+            topBar:SetValue(absorbAmt)
+            topBar:Show()
+        else
+            topBar:Hide()
+        end
+    end
+
+    -- Absorb styles disabled: only the Absorb Bar is active. Keep the
+    -- pre-existing behavior for the in-frame bars and stop here.
+    if not styleOn then
+        ab:Hide()
+        if fw then fw:Hide() end
+        if ha then ha:Hide() end
+        return
     end
 
     -- Keep bars sized to health bar every update
@@ -3318,8 +3374,9 @@ local function UpdateDefensives(button, unit, updateInfo)
             -- aura so its spellId can't be read directly. Identify the player's
             -- OWN Freedom via the spec-scoped fingerprint and treat it as an
             -- external. Gated on Paladin class (only caster of Freedom) so other
-            -- viewers never run the fingerprint; only a Holy Paladin viewing
-            -- their own Freedom ever resolves to 1044.
+            -- viewers never run the fingerprint. All three Paladin specs resolve
+            -- here: Holy natively, Protection/Retribution via the Buff Manager
+            -- borrow-spec entries that route them to the Holy spell table.
             if not isExternal and playerClassToken == "PALADIN"
                 and ns.BM_IdentifySecretAura
                 and ns.BM_IdentifySecretAura(unit, iid) == 1044 then
@@ -3639,11 +3696,37 @@ local function RegisterPrivateAuraSlots(button, unit)
     local grow = s.paGrowDirection or "RIGHT"
     local spc = PixelSnap(s.paSpacing or 1)
 
+    -- Hide Tooltips: Blizzard draws each private aura icon at iconInfo size
+    -- centered on the slot frame, but the icon's HOVER area comes from the
+    -- slot frame's own rect (the C-side icon ignores Lua mouse flags set on
+    -- the parent). Collapsing each slot to a sub-pixel point leaves the icon
+    -- rendering at full size with no surface left to hover, so the tooltip
+    -- can never trigger. The offset shift below moves the point to where the
+    -- full-size slot's CENTER used to sit, and the chain spacing regains the
+    -- icon width the collapsed frames no longer contribute -- the rendered
+    -- icons land pixel-identical to normal mode.
+    local slotSz = sz
+    if s.paHideTooltip then
+        slotSz = 0.001
+        local half = sz / 2
+        if pos == "topleft" or pos == "left" or pos == "bottomleft" then
+            ox = ox + half
+        elseif pos == "topright" or pos == "right" or pos == "bottomright" then
+            ox = ox - half
+        end
+        if pos == "topleft" or pos == "top" or pos == "topright" then
+            oy = oy - half
+        elseif pos == "bottomleft" or pos == "bottom" or pos == "bottomright" then
+            oy = oy + half
+        end
+        spc = spc + sz
+    end
+
     local parentStrata = button:GetFrameStrata()
     local fixedStrata = PA_STRATA_FIX[parentStrata] or "DIALOG"
 
     for i, paFrame in ipairs(d.privateAuraFrames) do
-        paFrame:SetSize(sz, sz)
+        paFrame:SetSize(slotSz, slotSz)
         paFrame:SetFrameStrata(fixedStrata)
         paFrame:SetFrameLevel(button:GetFrameLevel() + ns.LVL_AURA)
         paFrame:ClearAllPoints()
@@ -4217,6 +4300,738 @@ ns._UpdateButtonHealth = function(button)
 end
 
 -------------------------------------------------------------------------------
+--  Friendly Boss Frames (raid only)
+--  Five standalone secure unit buttons for boss1-boss5. Encounters expose
+--  healable friendly NPCs as boss units, so a secure visibility driver on
+--  [@bossN,help] is the entire detection -- no NPC database, fully combat
+--  safe. The buttons render ONLY a health bar, name text and health text,
+--  all following the raid-frame settings for those elements. Deliberately
+--  excluded from the preview system and unlock mode; the Free Move position
+--  uses its own drag overlay. Display "healers" activates the feature only
+--  while the player is on a healer spec (nothing is even built otherwise).
+-------------------------------------------------------------------------------
+-- Scope block: the file is at Lua 5.1's 200-local cap for the main chunk, so
+-- FB must not occupy a main-chunk slot. Inside do/end its register frees at
+-- the block close; the closures below keep it alive as an upvalue.
+do
+local FB = { buttons = {}, trackers = {} }
+ns._FB = FB
+
+-- Baseline heal per healer class for NPC range checks. Boss units sit outside
+-- UnitInRange's group-member domain and never fire UNIT_IN_RANGE_UPDATE, so
+-- range is measured against a known helpful spell instead -- healer specs
+-- only; everyone else keeps full alpha (no range checking at all).
+FB.RANGE_HEAL = {
+    PRIEST  = 2061,   -- Flash Heal
+    PALADIN = 19750,  -- Flash of Light
+    SHAMAN  = 8004,   -- Healing Surge
+    DRUID   = 8936,   -- Regrowth
+    MONK    = 116670, -- Vivify
+    EVOKER  = 361469, -- Living Flame (25yd: native Evoker range)
+}
+
+-- Secret-safe alpha application (result may be secret in instances, which
+-- SetAlphaFromBoolean accepts natively). The result can also be NIL (unit not
+-- range-checkable right now / spell momentarily not evaluable), which it
+-- rejects -- treat that as in range. issecretvalue runs first so the nil
+-- check never touches a secret.
+FB.ApplyRange = function(b)
+    if not FB.rangeSpell then return end
+    local s = ns._scaledProfile or db.profile
+    local inRange = C_Spell.IsSpellInRange(FB.rangeSpell, FB.UnitOf(b))
+    if issecretvalue(inRange) or inRange ~= nil then
+        b:SetAlphaFromBoolean(inRange, 1, s.oorAlpha or 0.4)
+    else
+        b:SetAlpha(1)
+    end
+end
+
+FB.RangeTick = function()
+    for _, b in ipairs(FB.buttons) do
+        if b:IsVisible() then FB.ApplyRange(b) end
+    end
+end
+
+-- The ticker exists only while a range spell is resolved AND at least one
+-- boss button is actually visible (specific encounters only) -- zero idle cost.
+FB.UpdateRangeTicker = function()
+    local want = FB.rangeSpell and (FB.visCount or 0) > 0
+    if want and not FB.rangeTicker then
+        FB.rangeTicker = C_Timer.NewTicker(0.4, FB.RangeTick)
+    elseif not want and FB.rangeTicker then
+        FB.rangeTicker:Cancel()
+        FB.rangeTicker = nil
+    end
+end
+
+-- Current unit for a button. The slot controller reassigns units so friendly
+-- bosses collapse into the FIRST slots (boss2 friendly while boss1 is the
+-- enemy -> slot 1 shows boss2); the live truth is the secure "unit"
+-- attribute. _fbUnit is only the build-time default.
+FB.UnitOf = function(b)
+    return b:GetAttribute("unit") or b._fbUnit
+end
+
+FB.Settings = function()
+    return db and db.profile and db.profile.friendlyBoss
+end
+
+FB.ShouldBeActive = function()
+    local fb = FB.Settings()
+    if not fb then return false end
+    if fb.display == "always" then return true end
+    if fb.display == "healers" then
+        local spec = GetSpecialization and GetSpecialization()
+        local role = spec and GetSpecializationRole and GetSpecializationRole(spec)
+        return role == "HEALER"
+    end
+    return false
+end
+
+-- Anchor a FontString using the same position vocabulary as the raid frames'
+-- name/health text anchors (AnchorNameText/AnchorHealthText).
+FB.AnchorText = function(fs, health, pos, ox, oy)
+    fs:ClearAllPoints()
+    if pos == "topleft" then
+        fs:SetPoint("TOPLEFT", health, "TOPLEFT", 2 + ox, -2 + oy)
+        fs:SetJustifyH("LEFT"); fs:SetJustifyV("TOP")
+    elseif pos == "top" then
+        fs:SetPoint("TOP", health, "TOP", ox, -2 + oy)
+        fs:SetJustifyH("CENTER"); fs:SetJustifyV("TOP")
+    elseif pos == "topright" then
+        fs:SetPoint("TOPRIGHT", health, "TOPRIGHT", -2 + ox, -2 + oy)
+        fs:SetJustifyH("RIGHT"); fs:SetJustifyV("TOP")
+    elseif pos == "left" then
+        fs:SetPoint("LEFT", health, "LEFT", 2 + ox, oy)
+        fs:SetJustifyH("LEFT"); fs:SetJustifyV("MIDDLE")
+    elseif pos == "right" then
+        fs:SetPoint("RIGHT", health, "RIGHT", -2 + ox, oy)
+        fs:SetJustifyH("RIGHT"); fs:SetJustifyV("MIDDLE")
+    elseif pos == "bottomleft" then
+        fs:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 2 + ox, 2 + oy)
+        fs:SetJustifyH("LEFT"); fs:SetJustifyV("BOTTOM")
+    elseif pos == "bottom" then
+        fs:SetPoint("BOTTOM", health, "BOTTOM", ox, 2 + oy)
+        fs:SetJustifyH("CENTER"); fs:SetJustifyV("BOTTOM")
+    elseif pos == "bottomright" then
+        fs:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", -2 + ox, 2 + oy)
+        fs:SetJustifyH("RIGHT"); fs:SetJustifyV("BOTTOM")
+    else -- "center"
+        fs:SetPoint("CENTER", health, "CENTER", ox, oy)
+        fs:SetJustifyH("CENTER"); fs:SetJustifyV("MIDDLE")
+    end
+    -- Force re-render after a JustifyH change
+    local txt = fs:GetText()
+    fs:SetText("")
+    fs:SetText(txt or "")
+end
+
+-- Recolor the border for the current state. Mirrors the raid buttons' single
+-- recolored border: hover (raised) > target (raised) > normal, using the same
+-- raid border settings -- nothing is configurable separately here.
+FB.ApplyBorderColor = function(b)
+    if not PP or not b._borderFrame or not db then return end
+    local s = ns._scaledProfile or db.profile
+    if (s.borderSize or 1) <= 0 then return end
+    local r, g, bcol, a
+    local raised = false
+    if b._fbHovered and s.hoverBorderEnabled ~= false then
+        local c = s.hoverBorderColor or { r = 1, g = 1, b = 1 }
+        r, g, bcol, a = c.r, c.g, c.b, s.hoverBorderAlpha or 1
+        raised = true
+    elseif UnitIsUnit(FB.UnitOf(b), "target") and s.targetBorderEnabled ~= false then
+        local c = s.targetBorderColor or { r = 1, g = 1, b = 1 }
+        r, g, bcol, a = c.r, c.g, c.b, s.targetBorderAlpha or 1
+        raised = true
+    else
+        local c = s.borderColor or { r = 0, g = 0, b = 0 }
+        r, g, bcol, a = c.r, c.g, c.b, s.borderAlpha or 1
+    end
+    -- Raise above neighboring frames while highlighted (same reasoning as the
+    -- raid buttons: overlapping frames would cover the highlight otherwise).
+    local pl = b:GetFrameLevel()
+    local lvl = s.borderBehind and math.max(0, pl - 1) or (pl + (raised and ns.LVL_RAISE or 8))
+    if b._borderFrame:GetFrameLevel() ~= lvl then
+        b._borderFrame:SetFrameLevel(lvl)
+        local container = PP.GetBorders(b._borderFrame)
+        if container then container:SetFrameLevel(lvl + 1) end
+    end
+    EllesmereUI.SetBorderStyleColor(b._borderFrame, r, g, bcol, a)
+end
+
+-- Apply the raid border style (size/color/texture/offsets) to one button.
+FB.StyleBorder = function(b)
+    if not PP or not b._borderFrame then return end
+    local s = ns._scaledProfile or db.profile
+    local bs = s.borderSize or 1
+    local bc = s.borderColor or { r = 0, g = 0, b = 0 }
+    local pl = b:GetFrameLevel()
+    b._borderFrame:SetFrameLevel(s.borderBehind and math.max(0, pl - 1) or (pl + 8))
+    EllesmereUI.ApplyBorderStyle(b._borderFrame, bs, bc.r, bc.g, bc.b, s.borderAlpha or 1,
+        s.borderTexture or "solid", s.borderTextureOffset, s.borderTextureOffsetY,
+        s.borderTextureShiftX, s.borderTextureShiftY, "unitframes", bs)
+    FB.ApplyBorderColor(b)
+end
+
+-- Refresh one boss button: health bar value/color, health text, name text.
+-- Mirrors the corresponding slices of UpdateButton/_UpdateButtonHealth; boss
+-- units are not group units, so this never touches the roster hot paths.
+FB.Update = function(b)
+    local unit = FB.UnitOf(b)
+    if not db or not UnitExists(unit) then return end
+    local s = ns._scaledProfile or db.profile
+    local health = b._health
+
+    local pct = GetSafeHealthPercent(unit)
+    health:SetMinMaxValues(0, 100)
+    local smooth = s.smoothBars and Enum and Enum.StatusBarInterpolation
+        and Enum.StatusBarInterpolation.ExponentialEaseOut
+    if smooth then health:SetValue(pct, smooth) else health:SetValue(pct) end
+    -- Own color setting (defaults #17AC31). The raid color modes mislead
+    -- here: gradient modes read as damage states and many NPCs carry real
+    -- class tokens (a friendly add can come out Rogue-yellow).
+    local fbc = FB.Settings()
+    fbc = fbc and fbc.healthColor
+    local fillTex = health:GetStatusBarTexture()
+    if fillTex then fillTex:SetAlpha(1) end
+    health:SetStatusBarColor(fbc and fbc.r or 23/255, fbc and fbc.g or 172/255,
+        fbc and fbc.b or 49/255, (s.healthBarOpacity or 100) / 100)
+
+    if b._nameText then
+        b._nameText:SetText(ResolveDisplayName(unit))
+        local nr, ng, nb = GetNameColor(unit, s)
+        b._nameText:SetTextColor(nr, ng, nb)
+    end
+
+    if b._healthText then
+        local mode = s.healthTextMode or "none"
+        if UnitIsDeadOrGhost(unit) then
+            b._healthText:SetText("")
+        elseif mode == "percent" then
+            b._healthText:SetFormattedText("%.0f%%", pct)
+        elseif mode == "percentNoSign" then
+            b._healthText:SetFormattedText("%.0f", pct)
+        elseif mode == "number" then
+            local curr = UnitHealth(unit, true)
+            if curr and AbbreviateNumbers then
+                b._healthText:SetText(AbbreviateNumbers(curr))
+            elseif curr then
+                b._healthText:SetFormattedText("%s", curr)
+            end
+        elseif mode == "numberPercent" then
+            local curr = UnitHealth(unit, true)
+            local numStr = (curr and AbbreviateNumbers) and AbbreviateNumbers(curr) or tostring(curr or 0)
+            b._healthText:SetFormattedText("%s | %.0f%%", numStr, pct)
+        elseif mode == "percentNumber" then
+            local curr = UnitHealth(unit, true)
+            local numStr = (curr and AbbreviateNumbers) and AbbreviateNumbers(curr) or tostring(curr or 0)
+            b._healthText:SetFormattedText("%.0f%% | %s", pct, numStr)
+        else
+            b._healthText:SetText("")
+        end
+        if mode ~= "none" then
+            local htr, htg, htb = GetHealthTextColor(unit, s)
+            b._healthText:SetTextColor(htr, htg, htb, 0.9)
+        end
+    end
+
+    FB.ApplyBorderColor(b)
+end
+
+-- One-time construction of the container, the five buttons, click-cast
+-- registration and per-unit event trackers. Buttons are created hidden;
+-- the secure visibility drivers own show/hide from then on.
+FB.EnsureBuilt = function()
+    if FB.built then return end
+    FB.built = true
+
+    local container = CreateFrame("Frame", "ERFFriendlyBossContainer", UIParent)
+    container:Hide()
+    FB.container = container
+
+    for i = 1, 5 do
+        local b = CreateFrame("Button", "ERFFriendlyBoss" .. i, container, "SecureUnitButtonTemplate")
+        b._fbUnit = "boss" .. i
+        b:SetAttribute("unit", b._fbUnit)
+        b:SetAttribute("*type1", "target")
+        b:SetAttribute("*type2", "togglemenu")
+        b:RegisterForClicks("AnyUp")
+        b:Hide()
+
+        local bg = b:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        if PP then PP.DisablePixelSnap(bg) end
+        b._bg = bg
+
+        local health = CreateFrame("StatusBar", nil, b)
+        health:SetFrameLevel(b:GetFrameLevel() + 2)
+        health:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+        health:SetPoint("TOPRIGHT", b, "TOPRIGHT", 0, 0)
+        if PP then PP.DisablePixelSnap(health) end
+        health:SetMinMaxValues(0, 100)
+        health:SetValue(100)
+        b._health = health
+
+        local carrier = CreateFrame("Frame", nil, b)
+        carrier:SetAllPoints(health)
+        carrier:SetFrameLevel(b:GetFrameLevel() + 12)
+        local nameFS = carrier:CreateFontString(nil, "OVERLAY")
+        nameFS:SetWordWrap(false)
+        b._nameText = nameFS
+        local healthFS = carrier:CreateFontString(nil, "OVERLAY")
+        healthFS:SetWordWrap(false)
+        b._healthText = healthFS
+
+        -- Border frame (same construction as the raid buttons; styled via the
+        -- shared raid border settings in FB.StyleBorder)
+        local bdr = CreateFrame("Frame", nil, b)
+        bdr:SetAllPoints(b)
+        bdr:SetFrameLevel(b:GetFrameLevel() + 8)
+        b._borderFrame = bdr
+
+        -- Refresh as soon as the driver shows the button (initial spawn state);
+        -- visible-count drives the range ticker lifecycle.
+        b:HookScript("OnShow", function(self)
+            FB.visCount = (FB.visCount or 0) + 1
+            FB.Update(self)
+            FB.ApplyRange(self)
+            FB.UpdateRangeTicker()
+        end)
+        b:HookScript("OnHide", function(self)
+            FB.visCount = math.max(0, (FB.visCount or 0) - 1)
+            FB.UpdateRangeTicker()
+        end)
+
+        -- Hover highlight (these are our own buttons; hooks are safe)
+        b:HookScript("OnEnter", function(self)
+            self._fbHovered = true
+            FB.ApplyBorderColor(self)
+        end)
+        b:HookScript("OnLeave", function(self)
+            self._fbHovered = nil
+            FB.ApplyBorderColor(self)
+        end)
+
+        -- Re-render when the slot controller reassigns this slot's unit
+        -- mid-combat (a friendly boss spawning/despawning reflows the slots
+        -- without an OnShow on already-visible buttons).
+        b:HookScript("OnAttributeChanged", function(self, name)
+            if name == "unit" and self:IsVisible() then
+                FB.Update(self)
+                FB.ApplyRange(self)
+            end
+        end)
+
+        -- Full click-cast / hovercast binding suite (mouseover heals included)
+        if ns.CC_RegisterFrame then ns.CC_RegisterFrame(b) end
+
+        -- Boss units are outside the roster trackers; track them here. The
+        -- slot controller may have assigned this boss unit to ANY slot, so
+        -- route the event to whichever button currently shows it.
+        local unitId = "boss" .. i
+        local t = CreateFrame("Frame")
+        t:RegisterUnitEvent("UNIT_HEALTH", unitId)
+        t:RegisterUnitEvent("UNIT_MAXHEALTH", unitId)
+        t:RegisterUnitEvent("UNIT_NAME_UPDATE", unitId)
+        t:SetScript("OnEvent", function()
+            for _, btn in ipairs(FB.buttons) do
+                if btn:IsVisible() and btn:GetAttribute("unit") == unitId then
+                    FB.Update(btn)
+                    break
+                end
+            end
+        end)
+        FB.trackers[i] = t
+
+        FB.buttons[i] = b
+    end
+
+    -- Slot controller: collapses friendly bosses into the FIRST slots. Button
+    -- positions stay fixed; the controller assigns boss units to slots in
+    -- bossN order and shows/hides the buttons. Runs in the restricted
+    -- environment so mid-combat spawns/despawns reflow safely (insecure code
+    -- cannot Show/Hide or re-unit protected buttons in combat). Drivers are
+    -- registered in FB_Apply; they feed state-inraid / state-fb1..5 here.
+    -- One shared body bound per attribute (no wildcard handler, no reliance
+    -- on the snippet's `name` local); FB_Apply also force-runs it via
+    -- SecureHandlerExecute because the driver manager skips the attribute
+    -- handler when a re-registered driver's value is unchanged.
+    FB.RELAYOUT = [[
+        local inraid = self:GetAttribute("state-inraid")
+        local slot = 0
+        if inraid == 1 or inraid == "1" then
+            for i = 1, 5 do
+                local v = self:GetAttribute("state-fb" .. i)
+                if v == 1 or v == "1" then
+                    slot = slot + 1
+                    local b = self:GetFrameRef("slot" .. slot)
+                    if b then
+                        b:SetAttribute("unit", "boss" .. i)
+                        b:Show()
+                    end
+                end
+            end
+        end
+        for j = slot + 1, 5 do
+            local b = self:GetFrameRef("slot" .. j)
+            if b then b:Hide() end
+        end
+    ]]
+    local controller = CreateFrame("Frame", "ERFFriendlyBossController", nil, "SecureHandlerAttributeTemplate")
+    for i = 1, 5 do
+        controller:SetFrameRef("slot" .. i, FB.buttons[i])
+    end
+    -- The template's handler attribute is "_onattributechanged" (single
+    -- wildcard receiving name/value -- same idiom as the Action Bars
+    -- controllers). The relayout body lives in its own attribute so the
+    -- handler and FB_Apply's force-run share one definition.
+    controller:SetAttributeNoHandler("fb_relayout", FB.RELAYOUT)
+    controller:SetAttributeNoHandler("_onattributechanged", [[
+        if name == "state-inraid" or name == "state-fb1" or name == "state-fb2"
+           or name == "state-fb3" or name == "state-fb4" or name == "state-fb5" then
+            self:RunAttribute("fb_relayout")
+        end
+    ]])
+    FB.controller = controller
+end
+
+-- Re-apply all setting-derived properties (size, slots, texture, fonts,
+-- text anchors). Out-of-combat only; callers gate.
+FB.ApplyStyle = function()
+    if not FB.built then return end
+    local s = ns._scaledProfile or db.profile
+    local w = PixelSnap(s.frameWidth or 125)
+    local h = PixelSnap(s.frameHeight or 60)
+    local sp = s.cellSpacing or -1
+    -- Free Move ignores the raid growth settings entirely: simple vertical
+    -- stack by default, horizontal via the Horizontal Frames cog toggle.
+    -- Attached modes keep stacking like a real group (unitGrowth).
+    local fbset = FB.Settings()
+    local grow
+    if fbset and fbset.position == "free" then
+        grow = fbset.freeHorizontal and "RIGHT" or "DOWN"
+    else
+        grow = s.unitGrowth or "DOWN"
+    end
+    local texPath = ResolveHealthTexture()
+    local bgc = s.customBgColor or { r = 17/255, g = 17/255, b = 17/255 }
+
+    local stepW, stepH = 0, 0
+    if grow == "DOWN" or grow == "UP" then
+        FB.container:SetSize(w, h * 5 + sp * 4)
+        stepH = h + sp
+    else
+        FB.container:SetSize(w * 5 + sp * 4, h)
+        stepW = w + sp
+    end
+
+    for i, b in ipairs(FB.buttons) do
+        b:SetSize(w, h)
+        b:ClearAllPoints()
+        local off = i - 1
+        if grow == "UP" then
+            b:SetPoint("BOTTOMLEFT", FB.container, "BOTTOMLEFT", 0, off * stepH)
+        elseif grow == "LEFT" then
+            b:SetPoint("TOPRIGHT", FB.container, "TOPRIGHT", -off * stepW, 0)
+        elseif grow == "RIGHT" then
+            b:SetPoint("TOPLEFT", FB.container, "TOPLEFT", off * stepW, 0)
+        else -- DOWN
+            b:SetPoint("TOPLEFT", FB.container, "TOPLEFT", 0, -off * stepH)
+        end
+
+        b._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
+        b._health:SetStatusBarTexture(texPath)
+        local ft = b._health:GetStatusBarTexture()
+        if ft then ft:SetHorizTile(false) end
+        -- No power bar / top name bar here: health fills the button.
+        b._health:SetHeight(h)
+
+        ApplyFont(b._nameText, s.nameSize or 10)
+        ApplyFont(b._healthText, s.healthTextSize or 9)
+        b._nameText:SetWidth(w * 0.75)
+        b._nameText:SetHeight(0)
+        b._healthText:SetWidth(w * 0.75)
+        b._healthText:SetHeight(0)
+        local namePos = s.namePosition or "center"
+        if namePos == "none" then
+            b._nameText:Hide()
+        else
+            b._nameText:Show()
+            FB.AnchorText(b._nameText, b._health, namePos, s.nameOffsetX or 0, s.nameOffsetY or 0)
+        end
+        FB.AnchorText(b._healthText, b._health, s.healthTextPosition or "center",
+            s.healthTextOffsetX or 0, s.healthTextOffsetY or 0)
+        FB.StyleBorder(b)
+    end
+end
+
+-- Position the container per the position setting. The container effectively
+-- inherits protection from its secure children, so SetPoint is OOC-only.
+FB.Anchor = function()
+    if not FB.built then return end
+    if InCombatLockdown() then FB.anchorDirty = true; return end
+    local s = db.profile
+    local fb = FB.Settings()
+    local c = FB.container
+    c:ClearAllPoints()
+
+    if fb.position ~= "free" then
+        local anchorHdr
+        if s.mergeGroups then
+            anchorHdr = ns._flatHeader
+        else
+            -- The boss group behaves like one more raid group: it slots in
+            -- before the first / after the last group that is BOTH enabled
+            -- in Show Groups AND currently has players in it. When no group
+            -- is populated (not in a raid yet), fall back to the Show Groups
+            -- bounds alone so the position is still sane.
+            local vg = s.visibleGroups or {}
+            local occupied = {}
+            for ri = 1, GetNumGroupMembers() or 0 do
+                local _, _, sub = GetRaidRosterInfo(ri)
+                if sub then occupied[sub] = true end
+            end
+            local first, last
+            for gi = 1, 8 do
+                if vg[gi] ~= false and separatedHdrs[gi] and occupied[gi] then
+                    if not first then first = separatedHdrs[gi] end
+                    last = separatedHdrs[gi]
+                end
+            end
+            if not first then
+                for gi = 1, 8 do
+                    if vg[gi] ~= false and separatedHdrs[gi] then
+                        if not first then first = separatedHdrs[gi] end
+                        last = separatedHdrs[gi]
+                    end
+                end
+            end
+            anchorHdr = (fb.position == "left") and first or last
+        end
+        if anchorHdr then
+            -- Slot in along the group growth axis exactly like a real group.
+            local gap = s.groupSpacing or -1
+            local grow = s.groupGrowth or "RIGHT"
+            local before = (fb.position == "left")
+            if grow == "RIGHT" then
+                if before then c:SetPoint("TOPRIGHT", anchorHdr, "TOPLEFT", -gap, 0)
+                else c:SetPoint("TOPLEFT", anchorHdr, "TOPRIGHT", gap, 0) end
+            elseif grow == "LEFT" then
+                if before then c:SetPoint("TOPLEFT", anchorHdr, "TOPRIGHT", gap, 0)
+                else c:SetPoint("TOPRIGHT", anchorHdr, "TOPLEFT", -gap, 0) end
+            elseif grow == "DOWN" then
+                if before then c:SetPoint("BOTTOMLEFT", anchorHdr, "TOPLEFT", 0, gap)
+                else c:SetPoint("TOPLEFT", anchorHdr, "BOTTOMLEFT", 0, -gap) end
+            else -- UP
+                if before then c:SetPoint("TOPLEFT", anchorHdr, "BOTTOMLEFT", 0, -gap)
+                else c:SetPoint("BOTTOMLEFT", anchorHdr, "TOPLEFT", 0, gap) end
+            end
+            return
+        end
+        -- No usable group header: fall through to the free position.
+    end
+
+    local p = fb.freePos or {}
+    c:SetPoint("CENTER", UIParent, "CENTER", p.x or 100, p.y or 0)
+end
+
+-- Master apply: activates, deactivates and refreshes the whole feature.
+-- Called from OnEnable, the options dropdowns, spec changes, profile swaps
+-- (_ERF_RefreshAll) and the post-combat dirty pass.
+function ns.FB_Apply()
+    if not db or not db.profile then return end
+    local fb = FB.Settings()
+    if not fb then return end
+    if InCombatLockdown() then FB.applyDirty = true; return end
+
+    if not FB.ShouldBeActive() then
+        if FB.built then
+            if FB.controller then
+                UnregisterAttributeDriver(FB.controller, "state-inraid")
+                for i = 1, 5 do
+                    UnregisterAttributeDriver(FB.controller, "state-fb" .. i)
+                end
+            end
+            for _, b in ipairs(FB.buttons) do
+                b:Hide()
+            end
+            FB.container:Hide()
+        end
+        if FB.mover then FB.mover:Hide() end
+        FB.rangeSpell = nil
+        FB.UpdateRangeTicker()
+        return
+    end
+
+    FB.EnsureBuilt()
+    FB.ApplyStyle()
+    FB.Anchor()
+    FB.container:Show()
+    -- Drivers feed the slot controller, which assigns friendly bosses to the
+    -- first slots in bossN order and shows/hides the buttons securely.
+    RegisterAttributeDriver(FB.controller, "state-inraid", "[@raid1,exists] 1; 0")
+    for i = 1, 5 do
+        RegisterAttributeDriver(FB.controller, "state-fb" .. i, "[@boss" .. i .. ",help] 1; 0")
+    end
+    -- Force one relayout now: the driver manager only fires the attribute
+    -- handlers on VALUE CHANGES, so a (re)apply with unchanged states would
+    -- otherwise never run the initial layout. FB_Apply is OOC-only, so the
+    -- insecure Execute is always legal here.
+    if SecureHandlerExecute then
+        SecureHandlerExecute(FB.controller, FB.RELAYOUT)
+    end
+    for _, b in ipairs(FB.buttons) do
+        if b:IsVisible() then FB.Update(b) end
+    end
+
+    -- Range dimming: healer specs only (regardless of display mode).
+    local spec = GetSpecialization and GetSpecialization()
+    local role = spec and GetSpecializationRole and GetSpecializationRole(spec)
+    local _, pClass = UnitClass("player")
+    FB.rangeSpell = (role == "HEALER") and FB.RANGE_HEAL[pClass] or nil
+    if not FB.rangeSpell then
+        for _, b in ipairs(FB.buttons) do b:SetAlpha(1) end
+    else
+        for _, b in ipairs(FB.buttons) do
+            if b:IsVisible() then FB.ApplyRange(b) end
+        end
+    end
+    FB.UpdateRangeTicker()
+end
+
+function ns.FB_IsMoverShown()
+    return FB.mover and FB.mover:IsShown() or false
+end
+
+-- Free Move drag overlay (unlock-mode look, TOOLTIP strata so it floats
+-- above the options panel). Deliberately independent of unlock mode.
+function ns.FB_SetMoverShown(show)
+    if not show then
+        if FB.mover then FB.mover:Hide() end
+        return
+    end
+    local fb = FB.Settings()
+    if not fb or fb.position ~= "free" then return end
+    FB.EnsureBuilt()
+    FB.ApplyStyle()
+    FB.Anchor()
+
+    if not FB.mover then
+        local m = CreateFrame("Frame", "ERFFriendlyBossMover", UIParent)
+        m:SetFrameStrata("TOOLTIP")
+        m:SetClampedToScreen(true)
+        m:SetMovable(true)
+        m:EnableMouse(true)
+        m:RegisterForDrag("LeftButton")
+        local mbg = m:CreateTexture(nil, "BACKGROUND")
+        mbg:SetAllPoints()
+        mbg:SetColorTexture(0.075, 0.113, 0.141, 0.95)
+        local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+        if EllesmereUI.MakeBorder then
+            EllesmereUI.MakeBorder(m, ar or 1, ag or 1, ab or 1, 0.6)
+        end
+        local lbl = m:CreateFontString(nil, "OVERLAY")
+        lbl:SetFont(EllesmereUI.GetFontPath(), 11, "")
+        lbl:SetShadowOffset(1, -1)
+        lbl:SetShadowColor(0, 0, 0, 0.8)
+        lbl:SetTextColor(1, 1, 1, 0.75)
+        lbl:SetPoint("CENTER", m, "CENTER")
+        lbl:SetWordWrap(false)
+        lbl:SetText("Friendly Boss Frames")
+        m:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        m:SetScript("OnDragStop", function(self)
+            self:StopMovingOrSizing()
+            local cx, cy = self:GetCenter()
+            local ux, uy = UIParent:GetCenter()
+            if cx and ux then
+                local set = FB.Settings()
+                if set then
+                    set.freePos = {
+                        x = math.floor(cx - ux + 0.5),
+                        y = math.floor(cy - uy + 0.5),
+                    }
+                end
+            end
+            FB.Anchor()
+        end)
+        FB.mover = m
+        -- Close the mover with the options panel so it can't be stranded.
+        if EllesmereUI._mainFrame and not FB._panelHooked then
+            FB._panelHooked = true
+            EllesmereUI._mainFrame:HookScript("OnHide", function()
+                if FB.mover then FB.mover:Hide() end
+            end)
+        end
+    end
+
+    FB.mover:SetSize(FB.container:GetWidth(), FB.container:GetHeight())
+    FB.mover:ClearAllPoints()
+    local p = (FB.Settings() or {}).freePos or {}
+    FB.mover:SetPoint("CENTER", UIParent, "CENTER", p.x or 100, p.y or 0)
+    FB.mover:Show()
+end
+
+-- Standing event frame: exists even while the feature is inactive so a spec
+-- change can activate display="healers" without a /reload.
+do
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:RegisterEvent("INSTANCE_ENCOUNTER_ENGAGE_UNIT")
+    ev:RegisterEvent("GROUP_ROSTER_UPDATE")
+    ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+    ev:SetScript("OnEvent", function(_, event)
+        if not db then return end
+        if event == "PLAYER_SPECIALIZATION_CHANGED" then
+            ns.FB_Apply()
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            if FB.applyDirty then FB.applyDirty = nil; ns.FB_Apply() end
+            if FB.anchorDirty then FB.anchorDirty = nil; FB.Anchor() end
+        elseif not FB.built or not FB.container or not FB.container:IsShown() then
+            return
+        elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
+            for _, b in ipairs(FB.buttons) do
+                if b:IsVisible() then FB.Update(b) end
+            end
+        elseif event == "PLAYER_TARGET_CHANGED" then
+            -- Lightweight: only the border state can change here
+            for _, b in ipairs(FB.buttons) do
+                if b:IsVisible() then FB.ApplyBorderColor(b) end
+            end
+        elseif event == "GROUP_ROSTER_UPDATE" then
+            -- First/last visible group (and the size tier) can shift with
+            -- the roster; restyle + re-anchor, deferred through combat.
+            if InCombatLockdown() then
+                FB.applyDirty = true
+            else
+                FB.ApplyStyle()
+                FB.Anchor()
+            end
+        end
+    end)
+    FB.eventFrame = ev
+end
+
+-- Temporary diagnostic: /euifb dumps the slot controller's driver states and
+-- the per-button layout. Remove once friendly boss frames are confirmed live.
+SLASH_EUIFB1 = "/euifb"
+SlashCmdList.EUIFB = function()
+    print("|cff00d2ffFB|r active:", FB.ShouldBeActive(), "built:", FB.built or false,
+        "rangeSpell:", FB.rangeSpell or "none")
+    if not FB.built then return end
+    local c = FB.controller
+    print("  container shown:", FB.container:IsShown(),
+        "inraid:", c and tostring(c:GetAttribute("state-inraid")) or "no controller")
+    for i = 1, 5 do
+        local b = FB.buttons[i]
+        print(("  slot%d shown=%s unit=%s | fb%d=%s"):format(
+            i, tostring(b:IsShown()), tostring(b:GetAttribute("unit")),
+            i, c and tostring(c:GetAttribute("state-fb" .. i)) or "?"))
+    end
+end
+end -- FB scope block
+
+-------------------------------------------------------------------------------
 --  Show Self First (raid, out-of-combat only)
 --  The player's own subgroup header sorts via a per-group nameList that lists
 --  every group member with the player first, so the secure header itself orders
@@ -4769,9 +5584,17 @@ local function LayoutGroups()
             if py > maxY then maxY = py end
         end
 
+        -- For UP/LEFT unit growth, pin each header by the corner its units
+        -- grow away from: the offset moves (x, y) to that cell edge and the
+        -- matching header corner anchors there, so the group fills its cell
+        -- (the header rect grows away from the pinned corner as members join).
+        -- Anchoring TOPLEFT for these directions displaced the real frames a
+        -- full group height/width outside the container, mismatching the
+        -- preview and unlock mover.
+        local hdrAnchor = "TOPLEFT"
         local hdrOffX, hdrOffY = 0, 0
-        if unitGrowth == "UP"   then hdrOffY = -groupH end
-        if unitGrowth == "LEFT" then hdrOffX = groupW  end
+        if unitGrowth == "UP"   then hdrAnchor = "BOTTOMLEFT"; hdrOffY = -groupH end
+        if unitGrowth == "LEFT" then hdrAnchor = "TOPRIGHT";   hdrOffX = groupW  end
 
         local visSlot = 0  -- running counter for visible groups (collapses gaps)
         for group = 1, 8 do
@@ -4785,7 +5608,7 @@ local function LayoutGroups()
                     visSlot = visSlot + 1
 
                     hdr:ClearAllPoints()
-                    hdr:SetPoint("TOPLEFT", containerFrame, "TOPLEFT", x, y)
+                    hdr:SetPoint(hdrAnchor, containerFrame, "TOPLEFT", x, y)
                     local layoutChanged = false
                     if hdr:GetAttribute("point") ~= hdrPoint
                     or hdr:GetAttribute("xOffset") ~= hdrXOff
@@ -4884,14 +5707,17 @@ local function ReloadFrames()
 
     -- Auto-resize indicators: scale factor based on active tier vs base 20-man
     -- Read base dimensions from raw db.profile (not proxy, which returns active tier)
-    if db.profile.autoResizeIndicators and ns._activeSizeW and ns._activeSizeH then
+    local sizeScale = 1
+    if ns._activeSizeW and ns._activeSizeH then
         local baseW = db.profile.frameWidth or 72
         local baseH = db.profile.frameHeight or 46
         local scale = math.min(ns._activeSizeW / baseW, ns._activeSizeH / baseH)
-        ns._indicatorScale = math.max(math.min(scale, 1.3), 0.7)
-    else
-        ns._indicatorScale = 1
+        sizeScale = math.max(math.min(scale, 1.3), 0.7)
     end
+    -- Buff Manager indicators ALWAYS follow the size-derived scale; the Auto
+    -- Resize toggle gates only the other indicators/auras/text sizes.
+    ns._bmScale = sizeScale
+    ns._indicatorScale = db.profile.autoResizeIndicators and sizeScale or 1
 
     local powerH = IsPowerBarEnabled(s) and PixelSnap(s.powerHeight or 4) or 0
     local healthH = PixelSnap(bh - powerH)
@@ -5026,6 +5852,11 @@ local function ReloadFrames()
     for unit, btn in pairs(unitToButton) do
         RegisterPrivateAuras(btn, unit)
     end
+
+    -- Friendly Boss Frames inherit size/growth/spacing/border/text settings;
+    -- restyle + re-anchor them with everything else (growth changes move the
+    -- anchor points, not just the anchored-to header).
+    if ns.FB_Apply then ns.FB_Apply() end
 end
 
 ns.ReloadFrames = ReloadFrames
@@ -5090,15 +5921,57 @@ ns._ResizePartyButtons = function(w, h)
             if d.nameText then d.nameText:SetWidth(bw * 0.75) end
             -- Live-rescale indicators/auras. No-op for hidden buttons / no unit
             -- (e.g. options menu while not grouped), so cheap there.
-            if autoResize and ns.BM_UpdateIndicators and btn:IsVisible() then
+            if autoResize then
+                -- The scale derives from frame size (recomputed above), so the
+                -- scaled sizes must re-apply during the drag -- same set the
+                -- full reload scales through the party proxy.
+                local pp = ns._scaledPartyProxy
+                if d.roleIcon then
+                    local riSz = PixelSnap(pp.roleIconSize or 14)
+                    d.roleIcon:SetSize(riSz, riSz)
+                    if d.AnchorRoleIcon then d.AnchorRoleIcon() end
+                end
+                if d.leaderIcon then
+                    local liSz = PixelSnap(pp.leaderIconSize or 14)
+                    d.leaderIcon:SetSize(liSz, liSz)
+                end
+                if d.raidMarker then
+                    local rmSz = PixelSnap(pp.raidMarkerSize or 16)
+                    d.raidMarker:SetSize(rmSz, rmSz)
+                end
+                if d.debuffIcons then
+                    for _, icon in ipairs(d.debuffIcons) do
+                        icon:SetSize(pp.debuffSize or 18, pp.debuffSize or 18)
+                    end
+                end
+                if d.defIcons then
+                    for _, icon in ipairs(d.defIcons) do
+                        icon:SetSize(pp.defSize or 22, pp.defSize or 22)
+                    end
+                end
+                if d.nameText then ApplyFont(d.nameText, pp.nameSize or 10) end
+                if d.healthText then ApplyFont(d.healthText, pp.healthTextSize or 9) end
+                if d.statusText then ApplyFont(d.statusText, pp.statusTextSize or 14) end
+            end
+            -- BM buffs ALWAYS follow the size-derived scale (independent of
+            -- the Auto Resize toggle), so re-render them on every size tick.
+            if ns.BM_UpdateIndicators and btn:IsVisible() then
                 local u = btn:GetAttribute("unit")
                 if u then ns.BM_UpdateIndicators(btn, u, db) end
             end
         end
     end
     -- Container resize deferred to drag end (SetSize on the container
-    -- triggers SecureGroupHeaderTemplate to re-process children, causing blink)
-
+    -- triggers SecureGroupHeaderTemplate to re-process children, causing blink).
+    -- Slot offsets + the header's own size DO follow the live size: this keeps
+    -- the self button aligned with the header stack (height) and the header's
+    -- centered child anchors growing from the correct origin (width). Pure
+    -- anchor tracking -- no secure re-process, no blink.
+    if ns._PositionPartySlots then
+        local cs2 = PixelSnap(s.partyCellSpacing or s.cellSpacing or 2)
+        local growth2 = s.partyHorizontal and "RIGHT" or "DOWN"
+        ns._PositionPartySlots(bw, bh, cs2, growth2)
+    end
 end
 
 -- Apply tier-based position offset to the container frame.
@@ -5929,11 +6802,12 @@ ns._PARTY_KEY_SECTION = {}
 ns._PARTY_OVERRIDE_KEYS = {}
 
 ns._PARTY_SECTION_ORDER = {
-    "healthBar", "powerBar", "textDisplay", "indicators", "dispels", "topNameBar",
+    "healthBar", "absorbs", "powerBar", "textDisplay", "indicators", "dispels", "topNameBar",
     "rangeTooltip", "defensives", "privateAuras", "debuffDisplay", "debuffStyle",
 }
 ns._PARTY_SECTION_LABELS = {
     healthBar     = "Health Bar",
+    absorbs       = "Absorbs",
     powerBar      = "Power Bar",
     textDisplay   = "Text Display",
     indicators    = "Indicators",
@@ -5951,9 +6825,12 @@ do
         healthBar = {
             "healthBarTexture", "healthBarOpacity", "healthColorMode",
             "customFillColor", "customBgColor", "bgDarkness", "smoothBars",
-            "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode",
-            "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
             "healPrediction", "healPredOpacity", "healPredColor",
+        },
+        absorbs = {
+            "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode",
+            "absorbBarEnabled", "absorbBarHeight", "absorbBarColor",
+            "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
         },
         powerBar = {
             "showPowerBar", "powerHeight", "powerBgDarkness", "powerBgColor",
@@ -6001,7 +6878,7 @@ do
             "defShowSwipe", "defShowDurText", "defDurTextColor", "defDurTextSize", "defDurTextOffsetX", "defDurTextOffsetY",
         },
         privateAuras = {
-            "paSize", "paShowCountdown",
+            "paSize", "paShowCountdown", "paHideTooltip",
             "paPosition", "paOffsetX", "paOffsetY", "paGrowDirection", "paSpacing",
         },
         debuffDisplay = {
@@ -6030,6 +6907,18 @@ ns._IsPartySectionCustom = function(section)
     return ss[section] == false
 end
 
+-- The Absorbs section was split out of Health Bar: profiles saved before the
+-- split carry no "absorbs" sync state, so they inherit the Health Bar state
+-- that governed those settings at the time. Idempotent (only fills a nil key)
+-- and runs on every enable/profile swap, so imported profiles are covered too.
+ns._NormalizePartySyncSections = function()
+    if not (db and db.profile) then return end
+    local ss = db.profile.partySyncSections
+    if ss and ss.absorbs == nil and ss.healthBar == false then
+        ss.absorbs = false
+    end
+end
+
 ns._partyProxy = setmetatable({}, {
     __index = function(_, key)
         local section = ns._PARTY_KEY_SECTION[key]
@@ -6050,6 +6939,10 @@ ns._indicatorScale = 1
 -- Separate scale for party frames (party + raid never display together, but the
 -- single global was a conflict trap). Computed by ns._UpdatePartyIndicatorScale.
 ns._partyIndicatorScale = 1
+-- Buff Manager scales: identical formulas but NOT gated on the Auto Resize
+-- toggles -- BM indicators always track frame size (raid tier / party size).
+ns._bmScale = 1
+ns._partyBmScale = 1
 
 local INDICATOR_SCALE_KEYS = {}
 for _, k in ipairs({
@@ -6108,16 +7001,15 @@ end })
 ns._UpdatePartyIndicatorScale = function()
     if not (db and db.profile) then return end
     local s = db.profile
-    if s.partyAutoResizeIndicators then
-        local baseW = s.frameWidth or 72
-        local baseH = s.frameHeight or 46
-        local pw = s.partyFrameWidth or s.frameWidth or 125
-        local ph = s.partyFrameHeight or s.frameHeight or 60
-        local scale = math.min(pw / baseW, ph / baseH)
-        ns._partyIndicatorScale = math.max(math.min(scale, 1.3), 0.7)
-    else
-        ns._partyIndicatorScale = 1
-    end
+    local baseW = s.frameWidth or 72
+    local baseH = s.frameHeight or 46
+    local pw = s.partyFrameWidth or s.frameWidth or 125
+    local ph = s.partyFrameHeight or s.frameHeight or 60
+    local scale = math.max(math.min(math.min(pw / baseW, ph / baseH), 1.3), 0.7)
+    -- Buff Manager indicators ALWAYS follow the size-derived scale; the
+    -- toggle gates only the other indicators/auras/text sizes.
+    ns._partyBmScale = scale
+    ns._partyIndicatorScale = s.partyAutoResizeIndicators and scale or 1
 end
 
 ns._IsPartyAllSynced = function()
@@ -6240,6 +7132,67 @@ ns._UpdateAllPartyButtons = function()
     end
 end
 
+-- Position the self button + party header at their slot offsets, sized from
+-- the CURRENT frame dimensions. Shared by the full layout pass and the
+-- width/height slider hot path (_ResizePartyButtons): the slot offsets and
+-- the header's own size both derive from the frame size, so a live resize
+-- must re-apply them or the self button drifts from the header stack and the
+-- header's centered child anchors keep growing around the stale width.
+-- Returns useSelf for the caller's showPlayer attribute logic.
+ns._PositionPartySlots = function(bw, bh, cs, unitGrowth)
+    if not ns._partyHeader then return false end
+    local s = db.profile
+    local pSelfFirst = s.partyShowSelfFirst
+    if pSelfFirst == nil then pSelfFirst = s.showSelfFirst end
+    local pSelfLast = s.partySelfLast
+    if pSelfLast == nil then pSelfLast = s.showSelfLast end
+    local hideSelf = s.partyHideSelf
+    local useSelf = (pSelfFirst or pSelfLast) and not hideSelf and IsInGroup()
+
+    -- The header's own size feeds the first child's centered anchor
+    -- (point=TOP centers on header width; point=LEFT centers on height).
+    -- Anchors track size changes live, so this re-centers the stack with NO
+    -- secure child re-process (and therefore no blink) during slider drags.
+    -- The header re-derives the same size on its next natural child pass.
+    ns._partyHeader:SetSize(bw, bh)
+
+    -- Step between adjacent unit slots along the growth axis (party = DOWN/RIGHT)
+    local slotStepX, slotStepY = 0, 0
+    if unitGrowth == "RIGHT" then slotStepX = bw + cs else slotStepY = -(bh + cs) end
+
+    local sb = ns._partySelfButton
+    if useSelf then
+        local selfSlot, hdrSlot = 0, 1
+        if pSelfLast then
+            local numOthers = (GetNumGroupMembers() or 1) - 1
+            if numOthers < 0 then numOthers = 0 end
+            selfSlot, hdrSlot = numOthers, 0
+        end
+        if sb then
+            sb:SetSize(bw, bh)
+            sb:ClearAllPoints()
+            sb:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(slotStepX * selfSlot), PixelSnap(slotStepY * selfSlot))
+            if not InCombatLockdown() then sb:Show() end
+        end
+        ns._partyHeader:ClearAllPoints()
+        ns._partyHeader:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(slotStepX * hdrSlot), PixelSnap(slotStepY * hdrSlot))
+    else
+        if sb and not InCombatLockdown() then sb:Hide() end
+        ns._partyHeader:ClearAllPoints()
+        -- Center When Solo: when not in a group, center the lone player frame in
+        -- the container by offsetting the header 2 slots along the growth axis
+        -- ((5-1)/2 = 2). The container is always sized for 5 slots, so a single
+        -- frame at slot 2 sits centered. Only DOWN/RIGHT growth for party.
+        local cOffX, cOffY = 0, 0
+        if s.partyCenterWhenSolo and not IsInGroup() then
+            cOffX = slotStepX * 2
+            cOffY = slotStepY * 2
+        end
+        ns._partyHeader:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(cOffX), PixelSnap(cOffY))
+    end
+    return useSelf
+end
+
 -- Layout party frames: apply unitGrowth direction and cell spacing to the header.
 ns._LayoutPartyFrames = function()
     if not ns._partyHeader then return end
@@ -6278,24 +7231,14 @@ ns._LayoutPartyFrames = function()
         if wasShown then ns._partyHeader:Show() end
     end
 
+    -- Self button + header slot positioning (also sets the header's own size,
+    -- which drives the children's centered anchors). Shared with the slider
+    -- hot path; returns useSelf for the showPlayer attribute logic below.
     -- Self-first via composition: a static unit="player" self button owns
-    -- slot 0 and the party header excludes the player (showPlayer=false).
-    -- Strict player-first only (no tanks-above), so the self button is fully
-    -- static and can never be wiped/reordered.
-    local pSelfFirst = s.partyShowSelfFirst
-    if pSelfFirst == nil then pSelfFirst = s.showSelfFirst end
-    local pSelfLast = s.partySelfLast
-    if pSelfLast == nil then pSelfLast = s.showSelfLast end
+    -- slot 0 and the party header excludes the player (showPlayer=false);
+    -- self ordering only matters in a group (see ns._PositionPartySlots).
+    local useSelf = ns._PositionPartySlots(bw, bh, cs, unitGrowth)
     local hideSelf = s.partyHideSelf
-    -- Self ordering only matters in a group. When solo, skip the self button and
-    -- let the header show the lone player via showSolo -- otherwise showSolo
-    -- forces the player into the header too (showPlayer=false is ignored solo),
-    -- duplicating the player frame.
-    local useSelf = (pSelfFirst or pSelfLast) and not hideSelf and IsInGroup()
-
-    -- Step between adjacent unit slots along the growth axis (party = DOWN/RIGHT)
-    local slotStepX, slotStepY = 0, 0
-    if unitGrowth == "RIGHT" then slotStepX = bw + cs else slotStepY = -(bh + cs) end
 
     -- Size container for unlock mode mover (always sized for 5 units)
     local containerW, containerH
@@ -6306,7 +7249,22 @@ ns._LayoutPartyFrames = function()
         containerW = bw
         containerH = 5 * bh + 4 * cs
     end
-    ns._partyContainerFrame:SetSize(PixelSnap(containerW), PixelSnap(containerH))
+    local newCW, newCH = PixelSnap(containerW), PixelSnap(containerH)
+    local curCW, curCH = ns._partyContainerFrame:GetSize()
+    if math.abs((curCW or 0) - newCW) > 0.01 or math.abs((curCH or 0) - newCH) > 0.01 then
+        -- Resizing the container triggers an implicit SecureGroupHeader child
+        -- re-process, and that implicit pass has been observed landing with
+        -- units unassigned (NAMELIST sort especially): children left hidden
+        -- with unit=nil until the next clean re-process. Bracket the resize
+        -- with an explicit header Hide/Show -- the implicit pass runs while
+        -- hidden (inert) and the Show() performs a clean, reliable re-process.
+        -- Skipping the resize entirely when unchanged also avoids pointless
+        -- re-processes on every settings reload.
+        local hdrWasShown = ns._partyHeader:IsShown()
+        if hdrWasShown then ns._partyHeader:Hide() end
+        ns._partyContainerFrame:SetSize(newCW, newCH)
+        if hdrWasShown then ns._partyHeader:Show() end
+    end
 
     -- Apply sort attributes + player visibility to the party header
     if not InCombatLockdown() then
@@ -6361,41 +7319,9 @@ ns._LayoutPartyFrames = function()
         end
     end
 
-    -- Position the self button and the party header. Self-first: self owns slot 0
-    -- and the header starts at slot 1. Self-last: the header owns slots 0..N-1 and
-    -- the self button sits in the slot just after the last other member (count is
-    -- live group size minus self; layout re-runs on roster change out of combat).
-    local sb = ns._partySelfButton
-    if useSelf then
-        local selfSlot, hdrSlot = 0, 1
-        if pSelfLast then
-            local numOthers = (GetNumGroupMembers() or 1) - 1
-            if numOthers < 0 then numOthers = 0 end
-            selfSlot, hdrSlot = numOthers, 0
-        end
-        if sb then
-            sb:SetSize(bw, bh)
-            sb:ClearAllPoints()
-            sb:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(slotStepX * selfSlot), PixelSnap(slotStepY * selfSlot))
-            if not InCombatLockdown() then sb:Show() end
-        end
-        ns._partyHeader:ClearAllPoints()
-        ns._partyHeader:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(slotStepX * hdrSlot), PixelSnap(slotStepY * hdrSlot))
-    else
-        if sb and not InCombatLockdown() then sb:Hide() end
-        ns._partyHeader:ClearAllPoints()
-        -- Center When Solo: when not in a group, center the lone player frame in
-        -- the container by offsetting the header 2 slots along the growth axis
-        -- ((5-1)/2 = 2). The container is always sized for 5 slots (above), so a
-        -- single frame at slot 2 sits centered. Only DOWN/RIGHT growth for party,
-        -- both covered by slotStepX/slotStepY.
-        local cOffX, cOffY = 0, 0
-        if s.partyCenterWhenSolo and not IsInGroup() then
-            cOffX = slotStepX * 2
-            cOffY = slotStepY * 2
-        end
-        ns._partyHeader:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", PixelSnap(cOffX), PixelSnap(cOffY))
-    end
+    -- Self button + header slot positioning ran above (ns._PositionPartySlots),
+    -- before the attribute pass so a header Hide/Show re-process anchors the
+    -- children against the already-correct header position and size.
 end
 
 -- Party visibility: show/hide based on group state.
@@ -6468,6 +7394,10 @@ ns.ReloadPartyFrames = function()
     if not ns._partyHeader then return end
     local p = ns._partyProxy  -- reads party_ keys with fallthrough
     local raw = db.profile
+    -- Scaled reads for everything in INDICATOR_SCALE_KEYS (role/leader/marker
+    -- icons, aura icon sizes, text sizes): mirrors the raid loop, which reads
+    -- through ns._scaledProfile. Non-scale keys pass through unchanged.
+    local pp = ns._scaledPartyProxy
 
     -- Recompute the party indicator/aura scale (Auto Resize) up front; the
     -- _UpdateAllPartyButtons() call at the end re-renders indicators with it.
@@ -6534,7 +7464,7 @@ ns.ReloadPartyFrames = function()
 
         -- Name text
         if d.nameText then
-            ApplyFont(d.nameText, raw.nameSize or 10)
+            ApplyFont(d.nameText, pp.nameSize or 10)
             if d.AnchorNameText then d.AnchorNameText() end
             -- Override width constraint for party button dimensions
             d.nameText:SetWidth(bw * 0.75)
@@ -6542,39 +7472,39 @@ ns.ReloadPartyFrames = function()
 
         -- Health text
         if d.healthText then
-            ApplyFont(d.healthText, raw.healthTextSize or 9)
+            ApplyFont(d.healthText, pp.healthTextSize or 9)
             if d.AnchorHealthText then d.AnchorHealthText() end
         end
 
         -- Status text
         if d.statusText then
             local stc = raw.statusTextColor or { r = 1, g = 1, b = 1 }
-            ApplyFont(d.statusText, raw.statusTextSize or 14)
+            ApplyFont(d.statusText, pp.statusTextSize or 14)
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
             if d.AnchorStatusText then d.AnchorStatusText() end
         end
 
         -- Role icon
         if d.roleIcon then
-            local riSz = PixelSnap(raw.roleIconSize or 14)
+            local riSz = PixelSnap(pp.roleIconSize or 14)
             d.roleIcon:SetSize(riSz, riSz)
             if d.AnchorRoleIcon then d.AnchorRoleIcon() end
         end
 
         -- Leader icon
         if d.leaderIcon then
-            local liSz = PixelSnap(raw.leaderIconSize or 14)
+            local liSz = PixelSnap(pp.leaderIconSize or 14)
             d.leaderIcon:SetSize(liSz, liSz)
             d.leaderIcon:ClearAllPoints()
             local liPos = (raw.leaderIconPosition or "top"):upper()
-            d.leaderIcon:SetPoint(liPos, d.health, liPos, raw.leaderIconOffsetX or 0, raw.leaderIconOffsetY or 0)
+            d.leaderIcon:SetPoint(liPos, d.health, liPos, pp.leaderIconOffsetX or 0, pp.leaderIconOffsetY or 0)
             -- Keep the leader-icon host on the chat frame's current strata/level
             if d.leaderHost then ns.ApplyChatStrata(d.leaderHost) end
         end
 
         -- Raid marker
         if d.raidMarker then
-            local rmSz = PixelSnap(raw.raidMarkerSize or 16)
+            local rmSz = PixelSnap(pp.raidMarkerSize or 16)
             d.raidMarker:SetSize(rmSz, rmSz)
             if d.AnchorRaidMarker then d.AnchorRaidMarker() end
         end
@@ -6585,7 +7515,7 @@ ns.ReloadPartyFrames = function()
         -- Debuff icons
         if d.debuffIcons then
             for _, icon in ipairs(d.debuffIcons) do
-                icon:SetSize(raw.debuffSize or 18, raw.debuffSize or 18)
+                icon:SetSize(pp.debuffSize or 18, pp.debuffSize or 18)
             end
             if d.AnchorDebuffs then d.AnchorDebuffs() end
         end
@@ -6593,7 +7523,7 @@ ns.ReloadPartyFrames = function()
         -- Defensive icons
         if d.defIcons then
             for _, icon in ipairs(d.defIcons) do
-                icon:SetSize(raw.defSize or 22, raw.defSize or 22)
+                icon:SetSize(pp.defSize or 22, pp.defSize or 22)
             end
             if d.AnchorDefensives then d.AnchorDefensives() end
         end
@@ -6604,13 +7534,14 @@ ns.ReloadPartyFrames = function()
         -- Private aura frames
         if d.privateAuraFrames then
             for _, paFrame in ipairs(d.privateAuraFrames) do
-                paFrame:SetSize(raw.debuffSize or 18, raw.debuffSize or 18)
+                paFrame:SetSize(pp.debuffSize or 18, pp.debuffSize or 18)
             end
         end
 
-        -- Buff manager indicators
+        -- Buff manager indicators (pass the scaled proxy: BM picks the party
+        -- indicator scale by recognizing this exact table)
         if d.bmIconPool and d.health and ns.BM_AnchorIndicators then
-            ns.BM_AnchorIndicators(d, d.health, raw)
+            ns.BM_AnchorIndicators(d, d.health, pp)
         end
     end
 
@@ -7796,6 +8727,21 @@ local function CreatePreviewFrame(index)
     absorbBar._curClip = curClip
     absorbBar._missClip = missClip
 
+    -- Absorb Bar (preview): solid bar above the frame, fills from the right
+    do
+        local tb = CreateFrame("StatusBar", nil, f)
+        tb:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        tb:SetStatusBarColor(1, 1, 1, 1)
+        tb:SetReverseFill(true)
+        tb:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 0)
+        tb:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0, 0)
+        tb:SetHeight(4)
+        tb:SetFrameLevel(health:GetFrameLevel() + 3)
+        tb:SetMinMaxValues(0, 100)
+        tb:Hide()
+        absorbBar._topBar = tb
+    end
+
     -- Power bar (anchored to frame bottom for pixel alignment)
     local power
     if powerH > 0 then
@@ -8374,9 +9320,30 @@ local function ApplyPreviewData(f, index)
         elseif ns._testMode then
             if ns._testAbsorbs == false then absStyle = "none"
             elseif ns._testAbsorbs and absStyle == "none" then absStyle = "striped" end
+        elseif not ns._absorbsPreviewVisible then absStyle = "none"
         end
         local absorbAmt = ns.previewAbsorbValues[index] or 0
         local fw = f._absorbBar._forward
+        -- Absorb Bar (solid bar above the frame): same preview gating as the
+        -- shield styles (indicators / test mode / absorbs eyeball).
+        local topBar = f._absorbBar._topBar
+        if topBar then
+            local barOn = s.absorbBarEnabled
+            if ns._indicatorsVisible then barOn = false
+            elseif ns._testMode then
+                if ns._testAbsorbs == false then barOn = false end
+            elseif not ns._absorbsPreviewVisible then barOn = false
+            end
+            if barOn and absorbAmt > 0 then
+                local bc = s.absorbBarColor or { r = 1, g = 1, b = 1 }
+                topBar:SetHeight(PixelSnap(s.absorbBarHeight or 4))
+                topBar:SetStatusBarColor(bc.r, bc.g, bc.b, 1)
+                topBar:SetValue(absorbAmt)
+                topBar:Show()
+            else
+                topBar:Hide()
+            end
+        end
         if absStyle ~= "none" and absorbAmt > 0 then
             local tex = ABSORB_STYLE_TEX[absStyle] or "Interface\\Buttons\\WHITE8X8"
             local alpha = (s.absorbOpacity or 90) / 100
@@ -8472,6 +9439,7 @@ local function ApplyPreviewData(f, index)
         elseif ns._testMode then
             if ns._testHealAbsorbs == false then haStyle = "none"
             elseif ns._testHealAbsorbs and haStyle == "none" then haStyle = "clean" end
+        elseif not ns._absorbsPreviewVisible then haStyle = "none"
         end
         local haAmt = ns.previewHealAbsorbValues[index] or 0
         if haStyle ~= "none" and haAmt > 0 then
@@ -9109,6 +10077,7 @@ local function ApplyPreviewData(f, index)
         if f._absorbBar then
             f._absorbBar:Hide()
             if f._absorbBar._forward then f._absorbBar._forward:Hide() end
+            if f._absorbBar._topBar then f._absorbBar._topBar:Hide() end
         end
     elseif isOffline then
         if f._health then
@@ -10736,6 +11705,10 @@ function ERF:OnEnable()
         self._needsCapture = false
     end
 
+    -- Inherit the Absorbs section's party-sync state from Health Bar for
+    -- profiles saved before the section split (must precede any proxy reads).
+    ns._NormalizePartySyncSections()
+
     -- Initialize click-cast engine (before CreateHeaders so ClickCastFrames hook is active)
     if ns.CC_Init then ns.CC_Init() end
 
@@ -10771,11 +11744,17 @@ function ERF:OnEnable()
     -- Register with unlock mode
     RegisterWithUnlockMode()
 
+    -- Friendly Boss Frames: initial activation (raid-only boss1-5 frames)
+    if ns.FB_Apply then ns.FB_Apply() end
+
     -- Profile-swap refresh: EllesmereUI.RefreshAllAddons calls this on a profile
     -- change so raid + party frames re-read the (now-swapped) profile live,
     -- instead of staying stale until /reload. Mirrors the reload sequence above.
     _G._ERF_RefreshAll = function()
         if not ns.db then return end
+        -- Absorbs sync-state inheritance for swapped/imported profiles saved
+        -- before the Absorbs section split (must precede party proxy reads).
+        ns._NormalizePartySyncSections()
         -- Rebuild the buff-manager spell lookup for the new profile's per-spec
         -- indicators (and the Simple Setup whitelist) before frames re-render.
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(ns.db) end
@@ -10802,6 +11781,8 @@ function ERF:OnEnable()
         if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
         -- Re-apply click-cast / hovercast bindings for the new profile.
         if ns.CC_ApplyBindings then ns.CC_ApplyBindings() end
+        -- Friendly Boss Frames re-read the swapped profile.
+        if ns.FB_Apply then ns.FB_Apply() end
     end
 
 
@@ -10943,6 +11924,60 @@ function ERF:OnEnable()
     -- Init options module if it loaded before us
     if ns._InitEUIModule then
         C_Timer.After(0, ns._InitEUIModule)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  TEMP DEBUG: /euiparty -- dumps the live geometry/state of the party self
+--  button and the five header children (shown, alpha, size, health bar shown/
+--  height/value/texture, power shown). Run while frames look broken to
+--  pinpoint whether the health bar is hidden, zero-height, textureless or
+--  value-zero. Remove after the resize investigation.
+-------------------------------------------------------------------------------
+do
+    local function SafeStr(v)
+        if v == nil then return "nil" end
+        if issecretvalue and issecretvalue(v) then return "SECRET" end
+        return tostring(v)
+    end
+    SLASH_EUIPARTY1 = "/euiparty"
+    SlashCmdList["EUIPARTY"] = function()
+        print("|cff0cd29fEUI party debug|r pvActive=" .. tostring(ns._partyPvActive and true or false)
+            .. "  visible=" .. tostring(ns._partyFramesVisible)
+            .. "  inGroup=" .. tostring(IsInGroup()) .. "  members=" .. tostring(GetNumGroupMembers()))
+        local hd = ns._partyHeader
+        if hd then
+            print(("  header shown=%s w=%.0f h=%.0f kids=%d | sortMethod=%s nameList=%s groupFilter=%s groupBy=%s")
+                :format(tostring(hd:IsShown()), hd:GetWidth() or 0, hd:GetHeight() or 0,
+                    hd:GetNumChildren() or 0,
+                    tostring(hd:GetAttribute("sortMethod")), tostring(hd:GetAttribute("nameList")),
+                    tostring(hd:GetAttribute("groupFilter")), tostring(hd:GetAttribute("groupBy"))))
+            print(("  header showParty=%s showPlayer=%s showSolo=%s point=%s xOff=%s yOff=%s")
+                :format(tostring(hd:GetAttribute("showParty")), tostring(hd:GetAttribute("showPlayer")),
+                    tostring(hd:GetAttribute("showSolo")), tostring(hd:GetAttribute("point")),
+                    tostring(hd:GetAttribute("xOffset")), tostring(hd:GetAttribute("yOffset"))))
+        end
+        local function dump(tag, btn)
+            if not btn then return end
+            local d = GetFFD(btn)
+            local h = d and d.health
+            local fill = h and h:GetStatusBarTexture()
+            print(("  %s shown=%s alpha=%.2f w=%.0f h=%.0f | health shown=%s hh=%.1f val=%s tex=%s | power shown=%s")
+                :format(tag, tostring(btn:IsShown()), btn:GetAlpha(),
+                    btn:GetWidth() or 0, btn:GetHeight() or 0,
+                    tostring(h and h:IsShown()), h and h:GetHeight() or -1,
+                    SafeStr(h and h:GetValue()), SafeStr(fill and fill:GetTexture()),
+                    tostring(d and d.power and d.power:IsShown())))
+        end
+        dump("self", ns._partySelfButton)
+        if ns._partyHeader then
+            for i = 1, 5 do
+                local btn = ns._partyHeader[i]
+                if btn then
+                    dump("hdr" .. i .. " u=" .. tostring(btn:GetAttribute("unit")), btn)
+                end
+            end
+        end
     end
 end
 

@@ -686,6 +686,7 @@ local defaults = {
         boss = {
             frameWidth = 160,
             healthHeight = 34,
+            oorAlpha = 0.4,
             powerHeight = 6,
             powerPosition = "below",
             powerWidth = 0,
@@ -794,6 +795,15 @@ local defaults = {
             classPower = { point = "CENTER", relPoint = "CENTER", x = 0, y = -220 },
         },
         bossSpacing = 80,
+
+        -- Player dispel overlay (player frame only; keys mirror Raid Frames)
+        dispelOverlay        = "none",   -- "none", "fill", "full", "gradient"
+        dispelOverlayOpacity = 100,
+        dispelColorMagic   = { r = 0.349, g = 0.475, b = 1.0 },
+        dispelColorCurse   = { r = 0.636, g = 0.0,   b = 0.64 },
+        dispelColorDisease = { r = 0.671, g = 0.384, b = 0.098 },
+        dispelColorPoison  = { r = 0.0,   g = 0.706, b = 0.286 },
+        dispelColorBleed   = { r = 0.75,  g = 0.15,  b = 0.15 },
     }
 }
 local frames = {}
@@ -2293,40 +2303,81 @@ local ABSORB_SHIELD_TEX = "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\shie
 -- Absorb bar style textures and alpha values. "striped" and "blizzard"
 -- textures will be added to Media/ when the user uploads them.
 local ABSORB_STYLE_TEX = {
-    striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
-    clean    = "Interface\\Buttons\\WHITE8X8",
-    blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+    striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+    stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
+    clean           = "Interface\\Buttons\\WHITE8X8",
+    blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
 }
 local ABSORB_STYLE_ALPHA = {
-    striped  = 0.8,
-    clean    = 0.3,
-    blizzard = 0.8,
+    striped         = 0.8,
+    stripedReversed = 0.8,
+    clean           = 0.3,
+    blizzard        = 0.8,
 }
+
+-- Effective absorb opacity: the per-unit absorbOpacity once set, otherwise the
+-- pre-split behavior (clean uses absorbCleanAlpha, other styles the fixed 0.8).
+-- Read-time fallback so existing user settings render identically with no
+-- migration; the options slider shows the same effective value.
+local function GetAbsorbOpacity(style, settings)
+    if settings and settings.absorbOpacity then
+        return settings.absorbOpacity / 100
+    end
+    if style == "clean" and settings then
+        return (settings.absorbCleanAlpha or 30) / 100
+    end
+    return ABSORB_STYLE_ALPHA[style] or 0.8
+end
 
 local function ApplyAbsorbStyle(absorbBar, style, settings)
     if not absorbBar then return end
     local tex = ABSORB_STYLE_TEX[style] or ABSORB_SHIELD_TEX
-    local alpha = ABSORB_STYLE_ALPHA[style] or 0.8
-    if style == "clean" and settings then
-        alpha = (settings.absorbCleanAlpha or 30) / 100
-    end
+    local alpha = GetAbsorbOpacity(style, settings)
+    local ac = (settings and settings.absorbColor) or { r = 1, g = 1, b = 1 }
+    -- striped-5-reversed.png is a repeating tile (the striped3 shield texture
+    -- is a stretch texture; do not change how it renders)
+    local tiled = (style == "stripedReversed")
     local mask = absorbBar._absorbMask
     absorbBar:SetStatusBarTexture(tex)
-    absorbBar:SetStatusBarColor(1, 1, 1, alpha)
+    absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
     local fill = absorbBar:GetStatusBarTexture()
     if fill then
         fill:SetDrawLayer("ARTWORK", 1)
+        fill:SetHorizTile(tiled)
+        fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
     end
     local fw = absorbBar._forward
     if fw then
         fw:SetStatusBarTexture(tex)
-        fw:SetStatusBarColor(1, 1, 1, alpha)
+        fw:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
         local fwFill = fw:GetStatusBarTexture()
         if fwFill then
             fwFill:SetDrawLayer("ARTWORK", 1)
+            fwFill:SetHorizTile(tiled)
+            fwFill:SetVertTile(tiled)
             if mask then fwFill:AddMaskTexture(mask) end
         end
+    end
+end
+
+-- Heal absorb styling (mirrors the raid frames Absorbs section). Defaults
+-- reproduce the pre-split hardcoded look: clean white8x8, red, 0.65 alpha.
+local function ApplyHealAbsorbStyle(haBar, style, settings)
+    if not haBar then return end
+    local tex = ABSORB_STYLE_TEX[style] or "Interface\\Buttons\\WHITE8X8"
+    local alpha = ((settings and settings.healAbsorbOpacity) or 65) / 100
+    local hc = (settings and settings.healAbsorbColor) or { r = 0.8, g = 0.15, b = 0.15 }
+    local tiled = (style == "stripedReversed")
+    local mask = haBar._absorbMask
+    haBar:SetStatusBarTexture(tex)
+    haBar:SetStatusBarColor(hc.r, hc.g, hc.b, alpha)
+    local fill = haBar:GetStatusBarTexture()
+    if fill then
+        fill:SetDrawLayer("ARTWORK", 2)
+        fill:SetHorizTile(tiled)
+        fill:SetVertTile(tiled)
+        if mask then fill:AddMaskTexture(mask) end
     end
 end
 
@@ -2374,46 +2425,89 @@ local function UpdateAbsorbBarReverseFill(frame, isReversed)
     local hpTex = hpBar:GetStatusBarTexture()
     if not hpTex then return end
 
+    ab._isReversed = isReversed and true or false
+
+    -- Placement settings (mirror the raid frames Absorbs section):
+    --   overlay = backfill into the filled health from the HP edge (default)
+    --   right   = full bar, fill from the frame's right edge
+    --   left    = full bar, fill from the frame's left edge
+    local s = GetSettingsForUnit(frame.unit)
+    local absorbMode = (s and s.absorbEdgeMode) or "overlay"
+    local healMode = (s and s.healAbsorbEdgeMode) or "overlay"
+
     curClip:ClearAllPoints()
     missClip:ClearAllPoints()
     ab:ClearAllPoints()
     fw:ClearAllPoints()
 
+    -- missClip + forward bar always use the overlay layout; in the edge modes
+    -- the full-bar backfill shows the whole absorb and the Override hides fw.
     if isReversed then
-        curClip:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT", 0, 0)
-        curClip:SetPoint("BOTTOMLEFT",  hpTex, "BOTTOMLEFT", 0, 0)
         missClip:SetPoint("TOPRIGHT",    hpTex, "TOPLEFT", 1, 0)
         missClip:SetPoint("BOTTOMLEFT",  hpBar, "BOTTOMLEFT", 0, 0)
-        ab:SetReverseFill(false)
-        ab:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
-        ab:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
         fw:SetReverseFill(true)
         fw:SetPoint("TOPRIGHT",    hpTex, "TOPLEFT",    0, 0)
         fw:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMLEFT", 0, 0)
     else
-        curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
-        curClip:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
         missClip:SetPoint("TOPLEFT",     hpTex, "TOPRIGHT", -1, 0)
         missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
-        ab:SetReverseFill(true)
-        ab:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
-        ab:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
         fw:SetReverseFill(false)
         fw:SetPoint("TOPLEFT",    hpTex, "TOPRIGHT",    0, 0)
         fw:SetPoint("BOTTOMLEFT", hpTex, "BOTTOMRIGHT", 0, 0)
     end
 
-    -- Heal absorb bar follows the same reverse-fill logic as the backfill bar
+    -- Shield absorb placement
+    if absorbMode == "right" or absorbMode == "left" then
+        -- Full bar: clip covers the whole health bar, backfill anchors to the
+        -- chosen frame edge (absolute, independent of reverse fill).
+        curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
+        curClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+        if absorbMode == "left" then
+            ab:SetReverseFill(false)
+            ab:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
+            ab:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+        else
+            ab:SetReverseFill(true)
+            ab:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
+            ab:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+        end
+    elseif isReversed then
+        curClip:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT", 0, 0)
+        curClip:SetPoint("BOTTOMLEFT",  hpTex, "BOTTOMLEFT", 0, 0)
+        ab:SetReverseFill(false)
+        ab:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
+        ab:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+    else
+        curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",  0, 0)
+        curClip:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
+        ab:SetReverseFill(true)
+        ab:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
+        ab:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+    end
+
+    -- Heal absorb placement (independent of shield absorb)
     local ha = ab._healAbsorb
     if ha then
         ha:ClearAllPoints()
-        ha:SetReverseFill(not isReversed)
-        if isReversed then
+        if healMode == "right" then
+            ha:SetReverseFill(true)
+            ha:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
+            ha:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+        elseif healMode == "left" then
+            ha:SetReverseFill(false)
             ha:SetPoint("TOPLEFT",    hpBar, "TOPLEFT",    0, 0)
             ha:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
         else
-            ha:SetPoint("TOPRIGHT",    hpBar, "TOPRIGHT",    0, 0)
-            ha:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+            -- Overlay (default): eat into the filled health from the HP edge,
+            -- mirrored for reverse-filled health bars.
+            ha:SetReverseFill(not isReversed)
+            if isReversed then
+                ha:SetPoint("TOPLEFT",    hpTex, "TOPLEFT",    0, 0)
+                ha:SetPoint("BOTTOMLEFT", hpTex, "BOTTOMLEFT", 0, 0)
+            else
+                ha:SetPoint("TOPRIGHT",    hpTex, "TOPRIGHT",    0, 0)
+                ha:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
+            end
         end
     end
 end
@@ -2509,6 +2603,7 @@ local function CreateAbsorbBar(frame, unit, settings)
     -- Reverse-fills from the health texture edge inward (eats into green).
     local healAbsorbBar = CreateFrame("StatusBar", nil, curClip)
     healAbsorbBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    healAbsorbBar._absorbMask = absorbMask
     local haFill = healAbsorbBar:GetStatusBarTexture()
     if haFill then haFill:SetDrawLayer("ARTWORK", 2); haFill:AddMaskTexture(absorbMask) end
     healAbsorbBar:SetStatusBarColor(0.8, 0.15, 0.15, 0.65)
@@ -2534,6 +2629,7 @@ local function CreateAbsorbBar(frame, unit, settings)
     backfillBar._curClip      = curClip
     backfillBar._missClip     = missClip
     backfillBar._absorbMask   = absorbMask
+    backfillBar._isReversed   = isReversed
 
     -- Raise power bar above absorb overlay so it renders on top
     local power = frame and frame.Power
@@ -2587,9 +2683,19 @@ local function CreateAbsorbBar(frame, unit, settings)
             ab:SetWidth(hpW); ab:SetHeight(hpH)
             if fw then fw:SetWidth(hpW); fw:SetHeight(hpH) end
 
+            -- Re-anchor when the placement settings change. The key starts
+            -- nil, so this also applies the saved placement on first update.
+            local absorbMode = (s and s.absorbEdgeMode) or "overlay"
+            local edgeKey = absorbMode .. ":" .. ((s and s.healAbsorbEdgeMode) or "overlay")
+            if ab._lastEdgeKey ~= edgeKey then
+                ab._lastEdgeKey = edgeKey
+                UpdateAbsorbBarReverseFill(self, ab._isReversed)
+            end
+
             -- Re-apply absorb style only when the style setting changes
             -- (not on every health event). Calling SetStatusBarTexture on
             -- every update causes the bar to flash visible even at zero absorb.
+            -- Opacity/color edits re-apply via ReloadFrames' direct call.
             local absStyle = s and s.showPlayerAbsorb
             if absStyle and absStyle ~= "none" and ab._lastAbsStyle ~= absStyle then
                 ab._lastAbsStyle = absStyle
@@ -2608,18 +2714,32 @@ local function CreateAbsorbBar(frame, unit, settings)
                 fw:SetMinMaxValues(0, maxHealth)
                 fw:SetValue(absorbAmt)
                 fw:Show()
+                -- Edge modes: the full-bar backfill shows the whole absorb,
+                -- so the overlay-only forward bar is not needed.
+                if absorbMode ~= "overlay" then fw:Hide() end
             end
 
-            -- Heal absorb: red overlay eating into filled health.
+            -- Heal absorb: overlay eating into filled health.
             -- The value can be a secret number in 12.0+, so never compare
             -- it in Lua. Feed it directly to StatusBar:SetValue and let the
             -- bar render zero width when the value is 0.
             if ha then
-                local healAbsorbAmt = UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(updUnit) or 0
-                ha:SetWidth(hpW); ha:SetHeight(hpH)
-                ha:SetMinMaxValues(0, maxHealth)
-                ha:SetValue(healAbsorbAmt)
-                ha:Show()
+                local haStyle = (s and s.healAbsorbStyle) or "clean"
+                if haStyle == "none" then
+                    ha:Hide()
+                else
+                    local hc = (s and s.healAbsorbColor) or { r = 0.8, g = 0.15, b = 0.15 }
+                    local haKey = haStyle .. ((s and s.healAbsorbOpacity) or 65) .. hc.r .. hc.g .. hc.b
+                    if ha._lastHaKey ~= haKey then
+                        ha._lastHaKey = haKey
+                        ApplyHealAbsorbStyle(ha, haStyle, s)
+                    end
+                    local healAbsorbAmt = UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(updUnit) or 0
+                    ha:SetWidth(hpW); ha:SetHeight(hpH)
+                    ha:SetMinMaxValues(0, maxHealth)
+                    ha:SetValue(healAbsorbAmt)
+                    ha:Show()
+                end
             end
         end,
     }
@@ -9362,4 +9482,271 @@ function EllesmereUF:OnEnable()
     end)
 
     -- Incompatible addon detection is handled globally by EllesmereUI
+end
+
+-------------------------------------------------------------------------------
+--  Boss Frame Range Dimming
+--  Boss units sit outside UnitInRange's group-member domain, so range is
+--  measured against a known spell instead: a harm spell for attackable
+--  bosses (all specs, first known spell in the class chain wins), or the
+--  class baseline heal for friendly bosses (healer specs only). Whole-frame
+--  alpha follows db.profile.boss.oorAlpha; 100% means no fade and the check
+--  short-circuits. The ticker exists only while a boss frame is shown.
+--  (do-block: zero persistent main-chunk locals.)
+-------------------------------------------------------------------------------
+do
+    local HARM_CHAIN = {
+        DEATHKNIGHT = { 49576, 47541 },           -- Death Grip, Death Coil
+        DEMONHUNTER = { 185123, 183752, 204021 }, -- Throw Glaive, Consume Magic, Fiery Brand
+        DRUID       = { 8921, 5176, 6795 },       -- Moonfire, Wrath, Growl
+        EVOKER      = { 362969 },                 -- Azure Strike (25yd native)
+        HUNTER      = { 75, 466930, 190925 },     -- Auto Shot, Black Arrow, Harpoon
+        MAGE        = { 116, 133, 44425, 118 },   -- Frostbolt, Fireball, Arcane Barrage, Polymorph
+        MONK        = { 117952, 115546 },         -- Crackling Jade Lightning, Provoke
+        PALADIN     = { 20271, 62124 },           -- Judgment, Hand of Reckoning
+        PRIEST      = { 589, 585, 8092 },         -- Shadow Word: Pain, Smite, Mind Blast
+        ROGUE       = { 36554, 185763, 2094 },    -- Shadowstep, Pistol Shot, Blind
+        SHAMAN      = { 188196, 370 },            -- Lightning Bolt, Purge
+        WARLOCK     = { 234153, 232670, 686, 348, 172, 5782 }, -- Drain Life, Shadow Bolt (both ids), Immolate, Corruption, Fear
+        WARRIOR     = { 355, 100 },               -- Taunt, Charge
+    }
+    local HELP_HEAL = {
+        PRIEST = 2061, PALADIN = 19750, SHAMAN = 8004,
+        DRUID = 8936, MONK = 116670, EVOKER = 361469,
+    }
+
+    local harmSpell, helpSpell
+    local visCount, ticker = 0, nil
+
+    local function Known(sid)
+        if C_SpellBook and C_SpellBook.IsSpellInSpellBook and Enum.SpellBookSpellBank then
+            return C_SpellBook.IsSpellInSpellBook(sid, Enum.SpellBookSpellBank.Player, true)
+        end
+        return IsSpellKnown and IsSpellKnown(sid)
+    end
+
+    local function ResolveRangeSpells()
+        harmSpell, helpSpell = nil, nil
+        local _, pClass = UnitClass("player")
+        for _, sid in ipairs(HARM_CHAIN[pClass] or {}) do
+            if Known(sid) then harmSpell = sid; break end
+        end
+        local spec = GetSpecialization and GetSpecialization()
+        local role = spec and GetSpecializationRole and GetSpecializationRole(spec)
+        if role == "HEALER" then helpSpell = HELP_HEAL[pClass] end
+    end
+
+    local function TickOne(f, unit)
+        if not db then return end
+        local oor = (db.profile.boss and db.profile.boss.oorAlpha) or 0.4
+        if oor >= 1 or not UnitExists(unit) then
+            f:SetAlpha(1)
+            return
+        end
+        local spell
+        if UnitCanAttack("player", unit) then
+            spell = harmSpell
+        else
+            spell = helpSpell
+        end
+        if spell then
+            -- Secret-safe: the result may be secret in instances, which
+            -- SetAlphaFromBoolean accepts natively -- but it can also be NIL
+            -- (unit not range-checkable right now / spell momentarily not
+            -- evaluable), which it rejects. issecretvalue runs first so the
+            -- nil check never touches a secret.
+            local inRange = C_Spell.IsSpellInRange(spell, unit)
+            if issecretvalue(inRange) or inRange ~= nil then
+                f:SetAlphaFromBoolean(inRange, 1, oor)
+            else
+                f:SetAlpha(1)
+            end
+        else
+            f:SetAlpha(1)
+        end
+    end
+
+    local function Tick()
+        for i = 1, 5 do
+            local f = frames["boss" .. i]
+            if f and f:IsVisible() then TickOne(f, "boss" .. i) end
+        end
+    end
+
+    local function UpdateTicker()
+        local want = visCount > 0
+        if want and not ticker then
+            ticker = C_Timer.NewTicker(0.4, Tick)
+        elseif not want and ticker then
+            ticker:Cancel()
+            ticker = nil
+        end
+    end
+
+    local hooked = false
+    local function InstallHooks()
+        if hooked or not frames["boss1"] then return end
+        hooked = true
+        for i = 1, 5 do
+            local f = frames["boss" .. i]
+            if f then
+                local unit = "boss" .. i
+                if f:IsVisible() then visCount = visCount + 1 end
+                f:HookScript("OnShow", function(self)
+                    visCount = visCount + 1
+                    TickOne(self, unit)
+                    UpdateTicker()
+                end)
+                f:HookScript("OnHide", function(self)
+                    visCount = math.max(0, visCount - 1)
+                    self:SetAlpha(1)
+                    UpdateTicker()
+                end)
+            end
+        end
+        UpdateTicker()
+    end
+
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    ev:SetScript("OnEvent", function()
+        ResolveRangeSpells()
+        InstallHooks()
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Player Dispel Overlay (player frame only, health bar only)
+--  Settings mirror the raid frames' Dispel Overlay / Dispel Colors keys 1:1.
+--  SECRET-SAFE, same as the raid frames: in raid content even the player's
+--  own debuffs can carry a secret dispelName (boss/raid auras), so detection
+--  is the bare `dispelName ~= nil` test (a permitted secret nil-check) and
+--  the color comes from GetAuraDispelTypeColor evaluating a Step color curve
+--  seeded from the user's dispel colors -- the secret type is never read,
+--  indexed or branched on. Curve indices are Blizzard's dispel enum:
+--  0 none, 1 Magic, 2 Curse, 3 Disease, 4 Poison, 9 Enrage, 11 Bleed.
+--  (do-block: zero persistent main-chunk locals.)
+-------------------------------------------------------------------------------
+do
+    local olTex
+    local curve
+
+    local function RebuildCurve()
+        if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return end
+        local p = db and db.profile
+        curve = C_CurveUtil.CreateColorCurve()
+        curve:SetType(Enum.LuaCurveType.Step)
+        local function add(idx, key, dr, dg, dbv)
+            local col = p and p[key]
+            curve:AddPoint(idx, CreateColor(col and col.r or dr, col and col.g or dg, col and col.b or dbv))
+        end
+        add(0,  "dispelColorMagic",   0.349, 0.475, 1.0)   -- none: harmless default
+        add(1,  "dispelColorMagic",   0.349, 0.475, 1.0)
+        add(2,  "dispelColorCurse",   0.636, 0.0,   0.64)
+        add(3,  "dispelColorDisease", 0.671, 0.384, 0.098)
+        add(4,  "dispelColorPoison",  0.0,   0.706, 0.286)
+        add(9,  "dispelColorBleed",   0.75,  0.15,  0.15)
+        add(11, "dispelColorBleed",   0.75,  0.15,  0.15)
+    end
+
+    local function Update()
+        if not db then return end
+        local pf = frames and frames["player"]
+        local health = pf and pf.Health
+        if not health then return end
+        local p = db.profile
+        local mode = p.dispelOverlay or "none"
+
+        if not olTex then
+            if mode == "none" then return end
+            olTex = health:CreateTexture(nil, "ARTWORK", nil, 3)
+            olTex:SetTexture("Interface\\Buttons\\WHITE8X8")
+            olTex:Hide()
+        end
+        if mode == "none" then olTex:Hide(); return end
+
+        -- First harmful aura with a dispel type. dispelName can be SECRET on
+        -- the player in raid content: only the nil-test is permitted -- never
+        -- index a table with it or branch on its value.
+        local found
+        for i = 1, 40 do
+            local ad = C_UnitAuras.GetAuraDataByIndex("player", i, "HARMFUL")
+            if not ad then break end
+            if ad.dispelName ~= nil then
+                found = ad
+                break
+            end
+        end
+        if not found then olTex:Hide(); return end
+
+        -- Resolve the color through the curve. The components may be secret;
+        -- they pass straight into SetColorTexture/SetVertexColor natively.
+        if not curve then RebuildCurve() end
+        local r, g, b = 0.349, 0.475, 1.0
+        if curve and C_UnitAuras.GetAuraDispelTypeColor then
+            local col = C_UnitAuras.GetAuraDispelTypeColor("player", found.auraInstanceID, curve)
+            if col then
+                r, g, b = col:GetRGB()
+            end
+        end
+        local alpha = (p.dispelOverlayOpacity or 100) / 100
+
+        olTex:ClearAllPoints()
+        olTex:SetVertexColor(1, 1, 1, 1)
+        if mode == "full" then
+            olTex:SetAllPoints(health)
+            olTex:SetColorTexture(r, g, b, alpha)
+        elseif mode == "gradient" then
+            -- Pre-baked vertical gradient tinted via vertex color (CreateColor
+            -- cannot wrap secret components; SetVertexColor passes them natively)
+            olTex:SetAllPoints(health)
+            olTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-tb.tga")
+            olTex:SetVertexColor(r, g, b, alpha)
+        else -- "fill": cover only the filled health portion
+            local fillTex = health:GetStatusBarTexture()
+            if fillTex then
+                olTex:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+                olTex:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 0)
+            else
+                olTex:SetAllPoints(health)
+            end
+            olTex:SetColorTexture(r, g, b, alpha)
+        end
+        olTex:Show()
+    end
+
+    ns.UpdatePlayerDispelOverlay = function()
+        RebuildCurve()
+        Update()
+    end
+
+    -- Re-seed the curve + re-apply after any frame reload (settings changes
+    -- and profile swaps route through ns.ReloadFrames / _EUF_ReloadFrames).
+    -- ns.ReloadFrames is assigned during OnEnable, so the wrap is deferred to
+    -- the first event after login; the global export is re-pointed too.
+    local wrapped = false
+    local function EnsureReloadHook()
+        if wrapped or not ns.ReloadFrames then return end
+        wrapped = true
+        local orig = ns.ReloadFrames
+        local function hookedReload(...)
+            orig(...)
+            RebuildCurve()
+            Update()
+        end
+        ns.ReloadFrames = hookedReload
+        if _G._EUF_ReloadFrames == orig then
+            _G._EUF_ReloadFrames = hookedReload
+        end
+    end
+
+    local ev2 = CreateFrame("Frame")
+    ev2:RegisterUnitEvent("UNIT_AURA", "player")
+    ev2:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev2:SetScript("OnEvent", function()
+        EnsureReloadHook()
+        Update()
+    end)
 end

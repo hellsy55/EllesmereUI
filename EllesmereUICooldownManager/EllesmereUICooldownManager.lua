@@ -2185,7 +2185,11 @@ BuildCDMBar = function(barIndex)
         if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
         if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
         if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        -- Containers never capture mouse motion: the rect spans the bar's
+        -- full layout area and a motion-enabled frame with no unit steals
+        -- mouseover focus from unit frames underneath. Icon hover is managed
+        -- per-icon, gated on the bar's tooltip setting.
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
         frame._barKey = key
         frame._barIndex = barIndex
         cdmBarFrames[key] = frame
@@ -2201,7 +2205,7 @@ BuildCDMBar = function(barIndex)
             end
             frame._preMousePos = nil
             SetFrameClickThrough(frame, false)
-            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+            if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
         end
         EllesmereUI.SetElementVisibility(frame, false)
         return
@@ -2230,7 +2234,7 @@ BuildCDMBar = function(barIndex)
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
         SetFrameClickThrough(frame, false)
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
     end
     frame._mouseGrow = nil
 
@@ -2291,6 +2295,7 @@ BuildCDMBar = function(barIndex)
         -- Make frame and all children fully click-through while following cursor
         SetFrameClickThrough(frame, true)
         local lastMX, lastMY
+        local mouseAssertTick = 0
         frame:ClearAllPoints()
         frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", 0, 0)
         frame._mouseTrack = true
@@ -2326,6 +2331,26 @@ BuildCDMBar = function(barIndex)
                     end
                 end
                 _CDMApplyVisibility()
+            end
+            -- Throttled mouse-through re-assert: the Decorate/Show/Cooldown
+            -- path can re-enable mouse on icons mid-session, and an icon
+            -- riding the cursor with mouse enabled intermittently kills
+            -- [@mouseover] hovercast keys. Cheap no-op when state is clean.
+            mouseAssertTick = mouseAssertTick + 1
+            if mouseAssertTick >= 30 then
+                mouseAssertTick = 0
+                local icons = cdmBarIcons[key]
+                if icons then
+                    for ii = 1, #icons do
+                        local ic = icons[ii]
+                        if ic then
+                            if ic:IsMouseEnabled() then ic:EnableMouse(false) end
+                            if ic.IsMouseMotionEnabled and ic:IsMouseMotionEnabled() then
+                                ic:EnableMouseMotion(false)
+                            end
+                        end
+                    end
+                end
             end
             local s = UIParent:GetEffectiveScale()
             local cx, cy = GetCursorPosition()
@@ -3090,6 +3115,27 @@ local function ApplyCDMTooltipState(barKey)
             end
         end
     end
+    -- Mouse-motion follows the tooltip setting. A motion-enabled icon with
+    -- no unit becomes the mouseover-focus frame and steals hover from unit
+    -- frames underneath (raid frame hover highlight and [@mouseover] casts
+    -- die wherever a bar overlaps them), so icons may only capture the mouse
+    -- when tooltips are actually on. Cursor-anchored bars stay fully mouse-
+    -- through (SetFrameClickThrough owns their state); vis-hidden bars stay
+    -- inert. Mouse calls on Blizzard CDM frames are blocked in combat.
+    if not InCombatLockdown() then
+        local frame = cdmBarFrames[barKey]
+        local wantHover = (enabled and frame and not frame._mouseTrack
+            and not frame._visHidden) and true or false
+        local icons = cdmBarIcons[barKey]
+        if icons then
+            for i = 1, #icons do
+                local ic = icons[i]
+                if ic and ic.EnableMouseMotion then
+                    ic:EnableMouseMotion(wantHover)
+                end
+            end
+        end
+    end
     -- Show/hide the global tooltip frame based on whether any bar wants tooltips
     if next(_tooltipBars) then
         _tooltipFrame:Show()
@@ -3650,7 +3696,9 @@ local function SetFocusKickAlpha(a)
     if frame then
         frame:SetAlpha(a)
         if frame.EnableMouseMotion and not InCombatLockdown() then
-            frame:EnableMouseMotion(a > 0)
+            -- Container never captures motion (steals hover from frames
+            -- underneath); icon hover is owned by the tooltip setting.
+            frame:EnableMouseMotion(false)
         end
         frame._visHidden = (a == 0)
     end
@@ -4267,8 +4315,10 @@ _CDMApplyVisibility = function()
             -- Ghost bar stays hidden even in unlock mode
             elseif unlockActive and not barData.isGhostBar then
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion and not InCombatLockdown() and not frame._mouseTrack then
-                    frame:EnableMouseMotion(true)
+                -- Container stays motion-through even in unlock mode; drag
+                -- handling lives on the unlock overlay frames, not the bar.
+                if frame.EnableMouseMotion and not InCombatLockdown() then
+                    frame:EnableMouseMotion(false)
                 end
                 frame._visHidden = false
             else
@@ -4322,12 +4372,15 @@ _CDMApplyVisibility = function()
                 -- Custom injected icons are parented to the bar frame, so
                 -- frame alpha would double-apply with icon alpha.
                 frame:SetAlpha(1)
-                -- Don't re-enable mouse motion on cursor-tracked bars;
-                -- SetFrameClickThrough disabled it for click-through and
-                -- re-enabling here on every visibility pass was the source
-                -- of the intermittent hover-blocking bug.
-                if frame.EnableMouseMotion and not InCombatLockdown() and not frame._mouseTrack then
-                    frame:EnableMouseMotion(true)
+                -- The container never captures mouse motion: its rect spans
+                -- the bar's full layout area (mostly empty space on dynamic
+                -- bars like buffs), and a motion-enabled frame with no unit
+                -- steals mouseover focus from unit frames underneath -- raid
+                -- frame hover highlights and [@mouseover] casts died wherever
+                -- the bar overlapped them. Icon hover is handled per-icon
+                -- below, gated on the bar's tooltip setting.
+                if frame.EnableMouseMotion and not InCombatLockdown() then
+                    frame:EnableMouseMotion(false)
                 end
                 frame._visHidden = false
                 -- Apply opacity to icons every pass (idempotent, handles
@@ -4344,17 +4397,16 @@ _CDMApplyVisibility = function()
                             -- ADDON_ACTION_BLOCKED when dismounting mid-combat.
                             if not icCombat2 then
                                 ic:EnableMouse(false)
-                                -- Cursor-tracked bars must stay fully click-AND-
-                                -- motion-through. An icon riding at the cursor on
-                                -- the TOOLTIP strata that still receives mouse
-                                -- MOTION becomes the mouseover-focus frame; with no
-                                -- unit of its own it steals focus from whatever unit
-                                -- frame is underneath, so [@mouseover] resolves to
-                                -- nothing and hovercast keys fall through to the
-                                -- action bar (and stay stuck until you re-mouseover).
-                                -- Mirror the frame-level _mouseTrack guard above.
+                                -- An icon that receives mouse MOTION becomes the
+                                -- mouseover-focus frame; with no unit of its own it
+                                -- steals focus from whatever unit frame is underneath,
+                                -- so [@mouseover] resolves to nothing and the unit
+                                -- frame's hover highlight never fires. Icons may only
+                                -- capture the mouse when this bar's tooltips are on,
+                                -- and never on cursor-tracked bars (those must stay
+                                -- fully click-AND-motion-through).
                                 if ic.EnableMouseMotion then
-                                    ic:EnableMouseMotion(not frame._mouseTrack)
+                                    ic:EnableMouseMotion((barData.showTooltip and not frame._mouseTrack) and true or false)
                                 end
                             end
                             local icfc = _ecmeFC[ic]
@@ -5471,7 +5523,9 @@ function ECME:CDMFinishSetup()
                                 if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
                                 if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
                                 if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
-                                if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                                -- Containers never capture mouse motion (see
+                                -- BuildCDMBar creation block).
+                                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
                                 frame._barKey = key
                                 frame._barIndex = i
                                 cdmBarFrames[key] = frame

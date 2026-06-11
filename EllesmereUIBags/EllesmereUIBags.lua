@@ -3,14 +3,6 @@
 --  Enhanced Bags System for EllesmereUI (Midnight)
 --  Sidebar category filter + flat item grid layout.
 -------------------------------------------------------------------------------
--- Guard: old Bags saved variables file may contain a stale EllesmereUIDB
--- that overwrites the parent's current data (profiles vanish). Detect by
--- checking if the table reference changed from what the parent saved, and
--- restore it. After one logout the stale entry is purged from the file.
-if EllesmereUI and EllesmereUI._parentDBRef and EllesmereUIDB ~= EllesmereUI._parentDBRef then
-    EllesmereUIDB = EllesmereUI._parentDBRef
-end
-
 EUI_Bags = CreateFrame("Frame", "EUI_MainBagFrame", UIParent)
 EUI_Bags:Hide()
 

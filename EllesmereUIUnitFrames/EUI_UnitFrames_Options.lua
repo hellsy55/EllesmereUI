@@ -1671,16 +1671,24 @@ initFrame:SetScript("OnEvent", function(self)
         if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
             local absStyle = settings.showPlayerAbsorb
             local PREV_ABS_TEX = {
-                striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
-                clean    = "Interface\\Buttons\\WHITE8X8",
-                blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+                striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+                stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
+                clean           = "Interface\\Buttons\\WHITE8X8",
+                blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
             }
-            local PREV_ABS_ALPHA = { striped = 0.8, clean = 0.3, blizzard = 0.8 }
+            local PREV_ABS_ALPHA = { striped = 0.8, stripedReversed = 0.8, clean = (settings.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
             local tex   = PREV_ABS_TEX[absStyle] or PREV_ABS_TEX.striped
-            local alpha = PREV_ABS_ALPHA[absStyle] or 0.8
+            -- Effective opacity/color: mirrors GetAbsorbOpacity in EllesmereUIUnitFrames.lua
+            local alpha = settings.absorbOpacity and (settings.absorbOpacity / 100) or PREV_ABS_ALPHA[absStyle] or 0.8
+            local ac = settings.absorbColor or { r = 1, g = 1, b = 1 }
             absorbBar = CreateFrame("StatusBar", nil, health)
             absorbBar:SetStatusBarTexture(tex)
-            absorbBar:SetStatusBarColor(1, 1, 1, alpha)
+            local absFillTex = absorbBar:GetStatusBarTexture()
+            if absFillTex then
+                local absTiled = (absStyle == "stripedReversed")
+                absFillTex:SetHorizTile(absTiled); absFillTex:SetVertTile(absTiled)
+            end
+            absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
             if settings.healthReverseFill then
                 absorbBar:SetReverseFill(false)
                 PP.Point(absorbBar, "TOPLEFT", healthFill, "TOPLEFT", 0, 0)
@@ -1697,6 +1705,7 @@ initFrame:SetScript("OnEvent", function(self)
             absorbBar:SetFrameLevel(health:GetFrameLevel() + 1)
             if not absStyle or absStyle == "none" then absorbBar:Hide() end
         end
+        pf._absorbBar = absorbBar
 
         -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
         local buffIcons = {}
@@ -2518,13 +2527,22 @@ initFrame:SetScript("OnEvent", function(self)
                 local absS = s.showPlayerAbsorb
                 if absS and absS ~= "none" then
                     local _paTex = {
-                        striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
-                        clean    = "Interface\\Buttons\\WHITE8X8",
-                        blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+                        striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+                        stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
+                        clean           = "Interface\\Buttons\\WHITE8X8",
+                        blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
                     }
-                    local _paAlpha = { striped = 0.8, clean = (s.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
+                    local _paAlpha = { striped = 0.8, stripedReversed = 0.8, clean = (s.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
+                    -- Effective opacity/color: mirrors GetAbsorbOpacity in EllesmereUIUnitFrames.lua
+                    local _paA = s.absorbOpacity and (s.absorbOpacity / 100) or _paAlpha[absS] or 0.8
+                    local _paC = s.absorbColor or { r = 1, g = 1, b = 1 }
                     absorbBar:SetStatusBarTexture(_paTex[absS] or _paTex.striped)
-                    absorbBar:SetStatusBarColor(1, 1, 1, _paAlpha[absS] or 0.8)
+                    local _paFill = absorbBar:GetStatusBarTexture()
+                    if _paFill then
+                        local _paTiled = (absS == "stripedReversed")
+                        _paFill:SetHorizTile(_paTiled); _paFill:SetVertTile(_paTiled)
+                    end
+                    absorbBar:SetStatusBarColor(_paC.r, _paC.g, _paC.b, _paA)
                     absorbBar:ClearAllPoints()
                     if s.healthReverseFill then
                         absorbBar:SetReverseFill(false)
@@ -3092,6 +3110,13 @@ initFrame:SetScript("OnEvent", function(self)
         powerHeight          = { player=true, target=true, focus=true },
         showPlayerAbsorb     = { player=true, target=true, focus=true },
         absorbCleanAlpha     = { player=true, target=true, focus=true },
+        absorbOpacity        = { player=true, target=true, focus=true },
+        absorbColor          = { player=true, target=true, focus=true },
+        absorbEdgeMode       = { player=true, target=true, focus=true },
+        healAbsorbStyle      = { player=true, target=true, focus=true },
+        healAbsorbOpacity    = { player=true, target=true, focus=true },
+        healAbsorbColor      = { player=true, target=true, focus=true },
+        healAbsorbEdgeMode   = { player=true, target=true, focus=true },
         showBuffs            = { player=true, target=true, focus=true },
         combatIndicatorStyle   = { player=true },
         combatIndicatorColor   = { player=true },
@@ -7767,76 +7792,161 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        -- Dispel Overlay + Dispel Colors (player frame only; settings keys
+        -- mirror the Raid Frames dispel system 1:1)
+        if selectedUnit == "player" then
+            local dispelOverlayValues = {
+                none     = "None",
+                fill     = "Fill Overlay",
+                full     = "Full Overlay",
+                gradient = "Gradient Overlay",
+            }
+            local dispelOverlayOrder = { "none", "fill", "full", "gradient" }
+            local function DispelRefresh()
+                if ns.UpdatePlayerDispelOverlay then ns.UpdatePlayerDispelOverlay() end
+            end
+            local dispelRow
+            dispelRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Dispel Overlay", values=dispelOverlayValues, order=dispelOverlayOrder,
+                  getValue=function() return db.profile.dispelOverlay or "none" end,
+                  setValue=function(v) db.profile.dispelOverlay = v; DispelRefresh() end },
+                { type="multiSwatch", text="Dispel Colors",
+                  swatches = {
+                    { tooltip = "Magic", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorMagic; if c then return c.r, c.g, c.b end return 0.349, 0.475, 1.0 end,
+                      setValue = function(r, g, b) db.profile.dispelColorMagic = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Curse", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorCurse; if c then return c.r, c.g, c.b end return 0.636, 0.0, 0.64 end,
+                      setValue = function(r, g, b) db.profile.dispelColorCurse = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Disease", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorDisease; if c then return c.r, c.g, c.b end return 0.671, 0.384, 0.098 end,
+                      setValue = function(r, g, b) db.profile.dispelColorDisease = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Poison", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorPoison; if c then return c.r, c.g, c.b end return 0.0, 0.706, 0.286 end,
+                      setValue = function(r, g, b) db.profile.dispelColorPoison = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Bleed", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorBleed; if c then return c.r, c.g, c.b end return 0.75, 0.15, 0.15 end,
+                      setValue = function(r, g, b) db.profile.dispelColorBleed = { r=r, g=g, b=b }; DispelRefresh() end },
+                  } });  y = y - h
+            -- Inline cog on Dispel Overlay: Overlay Opacity
+            do
+                local rgn = dispelRow._leftRegion
+                local _, opShow = EllesmereUI.BuildCogPopup({
+                    title = "Dispel Overlay",
+                    rows = {
+                        { type="slider", label="Overlay Opacity", min=5, max=100, step=1,
+                          get=function() return db.profile.dispelOverlayOpacity or 100 end,
+                          set=function(v) db.profile.dispelOverlayOpacity = v; DispelRefresh() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) opShow(self) end)
+            end
+        end
+
         _, h = W:Spacer(parent, y, 20); y = y - h
 
-        local sharedAddHeader
         -------------------------------------------------------------------
-        --  ADDITIONAL SETTINGS
+        --  ABSORBS (player/target/focus -- mirrors the Raid Frames section)
         -------------------------------------------------------------------
-        sharedAddHeader, h = W:SectionHeader(parent, "ADDITIONAL SETTINGS", y); y = y - h
+        -- Declared outside the gate: the click-mapping table at the bottom of
+        -- this function references them (block-locals would be nil there).
+        local sharedAbsorbsHeader, absorbRow
+        local _supportsAbsorbs = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
+        if _supportsAbsorbs then
+        sharedAbsorbsHeader, h = W:SectionHeader(parent, "ABSORBS", y); y = y - h
 
-        -- Row 1: Absorb Style + Combat Indicator
-        local _showAbsorbsCombat = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
-        if _showAbsorbsCombat then
-        local COMBAT_MEDIA_P = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
-        local combatIndValues = {
-            ["none"]="None", ["standard"]="Standard", ["class"]="Class Theme",
-            _menuOpts = { itemHeight = 32, icon = function(key)
-                if key == "none" then return nil end
-                local _, ct = UnitClass("player")
-                if not ct then return nil end
-                if key == "class" then
-                    local coords = CLASS_FULL_COORDS[ct]
-                    if not coords then return nil end
-                    return COMBAT_MEDIA_P .. "combat-indicator-class-custom.png", coords[1], coords[2], coords[3], coords[4]
-                else
-                    return COMBAT_MEDIA_P .. "combat-indicator-custom.png", 0, 1, 0, 1
-                end
-            end },
-        }
-        local combatIndOrder = { "none", "standard", "class" }
         local absorbStyleValues = {
-            ["none"]="None", ["striped"]="Striped", ["clean"]="Clean (Flat)",
-            ["blizzard"]="Blizzard",
+            ["none"]            = "None",
+            ["striped"]         = "Striped",
+            ["stripedReversed"] = "Striped Reversed",
+            ["clean"]           = "Clean (Flat)",
+            ["blizzard"]        = "Blizzard",
         }
-        local absorbStyleOrder = { "none", "striped", "clean", "blizzard" }
-        local sharedAddRow1
-        sharedAddRow1, h = W:DualRow(parent, y,
-            { type="dropdown", text="Absorb Style",
-              values=absorbStyleValues, order=absorbStyleOrder,
+        local absorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard" }
+
+        -- Effective absorb opacity: absorbOpacity once set, otherwise the
+        -- pre-split behavior (clean -> absorbCleanAlpha, other styles 80).
+        -- Must match GetAbsorbOpacity in EllesmereUIUnitFrames.lua.
+        local function EffAbsorbOpacity()
+            local v = SValSupported("absorbOpacity", nil)
+            if v then return v end
+            if SValSupported("showPlayerAbsorb", "none") == "clean" then
+                return SValSupported("absorbCleanAlpha", 30)
+            end
+            return 80
+        end
+
+        -- Row 1: Absorb Style (+ color swatch + placement cog) | Absorb Opacity
+        absorbRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
               getValue=function() return SValSupported("showPlayerAbsorb", "none") end,
-              setValue=function(v) SSetSupported("showPlayerAbsorb", v); ReloadAndUpdate(); UpdatePreview() end },
-            { type="dropdown", text="Combat Indicator", values=combatIndValues, order=combatIndOrder,
-              getValue=function() return SValSupported("combatIndicatorStyle", "class") end,
-              setValue=function(v) SSetSupported("combatIndicatorStyle", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        SApplySupport(sharedAddRow1._leftRegion, "showPlayerAbsorb")
-        SApplySupport(sharedAddRow1._rightRegion, "combatIndicatorStyle")
-        -- Inline cog for Absorb Style: Clean Opacity slider
+              setValue=function(v)
+                  if v == "clean" then
+                      UNIT_DB_MAP[selectedUnit]().absorbOpacity = 30
+                  else
+                      UNIT_DB_MAP[selectedUnit]().absorbOpacity = 90
+                  end
+                  SSetSupported("showPlayerAbsorb", v)
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Absorb Opacity", min=5, max=100, step=1,
+              disabled=function() return SValSupported("showPlayerAbsorb", "none") == "none" end,
+              disabledTooltip="Absorb Style",
+              getValue=EffAbsorbOpacity,
+              setValue=function(v) SSetSupported("absorbOpacity", v) end });  y = y - h
+        SApplySupport(absorbRow._leftRegion, "showPlayerAbsorb")
+        SApplySupport(absorbRow._rightRegion, "absorbOpacity")
+        -- Inline color swatch for absorb color
         do
-            local rgn = sharedAddRow1._leftRegion
-            local _, absorbCogShow = EllesmereUI.BuildCogPopup({
-                title = "Absorb Settings",
+            local rgn = absorbRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, absorbRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGetSupported("absorbColor")
+                    if c then return c.r, c.g, c.b, 1 end
+                    return 1, 1, 1, 1
+                end,
+                function(r, g, b)
+                    UNIT_DB_MAP[selectedUnit]().absorbColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateAbsorbSwatchVis()
+                swatch:SetAlpha(SValSupported("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
+            UpdateAbsorbSwatchVis()
+        end
+        -- Inline cog: absorb placement (overlay / right edge / left edge)
+        do
+            local rgn = absorbRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Absorb Rendering",
                 rows = {
-                    { type = "slider", label = "Clean Opacity", min = 5, max = 100, step = 1,
-                      get = function() return SValSupported("absorbCleanAlpha", 30) end,
-                      set = function(v) SSetSupported("absorbCleanAlpha", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="dropdown", label="Placement",
+                      values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
+                      order = { "overlay", "right", "left" },
+                      get=function() return SValSupported("absorbEdgeMode", "overlay") end,
+                      set=function(v) SSetSupported("absorbEdgeMode", v) end },
                 },
             })
-            local absorbCogBtn = CreateFrame("Button", nil, rgn)
-            absorbCogBtn:SetSize(26, 26)
-            absorbCogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = absorbCogBtn
-            absorbCogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            absorbCogBtn:SetAlpha(0.4)
-            local absorbCogTex = absorbCogBtn:CreateTexture(nil, "OVERLAY")
-            absorbCogTex:SetAllPoints(); absorbCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            absorbCogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
-            absorbCogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
-            absorbCogBtn:SetScript("OnClick", function(s) absorbCogShow(s) end)
+            MakeCogBtn(rgn, cogShow)
         end
-        -- Sync icons: Show Absorbs (left) and Combat Indicator (right)
+        -- Sync icon: Absorb Style across all frames
         do
-            local rgn = sharedAddRow1._leftRegion
+            local rgn = absorbRow._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Absorb Style to all Frames",
@@ -7865,8 +7975,107 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+
+        -- Row 2: Heal Absorb Style (+ color swatch + placement cog) | Heal Absorb Opacity
+        local healAbsorbRow
+        healAbsorbRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Heal Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+              getValue=function() return SValSupported("healAbsorbStyle", "clean") end,
+              setValue=function(v)
+                  if v == "clean" then
+                      UNIT_DB_MAP[selectedUnit]().healAbsorbOpacity = 50
+                  else
+                      UNIT_DB_MAP[selectedUnit]().healAbsorbOpacity = 75
+                  end
+                  SSetSupported("healAbsorbStyle", v)
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Heal Absorb Opacity", min=5, max=100, step=1,
+              disabled=function() return SValSupported("healAbsorbStyle", "clean") == "none" end,
+              disabledTooltip="Heal Absorb Style",
+              getValue=function() return SValSupported("healAbsorbOpacity", 65) end,
+              setValue=function(v) SSetSupported("healAbsorbOpacity", v) end });  y = y - h
+        SApplySupport(healAbsorbRow._leftRegion, "healAbsorbStyle")
+        SApplySupport(healAbsorbRow._rightRegion, "healAbsorbOpacity")
+        -- Inline color swatch for heal absorb color
         do
-            local rgn = sharedAddRow1._rightRegion
+            local rgn = healAbsorbRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, healAbsorbRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGetSupported("healAbsorbColor")
+                    if c then return c.r, c.g, c.b, 1 end
+                    return 0.8, 0.15, 0.15, 1
+                end,
+                function(r, g, b)
+                    UNIT_DB_MAP[selectedUnit]().healAbsorbColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateHealAbsorbSwatchVis()
+                swatch:SetAlpha(SValSupported("healAbsorbStyle", "clean") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
+            UpdateHealAbsorbSwatchVis()
+        end
+        -- Inline cog: heal absorb placement (independent of shield absorb)
+        do
+            local rgn = healAbsorbRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Heal Absorb Rendering",
+                rows = {
+                    { type="dropdown", label="Placement",
+                      values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
+                      order = { "overlay", "right", "left" },
+                      get=function() return SValSupported("healAbsorbEdgeMode", "overlay") end,
+                      set=function(v) SSetSupported("healAbsorbEdgeMode", v) end },
+                },
+            })
+            MakeCogBtn(rgn, cogShow)
+        end
+
+        _, h = W:Spacer(parent, y, 20); y = y - h
+        end -- _supportsAbsorbs
+
+        local sharedAddHeader
+        -------------------------------------------------------------------
+        --  ADDITIONAL SETTINGS
+        -------------------------------------------------------------------
+        sharedAddHeader, h = W:SectionHeader(parent, "ADDITIONAL SETTINGS", y); y = y - h
+
+        -- Row 1: Combat Indicator (absorb settings live in the ABSORBS section above)
+        -- Declared outside the gate: the click-mapping table at the bottom of
+        -- this function references it (a block-local would be nil there).
+        local sharedAddRow1
+        local _showAbsorbsCombat = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
+        if _showAbsorbsCombat then
+        local COMBAT_MEDIA_P = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
+        local combatIndValues = {
+            ["none"]="None", ["standard"]="Standard", ["class"]="Class Theme",
+            _menuOpts = { itemHeight = 32, icon = function(key)
+                if key == "none" then return nil end
+                local _, ct = UnitClass("player")
+                if not ct then return nil end
+                if key == "class" then
+                    local coords = CLASS_FULL_COORDS[ct]
+                    if not coords then return nil end
+                    return COMBAT_MEDIA_P .. "combat-indicator-class-custom.png", coords[1], coords[2], coords[3], coords[4]
+                else
+                    return COMBAT_MEDIA_P .. "combat-indicator-custom.png", 0, 1, 0, 1
+                end
+            end },
+        }
+        local combatIndOrder = { "none", "standard", "class" }
+        sharedAddRow1, h = W:DualRow(parent, y,
+            { type="dropdown", text="Combat Indicator", values=combatIndValues, order=combatIndOrder,
+              getValue=function() return SValSupported("combatIndicatorStyle", "class") end,
+              setValue=function(v) SSetSupported("combatIndicatorStyle", v); ReloadAndUpdate(); UpdatePreview() end },
+            { type="label", text="" });  y = y - h
+        SApplySupport(sharedAddRow1._leftRegion, "combatIndicatorStyle")
+        -- Sync icon: Combat Indicator
+        do
+            local rgn = sharedAddRow1._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Combat Indicator Style to all Frames",
@@ -7898,7 +8107,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Eyeball toggle + cog + swatch on combat indicator dropdown
         do
-            local ciRgn = sharedAddRow1._rightRegion
+            local ciRgn = sharedAddRow1._leftRegion
             local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
             local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
             local eyeBtn = CreateFrame("Button", nil, ciRgn)
@@ -8215,6 +8424,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         parent._sharedClickTargets = {
             healthBar    = { section = sharedBarsHeader,     target = sharedSizeRow },
+            absorbs      = { section = sharedAbsorbsHeader,  target = absorbRow, slotSide = "left" },
             powerBar     = { section = sharedPowerHeader,    target = sharedPowerRow1, slotSide = "left" },
             powerBarText = { section = sharedPowerHeader,    target = sharedPowerRow2, slotSide = "left" },
             portrait     = { section = sharedPortraitHeader, target = sharedPortraitModeRow, slotSide = "left" },
@@ -8227,7 +8437,7 @@ initFrame:SetScript("OnEvent", function(self)
             btbRightText = { section = sharedBtbHeader,      target = sharedBtbTextRow, slotSide = "right" },
             btbCenterText= { section = sharedBtbHeader,      target = sharedBtbCenterRow, slotSide = "left" },
             btbClassIcon = { section = sharedBtbHeader,      target = sharedBtbCenterRow, slotSide = "right" },
-            combatIndicator = { section = sharedAddHeader, target = sharedAddRow1, slotSide = "right" },
+            combatIndicator = { section = sharedAddHeader, target = sharedAddRow1, slotSide = "left" },
             buffIcon     = { section = sharedBuffDebuffHeader, target = sharedAddRow2, slotSide = "left" },
             debuffIcon   = { section = sharedBuffDebuffHeader, target = sharedAddRow3, slotSide = "left" },
             raidMarker   = { section = sharedAddHeader,      target = sharedAddRow4, slotSide = "left" },
@@ -8481,6 +8691,13 @@ initFrame:SetScript("OnEvent", function(self)
             local baseLevel = (pv._health and pv._health:GetFrameLevel() or 20) + 15
             local textLevel = baseLevel + 10
             if pv._health then CreateHitOverlay(pv._health, "healthBar", false, baseLevel) end
+            -- Absorb segment: hit area follows the absorb bar's FILL texture
+            -- (the bar frame spans the whole health width), sitting above the
+            -- health overlay so the shield strip routes to the Absorbs section.
+            if pv._absorbBar and pv._absorbBar:IsShown() then
+                local absFill = pv._absorbBar:GetStatusBarTexture()
+                if absFill then CreateHitOverlay(absFill, "absorbs", false, baseLevel + 5) end
+            end
             if pv._power then CreateHitOverlay(pv._power, "powerBar", false, baseLevel) end
             if pv._portraitFrame and pv._portraitFrame:IsShown() then CreateHitOverlay(pv._portraitFrame, "portrait", false, baseLevel) end
             if pv._castbar then
@@ -9321,6 +9538,15 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.RegisterWidgetRefresh(UpdateDebuffCogDisabled)
                 end
             end
+
+            -- Out of Range fade (100% = no fade). Read live by the range
+            -- ticker, so no reload call is needed.
+            _, hh = Ww:DualRow(pp, yy,
+                { type="slider", text="Out of Range Alpha", min=10, max=100, step=1,
+                  tooltip="Fades boss frames when the boss is out of range of your spells. Set to 100% to disable the fade.",
+                  getValue=function() return math.floor(((db.profile.boss.oorAlpha or 0.4) * 100) + 0.5) end,
+                  setValue=function(v) db.profile.boss.oorAlpha = v / 100 end },
+                { type="label", text="" });  yy = yy - hh
 
             return yy
         end

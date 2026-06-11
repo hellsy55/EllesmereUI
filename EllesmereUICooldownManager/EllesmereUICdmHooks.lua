@@ -1988,13 +1988,16 @@ local function CollectAndReanchor()
                         if frame:GetParent() ~= container then
                             frame:SetParent(container)
                         end
-                        -- Enable mouse motion (OnEnter/OnLeave) for tooltips
-                        -- but keep clicks pass-through. Skip for cursor-
-                        -- anchored bars: re-enabling mouse here would undo
-                        -- the click-through set by SetFrameClickThrough and
-                        -- cause the bar to block hover interactions.
+                        -- Mouse motion (OnEnter/OnLeave) only while this bar's
+                        -- tooltips are on -- a motion-enabled icon steals
+                        -- mouseover focus from unit frames underneath (raid
+                        -- frame hover highlight, [@mouseover] casts). Clicks
+                        -- always pass through. Cursor-anchored bars stay fully
+                        -- mouse-through: re-enabling mouse here would undo the
+                        -- click-through set by SetFrameClickThrough.
                         local isCursorBar = container and container._mouseTrack
-                        if not isCursorBar then
+                        local bdHover = barDataByKey and barDataByKey[barKey]
+                        if bdHover and bdHover.showTooltip and not isCursorBar then
                             frame:EnableMouse(true)
                             if frame.SetMouseClickEnabled then frame:SetMouseClickEnabled(false) end
                             if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
@@ -2011,6 +2014,18 @@ local function CollectAndReanchor()
                                 frame.Cooldown:SetMouseMotionEnabled(false)
                             end
                         end
+                    end
+                    -- Cursor-anchored bars must stay fully mouse-through on
+                    -- EVERY icon, native viewer icons included -- the branch
+                    -- above only re-asserts our own custom frames, but the
+                    -- same Decorate/Show/SetParent/Cooldown path can re-enable
+                    -- mouse on native icons. A mouse-enabled icon riding the
+                    -- cursor intermittently kills [@mouseover] hovercast keys
+                    -- while frame focus still looks correct.
+                    if container and container._mouseTrack then
+                        frame:EnableMouse(false)
+                        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                        if frame.Cooldown then frame.Cooldown:EnableMouse(false) end
                     end
                     -- Active state hooks handled in DecorateFrame (SetSwipeColor
                     -- hook on every frame, forces our color always).

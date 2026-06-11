@@ -72,10 +72,8 @@ do
 end
 
 -- EllesmereUIDB is initialized from SavedVariables at ADDON_LOADED time.
--- Do NOT create it here -- that would overwrite saved data.
--- Save a reference so child addons can detect if their stale saved variables
--- file overwrote EllesmereUIDB (see Bags TOC SavedVariables fix, session 94).
-EllesmereUI._parentDBRef = EllesmereUIDB
+-- Do NOT create it here -- that would overwrite saved data. (Protection
+-- against stale child SV copies lives in EllesmereUI_Lite.lua.)
 
 -- Panel background
 local PANEL_BG_R, PANEL_BG_G, PANEL_BG_B     = 0.05, 0.07, 0.09
@@ -8278,7 +8276,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.1"
+EllesmereUI.VERSION = "8.1.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

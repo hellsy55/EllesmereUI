@@ -257,11 +257,22 @@ end
 -- indicator placements (source) but only ever display the listed spells. Earth
 -- Shield is castable by every Shaman spec, so Enhancement and Elemental borrow
 -- Restoration's setup and show only Earth Shield -- exactly where the player
--- positioned Restoration's Earth Shield indicator. Keyed by spec ID; spells is a
--- set keyed by the primary spell ID indicators reference (974).
+-- positioned Restoration's Earth Shield indicator. Blessing of Freedom works
+-- the same way for Protection/Retribution Paladins (this also lets the
+-- defensives display's externals fingerprint resolve Freedom on every Paladin
+-- spec, since BM_IdentifySecretAura keys off the resolved spec). Keyed by spec
+-- ID; spells is a set keyed by the primary spell ID indicators reference.
 local BORROW_SPECS = {
-    [262] = { source = "SHAMAN_RESTORATION", spells = { [974] = true } }, -- Elemental
-    [263] = { source = "SHAMAN_RESTORATION", spells = { [974] = true } }, -- Enhancement
+    [262] = { source = "SHAMAN_RESTORATION", spells = { [974] = true } },  -- Elemental
+    [263] = { source = "SHAMAN_RESTORATION", spells = { [974] = true } },  -- Enhancement
+    -- sigs: fingerprints can differ from the source spec because the
+    -- RAID_PLAYER_DISPELLABLE probe reflects the PLAYER's dispel capability.
+    -- Freedom reads 1:0:0:1 on Holy (magic dispel) but 1:0:0:0 on Prot/Ret
+    -- (no magic dispel), so the borrow entries register their own variant.
+    [66]  = { source = "PALADIN_HOLY", spells = { [1044] = true },
+              sigs = { ["1:0:0:0"] = 1044 } }, -- Protection
+    [70]  = { source = "PALADIN_HOLY", spells = { [1044] = true },
+              sigs = { ["1:0:0:0"] = 1044 } }, -- Retribution
 }
 
 -- Resolve the player's CURRENT spec to a BM spec key. This MUST be done by spec
@@ -355,6 +366,18 @@ end
 -- Per-spec signature -> spellID lookup (built lazily)
 local specSignatures = {}  -- [specKey] = { ["1:1:1:0"] = spellID }
 
+-- Try to match a secret aura against the player's own spec signatures.
+-- Only track indicators for the player's active spec. Checking all specs of the
+-- same class causes cross-spec bleed (e.g. Disc seeing Holy indicators).
+-- Also prevents cross-class signature collisions for secret aura fingerprinting.
+-- Declared BEFORE GetSpecSignatures so its borrow-variant merge captures these
+-- as upvalues (a later declaration would resolve to nil globals inside it).
+local activeSpecKey_BM = nil
+-- When the active spec borrows another's indicators (Enh/Ele -> Resto, Prot/Ret
+-- -> Holy), this holds that borrow config so tracking can be restricted to the
+-- borrowed spells and the borrow's signature variants can merge in.
+local activeBorrow_BM = nil
+
 local function GetSpecSignatures(specKey)
     if specSignatures[specKey] then return specSignatures[specKey] end
     local sigs = {}
@@ -371,18 +394,19 @@ local function GetSpecSignatures(specKey)
             end
         end
     end
+    -- Borrow specs can fingerprint a spell differently than the source spec
+    -- (the dispellable probe tracks the player's own dispel kit), so merge the
+    -- active borrow entry's signature variants in. Safe with the lazy cache:
+    -- specSignatures is wiped on every RebuildLookup (login + spec change),
+    -- so the merged table always reflects the current spec context.
+    if activeBorrow_BM and activeBorrow_BM.source == specKey and activeBorrow_BM.sigs then
+        for sig, sid in pairs(activeBorrow_BM.sigs) do
+            if not sigs[sig] then sigs[sig] = sid end
+        end
+    end
     specSignatures[specKey] = sigs
     return sigs
 end
-
--- Try to match a secret aura against the player's own spec signatures.
--- Only track indicators for the player's active spec. Checking all specs of the
--- same class causes cross-spec bleed (e.g. Disc seeing Holy indicators).
--- Also prevents cross-class signature collisions for secret aura fingerprinting.
-local activeSpecKey_BM = nil
--- When the active spec borrows another's indicators (Enh/Ele -> Resto), this
--- holds that borrow config so tracking can be restricted to the borrowed spells.
-local activeBorrow_BM = nil
 
 local function DetectActiveSpecKey()
     -- Locale-independent: resolve by spec ID. nil for any non-tracked spec, which
@@ -900,7 +924,7 @@ function ns.BM_AnchorIndicators(d, health, s)
     if d.bmSimpleIcons and health and ns.db and ns.db.profile and ns.db.profile.bmDisplayMode == "simple" then
         local bs = ns.db.profile.bmSimple
         if bs then
-            local iscale = (d._isParty and ns._partyIndicatorScale or ns._indicatorScale) or 1
+            local iscale = (d._isParty and ns._partyBmScale or ns._bmScale) or 1
             local sz = (bs.size or 22) * iscale
             for _, f in ipairs(d.bmSimpleIcons) do f:SetSize(sz, sz) end
             ns.BM_AnchorSimpleGrid(d, health, bs, iscale, nil)
@@ -1325,7 +1349,7 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
         if not needScan then return end
     end
 
-    local iscale = (d._isParty and ns._partyIndicatorScale or ns._indicatorScale) or 1
+    local iscale = (d._isParty and ns._partyBmScale or ns._bmScale) or 1
     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
     local sz = (bs.size or 22) * iscale
     local bdrSz = bs.borderSize or 1
@@ -1474,7 +1498,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
     end
 
     -- Party buttons use the party scale (Auto Resize); raid buttons use theirs.
-    local iscale = (d._isParty and ns._partyIndicatorScale or ns._indicatorScale) or 1
+    local iscale = (d._isParty and ns._partyBmScale or ns._bmScale) or 1
     -- Base level for the Frame Level setting (re-applied per indicator below).
     local buttonLvl = button:GetFrameLevel()
 
@@ -2226,7 +2250,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
     local barPool  = f._bmBarPool
     if not iconPool then return end
     -- Party preview passes the party proxy as `s`; use the party scale then.
-    local iscale = ((s == ns._scaledPartyProxy) and ns._partyIndicatorScale or ns._indicatorScale) or 1
+    local iscale = ((s == ns._scaledPartyProxy) and ns._partyBmScale or ns._bmScale) or 1
 
     -- Hide all first (reset cooldowns so they re-apply fresh)
     for _, fr in ipairs(iconPool) do
@@ -5362,4 +5386,46 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
     -- Return exactly the visible height so the outer scroll frame has no scroll range
     -- Return 0: content lives on scrollFrame directly, not scroll child
     return 0
+end
+
+-------------------------------------------------------------------------------
+--  TEMP DEBUG: /euifreedom [unit]  (default target, falls back to player)
+--  Prints every HELPFUL aura's id/name (SECRET when hidden), its four-filter
+--  fingerprint, what BM_IdentifySecretAura resolves it to, and whether the
+--  EXTERNAL_DEFENSIVE filter passes -- plus the active spec key and its
+--  registered signature table. Remove after the Freedom investigation.
+-------------------------------------------------------------------------------
+do
+    local function SafeStr(v)
+        if v == nil then return "nil" end
+        if issecretvalue and issecretvalue(v) then return "SECRET" end
+        return tostring(v)
+    end
+    SLASH_EUIFREEDOM1 = "/euifreedom"
+    SlashCmdList["EUIFREEDOM"] = function(msg)
+        local unit = (msg and msg ~= "" and msg) or "target"
+        if not UnitExists(unit) then unit = "player" end
+        print("|cff0cd29fEUI Freedom debug|r unit=" .. unit
+            .. "  specKey=" .. tostring(activeSpecKey_BM)
+            .. "  borrow=" .. tostring(activeBorrow_BM and "yes" or "no"))
+        if activeSpecKey_BM then
+            local sigs = GetSpecSignatures(activeSpecKey_BM)
+            local parts = {}
+            for k, v in pairs(sigs) do parts[#parts + 1] = k .. "->" .. tostring(v) end
+            print("  registered sigs: " .. (next(parts) and table.concat(parts, "  ") or "none"))
+        end
+        local i = 1
+        while true do
+            local ad = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
+            if not ad then break end
+            local iid = ad.auraInstanceID
+            local sig = iid and MakeSignature(unit, iid) or "noIID"
+            local ident = iid and ns.BM_IdentifySecretAura and ns.BM_IdentifySecretAura(unit, iid)
+            local ext = iid and not C_UnitAuras_IsAuraFilteredOutByInstanceID(unit, iid, "HELPFUL|EXTERNAL_DEFENSIVE")
+            print(("  #%d id=%s name=%s sig=%s ident=%s extFilter=%s"):format(
+                i, SafeStr(ad.spellId), SafeStr(ad.name), tostring(sig),
+                tostring(ident), tostring(ext)))
+            i = i + 1
+        end
+    end
 end
