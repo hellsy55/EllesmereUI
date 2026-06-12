@@ -608,6 +608,15 @@ local defaults = {
         debuffDurTextOffsetX = 0,
         debuffDurTextOffsetY = 0,
 
+        -- Targeted spells (party only; see EUI_RF_TargetedSpells.lua)
+        tsEnabled   = true,
+        tsIconSize  = 24,
+        tsPosition  = "center",
+        tsGrowDirection = "CENTER",
+        tsOffsetX   = 0,
+        tsOffsetY   = 0,
+        tsMaxIcons  = 3,
+
         -- Range & misc
         oorAlpha         = 0.4,
         showTooltip      = true,
@@ -6487,6 +6496,9 @@ ns._ResizePartyButtons = function(w, h)
             end
         end
     end
+    -- Targeted Spells icons read the same Auto Resize scale; one call
+    -- restyles and relayouts every button's icons (and the preview).
+    if autoResize and ns.TS_ApplySettings then ns.TS_ApplySettings() end
     -- Container resize deferred to drag end (SetSize on the container
     -- triggers SecureGroupHeaderTemplate to re-process children, causing blink).
     -- Slot offsets + the header's own size DO follow the live size: this keeps
@@ -8214,6 +8226,10 @@ ns.ReloadPartyFrames = function()
     for unit, btn in pairs(ns._partyUnitToButton) do
         RegisterPrivateAuras(btn, unit)
     end
+
+    -- Targeted Spells icons scale through the party Auto Resize factor
+    -- recomputed above; restyle them with everything else.
+    if ns.TS_ApplySettings then ns.TS_ApplySettings() end
 end
 
 local function RegisterWithUnlockMode()
@@ -12142,6 +12158,10 @@ local function RefreshPartyPreview()
             end
         end
     end
+
+    -- Targeted Spells preview icon: re-style with the scale recomputed above
+    -- (also makes it appear/disappear with the party preview itself).
+    if ns.TS_RefreshPreview then ns.TS_RefreshPreview() end
 end
 
 local function ShowPartyPreview()

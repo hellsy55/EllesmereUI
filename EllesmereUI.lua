@@ -1730,6 +1730,22 @@ do
 
     -- Hook all known widget types by creating one of each and hooking its metatable
     local hookFrame = CreateFrame("Frame")
+    do
+        -- Pre-hook ORIGINAL image setters, captured BEFORE HookPixelSnap
+        -- wraps the Texture metatable. Pooled hot-path textures (nameplate
+        -- aura slots) are pixel-snapped once at creation and then call
+        -- these raw setters, skipping the wrapper + guard + cache lookup
+        -- on every subsequent image swap. Purely additive: no other call
+        -- site or module is affected, and the hook itself is unchanged.
+        -- Caveat for adopters: a texture using raw setters must have had
+        -- PP.DisablePixelSnap applied once, and nothing may re-enable
+        -- snap on it afterwards (our own pooled textures qualify).
+        local mt = getmetatable(hookFrame:CreateTexture())
+        if mt and mt.__index then
+            PP.RawSetTexture = mt.__index.SetTexture
+            PP.RawSetColorTexture = mt.__index.SetColorTexture
+        end
+    end
     HookPixelSnap(hookFrame)
     HookPixelSnap(hookFrame:CreateTexture())
     HookPixelSnap(hookFrame:CreateFontString())
@@ -8276,7 +8292,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.1.2"
+EllesmereUI.VERSION = "8.1.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
