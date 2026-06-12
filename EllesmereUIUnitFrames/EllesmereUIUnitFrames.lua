@@ -1445,6 +1445,7 @@ local function ContentToTag(content)
     elseif content == "curhp_curpp" then return "[curhpshort] | [curpp]"
     elseif content == "perhp_perpp" then return "[perhp]% | [perpp]%"
     elseif content == "absorb" then return "[eui-absorb]"
+    elseif content == "group" then return "[group]"
     else return nil end
 end
 

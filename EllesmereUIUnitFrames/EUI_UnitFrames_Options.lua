@@ -289,10 +289,11 @@ initFrame:SetScript("OnEvent", function(self)
         ["perhpnum"]     = "Health % | #",
         ["both"]         = "Health # | %",
         ["absorb"]       = "Absorb Amount",
+        ["group"]        = "Group Number",
         ["none"]         = "None",
     }
     local healthTextOrder = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both" }
-    local healthTextOrderPlayer = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "absorb" }
+    local healthTextOrderPlayer = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "absorb", "group" }
 
     -- Text bar (BTB) text dropdown values (includes power options)
     local btbTextValues = {
@@ -4930,7 +4931,7 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, key in ipairs(keys) do
                     if key ~= selectedUnit then
                         local d = UNIT_DB_MAP[key]()
-                        d.centerTextContent = (v == "absorb" and key ~= "player") and "none" or v
+                        d.centerTextContent = ((v == "absorb" or v == "group") and key ~= "player") and "none" or v
                         d.centerTextClassColor = src.centerTextClassColor
                         d.centerTextColorR, d.centerTextColorG, d.centerTextColorB = src.centerTextColorR, src.centerTextColorG, src.centerTextColorB
                         d.centerTextSize = src.centerTextSize
@@ -4948,7 +4949,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = src.centerTextContent or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
                         local d = UNIT_DB_MAP[key]()
-                        local expected = (v == "absorb" and key ~= "player") and "none" or v
+                        local expected = ((v == "absorb" or v == "group") and key ~= "player") and "none" or v
                         if (d.centerTextContent or "none") ~= expected then return false end
                         if (d.centerTextClassColor or false) ~= (src.centerTextClassColor or false) then return false end
                         if (d.centerTextColorR or 1) ~= (src.centerTextColorR or 1) then return false end
