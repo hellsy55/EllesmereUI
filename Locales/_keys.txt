@@ -86,6 +86,7 @@ Friendly NPC Settings
 Friendly Nameplate Settings
 Full Preview
 Group
+Group Number
 Grow
 Grow Direction
 H Match
