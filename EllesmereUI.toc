@@ -47,6 +47,7 @@ EllesmereUI_Startup.lua
 # Shared EllesmereUI Files
 EllesmereUI.lua
 EllesmereUI_BlizzardParty.lua
+EllesmereUI_Kick.lua
 EllesmereUI_Widgets.lua
 EllesmereUI_Visibility.lua
 EllesmereUI_Presets.lua

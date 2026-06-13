@@ -296,6 +296,8 @@ local defaults = {
             showCastDuration = true,
             showCastTarget = true,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
+            castbarInterruptReadyColor = { r = 0.92, g = 0.35, b = 0.20 },
+            castbarKickTickEnabled = true,
             castbarClassColored = false,
             healthDisplay = "both",
             showBuffs = true,
@@ -581,6 +583,8 @@ local defaults = {
             showCastDuration = true,
             showCastTarget = true,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
+            castbarInterruptReadyColor = { r = 0.92, g = 0.35, b = 0.20 },
+            castbarKickTickEnabled = true,
             castbarClassColored = false,
             healthDisplay = "perhp",
             leftTextContent = "name",
@@ -3257,6 +3261,228 @@ end
 -- ApplyCastbarUnlockPos removed: cast bar positioning is now fully owned
 -- by the centralized unlock/anchor system (ApplySavedPositions).
 
+local function GetActiveKickSpell()
+    return EllesmereUI and EllesmereUI.GetActiveKickSpell and EllesmereUI.GetActiveKickSpell()
+end
+local function ComputeCastBarTint(readyTint, baseTint)
+    if EllesmereUI and EllesmereUI.ComputeCastBarTint then
+        return EllesmereUI.ComputeCastBarTint(readyTint, baseTint)
+    end
+    return baseTint.r, baseTint.g, baseTint.b
+end
+local function IsKickCastbarUnit(unit)
+    return unit == "target" or unit == "focus"
+end
+local function GetCastbarKickTickEnabled(settings)
+    if not settings then return true end
+    if settings.castbarKickTickEnabled ~= nil then return settings.castbarKickTickEnabled end
+    return true
+end
+local function GetCastbarUninterruptible(castbar)
+    local v = castbar and castbar.notInterruptible
+    if type(v) == "nil" then return false end
+    return v
+end
+local function HideUnitFrameKickTick(castbar)
+    if not castbar or not castbar.kickPositioner then return end
+    castbar.kickPositioner:Hide()
+    castbar.kickMarker:Hide()
+    if castbar._kickTicker then
+        castbar._kickTicker:Cancel()
+        castbar._kickTicker = nil
+    end
+end
+local function ApplyUnitFrameCastColor(castbar)
+    if not castbar or not castbar.castTintLayer then return end
+    local settings = castbar._eufSettings
+    local ownerUnit = castbar.__owner and castbar.__owner.unit
+    local cc
+    if settings and settings.castbarClassColored and ownerUnit == "player" then
+        if ownerUnit then
+            local _, classToken = UnitClass(ownerUnit)
+            if classToken and EllesmereUI.GetClassColor then
+                cc = EllesmereUI.GetClassColor(classToken)
+            end
+        end
+    end
+    if not cc then
+        local baseTint = (settings and settings.castbarFillColor) or GetCastbarColor()
+        if IsKickCastbarUnit(ownerUnit) then
+            local readyTint = (settings and settings.castbarInterruptReadyColor) or { r = 0.92, g = 0.35, b = 0.20 }
+            local cr, cg, cb = ComputeCastBarTint(readyTint, baseTint)
+            cc = { r = cr, g = cg, b = cb }
+        else
+            cc = baseTint
+        end
+    end
+    castbar.castTintLayer:SetVertexColor(cc.r, cc.g, cc.b)
+    if castbar._shieldedTint then
+        local uninterruptible = GetCastbarUninterruptible(castbar)
+        if castbar._shieldedTint.SetAlphaFromBoolean then
+            castbar._shieldedTint:SetAlphaFromBoolean(uninterruptible, 1, 0)
+        else
+            castbar._shieldedTint:SetAlpha(uninterruptible and 1 or 0)
+        end
+    end
+end
+local function UpdateUnitFrameKickTick(castbar)
+    if not castbar or not castbar.kickPositioner then return end
+    local settings = castbar._eufSettings
+    local ownerUnit = castbar.__owner and castbar.__owner.unit
+    if not IsKickCastbarUnit(ownerUnit) then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    if not GetCastbarKickTickEnabled(settings) or not GetActiveKickSpell() then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    if not (C_Spell and C_Spell.GetSpellCooldownDuration) then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    local kickProtected = GetCastbarUninterruptible(castbar)
+    castbar._kickProtected = kickProtected
+    local isChannel = castbar.channeling and true or false
+    local isEmpowered = false
+    if not (UnitCastingDuration and ownerUnit) then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    local castDuration
+    if isChannel then
+        if UnitEmpoweredChannelDuration then
+            castDuration = UnitEmpoweredChannelDuration(ownerUnit, true)
+            if castDuration then isEmpowered = true end
+        end
+        if not castDuration and UnitChannelDuration then
+            castDuration = UnitChannelDuration(ownerUnit)
+        end
+    else
+        castDuration = UnitCastingDuration(ownerUnit)
+    end
+    if not castDuration then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    local totalDur = castDuration:GetTotalDuration()
+    local interruptCD = C_Spell.GetSpellCooldownDuration(GetActiveKickSpell())
+    if not interruptCD then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    local barW = castbar:GetWidth()
+    local barH = castbar:GetHeight()
+    if not barW or barW <= 0 then
+        HideUnitFrameKickTick(castbar)
+        return
+    end
+    castbar.kickPositioner:SetSize(barW, barH)
+    castbar.kickPositioner:SetMinMaxValues(0, totalDur)
+    castbar.kickMarker:SetMinMaxValues(0, totalDur)
+    castbar.kickMarker:SetSize(barW, barH)
+    castbar.kickPositioner:SetValue(castDuration:GetElapsedDuration())
+    castbar.kickMarker:SetValue(interruptCD:GetRemainingDuration())
+    castbar.kickTick:SetColorTexture(1, 1, 1, 1)
+    if isChannel and not isEmpowered then
+        castbar.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
+        castbar.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
+        castbar.kickMarker:ClearAllPoints()
+        castbar.kickTick:ClearAllPoints()
+        castbar.kickMarker:SetPoint("RIGHT", castbar.kickPositioner:GetStatusBarTexture(), "LEFT")
+        castbar.kickTick:SetPoint("TOP", castbar.kickMarker, "TOP", 0, 0)
+        castbar.kickTick:SetPoint("BOTTOM", castbar.kickMarker, "BOTTOM", 0, 0)
+        castbar.kickTick:SetPoint("RIGHT", castbar.kickMarker:GetStatusBarTexture(), "LEFT")
+    else
+        castbar.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Standard)
+        castbar.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Standard)
+        castbar.kickMarker:ClearAllPoints()
+        castbar.kickTick:ClearAllPoints()
+        castbar.kickMarker:SetPoint("LEFT", castbar.kickPositioner:GetStatusBarTexture(), "RIGHT")
+        castbar.kickTick:SetPoint("TOP", castbar.kickMarker, "TOP", 0, 0)
+        castbar.kickTick:SetPoint("BOTTOM", castbar.kickMarker, "BOTTOM", 0, 0)
+        castbar.kickTick:SetPoint("LEFT", castbar.kickMarker:GetStatusBarTexture(), "RIGHT")
+    end
+    castbar.kickPositioner:Show()
+    castbar.kickMarker:Show()
+    if interruptCD.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+        local interruptible = C_CurveUtil.EvaluateColorValueFromBoolean(kickProtected, 0, 1)
+        local kickReady = interruptCD:IsZero()
+        local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(kickReady, 0, interruptible)
+        castbar.kickTick:SetAlpha(alpha)
+    else
+        castbar.kickTick:SetAlpha(0)
+    end
+    if castbar._kickTicker then castbar._kickTicker:Cancel() end
+    castbar._kickTicker = C_Timer.NewTicker(0.1, function()
+        if not castbar:IsShown() or not ownerUnit then
+            HideUnitFrameKickTick(castbar)
+            return
+        end
+        if not GetActiveKickSpell() then
+            HideUnitFrameKickTick(castbar)
+            return
+        end
+        local icd = C_Spell.GetSpellCooldownDuration(GetActiveKickSpell())
+        if icd and icd.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+            local interruptible = C_CurveUtil.EvaluateColorValueFromBoolean(castbar._kickProtected, 0, 1)
+            local kickReady = icd:IsZero()
+            local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(kickReady, 0, interruptible)
+            castbar.kickTick:SetAlpha(alpha)
+        end
+    end)
+end
+
+ns._castingCastbars = {}
+local activeCastbarCount = 0
+local _ufCastColorTicker
+local ufKickWatcher = CreateFrame("Frame")
+ufKickWatcher:SetScript("OnEvent", function(_, event)
+    if event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_USABLE" then
+        for cb in pairs(ns._castingCastbars) do
+            if cb:IsShown() and cb.__owner and cb.__owner.unit then
+                ApplyUnitFrameCastColor(cb)
+                UpdateUnitFrameKickTick(cb)
+            end
+        end
+    end
+end)
+local function NotifyCastbarStarted(castbar)
+    if not castbar or not castbar.__owner then return end
+    if not IsKickCastbarUnit(castbar.__owner.unit) then return end
+    if ns._castingCastbars[castbar] then return end
+    ns._castingCastbars[castbar] = true
+    activeCastbarCount = activeCastbarCount + 1
+    if activeCastbarCount == 1 then
+        ufKickWatcher:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+        ufKickWatcher:RegisterEvent("SPELL_UPDATE_USABLE")
+        if GetActiveKickSpell() and not _ufCastColorTicker then
+            _ufCastColorTicker = C_Timer.NewTicker(0.2, function()
+                for cb in pairs(ns._castingCastbars) do
+                    if cb:IsShown() then
+                        ApplyUnitFrameCastColor(cb)
+                    end
+                end
+            end)
+        end
+    end
+end
+local function NotifyCastbarEnded(castbar)
+    if not castbar or not ns._castingCastbars[castbar] then return end
+    ns._castingCastbars[castbar] = nil
+    activeCastbarCount = activeCastbarCount - 1
+    if activeCastbarCount <= 0 then
+        activeCastbarCount = 0
+        wipe(ns._castingCastbars)
+        ufKickWatcher:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
+        ufKickWatcher:UnregisterEvent("SPELL_UPDATE_USABLE")
+        if _ufCastColorTicker then
+            _ufCastColorTicker:Cancel()
+            _ufCastColorTicker = nil
+        end
+    end
+end
+
 local function CreateCastBar(frame, unit, settings)
     local settings = GetSettingsForUnit(unit)
     
@@ -3405,33 +3631,48 @@ local function CreateCastBar(frame, unit, settings)
     -- Cast bar reuses the unit's health bar texture (overridden donor-aware in ReloadFrames).
     ns.ApplyCastBarTexture(castbar, (settings and settings.healthBarTexture) or db.profile.healthBarTexture or "none")
 
-    castbar.PostCastStart = function(self)
+    local function OnCastbarCastActive(self)
         if self.castTintLayer then
             self.castTintLayer:SetAlpha(1)
-            local cc
-            local uSettings = self._eufSettings
-            -- Class colored only applies to the player cast bar
-            local ownerUnit = self.__owner and self.__owner.unit
-            if uSettings and uSettings.castbarClassColored and ownerUnit == "player" then
-                if ownerUnit then
-                    local _, classToken = UnitClass(ownerUnit)
-                    if classToken and EllesmereUI.GetClassColor then
-                        cc = EllesmereUI.GetClassColor(classToken)
-                    end
-                end
-            end
-            if not cc then
-                cc = (uSettings and uSettings.castbarFillColor) or GetCastbarColor()
-            end
-            self.castTintLayer:SetVertexColor(cc.r, cc.g, cc.b)
-            if self._shieldedTint then
-                self._shieldedTint:SetAlphaFromBoolean(self.notInterruptible, 1, 0)
-            end
+            ApplyUnitFrameCastColor(self)
         end
     end
-    castbar.PostChannelStart = castbar.PostCastStart
+    castbar.PostCastStart = OnCastbarCastActive
+    castbar.PostChannelStart = OnCastbarCastActive
 
-    castbar.PostCastInterruptible = castbar.PostCastStart
+    castbar.PostCastInterruptible = function(self)
+        ApplyUnitFrameCastColor(self)
+        UpdateUnitFrameKickTick(self)
+    end
+
+    if IsKickCastbarUnit(unit) then
+        local kickClip = CreateFrame("Frame", nil, castbar)
+        kickClip:SetAllPoints(castbar)
+        kickClip:SetClipsChildren(true)
+        castbar.kickClip = kickClip
+        local kickPositioner = CreateFrame("StatusBar", nil, kickClip)
+        kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        kickPositioner:GetStatusBarTexture():SetAlpha(0)
+        kickPositioner:SetPoint("CENTER", castbar)
+        kickPositioner:SetFrameLevel(castbar:GetFrameLevel() + 1)
+        kickPositioner:Hide()
+        castbar.kickPositioner = kickPositioner
+        local kickMarker = CreateFrame("StatusBar", nil, kickClip)
+        kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        kickMarker:GetStatusBarTexture():SetAlpha(0)
+        kickMarker:SetPoint("LEFT", kickPositioner:GetStatusBarTexture(), "RIGHT")
+        kickMarker:SetSize(1, 1)
+        kickMarker:SetFrameLevel(castbar:GetFrameLevel() + 2)
+        kickMarker:Hide()
+        castbar.kickMarker = kickMarker
+        local kickTick = kickMarker:CreateTexture(nil, "OVERLAY", nil, 3)
+        kickTick:SetColorTexture(1, 1, 1, 1)
+        kickTick:SetWidth(2)
+        kickTick:SetPoint("TOP", kickMarker, "TOP", 0, 0)
+        kickTick:SetPoint("BOTTOM", kickMarker, "BOTTOM", 0, 0)
+        kickTick:SetPoint("LEFT", kickMarker:GetStatusBarTexture(), "RIGHT")
+        castbar.kickTick = kickTick
+    end
 
     castbar.CustomTimeText = function(self, durationObject)
         if self._showDuration == false then
@@ -3507,6 +3748,7 @@ local function SetupShowOnCastBar(frame, unit)
     end
 
     local savedCastHook = castbar.PostCastStart
+    local savedInterruptHook = castbar.PostCastInterruptible
 
     castbar.PostCastStart = function(self, ...)
         local bg = self:GetParent()
@@ -3559,11 +3801,17 @@ local function SetupShowOnCastBar(frame, unit)
             if self._layoutTextZones then self:_layoutTextZones() end
         end
         if savedCastHook then savedCastHook(self, ...) end
+        UpdateUnitFrameKickTick(self)
+        NotifyCastbarStarted(self)
     end
     castbar.PostChannelStart = castbar.PostCastStart
-    castbar.PostCastInterruptible = savedCastHook
+    castbar.PostCastInterruptible = function(self, ...)
+        if savedInterruptHook then savedInterruptHook(self) end
+    end
 
     local function dismissCastBar(self)
+        HideUnitFrameKickTick(self)
+        NotifyCastbarEnded(self)
         self:Hide()
         if self._iconFrame then self._iconFrame:Hide() end
         -- Read setting dynamically so changes take effect without a reload.
@@ -3613,6 +3861,8 @@ local function SetupShowOnCastBar(frame, unit)
     -- but never fires PostCastStop, so dismissCastBar never runs and the
     -- background frame would otherwise remain visible as a black rectangle.
     castbar:HookScript("OnHide", function(self)
+        HideUnitFrameKickTick(self)
+        NotifyCastbarEnded(self)
         if self._iconFrame then self._iconFrame:Hide() end
         if shouldHideWhenInactive() then
             local bg = self:GetParent()
@@ -6600,6 +6850,10 @@ local function ReloadFrames()
                             tCbColor = settings.castbarFillColor
                         end
                         frame.Castbar:SetStatusBarColor(tCbColor.r, tCbColor.g, tCbColor.b, castbarOpacity)
+                        if frame.Castbar:IsShown() then
+                            ApplyUnitFrameCastColor(frame.Castbar)
+                            UpdateUnitFrameKickTick(frame.Castbar)
+                        end
                         -- Apply cast bar text settings
                         if frame.Castbar.Text then
                             local snSz = settings.castSpellNameSize or 11
@@ -6951,6 +7205,10 @@ local function ReloadFrames()
                         fCbColor = settings.castbarFillColor
                     end
                     frame.Castbar:SetStatusBarColor(fCbColor.r, fCbColor.g, fCbColor.b, castbarOpacity)
+                    if frame.Castbar:IsShown() then
+                        ApplyUnitFrameCastColor(frame.Castbar)
+                        UpdateUnitFrameKickTick(frame.Castbar)
+                    end
                     -- Apply cast bar text settings
                     if frame.Castbar.Text then
                         local snSz = settings.castSpellNameSize or 11

@@ -2005,55 +2005,20 @@ local function InitDB()
     -- Legacy stub: NewDB + DeepMergeDefaults handles defaults now.
     -- Kept as a no-op so any stray call sites don't error.
 end
-local kickSpellsByClass = {
-    DEATHKNIGHT = {47528},
-    WARRIOR = {6552},
-    WARLOCK = {19647, 89766, 119910, 1276467, 132409},
-    SHAMAN = {57994},
-    ROGUE = {1766},
-    PRIEST = {15487},
-    PALADIN = {31935, 96231},
-    MONK = {116705},
-    MAGE = {2139},
-    HUNTER = {187707, 147362},
-    EVOKER = {351338},
-    DRUID = {38675, 78675, 106839},
-    DEMONHUNTER = {183752},
-}
-local activeKickSpell
-function ns.GetActiveKickSpell() return activeKickSpell end
-local function RefreshKickAbility()
-    local playerClass = UnitClassBase("player")
-    local classKicks = kickSpellsByClass[playerClass]
-    activeKickSpell = nil
-    if not classKicks then return end
-    for i = 1, #classKicks do
-        local spellId = classKicks[i]
-        if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
-            local known = C_SpellBook.IsSpellKnownOrInSpellBook(spellId)
-            local petKnown = Enum and Enum.SpellBookSpellBank and C_SpellBook.IsSpellKnownOrInSpellBook(spellId, Enum.SpellBookSpellBank.Pet)
-            if known or petKnown then activeKickSpell = spellId end
-        elseif IsSpellKnown and IsSpellKnown(spellId) then
-            activeKickSpell = spellId
-        end
+function ns.GetActiveKickSpell()
+    return EllesmereUI and EllesmereUI.GetActiveKickSpell and EllesmereUI.GetActiveKickSpell()
+end
+-- Cast overlay uses the same tint as the on-plate cast bar.
+ns.ComputeCastBarTint = function(readyTint, baseTint)
+    if EllesmereUI and EllesmereUI.ComputeCastBarTint then
+        return EllesmereUI.ComputeCastBarTint(readyTint, baseTint)
     end
+    return baseTint.r, baseTint.g, baseTint.b
 end
-local function ComputeCastBarTint(readyTint, baseTint)
-    if not activeKickSpell then return baseTint.r, baseTint.g, baseTint.b end
-    if not (C_Spell and C_Spell.GetSpellCooldownDuration) then return baseTint.r, baseTint.g, baseTint.b end
-    if not (C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean) then return baseTint.r, baseTint.g, baseTint.b end
-    local cdTime = C_Spell.GetSpellCooldownDuration(activeKickSpell)
-    if not (cdTime and cdTime.IsZero) then return baseTint.r, baseTint.g, baseTint.b end
-    local offCooldown = cdTime:IsZero()
-    local rVal = C_CurveUtil.EvaluateColorValueFromBoolean(offCooldown, baseTint.r, readyTint.r)
-    local gVal = C_CurveUtil.EvaluateColorValueFromBoolean(offCooldown, baseTint.g, readyTint.g)
-    local bVal = C_CurveUtil.EvaluateColorValueFromBoolean(offCooldown, baseTint.b, readyTint.b)
-    return rVal, gVal, bVal
+local function GetActiveKickSpell()
+    return ns.GetActiveKickSpell()
 end
--- Exposed on ns so companion features (e.g. a future cast overlay rebuild)
--- can apply the same interrupt-ready tint as the on-plate cast bar without
--- duplicating the logic.
-ns.ComputeCastBarTint = ComputeCastBarTint
+local ComputeCastBarTint = ns.ComputeCastBarTint
 function ns.RefreshBorder()
     -- Bump appearance gen so pooled/off-screen plates pick up the
     -- change on their next SetUnit (cache-hit re-spawns check this).
@@ -2166,8 +2131,6 @@ function ns.RefreshHoverEffect()
 end
 
 local kickWatcher = CreateFrame("Frame")
-kickWatcher:RegisterEvent("PLAYER_LOGIN")
-kickWatcher:RegisterEvent("SPELLS_CHANGED")
 local activeCastCount = 0
 -- PERF: set of plates currently casting so kick/color updates iterate only
 -- the 1-3 casting plates instead of all 20+ plates in the scene.
@@ -2192,8 +2155,6 @@ kickWatcher:SetScript("OnEvent", function(self, event)
                 end
             end
         end
-    else
-        RefreshKickAbility()
     end
 end)
 local _castColorTicker
@@ -2209,7 +2170,7 @@ local function NotifyCastStarted(plate)
     if activeCastCount == 1 then
         kickWatcher:RegisterEvent("SPELL_UPDATE_COOLDOWN")
         kickWatcher:RegisterEvent("SPELL_UPDATE_USABLE")
-        if activeKickSpell and not _castColorTicker then
+        if GetActiveKickSpell() and not _castColorTicker then
             _castColorTicker = C_Timer.NewTicker(0.2, function()
                 for pl in pairs(ns._castingPlates) do
                     -- type() is the safe existence check: _kickProtected
@@ -5453,7 +5414,7 @@ function NameplateFrame:HideKickTick()
     end
 end
 function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
-    if not GetKickTickEnabled() or not activeKickSpell then
+    if not GetKickTickEnabled() or not GetActiveKickSpell() then
         self:HideKickTick()
         return
     end
@@ -5486,7 +5447,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
             return
         end
         local totalDur = castDuration:GetTotalDuration()
-        local interruptCD = C_Spell.GetSpellCooldownDuration(activeKickSpell)
+        local interruptCD = C_Spell.GetSpellCooldownDuration(GetActiveKickSpell())
         if not interruptCD then
             self:HideKickTick()
             return
@@ -5562,14 +5523,14 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
             -- activeKickSpell can go nil mid-cast if a spec/talent change
             -- fires SPELLS_CHANGED and the new spec doesn't have a kick
             -- learned. Bail rather than pass nil to C_Spell.
-            if not activeKickSpell then
+            if not GetActiveKickSpell() then
                 self:HideKickTick()
                 return
             end
             -- Compute tick visibility: show only when kick is on CD AND cast is interruptible.
             -- Both are secret booleans chain EvaluateColorValueFromBoolean calls
             -- to combine conditions into a single secret alpha.
-            local icd = C_Spell.GetSpellCooldownDuration(activeKickSpell)
+            local icd = C_Spell.GetSpellCooldownDuration(GetActiveKickSpell())
             if icd and icd.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
                 local interruptible = C_CurveUtil.EvaluateColorValueFromBoolean(self._kickProtected, 0, 1)
                 local kickReady = icd:IsZero()

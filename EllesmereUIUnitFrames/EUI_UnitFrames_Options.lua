@@ -3152,6 +3152,8 @@ initFrame:SetScript("OnEvent", function(self)
         showCastDuration     = { player=true, target=true, focus=true },
         showCastTarget       = { player=true, target=true, focus=true },
         castbarFillColor     = { player=true, target=true, focus=true },
+        castbarInterruptReadyColor = { target=true, focus=true },
+        castbarKickTickEnabled     = { target=true, focus=true },
         showClassPowerBar    = { player=true },
         lockClassPowerToFrame= { player=true },
         classPowerStyle      = { player=true },
@@ -5943,48 +5945,70 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=cbhDis, disabledTooltip=cbhTip, rawTooltip=cbhRaw,
               getValue=GetCastbarHeight,
               setValue=function(v) SetCastbarHeight(v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        -- Inline fill color swatch on Show Cast Bar
+        -- Inline cast color swatch(es) on Show Cast Bar
         do
             local leftRgn = sharedCastRow1._leftRegion
-            local cbSw = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
-                function()
-                    local c = SGetSupported("castbarFillColor")
-                    c = c or { r=1, g=0.7, b=0 }
-                    return c.r, c.g, c.b, 1
-                end,
-                function(r, g, b)
-                    UNIT_DB_MAP[selectedUnit]().castbarFillColor = { r=r, g=g, b=b }
-                    ReloadAndUpdate(); UpdatePreview()
-                end, false, 20)
-            cbSw:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -12, 0)
-            cbSw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Fill Color") end)
-            cbSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            leftRgn._lastInline = cbSw
+            local function AddCastColorSwatch(tooltip, colorKey, fallback)
+                local sw = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                    function()
+                        local c = SGetSupported(colorKey)
+                        c = c or fallback
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        SSetSupported(colorKey, { r = r, g = g, b = b })
+                        ReloadAndUpdate(); UpdatePreview()
+                    end, false, 20)
+                sw:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -12, 0)
+                sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, tooltip) end)
+                sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                leftRgn._lastInline = sw
+            end
+            if selectedUnit == "target" or selectedUnit == "focus" then
+                -- Inline swatches anchor right-to-left; add CD first so interruptible sits left of it
+                AddCastColorSwatch("Interrupt on CD", "castbarInterruptReadyColor", { r = 0.92, g = 0.35, b = 0.20 })
+                AddCastColorSwatch("Interruptible Cast", "castbarFillColor", { r = 0.863, g = 0.820, b = 0.639 })
+            else
+                AddCastColorSwatch("Fill Color", "castbarFillColor", { r = 1, g = 0.7, b = 0 })
+            end
         end
         -- Sync icon: Show Cast Bar + Fill Color (left region)
         do
             local rgn = sharedCastRow1._leftRegion
+            local isKickUnit = selectedUnit == "target" or selectedUnit == "focus"
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Show Cast Bar and Fill Color to all Frames",
+                tooltip = isKickUnit and "Apply Show Cast Bar and Cast Color to Target and Focus"
+                    or "Apply Show Cast Bar and Fill Color to all Frames",
                 onClick = function()
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                    local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
+                    for _, key in ipairs(keys) do
                         SetCastbarEnabled(key, v)
-                        if c then UNIT_DB_MAP[key]().castbarFillColor = { r=c.r, g=c.g, b=c.b } end
+                        if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
+                        if readyC then UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b } end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                    local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
+                    for _, key in ipairs(keys) do
                         if GetCastbarEnabled(key) ~= v then return false end
                         local kc = UNIT_DB_MAP[key]().castbarFillColor
                         if c and kc then
                             if kc.r ~= c.r or kc.g ~= c.g or kc.b ~= c.b then return false end
                         elseif c ~= kc then return false end
+                        if isKickUnit then
+                            local kr = UNIT_DB_MAP[key]().castbarInterruptReadyColor
+                            if readyC and kr then
+                                if kr.r ~= readyC.r or kr.g ~= readyC.g or kr.b ~= readyC.b then return false end
+                            elseif readyC ~= kr then return false end
+                        end
                     end
                     return true
                 end,
@@ -5996,9 +6020,13 @@ initFrame:SetScript("OnEvent", function(self)
                     onApply       = function(checkedKeys)
                         local v = GetCastbarEnabled(selectedUnit)
                         local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
+                        local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
                         for _, key in ipairs(checkedKeys) do
                             SetCastbarEnabled(key, v)
-                            if c then UNIT_DB_MAP[key]().castbarFillColor = { r=c.r, g=c.g, b=c.b } end
+                            if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
+                            if readyC and (key == "target" or key == "focus") then
+                                UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b }
+                            end
                         end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
@@ -6046,7 +6074,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 2: Show Icon | Hide When Idle
+        -- Row 2: Show Icon | Hide When Idle (or kick tick for target/focus)
         local function GetShowIcon()
             if selectedUnit == "player" then
                 local v = UNIT_DB_MAP.player().showPlayerCastIcon
@@ -6074,14 +6102,37 @@ initFrame:SetScript("OnEvent", function(self)
             UNIT_DB_MAP[selectedUnit]().castbarHideWhenInactive = val
         end
 
+        local isKickCastUnit = selectedUnit == "target" or selectedUnit == "focus"
+        local castRow2Right
+        if isKickCastUnit then
+            castRow2Right = {
+                type = "toggle",
+                text = "Show Tick at Kick Ready Spot",
+                tooltip = "Shows a small white tick mark on the cast bar at the point where the cast will be when your interrupt comes off cooldown.",
+                getValue = function()
+                    local v = SGetSupported("castbarKickTickEnabled")
+                    if v == nil then return true end
+                    return v
+                end,
+                setValue = function(v)
+                    SSetSupported("castbarKickTickEnabled", v)
+                    ReloadAndUpdate(); UpdatePreview()
+                end,
+            }
+        else
+            castRow2Right = {
+                type = "toggle",
+                text = "Hide When Idle",
+                getValue = GetHideInactive,
+                setValue = function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end,
+            }
+        end
         local castRow2
         castRow2, h = W:DualRow(parent, y,
             { type="toggle", text="Show Icon",
               getValue=GetShowIcon,
               setValue=function(v) SetShowIcon(v); ReloadAndUpdate(); UpdatePreview() end },
-            { type="toggle", text="Hide When Idle",
-              getValue=GetHideInactive,
-              setValue=function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+            castRow2Right);  y = y - h
         -- Sync icon: Show Icon (left)
         do
             local rgn = castRow2._leftRegion
@@ -6154,9 +6205,34 @@ initFrame:SetScript("OnEvent", function(self)
             })
             MakeCogBtn(rgn, cogShow)
         end
-        -- Sync icon: Hide When Idle (right)
+        -- Sync icon: Hide When Idle or kick tick (right)
         do
             local rgn = castRow2._rightRegion
+            if isKickCastUnit then
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Kick Tick Setting to Target and Focus",
+                    onClick = function()
+                        local v = UNIT_DB_MAP[selectedUnit]().castbarKickTickEnabled
+                        for _, key in ipairs({ "target", "focus" }) do
+                            UNIT_DB_MAP[key]().castbarKickTickEnabled = v
+                        end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = UNIT_DB_MAP[selectedUnit]().castbarKickTickEnabled
+                        for _, key in ipairs({ "target", "focus" }) do
+                            if key ~= selectedUnit then
+                                local kv = UNIT_DB_MAP[key]().castbarKickTickEnabled
+                                if (v == nil) ~= (kv == nil) then return false end
+                                if v ~= nil and kv ~= nil and v ~= kv then return false end
+                            end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                })
+            else
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Hide When Idle to all Frames",
@@ -6190,6 +6266,53 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 },
             })
+            end
+        end
+
+        if isKickCastUnit then
+            local castHideRow
+            castHideRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Hide When Idle",
+                  getValue=GetHideInactive,
+                  setValue=function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end },
+                { text="" })
+            y = y - h
+            do
+                local rgn = castHideRow._leftRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Hide When Idle to all Frames",
+                    onClick = function()
+                        local v = GetHideInactive()
+                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                            UNIT_DB_MAP[key]().castbarHideWhenInactive = v
+                        end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = GetHideInactive()
+                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                            local kv = UNIT_DB_MAP[key]().castbarHideWhenInactive
+                            if kv == nil then kv = true end
+                            if kv ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_UNIT_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return selectedUnit end,
+                        onApply       = function(checkedKeys)
+                            local v = GetHideInactive()
+                            for _, key in ipairs(checkedKeys) do
+                                UNIT_DB_MAP[key]().castbarHideWhenInactive = v
+                            end
+                            ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
         end
 
         -- Row 3: Spell Name Size (with inline color swatch) | Duration Size (with inline color swatch)
