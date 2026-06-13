@@ -1103,6 +1103,8 @@ initFrame:SetScript("OnEvent", function(self)
             elseif content == "absorb" then
                 local maxHP = UnitHealthMax("player") or 1
                 return AbbreviateNumbers(math.floor(maxHP * 0.14))
+            elseif content == "group" then
+                return "3"
             else
                 return ""
             end
@@ -3255,19 +3257,28 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
         -- Helper: build a standard cog button on a region
-        local function MakeCogBtn(rgn, showFn, anchorTo, iconPath)
+        local function MakeCogBtn(rgn, showFn, anchorTo, iconPath, disabledFn)
             local cogBtn = CreateFrame("Button", nil, rgn)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", anchorTo or rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
             cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+            local function isOff() return disabledFn and disabledFn() or false end
+            cogBtn:SetScript("OnEnter", function(self) if not isOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) if not isOff() then self:SetAlpha(0.4) end end)
+            cogBtn:SetScript("OnClick", function(self) if not isOff() then showFn(self) end end)
+            -- Disabled state (cog alpha 0.15 disabled / 0.4 enabled, per the
+            -- inline-controls pattern); re-evaluated on page refresh.
+            local function applyCogState()
+                local off = isOff()
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                cogBtn:EnableMouse(not off)
+            end
+            applyCogState()
+            if disabledFn then EllesmereUI.RegisterWidgetRefresh(applyCogState) end
             return cogBtn
         end
 
@@ -4687,7 +4698,7 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, key in ipairs(keys) do
                     if key ~= selectedUnit then
                         local d = UNIT_DB_MAP[key]()
-                        d.leftTextContent = (v == "absorb" and key ~= "player") and "none" or v
+                        d.leftTextContent = ((v == "absorb" or v == "group") and key ~= "player") and "none" or v
                         d.leftTextClassColor = src.leftTextClassColor
                         d.leftTextColorR, d.leftTextColorG, d.leftTextColorB = src.leftTextColorR, src.leftTextColorG, src.leftTextColorB
                         d.leftTextSize = src.leftTextSize
@@ -4705,7 +4716,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = src.leftTextContent or "name"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
                         local d = UNIT_DB_MAP[key]()
-                        local expected = (v == "absorb" and key ~= "player") and "none" or v
+                        local expected = ((v == "absorb" or v == "group") and key ~= "player") and "none" or v
                         if (d.leftTextContent or "name") ~= expected then return false end
                         if (d.leftTextClassColor or false) ~= (src.leftTextClassColor or false) then return false end
                         if (d.leftTextColorR or 1) ~= (src.leftTextColorR or 1) then return false end
@@ -4820,7 +4831,7 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, key in ipairs(keys) do
                     if key ~= selectedUnit then
                         local d = UNIT_DB_MAP[key]()
-                        d.rightTextContent = (v == "absorb" and key ~= "player") and "none" or v
+                        d.rightTextContent = ((v == "absorb" or v == "group") and key ~= "player") and "none" or v
                         d.rightTextClassColor = src.rightTextClassColor
                         d.rightTextColorR, d.rightTextColorG, d.rightTextColorB = src.rightTextColorR, src.rightTextColorG, src.rightTextColorB
                         d.rightTextSize = src.rightTextSize
@@ -4838,7 +4849,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = src.rightTextContent or "both"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
                         local d = UNIT_DB_MAP[key]()
-                        local expected = (v == "absorb" and key ~= "player") and "none" or v
+                        local expected = ((v == "absorb" or v == "group") and key ~= "player") and "none" or v
                         if (d.rightTextContent or "both") ~= expected then return false end
                         if (d.rightTextClassColor or false) ~= (src.rightTextClassColor or false) then return false end
                         if (d.rightTextColorR or 1) ~= (src.rightTextColorR or 1) then return false end
@@ -6033,6 +6044,27 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+        -- Inline cog: kick-ready tick (target/focus only) on Show Cast Bar.
+        if selectedUnit == "target" or selectedUnit == "focus" then
+            local rgn = sharedCastRow1._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Cast Bar",
+                rows = {
+                    { type = "toggle", label = "Show Tick at Kick Ready Spot",
+                      tooltip = "Shows a small white tick mark on the cast bar at the point where the cast will be when your interrupt comes off cooldown.",
+                      get = function()
+                          local v = SGetSupported("castbarKickTickEnabled")
+                          if v == nil then return true end
+                          return v
+                      end,
+                      set = function(v)
+                          SSetSupported("castbarKickTickEnabled", v)
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
+                },
+            })
+            MakeCogBtn(rgn, cogShow)
+        end
         -- Sync icon: Cast Bar Height (right region)
         do
             local rgn = sharedCastRow1._rightRegion
@@ -6102,31 +6134,12 @@ initFrame:SetScript("OnEvent", function(self)
             UNIT_DB_MAP[selectedUnit]().castbarHideWhenInactive = val
         end
 
-        local isKickCastUnit = selectedUnit == "target" or selectedUnit == "focus"
-        local castRow2Right
-        if isKickCastUnit then
-            castRow2Right = {
-                type = "toggle",
-                text = "Show Tick at Kick Ready Spot",
-                tooltip = "Shows a small white tick mark on the cast bar at the point where the cast will be when your interrupt comes off cooldown.",
-                getValue = function()
-                    local v = SGetSupported("castbarKickTickEnabled")
-                    if v == nil then return true end
-                    return v
-                end,
-                setValue = function(v)
-                    SSetSupported("castbarKickTickEnabled", v)
-                    ReloadAndUpdate(); UpdatePreview()
-                end,
-            }
-        else
-            castRow2Right = {
-                type = "toggle",
-                text = "Hide When Idle",
-                getValue = GetHideInactive,
-                setValue = function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end,
-            }
-        end
+        local castRow2Right = {
+            type = "toggle",
+            text = "Hide When Idle",
+            getValue = GetHideInactive,
+            setValue = function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end,
+        }
         local castRow2
         castRow2, h = W:DualRow(parent, y,
             { type="toggle", text="Show Icon",
@@ -6205,34 +6218,9 @@ initFrame:SetScript("OnEvent", function(self)
             })
             MakeCogBtn(rgn, cogShow)
         end
-        -- Sync icon: Hide When Idle or kick tick (right)
+        -- Sync icon: Hide When Idle (right)
         do
             local rgn = castRow2._rightRegion
-            if isKickCastUnit then
-                EllesmereUI.BuildSyncIcon({
-                    region  = rgn,
-                    tooltip = "Apply Kick Tick Setting to Target and Focus",
-                    onClick = function()
-                        local v = UNIT_DB_MAP[selectedUnit]().castbarKickTickEnabled
-                        for _, key in ipairs({ "target", "focus" }) do
-                            UNIT_DB_MAP[key]().castbarKickTickEnabled = v
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                    isSynced = function()
-                        local v = UNIT_DB_MAP[selectedUnit]().castbarKickTickEnabled
-                        for _, key in ipairs({ "target", "focus" }) do
-                            if key ~= selectedUnit then
-                                local kv = UNIT_DB_MAP[key]().castbarKickTickEnabled
-                                if (v == nil) ~= (kv == nil) then return false end
-                                if v ~= nil and kv ~= nil and v ~= kv then return false end
-                            end
-                        end
-                        return true
-                    end,
-                    flashTargets = function() return { rgn } end,
-                })
-            else
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Hide When Idle to all Frames",
@@ -6266,53 +6254,6 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 },
             })
-            end
-        end
-
-        if isKickCastUnit then
-            local castHideRow
-            castHideRow, h = W:DualRow(parent, y,
-                { type="toggle", text="Hide When Idle",
-                  getValue=GetHideInactive,
-                  setValue=function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end },
-                { text="" })
-            y = y - h
-            do
-                local rgn = castHideRow._leftRegion
-                EllesmereUI.BuildSyncIcon({
-                    region  = rgn,
-                    tooltip = "Apply Hide When Idle to all Frames",
-                    onClick = function()
-                        local v = GetHideInactive()
-                        for _, key in ipairs(GROUP_UNIT_ORDER) do
-                            UNIT_DB_MAP[key]().castbarHideWhenInactive = v
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                    isSynced = function()
-                        local v = GetHideInactive()
-                        for _, key in ipairs(GROUP_UNIT_ORDER) do
-                            local kv = UNIT_DB_MAP[key]().castbarHideWhenInactive
-                            if kv == nil then kv = true end
-                            if kv ~= v then return false end
-                        end
-                        return true
-                    end,
-                    flashTargets = function() return { rgn } end,
-                    multiApply = {
-                        elementKeys   = GROUP_UNIT_ORDER,
-                        elementLabels = SHORT_LABELS,
-                        getCurrentKey = function() return selectedUnit end,
-                        onApply       = function(checkedKeys)
-                            local v = GetHideInactive()
-                            for _, key in ipairs(checkedKeys) do
-                                UNIT_DB_MAP[key]().castbarHideWhenInactive = v
-                            end
-                            ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                        end,
-                    },
-                })
-            end
         end
 
         -- Row 3: Spell Name Size (with inline color swatch) | Duration Size (with inline color swatch)
@@ -7788,12 +7729,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return SValSupported("maxBuffs", 4) end,
                       set=function(v) SSetSupported("maxBuffs", v) end },
-                    { type="toggle", label="Show Cooldown Text",
-                      get=function() return SValSupported("buffShowCooldownText", false) end,
-                      set=function(v) SSetSupported("buffShowCooldownText", v) end },
-                    { type="slider", label="Text Size", min=6, max=18, step=1,
-                      get=function() return SValSupported("buffCooldownTextSize", 10) end,
-                      set=function(v) SSetSupported("buffCooldownTextSize", v) end },
+                    { type="toggle", label="Cropped Icons",
+                      get=function() return SValSupported("buffCropIcons", false) end,
+                      set=function(v) SSetSupported("buffCropIcons", v) end },
                 },
             })
             MakeCogBtn(leftRgn, buffCogShow)
@@ -7813,6 +7751,59 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             MakeCogBtn(rightRgn, buffPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+        end
+
+        -- Buffs row 2: Duration Text Size | Stack Size
+        -- Duration Size is gated by an inline "Show Cooldown Text" toggle (same
+        -- DB key as before); when off, the slider/cog/label are disabled.
+        local buffDurOff = function() return not SValSupported("buffShowCooldownText", false) end
+        local sharedBuffRow2
+        sharedBuffRow2, h = W:DualRow(parent, y,
+            { type="slider", text="Buff Duration Size", min=6, max=24, step=1, trackWidth=120,
+              disabled=buffDurOff, disabledTooltip="Show Cooldown Text",
+              getValue=function() return SValSupported("buffCooldownTextSize", 10) end,
+              setValue=function(v) SSetSupported("buffCooldownTextSize", v) end },
+            { type="slider", text="Buff Stack Size", min=6, max=24, step=1,
+              getValue=function() return SValSupported("buffStackTextSize", 14) end,
+              setValue=function(v) SSetSupported("buffStackTextSize", v) end });  y = y - h
+        -- Directions cog on Buff Duration Size (X/Y offsets) -- disabled with the row
+        do
+            local leftRgn = sharedBuffRow2._leftRegion
+            local _, buffDurCogShow = EllesmereUI.BuildCogPopup({
+                title = "Duration Text",
+                rows = {
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffCooldownTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("buffCooldownTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffCooldownTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("buffCooldownTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(leftRgn, buffDurCogShow, nil, EllesmereUI.DIRECTIONS_ICON, buffDurOff)
+        end
+        -- Inline "Show Cooldown Text" toggle on Buff Duration Size (always enabled)
+        EllesmereUI.BuildInlineToggle({
+            region   = sharedBuffRow2._leftRegion,
+            getValue = function() return SValSupported("buffShowCooldownText", false) end,
+            setValue = function(v) SSetSupported("buffShowCooldownText", v) end,
+            onToggle = function() EllesmereUI:RefreshPage() end,
+        })
+        -- Directions cog on Buff Stack Size (X/Y offsets)
+        do
+            local rightRgn = sharedBuffRow2._rightRegion
+            local _, buffStackPosCogShow = EllesmereUI.BuildCogPopup({
+                title = "Stack Position",
+                rows = {
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffStackTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("buffStackTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffStackTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("buffStackTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(rightRgn, buffStackPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
         end
 
         -- Debuffs: Location | Icon Size + inline directions cog (X/Y)
@@ -7841,12 +7832,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return SValSupported("maxDebuffs", 20) end,
                       set=function(v) SSetSupported("maxDebuffs", v) end },
-                    { type="toggle", label="Show Cooldown Text",
-                      get=function() return SValSupported("debuffShowCooldownText", false) end,
-                      set=function(v) SSetSupported("debuffShowCooldownText", v) end },
-                    { type="slider", label="Text Size", min=6, max=18, step=1,
-                      get=function() return SValSupported("debuffCooldownTextSize", 10) end,
-                      set=function(v) SSetSupported("debuffCooldownTextSize", v) end },
+                    { type="toggle", label="Cropped Icons",
+                      get=function() return SValSupported("debuffCropIcons", false) end,
+                      set=function(v) SSetSupported("debuffCropIcons", v) end },
                 },
             })
             MakeCogBtn(leftRgn, debuffCogShow)
@@ -7866,6 +7854,59 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             MakeCogBtn(rightRgn, debuffPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+        end
+
+        -- Debuffs row 2: Duration Text Size | Stack Size
+        -- Duration Size is gated by an inline "Show Cooldown Text" toggle (same
+        -- DB key as before); when off, the slider/cog/label are disabled.
+        local debuffDurOff = function() return not SValSupported("debuffShowCooldownText", false) end
+        local sharedDebuffRow2
+        sharedDebuffRow2, h = W:DualRow(parent, y,
+            { type="slider", text="Debuff Duration Size", min=6, max=24, step=1, trackWidth=120,
+              disabled=debuffDurOff, disabledTooltip="Show Cooldown Text",
+              getValue=function() return SValSupported("debuffCooldownTextSize", 10) end,
+              setValue=function(v) SSetSupported("debuffCooldownTextSize", v) end },
+            { type="slider", text="Debuff Stack Size", min=6, max=24, step=1,
+              getValue=function() return SValSupported("debuffStackTextSize", 14) end,
+              setValue=function(v) SSetSupported("debuffStackTextSize", v) end });  y = y - h
+        -- Directions cog on Debuff Duration Size (X/Y offsets) -- disabled with the row
+        do
+            local leftRgn = sharedDebuffRow2._leftRegion
+            local _, debuffDurCogShow = EllesmereUI.BuildCogPopup({
+                title = "Duration Text",
+                rows = {
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffCooldownTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("debuffCooldownTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffCooldownTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("debuffCooldownTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(leftRgn, debuffDurCogShow, nil, EllesmereUI.DIRECTIONS_ICON, debuffDurOff)
+        end
+        -- Inline "Show Cooldown Text" toggle on Debuff Duration Size (always enabled)
+        EllesmereUI.BuildInlineToggle({
+            region   = sharedDebuffRow2._leftRegion,
+            getValue = function() return SValSupported("debuffShowCooldownText", false) end,
+            setValue = function(v) SSetSupported("debuffShowCooldownText", v) end,
+            onToggle = function() EllesmereUI:RefreshPage() end,
+        })
+        -- Directions cog on Debuff Stack Size (X/Y offsets)
+        do
+            local rightRgn = sharedDebuffRow2._rightRegion
+            local _, debuffStackPosCogShow = EllesmereUI.BuildCogPopup({
+                title = "Stack Position",
+                rows = {
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffStackTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("debuffStackTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffStackTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("debuffStackTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(rightRgn, debuffStackPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
         end
 
         -- Per-unit aura filters (NOT synced). Labels track the selected section

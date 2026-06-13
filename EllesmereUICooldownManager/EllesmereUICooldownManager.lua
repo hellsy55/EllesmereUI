@@ -282,7 +282,7 @@ local RACE_RACIALS = {
     -- so it is omitted from this list entirely.
     Dracthyr           = { { 357214, notClass = "EVOKER" } },
     EarthenDwarf       = { 436344 },
-    Haranir            = { 1287685 },
+    Haranir            = { 1237885 },  -- Thorn Bloom
 }
 ns.RACE_RACIALS = RACE_RACIALS
 
@@ -439,7 +439,7 @@ local DEFAULTS = {
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
                     showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
-                    keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
+                    keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2, keybindAlign = "left",
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
                 {
@@ -458,7 +458,7 @@ local DEFAULTS = {
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
                     showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
-                    keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
+                    keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2, keybindAlign = "left",
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
                 {
@@ -477,7 +477,7 @@ local DEFAULTS = {
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
                     showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
-                    keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2,
+                    keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2, keybindAlign = "left",
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
             },
@@ -1568,11 +1568,11 @@ local function GetCDMFont()
     return CDM_FONT_FALLBACK
 end
 local function GetCDMOutline()
-    return "OUTLINE"
+    return "OUTLINE, SLUG"
 end
 local function SetBlizzCDMFont(fs, font, size, r, g, b)
     if not (fs and fs.SetFont) then return end
-    fs:SetFont(font, size, "OUTLINE")
+    fs:SetFont(font, size, "OUTLINE, SLUG")
     fs:SetShadowOffset(0, 0)
     if r then fs:SetTextColor(r, g, b) end
 end
@@ -3391,7 +3391,7 @@ local function RefreshCDMIconAppearance(barKey)
                 -- Find Blizzard's countdown text FontString on the Cooldown widget
                 for _, rgn in pairs({ cd:GetRegions() }) do
                     if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
-                        rgn:SetFont(cdFont, cdSize, "OUTLINE")
+                        rgn:SetFont(cdFont, cdSize, "OUTLINE, SLUG")
                         rgn:SetShadowOffset(0, 0)
                         rgn:SetTextColor(cdR, cdG, cdB)
                         if cdX ~= 0 or cdY ~= 0 then
@@ -3458,14 +3458,21 @@ local function RefreshCDMIconAppearance(barKey)
 
         -- Update keybind text style
         if kbText then
-            kbText:SetFont(GetCDMFont(), (barData.keybindSize or 10) * fontScale, "OUTLINE")
+            kbText:SetFont(GetCDMFont(), (barData.keybindSize or 10) * fontScale, "OUTLINE, SLUG")
             kbText:SetShadowOffset(0, 0)
             kbText:ClearAllPoints()
             -- Scale-compensate the offset so it's visually consistent
             -- across icons with different Blizzard-assigned scales.
             local kbX = (barData.keybindOffsetX or 2) * fontScale
             local kbY = (barData.keybindOffsetY or -2) * fontScale
-            kbText:SetPoint("TOPLEFT", txOverlay, "TOPLEFT", kbX, kbY)
+            -- "right" alignment: anchor top-right and grow left (offset mirrored).
+            if barData.keybindAlign == "right" then
+                kbText:SetJustifyH("RIGHT")
+                kbText:SetPoint("TOPRIGHT", txOverlay, "TOPRIGHT", -kbX, kbY)
+            else
+                kbText:SetJustifyH("LEFT")
+                kbText:SetPoint("TOPLEFT", txOverlay, "TOPLEFT", kbX, kbY)
+            end
             kbText:SetTextColor(barData.keybindR or 1, barData.keybindG or 1, barData.keybindB or 1, barData.keybindA or 0.9)
         end
 

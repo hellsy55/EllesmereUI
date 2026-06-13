@@ -471,6 +471,7 @@ local defaults = {
         roleIconPosition = "bottomleft",  -- "topleft", "topright", "bottomleft", "bottomright"
         roleIconOffsetX  = 0,
         roleIconOffsetY  = 0,
+        roleIconHideInCombat = false,
         showRoleForTank    = true,
         showRoleForHealer  = true,
         showRoleForDPS     = false,
@@ -535,7 +536,7 @@ local defaults = {
         -- Private Auras (Blizzard-rendered boss debuff icons)
         paSize           = 20,
         paShowCountdown  = false,
-        paHideTooltip    = false,
+        paHideTooltip    = true,
         paPosition       = "center",
         paOffsetX        = 0,
         paOffsetY        = 0,
@@ -589,6 +590,7 @@ local defaults = {
 
         debuffSize       = 18,
         debuffCap        = 3,
+        debuffHideTooltips = true,
         debuffPosition   = "bottomright",
         debuffOffsetX    = 0,
         debuffOffsetY    = 0,
@@ -2257,6 +2259,42 @@ local function StyleButton(button)
         dbDurFS:Hide()
         icon._durText = dbDurFS
 
+        -- Hover tooltip support. Gated by the Debuff Display "Hide Tooltips"
+        -- setting (default hidden): ApplyDebuffIcon toggles mouse MOTION to
+        -- match. Clicks always pass through (SetMouseClickEnabled false) so
+        -- click-casting and targeting on the secure unit button keep working.
+        -- When motion is on, the icon takes the hover, shows the aura's native
+        -- tooltip (instead of the unit tooltip) via the secret-safe instance-ID
+        -- API, and mirrors the button hover border so it does not blink off.
+        if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(false) end
+        if icon.SetMouseMotionEnabled then icon:SetMouseMotionEnabled(false) end
+        icon:SetScript("OnEnter", function(self)
+            local u, iid = self._tipUnit, self._tipIID
+            if not u or not iid then return end
+            local b = self:GetParent()
+            local fd = b and GetFFD(b)
+            if fd then
+                fd._hovered = true
+                if fd.ApplyBorderColor then fd.ApplyBorderColor() end
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if GameTooltip.SetUnitAuraByAuraInstanceID then
+                GameTooltip:SetUnitAuraByAuraInstanceID(u, iid)
+            elseif GameTooltip.SetUnitDebuffByAuraInstanceID then
+                GameTooltip:SetUnitDebuffByAuraInstanceID(u, iid)
+            end
+            GameTooltip:Show()
+        end)
+        icon:SetScript("OnLeave", function(self)
+            local b = self:GetParent()
+            local fd = b and GetFFD(b)
+            if fd then
+                fd._hovered = false
+                if fd.ApplyBorderColor then fd.ApplyBorderColor() end
+            end
+            GameTooltip:Hide()
+        end)
+
         d.debuffIcons[i] = icon
     end
 
@@ -2750,6 +2788,34 @@ local function StyleButton(button)
 end
 
 -------------------------------------------------------------------------------
+--  Role icon show/hide decision. Shared by UpdateButton and the lightweight
+--  ns._UpdateRoleIcons combat-transition updater so both stay in lockstep.
+--  Honors the per-row "Hide In Combat" cog: when set, the icon is suppressed
+--  for the duration of combat and restored on PLAYER_REGEN_ENABLED.
+--  (Lives on ns, not a file local, to respect the chunk local cap.)
+-------------------------------------------------------------------------------
+ns._UpdateRoleIcon = function(d, s, unit)
+    local roleIcon = d.roleIcon
+    if not roleIcon then return end
+    local style = s.roleIconStyle or "modern"
+    if style == "none" then roleIcon:Hide(); return end
+    if s.roleIconHideInCombat and inCombat then roleIcon:Hide(); return end
+    local role = UnitGroupRolesAssigned(unit)
+    if role and not issecretvalue(role) then
+        local showForRole = (role == "TANK" and s.showRoleForTank)
+            or (role == "HEALER" and s.showRoleForHealer)
+            or (role == "DAMAGER" and s.showRoleForDPS)
+        if showForRole and ApplyRoleIcon(roleIcon, role, style) then
+            roleIcon:Show()
+        else
+            roleIcon:Hide()
+        end
+    else
+        roleIcon:Hide()
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Update all visual elements for a single button
 -------------------------------------------------------------------------------
 local function UpdateButton(button)
@@ -2956,26 +3022,7 @@ local function UpdateButton(button)
     end
 
     -- Role icon
-    if d.roleIcon then
-        local style = s.roleIconStyle or "modern"
-        if style ~= "none" then
-            local role = UnitGroupRolesAssigned(unit)
-            if role and not issecretvalue(role) then
-                local showForRole = (role == "TANK" and s.showRoleForTank)
-                    or (role == "HEALER" and s.showRoleForHealer)
-                    or (role == "DAMAGER" and s.showRoleForDPS)
-                if showForRole and ApplyRoleIcon(d.roleIcon, role, style) then
-                    d.roleIcon:Show()
-                else
-                    d.roleIcon:Hide()
-                end
-            else
-                d.roleIcon:Hide()
-            end
-        else
-            d.roleIcon:Hide()
-        end
-    end
+    ns._UpdateRoleIcon(d, s, unit)
 
     -- Leader/assistant icon
     if d.leaderIcon then
@@ -3211,6 +3258,19 @@ local function ApplyDebuffIcon(icon, auraData, unit, s)
         else
             icon._count:SetText("")
         end
+    end
+
+    -- Hover tooltip target: stash the unit + aura instance for the icon's
+    -- OnEnter, then toggle hover motion to match the Hide Tooltips setting (set
+    -- up in StyleButton). Read live so a combat-time toggle applies on the next
+    -- aura event even though ReloadFrames is deferred during combat.
+    icon._tipUnit = unit
+    icon._tipIID = auraData.auraInstanceID
+    -- Tooltips show only when the setting is explicitly off; nil/true = hidden.
+    local wantTipMotion = (s.debuffHideTooltips == false)
+    if icon._tipMotion ~= wantTipMotion and icon.SetMouseMotionEnabled then
+        icon:SetMouseMotionEnabled(wantTipMotion)
+        icon._tipMotion = wantTipMotion
     end
 
     icon:Show()
@@ -4246,6 +4306,22 @@ ns._UpdateTargetBorders = function()
     for unit, btn in pairs(unitToButton) do updateTarget(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do updateTarget(unit, btn) end
     for unit, btn in pairs(ns._xfUnitToButton) do updateTarget(unit, btn) end
+end
+
+-- Lightweight: only refresh role icons on each button. Driven by combat
+-- transitions so the "Hide In Combat" cog can suppress/restore the icons
+-- without a full per-button repaint. Texture Show/Hide is combat-legal (not a
+-- protected frame op), so this is safe to run from PLAYER_REGEN_DISABLED.
+ns._UpdateRoleIcons = function()
+    local function updateRole(unit, btn)
+        local d = GetFFD(btn)
+        if not d.roleIcon then return end
+        local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
+        ns._UpdateRoleIcon(d, s, unit)
+    end
+    for unit, btn in pairs(unitToButton) do updateRole(unit, btn) end
+    for unit, btn in pairs(ns._partyUnitToButton) do updateRole(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do updateRole(unit, btn) end
 end
 
 -- Lightweight: health-only update for UNIT_HEALTH / UNIT_MAXHEALTH.
@@ -7050,8 +7126,12 @@ local function OnEvent(self, event, arg1, ...)
             if ns._HideSizePreview then ns._HideSizePreview() end
         end
         if ns.EnsureRealFramesRestored then ns.EnsureRealFramesRestored() end
+        -- Combat starting: hide role icons on frames using the "Hide In Combat" cog.
+        if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        -- Combat ended: restore any role icons suppressed by "Hide In Combat".
+        if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
         -- Complete any container reparent that was blocked during combat (e.g.
         -- the options panel was closed mid-combat while a preview was active).
         -- Without this, a combat auto-close can leave the real frames orphaned
@@ -7535,7 +7615,7 @@ do
             "healthTextSize", "healthTextPosition", "healthTextOffsetX", "healthTextOffsetY",
         },
         indicators = {
-            "roleIconStyle", "roleIconSize", "roleIconPosition", "roleIconOffsetX", "roleIconOffsetY",
+            "roleIconStyle", "roleIconSize", "roleIconPosition", "roleIconOffsetX", "roleIconOffsetY", "roleIconHideInCombat",
             "showRoleForTank", "showRoleForHealer", "showRoleForDPS",
             "showRaidMarker", "raidMarkerSize", "raidMarkerPosition", "raidMarkerOffsetX", "raidMarkerOffsetY",
             "showReadyCheck", "showSummonPending",
@@ -7575,7 +7655,7 @@ do
         debuffDisplay = {
             "debuffFilter", "hideLustDebuff",
             "debuffPosition", "debuffOffsetX", "debuffOffsetY",
-            "debuffGrowDirection", "debuffCap",
+            "debuffGrowDirection", "debuffCap", "debuffHideTooltips",
         },
         debuffStyle = {
             "debuffSize", "debuffBorderSize", "debuffBorderColor", "debuffSpacing",

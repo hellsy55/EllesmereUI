@@ -5639,10 +5639,32 @@ local function BuildSyncIcon(opts)
     return applyBtn
 end
 
+-- Inline toggle: a small toggle placed inline inside a DualRow half-region,
+-- chaining left of the control (slider/dropdown) like the sync icon / cog. Used
+-- to gate the row's control (e.g. enable/disable the duration text). The toggle
+-- itself is never disabled. opts: region, getValue, setValue, onToggle, sizeRatio.
+local function BuildInlineToggle(opts)
+    local region = opts.region
+    if not region then return nil end
+    local toggle, _, tgSnap = BuildToggleControl(region, region:GetFrameLevel() + 5,
+        opts.getValue,
+        function(v)
+            if opts.setValue then opts.setValue(v) end
+            if opts.onToggle then opts.onToggle(v) end
+        end,
+        { sizeRatio = opts.sizeRatio or 0.8 })
+    toggle:ClearAllPoints()
+    toggle:SetPoint("RIGHT", region._lastInline or region._control, "LEFT", -8, 0)
+    region._lastInline = toggle
+    RegisterWidgetRefresh(tgSnap)
+    return toggle
+end
+
 EllesmereUI.BuildSliderCore     = BuildSliderCore
 EllesmereUI.BuildDropdownControl = BuildDropdownControl
 EllesmereUI.BuildColorSwatch    = BuildColorSwatch
 EllesmereUI.BuildToggleControl   = BuildToggleControl
+EllesmereUI.BuildInlineToggle    = BuildInlineToggle
 EllesmereUI.BuildCheckboxControl = BuildCheckboxControl
 EllesmereUI.BuildCogPopup       = BuildCogPopup
 EllesmereUI.BuildSyncIcon       = BuildSyncIcon

@@ -1860,6 +1860,31 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
         end
+        -- Inline cog on the Role Icons dropdown: Hide In Combat toggle
+        do
+            local rgn = row._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Role Icons",
+                rows = {
+                    { type="toggle", label="Hide In Combat",
+                      tooltip="Hide role icons while you are in combat.",
+                      get=function() return SVal("roleIconHideInCombat", false) end,
+                      set=function(v) SSet("roleIconHideInCombat", v); if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
         -- Row 2: Role Position (+ cog for X/Y) | Role Icon Size
         local rolePositionValues = {
             topleft     = "Top Left",
@@ -4793,7 +4818,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return SVal("paShowCountdown", false) end,
               setValue=function(v) SSet("paShowCountdown", v) end },
             { type="toggle", text="Hide Tooltips",
-              getValue=function() return SVal("paHideTooltip", false) end,
+              getValue=function() return SVal("paHideTooltip", true) end,
               setValue=function(v) SSet("paHideTooltip", v) end });  y = y - h
 
         -------------------------------------------------------------------
@@ -4943,14 +4968,18 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
 
-        -- Row 3: Max Debuffs | (empty)
+        -- Row 3: Max Debuffs | Hide Tooltips
         _, h = W:DualRow(parent, y,
             { type="slider", text="Max Debuffs", min=1, max=8, step=1,
               disabled=function() return SVal("debuffFilter", "all") == "none" end,
               disabledTooltip="Show Debuffs",
               getValue=function() return SVal("debuffCap", 3) end,
               setValue=function(v) SSet("debuffCap", v) end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Hide Tooltips",
+              disabled=function() return SVal("debuffFilter", "all") == "none" end,
+              disabledTooltip="Show Debuffs",
+              getValue=function() return SVal("debuffHideTooltips", true) end,
+              setValue=function(v) SSet("debuffHideTooltips", v) end });  y = y - h
 
         -------------------------------------------------------------------
         --  DEBUFF STYLE

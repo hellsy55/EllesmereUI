@@ -32,7 +32,6 @@ local f, t
 local lastX, lastY
 
 local lastScale, lastHex, lastTex, lastAlpha
-local lastR, lastG, lastB
 local isVisible = true
 
 -------------------------------------------------------------------------------
@@ -111,7 +110,6 @@ local function Apply()
         lastHex = hex
         lastAlpha = a
         local r, g, b = ResolveColor(p)
-        lastR, lastG, lastB = r, g, b
         t:SetVertexColor(r, g, b, a)
     end
 
@@ -1069,6 +1067,7 @@ function ECL:OnInitialize()
                 hex = "0CD29D",
                 texture = "ring_normal",
                 scale = 1,
+                alpha = 100,
                 gcd = {
                     enabled = false,
                     attached = true,

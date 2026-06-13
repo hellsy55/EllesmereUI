@@ -3919,20 +3919,72 @@ local function CreateUnifiedBorder(frame, unit)
 end
 
 
--- Apply cooldown text settings to all existing buttons in an aura container.
--- Called from ReloadFrames to live-update without /reload.
-local function ApplyAuraCooldownText(container, showCD, cdSize)
+-- Cropped aura icons: the button becomes a rectangle (height = 80% of width)
+-- and the texture is trimmed top/bottom so the visible art keeps its aspect
+-- ratio (no vertical squish), matching the action bar "cropped" shape.
+-- Horizontal keeps the normal 0.07 zoom (span 0.86); the vertical span is
+-- derived from the button's ACTUAL width/height (height = uSpan * h/w, centered)
+-- so the shown texture's width:height always equals the frame's exactly -- even
+-- after the height is rounded to whole pixels.
+local AURA_CROP_HEIGHT = 0.80
+local AURA_ZOOM = 0.07
+local function SetAuraIconCrop(icon, cropped, w, h)
+    if not icon then return end
+    if cropped and w and h and w > 0 then
+        local uSpan = 1 - 2 * AURA_ZOOM
+        local vSpan = uSpan * (h / w)
+        local v0 = 0.5 - vSpan / 2
+        icon:SetTexCoord(AURA_ZOOM, 1 - AURA_ZOOM, v0, 1 - v0)
+    else
+        icon:SetTexCoord(AURA_ZOOM, 1 - AURA_ZOOM, AURA_ZOOM, 1 - AURA_ZOOM)
+    end
+end
+
+-- Apply cooldown text + stack count settings to all existing buttons in an aura
+-- container. Called from ReloadFrames to live-update without /reload.
+-- auraSize/cropped (optional) drive the cropped-icon rectangle + texcoord.
+local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped)
     if not container then return end
+    -- Cropped style: make the buttons rectangular (height = 80% of width). oUF
+    -- sizes each button to element.width x element.height and uses them for the
+    -- grid spacing, so we set both and re-layout when they change. Texcoord is
+    -- applied per button below (and at creation in SetupAuraIcon).
+    local cropW, cropH
+    if auraSize then
+        cropW = auraSize
+        cropH = cropped and math.floor(auraSize * AURA_CROP_HEIGHT + 0.5) or auraSize
+        if container.width ~= cropW or container.height ~= cropH then
+            container.width = cropW
+            container.height = cropH
+            if container.ForceUpdate then container:ForceUpdate() end
+        end
+    elseif container.width ~= nil or container.height ~= nil then
+        -- No explicit size (e.g. boss simple debuffs): fall back to element.size.
+        container.width = nil
+        container.height = nil
+        if container.ForceUpdate then container:ForceUpdate() end
+    end
     for i = 1, (container.createdButtons or 0) do
         local btn = container[i]
+        if btn and btn.Icon then SetAuraIconCrop(btn.Icon, cropped, cropW, cropH) end
         if btn and btn.Cooldown then
             btn.Cooldown:SetHideCountdownNumbers(not showCD)
-            if showCD then
-                local cdText = btn.Cooldown:GetRegions()
-                if cdText and cdText.SetFont then
-                    cdText:SetFont(cachedFontPath, cdSize, "OUTLINE")
-                end
+            local cdText = btn.Cooldown:GetRegions()
+            if cdText and cdText.SetFont then
+                if showCD then cdText:SetFont(cachedFontPath, cdSize, "OUTLINE") end
+                -- Default cooldown text is centered; offset 0,0 == default.
+                cdText:ClearAllPoints()
+                cdText:SetPoint("CENTER", btn.Cooldown, "CENTER", cdOffX or 0, cdOffY or 0)
             end
+        end
+        -- Stack count: our font (same as duration text), outline + slug hardcoded.
+        -- Size defaults to 14 (the old NumberFontNormal size) so numbers stay the
+        -- same size unless the Stack Size slider is changed. Default anchor matches
+        -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default.
+        if btn and btn.Count then
+            btn.Count:SetFont(cachedFontPath, stackSize or 14, "OUTLINE, SLUG")
+            btn.Count:ClearAllPoints()
+            btn.Count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1 + (stackOffX or 0), stackOffY or 0)
         end
     end
 end
@@ -3953,35 +4005,68 @@ local function CreateTargetAuras(frame, unit)
     local function SetupAuraIcon(container, button)
         if not button then return end
 
+        -- Read settings fresh (the `settings` local is declared below this
+        -- closure in the function body, so it's not captured as an upvalue).
+        local isBuff = container and container.filter == "HELPFUL"
+        local s = GetSettingsForUnit(unit or "target")
         if button.Icon then
-            button.Icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            -- Cropped icons trim the texture top/bottom to keep aspect ratio.
+            local cropped, aSize
+            if isBuff then cropped = s and s.buffCropIcons; aSize = (s and s.buffSize) or 22
+            else cropped = s and s.debuffCropIcons; aSize = (s and s.debuffSize) or 22 end
+            local cH = cropped and math.floor(aSize * AURA_CROP_HEIGHT + 0.5) or aSize
+            SetAuraIconCrop(button.Icon, cropped, aSize, cH)
         end
 
         if button.Cooldown then
             button.Cooldown:SetDrawEdge(false)
             button.Cooldown:SetReverse(true)
-            -- Read settings fresh (the `settings` local is declared below this
-            -- closure in the function body, so it's not captured as an upvalue).
-            local isBuff = container and container.filter == "HELPFUL"
-            local s = GetSettingsForUnit(unit or "target")
-            local showText, textSize
+            local showText, textSize, cdOffX, cdOffY
             if isBuff then
                 showText = s and s.buffShowCooldownText
                 textSize = s and s.buffCooldownTextSize or 10
+                cdOffX = (s and s.buffCooldownTextOffsetX) or 0
+                cdOffY = (s and s.buffCooldownTextOffsetY) or 0
             elseif s and s.simpleDebuffs ~= false and unit and unit:match("^boss") then
                 showText = s and s.simpleDebuffShowCooldownText
                 textSize = s and s.simpleDebuffCooldownTextSize or 14
+                cdOffX = (s and s.debuffCooldownTextOffsetX) or 0
+                cdOffY = (s and s.debuffCooldownTextOffsetY) or 0
             else
                 showText = s and s.debuffShowCooldownText
                 textSize = s and s.debuffCooldownTextSize or 10
+                cdOffX = (s and s.debuffCooldownTextOffsetX) or 0
+                cdOffY = (s and s.debuffCooldownTextOffsetY) or 0
             end
             button.Cooldown:SetHideCountdownNumbers(not showText)
-            if showText then
-                local cdText = button.Cooldown:GetRegions()
-                if cdText and cdText.SetFont then
-                    cdText:SetFont(cachedFontPath, textSize, "OUTLINE")
-                end
+            local cdText = button.Cooldown:GetRegions()
+            if cdText and cdText.SetFont then
+                if showText then cdText:SetFont(cachedFontPath, textSize, "OUTLINE") end
+                -- Default cooldown text is centered; offset 0,0 == default (no change).
+                cdText:ClearAllPoints()
+                cdText:SetPoint("CENTER", button.Cooldown, "CENTER", cdOffX, cdOffY)
             end
+        end
+
+        -- Stack count: our font (same as duration text), outline + slug hardcoded.
+        -- Size defaults to 14 (the old NumberFontNormal size) so numbers stay the
+        -- same size unless the Stack Size slider is changed. Default anchor matches
+        -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default (no change).
+        if button.Count then
+            local s2 = GetSettingsForUnit(unit or "target")
+            local stackSize, sOffX, sOffY
+            if container and container.filter == "HELPFUL" then
+                stackSize = s2 and s2.buffStackTextSize
+                sOffX = (s2 and s2.buffStackTextOffsetX) or 0
+                sOffY = (s2 and s2.buffStackTextOffsetY) or 0
+            else
+                stackSize = s2 and s2.debuffStackTextSize
+                sOffX = (s2 and s2.debuffStackTextOffsetX) or 0
+                sOffY = (s2 and s2.debuffStackTextOffsetY) or 0
+            end
+            button.Count:SetFont(cachedFontPath, stackSize or 14, "OUTLINE, SLUG")
+            button.Count:ClearAllPoints()
+            button.Count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1 + sOffX, sOffY)
         end
 
         if not button.Border then
@@ -3989,6 +4074,13 @@ local function CreateTargetAuras(frame, unit)
             button.Border:SetAllPoints()
             button.Border:SetFrameLevel(button:GetFrameLevel() + 1)
             PP.CreateBorder(button.Border, 0, 0, 0, 1)
+        end
+
+        -- Keep the cooldown (and its built-in countdown text) above the icon
+        -- border so the duration number isn't hidden behind it. oUF's stack-count
+        -- frame sits one level above the cooldown, so it stays on top too.
+        if button.Cooldown and button.Border then
+            button.Cooldown:SetFrameLevel(button.Border:GetFrameLevel() + 1)
         end
     end
 
@@ -6495,7 +6587,7 @@ local function ReloadFrames()
                                     frame.Buffs:ForceUpdate()
                                 end
                             end
-                            ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10)
+                            ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
                         else
                             if frame:IsElementEnabled("Buffs") then
                                 frame:DisableElement("Buffs")
@@ -6544,7 +6636,7 @@ local function ReloadFrames()
                                     frame.Debuffs:ForceUpdate()
                                 end
                             end
-                            ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10)
+                            ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
                         end
                     end
 
@@ -6933,7 +7025,7 @@ local function ReloadFrames()
                             frame.Buffs:Hide()
                             frame.Buffs.num = 0
                         end
-                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10)
+                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
                     end
 
                     -- Debuffs
@@ -6978,7 +7070,7 @@ local function ReloadFrames()
                                 end
                             end
                         end
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
                     end
 
                     UpdateBordersForScale(frame, unit)
@@ -7285,7 +7377,7 @@ local function ReloadFrames()
                                 frame.Debuffs:ForceUpdate()
                             end
                         end
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
                     end
                 end
 
@@ -7333,7 +7425,7 @@ local function ReloadFrames()
                         frame.Buffs:Hide()
                         frame.Buffs.num = 0
                     end
-                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10)
+                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
                 end
 
                 UpdateBordersForScale(frame, unit)
@@ -7622,9 +7714,9 @@ local function ReloadFrames()
                     -- Use simple debuff cooldown text settings when simple display
                     -- is active, regular debuff settings otherwise.
                     if settings.simpleDebuffs ~= false then
-                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY)
                     else
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
                     end
                 end
 
@@ -7672,7 +7764,7 @@ local function ReloadFrames()
                         frame.Buffs:Hide()
                         frame.Buffs.num = 0
                     end
-                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10)
+                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
                 end
 
                 UpdateBordersForScale(frame, unit)

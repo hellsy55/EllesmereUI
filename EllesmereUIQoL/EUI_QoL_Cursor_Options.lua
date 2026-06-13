@@ -278,7 +278,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Only Show in Instances",
               disabled=function() local p = DB(); return p and p.enabled == false end,
-              disabledTooltip="Enable Cursor Circle",
+              disabledTooltip="Cursor Circle",
               getValue=function() local p = DB(); return p and p.instanceOnly end,
               setValue=function(v)
                 local p = DB(); if not p then return end
@@ -429,7 +429,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Only Show in Instances",
               disabled=function() return not GCD_DB().enabled end,
-              disabledTooltip="Enable GCD Circle",
+              disabledTooltip="GCD Circle",
               getValue=function() return GCD_DB().instanceOnly or false end,
               setValue=function(v)
                 GCD_DB().instanceOnly = v
@@ -612,7 +612,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Only Show in Instances",
               disabled=function() return not Cast_DB().enabled end,
-              disabledTooltip="Enable Cast Bar Circle",
+              disabledTooltip="Cast Bar Circle",
               getValue=function() return Cast_DB().instanceOnly or false end,
               setValue=function(v)
                 Cast_DB().instanceOnly = v

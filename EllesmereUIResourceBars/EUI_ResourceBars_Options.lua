@@ -2504,37 +2504,56 @@ initFrame:SetScript("OnEvent", function(self)
         -- Inline cog on Resource Text for size + position
         do
             local rgn = classColorRow._leftRegion
+            local resTextRows = {
+                { type = "toggle", label = "Show %",
+                  get = function()
+                      local p = DB()
+                      return (not p) or p.secondary.showPercent ~= false
+                  end,
+                  set = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.showPercent = v; RefreshClass()
+                  end },
+                { type = "slider", label = "Size", min = 8, max = 24, step = 1,
+                  get = function() local p = DB(); return p and p.secondary.textSize or 11 end,
+                  set = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.textSize = v; RefreshClass()
+                  end },
+                { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
+                  get = function() local p = DB(); return p and p.secondary.textXOffset or 0 end,
+                  set = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.textXOffset = v; RefreshClass()
+                  end },
+                { type = "slider", label = "Y Offset", min = -50, max = 50, step = 1,
+                  get = function() local p = DB(); return p and p.secondary.textYOffset or 0 end,
+                  set = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.textYOffset = v; RefreshClass()
+                  end },
+            }
+            -- Devourer (DH soul fragments) only: option to hide the "/ max"
+            -- suffix on the count text. Inserted above "Show %".
+            do
+                local gsr = _G._ERB_GetSecondaryResource
+                local secInfo = gsr and gsr()
+                if secInfo and secInfo.power == "SOUL_FRAGMENTS_DEVOURER" then
+                    table.insert(resTextRows, 1, {
+                        type = "toggle", label = "Show Max Stacks",
+                        get = function()
+                            local p = DB()
+                            return (not p) or p.secondary.showMaxStacks ~= false
+                        end,
+                        set = function(v)
+                            local p = DB(); if not p then return end
+                            p.secondary.showMaxStacks = v; RefreshClass()
+                        end })
+                end
+            end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Resource Text",
-                rows = {
-                    { type = "toggle", label = "Show %",
-                      get = function()
-                          local p = DB()
-                          return (not p) or p.secondary.showPercent ~= false
-                      end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.showPercent = v; RefreshClass()
-                      end },
-                    { type = "slider", label = "Size", min = 8, max = 24, step = 1,
-                      get = function() local p = DB(); return p and p.secondary.textSize or 11 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.textSize = v; RefreshClass()
-                      end },
-                    { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
-                      get = function() local p = DB(); return p and p.secondary.textXOffset or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.textXOffset = v; RefreshClass()
-                      end },
-                    { type = "slider", label = "Y Offset", min = -50, max = 50, step = 1,
-                      get = function() local p = DB(); return p and p.secondary.textYOffset or 0 end,
-                      set = function(v)
-                          local p = DB(); if not p then return end
-                          p.secondary.textYOffset = v; RefreshClass()
-                      end },
-                },
+                rows = resTextRows,
                 footer = false,
             })
             local cogBtn = MakeCogBtn(rgn, cogShow)

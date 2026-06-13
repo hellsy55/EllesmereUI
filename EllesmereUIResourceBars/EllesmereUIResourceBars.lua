@@ -710,6 +710,7 @@ local DEFAULTS = {
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
             showPercent = true,
+            showMaxStacks = true,
             textSize    = 11,
             textR       = 1, textG = 1, textB = 1,
             textXOffset = 0,
@@ -3548,10 +3549,16 @@ local function UpdateSecondaryResource()
                     elseif powerType == "IGNOREPAIN_BAR" then
                         -- Text is driven per-frame by IP.UpdateText (viewer
                         -- capture preferred, fill-width fallback). No-op here.
+                    elseif sp.showMaxStacks == false then
+                        -- Devourer with Show Max Stacks off: current count only.
+                        secondaryFrame._countText:SetFormattedText("%s", cur)
                     else
-                        secondaryFrame._countText:SetText(tostring(cur) .. " / " .. tostring(maxC))
+                        -- Current / max. SetFormattedText renders the (possibly
+                        -- secret) current and keeps the clean max -- no Lua concat
+                        -- of a secret value (see the note at the primary bar).
+                        secondaryFrame._countText:SetFormattedText("%s / %s", cur, maxC)
                     end
-
+                else
                     -- Secret value path: try UnitPowerPercent first, fall back to tostring
                     if powerType == "MAELSTROM_BAR" then
                         local pct = UnitPowerPercent and UnitPowerPercent("player", PT.MAELSTROM) or 0
@@ -3583,8 +3590,10 @@ local function UpdateSecondaryResource()
                         end
                     elseif powerType == "IGNOREPAIN_BAR" then
                         -- Text is driven per-frame by IP.UpdateText. No-op here.
+                    elseif sp.showMaxStacks == false then
+                        secondaryFrame._countText:SetFormattedText("%s", cur)
                     else
-                        secondaryFrame._countText:SetText(tostring(cur))
+                        secondaryFrame._countText:SetFormattedText("%s / %s", cur, maxC)
                     end
                 end
             end
