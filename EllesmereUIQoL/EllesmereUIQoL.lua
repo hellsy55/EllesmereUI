@@ -664,11 +664,11 @@ qolFrame:SetScript("OnEvent", function(self)
             end
         end)
 
-        -- Auto-accept role check for Quick Signup
+        -- Auto-accept role check for Quick Signup. Holding Shift skips the
+        -- auto-accept so the dialog stays open (e.g. to type a signup note).
         LFGListApplicationDialog:HookScript("OnShow", function(self)
             if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            local shiftBypass = EllesmereUIDB.quickSignupAutoRoleShift and IsShiftKeyDown()
-            if self.SignUpButton:IsEnabled() and not shiftBypass then
+            if self.SignUpButton:IsEnabled() and not IsShiftKeyDown() then
                 self.SignUpButton:Click()
             end
         end)
@@ -679,8 +679,8 @@ qolFrame:SetScript("OnEvent", function(self)
         roleFrame:SetScript("OnEvent", function()
             if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
             if not UnitInParty("player") then return end
-            -- Skip if Shift is held and shift-bypass is enabled
-            if EllesmereUIDB.quickSignupAutoRoleShift and IsShiftKeyDown() then return end
+            -- Holding Shift skips the auto role-check accept
+            if IsShiftKeyDown() then return end
             local leader, tank, healer, dps = GetLFGRoles()
             if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
                 LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
@@ -735,61 +735,10 @@ qolFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Hide Blizzard Party / Raid Manager frame
+    --  Implementation moved to the parent (EllesmereUI_BlizzardParty.lua) so the
+    --  Raid Frames module shares the exact same logic + saved setting. The QoL
+    --  options toggle still drives it via EllesmereUI._applyHideBlizzardPartyFrame.
     ---------------------------------------------------------------------------
-    do
-        local hookedMgr = false
-
-        local _partyHiddenParent
-        local _partyOrigParent
-
-        local function ApplyHideBlizzardPartyFrame()
-            local shouldHide = EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
-            local mgr = CompactRaidFrameManager or _G["CompactRaidFrameManager"]
-            if not mgr then return end
-
-            if shouldHide then
-                if not _partyHiddenParent then
-                    _partyHiddenParent = CreateFrame("Frame")
-                    _partyHiddenParent:Hide()
-                end
-                if not _partyOrigParent then
-                    _partyOrigParent = mgr:GetParent()
-                end
-                if not InCombatLockdown() then
-                    mgr:SetParent(_partyHiddenParent)
-                end
-                if not hookedMgr then
-                    hookedMgr = true
-                    local regenFrame = CreateFrame("Frame")
-                    regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-                    regenFrame:SetScript("OnEvent", function()
-                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame then
-                            if mgr:GetParent() ~= _partyHiddenParent then
-                                mgr:SetParent(_partyHiddenParent)
-                            end
-                        end
-                    end)
-                end
-            else
-                if _partyOrigParent and not InCombatLockdown() then
-                    mgr:SetParent(_partyOrigParent)
-                    mgr:Show()
-                end
-            end
-        end
-
-        EllesmereUI._applyHideBlizzardPartyFrame = ApplyHideBlizzardPartyFrame
-
-        local initFrame = CreateFrame("Frame")
-        initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        initFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-        initFrame:SetScript("OnEvent", function(self, event)
-            if event == "PLAYER_ENTERING_WORLD" then
-                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-            end
-            ApplyHideBlizzardPartyFrame()
-        end)
-    end
 
     ---------------------------------------------------------------------------
     --  Hide Talking Head Frame
@@ -1462,11 +1411,12 @@ do
     local function CreateDurabilityWarning()
         if durWarnOverlay then return end
 
-        durWarnOverlay = CreateFrame("Frame", "EUI_DurabilityWarning", UIParent)
+        durWarnOverlay = CreateFrame("Frame", nil, UIParent)
         durWarnOverlay:SetSize(400, 40)
-        durWarnOverlay:SetFrameStrata("DIALOG")
-        durWarnOverlay:SetFrameLevel(99)
+        durWarnOverlay:SetFrameStrata("HIGH")
+        durWarnOverlay:SetFrameLevel(50)
         durWarnOverlay:EnableMouse(false)
+        durWarnOverlay:SetMouseClickEnabled(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
         fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag("extras"))
@@ -1541,7 +1491,7 @@ do
         if durWarnOverlay then durWarnOverlay:Hide() end
     end
 
-    local repairWarnFrame = CreateFrame("Frame", "EUI_RepairWarnHandler", UIParent)
+    local repairWarnFrame = CreateFrame("Frame", nil, UIParent)
     if not (EllesmereUIDB and EllesmereUIDB.repairWarning == false) then
         repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -1632,9 +1582,26 @@ do
             end)
             return
         end
-        if EllesmereUIDB and EllesmereUIDB.disableRightClickTarget then
+        local db = EllesmereUIDB
+        local enemy = db and db.disableRightClickTarget
+        local allyCombat = db and db.disableRightClickTargetAllyCombat
+        if enemy or allyCombat then
+            -- Build the mouseover condition from the two independent toggles.
+            -- Enemies fire everywhere. Allies only fire while the player is in
+            -- combat (the [combat] conditional), so right clicking friendly NPCs
+            -- such as vendors and quest givers still works out of combat.
+            local macro = ""
+            if enemy then macro = macro .. "[@mouseover,harm,nodead]1;" end
+            if allyCombat then macro = macro .. "[@mouseover,help,nodead,combat]1;" end
+            macro = macro .. "0"
             SecureStateDriverManager:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
-            RegisterStateDriver(stateFrame, "mov", "[@mouseover,harm,nodead]1;0")
+            -- [combat] needs regen events so the state re-evaluates on combat
+            -- enter/exit even when the mouseover unit has not changed.
+            if allyCombat then
+                SecureStateDriverManager:RegisterEvent("PLAYER_REGEN_DISABLED")
+                SecureStateDriverManager:RegisterEvent("PLAYER_REGEN_ENABLED")
+            end
+            RegisterStateDriver(stateFrame, "mov", macro)
             stateFrame:SetAttribute("_onstate-mov", [[
                 if newstate == 1 then
                     self:SetBindingClick(1, "BUTTON2", "EUI_MouseLookBtn")
@@ -1666,7 +1633,8 @@ do
     local function CreateCrosshair()
         if crosshairFrame then return end
         crosshairFrame = CreateFrame("Frame", "EUI_CharacterCrosshair", UIParent)
-        crosshairFrame:SetFrameStrata("HIGH")
+        -- MEDIUM sits above gameplay HUD but below DIALOG/HIGH panels (talents, character, etc.).
+        crosshairFrame:SetFrameStrata("MEDIUM")
         crosshairFrame:SetFrameLevel(100)
         crosshairFrame:EnableMouse(false)
         crosshairFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)

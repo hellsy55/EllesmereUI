@@ -646,7 +646,9 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
 
     plate.highlight = plate.health:CreateTexture(nil, "OVERLAY", nil, 6)
     plate.highlight:SetAllPoints()
-    plate.highlight:SetColorTexture(1, 1, 1, 0.3)
+    local _hc = (FP() and FP().hoverColor) or ns.defaults.hoverColor
+    local _ha = (FP() and FP().hoverAlpha) or ns.defaults.hoverAlpha
+    plate.highlight:SetColorTexture(_hc.r, _hc.g, _hc.b, _ha)
     plate.highlight:Hide()
 
     plate.name = plate:CreateFontString(nil, "OVERLAY")
@@ -655,14 +657,15 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)
 
+    local _aSt = ns.ResolveTargetArrowStyle(FP())
     plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
-    plate.leftArrow:SetSize(11, 16)
+    plate.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. _aSt.l .. ".png")
+    plate.leftArrow:SetSize(_aSt.w, 16)
     plate.leftArrow:SetPoint("RIGHT", plate.name, "LEFT", -2, 0)
     plate.leftArrow:Hide()
     plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
-    plate.rightArrow:SetSize(11, 16)
+    plate.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. _aSt.r .. ".png")
+    plate.rightArrow:SetSize(_aSt.w, 16)
     plate.rightArrow:SetPoint("LEFT", plate.name, "RIGHT", 2, 0)
     plate.rightArrow:Hide()
 
@@ -823,7 +826,18 @@ function FriendlyFrame:ApplyTarget()
     if not self.unit then return end
     local isTarget = UnitIsUnit(self.unit, "target")
     self.glow:SetShown(isTarget)
-    local showArrows = isTarget and FP() and FP().showTargetArrows
+    local fp = FP()
+    local showArrows = isTarget and fp and fp.showTargetArrows
+    if showArrows then
+        local st = ns.ResolveTargetArrowStyle(fp)
+        self.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.l .. ".png")
+        self.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.r .. ".png")
+        local acr, acg, acb = ns.GetTargetArrowColor(fp)
+        self.leftArrow:SetVertexColor(acr, acg, acb)
+        self.rightArrow:SetVertexColor(acr, acg, acb)
+        self.leftArrow:SetSize(st.w, 16)
+        self.rightArrow:SetSize(st.w, 16)
+    end
     self.leftArrow:SetShown(showArrows or false)
     self.rightArrow:SetShown(showArrows or false)
 end

@@ -168,6 +168,14 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
         y = y - brezH
     end
 
+    ---------------------------------------------------------------------------
+    --  BLOODLUST TRACKER
+    ---------------------------------------------------------------------------
+    if _G._EUI_BuildBloodlustSection then
+        local lustH = _G._EUI_BuildBloodlustSection(parent, y, W, EllesmereUI.PP)
+        y = y - lustH
+    end
+
     parent:SetHeight(math.abs(y - yOffset))
 end
 

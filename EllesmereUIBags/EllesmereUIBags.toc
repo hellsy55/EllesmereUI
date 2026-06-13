@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Bags
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: Custom inventory UI with categories, item levels, and quality borders
+## Notes: A beautiful visual refresh of Blizzard Bags with intuitive organization.
 ## Author: Ellesmere
-## Version: 7.8.8
+## Version: 8.1.4
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIBagsDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

@@ -264,7 +264,7 @@ local RACE_RACIALS = {
     Human              = { 59752 },
     DarkIronDwarf      = { 265221 },
     Gnome              = { 20589 },
-    HighmountainTauren = { 69041 },
+    HighmountainTauren = { 255654 },  -- Bull Rush
     Worgen             = { 68992 },
     Goblin             = { 69070 },
     Pandaren           = { 107079 },
@@ -301,9 +301,23 @@ local _myRacialsSet = {}
 -- Custom Aura Bar presets (potions with hardcoded durations).
 -- Detection: SPELL_UPDATE_COOLDOWN (spell goes on CD = just used).
 -- Display: reverse cooldown swipe for the duration.
--- Bloodlust/Time Spiral/warlock pets removed — they can't be tracked
--- via cooldown detection (they're cast by OTHER players or have no CD).
+-- Bloodlust/Heroism is the exception below: it is debuff-driven (see the TBB
+-- tick special-case for popularKey == "bloodlust") rather than cooldown-
+-- detected, because the lust buff is cast by others and is secret. It starts a
+-- 40s bar off the player's Sated/Exhaustion debuff edge. Time Spiral / warlock
+-- pets stay out (no usable detection).
 local BUFF_BAR_PRESETS = {
+    {
+        -- Faction label: Horde = Bloodlust (2825), Alliance = Heroism (32182).
+        key      = "bloodlust",
+        name     = (UnitFactionGroup("player") == "Horde") and "Bloodlust" or "Heroism",
+        icon     = (UnitFactionGroup("player") == "Horde")
+                       and "Interface\\Icons\\spell_nature_bloodlust"
+                       or  "Interface\\Icons\\ability_shaman_heroism",
+        spellIDs = { (UnitFactionGroup("player") == "Horde") and 2825 or 32182 },
+        duration = 40,
+        tbbOnly  = true,  -- TBB-only; debuff-driven, not a cooldown-usable preset
+    },
     {
         key      = "lights_potential",
         name     = "Light's Potential",
@@ -475,7 +489,12 @@ local DEFAULTS = {
 
 -------------------------------------------------------------------------------
 --  Dedicated spell assignment store helpers
---  Lives at EllesmereUIDB.spellAssignments, completely separate from profiles.
+--  Lives at EllesmereUIDB.spellAssignments. The spell/bar-content data is
+--  per-profile: spellAssignments.profiles[name].specProfiles[specKey]. It sits
+--  at the top level (NOT inside the profile blob), so it never travels with
+--  profile export or module sync, but it IS forked/dropped/moved alongside the
+--  profile itself (copy/delete/rename in EllesmereUI_Profiles.lua). The active
+--  profile's bucket is resolved live via ns.GetActiveSpecProfiles().
 --  Consolidated into a single local table to stay within Lua 5.1's 200 local
 --  variable limit for the main chunk.
 -------------------------------------------------------------------------------
@@ -484,13 +503,51 @@ local SpellStore = {}
 function SpellStore.Get()
     if not EllesmereUIDB then EllesmereUIDB = {} end
     if not EllesmereUIDB.spellAssignments then
-        EllesmereUIDB.spellAssignments = { specProfiles = {} }
+        EllesmereUIDB.spellAssignments = { profiles = {} }
     end
     return EllesmereUIDB.spellAssignments
 end
 
+-- Active profile name for the per-profile spell store. Read live so a profile
+-- switch auto-follows on the next CDM rebuild with no repoint step.
+function ns.GetActiveProfileName()
+    return (EllesmereUIDB and EllesmereUIDB.activeProfile) or "Default"
+end
+
+-- Per-profile spell store. Spell/bar-content data is owned by each profile, so
+-- copying a profile forks its CDM and deleting a bar never crosses profiles. It
+-- lives at spellAssignments.profiles[name].specProfiles -- OUTSIDE the profile
+-- blob and the export payload, so module sync and profile export never carry it
+-- (both operate on the profile's addons blob, not this store).
+--
+-- A one-time migration (cdm_per_profile_spell_store_v1) seeds every existing
+-- profile from the legacy shared spellAssignments.specProfiles. Until that
+-- completes (_perProfileSeeded), fork the legacy data on first access so a
+-- profile never reads empty during the early window (e.g. if the migration
+-- body errored and is retrying next session).
+function ns.GetSpecProfilesForProfile(profileName)
+    local sa = SpellStore.Get()
+    if not sa.profiles then sa.profiles = {} end
+    local bucket = sa.profiles[profileName]
+    if not bucket then
+        bucket = { specProfiles = {} }
+        if not sa._perProfileSeeded and type(sa.specProfiles) == "table" and next(sa.specProfiles) then
+            local DeepCopy = EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy
+            if DeepCopy then bucket.specProfiles = DeepCopy(sa.specProfiles) end
+        end
+        sa.profiles[profileName] = bucket
+    end
+    if not bucket.specProfiles then bucket.specProfiles = {} end
+    return bucket.specProfiles
+end
+
+-- specProfiles table for the active profile (the live CDM bucket).
+function ns.GetActiveSpecProfiles()
+    return ns.GetSpecProfilesForProfile(ns.GetActiveProfileName())
+end
+
 function SpellStore.GetSpecProfiles()
-    return SpellStore.Get().specProfiles
+    return ns.GetActiveSpecProfiles()
 end
 
 -- (SpellStore.GetBarGlows removed -- Bar Glows disabled pending rewrite)
@@ -823,9 +880,9 @@ local function SaveCurrentSpecProfile()
     if not specProfiles[specKey] then specProfiles[specKey] = { barSpells = {} } end
     local prof = specProfiles[specKey]
 
-    -- Bar Glows and Tracked Buff Bars are stored directly in
-    -- specProfiles[specKey] (not in profile). No copying needed --
-    -- GetBarGlows() and GetTrackedBuffBars() read/write there directly.
+    -- Bar Glows and Tracked Buff Bars are stored in the active profile's
+    -- specProfiles[specKey] bucket. GetBarGlows() and GetTrackedBuffBars()
+    -- read/write there directly, so nothing extra to copy here.
 
     -- Snapshot visible icon counts for pre-sizing on next login
     ns.SaveCachedBarSizes()
@@ -1362,11 +1419,11 @@ local function ShowProcGlow(icon, cr, cg, cb)
     if fd and fd.procGlowActive then return end
 
     -- Per-spell proc glow settings
-    -- Force Custom Shape Glow (style 2) for custom-shaped icons
-    local shapeName = fc and fc.shapeName
-    local isCustomShape = shapeName and shapeName ~= "square" and shapeName ~= "csquare" and shapeName ~= "none"
-    local style = isCustomShape and 2 or PROC_GLOW_STYLE
     local fc = _ecmeFC[icon]
+    -- Force Custom Shape Glow (style 2) for custom-shaped icons (any shape but none/cropped)
+    local shapeName = (fc and fc.shapeApplied) and fc.shapeName or nil
+    local isCustomShape = shapeName and shapeName ~= "none" and shapeName ~= "cropped"
+    local style = isCustomShape and 2 or PROC_GLOW_STYLE
     local sid = fc and fc.spellID
     if sid then
         local bk = fc and fc.barKey
@@ -1392,8 +1449,13 @@ local function ShowProcGlow(icon, cr, cg, cb)
             end
         end
         if ss then
-            if ss.procGlow == 0 then return end -- proc glow disabled
-            if not isCustomShape and ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
+            -- Custom shapes are locked to Shape Glow: ignore the per-spell glow type
+            -- (including "None") so a custom-shaped icon always shows Shape Glow. The
+            -- per-spell glow COLOR below still applies.
+            if not isCustomShape then
+                if ss.procGlow == 0 then return end -- proc glow disabled
+                if ss.procGlow and ss.procGlow > 0 then style = ss.procGlow end
+            end
             -- Unified glow color takes priority over per-type settings
             local ur, ug, ub = ResolveGlowColor(ss)
             if ur then
@@ -1743,7 +1805,14 @@ local function EnforceCooldownViewerEditModeSettings()
     local buffIconIdx = Enum.EditModeCooldownViewerSystemIndices.BuffIcon
     local buffBarIdx  = Enum.EditModeCooldownViewerSystemIndices.BuffBar
 
-    local function UpsertSetting(settings, settingEnum, desiredValue)
+    -- Returns changed(bool). A layout stores a CooldownViewer setting ONLY when
+    -- it's been changed away from Blizzard's default, so an absent entry means
+    -- "running at the default." defaultValue is that default: when it already
+    -- equals what we want we leave the entry absent (no change, no forced reload) --
+    -- the effective value is already correct. We only add an explicit entry when
+    -- the default differs from desired (e.g. BuffIcon HideWhenInactive 0 when
+    -- "Always Show Buffs" is on).
+    local function UpsertSetting(settings, settingEnum, desiredValue, defaultValue)
         for _, s in ipairs(settings) do
             if s.setting == settingEnum then
                 if s.value ~= desiredValue then
@@ -1753,28 +1822,33 @@ local function EnforceCooldownViewerEditModeSettings()
                 return false
             end
         end
+        -- Absent: at the Blizzard default. Nothing to do if that already matches.
+        if desiredValue == defaultValue then
+            return false
+        end
         settings[#settings + 1] = { setting = settingEnum, value = desiredValue }
         return true
     end
 
     for _, sysInfo in ipairs(activeLayout.systems) do
         if sysInfo.system == cooldownSystem and type(sysInfo.settings) == "table" then
-            -- VisibleSetting=Always on ALL viewers
-            if UpsertSetting(sysInfo.settings, visSetting, visAlways) then
+            -- VisibleSetting=Always on ALL viewers. Default is Always, so an absent
+            -- entry is already correct and is left alone.
+            if UpsertSetting(sysInfo.settings, visSetting, visAlways, visAlways) then
                 changed = true
             end
             -- HideWhenInactive on buff icon viewer: 0 if user wants
             -- always-visible buff icons, 1 otherwise. BuffBar viewer
             -- (tracked bars) always stays at 1 -- "Always Show Buffs"
-            -- only applies to icon-based buff bars.
+            -- only applies to icon-based buff bars. Blizzard default is 1.
             if sysInfo.systemIndex == buffIconIdx then
                 local p = ECME.db and ECME.db.profile
                 local hideVal = (p and p.cdmBars and p.cdmBars.showInactiveBuffIcons) and 0 or 1
-                if UpsertSetting(sysInfo.settings, hideEnum, hideVal) then
+                if UpsertSetting(sysInfo.settings, hideEnum, hideVal, 1) then
                     changed = true
                 end
             elseif sysInfo.systemIndex == buffBarIdx then
-                if UpsertSetting(sysInfo.settings, hideEnum, 1) then
+                if UpsertSetting(sysInfo.settings, hideEnum, 1, 1) then
                     changed = true
                 end
             end
@@ -2108,8 +2182,14 @@ BuildCDMBar = function(barIndex)
         frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
         frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(5)
+        if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
+        if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
         if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        -- Containers never capture mouse motion: the rect spans the bar's
+        -- full layout area and a motion-enabled frame with no unit steals
+        -- mouseover focus from unit frames underneath. Icon hover is managed
+        -- per-icon, gated on the bar's tooltip setting.
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
         frame._barKey = key
         frame._barIndex = barIndex
         cdmBarFrames[key] = frame
@@ -2125,7 +2205,7 @@ BuildCDMBar = function(barIndex)
             end
             frame._preMousePos = nil
             SetFrameClickThrough(frame, false)
-            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+            if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
         end
         EllesmereUI.SetElementVisibility(frame, false)
         return
@@ -2154,7 +2234,7 @@ BuildCDMBar = function(barIndex)
         frame:SetFrameLevel(5)
         -- Restore mouse on frame and all children
         SetFrameClickThrough(frame, false)
-        if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
     end
     frame._mouseGrow = nil
 
@@ -2215,6 +2295,7 @@ BuildCDMBar = function(barIndex)
         -- Make frame and all children fully click-through while following cursor
         SetFrameClickThrough(frame, true)
         local lastMX, lastMY
+        local mouseAssertTick = 0
         frame:ClearAllPoints()
         frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", 0, 0)
         frame._mouseTrack = true
@@ -2250,6 +2331,26 @@ BuildCDMBar = function(barIndex)
                     end
                 end
                 _CDMApplyVisibility()
+            end
+            -- Throttled mouse-through re-assert: the Decorate/Show/Cooldown
+            -- path can re-enable mouse on icons mid-session, and an icon
+            -- riding the cursor with mouse enabled intermittently kills
+            -- [@mouseover] hovercast keys. Cheap no-op when state is clean.
+            mouseAssertTick = mouseAssertTick + 1
+            if mouseAssertTick >= 30 then
+                mouseAssertTick = 0
+                local icons = cdmBarIcons[key]
+                if icons then
+                    for ii = 1, #icons do
+                        local ic = icons[ii]
+                        if ic then
+                            if ic:IsMouseEnabled() then ic:EnableMouse(false) end
+                            if ic.IsMouseMotionEnabled and ic:IsMouseMotionEnabled() then
+                                ic:EnableMouseMotion(false)
+                            end
+                        end
+                    end
+                end
             end
             local s = UIParent:GetEffectiveScale()
             local cx, cy = GetCursorPosition()
@@ -2440,6 +2541,13 @@ local function ComputeTopRowStride(barData, count)
     if numRows == 2 and barData.customTopRowEnabled and barData.topRowCount and barData.topRowCount > 0 then
         local topCount = math.min(barData.topRowCount, count)
         local bottomCount = count - topCount
+        -- Custom top-row mode only spills into a second row once the icon count
+        -- actually exceeds the top-row count. Until then, report ONE effective
+        -- row so the bar doesn't reserve space for (or lay out) an empty second
+        -- row. The second row appears the moment a bottom-row icon exists.
+        if bottomCount <= 0 then
+            return topCount, 1, topCount
+        end
         return math.max(topCount, bottomCount), numRows, topCount
     end
     local stride = math.ceil(count / numRows)
@@ -2474,9 +2582,11 @@ local function ComputeCDMBarSize(barData, count)
         iH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
     end
     local sp = barData.spacing or 2
-    local rows = barData.numRows or 1
+    -- Use the EFFECTIVE row count from ComputeTopRowStride: it collapses to 1
+    -- when a custom top-row split has no icons in its second row yet, so the
+    -- footprint doesn't reserve an empty second row.
+    local stride, rows = ComputeTopRowStride(barData, count)
     if rows < 1 then rows = 1 end
-    local stride = ComputeTopRowStride(barData, count)
     local grow = barData.growDirection or "CENTER"
     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
     if isH then
@@ -2503,6 +2613,16 @@ local function GetStableCDMBarSize(barKey, frame, barData)
         return ComputeCDMBarSize(barData, count)
     end
 
+    -- Buff-family / custom-buff bars have no assigned spells (their icons are
+    -- auras added live), so before the first aura the frame is empty and the
+    -- spell count is 0. Size from the configured icon dimensions (one icon) so
+    -- the empty frame -- and the unlock overlay that mirrors it -- reflect the
+    -- icon size, instead of the generic placeholder that otherwise persisted
+    -- until a buff was acquired once.
+    if barData and ((ns.IsBarBuffFamily and ns.IsBarBuffFamily(barData)) or barData.barType == "custom_buff") then
+        return ComputeCDMBarSize(barData, 1)
+    end
+
     return EMPTY_CDM_BAR_SIZE[1], EMPTY_CDM_BAR_SIZE[2]
 end
 
@@ -2518,8 +2638,9 @@ LayoutCDMBar = function(barKey)
     if not barData or not barData.enabled then return end
 
     local grow = frame._mouseGrow or barData.growDirection or "CENTER"
-    local numRows = barData.numRows or 1
-    if numRows < 1 then numRows = 1 end
+    -- Row count is taken from ComputeTopRowStride's EFFECTIVE rows (effRows,
+    -- computed once the icon count is known below), which collapses a custom
+    -- top-row split to a single row until its second row is actually populated.
     local isHoriz = (grow == "RIGHT" or grow == "LEFT" or (grow == "CENTER" and not barData.verticalOrientation))
     -- spacing is a raw coord value; the per-frame pixel conversion below
     -- (spacingPx = floor(spacing / onePx + 0.5)) rounds to nearest whole
@@ -2542,13 +2663,26 @@ LayoutCDMBar = function(barKey)
     local PP = EllesmereUI.PP
     local onePx = PP.mult
     local iconW
-    -- Width-axis dim (icons spanning the width)
+    -- Set true ONLY when the width-match math below actually produces an iconW.
+    -- Gates the cropped-height-from-matched-width fix so non-matched and
+    -- height-matched bars stay byte-identical.
+    local widthMatchApplied = false
+    -- Set (to the matched cropped height in physical px) ONLY when the
+    -- height-match math below succeeds. Lets a cropped height-matched bar's
+    -- per-icon height use the matched height the branch already computed,
+    -- instead of the stored iconSize, so icons stay in lockstep with the
+    -- container's extraPixelsH leftover distribution.
+    local heightMatchIconHPx = nil
+    -- Width-axis dim (icons spanning the width). Use the effective row count
+    -- so a not-yet-populated second row doesn't widen the match math.
     local function CurWidthDim()
-        return isHoriz and ComputeTopRowStride(barData, #icons) or numRows
+        local s, r = ComputeTopRowStride(barData, #icons)
+        return isHoriz and s or r
     end
     -- Height-axis dim (icons spanning the height)
     local function CurHeightDim()
-        return isHoriz and numRows or ComputeTopRowStride(barData, #icons)
+        local s, r = ComputeTopRowStride(barData, #icons)
+        return isHoriz and r or s
     end
     -- Resolve a width/height match target unlock key to a live frame.
     -- The match DB stores keys like "CDM_cooldowns" or "MainBar"; the
@@ -2571,6 +2705,7 @@ LayoutCDMBar = function(barKey)
             if rawPhysIcon < 8 then rawPhysIcon = 8 end
             local basePhysIcon = math.floor(rawPhysIcon)
             iconW = basePhysIcon * onePx
+            widthMatchApplied = true
             local idealPhys = curDim * basePhysIcon + (curDim - 1) * physSp
             local extra = physTarget - idealPhys
             if extra > 0 and extra <= curDim then extraPixels = extra end
@@ -2589,6 +2724,7 @@ LayoutCDMBar = function(barKey)
             local basePhysIcon = math.floor(rawPhysIcon)
             iconW = basePhysIcon * onePx
             local basePhysIconH = math.floor(basePhysIcon * cropFactor)
+            heightMatchIconHPx = basePhysIconH
             local idealPhys = curDim * basePhysIconH + (curDim - 1) * physSp
             local extra = physTarget - idealPhys
             if extra > 0 and extra <= curDim then extraPixelsH = extra end
@@ -2606,7 +2742,25 @@ LayoutCDMBar = function(barKey)
     local iconH = iconW
     local shape = barData.iconShape or "none"
     if shape == "cropped" then
-        iconH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
+        if widthMatchApplied then
+            -- Width-matched: derive cropped height from the MATCHED icon width
+            -- so the icon keeps the same ~0.80 aspect ratio as the non-matched
+            -- path. Computed in physical pixels to stay on the pixel grid (the
+            -- matched iconW is already a clean pixel multiple). This matches the
+            -- non-matched path's aspect-ratio intent, not its exact value -- the
+            -- non-matched else branch rounds 0.80 in coord space, so the two can
+            -- differ by up to 1px at non-perfect UI scales.
+            local wPx = math.floor(iconW / onePx + 0.5)
+            iconH = math.floor(wPx * 0.80 + 0.5) * onePx
+        elseif heightMatchIconHPx then
+            -- Height-matched: use the EXACT cropped height the height-match math
+            -- already computed (basePhysIconH). Must match that value precisely
+            -- so per-icon height stays in lockstep with the container's
+            -- extraPixelsH leftover distribution, which was sized around it.
+            iconH = heightMatchIconHPx * onePx
+        else
+            iconH = math.floor((barData.iconSize or 36) * 0.80 + 0.5)
+        end
     end
 
     -- Use ALL icons in the array (not just IsShown). CollectAndReanchor
@@ -2642,7 +2796,9 @@ LayoutCDMBar = function(barKey)
     end
 
     -- Bar has visible icons -- ensure it is visible (unless visibility is "never")
-    local stride, _, customTopCount = ComputeTopRowStride(barData, sizeCount)
+    -- effRows is the EFFECTIVE row count: 1 when a custom top-row split has no
+    -- icons in its second row yet, so the container doesn't grow a blank row.
+    local stride, effRows, customTopCount = ComputeTopRowStride(barData, sizeCount)
 
     -- Container size -- compute everything in integer physical pixels first,
     -- then convert back to coord at the end. Doing the multiplications in
@@ -2666,9 +2822,9 @@ LayoutCDMBar = function(barKey)
     local totalWPx, totalHPx
     if isHoriz then
         totalWPx = stride  * iconWPx + (stride  - 1) * spacingPx + extraPixels
-        totalHPx = numRows * iconHPx + (numRows - 1) * spacingPx + extraPixelsH
+        totalHPx = effRows * iconHPx + (effRows - 1) * spacingPx + extraPixelsH
     else
-        totalWPx = numRows * iconWPx + (numRows - 1) * spacingPx + extraPixels
+        totalWPx = effRows * iconWPx + (effRows - 1) * spacingPx + extraPixels
         totalHPx = stride  * iconHPx + (stride  - 1) * spacingPx + extraPixelsH
     end
 
@@ -2755,7 +2911,7 @@ LayoutCDMBar = function(barKey)
 
         -- Map sequential index to bottom-up grid position.
         -- Icon 1..topRowCount fill the top row (visual row 0).
-        -- Remaining icons fill rows 1..numRows-1 (bottom rows).
+        -- Remaining icons fill rows 1..effRows-1 (bottom rows).
         local col, row
         if i <= topRowCount then
             col = i - 1
@@ -2959,6 +3115,27 @@ local function ApplyCDMTooltipState(barKey)
             end
         end
     end
+    -- Mouse-motion follows the tooltip setting. A motion-enabled icon with
+    -- no unit becomes the mouseover-focus frame and steals hover from unit
+    -- frames underneath (raid frame hover highlight and [@mouseover] casts
+    -- die wherever a bar overlaps them), so icons may only capture the mouse
+    -- when tooltips are actually on. Cursor-anchored bars stay fully mouse-
+    -- through (SetFrameClickThrough owns their state); vis-hidden bars stay
+    -- inert. Mouse calls on Blizzard CDM frames are blocked in combat.
+    if not InCombatLockdown() then
+        local frame = cdmBarFrames[barKey]
+        local wantHover = (enabled and frame and not frame._mouseTrack
+            and not frame._visHidden) and true or false
+        local icons = cdmBarIcons[barKey]
+        if icons then
+            for i = 1, #icons do
+                local ic = icons[i]
+                if ic and ic.EnableMouseMotion then
+                    ic:EnableMouseMotion(wantHover)
+                end
+            end
+        end
+    end
     -- Show/hide the global tooltip frame based on whether any bar wants tooltips
     if next(_tooltipBars) then
         _tooltipFrame:Show()
@@ -3009,6 +3186,11 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
         local bdrTarget = (fd and fd.borderFrame) or icon
         if fd and fd.borderFrame or EllesmereUI.PP.GetBorders(icon) then
             local texKey = barData.borderTexture or "solid"
+            -- "Show Behind": set the border frame's level before styling so the
+            -- textured backdrop inherits it. +13 in front of the icon, level-1 behind.
+            if fd and fd.borderFrame then
+                fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, icon:GetFrameLevel() - 1) or (icon:GetFrameLevel() + 13))
+            end
             EllesmereUI.ApplyBorderStyle(bdrTarget, borderSz, brdR, brdG, brdB, brdA, texKey, barData.borderTextureOffset, barData.borderTextureOffsetY, barData.borderTextureShiftX, barData.borderTextureShiftY, "cdm", barData.borderThickness or "thin")
         end
 
@@ -3514,7 +3696,9 @@ local function SetFocusKickAlpha(a)
     if frame then
         frame:SetAlpha(a)
         if frame.EnableMouseMotion and not InCombatLockdown() then
-            frame:EnableMouseMotion(a > 0)
+            -- Container never captures motion (steals hover from frames
+            -- underneath); icon hover is owned by the tooltip setting.
+            frame:EnableMouseMotion(false)
         end
         frame._visHidden = (a == 0)
     end
@@ -4131,8 +4315,10 @@ _CDMApplyVisibility = function()
             -- Ghost bar stays hidden even in unlock mode
             elseif unlockActive and not barData.isGhostBar then
                 frame:SetAlpha(1)
-                if frame.EnableMouseMotion and not InCombatLockdown() and not frame._mouseTrack then
-                    frame:EnableMouseMotion(true)
+                -- Container stays motion-through even in unlock mode; drag
+                -- handling lives on the unlock overlay frames, not the bar.
+                if frame.EnableMouseMotion and not InCombatLockdown() then
+                    frame:EnableMouseMotion(false)
                 end
                 frame._visHidden = false
             else
@@ -4186,12 +4372,15 @@ _CDMApplyVisibility = function()
                 -- Custom injected icons are parented to the bar frame, so
                 -- frame alpha would double-apply with icon alpha.
                 frame:SetAlpha(1)
-                -- Don't re-enable mouse motion on cursor-tracked bars;
-                -- SetFrameClickThrough disabled it for click-through and
-                -- re-enabling here on every visibility pass was the source
-                -- of the intermittent hover-blocking bug.
-                if frame.EnableMouseMotion and not InCombatLockdown() and not frame._mouseTrack then
-                    frame:EnableMouseMotion(true)
+                -- The container never captures mouse motion: its rect spans
+                -- the bar's full layout area (mostly empty space on dynamic
+                -- bars like buffs), and a motion-enabled frame with no unit
+                -- steals mouseover focus from unit frames underneath -- raid
+                -- frame hover highlights and [@mouseover] casts died wherever
+                -- the bar overlapped them. Icon hover is handled per-icon
+                -- below, gated on the bar's tooltip setting.
+                if frame.EnableMouseMotion and not InCombatLockdown() then
+                    frame:EnableMouseMotion(false)
                 end
                 frame._visHidden = false
                 -- Apply opacity to icons every pass (idempotent, handles
@@ -4208,7 +4397,17 @@ _CDMApplyVisibility = function()
                             -- ADDON_ACTION_BLOCKED when dismounting mid-combat.
                             if not icCombat2 then
                                 ic:EnableMouse(false)
-                                if ic.EnableMouseMotion then ic:EnableMouseMotion(true) end
+                                -- An icon that receives mouse MOTION becomes the
+                                -- mouseover-focus frame; with no unit of its own it
+                                -- steals focus from whatever unit frame is underneath,
+                                -- so [@mouseover] resolves to nothing and the unit
+                                -- frame's hover highlight never fires. Icons may only
+                                -- capture the mouse when this bar's tooltips are on,
+                                -- and never on cursor-tracked bars (those must stay
+                                -- fully click-AND-motion-through).
+                                if ic.EnableMouseMotion then
+                                    ic:EnableMouseMotion((barData.showTooltip and not frame._mouseTrack) and true or false)
+                                end
                             end
                             local icfc = _ecmeFC[ic]
                             if not (icfc and icfc._cdStateHidden) then
@@ -5042,7 +5241,17 @@ RegisterCDMUnlockElements = function()
                             storeY = y - fh / 2
                         end
                     end
-                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY }
+                    -- Phase 2 follow baseline: capture the anchor target's center
+                    -- (UIParent space) at save time so ApplyAnchorPosition can later
+                    -- shift the absolute saved edge by the target's displacement.
+                    -- Only for growth bars; nil for unanchored/CENTER bars -> follow
+                    -- stays off (pure absolute pin). require-re-save: existing bars
+                    -- pick this up only when next dragged + Save & Exit.
+                    local tgtx, tgty
+                    if grow and grow ~= "CENTER" and EllesmereUI.GetAnchorTargetCenterUI then
+                        tgtx, tgty = EllesmereUI.GetAnchorTargetCenterUI("CDM_" .. key)
+                    end
+                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY, tgtx = tgtx, tgty = tgty }
                     -- Skip rebuild when called from anchor propagation or while
                     -- unlock mode is active (unlock mode owns positioning then).
                     if not EllesmereUI._propagatingSave and not EllesmereUI._unlockActive then
@@ -5096,7 +5305,7 @@ RegisterCDMUnlockElements = function()
     end
 
     if #elements > 0 then
-        EllesmereUI:RegisterUnlockElements(elements)
+        EllesmereUI:RegisterUnlockElements(elements, "EllesmereUICooldownManager")
     end
     -- Expose for ApplyAnchorPosition's growth-direction edge read.
     -- Width-independent: stores edge anchor directly (LEFT/RIGHT/TOP).
@@ -5311,8 +5520,12 @@ function ECME:CDMFinishSetup()
                                 frame = CreateFrame("Frame", "ECME_CDMBar_" .. key, UIParent)
                                 frame:SetFrameStrata("MEDIUM")
                                 frame:SetFrameLevel(5)
+                                if frame.SetSnapToPixelGrid then frame:SetSnapToPixelGrid(false) end
+                                if frame.SetTexelSnappingBias then frame:SetTexelSnappingBias(0) end
                                 if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
-                                if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+                                -- Containers never capture mouse motion (see
+                                -- BuildCDMBar creation block).
+                                if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
                                 frame._barKey = key
                                 frame._barIndex = i
                                 cdmBarFrames[key] = frame
@@ -5329,9 +5542,10 @@ function ECME:CDMFinishSetup()
                             end
                             local spacing = barData.spacing or 2
                             local grow = barData.growDirection or "CENTER"
-                            local numRows = barData.numRows or 1
+                            -- Effective row count: collapses to 1 when a custom
+                            -- top-row split has no icons in its second row yet.
+                            local stride, numRows = ComputeTopRowStride(barData, cachedCount)
                             if numRows < 1 then numRows = 1 end
-                            local stride = ComputeTopRowStride(barData, cachedCount)
                             local isHoriz = (grow == "RIGHT" or grow == "LEFT" or (grow == "CENTER" and not barData.verticalOrientation))
                             -- Compute total in integer phys px to avoid PP.Scale floor
                             -- losing 1 px to floating-point dust on the multiply.
@@ -5642,6 +5856,7 @@ eventFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
 -- Hero talent / loadout change events
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+eventFrame:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 -- Cinematic/cutscene end: Blizzard restores hidden frames, so re-hide ours
 eventFrame:RegisterEvent("CINEMATIC_STOP")
@@ -5767,8 +5982,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         end)
         return
     end
-    if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED" then
-        -- Hero talent or loadout change ΓÇö debounced rebuild
+    if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED"
+        or event == "PLAYER_PVP_TALENT_UPDATE" then
+        -- Hero talent, loadout, or PvP talent context change -- debounced
+        -- rebuild. PvP talents (de)activating on arena enter/exit makes
+        -- Blizzard re-evaluate the viewer's tracked cooldown set; without a
+        -- rebuild the new pool frames are never re-claimed and the
+        -- unclaimed-frame cleanup blanks them (arena-exit empty-CDM bug).
         ScheduleTalentRebuild()
         return
     end
@@ -5863,6 +6083,19 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
+        -- Arena exit backstop: leaving an arena reverts PvP talents and
+        -- spell overrides, and Blizzard re-evaluates the viewer's tracked
+        -- cooldown set. If PLAYER_PVP_TALENT_UPDATE did not fire across the
+        -- zone-out, nothing re-claims the new pool frames and the
+        -- unclaimed-frame cleanup blanks them (arena-exit empty-CDM bug).
+        -- Schedule the same debounced rebuild a talent change gets; the
+        -- token debounce collapses this with the event-driven trigger when
+        -- both fire, so at most one rebuild runs.
+        local _, instType = IsInInstance()
+        if ns._cdmWasInArena and instType ~= "arena" then
+            ScheduleTalentRebuild()
+        end
+        ns._cdmWasInArena = (instType == "arena") or nil
         -- Install rotation helper hook after CDM frames have been built
         C_Timer.After(1, function()
             InstallRotationHook()
@@ -6071,9 +6304,9 @@ SlashCmdList.CDMDBG = function()
         end
     end
     -- Check all currently assigned spells in cooldowns + utility + ghost
-    local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
     local sk = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-    local prof = sa and sa.specProfiles and sk and sa.specProfiles[sk]
+    local prof = sp and sk and sp[sk]
     if prof and prof.barSpells then
         for barKey, bs in pairs(prof.barSpells) do
             if bs and bs.assignedSpells then

@@ -560,7 +560,8 @@ local function DecorateFrame(frame, barData)
             barData.borderTextureShiftX, barData.borderTextureShiftY,
             "cdm", barData.borderThickness or "thin")
     end
-    fd.borderFrame:SetFrameLevel(baseLvl + 13)
+    -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
+    fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
 
     fd.procGlowActive = false
 
@@ -1199,7 +1200,32 @@ local function ProcessPresetCooldowns()
                     if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
                         f._cooldown:SetCooldownFromDurationObject(durObj, true)
                     end
-                    ApplySpellDesaturation(f, durObj)
+                    -- Skip desaturation when the spell is only on GCD
+                    local cdInfo = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(sid)
+                    local onRealCD = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
+                    if cdInfo and cdInfo.isOnGCD and not onRealCD then
+                        if f._tex then f._tex:SetDesaturation(0) end
+                    else
+                        ApplySpellDesaturation(f, durObj)
+                    end
+                    -- Resource check: dim vertex color when not enough resources
+                    -- Only for custom spells (not racials -- racials don't cost resources)
+                    if f._isCustomSpellFrame and f._tex then
+                        if not onRealCD then
+                            local isUsable, notEnoughMana = C_Spell.IsSpellUsable(sid)
+                            if notEnoughMana then
+                                f._tex:SetVertexColor(0.5, 0.5, 1.0)
+                            elseif not isUsable then
+                                f._tex:SetVertexColor(0.4, 0.4, 0.4)
+                            elseif f._lastVertexDim then
+                                f._tex:SetVertexColor(1, 1, 1)
+                            end
+                            f._lastVertexDim = (not isUsable) or nil
+                        elseif f._lastVertexDim then
+                            f._tex:SetVertexColor(1, 1, 1)
+                            f._lastVertexDim = nil
+                        end
+                    end
                 end
             elseif f._isItemPresetFrame and f._presetItemID and now >= _encounterResetUntil then
                 local itemID = f._presetItemID
@@ -1962,13 +1988,16 @@ local function CollectAndReanchor()
                         if frame:GetParent() ~= container then
                             frame:SetParent(container)
                         end
-                        -- Enable mouse motion (OnEnter/OnLeave) for tooltips
-                        -- but keep clicks pass-through. Skip for cursor-
-                        -- anchored bars: re-enabling mouse here would undo
-                        -- the click-through set by SetFrameClickThrough and
-                        -- cause the bar to block hover interactions.
+                        -- Mouse motion (OnEnter/OnLeave) only while this bar's
+                        -- tooltips are on -- a motion-enabled icon steals
+                        -- mouseover focus from unit frames underneath (raid
+                        -- frame hover highlight, [@mouseover] casts). Clicks
+                        -- always pass through. Cursor-anchored bars stay fully
+                        -- mouse-through: re-enabling mouse here would undo the
+                        -- click-through set by SetFrameClickThrough.
                         local isCursorBar = container and container._mouseTrack
-                        if not isCursorBar then
+                        local bdHover = barDataByKey and barDataByKey[barKey]
+                        if bdHover and bdHover.showTooltip and not isCursorBar then
                             frame:EnableMouse(true)
                             if frame.SetMouseClickEnabled then frame:SetMouseClickEnabled(false) end
                             if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
@@ -1985,6 +2014,18 @@ local function CollectAndReanchor()
                                 frame.Cooldown:SetMouseMotionEnabled(false)
                             end
                         end
+                    end
+                    -- Cursor-anchored bars must stay fully mouse-through on
+                    -- EVERY icon, native viewer icons included -- the branch
+                    -- above only re-asserts our own custom frames, but the
+                    -- same Decorate/Show/SetParent/Cooldown path can re-enable
+                    -- mouse on native icons. A mouse-enabled icon riding the
+                    -- cursor intermittently kills [@mouseover] hovercast keys
+                    -- while frame focus still looks correct.
+                    if container and container._mouseTrack then
+                        frame:EnableMouse(false)
+                        if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                        if frame.Cooldown then frame.Cooldown:EnableMouse(false) end
                     end
                     -- Active state hooks handled in DecorateFrame (SetSwipeColor
                     -- hook on every frame, forces our color always).
@@ -2194,8 +2235,8 @@ local function CollectAndReanchor()
     -- moved out of the default bars).
     if ns.MigrateSpecToBarFilterModelV6 then
         local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local prof = sa and sa.specProfiles and specKey and sa.specProfiles[specKey]
+        local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+        local prof = sp and specKey and sp[specKey]
         local needsMigration = prof and not prof._barFilterModelV6
         if needsMigration then
             local added = ns.MigrateSpecToBarFilterModelV6()
@@ -2214,8 +2255,8 @@ local function CollectAndReanchor()
     -- the revived entries become diversions.
     if ns.MergeDormantSpellsIntoAssigned then
         local specKey2 = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-        local sa2 = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local prof2 = sa2 and sa2.specProfiles and specKey2 and sa2.specProfiles[specKey2]
+        local sp2 = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+        local prof2 = sp2 and specKey2 and sp2[specKey2]
         if prof2 and not prof2._dormantMerged then
             ns.MergeDormantSpellsIntoAssigned()
             if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
@@ -2255,6 +2296,13 @@ local function CollectAndReanchor()
             end
             if EllesmereUI.ReapplyAllUnlockAnchorsForced then
                 EllesmereUI.ReapplyAllUnlockAnchorsForced()
+            end
+            -- Arm the settle debounce so any further late resizes (the refresh
+            -- ladder / trinket retries) get one more forced re-apply once they
+            -- quiesce -- guarantees a first debounce window even if the initial
+            -- build's resizes fired before the OnSizeChanged hook was installed.
+            if EllesmereUI.ScheduleSettleReapply then
+                EllesmereUI.ScheduleSettleReapply()
             end
         end)
     else

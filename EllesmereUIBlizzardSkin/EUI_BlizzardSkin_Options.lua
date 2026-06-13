@@ -110,7 +110,18 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipItemLevel = v
               end },
-            { type="label", text="" }
+            -- Front-end duplicate of the toggle in Global Settings > Developer;
+            -- same EllesmereUIDB.showSpellID key read by the tooltip logic in
+            -- EllesmereUI.lua (no separate backend).
+            { type="toggle", text="Show Spell ID on Tooltip",
+              tooltip="Appends the spell or item ID to tooltips. The same setting as Global Settings > Developer.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showSpellID or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showSpellID = v
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -262,7 +273,7 @@ initFrame:SetScript("OnEvent", function(self)
             local bg = EllesmereUI.SolidTex(block, "BACKGROUND", 0, 0, 0, 0)
             bg:SetAllPoints()
             block:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(block, EllesmereUI.DisabledTooltip("Enable Character Sheet"))
+                EllesmereUI.ShowWidgetTooltip(block, EllesmereUI.DisabledTooltip("Character Sheet"))
             end)
             block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function refresh()
@@ -659,7 +670,7 @@ initFrame:SetScript("OnEvent", function(self)
             local itemLevelInspectBg = EllesmereUI.SolidTex(itemLevelInspectBlock, "BACKGROUND", 0, 0, 0, 0)
             itemLevelInspectBg:SetAllPoints()
             itemLevelInspectBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(itemLevelInspectBlock, EllesmereUI.DisabledTooltip("Enable Inspect Sheet"))
+                EllesmereUI.ShowWidgetTooltip(itemLevelInspectBlock, EllesmereUI.DisabledTooltip("Inspect Sheet"))
             end)
             itemLevelInspectBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 

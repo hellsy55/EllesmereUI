@@ -4,36 +4,72 @@
 --  Registers the Bags module and builds the options UI
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+--  Bags profile database
+-------------------------------------------------------------------------------
+local BAGS_DEFAULTS = {
+    profile = {
+        bagScale              = 1,
+        bagColumns            = 12,
+        bagCatTitleSize       = 11,
+        bagCountFontSize      = 11,
+        itemlevelFontSize     = 12,
+        showItemlevelInBags   = true,
+        showUpgradeIndicator  = true,
+        bagShowTrackRank      = false,
+        itemlevelUseCustomColor = false,
+        bagHideEmptyCategories = true,
+        bagSidebarCollapsed   = false,
+        bankSidebarCollapsed  = false,
+        bagShowPinnedItems    = true,
+        bagShowRecentItems    = true,
+        bagPinnedInOneBag     = true,
+        bagRecentInOneBag     = false,
+        bagShowPinRecentTips  = true,
+        bagShowSortIcon       = true,
+        bagHideRandomize      = false,
+        bagDefaultOneBag      = false,
+        bagNestByExpansion    = false,
+        bagHideOneBagWarning  = false,
+        bagHideAddCategory    = false,
+        bagMoveNoShift        = false,
+        enableGoldTracking    = true,
+        detachReagentBag      = false,
+        enhancedBags          = true,
+    },
+}
+local db = EllesmereUI.Lite.NewDB("EllesmereUIBagsDB", BAGS_DEFAULTS)
+EllesmereUI._bagsDB = db
+
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
 
     if not EllesmereUIDB then EllesmereUIDB = {} end
-    if EllesmereUIDB.showItemlevelInBags == nil then EllesmereUIDB.showItemlevelInBags = true end
-    if EllesmereUIDB.showUpgradeIndicator == nil then EllesmereUIDB.showUpgradeIndicator = true end
+    local p = db.profile
 
     -- Default disabled categories: Housing and Quest Items off by default
     if EllesmereUIDB.bagDisabledCategoriesSeeded == nil then
         EllesmereUIDB.bagDisabledCategoriesSeeded = true
-        if not EllesmereUIDB.bagDisabledCategories then EllesmereUIDB.bagDisabledCategories = {} end
-        EllesmereUIDB.bagDisabledCategories["Housing"] = true
-        EllesmereUIDB.bagDisabledCategories["Quest Items"] = true
+        if not p.bagDisabledCategories then p.bagDisabledCategories = {} end
+        p.bagDisabledCategories["Housing"] = true
+        p.bagDisabledCategories["Quest Items"] = true
     end
 
     -- Default category groups and order
     if not EllesmereUIDB.bagDefaultGroupsSeeded then
         EllesmereUIDB.bagDefaultGroupsSeeded = true
         -- Only seed if user has no existing customization
-        if not EllesmereUIDB.bagCategoryState and not EllesmereUIDB.bagCategoryOrder then
-            EllesmereUIDB.bagCategoryState = {
+        if not p.bagCategoryState and not p.bagCategoryOrder then
+            p.bagCategoryState = {
                 ["Weapons / Trinkets"] = { groupName = "The Armory", groupNameCustom = true },
                 ["Armor"]              = { groupName = "The Armory", groupNameCustom = true },
                 ["Item Set Gear"]      = { groupName = "The Armory", groupNameCustom = true },
                 ["Consumables"]        = { groupName = "Adventure Prep", groupNameCustom = true },
                 ["Gear Enhancements"]  = { groupName = "Adventure Prep", groupNameCustom = true },
             }
-            EllesmereUIDB.bagCategoryOrder = {
+            p.bagCategoryOrder = {
                 "Pinned Items",
                 "Recent Items",
                 "Weapons / Trinkets",
@@ -55,8 +91,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
     -- Migrate old numeric-keyed disabled categories to name-keyed
-    if EllesmereUIDB.bagDisabledCategories and _G.EUI_CategoryManager then
-        local dc = EllesmereUIDB.bagDisabledCategories
+    if p.bagDisabledCategories and _G.EUI_CategoryManager then
+        local dc = p.bagDisabledCategories
         local cats = _G.EUI_CategoryManager:GetCategories()
         local migrated = {}
         local changed = false
@@ -68,7 +104,7 @@ initFrame:SetScript("OnEvent", function(self)
                 migrated[k] = v
             end
         end
-        if changed then EllesmereUIDB.bagDisabledCategories = migrated end
+        if changed then p.bagDisabledCategories = migrated end
     end
 
     if not EllesmereUI or not EllesmereUI.RegisterModule then return end
@@ -99,13 +135,13 @@ initFrame:SetScript("OnEvent", function(self)
                 line1:SetTextColor(1, 1, 1, 0.75)
                 line1:SetPoint("TOP", infoFrame, "TOP", 0, 0)
                 line1:SetJustifyH("CENTER")
-                line1:SetText("Reposition this element with Shift+Click and Drag.")
+                line1:SetText(EllesmereUI.L("Reposition this element with Shift+Click and Drag."))
                 local line2 = infoFrame:CreateFontString(nil, "OVERLAY")
                 line2:SetFont(fontPath, 15, "")
                 line2:SetTextColor(1, 1, 1, 0.75)
                 line2:SetPoint("TOP", line1, "BOTTOM", 0, -2)
                 line2:SetJustifyH("CENTER")
-                line2:SetText("Drag categories on bag sidebar to reposition, group or ungroup.")
+                line2:SetText(EllesmereUI.L("Drag categories on bag sidebar to reposition, group or ungroup."))
                 y = y - 50
             end
 
@@ -118,9 +154,9 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Window Scale", min=50, max=150, step=5,
                   tooltip="Scale of the bag and bank windows.",
-                  getValue=function() return math.floor((EllesmereUIDB and EllesmereUIDB.bagScale or 1) * 100 + 0.5) end,
+                  getValue=function() return math.floor((db.profile.bagScale or 1) * 100 + 0.5) end,
                   setValue=function(v)
-                      EllesmereUIDB.bagScale = v / 100
+                      db.profile.bagScale = v / 100
                       local s = v / 100
                       if _G.EUI_Bags then _G.EUI_Bags:SetScale(s) end
                       if _G.EUI_BagsReagent then _G.EUI_BagsReagent:SetScale(s) end
@@ -129,9 +165,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
                 { type="toggle", text="Hide Categories with 0 Items",
                   tooltip="Hide sidebar categories that have no items in them.",
-                  getValue=function() return not EllesmereUIDB or EllesmereUIDB.bagHideEmptyCategories ~= false end,
+                  getValue=function() return db.profile.bagHideEmptyCategories ~= false end,
                   setValue=function(v)
-                      EllesmereUIDB.bagHideEmptyCategories = v
+                      db.profile.bagHideEmptyCategories = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -140,16 +176,16 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Category Title Size", min=8, max=16, step=1,
                   tooltip="Font size for category titles in the sidebar and content grid.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagCatTitleSize or 11 end,
+                  getValue=function() return db.profile.bagCatTitleSize or 11 end,
                   setValue=function(v)
-                      EllesmereUIDB.bagCatTitleSize = v
+                      db.profile.bagCatTitleSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
                 { type="toggle", text="Default Open to OneBag",
                   tooltip="Open bags and bank to the OneBag/OneBank view by default instead of categorized views.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag == true end,
+                  getValue=function() return db.profile.bagDefaultOneBag == true end,
                   setValue=function(v)
-                      EllesmereUIDB.bagDefaultOneBag = v
+                      db.profile.bagDefaultOneBag = v
                       if _G.EUI_Bags and _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
                           _G.EUI_Bags:RefreshInventory()
                       end
@@ -182,15 +218,15 @@ initFrame:SetScript("OnEvent", function(self)
                         leftRgn, 210, leftRgn:GetFrameLevel() + 2,
                         catItems,
                         function(defName)
-                            local dc = EllesmereUIDB and EllesmereUIDB.bagDisabledCategories
+                            local dc = db.profile.bagDisabledCategories
                             return not (dc and dc[defName])
                         end,
                         function(defName, v)
-                            if not EllesmereUIDB.bagDisabledCategories then EllesmereUIDB.bagDisabledCategories = {} end
+                            if not db.profile.bagDisabledCategories then db.profile.bagDisabledCategories = {} end
                             if v then
-                                EllesmereUIDB.bagDisabledCategories[defName] = nil
+                                db.profile.bagDisabledCategories[defName] = nil
                             else
-                                EllesmereUIDB.bagDisabledCategories[defName] = true
+                                db.profile.bagDisabledCategories[defName] = true
                             end
                             if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then
                                 C_Timer.After(0.1, function()
@@ -256,19 +292,19 @@ initFrame:SetScript("OnEvent", function(self)
                         rightRgn, 210, rightRgn:GetFrameLevel() + 2,
                         currencyItems,
                         function(cID)
-                            local co = EllesmereUIDB and EllesmereUIDB.currencyOrder
+                            local co = db.profile.currencyOrder
                             return co and co[cID] and true or false
                         end,
                         function(cID, v)
-                            if not EllesmereUIDB.currencyOrder then EllesmereUIDB.currencyOrder = {} end
+                            if not db.profile.currencyOrder then db.profile.currencyOrder = {} end
                             if v then
                                 local maxOrder = 0
-                                for _, ord in pairs(EllesmereUIDB.currencyOrder) do
+                                for _, ord in pairs(db.profile.currencyOrder) do
                                     if type(ord) == "number" and ord > maxOrder then maxOrder = ord end
                                 end
-                                EllesmereUIDB.currencyOrder[cID] = maxOrder + 1
+                                db.profile.currencyOrder[cID] = maxOrder + 1
                             else
-                                EllesmereUIDB.currencyOrder[cID] = nil
+                                db.profile.currencyOrder[cID] = nil
                             end
                             if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then
                                 C_Timer.After(0.1, function()
@@ -288,16 +324,16 @@ initFrame:SetScript("OnEvent", function(self)
             bagsRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Item Level",
                   tooltip="Display item levels on equipment items in the inventory.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.showItemlevelInBags ~= false end,
+                  getValue=function() return db.profile.showItemlevelInBags ~= false end,
                   setValue=function(v)
-                      EllesmereUIDB.showItemlevelInBags = v
+                      db.profile.showItemlevelInBags = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
                 { type="toggle", text="Show Gear Track Rank",
                   tooltip="Display the upgrade track rank number on the bottom-right of gear items.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagShowTrackRank or false end,
+                  getValue=function() return db.profile.bagShowTrackRank or false end,
                   setValue=function(v)
-                      EllesmereUIDB.bagShowTrackRank = v
+                      db.profile.bagShowTrackRank = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -306,18 +342,18 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Item Count Text Size", min=8, max=16, step=1,
                   tooltip="Font size for stack counts, keystone levels, and dungeon abbreviations.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11 end,
+                  getValue=function() return db.profile.bagCountFontSize or 11 end,
                   setValue=function(v)
-                      EllesmereUIDB.bagCountFontSize = v
+                      db.profile.bagCountFontSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
                       local bank = _G.EUI_BankFrame
                       if bank and bank.RefreshTextSizes then bank:RefreshTextSizes() end
                   end },
                 { type="slider", text="Item Level Text Size", min=8, max=16, step=1,
                   tooltip="Font size for item level numbers on equipment items.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12 end,
+                  getValue=function() return db.profile.itemlevelFontSize or 12 end,
                   setValue=function(v)
-                      EllesmereUIDB.itemlevelFontSize = v
+                      db.profile.itemlevelFontSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
                       local bank = _G.EUI_BankFrame
                       if bank and bank.RefreshTextSizes then bank:RefreshTextSizes() end
@@ -333,9 +369,9 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Sort Icon",
                   tooltip="Display the sort button in the bag header.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagShowSortIcon ~= false end,
+                  getValue=function() return db.profile.bagShowSortIcon ~= false end,
                   setValue=function(v)
-                      EllesmereUIDB.bagShowSortIcon = v
+                      db.profile.bagShowSortIcon = v
                       if _G.EUI_Bags and _G.EUI_Bags._sortBtn then
                           if v then
                               _G.EUI_Bags._sortBtn:Show()
@@ -354,8 +390,8 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
                 { type="toggle", text="Gold Tracking and History",
                   tooltip="Track and display gold amounts from all your characters on hover.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.enableGoldTracking ~= false end,
-                  setValue=function(v) EllesmereUIDB.enableGoldTracking = v end }
+                  getValue=function() return db.profile.enableGoldTracking ~= false end,
+                  setValue=function(v) db.profile.enableGoldTracking = v end }
             ); y = y - h
 
             -- Show Pinned Items | Show Recent Items (each with inline cog for OneBag)
@@ -363,17 +399,17 @@ initFrame:SetScript("OnEvent", function(self)
             pinRecRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Pinned Items",
                   tooltip="Show the Pinned Items category in the sidebar and content grid.",
-                  getValue=function() return not EllesmereUIDB or EllesmereUIDB.bagShowPinnedItems ~= false end,
+                  getValue=function() return db.profile.bagShowPinnedItems ~= false end,
                   setValue=function(v)
-                      EllesmereUIDB.bagShowPinnedItems = v
+                      db.profile.bagShowPinnedItems = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                       EllesmereUI:RefreshPage()
                   end },
                 { type="toggle", text="Show Recent Items",
                   tooltip="Show the Recent Items category in the sidebar and content grid for newly acquired items.",
-                  getValue=function() return not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false end,
+                  getValue=function() return db.profile.bagShowRecentItems ~= false end,
                   setValue=function(v)
-                      EllesmereUIDB.bagShowRecentItems = v
+                      db.profile.bagShowRecentItems = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                       EllesmereUI:RefreshPage()
                   end }
@@ -385,9 +421,9 @@ initFrame:SetScript("OnEvent", function(self)
                     title = "Pinned Items Options",
                     rows = {
                         { type="toggle", label="Show in OneBag",
-                          get=function() return not EllesmereUIDB or EllesmereUIDB.bagPinnedInOneBag ~= false end,
+                          get=function() return db.profile.bagPinnedInOneBag ~= false end,
                           set=function(v)
-                              EllesmereUIDB.bagPinnedInOneBag = v
+                              db.profile.bagPinnedInOneBag = v
                               if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                           end },
                     },
@@ -400,11 +436,11 @@ initFrame:SetScript("OnEvent", function(self)
                 local pcCogTex = pcCog:CreateTexture(nil, "OVERLAY")
                 pcCogTex:SetAllPoints()
                 pcCogTex:SetTexture(EllesmereUI.COGS_ICON)
-                local function pcCogOff() return EllesmereUIDB and EllesmereUIDB.bagShowPinnedItems == false end
+                local function pcCogOff() return db.profile.bagShowPinnedItems == false end
                 pcCog:SetAlpha(pcCogOff() and 0.15 or 0.4)
                 pcCog:SetScript("OnEnter", function(self)
                     if pcCogOff() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Pinned Items must be enabled"))
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Pinned Items"))
                     else self:SetAlpha(0.7) end
                 end)
                 pcCog:SetScript("OnLeave", function(self)
@@ -417,7 +453,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local pcBlock = CreateFrame("Frame", nil, pcCog)
                 pcBlock:SetAllPoints(); pcBlock:SetFrameLevel(pcCog:GetFrameLevel() + 10); pcBlock:EnableMouse(true)
                 pcBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(pcCog, EllesmereUI.DisabledTooltip("Show Pinned Items must be enabled"))
+                    EllesmereUI.ShowWidgetTooltip(pcCog, EllesmereUI.DisabledTooltip("Show Pinned Items"))
                 end)
                 pcBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 if pcCogOff() then pcBlock:Show() else pcBlock:Hide() end
@@ -433,9 +469,9 @@ initFrame:SetScript("OnEvent", function(self)
                     title = "Recent Items Options",
                     rows = {
                         { type="toggle", label="Show in OneBag",
-                          get=function() return EllesmereUIDB and EllesmereUIDB.bagRecentInOneBag == true end,
+                          get=function() return db.profile.bagRecentInOneBag == true end,
                           set=function(v)
-                              EllesmereUIDB.bagRecentInOneBag = v
+                              db.profile.bagRecentInOneBag = v
                               if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                           end },
                     },
@@ -448,11 +484,11 @@ initFrame:SetScript("OnEvent", function(self)
                 local rcCogTex = rcCog:CreateTexture(nil, "OVERLAY")
                 rcCogTex:SetAllPoints()
                 rcCogTex:SetTexture(EllesmereUI.COGS_ICON)
-                local function rcCogOff() return EllesmereUIDB and EllesmereUIDB.bagShowRecentItems == false end
+                local function rcCogOff() return db.profile.bagShowRecentItems == false end
                 rcCog:SetAlpha(rcCogOff() and 0.15 or 0.4)
                 rcCog:SetScript("OnEnter", function(self)
                     if rcCogOff() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Recent Items must be enabled"))
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Recent Items"))
                     else self:SetAlpha(0.7) end
                 end)
                 rcCog:SetScript("OnLeave", function(self)
@@ -465,7 +501,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local rcBlock = CreateFrame("Frame", nil, rcCog)
                 rcBlock:SetAllPoints(); rcBlock:SetFrameLevel(rcCog:GetFrameLevel() + 10); rcBlock:EnableMouse(true)
                 rcBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(rcCog, EllesmereUI.DisabledTooltip("Show Recent Items must be enabled"))
+                    EllesmereUI.ShowWidgetTooltip(rcCog, EllesmereUI.DisabledTooltip("Show Recent Items"))
                 end)
                 rcBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 if rcCogOff() then rcBlock:Show() else rcBlock:Hide() end
@@ -479,17 +515,16 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Pinned & Recent Tips",
                   tooltip="Show helpful tip text on Pinned Items and Recent Items category headers.",
-                  getValue=function() return not EllesmereUIDB or EllesmereUIDB.bagShowPinRecentTips ~= false end,
+                  getValue=function() return db.profile.bagShowPinRecentTips ~= false end,
                   setValue=function(v)
-                      EllesmereUIDB.bagShowPinRecentTips = v
+                      db.profile.bagShowPinRecentTips = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
                 { type="toggle", text="Hide 'Add Category' Tab",
                   tooltip="Hides the Add Category button at the bottom of the bag sidebar.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagHideAddCategory or false end,
+                  getValue=function() return db.profile.bagHideAddCategory or false end,
                   setValue=function(v)
-                      if not EllesmereUIDB then EllesmereUIDB = {} end
-                      EllesmereUIDB.bagHideAddCategory = v
+                      db.profile.bagHideAddCategory = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -498,16 +533,15 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Move Bags Without Shift",
                   tooltip="When enabled, left-click dragging the bag window will move it without needing to hold Shift.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagMoveNoShift or false end,
+                  getValue=function() return db.profile.bagMoveNoShift or false end,
                   setValue=function(v)
-                      if not EllesmereUIDB then EllesmereUIDB = {} end
-                      EllesmereUIDB.bagMoveNoShift = v
+                      db.profile.bagMoveNoShift = v
                   end },
                 { type="toggle", text="Nest by Expansion",
                   tooltip="In the All Items bag view, show each category's items under indented expansion sub-headers (newest expansions first), even when everything in that category is from one expansion.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagNestByExpansion == true end,
+                  getValue=function() return db.profile.bagNestByExpansion == true end,
                   setValue=function(v)
-                      EllesmereUIDB.bagNestByExpansion = v and true or false
+                      db.profile.bagNestByExpansion = v and true or false
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -516,16 +550,16 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Hide OneBag Warning",
                   tooltip="Hide the warning text at the top of the OneBag view.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagHideOneBagWarning == true end,
+                  getValue=function() return db.profile.bagHideOneBagWarning == true end,
                   setValue=function(v)
-                      EllesmereUIDB.bagHideOneBagWarning = v
+                      db.profile.bagHideOneBagWarning = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
                 { type="toggle", text="Hide OneBag Randomize Button",
                   tooltip="Hide the randomize (dice) button in the OneBag view.",
-                  getValue=function() return EllesmereUIDB and EllesmereUIDB.bagHideRandomize == true end,
+                  getValue=function() return db.profile.bagHideRandomize == true end,
                   setValue=function(v)
-                      EllesmereUIDB.bagHideRandomize = v
+                      db.profile.bagHideRandomize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -537,15 +571,21 @@ initFrame:SetScript("OnEvent", function(self)
             return ok and result or 0
         end,
         onReset = function()
-            if not EllesmereUIDB then return end
-            -- Wipe all bag* and bank* prefixed keys + non-prefixed bags keys
-            local extraKeys = { enableGoldTracking = true, itemlevelFontSize = true, detachReagentBag = true, goldData = true, warbandGold = true }
-            for k in pairs(EllesmereUIDB) do
-                if type(k) == "string" then
-                    if k:sub(1, 3) == "bag" or k:sub(1, 4) == "bank" or extraKeys[k] then
-                        EllesmereUIDB[k] = nil
-                    end
+            -- Wipe per-profile data and re-apply defaults
+            local bdb = EllesmereUI._bagsDB
+            local p = bdb and bdb.profile
+            if p then
+                for k in pairs(p) do p[k] = nil end
+                if bdb._profileDefaults then
+                    EllesmereUI.Lite.DeepMergeDefaults(p, bdb._profileDefaults)
                 end
+            end
+            -- Wipe per-character data from root DB
+            if EllesmereUIDB then
+                EllesmereUIDB.bagPinnedItems = nil
+                EllesmereUIDB.bagItemAssignments = nil
+                EllesmereUIDB.characterGold = nil
+                EllesmereUIDB.warbandGold = nil
             end
             EllesmereUI:InvalidatePageCache()
         end,

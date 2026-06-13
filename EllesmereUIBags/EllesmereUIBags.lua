@@ -3,14 +3,6 @@
 --  Enhanced Bags System for EllesmereUI (Midnight)
 --  Sidebar category filter + flat item grid layout.
 -------------------------------------------------------------------------------
--- Guard: old Bags saved variables file may contain a stale EllesmereUIDB
--- that overwrites the parent's current data (profiles vanish). Detect by
--- checking if the table reference changed from what the parent saved, and
--- restore it. After one logout the stale entry is purged from the file.
-if EllesmereUI and EllesmereUI._parentDBRef and EllesmereUIDB ~= EllesmereUI._parentDBRef then
-    EllesmereUIDB = EllesmereUI._parentDBRef
-end
-
 EUI_Bags = CreateFrame("Frame", "EUI_MainBagFrame", UIParent)
 EUI_Bags:Hide()
 
@@ -21,19 +13,24 @@ EUI_BagsWindow = CreateFrame("Frame", "EUI_BagsWindowFrame", UIParent)
 EUI_BagsWindow:Hide()
 
 local SLOT_SIZE, SPACING = 34, 4
+local _canUseCache = {}  -- [itemID] = true (usable) | false (unusable), via tooltip red-text scan
 -- Weak-keyed table for bank-deposit routing state. Writing custom keys onto
 -- ContainerFrameItemButtonTemplate frames during PreClick taints the secure
 -- execution chain and causes UseContainerItem() ADDON_ACTION_FORBIDDEN.
 local _bankRouted = setmetatable({}, { __mode = "k" })
 
+local EUI = EllesmereUI
+-- Profile access helper (DB created in EUI_Bags_Options.lua, loaded first per TOC)
+local _emptyP = {}
+local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
+
 local function ApplyBagScale()
-    local s = EllesmereUIDB and EllesmereUIDB.bagScale or 1
+    local s = BP().bagScale or 1
     if EUI_Bags then EUI_Bags:SetScale(s) end
     if EUI_BagsReagent then EUI_BagsReagent:SetScale(s) end
     if EUI_BagsWindow then EUI_BagsWindow:SetScale(s) end
 end
 
-local EUI = EllesmereUI
 local GetUpgradeTrack = EUI.GetUpgradeTrack
 -- Locale-safe gear detection: GetItemInfo returns localized type strings
 -- ("Armor"/"Weapon" only on enUS). Use GetItemInfoInstant's numeric classID.
@@ -56,10 +53,10 @@ local function GetAccentRGB()
 end
 
 local function GetColumns()
-    return EllesmereUIDB and EllesmereUIDB.bagColumns or 12
+    return BP().bagColumns or 12
 end
 local function GetCatTitleSize()
-    return EllesmereUIDB and EllesmereUIDB.bagCatTitleSize or 11
+    return BP().bagCatTitleSize or 11
 end
 
 -- Abbreviate a dungeon name to initials (skip "of", "the", "a")
@@ -426,12 +423,11 @@ end
 
 -- Saved visual order per category/group. Keyed by category index (number) or
 -- group name (string). Value is an ordered list of "bag:slot" strings.
--- Persisted in EllesmereUIDB.bagVisualOrder.
+-- Persisted in BP().bagVisualOrder.
 -- Items in the saved list display in that order; items not in the list append to end.
 local function GetVisualOrder()
-    if not EllesmereUIDB then EllesmereUIDB = {} end
-    if not EllesmereUIDB.bagVisualOrder then EllesmereUIDB.bagVisualOrder = {} end
-    return EllesmereUIDB.bagVisualOrder
+    if not BP().bagVisualOrder then BP().bagVisualOrder = {} end
+    return BP().bagVisualOrder
 end
 
 local function SaveCategoryOrder(key, items)
@@ -717,7 +713,14 @@ local function CreateHeader()
                         end
                     end
                 end
-                -- Find a pair to merge: smallest partial -> largest partial
+                -- Merge ONE pair per itemID this pass (smallest partial -> largest).
+                -- Distinct itemIDs live in distinct slots, so issuing every itemID's
+                -- merge in the same frame never conflicts; we then wait a single
+                -- BAG_UPDATE and repeat for anything still partial. Converges in a few
+                -- rounds (max partials-per-item) instead of one merge per round, which
+                -- was the dominant cause of the multi-second sort lockout. (Previously
+                -- this `break`-ed after the first merge -> one 0.15s+BAG_UPDATE round
+                -- per partial stack, i.e. dozens of serial rounds on a full bag.)
                 local merged = false
                 for _, partials in pairs(stacks) do
                     if #partials >= 2 then
@@ -731,7 +734,6 @@ local function CreateHeader()
                             C_Container.PickupContainerItem(dst.bag, dst.slot)
                             ClearCursor()
                             merged = true
-                            break  -- one merge per pass, wait for BAG_UPDATE
                         end
                     end
                 end
@@ -990,7 +992,7 @@ local function CreateHeader()
     end)
     EUI_Bags._doVisualSort = DoVisualSort
     EUI_Bags._sortBtn = sort
-    if EllesmereUIDB and EllesmereUIDB.bagShowSortIcon == false then sort:Hide() end
+    if BP().bagShowSortIcon == false then sort:Hide() end
 
     -- Randomize Button (dice icon, OneBag only, top-right of bag frame)
     local dice = CreateFrame("Button", nil, EUI_Bags)
@@ -1304,7 +1306,7 @@ end
 EUI_Bags.CaptureWarbandGold = CaptureWarbandGold
 
 local function CaptureTrackedGold()
-    if EllesmereUIDB and EllesmereUIDB.enableGoldTracking == false then return end
+    if BP().enableGoldTracking == false then return end
     CaptureCurrentCharacterGold()
     CaptureWarbandGold()
 end
@@ -1401,7 +1403,7 @@ end
 
 local function ShowGoldTooltip(anchor)
     if not EllesmereUIDB then return end
-    if EllesmereUIDB.enableGoldTracking == false then return end
+    if BP().enableGoldTracking == false then return end
 
     local totalGold = 0
     local charList = {}
@@ -1561,7 +1563,7 @@ local function CreateFooter()
     moneyHitbox:SetScript("OnLeave", function() HideGoldTooltip() end)
     moneyHitbox:SetScript("OnMouseDown", function(self, button)
         if not EllesmereUIDB then return end
-        if EllesmereUIDB.enableGoldTracking == false then return end
+        if BP().enableGoldTracking == false then return end
         if button == "RightButton" and IsControlKeyDown() then
             ResetAllGoldData(); HideGoldTooltip(); return
         end
@@ -1590,7 +1592,7 @@ local function UpdateCurrencyDisplays()
 
     -- Build tracked list from internal order table (decoupled from Blizzard)
     local tracked = {}
-    local orderDB = EllesmereUIDB and EllesmereUIDB.currencyOrder
+    local orderDB = BP().currencyOrder
     if orderDB and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
         for cID, order in pairs(orderDB) do
             if type(order) == "number" then
@@ -1802,6 +1804,12 @@ end)
 -------------------------------------------------------------------------------
 local function GetOrCreateSlot(idx)
     if itemSlots[idx] then return itemSlots[idx] end
+    -- Never CreateFrame a secure ContainerFrameItemButtonTemplate button during
+    -- combat lockdown: a button born in combat is tainted and its click gets
+    -- UseContainerItem() blocked (ADDON_ACTION_FORBIDDEN) in M+/Delves. The
+    -- pre-warmed pool covers normal counts; if we somehow run past it in combat
+    -- the caller skips this slot and PLAYER_REGEN_ENABLED replays a full refresh.
+    if InCombatLockdown() then return nil end
 
     local slotParent = CreateFrame("Frame", nil, EUI_Bags)
     slotParent:SetSize(SLOT_SIZE, SLOT_SIZE)
@@ -1923,7 +1931,7 @@ local function GetOrCreateSlot(idx)
     local pt = btn:GetPushedTexture()
     if pt then
         pt:SetAtlas(nil)
-        pt:SetTexture("Interface\\AddOns\\EllesmereUIActionBars\\Media\\highlight-3.png")
+        pt:SetTexture("Interface\\AddOns\\EllesmereUIBags\\Media\\highlight-3.png")
         pt:SetTexCoord(0, 1, 0, 1)
         pt:ClearAllPoints(); pt:SetAllPoints(btn)
         pt:SetVertexColor(0.973, 0.839, 0.604, 1)
@@ -1957,7 +1965,7 @@ local function GetOrCreateSlot(idx)
     textOverlay:SetFrameLevel((btn.Cooldown and btn.Cooldown:GetFrameLevel() or btn:GetFrameLevel()) + 2)
     btn._textOverlay = textOverlay
 
-    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
+    local countSize = BP().bagCountFontSize or 11
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
@@ -1971,7 +1979,7 @@ local function GetOrCreateSlot(idx)
         btn.ItemLevelText:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
         btn.ItemLevelText:SetTextColor(1, 1, 1, 1)
     end
-    local fontSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    local fontSize = BP().itemlevelFontSize or 12
     local fontPath = GetFont()
     btn.ItemLevelText:SetFont(fontPath, fontSize, "OUTLINE")
     btn.ItemLevelText:SetText("")
@@ -2000,6 +2008,8 @@ end
 
 local function GetOrCreateReagentSlot(idx)
     if reagentSlots[idx] then return reagentSlots[idx] end
+    -- Never create a secure button during combat (taint). See GetOrCreateSlot.
+    if InCombatLockdown() then return nil end
 
     local slotParent = CreateFrame("Frame", nil, EUI_BagsReagent)
     slotParent:SetSize(SLOT_SIZE, SLOT_SIZE)
@@ -2027,7 +2037,7 @@ local function GetOrCreateReagentSlot(idx)
     local pt = btn:GetPushedTexture()
     if pt then
         pt:SetAtlas(nil)
-        pt:SetTexture("Interface\\AddOns\\EllesmereUIActionBars\\Media\\highlight-3.png")
+        pt:SetTexture("Interface\\AddOns\\EllesmereUIBags\\Media\\highlight-3.png")
         pt:SetTexCoord(0, 1, 0, 1)
         pt:ClearAllPoints(); pt:SetAllPoints(btn)
         pt:SetVertexColor(0.973, 0.839, 0.604, 1)
@@ -2064,7 +2074,7 @@ local function GetOrCreateReagentSlot(idx)
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
-        countFS:SetFont(GetFont(), EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11, "OUTLINE")
+        countFS:SetFont(GetFont(), BP().bagCountFontSize or 11, "OUTLINE")
         countFS:ClearAllPoints()
         countFS:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     end
@@ -2074,7 +2084,7 @@ local function GetOrCreateReagentSlot(idx)
         btn.ItemLevelText:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
         btn.ItemLevelText:SetTextColor(1, 1, 1, 1)
     end
-    local fontSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    local fontSize = BP().itemlevelFontSize or 12
     btn.ItemLevelText:SetFont(STANDARD_TEXT_FONT, fontSize, "OUTLINE")
     btn.ItemLevelText:SetText("")
 
@@ -2093,7 +2103,7 @@ local function GetOrCreateBagSlot(idx)
     btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     btn.icon:SetAllPoints(btn)
     btn.Count = btn:CreateFontString(nil, "OVERLAY")
-    btn.Count:SetFont(GetFont(), EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11, "OUTLINE")
+    btn.Count:SetFont(GetFont(), BP().bagCountFontSize or 11, "OUTLINE")
     btn.Count:SetPoint("BOTTOMRIGHT", -2, 2)
     btn.Count:SetTextColor(1, 1, 1)
     CreateInsetBorder(btn)
@@ -2122,8 +2132,8 @@ end
 -------------------------------------------------------------------------------
 local function RefreshTextSizes()
     local fontPath = GetFont()
-    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
-    local ilvlSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    local countSize = BP().bagCountFontSize or 11
+    local ilvlSize = BP().itemlevelFontSize or 12
     for _, btn in pairs(itemSlots) do
         if btn.Count then btn.Count:SetFont(fontPath, countSize, "OUTLINE") end
         if btn.ItemLevelText then btn.ItemLevelText:SetFont(fontPath, ilvlSize, "OUTLINE") end
@@ -2206,15 +2216,15 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         -- Item Level + Upgrade Rank (gear only)
         if btn.ItemLevelText then
             if data._isGear then
-                local showIlvl = not EllesmereUIDB or EllesmereUIDB.showItemlevelInBags ~= false
+                local showIlvl = BP().showItemlevelInBags ~= false
                 if showIlvl then
                     btn.ItemLevelText:SetText(data._giIlvl or "")
                     -- Track color + rank (pre-cached on data table)
                     local r, g, b
                     local rankText = data._giTrackRank or ""
                     local trackColor = data._giTrackColor
-                    if EllesmereUIDB and EllesmereUIDB.itemlevelUseCustomColor and EllesmereUIDB.itemlevelCustomColor then
-                        r, g, b = EllesmereUIDB.itemlevelCustomColor.r, EllesmereUIDB.itemlevelCustomColor.g, EllesmereUIDB.itemlevelCustomColor.b
+                    if BP().itemlevelUseCustomColor and BP().itemlevelCustomColor then
+                        r, g, b = BP().itemlevelCustomColor.r, BP().itemlevelCustomColor.g, BP().itemlevelCustomColor.b
                     elseif rankText ~= "" and trackColor then
                         r, g, b = trackColor.r, trackColor.g, trackColor.b
                     else
@@ -2223,7 +2233,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
                     btn.ItemLevelText:SetTextColor(r, g, b, 1)
                     -- Rank text at bottom-right
                     local countFS = btn.Count
-                    if countFS and EllesmereUIDB and EllesmereUIDB.bagShowTrackRank and rankText ~= "" then
+                    if countFS and BP().bagShowTrackRank and rankText ~= "" then
                         countFS:SetText(rankText:match("^(%d+)/") or rankText)
                         countFS:SetTextColor(r, g, b, 1)
                         countFS:Show()
@@ -2279,6 +2289,39 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
                 if btn._textOverlay then btn.IconOverlay:SetParent(btn._textOverlay) end
             else
                 btn.IconOverlay:SetAlpha(0)
+            end
+        end
+        if btn.icon and data.info and data.info.itemID then
+            local id = data.info.itemID
+            local canUse = _canUseCache[id]
+            if canUse == nil then
+                canUse = true
+                if IsEquippableItem(id) or C_Item.GetItemSpell(id) then
+                    local tip = C_TooltipInfo.GetItemByID(id)
+                    if tip and tip.lines then
+                        for _, row in ipairs(tip.lines) do
+                            local lc = row.leftColor
+                            if lc and lc.r == 1 and lc.g < 0.2 and lc.b < 0.2
+                               and row.leftText ~= ITEM_SCRAPABLE_NOT
+                               and row.leftText ~= CANNOT_UNEQUIP_COMBAT
+                               and row.leftText ~= ITEM_DISENCHANT_NOT_DISENCHANTABLE then
+                                canUse = false
+                                break
+                            end
+                            local rc = row.rightColor
+                            if rc and rc.r == 1 and rc.g < 0.2 and rc.b < 0.2 then
+                                canUse = false
+                                break
+                            end
+                        end
+                    end
+                end
+                _canUseCache[id] = canUse
+            end
+            if canUse == false then
+                btn.icon:SetVertexColor(1, 0.1, 0.1)
+            else
+                btn.icon:SetVertexColor(1, 1, 1)
             end
         end
         if btn.IconOverlay2 then
@@ -2807,7 +2850,7 @@ end
 local _sidebarBtns = {}  -- array of sidebar button frames
 
 local function GetSidebarWidth()
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed
+    local collapsed = BP().bagSidebarCollapsed
     return collapsed and SIDEBAR_W_COLLAPSED or SIDEBAR_W_EXPANDED
 end
 
@@ -3182,7 +3225,7 @@ StartSidebarDrag = function(btnSelf, catIdx, catName, catIcon, catIsAtlas)
         ghost.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     end
     ghost.label:SetText(catName or "?")
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed
+    local collapsed = BP().bagSidebarCollapsed
     if collapsed then ghost.label:Hide() else ghost.label:Show() end
     ghost:Show()
 
@@ -3484,7 +3527,7 @@ local function CreateSidebar()
     collapseBtn._icon:SetAlpha(0.4)
 
     local function UpdateCollapseArrow()
-        local collapsed = EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed
+        local collapsed = BP().bagSidebarCollapsed
         collapseBtn:ClearAllPoints()
         if collapsed then
             collapseBtn._icon:SetRotation(math.pi)
@@ -3498,7 +3541,7 @@ local function CreateSidebar()
 
     collapseBtn:SetScript("OnEnter", function(self)
         self._icon:SetAlpha(0.9)
-        local collapsed = EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed
+        local collapsed = BP().bagSidebarCollapsed
         if EUI.ShowWidgetTooltip then
             EUI.ShowWidgetTooltip(self, collapsed and "Expand Sidebar" or "Collapse Sidebar")
         end
@@ -3508,14 +3551,13 @@ local function CreateSidebar()
         if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
     end)
     collapseBtn:SetScript("OnClick", function()
-        if not EllesmereUIDB then EllesmereUIDB = {} end
         -- Determine which edge to preserve based on screen position
         local center = EUI_Bags:GetCenter()
         local screenW = UIParent:GetWidth()
         local onRightSide = center and screenW and (center > screenW / 2)
         local oldWidth = onRightSide and EUI_Bags:GetWidth() or nil
 
-        EllesmereUIDB.bagSidebarCollapsed = not EllesmereUIDB.bagSidebarCollapsed
+        BP().bagSidebarCollapsed = not BP().bagSidebarCollapsed
         UpdateCollapseArrow()
         sidebar:SetWidth(GetSidebarWidth())
         EUI_Bags:RefreshInventory()
@@ -3528,8 +3570,7 @@ local function CreateSidebar()
                 local point, rel, relPoint, x, y = EUI_Bags:GetPoint()
                 EUI_Bags:ClearAllPoints()
                 EUI_Bags:SetPoint(point, rel, relPoint, x + shift, y)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.bagsPosition = { point = point, relativePoint = relPoint, x = x + shift, y = y }
+                BP().bagsPosition = { point = point, relativePoint = relPoint, x = x + shift, y = y }
             end
         end
     end)
@@ -3568,9 +3609,8 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
     MenuUtil.CreateContextMenu(btn, function(_, rootDescription)
         local myGroup = cat.groupName
 
-        if not EllesmereUIDB then EllesmereUIDB = {} end
-        if not EllesmereUIDB.bagHiddenInAllItems then EllesmereUIDB.bagHiddenInAllItems = {} end
-        local hiddenSet = EllesmereUIDB.bagHiddenInAllItems
+        if not BP().bagHiddenInAllItems then BP().bagHiddenInAllItems = {} end
+        local hiddenSet = BP().bagHiddenInAllItems
 
         if isGroupHeader and myGroup then
             -- Group header: Rename + Disband
@@ -3686,7 +3726,7 @@ end
 local function BuildSidebarButtons(categoryCounts, totalCount)
     local sidebar = EUI_Bags._sidebar
     if not sidebar then return end
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed
+    local collapsed = BP().bagSidebarCollapsed
     local sidebarW = GetSidebarWidth()
     sidebar:SetWidth(sidebarW)
 
@@ -3699,7 +3739,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
 
     -- Build display list: { catIdx, name, icon, count, isGroupHeader, groupName, indent }
     local displayList = {}
-    local defaultOneBag = EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag
+    local defaultOneBag = BP().bagDefaultOneBag
     if defaultOneBag then
         displayList[#displayList + 1] = { catIdx = -1, name = "OneBag", icon = 133634, count = totalCount }
         displayList[#displayList + 1] = { catIdx = 0, name = "All Items", icon = 133633, count = totalCount }
@@ -3751,9 +3791,9 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
             local count = categoryCounts and categoryCounts[ci] or 0
             local isUserCreated = not cat.isCatchAll and (not cat.types or #cat.types == 0)
             -- Skip Pinned/Recent Items if disabled
-            if cat.isPinned and EllesmereUIDB and EllesmereUIDB.bagShowPinnedItems == false then
+            if cat.isPinned and BP().bagShowPinnedItems == false then
                 -- skip
-            elseif cat.isRecent and EllesmereUIDB and EllesmereUIDB.bagShowRecentItems == false then
+            elseif cat.isRecent and BP().bagShowRecentItems == false then
                 -- skip
             else
                 displayList[#displayList + 1] = { catIdx = ci, name = cat.name, icon = cat.icon or 134400, isAtlas = cat.isAtlas, count = count, noMove = cat.noMove, isPinned = cat.isPinned, isRecent = cat.isRecent, isUserCreated = cat.isUserCreated }
@@ -3762,7 +3802,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
     end
 
     -- Hide empty categories (sidebar-only visual, does not affect grouping)
-    local hideEmpty = not EllesmereUIDB or EllesmereUIDB.bagHideEmptyCategories ~= false
+    local hideEmpty = BP().bagHideEmptyCategories ~= false
     if hideEmpty then
         local filtered = {}
         for _, entry in ipairs(displayList) do
@@ -3819,7 +3859,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
                 local isSel = (self._isGroupHeader and self._groupName == selectedGroupName)
                     or (not self._isGroupHeader and self._catIdx == selectedCategoryIndex and not selectedGroupName)
                 if not isSel then self._bg:SetColorTexture(1, 1, 1, 0.06) end
-                if (EllesmereUIDB and EllesmereUIDB.bagSidebarCollapsed) and EUI.ShowWidgetTooltip then
+                if (BP().bagSidebarCollapsed) and EUI.ShowWidgetTooltip then
                     EUI.ShowWidgetTooltip(self, (self._catName or "?") .. " (" .. (self._catCount or 0) .. ")")
                 end
             end)
@@ -3996,7 +4036,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
     end
 
     -- "+Add Category" button at the bottom of the sidebar
-    local hideAddCat = EllesmereUIDB and EllesmereUIDB.bagHideAddCategory
+    local hideAddCat = BP().bagHideAddCategory
     if not collapsed and not hideAddCat then
         if not sidebar._addCatBtn then
             local btn = CreateFrame("Button", nil, sidebarChild or sidebar)
@@ -4557,7 +4597,16 @@ end
 -------------------------------------------------------------------------------
 function EUI_Bags:RefreshInventory()
     if not EUI_Bags:IsVisible() then return end
-    local db = EllesmereUIDB or {}
+
+    -- Taint note: we may be refreshing during combat (bags opened mid-fight in
+    -- M+/Delves). Viewing/repositioning already-created buttons is safe; the ONE
+    -- thing that poisons a secure ContainerFrameItemButtonTemplate button -- and
+    -- gets its click blocked as UseContainerItem() ADDON_ACTION_FORBIDDEN -- is
+    -- CREATING it during combat lockdown. So GetOrCreateSlot refuses to create
+    -- new buttons in combat (it returns nil; render sites skip those slots), and
+    -- the pre-warmed pool means that almost never happens. If anything WAS
+    -- skipped while locked, PLAYER_REGEN_ENABLED replays a full refresh.
+    if InCombatLockdown() then EUI_Bags._refreshPendingCombat = true end
 
     C_NewItems.ClearAll()
 
@@ -4663,7 +4712,7 @@ function EUI_Bags:RefreshInventory()
         end
     end
     local recentCount = 0
-    local showRecent = not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false
+    local showRecent = BP().bagShowRecentItems ~= false
     if recentCatIdx and EUI_Bags._recentItems and showRecent then
         for _, data in ipairs(tempItems) do
             if data.info and data.info.itemID and EUI_Bags._recentItems[data.info.itemID] then
@@ -4672,7 +4721,7 @@ function EUI_Bags:RefreshInventory()
         end
         categoryCounts[recentCatIdx] = recentCount
     end
-    local showPinned = not EllesmereUIDB or EllesmereUIDB.bagShowPinnedItems ~= false
+    local showPinned = BP().bagShowPinnedItems ~= false
     local pinnedSet = EllesmereUIDB and EllesmereUIDB.bagPinnedItems
     if pinnedCatIdx and pinnedSet and showPinned then
         local pinnedCount = 0
@@ -4806,7 +4855,6 @@ function EUI_Bags:RefreshInventory()
     local startX = gridPadX + 5
     local curY = -6
     local slotIdx = 0
-    local emptyIdx = 0  -- index into emptySlots pool
 
     -- Lightweight empty pad pool (no ItemButton template, just bg + border)
     if not EUI_Bags._emptyPads then EUI_Bags._emptyPads = {} end
@@ -4858,7 +4906,7 @@ function EUI_Bags:RefreshInventory()
             EUI_Bags._oneBagWarning = warn
         end
         local warn = EUI_Bags._oneBagWarning
-        local _warnHidden = EllesmereUIDB and EllesmereUIDB.bagHideOneBagWarning
+        local _warnHidden = BP().bagHideOneBagWarning
         if not _warnHidden then
             warn:SetParent(child)
             warn:ClearAllPoints()
@@ -4871,7 +4919,7 @@ function EUI_Bags:RefreshInventory()
         end
 
         -- Pinned Items quickview (display-only duplicates)
-        local showPinnedOneBag = (not EllesmereUIDB or EllesmereUIDB.bagPinnedInOneBag ~= false) and showPinned
+        local showPinnedOneBag = (BP().bagPinnedInOneBag ~= false) and showPinned
         if showPinnedOneBag then
             local pinItems = {}
             if pinnedSet then
@@ -4888,7 +4936,7 @@ function EUI_Bags:RefreshInventory()
             pinHdr:ClearAllPoints()
             pinHdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
             pinHdr:SetWidth(columns * (SLOT_SIZE + SPACING))
-            local showTips = not EllesmereUIDB or EllesmereUIDB.bagShowPinRecentTips ~= false
+            local showTips = BP().bagShowPinRecentTips ~= false
             pinHdr._label:SetText("Pinned Items")
             pinHdr._hint:SetText(showTips and "(Middle Click to Add or Remove)" or "")
             if not pinHdr._hideBtn then
@@ -4912,8 +4960,7 @@ function EUI_Bags:RefreshInventory()
             pinHdr._hideBtn:ClearAllPoints()
             pinHdr._hideBtn:SetPoint("RIGHT", pinHdr, "RIGHT", _warnHidden and -5 or 0, 0)
             pinHdr._hideBtn:SetScript("OnClick", function()
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.bagPinnedInOneBag = false
+                BP().bagPinnedInOneBag = false
                 EUI_Bags:RefreshInventory()
             end)
             pinHdr._hideBtn:Show()
@@ -4961,8 +5008,8 @@ function EUI_Bags:RefreshInventory()
         end
 
         -- Recent Items quickview (display-only duplicates)
-        local showRecentOneBag = EllesmereUIDB and EllesmereUIDB.bagRecentInOneBag == true
-        local showRecent = not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false
+        local showRecentOneBag = BP().bagRecentInOneBag == true
+        local showRecent = BP().bagShowRecentItems ~= false
         if showRecentOneBag and showRecent then
             local recentItems = {}
             if EUI_Bags._recentItems then
@@ -4979,7 +5026,7 @@ function EUI_Bags:RefreshInventory()
             recHdr:ClearAllPoints()
             recHdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
             recHdr:SetWidth(columns * (SLOT_SIZE + SPACING))
-            local showTips = not EllesmereUIDB or EllesmereUIDB.bagShowPinRecentTips ~= false
+            local showTips = BP().bagShowPinRecentTips ~= false
             recHdr._label:SetText("Recent Items")
             recHdr._hint:SetText(showTips and "(Extra quickview display, your items are also in their category)" or "")
             if not recHdr._hideBtn then
@@ -5003,8 +5050,7 @@ function EUI_Bags:RefreshInventory()
             recHdr._hideBtn:ClearAllPoints()
             recHdr._hideBtn:SetPoint("RIGHT", recHdr, "RIGHT", (_warnHidden and not showPinnedOneBag) and -5 or 0, 0)
             recHdr._hideBtn:SetScript("OnClick", function()
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.bagRecentInOneBag = false
+                BP().bagRecentInOneBag = false
                 EUI_Bags:RefreshInventory()
             end)
             recHdr._hideBtn:Show()
@@ -5155,7 +5201,9 @@ function EUI_Bags:RefreshInventory()
             else
                 padCount = columns - remainder
             end
-            padCount = math.min(padCount, #emptySlots - emptyIdx)
+            -- Filler pads are purely cosmetic row-fillers (the only real slot is
+            -- the separate "+" button); they must NOT be clamped to the number of
+            -- actual empty bag slots, or they vanish entirely when bags are full.
             if padCount > 0 then
                 RenderEmptyPad(n, padCount)
             end
@@ -5169,7 +5217,7 @@ function EUI_Bags:RefreshInventory()
             if itemCount == 0 and not isUserCreated and not showPinAdd and not alwaysShow then return end
 
             local useExpNest = nestByExpansion
-                and EllesmereUIDB and EllesmereUIDB.bagNestByExpansion
+                and BP().bagNestByExpansion
                 and itemCount > 0
                 and not showPinAdd
                 and not alwaysShow
@@ -5180,7 +5228,7 @@ function EUI_Bags:RefreshInventory()
             hdr:ClearAllPoints()
             hdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
             hdr:SetWidth(gridW)
-            local showTips = not EllesmereUIDB or EllesmereUIDB.bagShowPinRecentTips ~= false
+            local showTips = BP().bagShowPinRecentTips ~= false
             if showPinAdd and showTips then
                 hdr._label:SetText(sectionName)
                 hdr._hint:SetText("(Middle Click to Add or Remove)")
@@ -5212,8 +5260,7 @@ function EUI_Bags:RefreshInventory()
                         if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
                     end)
                     hb:SetScript("OnClick", function(self)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB[self._dbKey] = false
+                        BP()[self._dbKey] = false
                         EUI_Bags:RefreshInventory()
                     end)
                     hdr._hideBtn = hb
@@ -5268,6 +5315,7 @@ function EUI_Bags:RefreshInventory()
                                     end
                                     slotIdx = slotIdx + 1
                                     local aSlot = GetOrCreateSlot(slotIdx)
+                                    if aSlot then
                                     aSlot:GetParent():SetParent(child)
                                     local col = remainder
                                     RenderButton(aSlot, { bag = 0, slot = 0 }, slotIdx, col, 0, startX, curY, columns)
@@ -5277,6 +5325,7 @@ function EUI_Bags:RefreshInventory()
                                     aOv:ClearAllPoints()
                                     aOv:SetAllPoints(aSlot)
                                     aOv:Show()
+                                    end
                                     -- Re-advance curY for the row
                                     curY = curY - (SLOT_SIZE + SPACING)
                                 end
@@ -5292,10 +5341,12 @@ function EUI_Bags:RefreshInventory()
                 local _t0RB = ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
-                btn:GetParent():SetParent(child)
-                local col = (j - 1) % columns
-                local row = math.floor((j - 1) / columns)
-                RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                if btn then
+                    btn:GetParent():SetParent(child)
+                    local col = (j - 1) % columns
+                    local row = math.floor((j - 1) / columns)
+                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                end
                 ProfEnd("RenderButton", _t0RB)
             end
 
@@ -5304,16 +5355,18 @@ function EUI_Bags:RefreshInventory()
                 local pinIdx = itemCount + 1
                 slotIdx = slotIdx + 1
                 local pinSlot = GetOrCreateSlot(slotIdx)
-                pinSlot:GetParent():SetParent(child)
-                local col = (pinIdx - 1) % columns
-                local row = math.floor((pinIdx - 1) / columns)
-                RenderButton(pinSlot, { bag = 0, slot = 0 }, slotIdx, col, row, startX, curY, columns)
-                local ov = GetOrCreatePinOverlay()
-                ov:SetParent(child)
-                ov:ClearAllPoints()
-                ov:SetAllPoints(pinSlot)
-                ov:Show()
-                itemCount = itemCount + 1
+                if pinSlot then
+                    pinSlot:GetParent():SetParent(child)
+                    local col = (pinIdx - 1) % columns
+                    local row = math.floor((pinIdx - 1) / columns)
+                    RenderButton(pinSlot, { bag = 0, slot = 0 }, slotIdx, col, row, startX, curY, columns)
+                    local ov = GetOrCreatePinOverlay()
+                    ov:SetParent(child)
+                    ov:ClearAllPoints()
+                    ov:SetAllPoints(pinSlot)
+                    ov:Show()
+                    itemCount = itemCount + 1
+                end
             end
 
             -- Assign "+" button: for categories that accept item assignments
@@ -5348,7 +5401,10 @@ function EUI_Bags:RefreshInventory()
             else
                 padCount = columns - remainder
             end
-            padCount = math.min(padCount, #emptySlots - emptyIdx)
+            -- ALL section filler pads are purely cosmetic row-fillers (the only
+            -- real interactive slot is the separate "+" assign/pin button). They
+            -- must NOT be clamped to the count of actual empty bag slots, or they
+            -- vanish when bags are full (#emptySlots == 0).
             if padCount > 0 then
                 RenderEmptyPad(itemCount, padCount)
             end
@@ -5358,7 +5414,7 @@ function EUI_Bags:RefreshInventory()
             curY = curY - (sectionRows * (SLOT_SIZE + SPACING)) - 6
         end
 
-        local hiddenSet = EllesmereUIDB and EllesmereUIDB.bagHiddenInAllItems or {}
+        local hiddenSet = BP().bagHiddenInAllItems or {}
         for ci, cat in ipairs(cats) do
             if cat.isPinned then
                 -- Pinned Items: display-only duplicate (items also appear in their normal category)
@@ -5375,7 +5431,7 @@ function EUI_Bags:RefreshInventory()
             elseif cat.isRecent then
                 -- Recent Items: display-only duplicate (items also appear in their normal category)
                 if EUI_Bags._recentItems
-                   and (not EllesmereUIDB or EllesmereUIDB.bagShowRecentItems ~= false) then
+                   and (BP().bagShowRecentItems ~= false) then
                     local recentItems = {}
                     for _, data in ipairs(displayItems) do
                         if data.info and data.info.itemID and EUI_Bags._recentItems[data.info.itemID] then
@@ -5429,7 +5485,7 @@ function EUI_Bags:RefreshInventory()
                 end
             end
 
-            local hideEmpty = not EllesmereUIDB or EllesmereUIDB.bagHideEmptyCategories ~= false
+            local hideEmpty = BP().bagHideEmptyCategories ~= false
             for _, mi in ipairs(members) do
                 local memberCat = cats[mi]
                 local memberItems = itemsByMember[mi] or {}
@@ -5455,10 +5511,12 @@ function EUI_Bags:RefreshInventory()
                     local _t0RB = ProfBegin("RenderButton")
                     slotIdx = slotIdx + 1
                     local btn = GetOrCreateSlot(slotIdx)
-                    btn:GetParent():SetParent(child)
-                    local col = (j - 1) % columns
-                    local row = math.floor((j - 1) / columns)
-                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                    if btn then
+                        btn:GetParent():SetParent(child)
+                        local col = (j - 1) % columns
+                        local row = math.floor((j - 1) / columns)
+                        RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                    end
                     ProfEnd("RenderButton", _t0RB)
                 end
 
@@ -5486,7 +5544,7 @@ function EUI_Bags:RefreshInventory()
                 if memberItemCount == 0 then padCount = columns
                 elseif remainder == 0 then padCount = 0
                 else padCount = columns - remainder end
-                padCount = math.min(padCount, #emptySlots - emptyIdx)
+                -- Cosmetic filler pads -- never clamp to free bag slots (see above).
                 if padCount > 0 then
                     RenderEmptyPad(memberItemCount, padCount)
                 end
@@ -5611,7 +5669,7 @@ function EUI_Bags:RefreshInventory()
                 hdr:ClearAllPoints()
                 hdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
                 hdr:SetWidth(gridW)
-                local showTips = not EllesmereUIDB or EllesmereUIDB.bagShowPinRecentTips ~= false
+                local showTips = BP().bagShowPinRecentTips ~= false
                 if selCat and selCat.isPinned and showTips then
                     hdr._label:SetText(headerName)
                     hdr._hint:SetText("(Middle Click to Add or Remove)")
@@ -5631,10 +5689,12 @@ function EUI_Bags:RefreshInventory()
                 local _t0RB = ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
-                btn:GetParent():SetParent(child)
-                local col = (i - 1) % columns
-                local row = math.floor((i - 1) / columns)
-                RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                if btn then
+                    btn:GetParent():SetParent(child)
+                    local col = (i - 1) % columns
+                    local row = math.floor((i - 1) / columns)
+                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                end
                 ProfEnd("RenderButton", _t0RB)
             end
 
@@ -5647,7 +5707,7 @@ function EUI_Bags:RefreshInventory()
             else
                 padCount = columns - remainder
             end
-            padCount = math.min(padCount, #emptySlots - emptyIdx)
+            -- Cosmetic filler pads -- never clamp to free bag slots (see above).
             if padCount > 0 then
                 RenderEmptyPad(itemCount, padCount)
             end
@@ -5698,7 +5758,7 @@ function EUI_Bags:RefreshInventory()
     -- Parented to scroll child and anchored to the first category header.
     if EUI_Bags._diceBtn then
         local showDice = selectedCategoryIndex == -1
-            and not (EllesmereUIDB and EllesmereUIDB.bagHideRandomize)
+            and not (BP().bagHideRandomize)
         if showDice and EUI_Bags._scrollChild then
             local child = EUI_Bags._scrollChild
             EUI_Bags._diceBtn:SetParent(child)
@@ -5720,6 +5780,10 @@ end
 -------------------------------------------------------------------------------
 function EUI_BagsReagent:RefreshInventory()
     if not EUI_BagsReagent:IsVisible() then return end
+    -- Same secure-button rule as EUI_Bags:RefreshInventory: viewing in combat is
+    -- fine; only creating a new reagent button in combat is unsafe, which
+    -- GetOrCreateReagentSlot refuses. Mark pending so combat-end tops up.
+    if InCombatLockdown() then EUI_Bags._refreshPendingCombat = true end
     local tempItems = {}
     local numSlots = C_Container.GetContainerNumSlots(5)
     if numSlots > 0 then
@@ -5759,18 +5823,18 @@ function EUI_BagsReagent:RefreshInventory()
             if btn._textOverlay then btn._textOverlay:SetAlpha(filtered and 0.2 or 1) end
 
             if btn.ItemLevelText and data.info.itemID then
-                local showItemlevel = not EllesmereUIDB or EllesmereUIDB.showItemlevelInBags ~= false
+                local showItemlevel = BP().showItemlevelInBags ~= false
                 if showItemlevel then
                     local itemLink = C_Container.GetContainerItemLink(data.bag, data.slot)
                     if itemLink then
                         local _, _, quality, level = GetItemInfo(itemLink)
                         if IsGearItem(itemLink) then
-                            local fs = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+                            local fs = BP().itemlevelFontSize or 12
                             btn.ItemLevelText:SetFont(STANDARD_TEXT_FONT, fs, "OUTLINE")
                             btn.ItemLevelText:SetText(level or "")
                             local r, g, b
-                            if EllesmereUIDB and EllesmereUIDB.itemlevelUseCustomColor and EllesmereUIDB.itemlevelCustomColor then
-                                r, g, b = EllesmereUIDB.itemlevelCustomColor.r, EllesmereUIDB.itemlevelCustomColor.g, EllesmereUIDB.itemlevelCustomColor.b
+                            if BP().itemlevelUseCustomColor and BP().itemlevelCustomColor then
+                                r, g, b = BP().itemlevelCustomColor.r, BP().itemlevelCustomColor.g, BP().itemlevelCustomColor.b
                             else
                                 r, g, b = GetItemQualityColor(quality or 1)
                             end
@@ -5862,18 +5926,18 @@ end
 -------------------------------------------------------------------------------
 local function StartAddon()
     -- Apply default view based on setting (DB now available)
-    if EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag then
+    if BP().bagDefaultOneBag then
         selectedCategoryIndex = -1
     end
 
     InitializeCharacterGold()
-    if not EllesmereUIDB or EllesmereUIDB.enableGoldTracking ~= false then
+    if BP().enableGoldTracking ~= false then
         CaptureTrackedGold()
     end
 
     -- Position: default 50px from bottom-left, saved position overrides
-    if EllesmereUIDB and EllesmereUIDB.bagsPosition then
-        local pos = EllesmereUIDB.bagsPosition
+    if BP().bagsPosition then
+        local pos = BP().bagsPosition
         EUI_Bags:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
     else
         EUI_Bags:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -50, 50)
@@ -5900,8 +5964,7 @@ local function StartAddon()
             if left and top then
                 local PP = EUI and EUI.PP
                 if PP and PP.Snap then left = PP.Snap(left); top = PP.Snap(top) end
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
+                BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
                 EUI_Bags:ClearAllPoints()
                 EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
             end
@@ -5915,7 +5978,7 @@ local function StartAddon()
         EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", newLeft, newTop)
     end)
     EUI_Bags:SetScript("OnMouseDown", function(self, button)
-        local noShift = EllesmereUIDB and EllesmereUIDB.bagMoveNoShift
+        local noShift = BP().bagMoveNoShift
         if button ~= "LeftButton" or (not noShift and not IsKeyDown("LSHIFT")) then return end
         local cx, cy = GetCursorPosition()
         local es = self:GetEffectiveScale()
@@ -5935,8 +5998,7 @@ local function StartAddon()
             if left and top then
                 local PP = EUI and EUI.PP
                 if PP and PP.Snap then left = PP.Snap(left); top = PP.Snap(top) end
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
+                BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
                 EUI_Bags:ClearAllPoints()
                 EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
             end
@@ -6028,7 +6090,7 @@ local function StartAddon()
     EUI_BagsReagent:RegisterEvent("BAG_UPDATE")
     EUI_BagsReagent:SetScript("OnEvent", function(self, event)
         if event == "BAG_UPDATE" then
-            local detach = EllesmereUIDB and EllesmereUIDB.detachReagentBag or false
+            local detach = BP().detachReagentBag or false
             if detach and EUI_BagsReagent:IsVisible() then EUI_BagsReagent:RefreshInventory() end
         end
     end)
@@ -6060,7 +6122,7 @@ local function StartAddon()
                 EUI_Bags._doVisualSort()
             end
             EllesmereUIDB.bagsVisible = true
-            local detach = EllesmereUIDB and EllesmereUIDB.detachReagentBag or false
+            local detach = BP().detachReagentBag or false
             if detach then
                 EUI_BagsReagent:Show()
                 EUI_BagsReagent:RefreshInventory()
@@ -6074,7 +6136,7 @@ local function StartAddon()
         -- C_Container.ToggleAllBags in the same frame, causing a double-toggle.
         if GetTime() == _lastToggleTime then return end
         _lastToggleTime = GetTime()
-        local enhancedEnabled = not EllesmereUIDB or EllesmereUIDB.enhancedBags ~= false
+        local enhancedEnabled = BP().enhancedBags ~= false
         if enhancedEnabled then ToggleEUI()
         else if OriginalToggleAllBags then OriginalToggleAllBags() end end
     end
@@ -6158,7 +6220,7 @@ local function StartAddon()
         C_Timer.After(0.1, function()
             if EUI_Bags:IsVisible() then
                 EUI_Bags:RefreshInventory()
-                local detach = EllesmereUIDB and EllesmereUIDB.detachReagentBag or false
+                local detach = BP().detachReagentBag or false
                 if detach and EUI_BagsReagent:IsVisible() then EUI_BagsReagent:RefreshInventory() end
             end
             refreshPending = false
@@ -6169,11 +6231,35 @@ local function StartAddon()
     EUI_Bags:RegisterEvent("PLAYER_MONEY")
     EUI_Bags:RegisterEvent("ITEM_LOCK_CHANGED")
     EUI_Bags:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+    -- Replays a refresh that was deferred during combat (secure-button taint guard).
+    EUI_Bags:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+    -- Pre-warm the secure item-button pool while out of combat. Creating a
+    -- ContainerFrameItemButtonTemplate button during combat lockdown taints it,
+    -- which gets UseContainerItem() blocked in M+/Delves. Building all the
+    -- buttons we could need up front means RefreshInventory never has to create
+    -- one in combat -- it only positions/shows already-clean buttons.
+    do
+        local total = 0
+        for bag = 0, 5 do
+            total = total + (C_Container.GetContainerNumSlots(bag) or 0)
+        end
+        for i = 1, total do
+            local b = GetOrCreateSlot(i)
+            if b and b:GetParent() then b:GetParent():Hide() end
+        end
+        -- Reagent bag (bag 5) has its own secure-button pool; pre-warm it too.
+        local reagentSlotsN = C_Container.GetContainerNumSlots(5) or 0
+        for i = 1, reagentSlotsN do
+            local b = GetOrCreateReagentSlot(i)
+            if b and b:GetParent() then b:GetParent():Hide() end
+        end
+    end
 
     -- Seed currencyOrder from Blizzard's tracked currencies on first load
     if EllesmereUIDB and C_CurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo then
-        if not EllesmereUIDB.currencyOrder then EllesmereUIDB.currencyOrder = {} end
-        local co = EllesmereUIDB.currencyOrder
+        if not BP().currencyOrder then BP().currencyOrder = {} end
+        local co = BP().currencyOrder
         -- Only seed if our table is empty (first install or fresh profile)
         local hasAny = false
         for _ in pairs(co) do hasAny = true; break end
@@ -6209,8 +6295,8 @@ local function StartAddon()
     if EventRegistry and EventRegistry.RegisterCallback then
         EventRegistry:RegisterCallback("TokenFrame.OnTokenWatchChanged", function()
             if not EllesmereUIDB then return end
-            if not EllesmereUIDB.currencyOrder then EllesmereUIDB.currencyOrder = {} end
-            local co = EllesmereUIDB.currencyOrder
+            if not BP().currencyOrder then BP().currencyOrder = {} end
+            local co = BP().currencyOrder
             local blizzSet = ReadBlizzSet()
             -- Add newly checked currencies
             for cID in pairs(blizzSet) do
@@ -6238,6 +6324,18 @@ local function StartAddon()
     local _lastDetectFrame = 0
 
     EUI_Bags:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            -- Combat ended: replay any refresh deferred during combat, and top
+            -- up the pre-warmed pool in case bag count grew while locked.
+            if EUI_Bags._refreshPendingCombat then
+                EUI_Bags._refreshPendingCombat = nil
+                if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end
+                if EUI_BagsReagent:IsVisible() and EUI_BagsReagent.RefreshInventory then
+                    EUI_BagsReagent:RefreshInventory()
+                end
+            end
+            return
+        end
         if event == "BAG_UPDATE" and EUI_Bags.refreshEnabled ~= false then
             local now = GetTime()
             if now ~= _lastDetectFrame then

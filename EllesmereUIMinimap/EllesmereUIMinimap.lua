@@ -27,6 +27,7 @@ local defaults = {
         minimap = {
             enabled       = true,
             shape         = "square",
+            rotateMinimap = false,
             borderSize    = 1,
             showCoords    = false,
             coordPrecision = 0,
@@ -35,6 +36,7 @@ local defaults = {
             hideZoneText  = false,
             zoneInside    = false,
             scrollZoom    = true,
+            openMicroMenuOnMiddleClick = true,
             savedZoom     = 0,
             hideZoomButtons      = true,
             hideTrackingButton   = true,
@@ -42,7 +44,8 @@ local defaults = {
             hideMail             = false,
             hideRaidDifficulty   = false,
             hideCraftingOrder    = false,
-            hideExtraBtns        = { greatVault = false, portals = false, friendsOnline = false },
+            hideExtraBtns        = { greatVault = false, portals = false, friendsOnline = false, groupButton = false },
+            mouseoverExtraBtns   = false,  -- extra buttons only show on minimap mouseover
             greatVaultExtraInfo  = true,
             hideAddonCompartment = false,
             hideAddonButtons     = false,
@@ -169,6 +172,11 @@ local cachedAddonButtons = {}
 local _addonVisible = {}       -- persistent: tracks whether each addon WANTS its button visible
 local _suppressVisTrack = false -- flag to suppress tracking during our own Show/Hide calls
 local flyoutOwnedFrames = {}
+
+-- Mouseover Extra Buttons: re-evaluator, assigned by the controller further down.
+-- Forward-declared here so the flyout panels (created earlier than the
+-- controller) can trigger a re-evaluate from their OnShow/OnHide hooks.
+local MO_Evaluate
 
 -------------------------------------------------------------------------------
 --  Minimap Button Flyout
@@ -373,6 +381,9 @@ local function LayoutFlyoutButtons()
             icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
             icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
             pcall(icon.SetTexCoord, icon, 0.05, 0.95, 0.05, 0.95)
+            -- Foreign button icon: SetTexCoord was its only snap trigger and
+            -- that hook is no longer global, so disable snap on it once here.
+            if EllesmereUI.PP then EllesmereUI.PP.DisablePixelSnap(icon) end
         end
         -- Add atlas ring border overlay
         if not GetFFD(btn).flyoutRing then
@@ -423,6 +434,9 @@ local function EnsureFlyoutPanel()
         flyoutPanel:SetPoint("BOTTOMLEFT", flyoutToggle, "BOTTOMRIGHT", 2, 0)
         flyoutPanel:SetClampedToScreen(true)
         flyoutOwnedFrames[flyoutPanel] = true
+        -- Keep the mouseover stack in sync while this flyout opens/closes.
+        flyoutPanel:HookScript("OnShow", function() if MO_Evaluate then MO_Evaluate() end end)
+        flyoutPanel:HookScript("OnHide", function() if MO_Evaluate then MO_Evaluate() end end)
     end
 end
 
@@ -1672,6 +1686,11 @@ local function CreateMinimapPortalFlyout()
 
     EllesmereUI.RegisterEscapeClose(flyout)
 
+    -- Keep the mouseover stack shown while this flyout is open; re-evaluate when
+    -- it closes so the stack can hide if the mouse has already moved away.
+    flyout:HookScript("OnShow", function() if MO_Evaluate then MO_Evaluate() end end)
+    flyout:HookScript("OnHide", function() if MO_Evaluate then MO_Evaluate() end end)
+
     _portalFlyout = flyout
     return flyout
 end
@@ -2247,6 +2266,104 @@ local function SyncIndicatorVisibility()
     end
 end
 
+-------------------------------------------------------------------------------
+--  Mouseover Extra Buttons
+--  When enabled, the extra buttons (Great Vault, M+ Portals, Friends Online,
+--  Group Button) only show while the mouse is over the minimap or one of the
+--  buttons. Either flyout being open keeps the stack shown until it closes.
+--  Event-driven: minimap + button OnEnter/OnLeave drive it, with a small
+--  deferred hide so crossing the tiny gaps between frames doesn't flicker.
+-------------------------------------------------------------------------------
+local _moActive  = false   -- mouseover mode currently engaged
+local _moButtons = {}      -- extra buttons under control this layout
+local _moHooked  = {}      -- frames whose OnEnter/OnLeave we've already hooked
+local _moHideTimer = nil
+
+local function MO_OverAny()
+    if Minimap and Minimap:IsMouseOver() then return true end
+    if _portalFlyout and _portalFlyout:IsShown() then return true end
+    if flyoutPanel and flyoutPanel:IsShown() then return true end
+    for i = 1, #_moButtons do
+        local b = _moButtons[i]
+        if b:IsShown() and b:IsMouseOver() then return true end
+    end
+    return false
+end
+
+local function MO_Apply(show)
+    local a = show and 1 or 0
+    for i = 1, #_moButtons do _moButtons[i]:SetAlpha(a) end
+end
+
+local function MO_CancelHide()
+    if _moHideTimer then _moHideTimer:Cancel(); _moHideTimer = nil end
+end
+
+-- Assign the forward-declared upvalue so the flyout OnShow/OnHide hooks above
+-- (defined earlier in the file) can drive a re-evaluate.
+MO_Evaluate = function()
+    if not _moActive then return end
+    MO_CancelHide()
+    if MO_OverAny() then
+        MO_Apply(true)
+    else
+        -- Brief delay bridges the gap between adjacent frames (minimap -> button,
+        -- button -> button) so crossing it doesn't flash the stack off and on.
+        _moHideTimer = C_Timer.NewTimer(0.12, function()
+            _moHideTimer = nil
+            if _moActive and not MO_OverAny() then MO_Apply(false) end
+        end)
+    end
+end
+
+local function MO_HookFrame(frame)
+    if not frame or _moHooked[frame] then return end
+    _moHooked[frame] = true
+    frame:HookScript("OnEnter", function()
+        if _moActive then MO_CancelHide(); MO_Apply(true) end
+    end)
+    frame:HookScript("OnLeave", function()
+        if _moActive then MO_Evaluate() end
+    end)
+end
+
+-- Rebuild the managed-button list from the current profile + hide state, hook
+-- the minimap/buttons (once), and set the initial alpha. Called at the end of
+-- every indicator layout so the list reflects current visibility.
+local function MO_Refresh(p)
+    wipe(_moButtons)
+    local heb = (p and p.hideExtraBtns) or {}
+    if p and p.mouseoverExtraBtns then
+        if _greatVaultBtn and not heb.greatVault then _moButtons[#_moButtons + 1] = _greatVaultBtn end
+        if _customIndicators.friends and not heb.friendsOnline then _moButtons[#_moButtons + 1] = _customIndicators.friends end
+        if _portalBtn and not heb.portals then _moButtons[#_moButtons + 1] = _portalBtn end
+        if flyoutToggle and not heb.groupButton then _moButtons[#_moButtons + 1] = flyoutToggle end
+        -- Ungrouped addon buttons count as extra buttons for this setting too.
+        for _, btn in ipairs(cachedAddonButtons) do
+            if _addonVisible[btn] ~= false and IsUngrouped(btn) then
+                _moButtons[#_moButtons + 1] = btn
+            end
+        end
+    end
+    _moActive = (#_moButtons > 0)
+    if _moActive then
+        MO_HookFrame(Minimap)
+        for i = 1, #_moButtons do MO_HookFrame(_moButtons[i]) end
+        MO_Evaluate()
+    else
+        MO_CancelHide()
+        -- Restore full alpha (harmless on buttons hidden by hideExtraBtns).
+        if _greatVaultBtn then _greatVaultBtn:SetAlpha(1) end
+        if _customIndicators.friends then _customIndicators.friends:SetAlpha(1) end
+        if _portalBtn then _portalBtn:SetAlpha(1) end
+        if flyoutToggle then flyoutToggle:SetAlpha(1) end
+        -- Restore ungrouped addon buttons we may have dimmed.
+        for _, btn in ipairs(cachedAddonButtons) do
+            if IsUngrouped(btn) then btn:SetAlpha(1) end
+        end
+    end
+end
+
 local function LayoutIndicatorFrames(minimap, p, circleMode)
     local flvl = minimap:GetFrameLevel() + 10
 
@@ -2321,7 +2438,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
 
     if circleMode then
         -- Circle layout: horizontal row around the clock
-        if ci.tracking then
+        if ci.tracking and not p.hideTrackingButton then
             ci.tracking:ClearAllPoints()
             if clockBg and p.showClock then
                 ci.tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
@@ -2329,6 +2446,8 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.tracking:SetPoint("TOP", minimap, "TOP", -20, -3)
             end
             ci.tracking:Show()
+        elseif ci.tracking then
+            ci.tracking:Hide()
         end
 
         if ci.calendar and not p.hideGameTime then
@@ -2357,11 +2476,13 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         -- Square layout: vertical stack on the left side
         local y = 0
 
-        if ci.tracking then
+        if ci.tracking and not p.hideTrackingButton then
             ci.tracking:ClearAllPoints()
             ci.tracking:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
             ci.tracking:Show()
             y = y - sz
+        elseif ci.tracking then
+            ci.tracking:Hide()
         end
 
         if ci.calendar and not p.hideGameTime then
@@ -2455,6 +2576,9 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                     icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
                     icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 3)
                     pcall(icon.SetTexCoord, icon, 0.05, 0.95, 0.05, 0.95)
+                    -- Foreign button icon: SetTexCoord was its only snap trigger
+                    -- and that hook is no longer global, so disable snap once here.
+                    if EllesmereUI.PP then EllesmereUI.PP.DisablePixelSnap(icon) end
                 end
                 -- Black square background
                 if not GetFFD(btn).ungroupBg then
@@ -2563,13 +2687,18 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 anchor = _portalBtn
             end
         end
+
+        -- Flyout toggle (EUI group button for addon icons)
+        if flyoutToggle and heb.groupButton then
+            flyoutToggle:Hide()
+        end
     end
 
     -- Free Move: hook shift+drag on all indicator buttons and apply saved offsets
     local heb = p.hideExtraBtns or {}
     local freeMove = p.freeMoveBtns
     local fmTargets = {}
-    if ci.tracking then fmTargets[#fmTargets + 1] = ci.tracking end
+    if ci.tracking and not p.hideTrackingButton then fmTargets[#fmTargets + 1] = ci.tracking end
     if ci.calendar and not p.hideGameTime then fmTargets[#fmTargets + 1] = ci.calendar end
     if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
     if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
@@ -2589,6 +2718,10 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             ApplyBtnOffset(frame)
         end
     end
+
+    -- Mouseover Extra Buttons: apply after layout so the managed-button list and
+    -- their alpha reflect the current shown/hidden state.
+    MO_Refresh(p)
 end
 
 local function RestoreIndicatorFrames()
@@ -2653,6 +2786,10 @@ local function ApplyMinimap()
     local p = EBS.db.profile.minimap
     p.enabled = true
 
+    -- Rotate Minimap: enforce the CVar to match our setting. Default off keeps
+    -- it at 0; turning it on sets 1. Runs out of combat (ApplyMinimap defers).
+    SetCVar("rotateMinimap", p.rotateMinimap and "1" or "0")
+
     local minimap = Minimap
     if not minimap then return end
 
@@ -2709,6 +2846,27 @@ local function ApplyMinimap()
         if minimap.SetFixedFrameLevel then minimap:SetFixedFrameLevel(true) end
     end
     minimap:Show()
+
+    -- Middle-click interceptor: prevent minimap ping on middle-click,
+    -- route middle-click to our micro menu instead.
+    -- Transparent frame on top of minimap that passes left/right clicks through
+    -- but intercepts middle-click. Zero taint risk.
+    if not GetFFD(minimap).pingBlocker then
+        local blocker = CreateFrame("Frame", nil, minimap)
+        blocker:SetAllPoints()
+        blocker:SetFrameLevel(minimap:GetFrameLevel() + 10)
+        blocker:SetPassThroughButtons("LeftButton", "RightButton")
+        blocker:SetPropagateMouseMotion(true)
+        blocker:SetScript("OnMouseUp", function(_, btn)
+            if btn == "MiddleButton" and EBS._ToggleMicroMenu then
+                -- Gated by the "Open Micro Menu on Middle Click" toggle (read live)
+                local mp = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+                if mp and mp.openMicroMenuOnMiddleClick == false then return end
+                EBS._ToggleMicroMenu()
+            end
+        end)
+        GetFFD(minimap).pingBlocker = blocker
+    end
 
     -- Hide default decorations
     for _, name in ipairs(minimapDecorations) do
@@ -2969,7 +3127,9 @@ local function ApplyMinimap()
 
     -- Show/hide flyout toggle based on whether any grouped buttons exist
     local groupedButtons = CollectFlyoutButtons()
-    if #groupedButtons > 0 then
+    local mp2 = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    local hideGroupBtn = mp2 and mp2.hideExtraBtns and mp2.hideExtraBtns.groupButton
+    if #groupedButtons > 0 and not hideGroupBtn then
         flyoutToggle:Show()
     else
         flyoutToggle:Hide()
@@ -3474,24 +3634,13 @@ do
         if not menuFrame then CreateMenuFrame() end
         SetMenuVisible(not menuOpen)
     end
-
-    local _microMenuHooked = false
-    local function HookMinimapMiddleClick()
-        if _microMenuHooked then return end
-        local minimap = Minimap
-        if not minimap then return end
-        _microMenuHooked = true
-        minimap:HookScript("OnMouseUp", function(_, btn)
-            if btn == "MiddleButton" then ToggleMicroMenu() end
-        end)
-    end
+    EBS._ToggleMicroMenu = ToggleMicroMenu
 
     local hookFrame = CreateFrame("Frame")
     hookFrame:RegisterEvent("PLAYER_LOGIN")
     hookFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_LOGIN")
         CreateMenuFrame()
-        HookMinimapMiddleClick()
     end)
 end
 
