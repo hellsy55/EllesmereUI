@@ -5856,6 +5856,7 @@ eventFrame:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
 -- Hero talent / loadout change events
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+eventFrame:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 -- Cinematic/cutscene end: Blizzard restores hidden frames, so re-hide ours
 eventFrame:RegisterEvent("CINEMATIC_STOP")
@@ -5981,8 +5982,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         end)
         return
     end
-    if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED" then
-        -- Hero talent or loadout change ΓÇö debounced rebuild
+    if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED"
+        or event == "PLAYER_PVP_TALENT_UPDATE" then
+        -- Hero talent, loadout, or PvP talent context change -- debounced
+        -- rebuild. PvP talents (de)activating on arena enter/exit makes
+        -- Blizzard re-evaluate the viewer's tracked cooldown set; without a
+        -- rebuild the new pool frames are never re-claimed and the
+        -- unclaimed-frame cleanup blanks them (arena-exit empty-CDM bug).
         ScheduleTalentRebuild()
         return
     end
@@ -6077,6 +6083,19 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "PLAYER_ENTERING_WORLD" then
         _inCombat = InCombatLockdown and InCombatLockdown() or false
+        -- Arena exit backstop: leaving an arena reverts PvP talents and
+        -- spell overrides, and Blizzard re-evaluates the viewer's tracked
+        -- cooldown set. If PLAYER_PVP_TALENT_UPDATE did not fire across the
+        -- zone-out, nothing re-claims the new pool frames and the
+        -- unclaimed-frame cleanup blanks them (arena-exit empty-CDM bug).
+        -- Schedule the same debounced rebuild a talent change gets; the
+        -- token debounce collapses this with the event-driven trigger when
+        -- both fire, so at most one rebuild runs.
+        local _, instType = IsInInstance()
+        if ns._cdmWasInArena and instType ~= "arena" then
+            ScheduleTalentRebuild()
+        end
+        ns._cdmWasInArena = (instType == "arena") or nil
         -- Install rotation helper hook after CDM frames have been built
         C_Timer.After(1, function()
             InstallRotationHook()

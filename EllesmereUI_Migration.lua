@@ -2283,15 +2283,9 @@ EllesmereUI.RegisterMigration({
             end
         end
 
-        -- Auto-enable sync for Bags across all existing profiles
-        if not db.syncedModules then db.syncedModules = {} end
-        if not db.syncedModules.EllesmereUIBags then
-            db.syncedModules.EllesmereUIBags = {}
-        end
-        local sm = db.syncedModules.EllesmereUIBags
-        for profName in pairs(db.profiles) do
-            sm[profName] = true
-        end
+        -- (The Bags sync enable that used to live here moved into the
+        -- mirror-group reset migration below, which seeds the default
+        -- Bags group after wiping the old-format sync links.)
     end,
 })
 
@@ -2402,6 +2396,56 @@ EllesmereUI.RegisterMigration({
                     end
                 end
             end
+        end
+    end,
+})
+
+-- Profile sync rebuilt as two-way mirror groups: a module's sync set is now a
+-- membership group (the configuring profile is written into it) and only
+-- group members push their data at logout/switch. Old sets stored receivers
+-- only, with no record of who the sender was, so they cannot be translated
+-- reliably -- and under the old code ANY active profile pushed into them,
+-- which could silently overwrite profiles with data from an unrelated one.
+-- Reset every sync link; profile data itself is untouched. Users re-enable
+-- sync from the sidebar sync icons, which write the new group format.
+-- EXCEPTION: Bags keeps syncing by default -- but ONLY for the profiles
+-- that were in the old Bags set. Those members were already receiving bags
+-- pushes on every logout, so mirroring exactly them adds zero new overwrite
+-- exposure. Profiles OUTSIDE the old set may hold deliberately divergent
+-- bags data and must stay out: imports were always stripped from sync sets
+-- (preset imports included), and users could manually unsync Bags in the
+-- old popup. Never seed those.
+-- Registered LAST on purpose: it must run after the older Bags data-move
+-- migration so accounts jumping many versions end up in the new shape.
+EllesmereUI.RegisterMigration({
+    id          = "sync_reset_for_mirror_groups_v2",
+    scope       = "global",
+    description = "Reset all profile sync links for the mirror-group rework (profile data untouched; sync is re-enabled via the module sync icons). The Bags group carries over its previous members only.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db then return end
+        -- Capture the old Bags membership before wiping. Legacy boolean
+        -- format (pre per-profile sets) meant "all profiles".
+        local oldBags = db.syncedModules and db.syncedModules.EllesmereUIBags
+        local carried, count = {}, 0
+        if db.profiles then
+            if oldBags == true then
+                for profName in pairs(db.profiles) do
+                    carried[profName] = true
+                    count = count + 1
+                end
+            elseif type(oldBags) == "table" then
+                for profName, v in pairs(oldBags) do
+                    if v and db.profiles[profName] then
+                        carried[profName] = true
+                        count = count + 1
+                    end
+                end
+            end
+        end
+        db.syncedModules = {}
+        if count >= 2 then
+            db.syncedModules.EllesmereUIBags = carried
         end
     end,
 })

@@ -606,10 +606,15 @@ local function RepointAllDBs(profileName)
     local profileData = EllesmereUIDB.profiles[profileName]
     if not profileData.addons then profileData.addons = {} end
 
-    -- Sync: copy synced module data from outgoing profile to incoming.
-    -- activeProfile is already set to the new name by callers, so read
-    -- the outgoing profile from the db registry (not yet re-pointed).
-    -- New format: syncedModules[folder] = { [profileName] = true, ... }
+    -- Sync handoff: pull synced module data from the outgoing profile into
+    -- the incoming one, so a group member is current the moment it loads.
+    -- activeProfile is already set to the new name by callers, so the copy
+    -- MUST source from the registry's not-yet-repointed profile name --
+    -- SyncModuleToProfiles cannot be used here (it sources from the active
+    -- profile, which is already the incoming one).
+    -- Mirror group: the pull only happens when BOTH the outgoing and the
+    -- incoming profile are members of the module's group; a profile outside
+    -- the group never pushes into it.
     local sm = EllesmereUIDB.syncedModules
     if sm then
         local reg = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry
@@ -617,19 +622,19 @@ local function RepointAllDBs(profileName)
         local outProf = EllesmereUIDB.profiles[outName]
         if outProf and outProf.addons and outName ~= profileName then
             for folder, targets in pairs(sm) do
-                local shouldSync = false
-                if type(targets) == "table" then
-                    shouldSync = targets[profileName]
-                elseif targets == true then
-                    shouldSync = true  -- legacy compat
-                end
-                if shouldSync and outProf.addons[folder] then
-                    -- Use selective copy if exclusions exist
-                    if EllesmereUI.SyncModuleToProfiles then
-                        local singleTarget = { [profileName] = true }
-                        EllesmereUI.SyncModuleToProfiles(folder, singleTarget)
-                    else
+                if type(targets) == "table" and targets[profileName] and targets[outName]
+                   and outProf.addons[folder] then
+                    local exclusions = EllesmereUI._syncExclusions and EllesmereUI._syncExclusions[folder]
+                    local dst = profileData.addons[folder]
+                    if not (exclusions and next(exclusions)) then
                         profileData.addons[folder] = DeepCopy(outProf.addons[folder])
+                    elseif type(dst) == "table" then
+                        -- Overlay leaf-by-leaf so excluded keys (including
+                        -- nested and wildcard paths) keep the dest's values
+                        EllesmereUI._SelectiveOverlay(outProf.addons[folder], dst, exclusions, DeepCopy)
+                    else
+                        -- First sync to this profile: no dest values to preserve
+                        profileData.addons[folder] = EllesmereUI._SelectiveCopy(outProf.addons[folder], exclusions)
                     end
                 end
             end
@@ -699,6 +704,11 @@ local function RepointAllDBs(profileName)
         local colorsDB = EllesmereUI.GetCustomColorsDB()
         for k in pairs(colorsDB) do colorsDB[k] = nil end
         for k, v in pairs(profileData.customColors) do colorsDB[k] = DeepCopy(v) end
+    end
+    -- Sidebar sync icons key off the ACTIVE profile's group membership;
+    -- re-evaluate them on every repoint (switch/create/delete/rename/import)
+    if EllesmereUI._syncRefreshFns then
+        for _, fn in pairs(EllesmereUI._syncRefreshFns) do fn() end
     end
 end
 
@@ -1877,21 +1887,6 @@ end
 -------------------------------------------------------------------------------
 --  Profile management
 -------------------------------------------------------------------------------
--- Addons that auto-sync when a user creates their first second profile (Copy only)
-local AUTO_SYNC_DEFAULTS = {
-    -- BlizzardSkin excluded: no per-profile data (global settings only)
-    EllesmereUIBags              = true,
-    EllesmereUIDamageMeters      = true,
-    EllesmereUIMythicTimer       = true,
-    EllesmereUIQuestTracker      = true,
-    EllesmereUIFriends           = true,
-    EllesmereUIMinimap           = true,
-    EllesmereUIChat              = true,
-    EllesmereUIAuraBuffReminders = true,
-    EllesmereUIQoL               = true,
-    EllesmereUIRaidFrames        = true,
-}
-
 function EllesmereUI.SaveCurrentAsProfile(name)
     local db = GetProfilesDB()
     local current = db.activeProfile or "Default"
@@ -1901,6 +1896,7 @@ function EllesmereUI.SaveCurrentAsProfile(name)
     local profileCountBefore = 0
     for _ in pairs(db.profiles) do profileCountBefore = profileCountBefore + 1 end
 
+    -- Count existing profiles BEFORE adding the new one
     -- Deep-copy the current profile into the new name
     local copy = src and DeepCopy(src) or {}
     -- Ensure fonts/colors/unlock layout are current
@@ -1933,40 +1929,23 @@ function EllesmereUI.SaveCurrentAsProfile(name)
         table.insert(db.profileOrder, 1, name)
     end
 
-    -- Auto-sync rules (Copy only, never import/preset)
+    -- Bags is the ONE module that auto-syncs: bag settings should match
+    -- across profiles. Every other module is strictly opt-in via the sync
+    -- popup, and new profiles never inherit its group membership.
     if not EllesmereUIDB.syncedModules then EllesmereUIDB.syncedModules = {} end
-    local sm = EllesmereUIDB.syncedModules
-
+    local bagsGroup = EllesmereUIDB.syncedModules.EllesmereUIBags
     if profileCountBefore == 1 then
-        -- Rule 1: Going from 1 to 2 profiles. Auto-enable sync for
-        -- default addons between the two profiles.
-        for folder in pairs(AUTO_SYNC_DEFAULTS) do
-            if not sm[folder] then sm[folder] = {} end
-            sm[folder][name] = true
+        -- First second profile: create the default Bags group
+        if type(bagsGroup) ~= "table" then
+            bagsGroup = {}
+            EllesmereUIDB.syncedModules.EllesmereUIBags = bagsGroup
         end
-    else
-        -- Rule 2: 2+ profiles already exist. Extend fully-synced addons
-        -- to include the new profile. "Fully synced" means every other
-        -- non-active profile is in the sync target list.
-        local otherProfiles = {}
-        local otherCount = 0
-        for pName in pairs(db.profiles) do
-            if pName ~= current and pName ~= name then
-                otherProfiles[pName] = true
-                otherCount = otherCount + 1
-            end
-        end
-        for folder, targets in pairs(sm) do
-            if type(targets) == "table" then
-                local syncedCount = 0
-                for pName in pairs(targets) do
-                    if otherProfiles[pName] then syncedCount = syncedCount + 1 end
-                end
-                if otherCount > 0 and syncedCount >= otherCount then
-                    targets[name] = true
-                end
-            end
-        end
+        bagsGroup[current] = true
+        bagsGroup[name] = true
+    elseif type(bagsGroup) == "table" and bagsGroup[current] then
+        -- A copy of a bags-synced profile joins the group. Copies of a
+        -- profile the user deliberately removed from it stay out.
+        bagsGroup[name] = true
     end
 
     -- Switch to the new profile using the standard path so the outgoing
@@ -2006,7 +1985,7 @@ function EllesmereUI.DeleteProfile(name)
     end
     -- Refresh all sync buttons (hide them if down to 1 profile)
     if EllesmereUI._syncRefreshFns then
-        for _, fn in ipairs(EllesmereUI._syncRefreshFns) do fn() end
+        for _, fn in pairs(EllesmereUI._syncRefreshFns) do fn() end
     end
 end
 
@@ -2028,6 +2007,16 @@ function EllesmereUI.RenameProfile(oldName, newName)
     end
     for specID, pName in pairs(db.specProfiles) do
         if pName == oldName then db.specProfiles[specID] = newName end
+    end
+    -- Move sync group membership to the new name so the renamed profile
+    -- keeps syncing and no dead entry lingers in any module's group
+    if EllesmereUIDB.syncedModules then
+        for _, targets in pairs(EllesmereUIDB.syncedModules) do
+            if type(targets) == "table" and targets[oldName] then
+                targets[oldName] = nil
+                targets[newName] = true
+            end
+        end
     end
     if db.activeProfile == oldName then
         db.activeProfile = newName
@@ -2061,17 +2050,20 @@ function EllesmereUI.SwitchProfile(name)
     if EllesmereUI._settingsChanged and name ~= (db.activeProfile or "Default") then
         local sm = EllesmereUIDB.syncedModules
         if sm then
+            -- Mirror group: only flush groups the OUTGOING profile belongs
+            -- to. A profile outside a group never pushes into it.
+            local outName = db.activeProfile or "Default"
             local hasSyncTargets = false
             for folder, targets in pairs(sm) do
-                if type(targets) == "table" and next(targets) then
+                if type(targets) == "table" and targets[outName] then
                     hasSyncTargets = true
                     break
                 end
             end
             if hasSyncTargets then
-                -- Flush sync so target profiles have the latest data
+                -- Flush sync so the other group members have the latest data
                 for folder, targets in pairs(sm) do
-                    if type(targets) == "table" and next(targets) then
+                    if type(targets) == "table" and targets[outName] then
                         EllesmereUI.SyncModuleToProfiles(folder, targets)
                     end
                 end

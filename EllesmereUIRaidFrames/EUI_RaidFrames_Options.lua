@@ -2976,6 +2976,153 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -------------------------------------------------------------------
+        --  TARGETED SPELLS (raid only -- the party page builds its own
+        --  section with the ts* keys; these are tsRaid* and deliberately
+        --  OUTSIDE the party section-sync system, so no onSection call)
+        -------------------------------------------------------------------
+        if not _partyCtx then
+            local tsHeader
+            tsHeader, h = W:SectionHeader(parent, "TARGETED SPELLS", y); y = y - h
+
+            local function TSApply()
+                if ns.TS_ApplySettings then ns.TS_ApplySettings() end
+            end
+
+            -- Eyeball: toggle targeted spells visibility on the raid preview
+            do
+                local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
+                local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
+                local tsLabel
+                for _, rgn in ipairs({ tsHeader:GetRegions() }) do
+                    if rgn.GetText and EllesmereUI.EnKey(rgn:GetText()) == "TARGETED SPELLS" then
+                        tsLabel = rgn; break
+                    end
+                end
+                local eyeBtn = CreateFrame("Button", nil, tsHeader)
+                eyeBtn:SetSize(24, 24)
+                if tsLabel then
+                    eyeBtn:SetPoint("LEFT", tsLabel, "RIGHT", 5, 0)
+                else
+                    eyeBtn:SetPoint("LEFT", tsHeader, "BOTTOMLEFT", 85, 8)
+                end
+                eyeBtn:SetFrameLevel(tsHeader:GetFrameLevel() + 5)
+                eyeBtn:SetAlpha(0.4)
+                local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+                eyeTex:SetAllPoints()
+
+                if ns._tsRaidPreviewVisible == nil then ns._tsRaidPreviewVisible = false end
+                local function RefreshTsEye()
+                    if IsPreviewOff() then
+                        eyeTex:SetTexture(EYE_VISIBLE)
+                        eyeBtn:SetAlpha(0.15)
+                        return
+                    end
+                    eyeTex:SetTexture(ns._tsRaidPreviewVisible and EYE_INVISIBLE or EYE_VISIBLE)
+                    eyeBtn:SetAlpha(0.4)
+                end
+                RefreshTsEye()
+                eyeBtn:SetScript("OnClick", function()
+                    if IsPreviewOff() then return end
+                    ns._tsRaidPreviewVisible = not ns._tsRaidPreviewVisible
+                    RefreshTsEye()
+                    if ns.TS_RefreshRaidPreview then ns.TS_RefreshRaidPreview() end
+                end)
+                eyeBtn:SetScript("OnEnter", function(self)
+                    if IsPreviewOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, "Enable preview to use")
+                        return
+                    end
+                    self:SetAlpha(0.7)
+                    EllesmereUI.ShowWidgetTooltip(self, ns._tsRaidPreviewVisible and "Hide targeted spells on preview" or "Show targeted spells on preview")
+                end)
+                eyeBtn:SetScript("OnLeave", function(self)
+                    if not IsPreviewOff() then self:SetAlpha(0.4) end
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+            end  -- close do (eyeball)
+
+            row, h = W:DualRow(parent, y,
+                { type="toggle", text="Enable Targeted Spells",
+                  getValue=function() return SVal("tsRaidEnabled", true) end,
+                  setValue=function(v) SSet("tsRaidEnabled", v); TSApply(); EllesmereUI:RefreshPage() end },
+                { type="slider", text="Icon Size", min=12, max=48, step=1,
+                  disabled=function() return not SVal("tsRaidEnabled", true) end,
+                  disabledTooltip="Enable Targeted Spells",
+                  getValue=function() return SVal("tsRaidIconSize", 24) end,
+                  setValue=function(v) SSet("tsRaidIconSize", v); TSApply() end });  y = y - h
+
+            -- Row 2: Icon Position (+ cog for X/Y) | Growth Direction
+            local tsPositionValues = {
+                topleft     = "Top Left",
+                top         = "Top",
+                topright    = "Top Right",
+                left        = "Left",
+                center      = "Center",
+                right       = "Right",
+                bottomleft  = "Bottom Left",
+                bottom      = "Bottom",
+                bottomright = "Bottom Right",
+            }
+            local tsPositionOrder = { "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
+
+            local tsGrowValues = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down", CENTER = "Center" }
+            local tsGrowOrder = { "RIGHT", "LEFT", "UP", "DOWN", "CENTER" }
+
+            local function GetDefaultTSGrow(pos)
+                if pos == "right" or pos == "topright" or pos == "bottomright" then return "LEFT" end
+                if pos == "left" or pos == "topleft" or pos == "bottomleft" then return "RIGHT" end
+                if pos == "top" then return "DOWN" end
+                if pos == "bottom" then return "UP" end
+                return "CENTER"
+            end
+
+            row, h = W:DualRow(parent, y,
+                { type="dropdown", text="Icon Position", values=tsPositionValues, order=tsPositionOrder,
+                  disabled=function() return not SVal("tsRaidEnabled", true) end,
+                  disabledTooltip="Enable Targeted Spells",
+                  getValue=function() return string.lower(SVal("tsRaidPosition", "center")) end,
+                  setValue=function(v)
+                      SSet("tsRaidPosition", v)
+                      SSet("tsRaidGrowDirection", GetDefaultTSGrow(v))
+                      TSApply()
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="dropdown", text="Growth Direction", values=tsGrowValues, order=tsGrowOrder,
+                  disabled=function() return not SVal("tsRaidEnabled", true) end,
+                  disabledTooltip="Enable Targeted Spells",
+                  getValue=function() return SVal("tsRaidGrowDirection", "CENTER") end,
+                  setValue=function(v) SSet("tsRaidGrowDirection", v); TSApply() end });  y = y - h
+            -- Cog for targeted spells offset X/Y
+            do
+                local rgn = row._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Targeted Spells Offset",
+                    rows = {
+                        { type="slider", label="Offset X", min=-50, max=50, step=1,
+                          get=function() return SVal("tsRaidOffsetX", 0) end,
+                          set=function(v) SSet("tsRaidOffsetX", v); TSApply() end },
+                        { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                          get=function() return SVal("tsRaidOffsetY", 0) end,
+                          set=function(v) SSet("tsRaidOffsetY", v); TSApply() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(SVal("tsRaidEnabled", true) and 0.4 or 0.15)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(SVal("tsRaidEnabled", true) and 0.4 or 0.15) end)
+                cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            end
+
+            _secY = y
+        end
+
+        -------------------------------------------------------------------
         --  RANGE & TOOLTIP
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
@@ -4045,7 +4192,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="label", text="" });  y = y - h
 
         -------------------------------------------------------------------
-        --  TARGETED SPELLS (party only)
+        --  TARGETED SPELLS (party; the raid Frames tab builds its own
+        --  section with independent tsRaid* keys)
         -------------------------------------------------------------------
         do
             local tsHeader
@@ -5802,6 +5950,8 @@ initFrame:SetScript("OnEvent", function(self)
             ns._absorbsPreviewVisible = false
             ns._tsPreviewVisible = false
             if ns.TS_RefreshPreview then ns.TS_RefreshPreview() end
+            ns._tsRaidPreviewVisible = false
+            if ns.TS_RefreshRaidPreview then ns.TS_RefreshRaidPreview() end
             -- Reset + cancel the shared health/power animation tickers (they are
             -- on ns now so a single cancel covers whichever preview built them).
             ns._healthAnimActive = false

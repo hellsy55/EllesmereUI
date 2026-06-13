@@ -608,7 +608,10 @@ local defaults = {
         debuffDurTextOffsetX = 0,
         debuffDurTextOffsetY = 0,
 
-        -- Targeted spells (party only; see EUI_RF_TargetedSpells.lua)
+        -- Targeted spells (see EUI_RF_TargetedSpells.lua). ts* = party,
+        -- tsRaid* = raid. Independent on purpose: tsRaid* keys are NOT in
+        -- PARTY_KEY_SECTION, so they stay outside the raid/party section
+        -- sync system.
         tsEnabled   = true,
         tsIconSize  = 24,
         tsPosition  = "center",
@@ -616,6 +619,13 @@ local defaults = {
         tsOffsetX   = 0,
         tsOffsetY   = 0,
         tsMaxIcons  = 3,
+        tsRaidEnabled   = true,
+        tsRaidIconSize  = 24,
+        tsRaidPosition  = "center",
+        tsRaidGrowDirection = "CENTER",
+        tsRaidOffsetX   = 0,
+        tsRaidOffsetY   = 0,
+        tsRaidMaxIcons  = 3,
 
         -- Range & misc
         oorAlpha         = 0.4,
@@ -652,6 +662,8 @@ local defaults = {
 -------------------------------------------------------------------------------
 local allButtons     = {}   -- flat list of all created buttons
 local unitToButton   = {}   -- unitToken -> button map (rebuilt on roster change)
+ns._raidUnitToButton = unitToButton  -- ns alias for Targeted Spells (same table:
+                            -- rebuilds wipe it in place, never replace it)
 ns._xfUnitToButton   = {}   -- unitToken -> Extra Frames duplicate (max 5; owned
                             -- by XF_Apply, never written by the rebuild paths)
 local separatedHdrs  = {}   -- [1..8] group headers
@@ -5596,7 +5608,13 @@ function ns._BuildSelfFirstNameList(playerGroup, sortByRole, roleOrder, selfLast
     local n = GetNumGroupMembers()
     for i = 1, n do
         local name, _, subgroup = GetRaidRosterInfo(i)
-        if subgroup == playerGroup and name then
+        -- A nil/placeholder name means the roster has not fully populated
+        -- (zoning, mid-loadscreen join) -- and with a nil name the subgroup
+        -- is not trustworthy either, so the whole list could silently omit
+        -- a member and the header would hide their frame. Bail to nil
+        -- (index-order fallback, everyone visible) until names resolve.
+        if not name or name == UNKNOWNOBJECT then return nil end
+        if subgroup == playerGroup then
             local unit = "raid" .. i
             local rp = 99
             if pri then rp = pri[UnitGroupRolesAssigned(unit)] or 99 end
@@ -5666,15 +5684,20 @@ function ns._BuildPartyClassNameList(includePlayer, sortByRole, roleOrder, class
     for _, unit in ipairs(units) do
         if UnitExists(unit) then
             local name, server = UnitName(unit)
-            if name then
-                if server and server ~= "" then name = name .. "-" .. server end
-                local _, classToken = UnitClass(unit)
-                members[#members + 1] = {
-                    name = name,
-                    rolePri = (rolePri and rolePri[UnitGroupRolesAssigned(unit)]) or 99,
-                    classPri = classPri[classToken] or 99,
-                }
-            end
+            -- A member that exists but whose name has not populated yet
+            -- (zoning, mid-loadscreen join) cannot be listed: a nameList
+            -- missing a member makes the secure header hide that frame
+            -- entirely. Bail to nil so the caller falls back to the
+            -- groupFilter path (everyone visible, index order) until
+            -- UNIT_NAME_UPDATE rebuilds the list with real names.
+            if not name or name == UNKNOWNOBJECT then return nil end
+            if server and server ~= "" then name = name .. "-" .. server end
+            local _, classToken = UnitClass(unit)
+            members[#members + 1] = {
+                name = name,
+                rolePri = (rolePri and rolePri[UnitGroupRolesAssigned(unit)]) or 99,
+                classPri = classPri[classToken] or 99,
+            }
         end
     end
     if #members == 0 then return nil end
@@ -7260,6 +7283,33 @@ local function OnEvent(self, event, arg1, ...)
     elseif event == "UNIT_NAME_UPDATE" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then UpdateButton(btn) end
+        -- NAMELIST-driven headers (party Prioritize Class, raid Show Self
+        -- First) are built from member names. A member whose name populated
+        -- late was unListable when the list was built -- the secure header
+        -- hides their frame entirely, which is also why btn is nil for them
+        -- here. Rebuild the lists now that the real name exists (debounced:
+        -- names resolve in bursts after a loading screen). The builders bail
+        -- to the groupFilter fallback while any name is still unresolved, so
+        -- this also restores the proper order once the last name lands.
+        if inCombat then
+            ns._rosterDirtyInCombat = true
+        else
+            if ns._nameUpdateTimer then ns._nameUpdateTimer:Cancel() end
+            ns._nameUpdateTimer = C_Timer.NewTimer(0.1, function()
+                ns._nameUpdateTimer = nil
+                if InCombatLockdown() then
+                    ns._rosterDirtyInCombat = true
+                    return
+                end
+                if ns._partyFramesVisible and db.profile.partyPrioritizeClass
+                    and ns._LayoutPartyFrames then
+                    ns._LayoutPartyFrames()
+                end
+                if framesVisible and ns._ApplySortToHeaders then
+                    ns._ApplySortToHeaders()
+                end
+            end)
+        end
     elseif event == "UNIT_THREAT_LIST_UPDATE" or event == "UNIT_THREAT_SITUATION_UPDATE" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then
@@ -7399,7 +7449,14 @@ local function OnEvent(self, event, arg1, ...)
                 t0 = ns.ProfBegin("ReloadFrames:PEW"); ReloadFrames(); ns.ProfEnd("ReloadFrames:PEW", t0)
             end
             if ns._partyFramesVisible then
-                ns._LayoutPartyFrames()
+                -- Full party reload (not just layout), mirroring the raid
+                -- branch above: private aura anchors registered during the
+                -- loading screen can carry stale geometry (icon size /
+                -- border scale are baked in at registration), and the
+                -- unit-guarded rebuild paths skip re-registration when
+                -- units are unchanged. ReloadPartyFrames recomputes the
+                -- Auto Resize scale and re-registers every anchor.
+                ns.ReloadPartyFrames()
             end
         end)
     end
@@ -8381,6 +8438,9 @@ end
 local function PvActive()
     return previewActive or ns._partyPvActive
 end
+-- Raid-preview state for the Targeted Spells module (previewActive /
+-- previewFrames are file-locals; the closure tracks the live values)
+ns._TSRaidPvState = function() return previewActive, previewFrames end
 -- Party preview reads party-scaled / party-prefixed settings so aura icons match
 -- the party frames (size, position, colors); raid preview reads the live profile.
 local function PvSettings()
@@ -11128,6 +11188,7 @@ local function RefreshPreview()
         end
         overlayContainer:Show()
     end
+    if ns.TS_RefreshRaidPreview then ns.TS_RefreshRaidPreview() end
 end
 
 -- Mouse-blocking overlays + alpha-based real-frame hide for the options preview.

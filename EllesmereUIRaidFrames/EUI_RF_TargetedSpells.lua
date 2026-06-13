@@ -23,6 +23,11 @@ local random        = math.random
 local issecret      = issecretvalue or function() return false end
 
 local ROSTER_UNITS = { "player", "party1", "party2", "party3", "party4" }
+local RAID_UNITS = {}
+for i = 1, 40 do RAID_UNITS[i] = "raid" .. i end
+local function Units()
+    return IsInRaid() and RAID_UNITS or ROSTER_UNITS
+end
 local T1 = 0.1
 local T2 = 0.15
 local T3 = 0.05
@@ -31,6 +36,14 @@ local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 local function S()
     return ns.db and ns.db.profile
+end
+
+local function SV(raid, key, dflt)
+    local s = S()
+    if not s then return dflt end
+    local v = s[(raid and "tsRaid" or "ts") .. key]
+    if v == nil then return dflt end
+    return v
 end
 
 local dA = {}
@@ -43,7 +56,7 @@ local function Sync()
     wipe(dB)
     wipe(dC)
     wipe(dD)
-    for _, u in ipairs(ROSTER_UNITS) do
+    for _, u in ipairs(Units()) do
         local ex = UnitExists(u)
         if not issecret(ex) and ex == true then
             local _, v1 = UnitClass(u)
@@ -88,12 +101,13 @@ local function Match(caster)
     if issecret(k1) or type(k1) ~= "string" then return nil end
 
     wipe(buf)
-    for _, u in ipairs(ROSTER_UNITS) do
+    local units = Units()
+    for _, u in ipairs(units) do
         if dA[u] == k1 then buf[#buf + 1] = u end
     end
     if #buf == 0 then
         Sync()
-        for _, u in ipairs(ROSTER_UNITS) do
+        for _, u in ipairs(units) do
             if dA[u] == k1 then buf[#buf + 1] = u end
         end
         if #buf == 0 then return nil end
@@ -118,8 +132,9 @@ end
 local buttonIcons = setmetatable({}, { __mode = "k" })
 
 local function StyleIcon(icon)
-    local s = S()
-    local sz = ((s and s.tsIconSize) or 24) * (ns._partyIndicatorScale or 1)
+    local raid = icon._tsRaid
+    local k = raid and 1 or (ns._partyIndicatorScale or 1)
+    local sz = SV(raid, "IconSize", 24) * k
     icon:SetSize(sz, sz)
     if icon._borderFrame then
         local PP = EllesmereUI and (EllesmereUI.PanelPP or EllesmereUI.PP)
@@ -130,8 +145,9 @@ local function StyleIcon(icon)
     end
 end
 
-local function CreateIcon(btn)
+local function CreateIcon(btn, raid)
     local icon = CreateFrame("Frame", nil, btn)
+    icon._tsRaid = raid or false
     icon:SetFrameLevel(btn:GetFrameLevel() + 12)
     icon:Hide()
 
@@ -162,19 +178,19 @@ local function CreateIcon(btn)
     return icon
 end
 
-local function AcquireIcon(btn)
+local function AcquireIcon(btn, raid)
     local icons = buttonIcons[btn]
     if not icons then
         icons = {}
+        icons._raid = raid or false
         buttonIcons[btn] = icons
     end
-    local s = S()
-    local maxIcons = (s and s.tsMaxIcons) or 3
+    local maxIcons = SV(raid, "MaxIcons", 3)
     for i = 1, #icons do
         if not icons[i]._tsCaster then return icons[i] end
     end
     if #icons >= maxIcons then return nil end
-    local icon = CreateIcon(btn)
+    local icon = CreateIcon(btn, raid)
     icons[#icons + 1] = icon
     return icon
 end
@@ -204,13 +220,13 @@ end
 local function LayoutButton(btn)
     local icons = buttonIcons[btn]
     if not icons then return end
-    local s = S()
-    local k = ns._partyIndicatorScale or 1
-    local sz = ((s and s.tsIconSize) or 24) * k
-    local pos = lower((s and s.tsPosition) or "center")
-    local grow = (s and s.tsGrowDirection) or "CENTER"
-    local ox = ((s and s.tsOffsetX) or 0) * k
-    local oy = ((s and s.tsOffsetY) or 0) * k
+    local raid = icons._raid
+    local k = raid and 1 or (ns._partyIndicatorScale or 1)
+    local sz = SV(raid, "IconSize", 24) * k
+    local pos = lower(SV(raid, "Position", "center"))
+    local grow = SV(raid, "GrowDirection", "CENTER")
+    local ox = SV(raid, "OffsetX", 0) * k
+    local oy = SV(raid, "OffsetY", 0) * k
     local anchor = btn._health or btn
     local spc = 2 * k
     local spacing = sz + spc
@@ -279,14 +295,15 @@ local function ClearAll()
 end
 
 local function ShowFor(caster, matches, texture, durObj)
-    local map = ns._partyUnitToButton
+    local raid = IsInRaid()
+    local map = raid and ns._raidUnitToButton or ns._partyUnitToButton
     if not map then return end
     local shownAny = false
     local list
     for _, unitToken in ipairs(matches) do
         local btn = map[unitToken]
         if btn and btn:IsShown() then
-            local icon = AcquireIcon(btn)
+            local icon = AcquireIcon(btn, raid)
             if icon then
                 icon._tsCaster = caster
                 StyleIcon(icon)
@@ -409,8 +426,10 @@ local CAST_EVENTS = {
 
 local function ShouldBeActive()
     local s = S()
-    if not s or s.tsEnabled == false then return false end
-    return IsInGroup() and not IsInRaid()
+    if not s then return false end
+    if not IsInGroup() then return false end
+    if IsInRaid() then return s.tsRaidEnabled ~= false end
+    return s.tsEnabled ~= false
 end
 
 local function UpdateActive()
@@ -541,6 +560,82 @@ function ns.TS_RefreshPreview()
     end
 end
 
+local rPvIcons = {}
+local rPvTicker
+
+local function StopRPvTicker()
+    if rPvTicker then
+        rPvTicker:Cancel()
+        rPvTicker = nil
+    end
+end
+
+local function RPvTick()
+    local active = ns._TSRaidPvState and ns._TSRaidPvState()
+    if not active then
+        StopRPvTicker()
+        return
+    end
+    local now = GetTime()
+    for i = 1, #rPvIcons do
+        local icon = rPvIcons[i]
+        if icon and icon._tsCaster and icon._cooldown then
+            if not icon._pvExp or icon._pvExp <= now then
+                local dur = random(4, 12)
+                icon._pvExp = now + dur
+                icon._cooldown:SetCooldown(now, dur)
+                icon._cooldown:Show()
+            end
+        end
+    end
+end
+
+function ns.TS_RefreshRaidPreview()
+    local s = S()
+    local active, frames
+    if ns._TSRaidPvState then active, frames = ns._TSRaidPvState() end
+    local on = active and frames and ns._tsRaidPreviewVisible
+        and s and s.tsRaidEnabled ~= false
+    if not on then
+        StopRPvTicker()
+        for i = 1, #rPvIcons do
+            rPvIcons[i]._tsCaster = nil
+            rPvIcons[i]._pvExp = nil
+            rPvIcons[i]:Hide()
+        end
+        return
+    end
+    local pos = lower((s and s.tsRaidPosition) or "center")
+    local ox = (s and s.tsRaidOffsetX) or 0
+    local oy = (s and s.tsRaidOffsetY) or 0
+    for i = 1, #PV_HOSTS do
+        local host = frames[PV_HOSTS[i]]
+        local icon = rPvIcons[i]
+        if host then
+            if not icon or icon:GetParent() ~= host then
+                if icon then icon:Hide() end
+                icon = CreateIcon(host, true)
+                rPvIcons[i] = icon
+            end
+            icon._tsCaster = "preview"
+            StyleIcon(icon)
+            icon._tex:SetTexture(PV_TEX[i])
+            icon:ClearAllPoints()
+            Place(icon, host._health or host, pos, ox, oy)
+            icon._pvExp = nil
+            icon:Show()
+        elseif icon then
+            icon._tsCaster = nil
+            icon._pvExp = nil
+            icon:Hide()
+        end
+    end
+    RPvTick()
+    if not rPvTicker then
+        rPvTicker = C_Timer.NewTicker(0.5, RPvTick)
+    end
+end
+
 function ns.TS_ApplySettings()
     UpdateActive()
     for btn, icons in pairs(buttonIcons) do
@@ -554,4 +649,5 @@ function ns.TS_ApplySettings()
         if any then LayoutButton(btn) end
     end
     ns.TS_RefreshPreview()
+    ns.TS_RefreshRaidPreview()
 end
