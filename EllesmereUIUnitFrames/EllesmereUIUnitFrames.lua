@@ -777,6 +777,7 @@ local defaults = {
             raidMarkerAlign = "left",
             raidMarkerX = 0,
             raidMarkerY = 0,
+            bossStackDirection = "down",
             healthReverseFill = false,
         },
         enabledFrames = {
@@ -6137,7 +6138,12 @@ local function ReloadFrames()
                     local prev = frames["boss" .. (bossIdx - 1)]
                     if prev then
                         frame:ClearAllPoints()
-                        frame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -bossSpacing)
+                        local bossStackDir = db.profile.boss and db.profile.boss.bossStackDirection or "down"
+                        if bossStackDir == "up" then
+                            frame:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, bossSpacing)
+                        else
+                            frame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -bossSpacing)
+                        end
                     end
                 end
             else
@@ -8789,6 +8795,7 @@ function InitializeFrames()
     local barHeight = (bossSettings.healthHeight or 34) + (bossSettings.powerHeight or 6) + (bossSettings.castbarHeight or 14)
     local gap = 10
     local spacing = db.profile.bossSpacing or (barHeight + gap)
+    local bossStackDir = db.profile.boss and db.profile.boss.bossStackDirection or "down"
     for i = 1, 5 do
         local bossUnit = "boss" .. i
         local bossFrame = oUF:Spawn(bossUnit, "EllesmereUIUnitFrames_Boss" .. i)
@@ -8806,7 +8813,11 @@ function InitializeFrames()
             local prev = frames["boss" .. (i - 1)]
             if prev then
                 bossFrame:ClearAllPoints()
-                bossFrame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
+                if bossStackDir == "up" then
+                    bossFrame:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, spacing)
+                else
+                    bossFrame:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -spacing)
+                end
             end
         end
 
@@ -9511,6 +9522,7 @@ function SetupOptionsPanel()
                     if EllesmereUI._unlockActive then return end
                     if k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
+                        local bossStackDir = db.profile.boss and db.profile.boss.bossStackDirection or "down"
                         -- boss1 to UIParent; chain 2..5 from the previous boss.
                         if frames.boss1 then
                             frames.boss1:ClearAllPoints()
@@ -9521,7 +9533,11 @@ function SetupOptionsPanel()
                             local prev = frames["boss" .. (i - 1)]
                             if bf and prev then
                                 bf:ClearAllPoints()
-                                bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
+                                if bossStackDir == "up" then
+                                    bf:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, spacing)
+                                else
+                                    bf:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -spacing)
+                                end
                             end
                         end
                     elseif k == "classPower" then
@@ -9566,6 +9582,7 @@ function SetupOptionsPanel()
                     end
                     if k == "boss" then
                         local spacing = db.profile.bossSpacing or 60
+                        local bossStackDir = db.profile.boss and db.profile.boss.bossStackDirection or "down"
                         if frames.boss1 then
                             local bx, by = SnapForFrame(frames.boss1, pos.x, pos.y)
                             frames.boss1:ClearAllPoints()
@@ -9576,7 +9593,11 @@ function SetupOptionsPanel()
                             local prev = frames["boss" .. (i - 1)]
                             if bf and prev then
                                 bf:ClearAllPoints()
-                                bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
+                                if bossStackDir == "up" then
+                                    bf:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, spacing)
+                                else
+                                    bf:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -spacing)
+                                end
                             end
                         end
                     elseif k == "classPower" then
