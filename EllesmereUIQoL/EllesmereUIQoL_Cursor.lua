@@ -988,7 +988,7 @@ local function RegisterUnlockElements()
     end
 
     if #elements > 0 then
-        EllesmereUI:RegisterUnlockElements(elements)
+        EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIQoL")
     end
 end
 
@@ -1106,10 +1106,19 @@ function ECL:OnInitialize()
     local sharedDB = EllesmereUI.Lite.NewDB("EllesmereUIQoLDB", cursorDefaults)
     -- Narrow view onto the cursor sub-table so legacy code using
     -- self.db.profile.<key> keeps working without rewrites.
-    self.db = {
-        _shared  = sharedDB,
-        profile  = sharedDB.profile.cursor,
-    }
+    -- profile is resolved DYNAMICALLY so it follows profile swaps. The profile
+    -- system repoints the registered sharedDB.profile in place (RepointAllDBs);
+    -- a frozen `profile = sharedDB.profile.cursor` reference would go stale after
+    -- a swap and the cursor would keep applying the old profile's settings.
+    self.db = setmetatable({ _shared = sharedDB }, {
+        __index = function(t, k)
+            if k == "profile" then
+                local p = t._shared.profile
+                if not p.cursor then p.cursor = {} end
+                return p.cursor
+            end
+        end,
+    })
     self.db.ResetProfile = function(dbSelf)
         local defaults = cursorDefaults.profile.cursor
         wipe(dbSelf.profile)

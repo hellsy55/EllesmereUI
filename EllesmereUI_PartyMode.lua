@@ -366,9 +366,36 @@ EllesmereUI:RegisterOnHide(OnSettingsClose)
 -------------------------------------------------------------------------------
 --  Init frame — handles PLAYER_LOGIN, events, PLAYER_LOGOUT
 -------------------------------------------------------------------------------
+-- Bloodlust celebration trigger: same player-only Sated/Exhaustion debuff edge
+-- detection used by the CDM lust bar. Fires a celebration the instant lust goes
+-- out (the debuff is applied at that moment). Hardcoded 40s celebration -- it
+-- deliberately ignores the Auto Celebration Duration slider.
+local PM_SATED_DEBUFFS = { 57723, 57724, 80354, 95809, 160455, 264689, 390435, 428628 }
+local _pmSatedPresent = false
+local function _pmPlayerHasSated()
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return false end
+    for i = 1, #PM_SATED_DEBUFFS do
+        if C_UnitAuras.GetPlayerAuraBySpellID(PM_SATED_DEBUFFS[i]) then return true end
+    end
+    return false
+end
+
 local pmInit = CreateFrame("Frame")
 pmInit:RegisterEvent("PLAYER_LOGIN")
 pmInit:RegisterEvent("PLAYER_LOGOUT")
+
+-- Register the player-only UNIT_AURA listener only while the Bloodlust trigger
+-- is enabled (UNIT_AURA is high-frequency). Global so the options checkbox can
+-- toggle it live, mirroring EllesmereUI_StartRandomTrigger.
+function EllesmereUI_UpdatePartyModeLustListener()
+    if EllesmereUIDB and EllesmereUIDB.partyModeTriggerBloodlust then
+        _pmSatedPresent = _pmPlayerHasSated()  -- baseline so only NEW edges fire
+        pmInit:RegisterUnitEvent("UNIT_AURA", "player")
+    else
+        pmInit:UnregisterEvent("UNIT_AURA")
+    end
+end
+
 pmInit:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
@@ -388,6 +415,25 @@ pmInit:SetScript("OnEvent", function(self, event, ...)
         if EllesmereUIDB and EllesmereUIDB.partyModeTriggerRandom then
             EllesmereUI_StartRandomTrigger()
         end
+        -- Start Bloodlust debuff listener if enabled
+        EllesmereUI_UpdatePartyModeLustListener()
+
+    elseif event == "UNIT_AURA" then
+        if not (EllesmereUIDB and EllesmereUIDB.partyModeTriggerBloodlust) then return end
+        local present = _pmPlayerHasSated()
+        if present and not _pmSatedPresent then
+            -- Rising edge: lust just went out. Hardcoded 40s (NOT the slider),
+            -- and this trigger never enables the Auto Celebration Duration setting.
+            EllesmereUIDB.partyMode = true
+            EllesmereUI_StartPartyMode()
+            if celebrationTimer then celebrationTimer:Cancel() end
+            celebrationTimer = C_Timer.NewTimer(40, function()
+                celebrationTimer = nil
+                if EllesmereUIDB then EllesmereUIDB.partyMode = false end
+                EllesmereUI_StopPartyMode()
+            end)
+        end
+        _pmSatedPresent = present
 
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         if not EllesmereUIDB or not EllesmereUIDB.partyModeTriggerKeystone then return end

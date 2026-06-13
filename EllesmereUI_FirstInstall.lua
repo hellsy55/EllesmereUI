@@ -15,6 +15,16 @@
 local EllesmereUI = _G.EllesmereUI
 if not EllesmereUI then return end
 
+-- Standalone builds bundle this file too, but the multi-module picker is
+-- meaningless there: its GROUPS reference suite sibling addons (Action Bars,
+-- Nameplates, ...) that simply do not exist in a single-module standalone. So
+-- the first-install popup is suite-only. The build never renames the word
+-- "Standalone", so deriving this from the host addon name (the `...` vararg =
+-- real folder name) is the rename-immune switch -- false in the suite (host
+-- "EllesmereUI"), true in any "EUIStandalone*" host. See the loader guard below.
+local EUI_HOST_ADDON = ...
+local IS_STANDALONE = type(EUI_HOST_ADDON) == "string" and EUI_HOST_ADDON:find("Standalone") ~= nil
+
 local PP = EllesmereUI.PanelPP
 
 local MakeBorder = EllesmereUI.MakeBorder
@@ -40,7 +50,7 @@ local GROUPS = {
             { label = "Unit Frames",      addon = "EllesmereUIUnitFrames" },
             { label = "Cooldown Manager", addon = "EllesmereUICooldownManager" },
             { label = "Resource Bars",    addon = "EllesmereUIResourceBars" },
-            { label = "Raid Frames",      comingSoon = true },
+            { label = "Raid Frames",      addon = "EllesmereUIRaidFrames" },
         },
     },
     {
@@ -352,11 +362,9 @@ local function ShowFirstInstallPopup()
     end
 
     local function RefreshButtonLabel()
-        if HasChanges() then
-            doneLbl:SetText("Reload UI")
-        else
-            doneLbl:SetText("Okay")
-        end
+        -- Picking addons always ends in a reload so the enable/disable choices
+        -- take effect, so the button always reads "Reload UI".
+        doneLbl:SetText("Reload UI")
     end
     RefreshButtonLabel()
 
@@ -444,18 +452,15 @@ local function ShowFirstInstallPopup()
     end
 
     doneBtn:SetScript("OnClick", function()
-        Close(HasChanges())
+        -- Always reload so the addon enable/disable selections take effect.
+        Close(true)
     end)
 
-    -- Escape to close (treated as Okay if no changes, nothing if changes -- user must decide)
+    -- Escape is disabled: the user must click Reload UI so their addon
+    -- selection always takes effect. Consume Escape; let other keys propagate.
     popup:EnableKeyboard(true)
     popup:SetScript("OnKeyDown", function(self, key)
-        if key == "ESCAPE" and not HasChanges() then
-            self:SetPropagateKeyboardInput(false)
-            Close(false)
-        else
-            self:SetPropagateKeyboardInput(true)
-        end
+        self:SetPropagateKeyboardInput(key ~= "ESCAPE")
     end)
 
     dimmer:Show()
@@ -471,6 +476,12 @@ EllesmereUI.ShowFirstInstallPopup = ShowFirstInstallPopup
 -- have not yet initialized their DBs this session, so any profile.addons
 -- entries can only have come from a prior version. This cleanly separates
 -- upgrades from fresh installs without needing version stamps.
+-- Standalone: never arm the suite first-install picker (see note at top of file).
+-- This makes the non-firing explicit rather than relying on the incidental
+-- addon-name mismatch (the renamed "EllesmereUI" ADDON_LOADED gate would point at
+-- the core token, never the real child/folder token, so it never matched anyway).
+if IS_STANDALONE then return end
+
 local _showPopupOnLogin = false
 
 local function ComputeShowOnLogin()

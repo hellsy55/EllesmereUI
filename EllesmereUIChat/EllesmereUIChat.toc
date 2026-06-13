@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Chat
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: A modern, light chat reskin with improved functionality
+## Notes: Modern chat enhancements with useful utilities.
 ## Author: Ellesmere
-## Version: 7.8.8
+## Version: 8.1.4
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIChatDB
 ## SavedVariablesPerCharacter: EllesmereUIChatScrollDB

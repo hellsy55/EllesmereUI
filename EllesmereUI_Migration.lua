@@ -147,23 +147,35 @@ local function RunMigration(spec)
         end
 
     elseif spec.scope == "specProfile" then
+        -- Per-profile spell store: spellAssignments.profiles[name].specProfiles.
+        -- The cdm_per_profile_spell_store_v1 migration (registered first) seeds
+        -- these buckets from the legacy flat store before any specProfile
+        -- migration runs, so iterating the nested structure covers every
+        -- profile's per-spec data in one pass. Flag still lives on each
+        -- specProfData._migrations table (carried forward verbatim by seeding).
         local sa = EllesmereUIDB.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for specKey, specProfData in pairs(sp) do
-                if type(specProfData) == "table" then
-                    RunOne(spec, {
-                        specProfile = specProfData,
-                        specKey     = specKey,
-                    }, specProfData)
+        local profiles = sa and sa.profiles
+        if profiles then
+            for profName, bucket in pairs(profiles) do
+                local sp = type(bucket) == "table" and bucket.specProfiles
+                if type(sp) == "table" then
+                    for specKey, specProfData in pairs(sp) do
+                        if type(specProfData) == "table" then
+                            RunOne(spec, {
+                                specProfile = specProfData,
+                                specKey     = specKey,
+                                profileName = profName,
+                            }, specProfData)
+                        end
+                    end
                 end
             end
         end
     end
 end
 
--- Public: run all registered migrations. Currently called once from the
--- parent ADDON_LOADED handler after PerformResetWipe + StampResetVersion.
+-- Public: run all registered migrations. Called once from the parent
+-- ADDON_LOADED handler (the legacy beta-wipe that used to precede it is gone).
 function EllesmereUI.RunRegisteredMigrations()
     if not EllesmereUIDB then return end
     for _, spec in ipairs(_migrations) do
@@ -200,15 +212,20 @@ function EllesmereUI.GetMigrationStatus()
                 end
             end
         elseif spec.scope == "specProfile" then
-            local sp = EllesmereUIDB and EllesmereUIDB.spellAssignments and EllesmereUIDB.spellAssignments.specProfiles
-            if sp then
-                for specKey, specProfData in pairs(sp) do
-                    if type(specProfData) == "table" then
-                        local flags = specProfData._migrations
-                        entry.ranScopes[#entry.ranScopes + 1] = {
-                            target = specKey,
-                            ran    = (flags and flags[spec.id]) and true or false,
-                        }
+            local profiles = EllesmereUIDB and EllesmereUIDB.spellAssignments and EllesmereUIDB.spellAssignments.profiles
+            if profiles then
+                for profName, bucket in pairs(profiles) do
+                    local sp = type(bucket) == "table" and bucket.specProfiles
+                    if type(sp) == "table" then
+                        for specKey, specProfData in pairs(sp) do
+                            if type(specProfData) == "table" then
+                                local flags = specProfData._migrations
+                                entry.ranScopes[#entry.ranScopes + 1] = {
+                                    target = profName .. "/" .. specKey,
+                                    ran    = (flags and flags[spec.id]) and true or false,
+                                }
+                            end
+                        end
                     end
                 end
             end
@@ -355,6 +372,31 @@ end
 -- Expose for profile import
 EllesmereUI.SnapProfilePositions = SnapProfilePositions
 
+-- Collect every per-profile spec-profile data table into a flat array. After
+-- the cdm_per_profile_spell_store_v1 seeding migration, CDM spell data lives at
+-- spellAssignments.profiles[name].specProfiles (per profile), not the legacy
+-- flat spellAssignments.specProfiles. Global-scope migration bodies that used to
+-- walk the flat store call this so they transform the LIVE per-profile data.
+-- Seeding is registered first, so the buckets exist by the time any body runs.
+local function CollectSpecProfiles(sa)
+    local out = {}
+    if type(sa) ~= "table" then return out end
+    local profiles = sa.profiles
+    if type(profiles) == "table" then
+        for _, bucket in pairs(profiles) do
+            local sp = type(bucket) == "table" and bucket.specProfiles
+            if type(sp) == "table" then
+                for _, specProfData in pairs(sp) do
+                    if type(specProfData) == "table" then
+                        out[#out + 1] = specProfData
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
 --------------------------------------------------------------------------------
 --  Registered migrations
 --  Each migration below is a one-time data transformation gated by the runner's
@@ -362,6 +404,49 @@ EllesmereUI.SnapProfilePositions = SnapProfilePositions
 --  transition from old inline migrations; they can be removed after a few
 --  release cycles once all existing users have been through the new system.
 --------------------------------------------------------------------------------
+
+-- IMPORTANT: this migration is registered FIRST so it runs before any
+-- specProfile-scoped migration. It converts the legacy account-wide CDM spell
+-- store (spellAssignments.specProfiles, shared by all profiles on a given spec)
+-- into a per-profile store (spellAssignments.profiles[name].specProfiles) by
+-- DeepCopying the legacy data into EVERY existing profile. This is what makes a
+-- profile copy own an independent CDM: before this, deleting a bar in a copied
+-- profile mutated the one shared bucket and wiped the origin. The DeepCopy
+-- carries each spec's _migrations flags forward verbatim, so already-run
+-- specProfile migrations do not re-run against the seeded copies. The legacy
+-- flat table is left in place as a dormant backup for one release; nothing
+-- reads it after seeding. NOTE: this is the spellAssignments.specProfiles store,
+-- NOT the unrelated EllesmereUIDB.specProfiles spec-to-profile auto-switch map.
+EllesmereUI.RegisterMigration({
+    id          = "cdm_per_profile_spell_store_v1",
+    scope       = "global",
+    description = "Fork the shared per-spec CDM spell store into every profile so profile copies own independent CDM data.",
+    body        = function(ctx)
+        local db = ctx.db
+        local sa = db and db.spellAssignments
+        if not sa then return end               -- fresh install: nothing stored yet
+        if sa._perProfileSeeded then return end -- already converted
+        local legacy = sa.specProfiles          -- old account-wide per-spec store
+        if not sa.profiles then sa.profiles = {} end
+        local DeepCopy = EllesmereUI._DeepCopy or (EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy)
+        local function seed(name)
+            if not name then return end
+            if sa.profiles[name] then return end -- idempotent: never clobber an existing bucket
+            local sp = {}
+            if legacy and DeepCopy then sp = DeepCopy(legacy) end
+            sa.profiles[name] = { specProfiles = sp }
+        end
+        if db.profiles then
+            for name, pd in pairs(db.profiles) do
+                if type(pd) == "table" then seed(name) end
+            end
+        end
+        -- Ensure the active/Default profile has a bucket even if it is not yet
+        -- present in db.profiles (very early / minimal-state installs).
+        seed(db.activeProfile or "Default")
+        sa._perProfileSeeded = true
+    end,
+})
 
 EllesmereUI.RegisterMigration({
     id          = "quest_tracker_sec_color_default",
@@ -505,26 +590,20 @@ EllesmereUI.RegisterMigration({
         -- Global: unlock anchors
         snapAnchors(ctx.db.unlockAnchors)
 
-        -- Spec profiles: TBB positions + bar sizes
-        local sa = ctx.db.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for _, specData in pairs(sp) do
-                if type(specData) == "table" then
-                    local tbbPos = specData.tbbPositions
-                    if tbbPos then
-                        for _, pos in pairs(tbbPos) do
-                            if type(pos) == "table" then snapPos(pos) end
-                        end
-                    end
-                    local tbb = specData.trackedBuffBars
-                    local tbbBars = tbb and tbb.bars
-                    if tbbBars then
-                        for _, bar in ipairs(tbbBars) do
-                            if type(bar) == "table" then
-                                roundFields(bar, { "width", "height" })
-                            end
-                        end
+        -- Spec profiles (per-profile store): TBB positions + bar sizes
+        for _, specData in ipairs(CollectSpecProfiles(ctx.db.spellAssignments)) do
+            local tbbPos = specData.tbbPositions
+            if tbbPos then
+                for _, pos in pairs(tbbPos) do
+                    if type(pos) == "table" then snapPos(pos) end
+                end
+            end
+            local tbb = specData.trackedBuffBars
+            local tbbBars = tbb and tbb.bars
+            if tbbBars then
+                for _, bar in ipairs(tbbBars) do
+                    if type(bar) == "table" then
+                        roundFields(bar, { "width", "height" })
                     end
                 end
             end
@@ -1114,20 +1193,17 @@ EllesmereUI.RegisterMigration({
             end
         end
 
-        -- 2. Walk every spec profile, nil stale main-buffs assignedSpells
-        -- and prune orphaned spell data for deleted extra bars.
-        local sa = ctx.db.spellAssignments
-        local specProfiles = sa and sa.specProfiles
-        if type(specProfiles) == "table" then
-            for _, specProf in pairs(specProfiles) do
-                local barSpells = specProf.barSpells
-                if type(barSpells) == "table" then
-                    if barSpells["buffs"] then
-                        barSpells["buffs"].assignedSpells = nil
-                    end
-                    for removedKey in pairs(removedBuffBarKeys) do
-                        barSpells[removedKey] = nil
-                    end
+        -- 2. Walk every spec profile (all profiles' per-spec buckets), nil
+        -- stale main-buffs assignedSpells and prune orphaned spell data for
+        -- deleted extra bars.
+        for _, specProf in ipairs(CollectSpecProfiles(ctx.db.spellAssignments)) do
+            local barSpells = specProf.barSpells
+            if type(barSpells) == "table" then
+                if barSpells["buffs"] then
+                    barSpells["buffs"].assignedSpells = nil
+                end
+                for removedKey in pairs(removedBuffBarKeys) do
+                    barSpells[removedKey] = nil
                 end
             end
         end
@@ -1339,30 +1415,28 @@ EllesmereUI.RegisterMigration({
         local bars = cdmBars and cdmBars.bars
         if type(bars) ~= "table" then return end
 
-        -- The spec profile store is global (not nested in any profile),
-        -- so we read EllesmereUIDB.spellAssignments.specProfiles directly.
-        -- We avoid touching ns.GetSpecProfiles since CDM hasn't initialized
-        -- by the time this runs (early phase, before child OnInitialize).
-        local sa = EllesmereUIDB and EllesmereUIDB.spellAssignments
-        local specProfiles = sa and sa.specProfiles
+        -- The spell store is per-profile (spellAssignments.profiles[name].
+        -- specProfiles). We collect every profile's per-spec buckets directly
+        -- (not via ns.GetSpecProfiles) since CDM hasn't initialized by the time
+        -- this runs (early phase, before child OnInitialize). Seeding has
+        -- already run, so the buckets exist.
+        local specProfs = CollectSpecProfiles(EllesmereUIDB and EllesmereUIDB.spellAssignments)
 
         for _, bd in ipairs(bars) do
             if bd.activeStateAnim == "hideActive" and not bd.isGhostBar then
-                if specProfiles then
-                    for _, prof in pairs(specProfiles) do
-                        local barSpells = prof and prof.barSpells
-                        local bs = barSpells and barSpells[bd.key]
-                        if bs and bs.assignedSpells then
-                            if not bs.spellSettings then bs.spellSettings = {} end
-                            for _, sid in ipairs(bs.assignedSpells) do
-                                if sid and sid > 0 then
-                                    if not bs.spellSettings[sid] then bs.spellSettings[sid] = {} end
-                                    local ss = bs.spellSettings[sid]
-                                    -- Only migrate if the user hasn't already
-                                    -- explicitly set a per-icon active state.
-                                    if not ss.activeSwipeMode and not ss.activeSwipeR then
-                                        ss.activeSwipeMode = "none"
-                                    end
+                for _, prof in ipairs(specProfs) do
+                    local barSpells = prof and prof.barSpells
+                    local bs = barSpells and barSpells[bd.key]
+                    if bs and bs.assignedSpells then
+                        if not bs.spellSettings then bs.spellSettings = {} end
+                        for _, sid in ipairs(bs.assignedSpells) do
+                            if sid and sid > 0 then
+                                if not bs.spellSettings[sid] then bs.spellSettings[sid] = {} end
+                                local ss = bs.spellSettings[sid]
+                                -- Only migrate if the user hasn't already
+                                -- explicitly set a per-icon active state.
+                                if not ss.activeSwipeMode and not ss.activeSwipeR then
+                                    ss.activeSwipeMode = "none"
                                 end
                             end
                         end
@@ -1736,14 +1810,33 @@ EllesmereUI.RegisterMigration({
     scope       = "global",
     description = "Remove __ghost_buffs spell data from all spec profiles.",
     body = function(ctx)
-        local sa = ctx.db and ctx.db.spellAssignments
-        local sp = sa and sa.specProfiles
-        if not sp then return end
-        for _, specData in pairs(sp) do
+        for _, specData in ipairs(CollectSpecProfiles(ctx.db and ctx.db.spellAssignments)) do
             if specData.barSpells then
                 specData.barSpells["__ghost_buffs"] = nil
             end
         end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "rf_split_absorb_edge_mode_v1",
+    scope       = "profile",
+    description = "Split the shared Raid Frames absorbFromRightEdge toggle into independent absorbEdgeMode / healAbsorbEdgeMode (overlay/right/left) per bar.",
+    body        = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        if type(rf) ~= "table" then return end
+        -- Existing users who had the old single toggle ON get BOTH bars set to
+        -- "right" so their look is unchanged; false/absent -> "overlay" (default).
+        -- Idempotent: only writes the new keys when they are still unset.
+        local function split(oldKey, absKey, healKey)
+            local old = rf[oldKey]
+            if old == nil then return end
+            local mode = (old == true) and "right" or "overlay"
+            if rf[absKey]  == nil then rf[absKey]  = mode end
+            if rf[healKey] == nil then rf[healKey] = mode end
+        end
+        split("absorbFromRightEdge",       "absorbEdgeMode",       "healAbsorbEdgeMode")
+        split("party_absorbFromRightEdge", "party_absorbEdgeMode", "party_healAbsorbEdgeMode")
     end,
 })
 
@@ -1801,19 +1894,6 @@ EllesmereUI.RegisterMigration({
                 end
             end
         end
-    end,
-})
-
-EllesmereUI.RegisterMigration({
-    id          = "erb_disable_expand_if_height_matched_v1",
-    scope       = "profile",
-    description = "Disable expandIfNoResource on power bar if height match is active for ERB_Power.",
-    body = function(ctx)
-        local hm = EllesmereUIDB and EllesmereUIDB.unlockHeightMatch
-        if not hm or not hm["ERB_Power"] then return end
-        local erb = ctx.profile.addons and ctx.profile.addons.EllesmereUIResourceBars
-        local pp = erb and erb.primary
-        if pp then pp.expandIfNoResource = false end
     end,
 })
 
@@ -1877,6 +1957,35 @@ EllesmereUI.RegisterMigration({
                 s.portraitStyle = global
             end
         end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "uf_split_totpet_into_tot_focus_v1",
+    scope       = "profile",
+    description = "Split shared totPet unit-frame settings into independent targettarget and focustarget tables.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if type(uf) ~= "table" then return end
+        local tp = uf.totPet
+        if type(tp) ~= "table" then return end
+        -- Self-contained deep copy (do not depend on an external helper).
+        local function DCopy(t)
+            if type(t) ~= "table" then return t end
+            local c = {}
+            for k, v in pairs(t) do c[k] = DCopy(v) end
+            return c
+        end
+        -- Copy the user's old shared overrides into BOTH new tables so each
+        -- mini renders identically to before. Overwrite unconditionally:
+        -- totPet only exists on un-migrated pre-split data, so any
+        -- targettarget/focustarget already present here are default-merge
+        -- artifacts (e.g. from an import's DeepMergeDefaults), never
+        -- user-authored. Deleting totPet afterward makes this a no-op on
+        -- re-run regardless of the per-profile migration flag.
+        uf.targettarget = DCopy(tp)
+        uf.focustarget  = DCopy(tp)
+        uf.totPet = nil
     end,
 })
 
@@ -2098,6 +2207,19 @@ EllesmereUI.RegisterMigration({
 
 
 EllesmereUI.RegisterMigration({
+    id          = "enhance_five_bar_off_existing_v1",
+    scope       = "profile",
+    description = "Existing profiles default enhanceFiveBar to false; new installs get true from defaults.",
+    body = function(ctx)
+        local erb = ctx.profile.addons and ctx.profile.addons.EllesmereUIResourceBars
+        local sec = erb and erb.secondary
+        if sec and sec.enhanceFiveBar == nil then
+            sec.enhanceFiveBar = false
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "auto_open_containers_preserve_v1",
     scope       = "global",
     description = "Preserve autoOpenContainers for existing users after default changed from on to off.",
@@ -2105,6 +2227,225 @@ EllesmereUI.RegisterMigration({
         local db = ctx.db
         if db.autoOpenContainers == nil then
             db.autoOpenContainers = true
+        end
+    end,
+})
+
+-------------------------------------------------------------------------------
+--  Bags profile migration: copy flat EllesmereUIDB root keys into each
+--  profile's addons.EllesmereUIBags so the Bags module can use NewDB().
+-------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "bags_to_profile_v1",
+    scope       = "global",
+    description = "Migrate Bags settings from EllesmereUIDB root to per-profile storage.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+
+        local function DCopy(t)
+            if type(t) ~= "table" then return t end
+            local c = {}
+            for k, v in pairs(t) do c[k] = DCopy(v) end
+            return c
+        end
+
+        local PROFILE_KEYS = {
+            "bagScale", "bagColumns", "bagCatTitleSize", "bagCountFontSize",
+            "itemlevelFontSize", "showItemlevelInBags", "showUpgradeIndicator",
+            "bagShowTrackRank", "itemlevelUseCustomColor", "itemlevelCustomColor",
+            "bagHideEmptyCategories", "bagSidebarCollapsed", "bankSidebarCollapsed",
+            "bagShowPinnedItems", "bagShowRecentItems", "bagPinnedInOneBag",
+            "bagRecentInOneBag", "bagShowPinRecentTips", "bagShowSortIcon",
+            "bagHideRandomize", "bagDefaultOneBag", "bagNestByExpansion",
+            "bagHideOneBagWarning", "bagHideAddCategory", "bagMoveNoShift",
+            "enableGoldTracking", "detachReagentBag", "enhancedBags",
+            "bagCategoryState", "bagCategoryOrder", "bagDisabledCategories",
+            "bagUserCategories", "bagsPosition", "bankPosition",
+            "bagVisualOrder", "bagHiddenInAllItems", "currencyOrder",
+        }
+
+        for profName, profData in pairs(db.profiles) do
+            if type(profData) == "table" then
+                if not profData.addons then profData.addons = {} end
+                if not profData.addons.EllesmereUIBags then
+                    local bags = {}
+                    for _, k in ipairs(PROFILE_KEYS) do
+                        local v = db[k]
+                        if v ~= nil then
+                            bags[k] = DCopy(v)
+                        end
+                    end
+                    if next(bags) then
+                        profData.addons.EllesmereUIBags = bags
+                    end
+                end
+            end
+        end
+
+        -- (The Bags sync enable that used to live here moved into the
+        -- mirror-group reset migration below, which seeds the default
+        -- Bags group after wiping the old-format sync links.)
+    end,
+})
+
+-- Guardian Druid Ironfur bar ships ON by default (DEFAULTS.secondary.guardianIronfurBar
+-- = true) so brand-new installs get it out of the box. Existing users, however,
+-- are used to Guardian having no class resource bar, so we pin every profile that
+-- already exists to OFF. This runs at parent ADDON_LOADED, BEFORE any child NewDB
+-- has populated EllesmereUIDB.profiles -- so the only profiles present here were
+-- loaded from SavedVariables (i.e. existing users). Fresh installs have no profiles
+-- yet, so nothing is pinned and they inherit the ON default. Global scope means it
+-- runs exactly once: profiles created later (including by existing users) also
+-- inherit the new ON default.
+EllesmereUI.RegisterMigration({
+    id          = "resourcebars_guardian_ironfur_existing_off_v1",
+    scope       = "global",
+    description = "Pin the Guardian Druid Ironfur bar OFF for existing users' profiles; fresh installs and future profiles inherit the new ON default.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only touch profiles that already hold real child-addon data, so a
+            -- stray empty/stub profile can't be mistaken for an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local rb = profData.addons.EllesmereUIResourceBars
+                if type(rb) ~= "table" then
+                    rb = {}
+                    profData.addons.EllesmereUIResourceBars = rb
+                end
+                if type(rb.secondary) ~= "table" then rb.secondary = {} end
+                if rb.secondary.guardianIronfurBar == nil then
+                    rb.secondary.guardianIronfurBar = false
+                end
+            end
+        end
+    end,
+})
+
+-- Prot Warrior Ignore Pain bar ships ON by default (DEFAULTS.secondary.
+-- protIgnorePainBar = true) so brand-new installs get it out of the box.
+-- Existing users are used to Prot having no class resource bar, so pin every
+-- profile that already exists to OFF. Same mechanism as the Guardian Ironfur
+-- migration above: runs at parent ADDON_LOADED before any child NewDB populates
+-- EllesmereUIDB.profiles, so only existing users' profiles are present; fresh
+-- installs have none and inherit the ON default. Global scope = runs once;
+-- future profiles inherit ON too.
+EllesmereUI.RegisterMigration({
+    id          = "resourcebars_protwar_ignorepain_existing_off_v1",
+    scope       = "global",
+    description = "Pin the Prot Warrior Ignore Pain bar OFF for existing users' profiles; fresh installs and future profiles inherit the new ON default.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only touch profiles that already hold real child-addon data, so a
+            -- stray empty/stub profile can't be mistaken for an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local rb = profData.addons.EllesmereUIResourceBars
+                if type(rb) ~= "table" then
+                    rb = {}
+                    profData.addons.EllesmereUIResourceBars = rb
+                end
+                if type(rb.secondary) ~= "table" then rb.secondary = {} end
+                if rb.secondary.protIgnorePainBar == nil then
+                    rb.secondary.protIgnorePainBar = false
+                end
+            end
+        end
+    end,
+})
+
+-- Unit Frame cast bars now count the spell icon as part of the bar's width by
+-- default (DEFAULTS.player.playerCastbarIconInWidth / *.castbarIconInWidth =
+-- true), so fresh installs get the icon inside the bar footprint out of the box.
+-- Existing users are used to the icon sitting to the LEFT of the bar (outside
+-- its width), so pin every already-existing profile to OFF. Same mechanism as
+-- the Guardian Ironfur migration: runs at parent ADDON_LOADED before any child
+-- NewDB populates EllesmereUIDB.profiles, so only existing users' profiles are
+-- present; fresh installs have none and inherit the ON default. Global scope =
+-- runs once; future profiles inherit ON too. Nameplates have their own cast bar
+-- settings and are intentionally NOT touched.
+EllesmereUI.RegisterMigration({
+    id          = "uf_castbar_icon_in_width_existing_off_v1",
+    scope       = "global",
+    description = "Pin cast-bar icon-in-width OFF for existing users' Unit Frames profiles; fresh installs and future profiles inherit the new ON default. Nameplates unaffected.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only touch profiles that already hold real child-addon data, so a
+            -- stray empty/stub profile can't be mistaken for an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local uf = profData.addons.EllesmereUIUnitFrames
+                if type(uf) ~= "table" then
+                    uf = {}
+                    profData.addons.EllesmereUIUnitFrames = uf
+                end
+                if type(uf.player) ~= "table" then uf.player = {} end
+                if uf.player.playerCastbarIconInWidth == nil then
+                    uf.player.playerCastbarIconInWidth = false
+                end
+                for _, unitKey in ipairs({ "target", "focus", "boss" }) do
+                    if type(uf[unitKey]) ~= "table" then uf[unitKey] = {} end
+                    if uf[unitKey].castbarIconInWidth == nil then
+                        uf[unitKey].castbarIconInWidth = false
+                    end
+                end
+            end
+        end
+    end,
+})
+
+-- Profile sync rebuilt as two-way mirror groups: a module's sync set is now a
+-- membership group (the configuring profile is written into it) and only
+-- group members push their data at logout/switch. Old sets stored receivers
+-- only, with no record of who the sender was, so they cannot be translated
+-- reliably -- and under the old code ANY active profile pushed into them,
+-- which could silently overwrite profiles with data from an unrelated one.
+-- Reset every sync link; profile data itself is untouched. Users re-enable
+-- sync from the sidebar sync icons, which write the new group format.
+-- EXCEPTION: Bags keeps syncing by default -- but ONLY for the profiles
+-- that were in the old Bags set. Those members were already receiving bags
+-- pushes on every logout, so mirroring exactly them adds zero new overwrite
+-- exposure. Profiles OUTSIDE the old set may hold deliberately divergent
+-- bags data and must stay out: imports were always stripped from sync sets
+-- (preset imports included), and users could manually unsync Bags in the
+-- old popup. Never seed those.
+-- Registered LAST on purpose: it must run after the older Bags data-move
+-- migration so accounts jumping many versions end up in the new shape.
+EllesmereUI.RegisterMigration({
+    id          = "sync_reset_for_mirror_groups_v2",
+    scope       = "global",
+    description = "Reset all profile sync links for the mirror-group rework (profile data untouched; sync is re-enabled via the module sync icons). The Bags group carries over its previous members only.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db then return end
+        -- Capture the old Bags membership before wiping. Legacy boolean
+        -- format (pre per-profile sets) meant "all profiles".
+        local oldBags = db.syncedModules and db.syncedModules.EllesmereUIBags
+        local carried, count = {}, 0
+        if db.profiles then
+            if oldBags == true then
+                for profName in pairs(db.profiles) do
+                    carried[profName] = true
+                    count = count + 1
+                end
+            elseif type(oldBags) == "table" then
+                for profName, v in pairs(oldBags) do
+                    if v and db.profiles[profName] then
+                        carried[profName] = true
+                        count = count + 1
+                    end
+                end
+            end
+        end
+        db.syncedModules = {}
+        if count >= 2 then
+            db.syncedModules.EllesmereUIBags = carried
         end
     end,
 })
@@ -2117,39 +2458,16 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
 
     ---------------------------------------------------------------------------
     --  Boot sequence (runs at parent ADDON_LOADED, before child addons init)
+    --  The legacy beta-wipe (PerformResetWipe/StampResetVersion) has been
+    --  removed entirely -- it was the nuclear _resetVersion purge whose
+    --  fresh-vs-old heuristic was fragile (and looped on standalone renames).
+    --  Only the registered-migration runner remains.
     --
-    --  1. Beta wipe (NUCLEAR)
-    --     For users coming from a pre-v9 SV layout that can't be safely
-    --     migrated. If this fires, every SV file is reset and there is
-    --     literally nothing left to migrate -- we early-exit so the
-    --     registered migrations don't run on already-empty data and waste
-    --     cycles attempting to bridge legacy flags that were just wiped.
-    --
-    --  2. StampResetVersion
-    --     Marks fresh installs (no _resetVersion at all) so they never see
-    --     the beta-wipe popup on a future load. No-op if already stamped.
-    --
-    --  3. RunRegisteredMigrations
-    --     Runs every migration registered via EllesmereUI.RegisterMigration.
-    --     Each migration's body sees the user's intact data because the
-    --     beta wipe (step 1) has already returned false here -- if it had
-    --     fired we'd never reach this line.
+    --  RunRegisteredMigrations: runs every migration registered via
+    --  EllesmereUI.RegisterMigration. The runner walks each migration and
+    --  iterates the appropriate scope (global/profile/specProfile),
+    --  pcall-wrapping each body and stamping per-scope flags on success.
     ---------------------------------------------------------------------------
-    if EllesmereUI.PerformResetWipe() then
-        -- Wipe fired. Stamp the new reset version and bail. There is no
-        -- user data left for migrations to operate on.
-        EllesmereUI.StampResetVersion()
-        return
-    end
-
-    -- Stamp fresh installs early (before child addons can create DBs
-    -- that would make StampResetVersion think it's an old install).
-    EllesmereUI.StampResetVersion()
-
-    -- Run all migrations registered via EllesmereUI.RegisterMigration.
-    -- The runner walks every registered migration and iterates the
-    -- appropriate scope (global/profile/specProfile), pcall-wrapping
-    -- each body and stamping per-scope flags on success.
     EllesmereUI.RunRegisteredMigrations()
 
     -- DM: fontSize was split into leftFontSize + rightFontSize.
@@ -2185,13 +2503,9 @@ migrationFrame:SetScript("OnEvent", function(self, event, addonName)
                 end
             end
         end
-        local sa = EllesmereUIDB.spellAssignments
-        local sp = sa and sa.specProfiles
-        if sp then
-            for _, specData in pairs(sp) do
-                if specData.barSpells then
-                    specData.barSpells["__ghost_buffs"] = nil
-                end
+        for _, specData in ipairs(CollectSpecProfiles(EllesmereUIDB.spellAssignments)) do
+            if specData.barSpells then
+                specData.barSpells["__ghost_buffs"] = nil
             end
         end
     end

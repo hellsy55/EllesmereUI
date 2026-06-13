@@ -217,7 +217,7 @@ initFrame:SetScript("OnEvent", function(self)
             circleBlock:SetFrameLevel(rightRgn:GetFrameLevel() + 20)
             circleBlock:EnableMouse(true)
             circleBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Enable Cursor Circle"))
+                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Cursor Circle"))
             end)
             circleBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCircleBlock()
@@ -234,7 +234,7 @@ initFrame:SetScript("OnEvent", function(self)
               values={ ring_normal = "Ring Normal", ring_light = "Ring Light", custom = "Ellesmere Logo", ring_thin = "Ring Thin", ring_heavy = "Ring Heavy", ring_thick = "Ring Thick" },
               order={ "ring_normal", "ring_light", "custom", "---", "ring_thin", "ring_heavy", "ring_thick" },
               disabled=function() local p = DB(); return p and p.enabled == false end,
-              disabledTooltip="Enable Cursor Circle",
+              disabledTooltip="Cursor Circle",
               getValue=function() local p = DB(); return p and p.texture or "ring_normal" end,
               setValue=function(v)
                 local p = DB(); if not p then return end
@@ -243,7 +243,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="slider", text="Scale", min=0.5, max=2.0, step=0.1,
               disabled=function() local p = DB(); return p and p.enabled == false end,
-              disabledTooltip="Enable Cursor Circle",
+              disabledTooltip="Cursor Circle",
               getValue=function() local p = DB(); return p and p.scale or 1 end,
               setValue=function(v)
                 local p = DB(); if not p then return end
@@ -256,7 +256,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="slider", text="Circle Opacity", min=0, max=100, step=1,
               disabled=function() local p = DB(); return p and p.enabled == false end,
-              disabledTooltip="Enable Cursor Circle",
+              disabledTooltip="Cursor Circle",
               getValue=function() local p = DB(); return p and (p.alpha or 100) end,
               setValue=function(v)
                 local p = DB(); if not p then return end
@@ -265,7 +265,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="toggle", text="Cursor Trail",
               disabled=function() local p = DB(); return p and p.enabled == false end,
-              disabledTooltip="Enable Cursor Circle",
+              disabledTooltip="Cursor Circle",
               getValue=function() local p = DB(); return p and p.trail or false end,
               setValue=function(v)
                 local p = DB(); if not p then return end
@@ -381,7 +381,7 @@ initFrame:SetScript("OnEvent", function(self)
             gcdBlock:SetFrameLevel(rightRgn:GetFrameLevel() + 20)
             gcdBlock:EnableMouse(true)
             gcdBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Enable GCD Circle"))
+                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("GCD Circle"))
             end)
             gcdBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateGCDBlock()
@@ -396,12 +396,12 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Ring Texture",
               values=ringTexValues, order=ringTexOrder,
               disabled=function() return not GCD_DB().enabled end,
-              disabledTooltip="Enable GCD Circle",
+              disabledTooltip="GCD Circle",
               getValue=function() return GCD_DB().ringTex or "light" end,
               setValue=function(v) GCD_DB().ringTex = v; RefreshGCD() end },
             { type="slider", text="Scale", min=10, max=80, step=1,
               disabled=function() return not GCD_DB().enabled end,
-              disabledTooltip="Enable GCD Circle",
+              disabledTooltip="GCD Circle",
               getValue=function() return GCD_DB().radius or 21 end,
               setValue=function(v) GCD_DB().radius = v; RefreshGCD() end }
         );  y = y - h
@@ -410,12 +410,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type="slider", text="Circle Opacity", min=0, max=100, step=1,
               disabled=function() return not GCD_DB().enabled end,
-              disabledTooltip="Enable GCD Circle",
+              disabledTooltip="GCD Circle",
               getValue=function() return GCD_DB().alpha or 80 end,
               setValue=function(v) GCD_DB().alpha = v; RefreshGCD() end },
+
             { type="toggle", text="Attach to Cursor",
               disabled=function() return not GCD_DB().enabled end,
-              disabledTooltip="Enable GCD Circle",
+              disabledTooltip="GCD Circle",
               getValue=function() return GCD_DB().attached ~= false end,
               setValue=function(v)
                 GCD_DB().attached = v
@@ -530,7 +531,7 @@ initFrame:SetScript("OnEvent", function(self)
             castBlock:SetFrameLevel(rightRgn:GetFrameLevel() + 20)
             castBlock:EnableMouse(true)
             castBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Enable Cast Bar Circle"))
+                EllesmereUI.ShowWidgetTooltip(rightRgn, EllesmereUI.DisabledTooltip("Cast Bar Circle"))
             end)
             castBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateCastBlock()
@@ -562,7 +563,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if not Cast_DB().enabled then
                     cogBtn:SetAlpha(0.15)
                     cogBtn:EnableMouse(false)
-                    cogBtn._disabledTooltip = "Enable Cast Bar Circle"
+                    cogBtn._disabledTooltip = "Cast Bar Circle"
                 else
                     cogBtn:SetAlpha(0.4)
                     cogBtn:EnableMouse(true)
@@ -578,12 +579,12 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Ring Texture",
               values=ringTexValues, order=ringTexOrder,
               disabled=function() return not Cast_DB().enabled end,
-              disabledTooltip="Enable Cast Bar Circle",
+              disabledTooltip="Cast Bar Circle",
               getValue=function() return Cast_DB().ringTex or "normal" end,
               setValue=function(v) Cast_DB().ringTex = v; RefreshCast() end },
             { type="slider", text="Scale", min=10, max=80, step=1,
               disabled=function() return not Cast_DB().enabled end,
-              disabledTooltip="Enable Cast Bar Circle",
+              disabledTooltip="Cast Bar Circle",
               getValue=function() return Cast_DB().radius or 30 end,
               setValue=function(v) Cast_DB().radius = v; RefreshCast() end }
         );  y = y - h
@@ -592,12 +593,13 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="slider", text="Circle Opacity", min=0, max=100, step=1,
               disabled=function() return not Cast_DB().enabled end,
-              disabledTooltip="Enable Cast Bar Circle",
+              disabledTooltip="Cast Bar Circle",
               getValue=function() return Cast_DB().alpha or 80 end,
               setValue=function(v) Cast_DB().alpha = v; RefreshCast() end },
+
             { type="toggle", text="Attach to Cursor",
               disabled=function() return not Cast_DB().enabled end,
-              disabledTooltip="Enable Cast Bar Circle",
+              disabledTooltip="Cast Bar Circle",
               getValue=function() return Cast_DB().attached ~= false end,
               setValue=function(v)
                 Cast_DB().attached = v

@@ -568,7 +568,7 @@ initFrame:SetScript("OnEvent", function(self)
             if not _previewHintFS then
                 _previewHintFS = EllesmereUI.MakeFont(container, 11, nil, 1, 1, 1)
                 _previewHintFS:SetAlpha(0.45)
-                _previewHintFS:SetText("Click elements to scroll to and highlight their options")
+                _previewHintFS:SetText(EllesmereUI.L("Click elements to scroll to and highlight their options"))
             end
             _previewHintFS:SetParent(container)
             _previewHintFS:ClearAllPoints()
@@ -794,14 +794,14 @@ initFrame:SetScript("OnEvent", function(self)
             local found
             for i = 1, rgn:GetNumRegions() do
                 local reg = select(i, rgn:GetRegions())
-                if reg and reg.GetText and reg:GetText() == labelText then
+                if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == labelText then
                     found = reg; break
                 end
             end
             if found then
                 suffix:SetPoint("LEFT", found, "RIGHT", 5, -1)
             end
-            suffix:SetText("(min)")
+            suffix:SetText(EllesmereUI.L("(min)"))
         end
 
         -----------------------------------------------------------------------
@@ -855,7 +855,7 @@ initFrame:SetScript("OnEvent", function(self)
             swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
             swatchBlock:EnableMouse(true)
             swatchBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("a Glow Type other than None"))
+                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("This option requires a Glow Type other than None"))
             end)
             swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateSwatchDisabled()
@@ -969,7 +969,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Layout Settings",
                 rows = {
-                    { type="slider", label="Y", min=-600, max=600, step=1,
+                    { type="slider", label="Y Offset", min=-600, max=600, step=1,
                       get=function() local d = DDB(); return d and d.yOffset or 0 end,
                       set=function(v) local d = DDB(); if not d then return end; d.yOffset = v
                           if _G._EABR_ApplyUnlockPos then _G._EABR_ApplyUnlockPos() end end },
@@ -1286,7 +1286,7 @@ initFrame:SetScript("OnEvent", function(self)
             zoneBg:SetAllPoints()
             local zoneLbl = EllesmereUI.MakeFont(zoneBtn, 12, nil, 1, 1, 1)
             zoneLbl:SetPoint("CENTER")
-            zoneLbl:SetText("Choose Zones")
+            zoneLbl:SetText(EllesmereUI.L("Choose Zones"))
 
             -- Hover animation
             do
@@ -1486,7 +1486,7 @@ initFrame:SetScript("OnEvent", function(self)
         zoneDDLbl:SetMaxLines(1)
         zoneDDLbl:SetJustifyH("LEFT")
         zoneDDLbl:SetWordWrap(false)
-        zoneDDLbl:SetText("Select Dungeon/Raid/PvP Zone")
+        zoneDDLbl:SetText(EllesmereUI.L("Select Dungeon/Raid/PvP Zone"))
 
         local zoneArrow = EllesmereUI.MakeDropdownArrow(zoneDDBtn, 14, EllesmereUI.PanelPP)
         zoneDDLbl:SetPoint("LEFT", zoneDDBtn, "LEFT", 14, 0)
@@ -1526,7 +1526,7 @@ initFrame:SetScript("OnEvent", function(self)
         zsPlaceholder:SetFont(fontPath, 11, "")
         zsPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.6)
         zsPlaceholder:SetPoint("LEFT", zoneSearch, "LEFT", 4, 0)
-        zsPlaceholder:SetText("Search...")
+        zsPlaceholder:SetText(EllesmereUI.L("Search..."))
         zoneSearch:SetScript("OnTextChanged", function(self)
             local t = self:GetText()
             zsPlaceholder:SetShown(t == "")
@@ -1684,7 +1684,7 @@ initFrame:SetScript("OnEvent", function(self)
             lbl:SetPoint("RIGHT", item, "RIGHT", -8, 0)
             lbl:SetJustifyH("LEFT")
             lbl:SetWordWrap(false)
-            lbl:SetText(z.name .. (z.type == "raid" and " (Raid)" or ""))
+            lbl:SetText(z.name .. (z.type == "raid" and EllesmereUI.L(" (Raid)") or ""))
 
             local function UpdateCheck()
                 cbCheck:SetShown(selectedZoneMap[i] == true)
@@ -1804,7 +1804,7 @@ initFrame:SetScript("OnEvent", function(self)
             btnLbl:SetMaxLines(1)
             btnLbl:SetJustifyH("LEFT")
             btnLbl:SetWordWrap(false)
-            btnLbl:SetText("Select a talent...")
+            btnLbl:SetText(EllesmereUI.L("Select a talent..."))
             local arrow = EllesmereUI.MakeDropdownArrow(btn, 12, EllesmereUI.PanelPP)
             btnLbl:SetPoint("LEFT", btn, "LEFT", 12, 0)
             btnLbl:SetPoint("RIGHT", arrow, "LEFT", -5, 0)
@@ -1843,7 +1843,7 @@ initFrame:SetScript("OnEvent", function(self)
             sPh:SetFont(fontPath, 11, "")
             sPh:SetTextColor(0.5, 0.5, 0.5, 0.6)
             sPh:SetPoint("LEFT", search, "LEFT", 4, 0)
-            sPh:SetText("Search...")
+            sPh:SetText(EllesmereUI.L("Search..."))
             search:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
             -- Scroll frame
@@ -2075,7 +2075,7 @@ initFrame:SetScript("OnEvent", function(self)
         addBtnText:SetPoint("CENTER")
         addBtnText:SetFont(fontPath, 13, GetABROptOutline())
         addBtnText:SetTextColor(eg.r, eg.g, eg.b, 0.7)
-        addBtnText:SetText("Add Reminder")
+        addBtnText:SetText(EllesmereUI.L("Add Reminder"))
 
         do
             local lerp = EllesmereUI.lerp
@@ -2178,7 +2178,7 @@ initFrame:SetScript("OnEvent", function(self)
                 emptyFS:SetFont(fontPath, 13, GetABROptOutline())
                 emptyFS:SetTextColor(0.5, 0.5, 0.5, 1)
                 emptyFS:SetPoint("CENTER")
-                emptyFS:SetText("No talent reminders configured")
+                emptyFS:SetText(EllesmereUI.L("No talent reminders configured"))
                 emptyRow:Show()
                 listRows[1] = emptyRow
                 listContainer:SetHeight(ROW_H)
@@ -2292,7 +2292,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local toggleLabel = row:CreateFontString(nil, "OVERLAY")
                 toggleLabel:SetFont(fontPath, 14, GetABROptOutline())
                 toggleLabel:SetPoint("LEFT", row, "CENTER", SIDE_PAD, 0)
-                toggleLabel:SetText("Show 'Not Needed' Reminder")
+                toggleLabel:SetText(EllesmereUI.L("Show 'Not Needed' Reminder"))
 
                 -- Checkbox (far right of right half)
                 local toggleBox = CreateFrame("Frame", nil, row)
@@ -2423,8 +2423,8 @@ initFrame:SetScript("OnEvent", function(self)
                     selectedTalentSpellID = nil
                     selectedTalentName = nil
                     selectedTalentSource = nil
-                    zoneDDLbl:SetText("Select Dungeon/Raid/PvP Zone")
-                    if talentDDLbl then talentDDLbl:SetText("Select a talent..."); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
+                    zoneDDLbl:SetText(EllesmereUI.L("Select Dungeon/Raid/PvP Zone"))
+                    if talentDDLbl then talentDDLbl:SetText(EllesmereUI.L("Select a talent...")); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
                     RebuildReminderList()
                     RefreshAll()
                     if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
@@ -2446,8 +2446,8 @@ initFrame:SetScript("OnEvent", function(self)
             selectedTalentSpellID = nil
             selectedTalentName = nil
             selectedTalentSource = nil
-            zoneDDLbl:SetText("Select Dungeon/Raid/PvP Zone")
-            if talentDDLbl then talentDDLbl:SetText("Select a talent..."); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
+            zoneDDLbl:SetText(EllesmereUI.L("Select Dungeon/Raid/PvP Zone"))
+            if talentDDLbl then talentDDLbl:SetText(EllesmereUI.L("Select a talent...")); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
 
             RebuildReminderList()
             RefreshAll()

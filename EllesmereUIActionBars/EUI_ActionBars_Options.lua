@@ -849,7 +849,11 @@ initFrame:SetScript("OnEvent", function(self)
                         bdPv:ClearAllPoints()
                         bdPv:SetPoint("TOPLEFT", bf, "TOPLEFT", -offX + sx, offY + sy)
                         bdPv:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", offX + sx, -offY + sy)
-                        bdPv:SetFrameLevel(bf:GetFrameLevel() + 2)
+                        if settings.borderBehind then
+                            bdPv:SetFrameLevel(math.max(0, bf:GetFrameLevel() - 1))
+                        else
+                            bdPv:SetFrameLevel(bf:GetFrameLevel() + 2)
+                        end
                         local texPath = EllesmereUI.ResolveBorderTexture(brdTexKey)
                         if texPath then
                             bdPv:SetBackdrop({
@@ -1250,7 +1254,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="dropdown", text="Orientation",
               values=orientValues, order=orientOrder,
-              disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP,
+              disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP, rawTooltip=true,
               getValue=function()
                   return EAB.db.profile.bars["XPBar"] and EAB.db.profile.bars["XPBar"].orientation or "HORIZONTAL"
               end,
@@ -1272,7 +1276,7 @@ initFrame:SetScript("OnEvent", function(self)
             local visRow, visH = W:DualRow(parent, y,
                 { type="dropdown", text="Visibility",
                   values=EllesmereUI.VIS_VALUES, order=EllesmereUI.VIS_ORDER,
-                  disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP,
+                  disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP, rawTooltip=true,
                   getValue=function() return GetVisibilityKey(EAB.db.profile.bars[barKey]) end,
                   setValue=function(v)
                       ApplyVisibilityKey(EAB.db.profile.bars[barKey], v)
@@ -1429,7 +1433,7 @@ initFrame:SetScript("OnEvent", function(self)
             visRow1, h = W:DualRow(parent, y,
                 { type="dropdown", text="Visibility",
                   values=EllesmereUI.VIS_VALUES, order=EllesmereUI.VIS_ORDER,
-                  disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil,
+                  disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil, rawTooltip=true,
                   getValue=function()
                       return GetVisibilityKey(SB())
                   end,
@@ -1890,6 +1894,7 @@ initFrame:SetScript("OnEvent", function(self)
                           return not EAB:BarSupportsOrientation(SelectedKey())
                       end,
                       disabledTooltip="This option is not supported for this bar type",
+                      rawTooltip=true,
                       labelOnlyTooltip=true,
                       getValue=function()
                           return not EAB:GetOrientationForBar(SelectedKey())
@@ -2121,6 +2126,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="dropdown", text="Border Style",
                       disabled=function() return BlizzStyleOn() or ShapeIsCustom() end,
                       disabledTooltip=function() if ShapeIsCustom() then return "This option requires a non-custom button shape" end return "This option requires Blizzard Style Action Bars to be disabled" end,
+                      rawTooltip=true,
                       values=texValues, order=texOrder,
                       getValue=function() return SGet("borderTexture") or "solid" end,
                       setValue=function(v)
@@ -2130,13 +2136,10 @@ initFrame:SetScript("OnEvent", function(self)
                               EAB.db.profile.bars[k].borderTextureOffsetY = nil
                               EAB.db.profile.bars[k].borderTextureShiftX = nil
                               EAB.db.profile.bars[k].borderTextureShiftY = nil
-                              if v ~= "solid" then
-                                  EAB.db.profile.bars[k].borderColor = { r = 1, g = 1, b = 1, a = 1 }
-                                  EAB.db.profile.bars[k].borderClassColor = false
-                              else
-                                  EAB.db.profile.bars[k].borderColor = { r = 0, g = 0, b = 0, a = 1 }
-                                  EAB.db.profile.bars[k].borderClassColor = false
-                              end
+                              local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                              EAB.db.profile.bars[k].borderColor = { r = _bcol.r, g = _bcol.g, b = _bcol.b, a = 1 }
+                              EAB.db.profile.bars[k].borderClassColor = false
+                              EAB.db.profile.bars[k].borderBehind = _bbehind
                               if defTh then
                                   EAB.db.profile.bars[k].borderThickness = defTh
                                   local entry = ns.BORDER_THICKNESS[defTh]
@@ -2158,7 +2161,7 @@ initFrame:SetScript("OnEvent", function(self)
                           EllesmereUI:RefreshPage()
                       end },
                     { type="dropdown", text="Border Size",
-                      disabled=BlizzStyleOn, disabledTooltip="This option requires Blizzard Style Action Bars to be disabled",
+                      disabled=BlizzStyleOn, disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
                       values=ns.BORDER_THICKNESS_LABELS, order=ns.BORDER_THICKNESS_ORDER,
                       itemDisabled=function(val)
                           if ShapeIsCustom() and (val == "thin" or val == "normal" or val == "heavy") then return true end
@@ -2256,6 +2259,14 @@ initFrame:SetScript("OnEvent", function(self)
                                   end)
                                   SUpdatePreview()
                               end },
+                            { type = "toggle", label = "Show Behind",
+                              get = function() return SGet("borderBehind") or false end,
+                              set = function(v)
+                                  SSet("borderBehind", v == false and nil or v, function(k)
+                                      EAB:ApplyBordersForBar(k)
+                                  end)
+                                  SUpdatePreview(); EllesmereUI:RefreshPage()
+                              end },
                         },
                     })
                     local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -2277,6 +2288,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local oy = SB().borderTextureOffsetY
                         local sx = SB().borderTextureShiftX
                         local sy = SB().borderTextureShiftY
+                        local bh = SB().borderBehind
                         local bc = SB().borderColor
                         local bcc = SB().borderClassColor
                         for _, key in ipairs(GROUP_BAR_ORDER) do
@@ -2285,6 +2297,7 @@ initFrame:SetScript("OnEvent", function(self)
                             EAB.db.profile.bars[key].borderTextureOffsetY = oy
                             EAB.db.profile.bars[key].borderTextureShiftX = sx
                             EAB.db.profile.bars[key].borderTextureShiftY = sy
+                            EAB.db.profile.bars[key].borderBehind = bh
                             if bc then EAB.db.profile.bars[key].borderColor = { r=bc.r, g=bc.g, b=bc.b, a=bc.a } end
                             EAB.db.profile.bars[key].borderClassColor = bcc
                             EAB:ApplyBordersForBar(key)
@@ -2297,12 +2310,14 @@ initFrame:SetScript("OnEvent", function(self)
                         local oy = SB().borderTextureOffsetY
                         local sx = SB().borderTextureShiftX
                         local sy = SB().borderTextureShiftY
+                        local bh = SB().borderBehind or false
                         for _, key in ipairs(GROUP_BAR_ORDER) do
                             if (EAB.db.profile.bars[key].borderTexture or "solid") ~= bt then return false end
                             if EAB.db.profile.bars[key].borderTextureOffset ~= ox then return false end
                             if EAB.db.profile.bars[key].borderTextureOffsetY ~= oy then return false end
                             if EAB.db.profile.bars[key].borderTextureShiftX ~= sx then return false end
                             if EAB.db.profile.bars[key].borderTextureShiftY ~= sy then return false end
+                            if (EAB.db.profile.bars[key].borderBehind or false) ~= bh then return false end
                         end
                         return true
                     end,
@@ -2317,6 +2332,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local oy = SB().borderTextureOffsetY
                             local sx = SB().borderTextureShiftX
                             local sy = SB().borderTextureShiftY
+                            local bh = SB().borderBehind
                             local bc = SB().borderColor
                             local bcc = SB().borderClassColor
                             for _, key in ipairs(checkedKeys) do
@@ -2325,6 +2341,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 EAB.db.profile.bars[key].borderTextureOffsetY = oy
                                 EAB.db.profile.bars[key].borderTextureShiftX = sx
                                 EAB.db.profile.bars[key].borderTextureShiftY = sy
+                                EAB.db.profile.bars[key].borderBehind = bh
                                 if bc then EAB.db.profile.bars[key].borderColor = { r=bc.r, g=bc.g, b=bc.b, a=bc.a } end
                                 EAB.db.profile.bars[key].borderClassColor = bcc
                                 EAB:ApplyBordersForBar(key)
@@ -2390,12 +2407,9 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
-                -- Block overlay on custom swatch when class colored
-                local swatchBlock = CreateFrame("Button", nil, customSwatch)
-                swatchBlock:SetAllPoints()
-                swatchBlock:SetFrameLevel(customSwatch:GetFrameLevel() + 10)
-                swatchBlock:EnableMouse(true)
-                swatchBlock:SetScript("OnClick", function()
+                -- Click the dimmed custom swatch to switch back from class color (no block overlay)
+                local origClick = customSwatch:GetScript("OnClick")
+                customSwatch:SetScript("OnClick", function(self, ...)
                     if SGet("borderClassColor") then
                         SSet("borderClassColor", false, function(k)
                             EAB:ApplyBordersForBar(k)
@@ -2403,21 +2417,18 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                         SUpdatePreview()
                         EllesmereUI:RefreshPage()
+                        return
                     end
+                    -- No border selected: allow swapping boxes but do not open the color picker
+                    if (SGet("borderThickness") or "thin") == "none" then return end
+                    if origClick then origClick(self, ...) end
                 end)
-                swatchBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(customSwatch, EllesmereUI.DisabledTooltip("Border color is controlled by class color"))
-                end)
-                swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
                 local function UpdateBorderSwatchState()
                     local isClassColored = SGet("borderClassColor")
-                    if isClassColored then
-                        customSwatch:SetAlpha(0.3); swatchBlock:Show()
-                    else
-                        customSwatch:SetAlpha(1); swatchBlock:Hide()
-                    end
-                    classBorderSwatch:SetAlpha(isClassColored and 1 or 0.3)
+                    local isNone = (SGet("borderThickness") or "thin") == "none"
+                    customSwatch:SetAlpha((isClassColored or isNone) and 0.3 or 1)
+                    classBorderSwatch:SetAlpha((isClassColored and not isNone) and 1 or 0.3)
                 end
                 EllesmereUI.RegisterWidgetRefresh(function() updateCustomSwatch(); updateClassBorderSwatch(); UpdateBorderSwatchState() end)
                 UpdateBorderSwatchState()
@@ -2508,11 +2519,16 @@ initFrame:SetScript("OnEvent", function(self)
             local classColorBorderRow
             classColorBorderRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Custom Button Shape",
-                  disabled=BlizzStyleOn, disabledTooltip="This option requires Blizzard Style Action Bars to be disabled",
+                  disabled=BlizzStyleOn, disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
                   values=SHAPE_VALUES, order=SHAPE_ORDER,
                   itemDisabled=function(val)
                       if val ~= "none" and val ~= "cropped" and (SGet("borderTexture") or "solid") ~= "solid" then return true end
                       return false
+                  end,
+                  itemDisabledTooltip=function(val)
+                      if val ~= "none" and val ~= "cropped" and (SGet("borderTexture") or "solid") ~= "solid" then
+                          return "This option requires the Border Style to be set to Solid"
+                      end
                   end,
                   getValue=function()
                       local v = SGet("buttonShape")
@@ -2562,7 +2578,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI:RefreshPage()
                   end },
                 { type="slider", text="Icon Zoom", min=0, max=10, step=0.5,
-                  disabled=BlizzStyleOn, disabledTooltip="This option requires Blizzard Style Action Bars to be disabled",
+                  disabled=BlizzStyleOn, disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
                   getValue=function() return SVal("iconZoom", EAB.db.profile.iconZoom or 5.5) end,
                   setValue=function(v)
                       SSet("iconZoom", v, function(k)
@@ -3928,7 +3944,7 @@ initFrame:SetScript("OnEvent", function(self)
                     hintHost:SetAllPoints(hdr)
                     _abPreviewHintFS = EllesmereUI.MakeFont(hintHost, 11, nil, 1, 1, 1)
                     _abPreviewHintFS:SetAlpha(0.45)
-                    _abPreviewHintFS:SetText("Click elements to scroll to and highlight their options")
+                    _abPreviewHintFS:SetText(EllesmereUI.L("Click elements to scroll to and highlight their options"))
                 end
                 _abPreviewHintFS:GetParent():SetParent(hdr)
                 _abPreviewHintFS:GetParent():Show()
@@ -4335,7 +4351,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return EAB.db.profile.useBlizzardStyle or p.pushedUseClassColor end,
               disabledTooltip=function()
                   if EAB.db.profile.useBlizzardStyle then return "This option requires Blizzard Style Action Bars to be disabled" end
-                  return "Class Colors"
+                  return "This option requires Class Colors to be disabled"
               end,
               rawTooltip=true,
               getValue=function()
@@ -4350,7 +4366,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Class Colored Bar Interactions",
               tooltip=INTERACTIONS_TIP,
               disabled=function() return EAB.db.profile.useBlizzardStyle end,
-              disabledTooltip="This option requires Blizzard Style Action Bars to be disabled",
+              disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
               getValue=function() return p.pushedUseClassColor end,
               setValue=function(v)
                   SetUnifiedClassColor(v)
@@ -4361,7 +4377,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Pushed Type",
               tooltip="The overlay that appears on the icon when you press and hold a spell button",
               disabled=function() return EAB.db.profile.useBlizzardStyle end,
-              disabledTooltip="This option requires Blizzard Style Action Bars to be disabled",
+              disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
               values=pushedTypeValues, order=pushedTypeOrder,
               getValue=function() return p.pushedTextureType or 2 end,
               setValue=function(v)
@@ -4373,7 +4389,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Highlight Type",
               tooltip="The overlay that appears on the icon when you hover your mouse over a spell button",
               disabled=function() return EAB.db.profile.useBlizzardStyle end,
-              disabledTooltip="This option requires Blizzard Style Action Bars to be disabled",
+              disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
               values=highlightTypeValues, order=highlightTypeOrder,
               getValue=function() return p.highlightTextureType or 2 end,
               setValue=function(v)
@@ -4499,6 +4515,7 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip="This is the full overlay that swipes from right to left on the icon during its cast duration",
               disabled=castAnimForced,
               disabledTooltip="This option requires a non-custom shaped action bar",
+              rawTooltip=true,
               getValue=function() return p.hideCastingAnimations or castAnimForced() end,
               setValue=function(v)
                   p.hideCastingAnimations = v
@@ -4568,7 +4585,7 @@ initFrame:SetScript("OnEvent", function(self)
                   C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
               end },
             { type="toggle", text="Use Class Color",
-              disabled=procGlowOff, disabledTooltip="This option requires a custom glow to be selected",
+              disabled=procGlowOff, disabledTooltip="This option requires a custom glow to be selected", rawTooltip=true,
               getValue=function() return p.procGlowUseClassColor end,
               setValue=function(v)
                   p.procGlowUseClassColor = v
@@ -4607,7 +4624,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if procGlowOff() then
                     EllesmereUI.ShowWidgetTooltip(self, GLOW_DISABLED_TIP)
                 elseif p.procGlowUseClassColor then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Colors"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Colors", "disabled"))
                 end
             end)
             glowSwatch:HookScript("OnLeave", function()
