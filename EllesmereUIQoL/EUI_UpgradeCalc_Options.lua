@@ -82,7 +82,7 @@ local function BuildUpgradeCalcPage(pageName, parent, yOffset)
         line1:SetTextColor(1, 1, 1, 0.75)
         line1:SetPoint("TOP", infoFrame, "TOP", 0, 0)
         line1:SetJustifyH("CENTER")
-        line1:SetText("Reposition this element with Shift+Click and Drag.")
+        line1:SetText(EllesmereUI.L("Reposition this element with Shift+Click and Drag."))
         y = y - 36
     end
 

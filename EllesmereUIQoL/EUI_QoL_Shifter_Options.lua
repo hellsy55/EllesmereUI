@@ -29,13 +29,13 @@ _G._EUI_BuildShifterPage = function(pageName, parent, yOffset)
         line1:SetTextColor(1, 1, 1, 0.75)
         line1:SetPoint("TOP", infoFrame, "TOP", 0, 0)
         line1:SetJustifyH("CENTER")
-        line1:SetText("Shift + Left-Click Drag to permanently save a panel's position.")
+        line1:SetText(EllesmereUI.L("Shift + Left-Click Drag to permanently save a panel's position."))
         local line2 = infoFrame:CreateFontString(nil, "OVERLAY")
         line2:SetFont(fontPath, 15, "")
         line2:SetTextColor(1, 1, 1, 0.75)
         line2:SetPoint("TOP", line1, "BOTTOM", 0, -2)
         line2:SetJustifyH("CENTER")
-        line2:SetText("Ctrl + Left-Click Drag for a temporary move that resets when the panel closes.")
+        line2:SetText(EllesmereUI.L("Ctrl + Left-Click Drag for a temporary move that resets when the panel closes."))
         y = y - 50
     end
 
@@ -100,7 +100,7 @@ _G._EUI_BuildShifterPage = function(pageName, parent, yOffset)
               local pretty = ddValues[frameName] or PrettifyName(frameName)
               EllesmereUI:ShowConfirmPopup({
                   title   = "Reset Window Position",
-                  message = "Reset " .. pretty .. " to its default position and reload your UI?",
+                  message = EllesmereUI.Lf("Reset %1$s to its default position and reload your UI?", pretty),
                   confirmText = "Reset",
                   cancelText  = "Cancel",
                   onConfirm = function()

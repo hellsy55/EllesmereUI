@@ -1,20 +1,9 @@
 -------------------------------------------------------------------------------
 --  EllesmereUIQoL_Keys.lua
 --  /keys slash command: displays party keystone levels in a styled popup.
---  Supports two keystone comm protocols:
---    1) LibOpenRaid (Details, BigWigs): prefix "LRS_LOGGED", logged channel
---       Send: "K,level,mapID,challengeMapID,classID,rating,mythicPlusMapID,specID"
---       Request: "J"
---    2) LibKeystone (DBM): prefix "LibKS", unlogged channel
---       Send: "level,mapID,rating"
---       (no request message -- data is pushed on group join / key change)
+--  Uses LibKeystone (BigWigs/DBM) for keystone data exchange.
 -------------------------------------------------------------------------------
--- LibOpenRaid protocol
-local LOR_PREFIX      = "LRS_LOGGED"
-local LOR_DATA_TAG    = "K"
-local LOR_REQUEST_TAG = "J"
--- LibKeystone (DBM) protocol
-local LKS_PREFIX      = "LibKS"
+local LibKeystone = LibStub and LibStub("LibKeystone", true)
 
 local myRealm = (GetRealmName():gsub("%s", ""))
 local partyKeys = {}  -- [playerName] = { dungeon = mapID, keyLevel = N, rating = N }
@@ -49,9 +38,6 @@ do
     end
 end
 local guildKeys = {}  -- [playerName] = { dungeon = mapID, keyLevel = N, rating = N }
-local deferredBroadcast = false
-local deferredQuery     = false
-local inChallenge       = false
 
 -------------------------------------------------------------------------------
 --  Helpers
@@ -123,17 +109,9 @@ local function DungeonNameFromMap(mapID)
     return "Unknown"
 end
 
-local function IsInActiveMPlus()
-    return C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
-       and C_ChallengeMode.IsChallengeModeActive()
-end
-
-local function IsInCombat()
-    return InCombatLockdown and InCombatLockdown()
-end
 
 -------------------------------------------------------------------------------
---  Keystone read / send / request
+--  Keystone read / request
 -------------------------------------------------------------------------------
 local function RecordOwnKey()
     local map, lvl = GetMyKeystone()
@@ -147,67 +125,10 @@ local function RecordOwnKey()
     if me then partyKeys[me] = { dungeon = map, keyLevel = lvl, rating = rating, classFile = myClassFile } end
 end
 
--- LibOpenRaid logged messages use a special encoding:
---   commas → semicolons (first occurrence only on receive, but send replaces first , with ;)
---   newlines → %
---   #commId appended at end
-local lorCommCounter = 0
-local function EncodeLOR(raw)
-    lorCommCounter = lorCommCounter + 1
-    -- Replace first comma with semicolon (LOR convention for logged channel)
-    local encoded = raw:gsub(",", ";", 1)
-    -- Append comm ID
-    return encoded .. "#" .. lorCommCounter
-end
-
-local function BuildLORPayload()
-    local map, lvl = GetMyKeystone()
-    local rating = 0
-    if C_PlayerInfo and C_PlayerInfo.GetPlayerMythicPlusRatingSummary then
-        local summary = C_PlayerInfo.GetPlayerMythicPlusRatingSummary("player")
-        if summary and summary.currentSeasonScore then rating = summary.currentSeasonScore end
-    end
-    local _, classID = UnitClassBase("player")
-    local specID = GetSpecializationInfo and GetSpecializationInfo(GetSpecialization() or 1) or 0
-    local raw = LOR_DATA_TAG .. "," .. lvl .. "," .. map .. "," .. map .. "," .. (classID or 0) .. "," .. rating .. "," .. map .. "," .. (specID or 0)
-    return EncodeLOR(raw), string.format("%d,%d,%d", lvl, map, rating)
-end
-
-local function GetGroupChannel()
-    if GetNumGroupMembers() <= 1 then return nil end
-    if IsInRaid(LE_PARTY_CATEGORY_HOME) then return "RAID" end
-    if IsInGroup(LE_PARTY_CATEGORY_HOME) then return "PARTY" end
-    -- Instance group (LFG/LFR) -- use INSTANCE_CHAT
-    if IsInRaid(LE_PARTY_CATEGORY_INSTANCE) then return "INSTANCE_CHAT" end
-    if IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then return "INSTANCE_CHAT" end
-    return nil
-end
-
-local function BroadcastOwnKey()
-    if IsInCombat() or inChallenge then deferredBroadcast = true; return end
-    local lorPayload, lksPayload = BuildLORPayload()
-    local ch = GetGroupChannel()
-    if ch then
-        C_ChatInfo.SendAddonMessageLogged(LOR_PREFIX, lorPayload, ch)
-        C_ChatInfo.SendAddonMessage(LKS_PREFIX, lksPayload, ch)
-    end
-    if IsInGuild() then
-        C_ChatInfo.SendAddonMessageLogged(LOR_PREFIX, lorPayload, "GUILD")
-        C_ChatInfo.SendAddonMessage(LKS_PREFIX, lksPayload, "GUILD")
-    end
-end
-
 local function QueryPartyKeys()
-    if IsInCombat() or inChallenge then deferredQuery = true; return end
-    local ch = GetGroupChannel()
-    if ch then
-        C_ChatInfo.SendAddonMessageLogged(LOR_PREFIX, EncodeLOR(LOR_REQUEST_TAG), ch)
-        C_ChatInfo.SendAddonMessage(LKS_PREFIX, "R", ch)
-    end
-    if IsInGuild() then
-        C_ChatInfo.SendAddonMessageLogged(LOR_PREFIX, EncodeLOR(LOR_REQUEST_TAG), "GUILD")
-        C_ChatInfo.SendAddonMessage(LKS_PREFIX, "R", "GUILD")
-    end
+    if not LibKeystone then return end
+    if IsInGroup() then LibKeystone.Request("PARTY") end
+    LibKeystone.Request("GUILD")
 end
 
 -------------------------------------------------------------------------------
@@ -628,110 +549,19 @@ end
 _G._EUI_RefreshKeystonePopup = RefreshPopupIfOpen
 
 -------------------------------------------------------------------------------
---  Events
---  Prefix registration must happen at file scope, but the event frame only
---  starts listening once /keys has been opened at least once so we don't
---  broadcast addon messages on every login/reload for users who never use it.
+--  LibKeystone callback
+--  Receives keystone data from any player running BigWigs/DBM (or any addon
+--  that embeds LibKeystone). No manual comm handling needed.
 -------------------------------------------------------------------------------
-local evFrame = CreateFrame("Frame")
-C_ChatInfo.RegisterAddonMessagePrefix(LOR_PREFIX)
-C_ChatInfo.RegisterAddonMessagePrefix(LKS_PREFIX)
-
-local eventsRegistered = false
-local function RegisterKeyEvents()
-    if eventsRegistered then return end
-    eventsRegistered = true
-    evFrame:RegisterEvent("CHAT_MSG_ADDON_LOGGED")
-    evFrame:RegisterEvent("CHAT_MSG_ADDON")
-    evFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    evFrame:RegisterEvent("BAG_UPDATE_DELAYED")
-    evFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    evFrame:RegisterEvent("CHALLENGE_MODE_START")
-    evFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-end
-
-local function NormalizeSender(sender)
-    if not sender then return nil end
-    local base, realm = sender:match("^([^%-]+)%-?(.*)$")
-    if realm == "" or realm == myRealm then return base end
-    return sender
-end
-
-evFrame:SetScript("OnEvent", function(_, ev, ...)
-    -- LibOpenRaid protocol (Details, BigWigs): logged channel
-    if ev == "CHAT_MSG_ADDON_LOGGED" then
-        local prefix, body, channel, sender = ...
-        if prefix ~= LOR_PREFIX or inChallenge then return end
-        local decoded = body:gsub("%%", "\n")
-        decoded = decoded:gsub(";", ",", 1)
-        decoded = decoded:gsub("#([^#]+)$", "")
-        local tag = decoded:sub(1, 1)
-        if tag == LOR_REQUEST_TAG then
-            BroadcastOwnKey()
-        elseif tag == LOR_DATA_TAG then
-            -- Format: K,level,mapID,challengeMapID,classID,rating,mythicPlusMapID,specID
-            local tokens = { strsplit(",", decoded) }
-            local lvl = tonumber(tokens[2]) or 0
-            local map = tonumber(tokens[3]) or 0
-            local cid = tonumber(tokens[5])
-            local rtg = tonumber(tokens[6]) or 0
-            -- Convert numeric classID to classFile for RAID_CLASS_COLORS
-            local classFile
-            if cid and cid > 0 then
-                local info = C_CreatureInfo and C_CreatureInfo.GetClassInfo(cid)
-                if info then classFile = info.classFile end
-            end
-            sender = NormalizeSender(sender)
-            if sender then
-                local tbl = (channel == "GUILD") and guildKeys or partyKeys
-                tbl[sender] = { dungeon = map, keyLevel = lvl, rating = rtg, classFile = classFile }
-                RefreshPopupIfOpen()
-            end
-        end
-    -- LibKeystone protocol (DBM): unlogged channel
-    elseif ev == "CHAT_MSG_ADDON" then
-        local prefix, body, channel, sender = ...
-        if prefix ~= LKS_PREFIX or inChallenge then return end
-        local tokens = { strsplit(",", body) }
-        local lvl = tonumber(tokens[1]) or 0
-        local map = tonumber(tokens[2]) or 0
-        local rtg = tonumber(tokens[3]) or 0
-        sender = NormalizeSender(sender)
-        if sender then
-            local tbl = (channel == "GUILD") and guildKeys or partyKeys
-            tbl[sender] = { dungeon = map, keyLevel = lvl, rating = rtg }
-            RefreshPopupIfOpen()
-        end
-    elseif ev == "CHALLENGE_MODE_START" then
-        inChallenge = true
-    elseif ev == "CHALLENGE_MODE_COMPLETED" then
-        inChallenge = false
-    elseif ev == "PLAYER_REGEN_ENABLED" then
-        if deferredBroadcast then deferredBroadcast = false; BroadcastOwnKey() end
-        if deferredQuery then deferredQuery = false; QueryPartyKeys() end
-    elseif ev == "GROUP_ROSTER_UPDATE" then
-        inChallenge = IsInActiveMPlus()
-        RecordOwnKey()
-        if IsInGroup() and not inChallenge and not IsInCombat() then
-            C_Timer.After(0.5 + math.random() * 0.3, function()
-                if IsInGroup() and not inChallenge and not IsInCombat() then
-                    BroadcastOwnKey()
-                    QueryPartyKeys()
-                end
-            end)
-        end
+local lksCallbackTable = {}
+if LibKeystone then
+    LibKeystone.Register(lksCallbackTable, function(keyLevel, keyMapID, playerRating, playerName, channel)
+        if not playerName then return end
+        local tbl = (channel == "GUILD") and guildKeys or partyKeys
+        tbl[playerName] = { dungeon = keyMapID, keyLevel = keyLevel, rating = playerRating }
         RefreshPopupIfOpen()
-    elseif ev == "BAG_UPDATE_DELAYED" then
-        local me = UnitName("player")
-        local map, lvl = GetMyKeystone()
-        local cur = partyKeys[me]
-        if not cur or cur.dungeon ~= map or cur.keyLevel ~= lvl then
-            RecordOwnKey()
-            if IsInGroup() and not inChallenge then BroadcastOwnKey() end
-            RefreshPopupIfOpen()
-        end
-    end
-end)
+    end)
+end
 
 -------------------------------------------------------------------------------
 --  Slash commands
@@ -748,7 +578,6 @@ do
 
     SlashCmdList["EUIKEYS"] = function()
         if not enabled then return end
-        RegisterKeyEvents()
         RecordOwnKey()
         QueryPartyKeys()
         ShowKeystonePopup()

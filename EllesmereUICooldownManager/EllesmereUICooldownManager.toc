@@ -2,9 +2,9 @@
 ## Title: |cff0cd29fEllesmereUI|r Cooldown Manager
 ## Category: |cff0cd29fEllesmere|rUI
 ## Group: EllesmereUI
-## Notes: CDM look customization, action bar glows, and buff bars
+## Notes: A CDM replacement focused on performance, customizations and alerts.
 ## Author: Ellesmere
-## Version: 7.8.8
+## Version: 8.1.4
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUICooldownManagerDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga

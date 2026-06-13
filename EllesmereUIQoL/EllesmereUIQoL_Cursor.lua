@@ -31,7 +31,7 @@ local UnitChannelInfo = UnitChannelInfo or ChannelInfo
 local f, t
 local lastX, lastY
 
-local lastScale, lastHex, lastTex
+local lastScale, lastHex, lastTex, lastAlpha
 local lastR, lastG, lastB
 local isVisible = true
 
@@ -106,13 +106,13 @@ local function Apply()
     -- Recompute whenever hex, class mode, accent mode, or the mode flag
     -- changed. Accent mode also needs per-frame re-read since ELLESMERE_GREEN
     -- mutates in place when the user changes their accent color mid-session.
-    if hex ~= lastHex or p.useClassColor or p.useAccentColor or colorModeChanged then
+    local a = (p.alpha or 100) / 100
+    if hex ~= lastHex or p.useClassColor or p.useAccentColor or colorModeChanged or a ~= lastAlpha then
         lastHex = hex
+        lastAlpha = a
         local r, g, b = ResolveColor(p)
-        if r ~= lastR or g ~= lastG or b ~= lastB or colorModeChanged then
-            lastR, lastG, lastB = r, g, b
-            t:SetVertexColor(r, g, b, 1)
-        end
+        lastR, lastG, lastB = r, g, b
+        t:SetVertexColor(r, g, b, a)
     end
 
     local tex = p.texture or DEF_TEX
@@ -988,7 +988,7 @@ local function RegisterUnlockElements()
     end
 
     if #elements > 0 then
-        EllesmereUI:RegisterUnlockElements(elements)
+        EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIQoL")
     end
 end
 
@@ -1106,10 +1106,19 @@ function ECL:OnInitialize()
     local sharedDB = EllesmereUI.Lite.NewDB("EllesmereUIQoLDB", cursorDefaults)
     -- Narrow view onto the cursor sub-table so legacy code using
     -- self.db.profile.<key> keeps working without rewrites.
-    self.db = {
-        _shared  = sharedDB,
-        profile  = sharedDB.profile.cursor,
-    }
+    -- profile is resolved DYNAMICALLY so it follows profile swaps. The profile
+    -- system repoints the registered sharedDB.profile in place (RepointAllDBs);
+    -- a frozen `profile = sharedDB.profile.cursor` reference would go stale after
+    -- a swap and the cursor would keep applying the old profile's settings.
+    self.db = setmetatable({ _shared = sharedDB }, {
+        __index = function(t, k)
+            if k == "profile" then
+                local p = t._shared.profile
+                if not p.cursor then p.cursor = {} end
+                return p.cursor
+            end
+        end,
+    })
     self.db.ResetProfile = function(dbSelf)
         local defaults = cursorDefaults.profile.cursor
         wipe(dbSelf.profile)

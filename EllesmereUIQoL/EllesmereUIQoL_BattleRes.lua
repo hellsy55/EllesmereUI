@@ -47,6 +47,18 @@ local defaults = {
             countOffsetY   = 0,
             pos            = nil,  -- { centerX, centerY } stored after first move
         },
+        -- Bloodlust Tracker: additive sibling of battleRes. Stores ONLY its own
+        -- keys here (enable, visibility, position). Appearance keys are left out
+        -- on purpose so the runtime/options proxy-read through to the current
+        -- battleRes values until the user overrides a setting on the tracker
+        -- (the same "starts identical, can diverge" model used for raid/party
+        -- frames). This keeps existing battleRes settings completely untouched
+        -- for current users.
+        bloodlust = {
+            enabled    = true,
+            visibility = "NEVER",  -- MPLUS_AND_RAID | MPLUS | RAID | NEVER
+            pos        = nil,      -- { centerX, centerY } stored after first move
+        },
     },
 }
 

@@ -38,7 +38,7 @@ do
                 -- Update label after toggle
                 if activateBtnLbl then
                     activateBtnLbl:SetText(
-                        (EllesmereUIDB and EllesmereUIDB.partyMode) and "Deactivate Party Mode" or "Activate Party Mode"
+                        (EllesmereUIDB and EllesmereUIDB.partyMode) and EllesmereUI.L("Deactivate Party Mode") or EllesmereUI.L("Activate Party Mode")
                     )
                 end
             end
@@ -60,7 +60,7 @@ do
         if activateBtnLbl then
             EllesmereUI.RegisterWidgetRefresh(function()
                 activateBtnLbl:SetText(
-                    (EllesmereUIDB and EllesmereUIDB.partyMode) and "Deactivate Party Mode" or "Activate Party Mode"
+                    (EllesmereUIDB and EllesmereUIDB.partyMode) and EllesmereUI.L("Deactivate Party Mode") or EllesmereUI.L("Activate Party Mode")
                 )
             end)
         end
@@ -82,7 +82,7 @@ do
 
             local label = EllesmereUI.MakeFont(kbFrame, 14, nil, EllesmereUI.TEXT_WHITE_R, EllesmereUI.TEXT_WHITE_G, EllesmereUI.TEXT_WHITE_B)
             PP.Point(label, "LEFT", kbFrame, "LEFT", SIDE_PAD, 0)
-            label:SetText("Toggle On/Off Keybind")
+            label:SetText(EllesmereUI.L("Toggle On/Off Keybind"))
 
             local KB_W, KB_H = 140, 30
             local kbBtn = CreateFrame("Button", nil, kbFrame)
@@ -132,7 +132,7 @@ do
                 end
                 if listening then return end
                 listening = true
-                kbLbl:SetText("Press a key...")
+                kbLbl:SetText(EllesmereUI.L("Press a key..."))
                 kbBtn:EnableKeyboard(true)
             end)
 
@@ -210,7 +210,7 @@ do
 
             local label = EllesmereUI.MakeFont(frame, 14, nil, EllesmereUI.TEXT_WHITE_R, EllesmereUI.TEXT_WHITE_G, EllesmereUI.TEXT_WHITE_B)
             PP.Point(label, "LEFT", frame, "LEFT", SIDE_PAD, 0)
-            label:SetText("Brightness")
+            label:SetText(EllesmereUI.L("Brightness"))
 
             local function briGet()
                 local db = EllesmereUIDB
@@ -302,6 +302,24 @@ do
             CB_SPLITS
         );  y = y - h
 
+        -- Row 4: Bloodlust (debuff-triggered, hardcoded 40s; intentionally NOT
+        -- wired into the Auto Celebration Duration slider, so it has its own
+        -- setValue rather than the shared TriggerSet).
+        _, h = W:TripleRow(parent, y,
+            { type = "checkbox", text = "Bloodlust",
+              getValue = TriggerGet("partyModeTriggerBloodlust"),
+              setValue = function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.partyModeTriggerBloodlust = v
+                  if EllesmereUI_UpdatePartyModeLustListener then EllesmereUI_UpdatePartyModeLustListener() end
+                  local rl = EllesmereUI._widgetRefreshList
+                  if rl then for i = 1, #rl do rl[i]() end end
+              end },
+            nil,
+            nil,
+            CB_SPLITS
+        );  y = y - h
+
         -- Bottom border for the checkbox grid (matches SectionHeader separator style)
         -- Placed 1px above current y so the next row's background doesn't cover it
         do
@@ -351,7 +369,7 @@ do
                 local durLabel
                 for i = 1, durFrame:GetNumRegions() do
                     local reg = select(i, durFrame:GetRegions())
-                    if reg and reg.GetText and reg:GetText() == "Auto Celebration Duration" then
+                    if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Auto Celebration Duration" then
                         durLabel = reg
                         break
                     end
@@ -361,7 +379,7 @@ do
                 else
                     suffix:SetPoint("LEFT", durFrame, "LEFT", 250, 0)
                 end
-                suffix:SetText("(seconds)")
+                suffix:SetText(EllesmereUI.L("(seconds)"))
             end
 
             local function RefreshDurDisabled()
@@ -378,7 +396,7 @@ do
                 local durLabel, durControl
                 for i = 1, durFrame:GetNumRegions() do
                     local reg = select(i, durFrame:GetRegions())
-                    if reg and reg.GetText and reg:GetText() == "Auto Celebration Duration" then
+                    if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Auto Celebration Duration" then
                         durLabel = reg
                         break
                     end
@@ -447,7 +465,7 @@ do
                 local cdLabel
                 for i = 1, cdFrame:GetNumRegions() do
                     local reg = select(i, cdFrame:GetRegions())
-                    if reg and reg.GetText and reg:GetText() == "Random Celebrations Minimum Cooldown" then
+                    if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Random Celebrations Minimum Cooldown" then
                         cdLabel = reg
                         break
                     end
@@ -457,7 +475,7 @@ do
                 else
                     suffix:SetPoint("LEFT", cdFrame, "LEFT", 350, 0)
                 end
-                suffix:SetText("(minutes)")
+                suffix:SetText(EllesmereUI.L("(minutes)"))
             end
 
             local function RefreshCdDisabled()
@@ -473,7 +491,7 @@ do
                 local cdLabel
                 for i = 1, cdFrame:GetNumRegions() do
                     local reg = select(i, cdFrame:GetRegions())
-                    if reg and reg.GetText and reg:GetText() == "Random Celebrations Minimum Cooldown" then
+                    if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Random Celebrations Minimum Cooldown" then
                         cdLabel = reg
                         break
                     end
@@ -554,6 +572,7 @@ do
                 EllesmereUIDB.partyModeTriggerNormalBoss = nil
                 EllesmereUIDB.partyModeTriggerLFRBoss = nil
                 EllesmereUIDB.partyModeTriggerMythic0 = nil
+                EllesmereUIDB.partyModeTriggerBloodlust = nil
                 EllesmereUIDB.partyModeTriggerRatedBG = nil
                 EllesmereUIDB.partyModeTriggerRatedArena = nil
                 EllesmereUIDB.partyModeTriggerRandom = nil
