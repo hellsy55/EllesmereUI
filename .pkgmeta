@@ -15,6 +15,7 @@ move-folders:
   EllesmereUI/EllesmereUINameplates: EllesmereUINameplates
   EllesmereUI/EllesmereUIQoL: EllesmereUIQoL
   EllesmereUI/EllesmereUIQuestTracker: EllesmereUIQuestTracker
+  EllesmereUI/EllesmereUIRaidFrames: EllesmereUIRaidFrames
   EllesmereUI/EllesmereUIResourceBars: EllesmereUIResourceBars
   EllesmereUI/EllesmereUIUnitFrames: EllesmereUIUnitFrames
 
@@ -32,13 +33,18 @@ externals:
   Libs/LibDeflate:
     url: https://github.com/SafeteeWoW/LibDeflate
     tag: latest
+  Libs/LibKeystone:
+    url: https://github.com/BigWigsMods/LibKeystone.git/LibKeystone
 
 enable-nolib-creation: no
 
 ignore:
   - .github
   - .gitignore
+  - .gitattributes
   - .kiro
+  - .tools
+  - CONTRIBUTING_TRANSLATIONS.md
+  - Locales/_keys.txt
   - README.md
   - CHANGELOG.md
-  - EllesmereUIRaidFrames

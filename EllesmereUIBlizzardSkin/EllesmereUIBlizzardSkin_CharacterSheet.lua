@@ -1138,20 +1138,14 @@ local function SkinCharacterSheet()
         return true
     end
 
-    -- This data is only consumed by the iLvl text and its hover tooltip --
-    -- both are invisible unless CharacterFrame is open. So: zero event
-    -- listeners while closed. On panel open, mark dirty. First call after
-    -- that recomputes; subsequent calls hit the cache. Combat-guarded so
-    -- we never scan during a pull.
+    -- Cached scan of bag items that are upgrades over equipped gear.
+    -- Invalidated by gear/bag changes while the character sheet is open.
     local _betterCache = nil
     local _betterDirty = true
 
     local _ComputeBetterInventoryItems  -- defined below
 
     local function GetBetterInventoryItems()
-        if InCombatLockdown() then
-            return _betterCache or {}
-        end
         if _betterDirty or not _betterCache then
             _betterCache = _ComputeBetterInventoryItems()
             _betterDirty = false
@@ -1159,15 +1153,9 @@ local function SkinCharacterSheet()
         return _betterCache
     end
 
-    -- Mark dirty on every sheet open so the bag contents are re-scanned
-    -- once when the user actually looks at it.
-    if CharacterFrame then
-        CharacterFrame:HookScript("OnShow", function()
-            _betterDirty = true
-        end)
-    end
+    -- Cache is invalidated by the iLvlUpdateFrame event handler below
+    -- (PLAYER_EQUIPMENT_CHANGED, BAG_UPDATE) and on CharacterFrame OnShow.
 
-    -- Function to get better items from inventory (equipment only)
     _ComputeBetterInventoryItems = function()
         local betterItems = {}
 
@@ -1357,7 +1345,6 @@ local function SkinCharacterSheet()
     -- Function to update itemlevel, PvP ilvl, and mythic+ rating
     local function UpdateItemLevelDisplay()
         local avgItemLevel, avgItemLevelEquipped, avgItemLevelPvP = GetAverageItemLevel()
-
         -- Format with two decimals
         local avgFormatted = format("%.2f", avgItemLevel)
         local avgEquippedFormatted = format("%.2f", avgItemLevelEquipped)
@@ -1417,19 +1404,20 @@ local function SkinCharacterSheet()
     local iLvlUpdateFrame = CreateFrame("Frame")
     iLvlUpdateFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     iLvlUpdateFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
-    -- BAG_UPDATE_DELAYED removed: the "avg / max" upgrade-suffix now
-    -- derives from a cache that refreshes on CharacterFrame OnShow, so no
-    -- need to re-display on every bag change while the sheet is closed.
+    iLvlUpdateFrame:RegisterEvent("BAG_UPDATE")
     iLvlUpdateFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     iLvlUpdateFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+    iLvlUpdateFrame:RegisterEvent("PLAYER_AVG_ITEM_LEVEL_UPDATE")
     iLvlUpdateFrame:SetScript("OnEvent", function(_, event, unit)
         if event == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
-        -- Skip work when the character sheet is closed; OnShow refresh
-        -- below covers the next-open case.
         if not (frame and frame:IsShown()) then return end
+        _betterDirty = true
         UpdateItemLevelDisplay()
     end)
-    frame:HookScript("OnShow", UpdateItemLevelDisplay)
+    frame:HookScript("OnShow", function()
+        _betterDirty = true
+        UpdateItemLevelDisplay()
+    end)
     UpdateItemLevelDisplay()
 
     -- Store callback for option changes (M+ rating and PvP ilvl)
@@ -2742,6 +2730,7 @@ local function SkinCharacterSheet()
     local TILES_TILE_STEP = TILES_TILE_H + TILES_TILE_GAP
 
     local _titlesBuilt = false
+    local _titlesOrder = {}  -- cached alphabetical index order; rebuilt with the button list
 
     -- One-time factory: creates a reusable button with once-bound scripts.
     -- Data travels via btn._titleIndex / btn._titleName, so scripts never
@@ -2799,6 +2788,24 @@ local function SkinCharacterSheet()
                 end
             end
         end
+
+        -- Sort alphabetically by title name; "No Title" (-1) is pinned first.
+        -- Title names carry a "%s" player-name placeholder (prefix or suffix) plus
+        -- surrounding spaces; strip them so the sort keys on the meaningful word
+        -- (e.g. "%s the Kingslayer" -> "the kingslayer", "Bloodsail Admiral %s"
+        -- -> "bloodsail admiral"). Computed once here, not per search keystroke.
+        local function SortKey(idx)
+            local name = titleButtons[idx].btn._titleName or ""
+            name = name:gsub("%%s", " "):gsub("^%s+", ""):gsub("%s+$", "")
+            return name:lower()
+        end
+        wipe(_titlesOrder)
+        for idx in pairs(titleButtons) do _titlesOrder[#_titlesOrder + 1] = idx end
+        table.sort(_titlesOrder, function(a, b)
+            if a == -1 then return true end
+            if b == -1 then return false end
+            return SortKey(a) < SortKey(b)
+        end)
     end
 
     -- Filter: show/hide + reposition visible buttons by current search text.
@@ -2808,12 +2815,7 @@ local function SkinCharacterSheet()
         local searchText = (titlesSearchBox:GetText() or ""):lower()
         local yOffset = 0
 
-        -- Sort keys so layout order is deterministic; "No Title" first.
-        local ordered = {}
-        for idx in pairs(titleButtons) do ordered[#ordered + 1] = idx end
-        table.sort(ordered)
-
-        for _, idx in ipairs(ordered) do
+        for _, idx in ipairs(_titlesOrder) do
             local btnData = titleButtons[idx]
             local btn = btnData.btn
             local name = (idx == -1) and "No Title" or (btn._titleName or "")
@@ -2845,6 +2847,7 @@ local function SkinCharacterSheet()
     _titlesInvalidator:RegisterEvent("KNOWN_TITLES_UPDATE")
     _titlesInvalidator:SetScript("OnEvent", function()
         _titlesBuilt = false
+        wipe(_titlesOrder)
         for idx, data in pairs(titleButtons) do
             if data.btn then data.btn:Hide() end
             titleButtons[idx] = nil

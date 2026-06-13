@@ -51,7 +51,7 @@ initFrame:SetScript("OnEvent", function(self)
             infoLabel:SetTextColor(1, 1, 1, 0.75)
             infoLabel:SetPoint("CENTER")
             infoLabel:SetJustifyH("CENTER")
-            infoLabel:SetText("Reposition this element within Blizzard Edit Mode")
+            infoLabel:SetText(EllesmereUI.L("Reposition this element within Blizzard Edit Mode"))
             y = y - 40
         end
 
@@ -73,7 +73,7 @@ initFrame:SetScript("OnEvent", function(self)
               values = chatVisValues,
               order  = chatVisOrder,
               getValue=function() return Cfg("visibility") or "always" end,
-              setValue=function(v) Set("visibility", v); RefreshAll() end },
+              setValue=function(v) Set("visibility", v); if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end; RefreshAll() end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
@@ -414,7 +414,7 @@ initFrame:SetScript("OnEvent", function(self)
             local resetFS = rgn:CreateFontString(nil, "OVERLAY")
             resetFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 12, "")
             resetFS:SetTextColor(1, 1, 1, 0.8)
-            resetFS:SetText("Reset")
+            resetFS:SetText(EllesmereUI.L("Reset"))
             resetFS:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
             local hitBtn = CreateFrame("Button", nil, rgn)
             hitBtn:SetAllPoints(resetFS)

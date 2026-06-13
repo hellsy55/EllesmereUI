@@ -1125,14 +1125,6 @@ if EllesmereUI then
     inspectHook:RegisterEvent("INSPECT_READY")
     inspectHook:SetScript("OnEvent", function(self, event, guid)
         if not InspectFrame or not InspectFrame:IsShown() then return end
-        if InspectFrame.unit and guid then
-            local currentGUID = UnitGUID(InspectFrame.unit)
-            if issecretvalue and issecretvalue(currentGUID) then
-                -- Can't validate; allow the reskin
-            elseif currentGUID and currentGUID ~= guid then
-                return
-            end
-        end
         skinned = false
         ApplyThemedInspectSheet()
         EnsureInspectNineSliceHidden()

@@ -63,6 +63,13 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
           setValue = function(v)
               KeysCfg().enabled = v
               EllesmereUI:RefreshPage()
+              EllesmereUI:ShowConfirmPopup({
+                  title = "Reload Required",
+                  message = "Changing the /keys popup requires a reload to update slash command registration.",
+                  confirmText = "Reload",
+                  cancelText = "Later",
+                  onConfirm = function() ReloadUI() end,
+              })
           end },
         { type    = "slider",
           text    = "Text Size",
@@ -159,6 +166,14 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
     if _G._EUI_BuildBattleResSection then
         local brezH = _G._EUI_BuildBattleResSection(parent, y, W, EllesmereUI.PP)
         y = y - brezH
+    end
+
+    ---------------------------------------------------------------------------
+    --  BLOODLUST TRACKER
+    ---------------------------------------------------------------------------
+    if _G._EUI_BuildBloodlustSection then
+        local lustH = _G._EUI_BuildBloodlustSection(parent, y, W, EllesmereUI.PP)
+        y = y - lustH
     end
 
     parent:SetHeight(math.abs(y - yOffset))

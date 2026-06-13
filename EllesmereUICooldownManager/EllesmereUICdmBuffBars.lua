@@ -232,17 +232,14 @@ ns.TBB_DEFAULT_BAR = TBB_DEFAULT_BAR
 --  Data Access
 -------------------------------------------------------------------------------
 function ns.GetTrackedBuffBars()
-    -- TBB is fully spec-specific, stored in specProfiles[specKey]
+    -- TBB is spec-specific and per-profile: specProfiles[specKey] under the
+    -- active profile's bucket (ns.GetActiveSpecProfiles).
     local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
     if not specKey then return { selectedBar = 1, bars = {} } end
-    if not EllesmereUIDB then return { selectedBar = 1, bars = {} } end
-    if not EllesmereUIDB.spellAssignments then
-        EllesmereUIDB.spellAssignments = { specProfiles = {} }
-    end
-    local sa = EllesmereUIDB.spellAssignments
-    if not sa.specProfiles then sa.specProfiles = {} end
-    if not sa.specProfiles[specKey] then sa.specProfiles[specKey] = { barSpells = {} } end
-    local prof = sa.specProfiles[specKey]
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+    if not sp then return { selectedBar = 1, bars = {} } end
+    if not sp[specKey] then sp[specKey] = { barSpells = {} } end
+    local prof = sp[specKey]
     if not prof.trackedBuffBars then
         prof.trackedBuffBars = { selectedBar = 1, bars = {} }
     end
@@ -250,13 +247,13 @@ function ns.GetTrackedBuffBars()
 end
 
 function ns.GetTBBPositions()
-    -- TBB positions are spec-specific, stored alongside trackedBuffBars
+    -- TBB positions are spec-specific, stored alongside trackedBuffBars in the
+    -- active profile's per-spec bucket.
     local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
     if not specKey then return {} end
-    if not EllesmereUIDB or not EllesmereUIDB.spellAssignments then return {} end
-    local sa = EllesmereUIDB.spellAssignments
-    if not sa.specProfiles or not sa.specProfiles[specKey] then return {} end
-    local prof = sa.specProfiles[specKey]
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+    if not sp or not sp[specKey] then return {} end
+    local prof = sp[specKey]
     if not prof.tbbPositions then prof.tbbPositions = {} end
     return prof.tbbPositions
 end
@@ -777,6 +774,11 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         bar._barBorder:SetAllPoints(bar)
         local bSz = cfg.borderSize or 0
         local textureKey = cfg.borderTexture or "solid"
+        -- "Show Behind": border container is a child of the bar; +5 draws in
+        -- front of the fill, level-1 draws behind it. Set before ApplyBorderStyle
+        -- so the textured backdrop frame inherits the correct level.
+        local baseLvl = bar:GetFrameLevel()
+        bar._barBorder:SetFrameLevel(cfg.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 5))
         EllesmereUI.ApplyBorderStyle(bar._barBorder, bSz,
             cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, 1,
             textureKey, cfg.borderTextureOffset, cfg.borderTextureOffsetY,
@@ -1142,6 +1144,79 @@ local function IsTrackedInCDM(cfg)
 end
 
 -------------------------------------------------------------------------------
+--  Bloodlust / Heroism duration bar (debuff-driven, self-timed)
+--  The lust buff is cast by others and is secret, so it can't be mirrored from
+--  a Blizzard buff-bar child. Instead we watch ONLY the player's Sated /
+--  Exhaustion debuff (player-only UNIT_AURA, never a global aura scan) and start
+--  a 40s bar on its rising edge -- the instant lust goes out. No login/reload
+--  reconstruction: if you reload mid-lust, no bar (the debuff was not just
+--  acquired). The matching preset uses popularKey == "bloodlust".
+-------------------------------------------------------------------------------
+local SATED_DEBUFFS = { 57723, 57724, 80354, 95809, 160455, 264689, 390435, 428628 }
+local _lustExpiry   = 0
+local _satedPresent = false
+local _lustListener
+
+local function _playerHasSated()
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return false end
+    for i = 1, #SATED_DEBUFFS do
+        -- Querying a KNOWN spellID returns the aura even when its fields are
+        -- secret in combat, so the edge is detected mid-fight. We never read
+        -- the (possibly secret) spellID back -- we already know it.
+        if C_UnitAuras.GetPlayerAuraBySpellID(SATED_DEBUFFS[i]) then return true end
+    end
+    return false
+end
+
+-- Toggle the player-only Sated listener. Registered only while a lust bar
+-- exists; baselines _satedPresent on enable so it fires only on NEW edges.
+local function _ensureLustListener(enable)
+    if enable then
+        if not _lustListener then
+            _lustListener = CreateFrame("Frame")
+            _lustListener:SetScript("OnEvent", function()
+                local present = _playerHasSated()
+                if present and not _satedPresent then
+                    _lustExpiry = GetTime() + 40  -- rising edge: lust just went out
+                end
+                _satedPresent = present
+            end)
+        end
+        _satedPresent = _playerHasSated()
+        _lustListener:RegisterUnitEvent("UNIT_AURA", "player")
+    elseif _lustListener then
+        _lustListener:UnregisterAllEvents()
+    end
+end
+
+-- Self-driven display for the lust bar: fill + timer come from our own 40s
+-- countdown, not from a Blizzard frame. Name/icon are set in BuildTrackedBuffBars.
+local function UpdateLustBar(bar, cfg)
+    local remaining = _lustExpiry - GetTime()
+    if remaining <= 0 then
+        if bar:IsShown() then bar:Hide() end
+        return
+    end
+    if not bar:IsShown() then bar:Show() end
+    local sb = bar._bar
+    if sb then
+        sb:SetMinMaxValues(0, 40)
+        sb:SetValue(remaining)
+        if cfg.showSpark and bar._spark then bar._spark:Show() end
+    end
+    if cfg.showTimer and bar._timerText then
+        if remaining < 10 then
+            bar._timerText:SetText(string.format("%.1f", remaining))
+        else
+            bar._timerText:SetText(string.format("%d", remaining))
+        end
+        bar._timerText:Show()
+    elseif bar._timerText then
+        bar._timerText:Hide()
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Main Tick: UpdateTrackedBuffBarTimers
 --  Direct reskin of Blizzard's BuffBarCooldownViewer StatusBars.
 --  Reads min/max/value from Blizzard's Bar -- zero duration computation.
@@ -1173,6 +1248,9 @@ function ns.UpdateTrackedBuffBarTimers()
             if not bar:IsShown() then bar:Show() end
         elseif cfg.enabled == false then
             bar:Hide()
+        elseif cfg.popularKey == "bloodlust" then
+            -- Self-driven 40s lust bar; no Blizzard frame to mirror.
+            UpdateLustBar(bar, cfg)
         else
             local blzChild = FindChild(cfg)
             if blzChild then ns.HookPandemicState(blzChild) end
@@ -1437,6 +1515,7 @@ function ns.BuildTrackedBuffBars()
     _anyStacks    = false
 
     local anyEnabled = false
+    local anyLust = false  -- any enabled bloodlust bar -> needs the Sated listener
     local lastGroupedBar  -- tracks previous enabled bar for grouped anchoring
     for i, cfg in ipairs(bars) do
         -- Update gating flags
@@ -1453,6 +1532,7 @@ function ns.BuildTrackedBuffBars()
             bar:Hide()
         else
             anyEnabled = true
+            if cfg.popularKey == "bloodlust" then anyLust = true end
             ApplyTrackedBuffBarSettings(bar, cfg)
 
             -- Icon texture
@@ -1544,6 +1624,9 @@ function ns.BuildTrackedBuffBars()
     elseif tbbTickFrame then
         tbbTickFrame:Hide()
     end
+
+    -- Start/stop the player-only Sated-debuff listener that drives the lust bar.
+    _ensureLustListener(anyLust)
 
     -- Unlock mode
     if ns.RegisterTBBUnlockElements then ns.RegisterTBBUnlockElements() end
@@ -1678,7 +1761,7 @@ function ns.RegisterTBBUnlockElements()
     end
 
     if #elements > 0 then
-        EllesmereUI:RegisterUnlockElements(elements)
+        EllesmereUI:RegisterUnlockElements(elements, "EllesmereUICooldownManager")
     end
 end
 _G._ECME_RegisterTBBUnlock = ns.RegisterTBBUnlockElements
