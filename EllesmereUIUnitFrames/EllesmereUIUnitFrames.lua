@@ -2849,6 +2849,11 @@ local function CreatePowerBar(frame, unit, settings)
         elseif not useP then
             local cf = s2.customPowerFillColor
             if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) else self:SetStatusBarColor(0, 0, 1) end
+        elseif bR then
+            -- Power-color mode, no gradient: apply EUI's GLOBAL power color.
+            -- oUF.colors.power is not overridden, so oUF would otherwise leave
+            -- the bar on its built-in default color instead of the user's.
+            self:SetStatusBarColor(bR, bG, bB)
         end
     end
 
@@ -3511,7 +3516,11 @@ local function CreateCastBar(frame, unit, settings)
     local bgTex = castbarBg:CreateTexture(nil, "BACKGROUND")
     PP.Point(bgTex, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
     PP.Point(bgTex, "BOTTOMRIGHT", castbarBg, "BOTTOMRIGHT", 0, 0)
-    bgTex:SetColorTexture(0, 0, 0, 0.5)
+    -- Background color/alpha: nil settings fall back to the original black 0.5 so
+    -- existing frames are unchanged unless the user sets castBgColor/castBgAlpha.
+    local _cbgC = settings.castBgColor
+    bgTex:SetColorTexture(_cbgC and _cbgC.r or 0, _cbgC and _cbgC.g or 0, _cbgC and _cbgC.b or 0, settings.castBgAlpha or 0.5)
+    castbarBg._bgTex = bgTex
 
     local castbar = CreateFrame("StatusBar", nil, castbarBg)
     PP.Point(castbar, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
@@ -3944,7 +3953,22 @@ end
 -- Apply cooldown text + stack count settings to all existing buttons in an aura
 -- container. Called from ReloadFrames to live-update without /reload.
 -- auraSize/cropped (optional) drive the cropped-icon rectangle + texcoord.
-local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped)
+-- Anchor a stack-count FontString per the "Position" setting. Default anchor
+-- matches oUF (BOTTOMRIGHT -1,0); corner anchors tuck the number just inside the
+-- icon edge, center sits dead-center. The user X/Y offset adds on top. On ns (not
+-- a local) to stay clear of the main-chunk 200-local cap.
+function ns.ApplyStackAnchor(fs, parent, pos, offX, offY)
+    if not fs or not parent then return end
+    local point, baseX = "BOTTOMRIGHT", -1
+    if pos == "bottomleft" then point, baseX = "BOTTOMLEFT", 1
+    elseif pos == "topright" then point, baseX = "TOPRIGHT", -1
+    elseif pos == "topleft" then point, baseX = "TOPLEFT", 1
+    elseif pos == "center" then point, baseX = "CENTER", 0 end
+    fs:ClearAllPoints()
+    fs:SetPoint(point, parent, point, baseX + (offX or 0), offY or 0)
+end
+
+local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped, stackPos)
     if not container then return end
     -- Cropped style: make the buttons rectangular (height = 80% of width). oUF
     -- sizes each button to element.width x element.height and uses them for the
@@ -3984,22 +4008,77 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
         -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default.
         if btn and btn.Count then
             btn.Count:SetFont(cachedFontPath, stackSize or 14, "OUTLINE, SLUG")
-            btn.Count:ClearAllPoints()
-            btn.Count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1 + (stackOffX or 0), stackOffY or 0)
+            ns.ApplyStackAnchor(btn.Count, btn, stackPos, stackOffX, stackOffY)
         end
     end
 end
 
--- Compose an oUF aura filter string from the per-unit filter toggles. Mirrors
--- the Blizzard filter-token model (Own Only = PLAYER, Raid Frames = RAID,
--- Important = IMPORTANT). Multiple checked options AND together server-side via
--- C_UnitAuras.GetAuraSlots, narrowing the set. On ns (not a local) to stay clear
+-- Build a SIGNATURE string from the per-unit filter toggles (Own Only = PLAYER,
+-- Raid Frames = RAID, Important = IMPORTANT). This is no longer the actual fetch
+-- filter -- it's only used as part of each element's change-detection key so a
+-- ForceUpdate fires when a toggle flips. The real fetch uses the broad base
+-- filter + the per-aura OR FilterAura below. On ns (not a local) to stay clear
 -- of the main-chunk 200-local cap.
 function ns.ComposeAuraFilter(base, ownOnly, raidFrames, important)
     if ownOnly    then base = base .. "|PLAYER" end
     if raidFrames then base = base .. "|RAID" end
     if important  then base = base .. "|IMPORTANT" end
     return base
+end
+
+-- Per-aura OR filter: when one or more of the 3 classification toggles is on, an
+-- aura shows if it matches ANY selected classification (union) instead of ANDing
+-- the tokens into the slot fetch (which would intersect). The element fetches
+-- with the broad base filter (HELPFUL/HARMFUL); per-classification membership is
+-- resolved here via IsAuraFilteredOutByInstanceID -- the same secret-safe API
+-- processData already uses to set data.isPlayerAura. No toggles -> show all.
+local IsAuraFilteredOut = C_UnitAuras and C_UnitAuras.IsAuraFilteredOutByInstanceID
+-- Sated/Exhaustion spell IDs (the lust debuff variants). Blizzard keeps these
+-- readable, so spellId is safe to match. Mirrors the Raid Frames list.
+local SATED_DEBUFFS = {
+    [57723]  = true,  -- Exhaustion (Heroism)
+    [57724]  = true,  -- Sated (Bloodlust)
+    [80354]  = true,  -- Temporal Displacement (Time Warp)
+    [95809]  = true,  -- Insanity (Ancient Hysteria)
+    [160455] = true,  -- Fatigued (Netherwinds)
+    [264689] = true,  -- Fatigued (Primal Rage)
+    [390435] = true,  -- Exhaustion (Fury of the Aspects)
+    [428628] = true,  -- Exhaustion (variant)
+}
+function ns.EUIAuraFilter(element, unit, data, filter)
+    if not data then return false end
+    local f = element._euiAuraFlags
+    -- Lust/Sated debuff: handled OUTSIDE the filter system -- gated solely by the
+    -- Show Lust Debuff toggle (off by default = hidden, on = always shown),
+    -- independent of the classification filters below.
+    local sid = data.spellId
+    if sid and not issecretvalue(sid) and SATED_DEBUFFS[sid] then
+        return (f and f.showLust) and true or false
+    end
+    -- "Own Only" never applies to the player's OWN debuffs -- ignore the player
+    -- flag for player + HARMFUL so a stale onlyPlayerDebuffs value has no effect.
+    local usePlayer = f and f.player
+    if usePlayer and unit == "player" and filter == "HARMFUL" then usePlayer = false end
+    if not f or not (usePlayer or f.raid or f.important) then return true end
+    local iid = data.auraInstanceID
+    if not iid then return true end
+    if usePlayer and data.isPlayerAura then return true end
+    local base = filter or "HELPFUL"
+    if IsAuraFilteredOut then
+        if f.raid and not IsAuraFilteredOut(unit, iid, base .. "|RAID") then return true end
+        if f.important and not IsAuraFilteredOut(unit, iid, base .. "|IMPORTANT") then return true end
+    end
+    return false
+end
+
+-- Point an aura element at the broad base filter + our OR FilterAura, recording
+-- the current classification toggles (and the lust-debuff override) for it to read.
+function ns.ApplyEUIAuraFilter(element, base, ownOnly, raidFrames, important, showLust)
+    element.filter = base
+    element.FilterAura = ns.EUIAuraFilter
+    local f = element._euiAuraFlags
+    if not f then f = {}; element._euiAuraFlags = f end
+    f.player, f.raid, f.important, f.showLust = ownOnly, raidFrames, important, showLust
 end
 
 local function CreateTargetAuras(frame, unit)
@@ -4055,19 +4134,20 @@ local function CreateTargetAuras(frame, unit)
         -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default (no change).
         if button.Count then
             local s2 = GetSettingsForUnit(unit or "target")
-            local stackSize, sOffX, sOffY
+            local stackSize, sOffX, sOffY, sPos
             if container and container.filter == "HELPFUL" then
                 stackSize = s2 and s2.buffStackTextSize
                 sOffX = (s2 and s2.buffStackTextOffsetX) or 0
                 sOffY = (s2 and s2.buffStackTextOffsetY) or 0
+                sPos = s2 and s2.buffStackTextPosition
             else
                 stackSize = s2 and s2.debuffStackTextSize
                 sOffX = (s2 and s2.debuffStackTextOffsetX) or 0
                 sOffY = (s2 and s2.debuffStackTextOffsetY) or 0
+                sPos = s2 and s2.debuffStackTextPosition
             end
             button.Count:SetFont(cachedFontPath, stackSize or 14, "OUTLINE, SLUG")
-            button.Count:ClearAllPoints()
-            button.Count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1 + sOffX, sOffY)
+            ns.ApplyStackAnchor(button.Count, button, sPos, sOffX, sOffY)
         end
 
         if not button.Border then
@@ -4125,7 +4205,7 @@ local function CreateTargetAuras(frame, unit)
     buffs.initialAnchor = bia
     buffs.growthX = bgx
     buffs.growthY = bgy
-    buffs.filter = "HELPFUL"
+    ns.ApplyEUIAuraFilter(buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
     buffs.PostCreateButton = SetupAuraIcon
     if not showBuffs then
         buffs:Hide()
@@ -4179,7 +4259,7 @@ local function CreateTargetAuras(frame, unit)
         debuffs.initialAnchor = dia
         debuffs.growthX = dgx
         debuffs.growthY = dgy
-        debuffs.filter = "HARMFUL"
+        ns.ApplyEUIAuraFilter(debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
         debuffs.PostCreateButton = SetupAuraIcon
         if settings and settings.onlyPlayerDebuffs then
             debuffs.onlyShowPlayer = true
@@ -4426,7 +4506,7 @@ local function StyleFullFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            centerText:SetWidth(0)
+            PP.Width(centerText, barW * 0.9)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -4441,7 +4521,7 @@ local function StyleFullFrame(frame, unit)
                 local rightUsed = EstimateUFTextWidth(rc)
                 PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
             else
-                leftText:SetWidth(0)
+                PP.Width(leftText, barW * 0.9)
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -4457,7 +4537,7 @@ local function StyleFullFrame(frame, unit)
                 local leftUsed = EstimateUFTextWidth(lc)
                 PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
             else
-                rightText:SetWidth(0)
+                PP.Width(rightText, barW * 0.9)
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -4662,7 +4742,7 @@ local function StyleFocusFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            centerText:SetWidth(0)
+            PP.Width(centerText, barW * 0.9)
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -4676,7 +4756,7 @@ local function StyleFocusFrame(frame, unit)
                 local rightUsed = EstimateUFTextWidth(rc)
                 PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
             else
-                leftText:SetWidth(0)
+                PP.Width(leftText, barW * 0.9)
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -4691,7 +4771,7 @@ local function StyleFocusFrame(frame, unit)
                 local leftUsed = EstimateUFTextWidth(lc)
                 PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
             else
-                rightText:SetWidth(0)
+                PP.Width(rightText, barW * 0.9)
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -6140,7 +6220,7 @@ local function ReloadFrames()
                         frame:ClearAllPoints()
                         local bossStackDir = db.profile.boss and db.profile.boss.bossStackDirection or "down"
                         if bossStackDir == "up" then
-                            frame:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, bossSpacing)
+                            frame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, bossSpacing)
                         else
                             frame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -bossSpacing)
                         end
@@ -6581,7 +6661,7 @@ local function ReloadFrames()
                             local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, buffCbOff, bgx or 0, bgy or 0, settings.maxBuffs or 4, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. buffFilter
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
-                                frame.Buffs.filter = buffFilter
+                                ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
                                 frame.Buffs.size = settings.buffSize or 22
                                 frame.Buffs:ClearAllPoints()
                                 frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + buffCbOff + (settings.buffOffsetY or 0))
@@ -6593,7 +6673,7 @@ local function ReloadFrames()
                                     frame.Buffs:ForceUpdate()
                                 end
                             end
-                            ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
+                            ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition)
                         else
                             if frame:IsElementEnabled("Buffs") then
                                 frame:DisableElement("Buffs")
@@ -6625,11 +6705,11 @@ local function ReloadFrames()
                                 if cbH <= 0 then cbH = 14 end
                                 debuffCbOff = -cbH
                             end
-                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant)
+                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
                             local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, debuffCbOff, dgx or 0, dgy or 0, settings.maxDebuffs or 10, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0) .. debuffFilter
                             if frame.Debuffs._lastDebuffKey ~= debuffKey then
                                 frame.Debuffs._lastDebuffKey = debuffKey
-                                frame.Debuffs.filter = debuffFilter
+                                ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
                                 frame.Debuffs.onlyShowPlayer = nil
                                 frame.Debuffs.size = settings.debuffSize or 22
                                 frame.Debuffs:ClearAllPoints()
@@ -6642,7 +6722,7 @@ local function ReloadFrames()
                                     frame.Debuffs:ForceUpdate()
                                 end
                             end
-                            ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
+                            ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition)
                         end
                     end
 
@@ -7012,7 +7092,7 @@ local function ReloadFrames()
                             local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, bgx or 0, bgy or 0, settings.maxBuffs or 20, liveCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. buffFilter
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
-                                frame.Buffs.filter = buffFilter
+                                ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
                                 frame.Buffs.size = settings.buffSize or 22
                                 frame.Buffs:ClearAllPoints()
                                 frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + liveCbOff + (settings.buffOffsetY or 0))
@@ -7031,7 +7111,7 @@ local function ReloadFrames()
                             frame.Buffs:Hide()
                             frame.Buffs.num = 0
                         end
-                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
+                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition)
                     end
 
                     -- Debuffs
@@ -7058,11 +7138,11 @@ local function ReloadFrames()
                                     liveDbCbOff = -cbH
                                 end
                             end
-                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant)
+                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
                             local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 20, liveDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0) .. debuffFilter
                             if frame.Debuffs._lastDebuffKey ~= debuffKey then
                                 frame.Debuffs._lastDebuffKey = debuffKey
-                                frame.Debuffs.filter = debuffFilter
+                                ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
                                 frame.Debuffs.onlyShowPlayer = nil
                                 frame.Debuffs.size = settings.debuffSize or 22
                                 frame.Debuffs:ClearAllPoints()
@@ -7076,7 +7156,7 @@ local function ReloadFrames()
                                 end
                             end
                         end
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition)
                     end
 
                     UpdateBordersForScale(frame, unit)
@@ -7366,11 +7446,11 @@ local function ReloadFrames()
                                 focusDbCbOff = -cbH
                             end
                         end
-                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant)
+                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
                         local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, focusDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0) .. debuffFilter
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
-                            frame.Debuffs.filter = debuffFilter
+                            ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
                             frame.Debuffs.onlyShowPlayer = nil
                             frame.Debuffs.size = settings.debuffSize or 22
                             frame.Debuffs:ClearAllPoints()
@@ -7383,7 +7463,7 @@ local function ReloadFrames()
                                 frame.Debuffs:ForceUpdate()
                             end
                         end
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition)
                     end
                 end
 
@@ -7412,7 +7492,7 @@ local function ReloadFrames()
                         local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, bgx or 0, bgy or 0, settings.maxBuffs or 4, focusBfCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. buffFilter
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
-                            frame.Buffs.filter = buffFilter
+                            ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
                             frame.Buffs.size = settings.buffSize or 22
                             frame.Buffs:ClearAllPoints()
                             frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + focusBfCbOff + (settings.buffOffsetY or 0))
@@ -7431,7 +7511,7 @@ local function ReloadFrames()
                         frame.Buffs:Hide()
                         frame.Buffs.num = 0
                     end
-                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
+                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition)
                 end
 
                 UpdateBordersForScale(frame, unit)
@@ -7575,6 +7655,10 @@ local function ReloadFrames()
                 if frame.Castbar then
                     local castbarBg = frame.Castbar:GetParent()
                     if castbarBg then
+                        if castbarBg._bgTex then
+                            local cbg = settings.castBgColor
+                            castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
+                        end
                         if settings.showCastbar ~= false then
                             if not frame:IsElementEnabled("Castbar") then
                                 frame:EnableElement("Castbar")
@@ -7665,6 +7749,10 @@ local function ReloadFrames()
                         local powerH = powerIsAtt and (settings.powerHeight or 0) or 0
                         effectiveDebuffSize = settings.healthHeight + powerH
                     end
+                    -- Boss preview: the fake debuff overlay handles display, so
+                    -- suppress the real (player-unit) debuffs to keep the preview
+                    -- to exactly the fake set.
+                    if ns._bossPreviewActive then dAnc = "none" end
                     if dAnc == "none" then
                         if frame:IsElementEnabled("Debuffs") then
                             frame:DisableElement("Debuffs")
@@ -7699,11 +7787,11 @@ local function ReloadFrames()
                             liveDbCbOff = 0
                             simpleAnchorParent = frame.Health or frame
                         end
-                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant)
+                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
                         local debuffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, dgx or 0, dgy or 0, settings.maxDebuffs or 10, liveDbCbOff, effectiveDebuffSize, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0) .. debuffFilter
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
-                            frame.Debuffs.filter = debuffFilter
+                            ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
                             frame.Debuffs.onlyShowPlayer = nil
                             frame.Debuffs.size = effectiveDebuffSize
                             frame.Debuffs:ClearAllPoints()
@@ -7720,15 +7808,18 @@ local function ReloadFrames()
                     -- Use simple debuff cooldown text settings when simple display
                     -- is active, regular debuff settings otherwise.
                     if settings.simpleDebuffs ~= false then
-                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.simpleDebuffCooldownTextOffsetX, settings.simpleDebuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, nil, nil, settings.debuffStackTextPosition)
                     else
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition)
                     end
                 end
 
                 -- Buffs (boss)
                 if frame.Buffs then
                     local showBuffs = settings.showBuffs ~= false
+                    -- Boss preview: the fake buff overlay handles display, so
+                    -- suppress the real (player-unit) buffs during preview.
+                    if ns._bossPreviewActive then showBuffs = false end
                     if showBuffs then
                         if not frame:IsElementEnabled("Buffs") then
                             frame:EnableElement("Buffs")
@@ -7747,11 +7838,12 @@ local function ReloadFrames()
                                 bossBfCbOff = -cbH
                             end
                         end
-                        local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                        -- Boss buffs are NEVER filtered -- always show all HELPFUL auras.
+                        local buffFilter = "HELPFUL"
                         local buffKey = string.format("%s%s%d%d%d%d%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, bgx or 0, bgy or 0, settings.maxBuffs or 4, bossBfCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. buffFilter
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
-                            frame.Buffs.filter = buffFilter
+                            ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", false, false, false)
                             frame.Buffs.size = settings.buffSize or 22
                             frame.Buffs:ClearAllPoints()
                             frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + bossBfCbOff + (settings.buffOffsetY or 0))
@@ -7770,7 +7862,7 @@ local function ReloadFrames()
                         frame.Buffs:Hide()
                         frame.Buffs.num = 0
                     end
-                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons)
+                    ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition)
                 end
 
                 UpdateBordersForScale(frame, unit)
@@ -8814,9 +8906,9 @@ function InitializeFrames()
             if prev then
                 bossFrame:ClearAllPoints()
                 if bossStackDir == "up" then
-                    bossFrame:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, spacing)
+                    bossFrame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, spacing)
                 else
-                    bossFrame:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -spacing)
+                    bossFrame:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
                 end
             end
         end
@@ -9264,6 +9356,11 @@ function SetupOptionsPanel()
         reloadPending = false
         ReloadFrames()
         ApplyBlizzCastbarState()
+        -- A reload restyles the boss frames and re-colors their health to the
+        -- player's class color (preview rides on unit="player") + re-tags the
+        -- name. Re-assert the preview (red color + fake name) so a settings
+        -- change doesn't revert it. Secret-safe: no health values are read.
+        if ns._bossPreviewActive and ns.SetBossPreview then ns.SetBossPreview(true) end
     end)
     ns.ReloadFrames = function()
         if not reloadPending then
@@ -9279,12 +9376,23 @@ function SetupOptionsPanel()
     -- the frame's left edge). Created on demand and torn down on preview
     -- disable.
     local FAKE_DEBUFF_SPELLS = { 122, 172, 1714 }  -- Frost Nova, Corruption, Curse of Tongues
+    local FAKE_DEBUFF_STACKS = { [2] = 3 }          -- one fake stack (icon 2 only)
+    local FAKE_DEBUFF_FRACS  = { 0.35, 0.62, 0.88 } -- static fake swipe fraction remaining
+    local FAKE_DEBUFF_SECS   = { 8, 15, 23 }         -- static fake duration-text seconds
     local function AttachFakeDebuffs(frame)
         -- Tear down any prior holder so size/anchor refresh on every call.
         if frame._previewDebuffs then
             frame._previewDebuffs:Hide()
             frame._previewDebuffs:SetParent(nil)
             frame._previewDebuffs = nil
+        end
+        -- Suppress the real (player-unit) debuffs while the fake overlay is up so
+        -- the preview shows exactly the fake set. Restored by ReloadFrames when
+        -- the preview is disabled.
+        if frame.Debuffs then
+            if frame:IsElementEnabled("Debuffs") then frame:DisableElement("Debuffs") end
+            frame.Debuffs:Hide()
+            frame.Debuffs.num = 0
         end
         local settings = db.profile.boss or {}
         local simple = settings.simpleDebuffs ~= false
@@ -9330,17 +9438,75 @@ function SetupOptionsPanel()
                 holder:SetPoint("RIGHT", frame, "LEFT", -gap, 0)
             end
         end
+        -- Cooldown-text + stack settings, mode-aware so the preview mirrors the
+        -- live boss aura buttons (simple keys in Simple Debuff Display, regular
+        -- debuff keys otherwise).
+        local showCD, cdSize, cdOffX, cdOffY
+        if simple then
+            showCD = settings.simpleDebuffShowCooldownText
+            cdSize = settings.simpleDebuffCooldownTextSize or 14
+            cdOffX = settings.simpleDebuffCooldownTextOffsetX or 0
+            cdOffY = settings.simpleDebuffCooldownTextOffsetY or 0
+        else
+            showCD = settings.debuffShowCooldownText
+            cdSize = settings.debuffCooldownTextSize or 10
+            cdOffX = settings.debuffCooldownTextOffsetX or 0
+            cdOffY = settings.debuffCooldownTextOffsetY or 0
+        end
+        local stackSize = settings.debuffStackTextSize or 14
+        local stackOffX = settings.debuffStackTextOffsetX or 0
+        local stackOffY = settings.debuffStackTextOffsetY or 0
+        local stackPos = settings.debuffStackTextPosition
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
+        local now = GetTime()
         for idx, spellID in ipairs(FAKE_DEBUFF_SPELLS) do
-            local icon = holder:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(iconSize, iconSize)
-            icon:SetPoint("RIGHT", holder, "RIGHT", -(idx - 1) * (iconSize + gap), 0)
+            local iconFrame = CreateFrame("Frame", nil, holder)
+            iconFrame:SetSize(iconSize, iconSize)
+            iconFrame:SetPoint("RIGHT", holder, "RIGHT", -(idx - 1) * (iconSize + gap), 0)
+            iconFrame:SetFrameLevel(holder:GetFrameLevel())
+            local icon = iconFrame:CreateTexture(nil, "ARTWORK")
+            icon:SetAllPoints()
             local tex = GetSpellTexture and GetSpellTexture(spellID)
                      or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID))
             if tex then icon:SetTexture(tex) end
             icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-            local border = CreateFrame("Frame", nil, holder)
+            -- Static fake cooldown swipe: a huge duration parked at a fixed
+            -- fraction so the wedge never visibly moves. Native countdown
+            -- numbers stay hidden; the duration text below is a manual static
+            -- FontString instead.
+            local cd = CreateFrame("Cooldown", nil, iconFrame, "CooldownFrameTemplate")
+            cd:SetAllPoints(iconFrame)
+            cd:SetFrameLevel(iconFrame:GetFrameLevel() + 1)
+            cd:SetDrawEdge(false)
+            cd:SetDrawBling(false)
+            cd:SetReverse(false)
+            cd:SetDrawSwipe(true)
+            cd:SetSwipeColor(0, 0, 0, 0.6)
+            cd:SetHideCountdownNumbers(true)
+            local frac = FAKE_DEBUFF_FRACS[idx] or 0.6
+            cd:SetCooldown(now - 3600 * (1 - frac), 3600)
+            -- Text host above the swipe so duration/stack never sit under it.
+            local textHost = CreateFrame("Frame", nil, iconFrame)
+            textHost:SetAllPoints(iconFrame)
+            textHost:SetFrameLevel(cd:GetFrameLevel() + 1)
+            local durText = textHost:CreateFontString(nil, "OVERLAY")
+            durText:SetDrawLayer("OVERLAY", 7)
+            durText:SetFont(fontPath, cdSize, "OUTLINE")
+            durText:SetPoint("CENTER", iconFrame, "CENTER", cdOffX, cdOffY)
+            durText:SetText(FAKE_DEBUFF_SECS[idx] or 10)
+            if not showCD then durText:Hide() end
+            -- Stack text on a single icon only (looks natural; most debuffs are
+            -- unstacked). Driven by the Stack Size / Stack X / Stack Y controls.
+            if FAKE_DEBUFF_STACKS[idx] then
+                local stack = textHost:CreateFontString(nil, "OVERLAY")
+                stack:SetDrawLayer("OVERLAY", 7)
+                stack:SetFont(fontPath, stackSize, "OUTLINE, SLUG")
+                ns.ApplyStackAnchor(stack, iconFrame, stackPos, stackOffX, stackOffY)
+                stack:SetText(FAKE_DEBUFF_STACKS[idx])
+            end
+            local border = CreateFrame("Frame", nil, iconFrame)
             border:SetAllPoints(icon)
-            border:SetFrameLevel(holder:GetFrameLevel() + 1)
+            border:SetFrameLevel(textHost:GetFrameLevel() + 1)
             if PP and PP.CreateBorder then PP.CreateBorder(border, 0, 0, 0, 1) end
         end
         frame._previewDebuffs = holder
@@ -9349,13 +9515,80 @@ function SetupOptionsPanel()
         if frame._previewDebuffs then frame._previewDebuffs:Hide() end
     end
 
-    -- Refresh the in-game boss preview's fake debuffs when boss settings that
-    -- affect them (simpleDebuffs, debuffAnchor, debuffSize) change.
+    -- Fake buff icons for the boss preview. Two square icons anchored where the
+    -- real Buffs frame would live, sized to the buff size. Created on demand and
+    -- torn down on preview disable. Capped at 2 regardless of Max Count.
+    local FAKE_BUFF_SPELLS = { 21562, 1459 }  -- Power Word: Fortitude, Arcane Intellect
+    local function AttachFakeBuffs(frame)
+        if frame._previewBuffs then
+            frame._previewBuffs:Hide()
+            frame._previewBuffs:SetParent(nil)
+            frame._previewBuffs = nil
+        end
+        -- Suppress the real (player-unit) buffs while preview is up. Restored by
+        -- ReloadFrames when the preview is disabled.
+        if frame.Buffs then
+            if frame:IsElementEnabled("Buffs") then frame:DisableElement("Buffs") end
+            frame.Buffs:Hide()
+            frame.Buffs.num = 0
+        end
+        local settings = db.profile.boss or {}
+        if settings.showBuffs == false then return end
+        local anchor = settings.buffAnchor or "topleft"
+        if anchor == "none" then return end
+        local iconSize = settings.buffSize or 22
+        local count = #FAKE_BUFF_SPELLS
+        local gap = 1
+        local holder = CreateFrame("Frame", nil, frame)
+        holder:SetSize(iconSize * count + gap * (count - 1), iconSize)
+        holder:SetFrameLevel(frame:GetFrameLevel() + 5)
+        holder:ClearAllPoints()
+        local castBg = frame.Castbar and frame.Castbar:GetParent()
+        local castbarH = (settings.showCastbar ~= false and castBg)
+                         and castBg:GetHeight() or 0
+        if anchor == "topleft" then
+            holder:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
+        elseif anchor == "topright" then
+            holder:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, gap)
+        elseif anchor == "bottomleft" then
+            holder:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -gap - castbarH)
+        elseif anchor == "bottomright" then
+            holder:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, -gap - castbarH)
+        elseif anchor == "right" then
+            holder:SetPoint("LEFT", frame, "RIGHT", gap, 0)
+        else  -- "left" or fallback
+            holder:SetPoint("RIGHT", frame, "LEFT", -gap, 0)
+        end
+        for idx, spellID in ipairs(FAKE_BUFF_SPELLS) do
+            local iconFrame = CreateFrame("Frame", nil, holder)
+            iconFrame:SetSize(iconSize, iconSize)
+            iconFrame:SetPoint("LEFT", holder, "LEFT", (idx - 1) * (iconSize + gap), 0)
+            iconFrame:SetFrameLevel(holder:GetFrameLevel())
+            local icon = iconFrame:CreateTexture(nil, "ARTWORK")
+            icon:SetAllPoints()
+            local tex = GetSpellTexture and GetSpellTexture(spellID)
+                     or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID))
+            if tex then icon:SetTexture(tex) end
+            icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            local border = CreateFrame("Frame", nil, iconFrame)
+            border:SetAllPoints(icon)
+            border:SetFrameLevel(iconFrame:GetFrameLevel() + 1)
+            if PP and PP.CreateBorder then PP.CreateBorder(border, 0, 0, 0, 1) end
+        end
+        frame._previewBuffs = holder
+    end
+    local function DetachFakeBuffs(frame)
+        if frame._previewBuffs then frame._previewBuffs:Hide() end
+    end
+
+    -- Refresh the in-game boss preview's fake auras when boss settings that
+    -- affect them (simpleDebuffs, debuffAnchor, debuffSize, buffAnchor, etc.)
+    -- change.
     ns.RefreshBossPreviewDebuffs = function()
         if not ns._bossPreviewActive then return end
         for i = 1, 3 do
             local f = frames["boss" .. i]
-            if f then AttachFakeDebuffs(f) end
+            if f then AttachFakeDebuffs(f); AttachFakeBuffs(f) end
         end
     end
 
@@ -9364,6 +9597,53 @@ function SetupOptionsPanel()
     -- so piggybacking on unit="player" would otherwise paint the bar in the
     -- user's class color -- wrong for a preview.
     local PREVIEW_HEALTH_RED_R, PREVIEW_HEALTH_RED_G, PREVIEW_HEALTH_RED_B = 0.8, 0.2, 0.2
+
+    -- Fake boss names for the preview. Generated once per activation (stable
+    -- across reloads), regenerated on a fresh activation. Health is intentionally
+    -- NOT faked: the health max is a secret value in Midnight and cannot be read
+    -- or compared, so the bar keeps the player's real (filled) health.
+    local PREVIEW_BOSS_NAMES = {
+        "The Lich King", "Ragnaros", "Kel'Thuzad", "Archimonde", "Kil'jaeden",
+        "Deathwing", "Yogg-Saron", "C'Thun", "Cenarius", "Varimathras",
+    }
+    local function GenBossPreviewNames()
+        local pool = {}
+        for i = 1, #PREVIEW_BOSS_NAMES do pool[i] = PREVIEW_BOSS_NAMES[i] end
+        for i = #pool, 2, -1 do
+            local j = math.random(i)
+            pool[i], pool[j] = pool[j], pool[i]
+        end
+        return { pool[1], pool[2], pool[3] }
+    end
+
+    -- Override the name fontstring with a fake boss name. Untag it so the [name]
+    -- tag (driven by unit="player") stops overwriting it. SetText with a literal
+    -- string is secret-safe. Restored on clear.
+    local function BossPreviewNameFS(f)
+        local s = db.profile.boss
+        local lc = (s and s.leftTextContent) or "name"
+        local rc = (s and s.rightTextContent) or "perhp"
+        local cc = (s and s.centerTextContent) or "none"
+        if lc == "name" then return f.LeftText end
+        if rc == "name" then return f.RightText end
+        if cc == "name" then return f.CenterText end
+        return nil
+    end
+    local function ApplyBossPreviewName(f, name)
+        local fs = BossPreviewNameFS(f)
+        if not fs then return end
+        f._previewNameFS = fs
+        if fs._curTag then fs._previewSavedTag = fs._curTag; f:Untag(fs); fs._curTag = nil end
+        fs:SetText(name)
+    end
+    local function ClearBossPreviewName(f)
+        local fs = f._previewNameFS
+        if not fs then return end
+        if fs._previewSavedTag then f:Tag(fs, fs._previewSavedTag); fs._curTag = fs._previewSavedTag; fs._previewSavedTag = nil end
+        f._previewNameFS = nil
+        if f.UpdateTags then f:UpdateTags() end
+    end
+
     local function ApplyBossPreviewColor(f)
         local h = f.Health
         if not h then return end
@@ -9403,6 +9683,9 @@ function SetupOptionsPanel()
     ns.SetBossPreview = function(enabled)
         if InCombatLockdown() then return false end
         ns._bossPreviewActive = enabled and true or false
+        if enabled and not ns._bossPreviewNames then
+            ns._bossPreviewNames = GenBossPreviewNames()
+        end
         for i = 1, 3 do
             local f = frames["boss" .. i]
             if f then
@@ -9411,15 +9694,26 @@ function SetupOptionsPanel()
                     f:Show()
                     ApplyBossPreviewColor(f)
                     if f.UpdateAllElements then f:UpdateAllElements("BossPreview") end
+                    -- After UpdateAllElements re-tags the name, override it with a fake boss name.
+                    ApplyBossPreviewName(f, (ns._bossPreviewNames and ns._bossPreviewNames[i]) or PREVIEW_BOSS_NAMES[i] or "Boss")
                     AttachFakeDebuffs(f)
+                    AttachFakeBuffs(f)
                 else
                     ClearBossPreviewColor(f)
+                    ClearBossPreviewName(f)
                     f:SetAttribute("unit", "boss" .. i)
                     if not UnitExists("boss" .. i) then f:Hide() end
                     if f.UpdateAllElements then f:UpdateAllElements("BossPreview") end
                     DetachFakeDebuffs(f)
+                    DetachFakeBuffs(f)
                 end
             end
+        end
+        if not enabled then
+            ns._bossPreviewNames = nil
+            -- Restore the real Buffs/Debuffs elements (and their anchors/counts)
+            -- that the fake overlay disabled while preview was active.
+            if ns.ReloadFrames then ns.ReloadFrames() end
         end
         return true
     end
@@ -9473,6 +9767,16 @@ function SetupOptionsPanel()
                     end
                     if k == "boss" then return GetFrameDimensions("boss1") end
                     return GetFrameDimensions(k)
+                end,
+                -- Extra height the unlock overlay should extend BELOW the frame.
+                -- Boss frames have a castbar anchored under the frame (not a
+                -- separate movable element like the player/target cast bars), so
+                -- the overlay grows down to wrap it. Other units return 0.
+                getBottomExtra = function(k)
+                    if k ~= "boss" then return 0 end
+                    local b = db.profile.boss
+                    if b and b.showCastbar ~= false then return b.castbarHeight or 14 end
+                    return 0
                 end,
                 setWidth = function(k, w)
                     if k == "classPower" then return end
@@ -9534,9 +9838,9 @@ function SetupOptionsPanel()
                             if bf and prev then
                                 bf:ClearAllPoints()
                                 if bossStackDir == "up" then
-                                    bf:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, spacing)
+                                    bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, spacing)
                                 else
-                                    bf:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -spacing)
+                                    bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
                                 end
                             end
                         end
@@ -9594,9 +9898,9 @@ function SetupOptionsPanel()
                             if bf and prev then
                                 bf:ClearAllPoints()
                                 if bossStackDir == "up" then
-                                    bf:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, spacing)
+                                    bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, spacing)
                                 else
-                                    bf:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -spacing)
+                                    bf:SetPoint("TOPLEFT", prev, "TOPLEFT", 0, -spacing)
                                 end
                             end
                         end

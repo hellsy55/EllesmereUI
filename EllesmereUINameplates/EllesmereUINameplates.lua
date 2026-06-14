@@ -18,6 +18,25 @@ local UnitGetTotalAbsorbs = UnitGetTotalAbsorbs
 local C_UnitAuras = C_UnitAuras
 local C_UnitAuras_GetAuraAppDisplayCount = C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount
 local C_UnitAuras_GetAuraDuration = C_UnitAuras and C_UnitAuras.GetAuraDuration
+-- Permanent / no-duration auras (enemy buffs in M+, until-dispelled debuffs)
+-- return a degenerate (0,0) duration object whose armed CooldownFrame strobes:
+-- the client internally shows the reversed swipe then self-hides on every aura
+-- rescan, and Lua show/hide gating CANNOT stop it. Mask it with ALPHA (which is
+-- orthogonal to the client's internal show/hide) so the strobe renders
+-- invisibly -- the exact fix used at the raid-frame aura sites. IsZero() may be
+-- a secret boolean for enemy auras, so it is only ever fed to SetAlphaFromBoolean,
+-- never branched on. baseAlpha is 1 (the cd frame's normal opacity); the stack
+-- count lives on a separate carrier so it survives the mask.
+local function NP_ArmAuraCooldown(cd, durObj)
+    if not (cd and durObj and cd.SetCooldownFromDurationObject) then return false end
+    cd:SetCooldownFromDurationObject(durObj)
+    if durObj.IsZero and cd.SetAlphaFromBoolean then
+        cd:SetAlphaFromBoolean(durObj:IsZero(), 0, 1)
+    elseif cd.SetAlpha then
+        cd:SetAlpha(1)
+    end
+    return true
+end
 local UnitName, UnitGUID = UnitName, UnitGUID
 local UnitIsUnit, UnitCanAttack = UnitIsUnit, UnitCanAttack
 local UnitIsEnemy, UnitIsTapDenied = UnitIsEnemy, UnitIsTapDenied
@@ -1868,7 +1887,13 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         if d.cd.SetDrawBling then d.cd:SetDrawBling(false) end
         if d.cd.SetReverse then d.cd:SetReverse(true) end
         if d.cd.SetHideCountdownNumbers then d.cd:SetHideCountdownNumbers(false) end
-        d.count = d.cd:CreateFontString(nil, "OVERLAY")
+        -- Stack count lives on a carrier ABOVE the cooldown so the zero-duration
+        -- alpha mask on d.cd (which kills the permanent-aura swipe strobe) never
+        -- hides the stack number.
+        d.countCarrier = CreateFrame("Frame", nil, d)
+        d.countCarrier:SetAllPoints(d)
+        d.countCarrier:SetFrameLevel(d.cd:GetFrameLevel() + 1)
+        d.count = d.countCarrier:CreateFontString(nil, "OVERLAY")
         SetFSFont(d.count, 11, "OUTLINE")
         PP.Point(d.count, "BOTTOMRIGHT", d, "BOTTOMRIGHT", 1, 1)
         d.count:SetJustifyH("RIGHT")
@@ -1909,7 +1934,12 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         if b.cd.SetDrawBling then b.cd:SetDrawBling(false) end
         if b.cd.SetReverse then b.cd:SetReverse(true) end
         if b.cd.SetHideCountdownNumbers then b.cd:SetHideCountdownNumbers(false) end
-        b.count = b.cd:CreateFontString(nil, "OVERLAY")
+        -- Stack count on a carrier ABOVE the cooldown (see debuff slot) so the
+        -- zero-duration alpha mask on b.cd never hides the stack number.
+        b.countCarrier = CreateFrame("Frame", nil, b)
+        b.countCarrier:SetAllPoints(b)
+        b.countCarrier:SetFrameLevel(b.cd:GetFrameLevel() + 1)
+        b.count = b.countCarrier:CreateFontString(nil, "OVERLAY")
         SetFSFont(b.count, 9, "OUTLINE")
         PP.Point(b.count, "BOTTOMRIGHT", b, "BOTTOMRIGHT", 2, -2)
         local bCdRegions = { b.cd:GetRegions() }
@@ -4634,7 +4664,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
                         if slot.cd and C_UnitAuras_GetAuraDuration then
                             local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                             if durObj and slot.cd.SetCooldownFromDurationObject then
-                                slot.cd:SetCooldownFromDurationObject(durObj)
+                                NP_ArmAuraCooldown(slot.cd, durObj)
                             end
                             slot._durationObj = durObj
                         end
@@ -4838,7 +4868,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             if slot.cd and C_UnitAuras_GetAuraDuration then
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and slot.cd.SetCooldownFromDurationObject then
-                    slot.cd:SetCooldownFromDurationObject(durObj)
+                    NP_ArmAuraCooldown(slot.cd, durObj)
                 end
                 slot._durationObj = durObj
             end
@@ -4874,7 +4904,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and cd.SetCooldownFromDurationObject then
                     if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
-                    cd:SetCooldownFromDurationObject(durObj)
+                    NP_ArmAuraCooldown(cd, durObj)
                     cd:Show()
                 end
                 slot._durationObj = durObj
@@ -4957,7 +4987,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             if slot.cd and C_UnitAuras_GetAuraDuration then
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and slot.cd.SetCooldownFromDurationObject then
-                    slot.cd:SetCooldownFromDurationObject(durObj)
+                    NP_ArmAuraCooldown(slot.cd, durObj)
                 end
             end
             if slot.count and C_UnitAuras_GetAuraAppDisplayCount then
@@ -4994,7 +5024,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and cd.SetCooldownFromDurationObject then
                     if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
-                    cd:SetCooldownFromDurationObject(durObj)
+                    NP_ArmAuraCooldown(cd, durObj)
                     cd:Show()
                 end
             end
@@ -5061,7 +5091,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             if slot.cd and C_UnitAuras_GetAuraDuration then
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and slot.cd.SetCooldownFromDurationObject then
-                    slot.cd:SetCooldownFromDurationObject(durObj)
+                    NP_ArmAuraCooldown(slot.cd, durObj)
                 end
             end
             if updated then
@@ -5091,7 +5121,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and cd.SetCooldownFromDurationObject then
                     if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
-                    cd:SetCooldownFromDurationObject(durObj)
+                    NP_ArmAuraCooldown(cd, durObj)
                     cd:Show()
                 end
             end
@@ -5702,7 +5732,7 @@ function NameplateFrame:UNIT_AURA(_, updateInfo)
                         if slot.cd and C_UnitAuras_GetAuraDuration then
                             local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                             if durObj and slot.cd.SetCooldownFromDurationObject then
-                                slot.cd:SetCooldownFromDurationObject(durObj)
+                                NP_ArmAuraCooldown(slot.cd, durObj)
                             end
                             slot._durationObj = durObj
                         end
