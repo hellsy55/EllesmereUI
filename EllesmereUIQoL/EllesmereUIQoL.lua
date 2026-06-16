@@ -1059,12 +1059,8 @@ do
         end
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
             statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag("extras"))
-            if EllesmereUI.GetFontUseShadow("extras") then
-                statsText:SetShadowOffset(1, -1)
-            else
-                statsText:SetShadowOffset(0, 0)
-            end
         end
         local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
         local scale = 1.0
@@ -1080,12 +1076,8 @@ do
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
             local fontSize = math.floor(12 * scale + 0.5)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
             statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag("extras"))
-            if EllesmereUI.GetFontUseShadow("extras") then
-                statsText:SetShadowOffset(1, -1)
-            else
-                statsText:SetShadowOffset(0, 0)
-            end
         end
         for _, ev in ipairs({
             "UNIT_STATS", "COMBAT_RATING_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
@@ -1137,7 +1129,6 @@ do
         local FONT = EllesmereUI.GetFontPath("extras")
         local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
         local LABEL_SIZE = FONT_SIZE - 2
-        local SHADOW_X, SHADOW_Y = 1, -1
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
         fpsFrame:SetSize(60, 20)
         fpsFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 10, -10)
@@ -1147,8 +1138,8 @@ do
 
         local function MakeFS(size)
             local f = fpsFrame:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f, EllesmereUI.GetFontUseShadow("extras")) end
             f:SetFont(FONT, size, EllesmereUI.GetFontOutlineFlag("extras"))
-            if EllesmereUI.GetFontUseShadow("extras") then f:SetShadowOffset(SHADOW_X, SHADOW_Y) else f:SetShadowOffset(0, 0) end
             f:SetTextColor(1, 1, 1, 1)
             return f
         end
@@ -1345,7 +1336,9 @@ do
                 savePos = function(key, point, relPoint, x, y)
                     if not EllesmereUIDB then EllesmereUIDB = {} end
                     if not point then return end
-                    EllesmereUIDB.secondaryStatsPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    -- Scale lives in this same table; carry it over so a drag doesn't wipe it.
+                    local prev = EllesmereUIDB.secondaryStatsPos
+                    EllesmereUIDB.secondaryStatsPos = { point = point, relPoint = relPoint, x = x, y = y, scale = prev and prev.scale }
                     if not EllesmereUI._unlockActive then
                         local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
                         if f then
@@ -1713,8 +1706,8 @@ do
             coordFrame:SetPoint("BOTTOM", WorldMapFrame.ScrollContainer, "BOTTOM", 0, 10)
 
             local PP = EllesmereUI.PanelPP
-            local fp = EllesmereUI.GetFontPath()
-            local outF = EllesmereUI.GetFontOutlineFlag()
+            local fp = EllesmereUI.GetFontPath("extras")
+            local outF = EllesmereUI.GetFontOutlineFlag("extras")
             local sz = (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
 
             local divider = coordFrame:CreateTexture(nil, "OVERLAY")
@@ -1722,19 +1715,19 @@ do
             PP.Size(divider, 2, sz)
             divider:SetPoint("BOTTOM", coordFrame, "BOTTOM", 0, 0)
 
-            local useShadow = EllesmereUI.GetFontUseShadow()
+            local useShadow = EllesmereUI.GetFontUseShadow("extras")
 
             local cursorFS = coordFrame:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(cursorFS, useShadow) end
             cursorFS:SetFont(fp, sz, outF)
             cursorFS:SetTextColor(1, 1, 1, 0.9)
-            cursorFS:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
             cursorFS:SetJustifyH("RIGHT")
             cursorFS:SetPoint("RIGHT", divider, "LEFT", -10, 0)
 
             local playerFS = coordFrame:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(playerFS, useShadow) end
             playerFS:SetFont(fp, sz, outF)
             playerFS:SetTextColor(1, 1, 1, 0.9)
-            playerFS:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
             playerFS:SetJustifyH("LEFT")
             playerFS:SetPoint("LEFT", divider, "RIGHT", 10, 0)
 
@@ -1800,14 +1793,14 @@ do
                 CreateCoordFrame()
                 if coordFrame then
                     local PP = EllesmereUI.PanelPP
-                    local fp = EllesmereUI.GetFontPath()
-                    local outF = EllesmereUI.GetFontOutlineFlag()
-                    local useShadow = EllesmereUI.GetFontUseShadow()
+                    local fp = EllesmereUI.GetFontPath("extras")
+                    local outF = EllesmereUI.GetFontOutlineFlag("extras")
+                    local useShadow = EllesmereUI.GetFontUseShadow("extras")
                     local sz = (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
+                    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(coordText.cursor, useShadow) end
                     coordText.cursor:SetFont(fp, sz, outF)
-                    coordText.cursor:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
+                    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(coordText.player, useShadow) end
                     coordText.player:SetFont(fp, sz, outF)
-                    coordText.player:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
                     PP.Size(coordText.divider, 2, sz)
                     coordFrame:Show()
                 end

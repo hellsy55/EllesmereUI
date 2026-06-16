@@ -150,24 +150,19 @@ local popup, rowFrames
 local ShowKeystonePopup  -- forward declaration
 
 local function ResolveFont()
-    return (EUI and EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    return (EUI and EUI.GetFontPath and EUI.GetFontPath("extras")) or "Fonts\\FRIZQT__.TTF"
 end
 
 local function ResolveOutline()
-    return (EUI and EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or ""
+    return (EUI and EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("extras")) or ""
 end
 
 local function MakeLabel(parent, size, _, r, g, b, a)
     local fs = parent:CreateFontString(nil, "OVERLAY")
     local flags = ResolveOutline()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, flags == "") end
     fs:SetFont(ResolveFont(), size, flags)
     if r then fs:SetTextColor(r, g or 1, b or 1, a or 1) end
-    if flags == "" then
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
     return fs
 end
 

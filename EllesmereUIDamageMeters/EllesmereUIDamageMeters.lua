@@ -380,24 +380,56 @@ end
 -------------------------------------------------------------------------------
 local _inCombat = false
 local _inEncounter = false       -- true between ENCOUNTER_START and ENCOUNTER_END
-local _encounterStartTime = 0    -- GetTime() at ENCOUNTER_START
 local _playerGUID
 local _windows = {}  -- array of active window tables
 ns._windows = _windows
 ns._DM_TYPE_NAMES = DM_TYPE_NAMES
-local _combatStartTime = 0   -- GetTime() at combat start
-local _combatEndTime = 0     -- GetTime() at combat end (frozen)
+local _combatEndTime = 0       -- GetTime() at combat end; control-flow sentinel (ticker teardown / freeze-once)
 local _needsFinalRefresh = false
+local _curViewFrozenDur = 0    -- final Current-session duration, pinned when combat ends
 
-local function GetCombatElapsed()
-    if _combatEndTime > 0 then
-        -- Combat ended: frozen value
-        return _combatEndTime - _combatStartTime
-    elseif _combatStartTime > 0 then
-        -- In combat: live ticking
-        return GetTime() - _combatStartTime
+-- Single source of truth for the "Current" session timer (window AND standalone
+-- both read this). While combat is live it returns the live session duration
+-- straight from the API -- the SAME session the bars render -- so when the server
+-- rolls "Current" to a new session (chain-pull boss, etc.) the timer resets in
+-- lockstep with the bars; there is no separate clock that can drift. Once combat
+-- ends every live caller is gated off and it returns the value pinned at the
+-- freeze instant, so the timer stops. Reset-on-new-session and stop-on-session-end
+-- are two faces of one state transition, not two things to remember to do together.
+local function GetCurrentViewDuration()
+    if _inCombat or _needsFinalRefresh then
+        if C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
+            local d = C_DamageMeter.GetSessionDurationSeconds(Enum.DamageMeterSessionType.Current)
+            if type(d) == "number" and not (issecretvalue and issecretvalue(d)) then
+                _curViewFrozenDur = d   -- keep the pin warm with the last live value
+                return d
+            end
+        end
+        return _curViewFrozenDur or 0
+    end
+    -- Not live: show the pinned final duration. If there is no pin yet (fresh
+    -- load / after /reload with retained session data), fall back to the API.
+    if _curViewFrozenDur and _curViewFrozenDur > 0 then return _curViewFrozenDur end
+    if C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
+        local d = C_DamageMeter.GetSessionDurationSeconds(Enum.DamageMeterSessionType.Current)
+        if type(d) == "number" and not (issecretvalue and issecretvalue(d)) then return d end
     end
     return 0
+end
+
+-- Stop the live timer AND pin its final value in one atomic step. Bound to every
+-- combat-end freeze site so a stop can never happen without pinning, and a pin
+-- never without a stop. The d >= pin guard keeps the last live value if the
+-- server already rolled Current to a fresh (smaller) session at the end; the pin
+-- is reset to 0 at every combat START so it cannot carry across combats.
+local function FreezeCombat(ts)
+    _combatEndTime = ts or GetTime()
+    if C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
+        local d = C_DamageMeter.GetSessionDurationSeconds(Enum.DamageMeterSessionType.Current)
+        if type(d) == "number" and not (issecretvalue and issecretvalue(d)) and d >= (_curViewFrozenDur or 0) then
+            _curViewFrozenDur = d
+        end
+    end
 end
 
 local _raidUnits, _partyUnits = {}, {}
@@ -420,7 +452,11 @@ local function IsGroupInCombat()
     return false
 end
 
-local StopSharedTicker  -- forward declaration (defined in refresh section)
+local StopSharedTicker   -- forward declaration (defined in refresh section)
+local StartSharedTicker  -- forward declaration (defined in refresh section)
+local ScheduleStopTicker -- forward declaration (defined in refresh section)
+local _sharedTicker      -- the live refresh ticker (assigned in refresh section)
+local _combatGen = 0     -- monotonic segment token; stale deferred teardowns compare against it
 
 -- Keystone start: wipe data so Overall = this dungeon run
 -- Keystone end: auto-swap windows from Current to Overall (if enabled)
@@ -436,7 +472,7 @@ instanceFrame:SetScript("OnEvent", function(_, event)
         if C_DamageMeter and C_DamageMeter.ResetAllCombatSessions then
             C_DamageMeter.ResetAllCombatSessions()
         end
-        _combatStartTime = 0; _combatEndTime = 0
+        _combatEndTime = 0; _curViewFrozenDur = 0
         -- Auto-swap: Overall -> Current on key start
         for _, w in ipairs(_windows) do
             local wdb2 = WinDB(w.idx)
@@ -474,12 +510,16 @@ instanceFrame:SetScript("OnEvent", function(_, event)
                 end
                 if not _inCombat then
                     for _, w in ipairs(_windows) do w.Refresh() end
+                elseif not _sharedTicker then
+                    -- Combat is live but the ticker died (teardown race): a new
+                    -- server session is our cue to revive the live refresh.
+                    StartSharedTicker()
                 end
             end)
         end
     elseif event == "DAMAGE_METER_RESET" then
         -- Blizzard cleared all session data (auto-reset CVar, manual reset, etc.)
-        _combatStartTime = 0; _combatEndTime = 0
+        _combatEndTime = 0; _curViewFrozenDur = 0
         if _targetsCache then wipe(_targetsCache) end
         for _, w in ipairs(_windows) do
             w._barCacheKey = nil
@@ -488,20 +528,43 @@ instanceFrame:SetScript("OnEvent", function(_, event)
             w.Refresh()
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
-        -- Zone transition (load screen): force-end all timers unconditionally.
-        -- Covers hearthing out mid-combat, instance teleports, etc.
-        _inEncounter = false
-        _encounterStartTime = 0
-        _inCombat = false
-        _needsFinalRefresh = false
-        StopSharedTicker()
-        -- Freeze the window timer if it's still ticking
-        if _combatStartTime > 0 and _combatEndTime == 0 then
-            _combatEndTime = GetTime()
-        end
-        -- Hide standalone timer immediately on zone change
-        if _saTimer and _saTimer:IsShown() and not _saTimerPreview then
-            _saTimer:Hide()
+        -- Zone transition (load screen). If we are STILL in combat after the load
+        -- (e.g. /reload on a target dummy, or zoning into an active fight), restore
+        -- the live timer -- WoW does not re-fire PLAYER_REGEN_DISABLED here, so
+        -- without this the session-derived timer would blank. Otherwise force-end.
+        if UnitAffectingCombat("player") then
+            -- Still personally in combat after the load (e.g. /reload on a target
+            -- dummy): restore the live timer -- WoW does not re-fire
+            -- PLAYER_REGEN_DISABLED here.
+            _inCombat = true
+            _combatEndTime = 0
+            _needsFinalRefresh = false
+            if not _sharedTicker then StartSharedTicker() end
+        elseif IsGroupInCombat() then
+            -- Not personally in combat but the group is (reload while dead /
+            -- spectating). Poll like the teammate pre-warm rather than asserting
+            -- _inCombat: SharedRefreshTick freezes the instant the group leaves
+            -- combat, so even a briefly-stale cross-instance group-combat flag on
+            -- a zone change cannot leave the timer running -- it self-terminates
+            -- within a tick instead of ticking forever.
+            _inCombat = false
+            _combatEndTime = 0
+            _needsFinalRefresh = true
+            if not _sharedTicker then StartSharedTicker() end
+        else
+            -- Out of combat: force-end. Covers hearth/teleport, leaving a BG or
+            -- arena, abandoning an M+ key, and any other zone-out.
+            local wasLive = _inCombat or _needsFinalRefresh or _inEncounter
+            _inEncounter = false
+            _inCombat = false
+            _needsFinalRefresh = false
+            StopSharedTicker()
+            -- Freeze (pin) the timer if combat was still live
+            if wasLive and _combatEndTime == 0 then FreezeCombat() end
+            -- Hide standalone timer immediately on zone change
+            if _saTimer and _saTimer:IsShown() and not _saTimerPreview then
+                _saTimer:Hide()
+            end
         end
         -- Refresh after zone-in to pick up visibility/data changes
         for _, w in ipairs(_windows) do
@@ -544,13 +607,8 @@ local function SetDMFont(fs, size)
     if not (fs and fs.SetFont) then return end
     local font = GetDMFont()
     local flags = GetDMOutline()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, flags == "") end
     fs:SetFont(font, size, flags)
-    if flags == "" then
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -1465,8 +1523,8 @@ end
 local function EnsureMenuRow(menu, idx)
     local row = menu._pool[idx]
     if row then return row end
-    local fontPath = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-    local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or ""
+    local fontPath = (EUI.GetFontPath and EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
+    local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
     row = CreateFrame("Button", nil, menu)
     row._hl = row:CreateTexture(nil, "BACKGROUND", nil, 1); row._hl:SetAllPoints()
     row._lbl = row:CreateFontString(nil, "OVERLAY"); row._lbl:SetFont(fontPath, CTX_FONT_SZ, outline)
@@ -1484,8 +1542,8 @@ local function EnsureMenuRow(menu, idx)
 end
 
 local function LayoutMenu(menu, items, onDismiss, isChild)
-    local fontPath = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-    local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or ""
+    local fontPath = (EUI.GetFontPath and EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
+    local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
     local EG = EUI.ELLESMERE_GREEN
     local hlAlpha = EUI.DD_ITEM_HL_A or 0.08
     for _, r in ipairs(menu._pool) do r:Hide() end
@@ -2140,10 +2198,10 @@ local function CreateDMWindow(winIdx)
     end
 
     -- Reset Data button, left of win action button
-    W.resetBtn = MakeHeaderBtn("dm_reset.png", -(btnSize * 3 + btnPad * 4 + 2), "Reset Data", function()
+    W.resetBtn = MakeHeaderBtn("dm_undo.png", -(btnSize * 3 + btnPad * 4 + 2), "Reset Data", function()
         if C_DamageMeter and C_DamageMeter.ResetAllCombatSessions then
             C_DamageMeter.ResetAllCombatSessions()
-            _combatStartTime = 0; _combatEndTime = 0
+            _combatEndTime = 0; _curViewFrozenDur = 0
             for _, w in ipairs(_windows) do w.Refresh() end
         end
     end)
@@ -2651,10 +2709,12 @@ local function CreateDMWindow(winIdx)
     local ovBrd = EUI.MakeBorder and EUI.MakeBorder(unlockOverlay, ar, ag, ab, 0.6)
     unlockOverlay:HookScript("OnEnter", function() if ovBrd then ovBrd:SetColor(1, 1, 1, 0.9) end end)
     unlockOverlay:HookScript("OnLeave", function() if ovBrd then ovBrd:SetColor(ar, ag, ab, 0.6) end end)
-    local ovFont = EUI.EXPRESSWAY or (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local ovFont = EUI.EXPRESSWAY or (EUI.GetFontPath and EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
     local labelFr = CreateFrame("Frame", nil, unlockOverlay); labelFr:SetAllPoints(); labelFr:SetFrameLevel(unlockOverlay:GetFrameLevel() + 3)
-    local ovLabel = labelFr:CreateFontString(nil, "OVERLAY"); ovLabel:SetFont(ovFont, 10, "")
-    ovLabel:SetShadowOffset(1, -1); ovLabel:SetShadowColor(0, 0, 0, 0.8); ovLabel:SetPoint("CENTER")
+    local ovLabel = labelFr:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(ovLabel, true) end
+    ovLabel:SetFont(ovFont, 10, "")
+    ovLabel:SetPoint("CENTER")
     ovLabel:SetText("Damage Meters"); ovLabel:SetTextColor(1, 1, 1, 0.9)
 
     -- Overlay absorbs clicks to block interaction with the window beneath.
@@ -3067,20 +3127,19 @@ local function CreateDMWindow(winIdx)
 
         local dur
         if W.curSessionID then
-            -- Historical session: use API duration
+            -- Historical session: use that session's stored API duration
             if C_DamageMeter and C_DamageMeter.GetAvailableCombatSessions then
                 local sess = C_DamageMeter.GetAvailableCombatSessions()
                 if sess then for _, s in ipairs(sess) do if s.sessionID == W.curSessionID then dur = s.durationSeconds; break end end end
             end
+        elseif W.curSession == Enum.DamageMeterSessionType.Current then
+            -- Live "Current" view: derived from the SAME session the bars render,
+            -- so it resets when the server rolls Current and freezes when combat
+            -- ends -- both in lockstep with the bars (see GetCurrentViewDuration).
+            dur = GetCurrentViewDuration()
         else
-            -- Current/Overall: use our own tracked timer during/after combat (immune to API drift)
-            local elapsed = GetCombatElapsed()
-            if elapsed > 0 then
-                dur = elapsed
-            else
-                -- No combat this session (e.g. after reload): fall back to API
-                dur = C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds and C_DamageMeter.GetSessionDurationSeconds(W.curSession)
-            end
+            -- Overall (timer is hidden for Overall by the isOverall gate below)
+            dur = C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds and C_DamageMeter.GetSessionDurationSeconds(W.curSession)
         end
         local isOverall = (not W.curSessionID and W.curSession == Enum.DamageMeterSessionType.Overall)
         -- Hide timer when segment has no data (count == 0) or is Overall
@@ -3478,8 +3537,8 @@ local function CreateDMWindow(winIdx)
         card._accent:Hide()
 
         -- Type icon
-        local fontPath = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-        local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or ""
+        local fontPath = (EUI.GetFontPath and EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
+        local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
         local iconSz = CARD_H - 2
         card._icon = card:CreateTexture(nil, "OVERLAY")
         card._icon:SetSize(iconSz, iconSz)
@@ -3508,8 +3567,8 @@ local function CreateDMWindow(winIdx)
     RefreshHome = function()
         if not homeFrame or not homeFrame:IsShown() then return end
         local bookmarks = GetBookmarks()
-        local fontPath = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-        local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag()) or ""
+        local fontPath = (EUI.GetFontPath and EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
+        local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
         local EG = EUI.ELLESMERE_GREEN
         local acR, acG, acB = GetAccentRGB()
 
@@ -3942,16 +4001,12 @@ UpdateSATimerText = function()
     if not _saTimer or not _saTimerFS then return end
     local cfg = DB()
     if not cfg.standaloneTimer then return end
-    -- In encounter: show encounter timer. In combat (no encounter): show
-    -- player combat timer. Out of combat: hide and clear.
-    if _inEncounter then
+    -- Same source as the window's Current timer so the two can never disagree.
+    -- Visible while combat is live (or while polling a group fight we are not in),
+    -- hidden out of combat.
+    if _inCombat or _needsFinalRefresh then
         if not _saTimer:IsShown() and not _saTimerPreview then _saTimer:Show() end
-        local elapsed = GetTime() - _encounterStartTime
-        _saTimerFS:SetText(FormatTimer(elapsed > 0 and elapsed or 0))
-    elseif _inCombat then
-        if not _saTimer:IsShown() and not _saTimerPreview then _saTimer:Show() end
-        local elapsed = GetCombatElapsed()
-        _saTimerFS:SetText(FormatTimer(elapsed > 0 and elapsed or 0))
+        _saTimerFS:SetText(FormatTimer(GetCurrentViewDuration()))
     else
         if not _saTimerPreview then
             if _saTimer:IsShown() then _saTimer:Hide() end
@@ -4115,7 +4170,8 @@ end
 -------------------------------------------------------------------------------
 --  Shared refresh ticker (one ticker for ALL windows)
 -------------------------------------------------------------------------------
-local _sharedTicker
+-- _sharedTicker is forward-declared near the top (so the session-update handler
+-- can revive it after a teardown race); it is assigned by Start/StopSharedTicker.
 
 local _regenTimestamp = 0  -- GetTime() when player left combat
 
@@ -4130,8 +4186,8 @@ local function SharedRefreshTick()
             groupDone = true
         end
         if groupDone then
-            -- Group combat ended: freeze timer, final refresh, stop
-            _combatEndTime = _regenTimestamp > 0 and _regenTimestamp or GetTime()
+            -- Group combat ended: freeze timer (pin final duration), final refresh, stop
+            FreezeCombat(_regenTimestamp > 0 and _regenTimestamp or GetTime())
             _inCombat = false
             _needsFinalRefresh = false
             _regenTimestamp = 0
@@ -4156,7 +4212,7 @@ end
 -- can be filtered from the C_DamageMeter Deaths session (which sometimes
 -- assigns a valid deathRecapID to feign deaths).
 -- Only active during combat to avoid idle CPU cost.
-local function StartSharedTicker()
+StartSharedTicker = function()
     if _sharedTicker then _sharedTicker:Cancel() end
     local rate = DB().refreshRate or TICK_COMBAT
     _sharedTicker = C_Timer.NewTicker(rate, SharedRefreshTick)
@@ -4164,6 +4220,19 @@ end
 
 StopSharedTicker = function()
     if _sharedTicker then _sharedTicker:Cancel(); _sharedTicker = nil end
+end
+
+-- Stop the ticker after `delay`, but no-op if a newer combat segment started in
+-- the meantime (generation mismatch) or combat is still live. Replaces the raw
+-- deferred StopSharedTicker calls, which could cancel the NEXT segment's ticker
+-- when a boss was pulled within the stop delay of the previous pack ending.
+ScheduleStopTicker = function(delay)
+    local gen = _combatGen
+    C_Timer.After(delay, function()
+        if gen ~= _combatGen then return end
+        if _inCombat or _needsFinalRefresh then return end
+        StopSharedTicker()
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -4186,11 +4255,13 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         -- Group member entered combat before us: start polling so bars populate
         if IsGroupInCombat() then
             _combatEndTime = 0
-            local apiDur = C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds
-                and C_DamageMeter.GetSessionDurationSeconds(Enum.DamageMeterSessionType.Current)
-            if apiDur and type(apiDur) == "number" and apiDur > 0 then
-                _combatStartTime = GetTime() - apiDur
-            end
+            _curViewFrozenDur = 0
+            -- Pre-warm: a teammate pulled before us. Mark a final-refresh poll
+            -- (NOT _inCombat -- the player may never personally enter combat, and
+            -- nothing would clear _inCombat then). SharedRefreshTick then refreshes
+            -- while the group fights and self-terminates when it leaves combat.
+            _needsFinalRefresh = true
+            _combatGen = _combatGen + 1
             StartSharedTicker()
         end
         ns.ProfEnd("Combat:UNIT_FLAGS", t0)
@@ -4198,23 +4269,54 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
     end
     if event == "ENCOUNTER_START" then
         _inEncounter = true
-        _encounterStartTime = GetTime()
+        -- A boss pull is a hard combat-segment boundary even in continuous
+        -- (chain-pull) combat, where PLAYER_REGEN_DISABLED never fires at the
+        -- boss. Bump the segment token (so any pending deferred stop no-ops),
+        -- assert combat, reset the timer pin, and ensure the live ticker runs.
+        -- No clock is anchored here: the timer is derived from the live "Current"
+        -- session, so it resets to ~0:00 the instant Blizzard's session roll lands
+        -- (the old synchronous GetSessionDurationSeconds read raced the roll and is
+        -- removed -- it returned the stale pre-pull duration).
+        _combatGen = _combatGen + 1
+        _inCombat = true
+        _combatEndTime = 0
+        _curViewFrozenDur = 0
+        _regenTimestamp = 0
+        _needsFinalRefresh = false
+        if not _sharedTicker then StartSharedTicker() end
+        for _, w in ipairs(_windows) do
+            w._barCacheKey = nil
+            w._barSources = nil
+            w._cachedTargets = nil
+            w.Refresh()
+        end
         return
     end
     if event == "ENCOUNTER_END" then
         _inEncounter = false
-        -- Boss kill/wipe: immediately end combat like Details does.
-        -- PLAYER_REGEN_ENABLED may lag several seconds behind ENCOUNTER_END,
-        -- leaving the timer running after the boss is dead.
+        local success = select(5, ...)   -- 1 = kill, 0 = wipe
+        -- On a clean kill, end combat promptly (PLAYER_REGEN_ENABLED can lag
+        -- several seconds behind ENCOUNTER_END). But if it was NOT a clean kill
+        -- and the group is still fighting (wipe with survivors, adds left, or we
+        -- AoE'd straight into the next pack), do NOT hard-freeze mid-combat --
+        -- keep the ticker live and let it freeze when the group truly leaves
+        -- combat. Hard-freezing here was a cause of the stuck-meter bug.
         if _inCombat or _needsFinalRefresh then
+            local gen = _combatGen
             -- Short delay: let Blizzard finalize the session data first
             C_Timer.After(0.5, function()
-                if _combatEndTime > 0 then return end  -- already ended
-                _combatEndTime = GetTime()
+                if gen ~= _combatGen then return end   -- a new segment (chain pull) started
+                if _combatEndTime > 0 then return end  -- already ended elsewhere
+                if success ~= 1 and IsGroupInCombat() then
+                    _needsFinalRefresh = true
+                    if not _sharedTicker then StartSharedTicker() end
+                    return
+                end
+                FreezeCombat()
                 _inCombat = false
                 _needsFinalRefresh = false
                 for _, w in ipairs(_windows) do w.Refresh() end
-                C_Timer.After(0.5, function() StopSharedTicker() end)
+                ScheduleStopTicker(0.5)
             end)
         end
         return
@@ -4223,20 +4325,14 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         local t0 = ns.ProfBegin("Combat:REGEN_DISABLED")
         -- Ignore post-match cleanup combat after a PvP match ends
         if _G._EUIDM_PvpBlocked and _G._EUIDM_PvpBlocked() then ns.ProfEnd("Combat:REGEN_DISABLED", t0); return end
+        _combatGen = _combatGen + 1
         _inCombat = true
         _combatEndTime = 0
+        _curViewFrozenDur = 0
         _regenTimestamp = 0
         _needsFinalRefresh = false
         _ttLastGUID = nil
         if _targetsCache then wipe(_targetsCache) end
-        -- Sync timer with API: if session already has elapsed time, backdate our start
-        local apiDur = C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds
-            and C_DamageMeter.GetSessionDurationSeconds(Enum.DamageMeterSessionType.Current)
-        if apiDur and type(apiDur) == "number" and apiDur > 0 then
-            _combatStartTime = GetTime() - apiDur
-        else
-            _combatStartTime = GetTime()
-        end
         StartSharedTicker()
         ns.ProfEnd("Combat:REGEN_DISABLED", t0)
     else
@@ -4251,15 +4347,14 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
             _needsFinalRefresh = true  -- let tick poll until group leaves combat
             -- Don't freeze timer -- group is still in combat
         else
-            -- Freeze timer: entire group out of combat
-            _combatEndTime = GetTime()
+            -- Freeze timer: entire group out of combat. Guard against overwriting
+            -- an earlier freeze (e.g. ENCOUNTER_END already froze at the boss end).
+            if _combatEndTime == 0 then FreezeCombat() end
             _inCombat = false
             _needsFinalRefresh = false
             for _, w in ipairs(_windows) do w.Refresh() end
-            -- One final tick then stop
-            C_Timer.After(DB().refreshRate or TICK_COMBAT, function()
-                StopSharedTicker()
-            end)
+            -- One final tick then stop (guarded so it can't cancel a new segment).
+            ScheduleStopTicker(DB().refreshRate or TICK_COMBAT)
         end
         -- Delayed refresh after player exits combat: API needs a moment to
         -- declassify secret source GUIDs so breakdowns work post-combat
@@ -4295,11 +4390,11 @@ do
             C_Timer.After(1.5, function()
                 if _pvpMatchActive then return end
                 if _combatEndTime > 0 then return end
-                _combatEndTime = GetTime()
+                FreezeCombat()
                 _inCombat = false
                 _needsFinalRefresh = false
                 for _, w in ipairs(_windows) do w.Refresh() end
-                C_Timer.After(0.5, function() StopSharedTicker() end)
+                ScheduleStopTicker(0.5)
                 -- Block new segments from post-match cleanup damage
                 _pvpBlockUntil = GetTime() + 20
             end)
@@ -4321,7 +4416,7 @@ if not _G["EllesmereUIDMResetBindBtn"] then
     btn:SetScript("OnClick", function()
         if C_DamageMeter and C_DamageMeter.ResetAllCombatSessions then
             C_DamageMeter.ResetAllCombatSessions()
-            _combatStartTime = 0; _combatEndTime = 0
+            _combatEndTime = 0; _curViewFrozenDur = 0
             for _, w in ipairs(_windows) do w.Refresh() end
         end
     end)

@@ -804,10 +804,9 @@ end
                 -- Apply EUI font
                 local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras"))
                     or "Fonts\\FRIZQT__.TTF"
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(timerText, true) end
                 timerText:SetFont(fontPath, 9, "")
                 timerText:SetTextColor(1, 0.831, 0, 1) -- #ffd400
-                timerText:SetShadowOffset(1, -1)
-                timerText:SetShadowColor(0, 0, 0, 0.8)
                 GetFFD(timerBar).style = true
             else
                 -- Blizzard style (matches BigWigs look)

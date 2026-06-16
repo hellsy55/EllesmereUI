@@ -25,20 +25,16 @@ end
 
 local function GetFontPath()
     if EllesmereUI and EllesmereUI.GetFontPath then
-        return EllesmereUI.GetFontPath("extras")
+        return EllesmereUI.GetFontPath("auraBuff")
     end
     return FONT_FALLBACK
 end
 
 local function SetTRFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
-    local outline = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("extras")) or ""
+    local outline = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("auraBuff")) or ""
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outline == "") end
     fs:SetFont(font, size, outline)
-    if outline == "" then
-        fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 local function InCombat()

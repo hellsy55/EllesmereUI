@@ -75,15 +75,10 @@ local function SkinAuraButton(btn, isDebuff)
     end
     if durFS and durFS.SetFont then
         if cfg.showText then
-            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
-            local outline = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "OUTLINE"
+            local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames") or STANDARD_TEXT_FONT
+            local outline = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("unitFrames") or "OUTLINE, SLUG"
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(durFS, outline == "") end
             durFS:SetFont(fontPath, cfg.textSize or 11, outline)
-            if outline == "" then
-                durFS:SetShadowOffset(1, -1)
-                durFS:SetShadowColor(0, 0, 0, 1)
-            else
-                durFS:SetShadowOffset(0, 0)
-            end
             durFS:SetTextColor(1, 1, 1, 1)
         else
             durFS:SetTextColor(0, 0, 0, 0)
@@ -99,11 +94,10 @@ local function SkinAuraButton(btn, isDebuff)
         end
     end
     if countFS and countFS.SetFont then
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
+        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames") or STANDARD_TEXT_FONT
         -- Stack count always uses a forced OUTLINE, SLUG flag (keeps the digits
         -- crisp regardless of the user's global font-outline setting).
-        countFS:SetFont(fontPath, cfg.textSize or 11, "OUTLINE, SLUG")
-        countFS:SetShadowOffset(0, 0)
+        EllesmereUI.ApplyIconTextFont(countFS, fontPath, cfg.textSize or 11, "unitFrames")
     end
 
     -- Pixel-perfect border using raw texture edges. No BackdropTemplate,

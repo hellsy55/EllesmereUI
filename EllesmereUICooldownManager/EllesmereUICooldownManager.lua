@@ -211,6 +211,7 @@ local StartNativeGlow, StopNativeGlow
 
 -- Keybind cache: built once out-of-combat, looked up per tick
 local _cdmKeybindCache       = {}   -- [spellID] -> formatted key string
+local _cdmKeybindFromMacro   = {}   -- [key] -> true if the cached bind came from a macro
 local _keybindRebuildPending = false
 local _keybindCacheReady     = false  -- true after first successful build
 local _keybindDebounceTimer  = nil   -- cancellable timer for debounced keybind updates
@@ -296,6 +297,27 @@ end
 
 local _myRacials = {}
 local _myRacialsSet = {}
+-- The single racial actually in this character's spellbook. The spell picker
+-- shows one generic "Racial" entry that adds this ID; NormalizeRacialAssignments
+-- rewrites any other race's stored racial to it, so a shared profile's racial
+-- slot follows each character's race automatically.
+local _activeRacialSpellID = nil
+
+-- Resolve the in-spellbook racial. Races whose entries are class-variant
+-- spell IDs (Blood Fury, Arcane Torrent, Gift of the Naaru) only have one
+-- in-book; pick it. Re-run at build time as well as OnEnable, because the
+-- spellbook may not be populated yet during early-login OnEnable.
+local function ResolveActiveRacial()
+    _activeRacialSpellID = nil
+    for _, sid in ipairs(_myRacials) do
+        local inBook = C_SpellBook and C_SpellBook.IsSpellInSpellBook
+            and C_SpellBook.IsSpellInSpellBook(sid)
+        if inBook then _activeRacialSpellID = sid; break end
+    end
+    if not _activeRacialSpellID then _activeRacialSpellID = _myRacials[1] end
+    ns._activeRacialSpellID = _activeRacialSpellID
+    return _activeRacialSpellID
+end
 
 
 -- Custom Aura Bar presets (potions with hardcoded durations).
@@ -1572,8 +1594,7 @@ local function GetCDMOutline()
 end
 local function SetBlizzCDMFont(fs, font, size, r, g, b)
     if not (fs and fs.SetFont) then return end
-    fs:SetFont(font, size, "OUTLINE, SLUG")
-    fs:SetShadowOffset(0, 0)
+    EllesmereUI.ApplyIconTextFont(fs, font, size, "cdm")
     if r then fs:SetTextColor(r, g, b) end
 end
 
@@ -3391,8 +3412,7 @@ local function RefreshCDMIconAppearance(barKey)
                 -- Find Blizzard's countdown text FontString on the Cooldown widget
                 for _, rgn in pairs({ cd:GetRegions() }) do
                     if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
-                        rgn:SetFont(cdFont, cdSize, "OUTLINE, SLUG")
-                        rgn:SetShadowOffset(0, 0)
+                        EllesmereUI.ApplyIconTextFont(rgn, cdFont, cdSize, "cdm")
                         rgn:SetTextColor(cdR, cdG, cdB)
                         if cdX ~= 0 or cdY ~= 0 then
                             rgn:ClearAllPoints()
@@ -3458,8 +3478,7 @@ local function RefreshCDMIconAppearance(barKey)
 
         -- Update keybind text style
         if kbText then
-            kbText:SetFont(GetCDMFont(), (barData.keybindSize or 10) * fontScale, "OUTLINE, SLUG")
-            kbText:SetShadowOffset(0, 0)
+            EllesmereUI.ApplyIconTextFont(kbText, GetCDMFont(), (barData.keybindSize or 10) * fontScale, "cdm")
             kbText:ClearAllPoints()
             -- Scale-compensate the offset so it's visually consistent
             -- across icons with different Blizzard-assigned scales.
@@ -3998,12 +4017,12 @@ local function FRSetFontSafe(fs, path, size, flags)
 end
 local function FRApplyFontShadow(fs)
     if not fs then return end
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm") then
-        fs:SetShadowColor(0, 0, 0, 0.8)
-        fs:SetShadowOffset(1, -1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
+    local useShadow = (EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm")) and true or false
+    -- Font is set by FRSetFontSafe before this call; capture and restore it so
+    -- priming the shadow FontObject does not change the typeface.
+    local _pf, _ps, _pfl = fs:GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, useShadow) end
+    if _pf then fs:SetFont(_pf, _ps, _pfl) end
 end
 
 local function GetFocusKickBarData()
@@ -4565,8 +4584,26 @@ local function FormatKeybindKey(key)
     return key ~= "" and key or nil
 end
 
+-- Store a keybind under a cache key with macro-deprioritization: a direct
+-- (non-macro) bind always wins. If nothing is cached yet we store it; if a
+-- macro bind was stored earlier and this one is a direct spell bind, it
+-- overrides the macro. Macro binds never overwrite an existing entry. This
+-- lets a user who has both a macro and the real spell bound see the real
+-- spell's key.
+local function _SetKeybind(cacheKey, formatted, fromMacro)
+    if not formatted then return end
+    if _cdmKeybindCache[cacheKey] == nil then
+        _cdmKeybindCache[cacheKey] = formatted
+        _cdmKeybindFromMacro[cacheKey] = fromMacro or nil
+    elseif _cdmKeybindFromMacro[cacheKey] and not fromMacro then
+        _cdmKeybindCache[cacheKey] = formatted
+        _cdmKeybindFromMacro[cacheKey] = nil
+    end
+end
+
 local function RebuildKeybindCache()
     wipe(_cdmKeybindCache)
+    wipe(_cdmKeybindFromMacro)
     for _, def in ipairs(_barBindingDefs) do
         for i = 1, 12 do
             local bindName = def.prefix .. i
@@ -4579,36 +4616,27 @@ local function RebuildKeybindCache()
                 end
                 local slotType, id = GetActionInfo(slot)
                 local spellID
+                local fromMacro = false
                 if slotType == "spell" then
                     spellID = id
                 elseif slotType == "macro" and id then
                     local macroSpell = GetMacroSpell(id)
                     spellID = macroSpell or (id > 0 and id) or nil
+                    fromMacro = true
                 elseif slotType == "item" and id then
                     -- Store under negated itemID (-id) to match the FC
                     -- convention for item presets/trinkets.
-                    local formatted = FormatKeybindKey(key)
-                    if formatted and not _cdmKeybindCache[-id] then
-                        _cdmKeybindCache[-id] = formatted
-                    end
+                    _SetKeybind(-id, FormatKeybindKey(key), false)
                 end
                 if spellID then
                     local formatted = FormatKeybindKey(key)
-                    if not _cdmKeybindCache[spellID] then
-                        _cdmKeybindCache[spellID] = formatted
-                    end
+                    _SetKeybind(spellID, formatted, fromMacro)
                     local name = C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
-                    if name and not _cdmKeybindCache[name] then
-                        _cdmKeybindCache[name] = formatted
-                    end
+                    if name then _SetKeybind(name, formatted, fromMacro) end
                     local ovr = C_Spell.GetOverrideSpell and C_Spell.GetOverrideSpell(spellID)
-                    if ovr and ovr ~= spellID and not _cdmKeybindCache[ovr] then
-                        _cdmKeybindCache[ovr] = formatted
-                    end
+                    if ovr and ovr ~= spellID then _SetKeybind(ovr, formatted, fromMacro) end
                     local base = C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(spellID)
-                    if base and base ~= spellID and not _cdmKeybindCache[base] then
-                        _cdmKeybindCache[base] = formatted
-                    end
+                    if base and base ~= spellID then _SetKeybind(base, formatted, fromMacro) end
                 end
             end
         end
@@ -4857,6 +4885,72 @@ ns.HideBlizzardCDM = HideBlizzardCDM
 -------------------------------------------------------------------------------
 local _rebuildGen = 0
 
+-- Rewrite stored racial spell IDs on CD/utility bars to this character's
+-- active racial. A shared profile keeps whichever race's racial each character
+-- added; this collapses them to a single "Racial" slot that follows each
+-- character's race without re-adding it. Operates on the active spec's
+-- assigned lists (other specs normalize when they next become active and
+-- rebuild). No-op on buff bars and when no active racial resolves.
+--
+-- Family-global: across ALL non-buff bars the racial ends up on at most ONE
+-- bar. If the active racial is already placed (the current character's own
+-- pick), it is kept where it sits and every other racial -- foreign racials
+-- left behind by other characters AND stray duplicates -- is stripped. If no
+-- active racial is present, the first foreign racial is promoted in place so
+-- the slot still appears for this character.
+function ns.NormalizeRacialAssignments()
+    -- Re-resolve now: at build time the spellbook is reliably populated, so
+    -- the variant pick (Blood Fury / Arcane Torrent / Gift of the Naaru) is
+    -- correct even if OnEnable ran before the spellbook loaded.
+    local active = ResolveActiveRacial()
+    if not active or active <= 0 then return end
+    local p = ECME.db and ECME.db.profile
+    if not (p and p.cdmBars and p.cdmBars.bars) then return end
+
+    -- Gather the non-buff bars' assigned lists once (in bar order).
+    local lists = {}
+    for _, b in ipairs(p.cdmBars.bars) do
+        local isBuff = (b.barType == "custom_buff")
+            or (ns.IsBarBuffFamily and ns.IsBarBuffFamily(b))
+        if not isBuff then
+            local sd = ns.GetBarSpellData(b.key)
+            if sd and sd.assignedSpells then lists[#lists + 1] = sd.assignedSpells end
+        end
+    end
+
+    -- Is the active racial already placed on a bar (this character's pick)?
+    local activePresent = false
+    for _, list in ipairs(lists) do
+        for _, sid in ipairs(list) do
+            if sid == active then activePresent = true; break end
+        end
+        if activePresent then break end
+    end
+
+    -- Single pass across every bar: keep exactly one racial slot total.
+    local kept = false
+    for _, list in ipairs(lists) do
+        for i = #list, 1, -1 do
+            local sid = list[i]
+            if sid and sid > 0 and ALL_RACIAL_SPELLS[sid] then
+                if sid == active and activePresent and not kept then
+                    -- Keep the current character's own racial where it sits.
+                    kept = true
+                elseif not activePresent and not kept then
+                    -- No active racial anywhere: promote this foreign one.
+                    list[i] = active
+                    kept = true
+                    ns._spellOrderDirty = true
+                else
+                    -- Any further racial (foreign or duplicate) is removed.
+                    table.remove(list, i)
+                    ns._spellOrderDirty = true
+                end
+            end
+        end
+    end
+end
+
 function ns.FullCDMRebuild(reason)
     _rebuildGen = _rebuildGen + 1
     ns._spellOrderDirty = true  -- force spell order cache rebuild
@@ -4883,6 +4977,10 @@ function ns.FullCDMRebuild(reason)
     -- routes everything in the viewer category to the default bar by
     -- spillover, so empty assignedSpells just means "show whatever
     -- Blizzard's viewer has" -- exactly the desired behavior.)
+
+    -- 2b. Normalize racial slots to this character's race BEFORE the route
+    -- map and bar build read assignedSpells.
+    if ns.NormalizeRacialAssignments then ns.NormalizeRacialAssignments() end
 
     -- 3. Rebuild route maps (must happen before BuildAllCDMBars)
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
@@ -5410,6 +5508,10 @@ function ECME:OnEnable()
             end
         end
     end
+
+    -- Resolve the in-spellbook racial (the generic "Racial" picker slot maps
+    -- to this ID). Re-resolved at build time too (spellbook may be empty here).
+    ResolveActiveRacial()
 
 
     -- Enable CDM cooldown viewer (keep Blizzard CDM running in background

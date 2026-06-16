@@ -126,9 +126,8 @@ initFrame:SetScript("OnEvent", function(self)
     local function SetPVFont(fs, font, size)
         if not (fs and fs.SetFont) then return end
         local f = GetRBOptOutline()
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, f == "") end
         fs:SetFont(font, size, f)
-        if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-        else fs:SetShadowOffset(0, 0) end
     end
     local CONTENT_PAD = 45
     local SIDE_PAD = 20
@@ -1930,6 +1929,25 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row 5: Shift Elements if No Power | (blank)
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Shift Elements if No Power",
+              tooltip = "Shifts any elements anchored to the power bar up or down to offset the missing power bar. Applies both when the Power Bar is disabled and for specs that have no power (for example, Beast Mastery and Marksmanship Hunters, whose Focus shows as the class resource bar).",
+              -- Intentionally NOT disabled when the Power Bar is off: this setting
+              -- is meant to fire precisely when the bar is disabled, so it must
+              -- stay configurable in that state.
+              values = { None = "None", Up = "Up", Down = "Down" },
+              order = { "None", "Up", "Down" },
+              getValue = function() local p = DB(); return (p and p.primary.shiftElementsIfNoPower) or "None" end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.primary.shiftElementsIfNoPower = v
+                  RebuildPower()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "label", text = "" }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
         -----------------------------------------------------------------------
@@ -3605,7 +3623,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
-              min = 50, max = 350, step = 1,
+              min = 50, max = 500, step = 1,
               disabled = pwDis, disabledTooltip = pwTip, rawTooltip = pwRaw,
               getValue = function() local p = DB(); return p and p.primary.width or 220 end,
               setValue = function(v)
@@ -4337,7 +4355,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
-              min = 50, max = 350, step = 1,
+              min = 50, max = 500, step = 1,
               disabled = hwDis, disabledTooltip = hwTip, rawTooltip = hwRaw,
               getValue = function() local p = DB(); return p and p.health.width or 220 end,
               setValue = function(v)

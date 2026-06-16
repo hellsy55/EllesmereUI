@@ -862,8 +862,8 @@ do
 
         local function MakeFont(parent, size, r, g, b, a)
             local fs = parent:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, true) end
             fs:SetFont(fontPath, size, "")
-            fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
             fs:SetTextColor(r or 1, g or 1, b or 1, a or 1)
             return fs
         end
@@ -933,7 +933,8 @@ do
             local bgT = btn:CreateTexture(nil, "BACKGROUND")
             bgT:SetAllPoints(); bgT:SetColorTexture(r, g, b, a)
             local lbl = btn:CreateFontString(nil, "OVERLAY")
-            lbl:SetFont(fontPath, 10, ""); lbl:SetShadowOffset(0, 0)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, false) end
+            lbl:SetFont(fontPath, 10, "")
             lbl:SetTextColor(1, 1, 1, 1); lbl:SetPoint("CENTER"); lbl:SetText(label)
             btn:SetScript("OnEnter", function() bgT:SetColorTexture(hr, hg, hb, 1) end)
             btn:SetScript("OnLeave", function() bgT:SetColorTexture(r, g, b, a) end)
@@ -1070,8 +1071,8 @@ do
 
         local function MakeFont(parent, size, r, g, b, a)
             local fs = parent:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, true) end
             fs:SetFont(fontPath, size, "")
-            fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
             fs:SetTextColor(r or 1, g or 1, b or 1, a or 1)
             return fs
         end
@@ -1175,8 +1176,8 @@ do
             sBrd = EllesmereUI.MakeBorder(syncBtn, accentColor.r, accentColor.g, accentColor.b, 0.7, PP)
         end
         local sLbl = syncBtn:CreateFontString(nil, "OVERLAY")
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(sLbl, false) end
         sLbl:SetFont(fontPath, 11, "")
-        sLbl:SetShadowOffset(0, 0)
         sLbl:SetPoint("CENTER")
 
         -- Grayed out until the toggles actually differ from the saved group
@@ -2889,8 +2890,12 @@ EllesmereUI.FONT_ORDER = {
 }
 -- Display name overrides for the font dropdown (key = FONT_ORDER name)
 EllesmereUI.FONT_DISPLAY_NAMES = {
-    ["Avant Garde"] = "Avant Garde (Naowh)",
 }
+
+-- Sentinel font key meaning "use the locale system font" -- offered in the font
+-- picker for glyph-restricted locales (CJK, Cyrillic) where bundled Latin fonts
+-- cannot render the script. Resolves to LOCALE_FONT_FALLBACK in ResolveFontName.
+EllesmereUI.SYSTEM_FONT_KEY = "__system"
 
 -- Register our bundled fonts with LibSharedMedia so other addons can use them
 -- and so SM's HashTable("font") includes them for our own dropdown lookups.
@@ -2938,8 +2943,30 @@ end
 -- Resolve a font name to a full file path for a given addon
 -- addonDir: the addon's Interface\AddOns\<name> path (used to build EllesmereUI/media/fonts/ path)
 local function ResolveFontName(fontName)
-    -- For locales that need system fonts (CJK, Cyrillic), skip custom fonts
-    if LOCALE_FONT_FALLBACK then return LOCALE_FONT_FALLBACK end
+    -- Glyph-restricted locales (CJK, Cyrillic): our bundled fonts are Latin-only,
+    -- so they -- and the default / System Default sentinel -- map to the system
+    -- glyph font. Only an external SharedMedia font the user installed may
+    -- override (it can carry the right glyphs; if it renders boxes the user can
+    -- switch back to System Default). Bundled names are excluded first because
+    -- they are also registered with LSM and would otherwise resolve to Latin.
+    if LOCALE_FONT_FALLBACK then
+        if fontName
+           and not EllesmereUI.FONT_FILES[fontName]
+           and not EllesmereUI.FONT_BLIZZARD[fontName] then
+            local smPath = EllesmereUI._smFontPaths and EllesmereUI._smFontPaths[fontName]
+            if smPath then return smPath end
+            local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+            if LSM and LSM:IsValid("font", fontName) then
+                local fetched = LSM:Fetch("font", fontName)
+                if fetched then
+                    if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
+                    EllesmereUI._smFontPaths[fontName] = fetched
+                    return fetched
+                end
+            end
+        end
+        return LOCALE_FONT_FALLBACK
+    end
     local bliz = EllesmereUI.FONT_BLIZZARD[fontName]
     if bliz then return bliz end
     local file = EllesmereUI.FONT_FILES[fontName]
@@ -2983,6 +3010,8 @@ EllesmereUI._addonKeyToFolder = {
     mythicTimer  = "EllesmereUIMythicTimer",
     blizzardSkin = "EllesmereUIBlizzardSkin",
     damageMeters = "EllesmereUIDamageMeters",
+    raidFrames   = "EllesmereUIRaidFrames",
+    bags         = "EllesmereUIBags",
 }
 EllesmereUI._moduleFontCache = {}
 EllesmereUI._moduleFontCacheVer = 0
@@ -3042,7 +3071,7 @@ end
 
 -- Get the WoW font flag string for the outline mode.
 -- Pass an addonKey to get per-module override; nil returns the global setting.
--- Returns: "OUTLINE", "THICKOUTLINE", or "" (none/shadow)
+-- Returns: "OUTLINE, SLUG", "THICKOUTLINE, SLUG", or "" (none/shadow)
 function EllesmereUI.GetFontOutlineFlag(addonKey)
     local db = EllesmereUI.GetFontsDB()
     local override = EllesmereUI.GetModuleFontEntry(addonKey)
@@ -3053,7 +3082,7 @@ function EllesmereUI.GetFontOutlineFlag(addonKey)
         mode = db.outlineMode or "none"
     end
     if mode == "outline" then return "OUTLINE, SLUG"
-    elseif mode == "thick" then return "THICKOUTLINE"
+    elseif mode == "thick" then return "THICKOUTLINE, SLUG"
     else return "" end
 end
 
@@ -3071,9 +3100,104 @@ function EllesmereUI.GetFontUseShadow(addonKey)
     return mode == "none" or mode == "shadow"
 end
 
+-- 12.0.7 PTR: runtime FontString:SetShadowOffset/SetShadowColor no longer renders a
+-- drop shadow; shadows only render when carried by a FontObject. Prime each string
+-- with a shared shadow (or no-shadow) FontObject via SetFontObject, then call SetFont
+-- for the typeface -- the inherited shadow survives SetFont and the instance text
+-- color is preserved. Mirrors how Blizzard's own shadowed font objects still render.
+do
+    local shadowObj = CreateFont("EllesmereUIShadowFont")
+    shadowObj:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    shadowObj:SetShadowColor(0, 0, 0, 1)
+    shadowObj:SetShadowOffset(1, -1)
+    local noShadowObj = CreateFont("EllesmereUINoShadowFont")
+    noShadowObj:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    noShadowObj:SetShadowColor(0, 0, 0, 0)
+    noShadowObj:SetShadowOffset(0, 0)
+    -- Prime a FontString so its drop shadow renders under 12.0.7. Call BEFORE SetFont.
+    function EllesmereUI.PrimeFontShadow(fs, useShadow)
+        if not (fs and fs.SetFontObject) then return end
+        fs:SetFontObject(useShadow and shadowObj or noShadowObj)
+    end
+end
+
+-- "Apply to All Game Text": swaps Blizzard's default game fonts to the user's
+-- global font face. This follows the proven, taint-safe approach: run once at
+-- PLAYER_LOGIN (out of combat), set the global STANDARD_TEXT_FONT string, and
+-- call SetFont on Blizzard's named font OBJECTS. Font objects are not secure
+-- frames and we never write keys onto Blizzard frame tables, so this cannot
+-- taint secure execution. Each object keeps its native size and outline flags
+-- (only the typeface changes), and the swap inherits to every FontString that
+-- draws from these objects. Toggling the option requires a reload, so there is
+-- no "undo" path: when disabled this is skipped and the fresh UI keeps the
+-- Blizzard defaults.
+function EllesmereUI.ApplyGlobalFontToGameText()
+    local db = EllesmereUI.GetFontsDB()
+    if not db.applyToAllGameText then return end
+    local path = ResolveFontName(db.global or "Expressway")
+    if not path then return end
+
+    -- Universal fallback consumed by newly-created Blizzard/addon text.
+    _G.STANDARD_TEXT_FONT = path
+
+    -- Enumerate every registered font object via the game's own font list,
+    -- rather than maintaining a hardcoded list that goes stale across patches.
+    -- This covers all Blizzard (and other addon) font objects in one pass.
+    local fonts = (GetFonts and GetFonts()) or {}
+    for i = 1, #fonts do
+        local obj = _G[fonts[i]]
+        -- Swap the face on each object, preserving its native size and outline
+        -- flags so only the typeface changes. Guard each: GetFonts may list
+        -- entries that are not usable font objects.
+        if obj and type(obj) == "table" and obj.GetFont and obj.SetFont then
+            local _, size, flags = obj:GetFont()
+            if size and size > 0 then obj:SetFont(path, size, flags) end
+        end
+    end
+end
+
+-- Returns the outline flag for icon-overlay text (stack counts, durations,
+-- keybinds) on action buttons, unit/raid auras, CDM icons and bags. When the
+-- module's box in the "Outline Icon Text" control is checked (the default) the
+-- text is forced to a crisp "OUTLINE, SLUG"; when unchecked it follows the
+-- user's global/per-module outline choice (each of the five modules has its
+-- own per-module font key registered in _addonKeyToFolder).
+function EllesmereUI.GetIconTextOutlineFlag(moduleKey)
+    local t = EllesmereUIDB and EllesmereUIDB.outlineIconText
+    if t and t[moduleKey] == false then
+        return (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag(moduleKey)) or ""
+    end
+    return "OUTLINE, SLUG"
+end
+
+-- Applies the icon-text outline flag AND the matching shadow in one call.
+-- Forced/checked -> "OUTLINE, SLUG" with no shadow. Unchecked -> the user's
+-- outline choice; when that resolves to no outline ("" = Drop Shadow / None
+-- mode) a drop shadow is applied so the text stays legible instead of flat.
+function EllesmereUI.ApplyIconTextFont(fs, fontPath, size, moduleKey)
+    if not (fs and fs.SetFont) then return end
+    local flag = EllesmereUI.GetIconTextOutlineFlag(moduleKey)
+    -- Prime the shadow FontObject before SetFont (12.0.7 shadow rendering).
+    EllesmereUI.PrimeFontShadow(fs, flag == "")
+    fs:SetFont(fontPath, size, flag)
+end
+
 -- Build font dropdown values/order with "EUI Global Font" at the top.
 -- Returns values, order tables suitable for W:DualRow dropdown config.
 function EllesmereUI.BuildFontDropdownData()
+    -- Glyph-restricted locales (CJK, Cyrillic): bundled Latin fonts cannot render
+    -- the script (and resolve to the system font anyway via ResolveFontName), so
+    -- per-module pickers offer only "EUI Global Font", "System Default", and
+    -- external SharedMedia -- matching the global font picker.
+    if EllesmereUI.LOCALE_FONT_FALLBACK then
+        local values = { ["__global"] = { text = "EUI Global Font" },
+                         [EllesmereUI.SYSTEM_FONT_KEY] = { text = "System Default", font = EllesmereUI.LOCALE_FONT_FALLBACK } }
+        local order  = { "__global", EllesmereUI.SYSTEM_FONT_KEY }
+        if EllesmereUI.AppendExternalSharedMediaFonts then
+            EllesmereUI.AppendExternalSharedMediaFonts(values, order)
+        end
+        return values, order
+    end
     local values = { ["__global"] = { text = "EUI Global Font" } }
     local order  = { "__global", "---" }
     local FONT_DIR = EllesmereUI.MEDIA_PATH .. "fonts\\"
@@ -4102,6 +4226,35 @@ function EllesmereUI.AppendSharedMediaFonts(values, order, opts)
         local key = keyByName and name or ("smf:" .. name)
         values[key] = { text = name, font = smFonts[name] }
         order[#order + 1] = key
+    end
+end
+
+-- Append only EXTERNAL SharedMedia fonts (those NOT bundled with EllesmereUI) to
+-- a dropdown values/order pair. Used for glyph-restricted locales (CJK, Cyrillic)
+-- where our bundled Latin fonts cannot render the script -- only user-installed
+-- SM fonts (which may carry the right glyphs) are offered, alongside System
+-- Default. Bundled names are skipped: they are registered with LSM too but would
+-- just show boxes for these locales.
+function EllesmereUI.AppendExternalSharedMediaFonts(values, order)
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if not LSM then return end
+    local smFonts = LSM:HashTable("font")
+    if not smFonts then return end
+    if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
+    local sorted = {}
+    for name, path in pairs(smFonts) do
+        EllesmereUI._smFontPaths[name] = path
+        if not EllesmereUI.FONT_FILES[name] and not EllesmereUI.FONT_BLIZZARD[name]
+           and not values[name] then
+            sorted[#sorted + 1] = name
+        end
+    end
+    if #sorted == 0 then return end
+    table.sort(sorted)
+    order[#order + 1] = "---"
+    for _, name in ipairs(sorted) do
+        values[name] = { text = name, font = smFonts[name] }
+        order[#order + 1] = name
     end
 end
 
@@ -6547,6 +6700,14 @@ local function CreateMainFrame()
     end
     EllesmereUI.SmoothScrollTo = SmoothScrollTo
 
+    -- Current content scroll offset. Returns the in-flight target while a
+    -- smooth animation is running, otherwise the settled position. Lets callers
+    -- capture the scroll position before a page rebuild and restore it after.
+    function EllesmereUI.GetContentScroll()
+        if isSmoothing then return scrollTarget or 0 end
+        return (scrollFrame and tonumber(scrollFrame:GetVerticalScroll())) or 0
+    end
+
     -- Instant scroll (for drag, page switch, etc.) -- also cancels any active animation
     local function InstantScrollTo(val)
         isSmoothing = false
@@ -7387,6 +7548,26 @@ local function CollectAllChildren(wrapper)
 end
 
 function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName, preSelectFn, highlightText)
+    -- For split rows (DualRow etc.), narrow a deep-link highlight to the specific
+    -- half/slot whose own label matches, instead of pulsing the whole row. Returns
+    -- the matching child region, or nil to fall back to the full row. Defined inline
+    -- (not a file-scope local) because EllesmereUI.lua's main chunk is at the Lua 5.1
+    -- 200-local cap -- a new top-level local would overflow it.
+    local function ResolveHighlightSlot(row, text)
+        if not text or not row.GetChildren then return nil end
+        local locText = EllesmereUI.L and EllesmereUI.L(text) or text
+        for _, region in ipairs({ row:GetChildren() }) do
+            local lbl = region._label
+            if lbl and lbl.GetText then
+                local t = lbl:GetText()
+                if t and t ~= "" and (t:find(text, 1, true) or (locText ~= text and t:find(locText, 1, true))) then
+                    return region
+                end
+            end
+        end
+        return nil
+    end
+
     self:Show()
     self:SelectModule(moduleName)
     self:SelectPage(pageName)
@@ -7412,13 +7593,16 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
         local sections = CollectAllChildren(cached.wrapper)
         for _, sec in ipairs(sections) do
             if sec.header._sectionName == sectionName then
-                -- Find the specific row to highlight and scroll to
+                -- Find the row to scroll to; narrow the highlight to the matching
+                -- slot (DualRow half) when possible, otherwise pulse the whole row.
                 local target = sec.header
+                local hlTarget = sec.header
                 if highlightText then
                     for _, m in ipairs(sec.members) do
                         if (m._labelText and m._labelText:find(highlightText, 1, true))
                            or (m._labelTextLoc and m._labelTextLoc:find(highlightText, 1, true)) then
                             target = m
+                            hlTarget = ResolveHighlightSlot(m, highlightText) or m
                             break
                         end
                     end
@@ -7430,7 +7614,7 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
                     EllesmereUI.SmoothScrollTo(scrollPos)
                     C_Timer.After(0.15, function()
                         local hl = GetSearchHighlight()
-                        PlaySearchHighlight(hl, target)
+                        PlaySearchHighlight(hl, hlTarget)
                     end)
                 end
                 return
@@ -8623,7 +8807,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.1.6"
+EllesmereUI.VERSION = "8.1.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -8696,9 +8880,8 @@ do
                 if self._warn then return end
                 if not HasAnchoredActionBars() then return end
                 local warn = UIParent:CreateFontString(nil, "OVERLAY")
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(warn, true) end
                 warn:SetFont("Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF", 24, "")
-                warn:SetShadowOffset(1, -1)
-                warn:SetShadowColor(0, 0, 0, 0.8)
                 warn:SetTextColor(0.878, 0.247, 0.247, 1)
                 warn:SetPoint("CENTER", UIParent, "CENTER", 0, 50)
                 warn:SetJustifyH("CENTER")
@@ -9323,6 +9506,10 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     -- PLAYER_LOGIN: register demo modules (UI is built lazily on first open)
     self:UnregisterEvent("PLAYER_LOGIN")
+
+    -- Apply the global font to Blizzard's default game text (opt-in, reload-gated).
+    -- Done here at login, out of combat, so it runs once before the UI renders.
+    EllesmereUI.ApplyGlobalFontToGameText()
 
     ---------------------------------------------------------------------------
     --  Escape proxy: single UISpecialFrames entry for all EUI frames.

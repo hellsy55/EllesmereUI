@@ -113,12 +113,12 @@ local function ApplyShape()
 
     -- Duration text (centered) and count text (bottom-right) -- positioned for
     -- every shape since the early-return below would otherwise skip them.
-    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or STANDARD_TEXT_FONT, p.durationSize or 12, "OUTLINE")
+    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, p.durationSize or 12, "OUTLINE, SLUG")
     durationFS:ClearAllPoints()
     durationFS:SetPoint("CENTER", frame, "CENTER",
         p.durationOffsetX or 0, p.durationOffsetY or 0)
 
-    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or STANDARD_TEXT_FONT, p.countSize or 11, "OUTLINE")
+    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, p.countSize or 11, "OUTLINE, SLUG")
     countFS:ClearAllPoints()
     countFS:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
         -2 + (p.countOffsetX or 0), 2 + (p.countOffsetY or 0))
@@ -387,11 +387,11 @@ local function CreateBrezFrame()
     cooldownFrame:SetFrameLevel(frame:GetFrameLevel() + 1)
 
     durationFS = cooldownFrame:CreateFontString(nil, "OVERLAY")
-    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or STANDARD_TEXT_FONT, 14, "OUTLINE")
+    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 14, "OUTLINE, SLUG")
     durationFS:SetText("")
 
     countFS = cooldownFrame:CreateFontString(nil, "OVERLAY")
-    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or STANDARD_TEXT_FONT, 12, "OUTLINE")
+    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 12, "OUTLINE, SLUG")
     countFS:SetText("")
 
     return frame

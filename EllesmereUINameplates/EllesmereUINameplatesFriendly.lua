@@ -171,11 +171,8 @@ local function ApplyFontToNameText(nameText)
     if not nameText or not nameText.SetFont then return end
     local font = GetFont()
     local _, h = nameText:GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameText, GetNPUseShadow()) end
     nameText:SetFont(font, h or 9, GetNPOutline())
-    if GetNPUseShadow() then
-        nameText:SetShadowOffset(1, -1)
-        nameText:SetShadowColor(0, 0, 0, 1)
-    end
     if nameText.SetSnapToPixelGrid then
         nameText:SetSnapToPixelGrid(false)
     end
@@ -245,8 +242,7 @@ local function AcquireOverlay()
     overlay.name = overlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(overlay.name, 9, "")
     overlay.name:SetPoint("CENTER", overlay, "CENTER", 0, 0)
-    overlay.name:SetShadowOffset(1, -1)
-    overlay.name:SetShadowColor(0, 0, 0, 1)
+    -- 12.0.7: shadow is primed by SetFSFont above (FontObject-based); instance shadow removed.
     if overlay.name.SetSnapToPixelGrid then
         overlay.name:SetSnapToPixelGrid(false)
     end
@@ -257,8 +253,7 @@ local function AcquireOverlay()
     overlay.title = overlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(overlay.title, 9, "")
     overlay.title:SetPoint("TOP", overlay.name, "BOTTOM", 0, -1)
-    overlay.title:SetShadowOffset(1, -1)
-    overlay.title:SetShadowColor(0, 0, 0, 1)
+    -- 12.0.7: shadow is primed by SetFSFont above (FontObject-based); instance shadow removed.
     if overlay.title.SetSnapToPixelGrid then
         overlay.title:SetSnapToPixelGrid(false)
     end
@@ -290,11 +285,8 @@ local function ShowNPCOverlay(nameplate, unit)
     overlay.name:SetMaxLines(1)
     -- Apply our font
     local font = GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(overlay.name, GetNPUseShadow()) end
     overlay.name:SetFont(font, NPC_OVERLAY_FONT_SIZE, GetNPOutline())
-    if GetNPUseShadow() then
-        overlay.name:SetShadowOffset(1, -1)
-        overlay.name:SetShadowColor(0, 0, 0, 1)
-    end
     if overlay.name.SetSnapToPixelGrid then
         overlay.name:SetSnapToPixelGrid(false)
     end
@@ -309,11 +301,8 @@ local function ShowNPCOverlay(nameplate, unit)
         local titleText = GetNPCTitle(unit)
         if titleText then
             local font = GetFont()
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(overlay.title, GetNPUseShadow()) end
             overlay.title:SetFont(font, NPC_TITLE_FONT_SIZE, GetNPOutline())
-            if GetNPUseShadow() then
-                overlay.title:SetShadowOffset(1, -1)
-                overlay.title:SetShadowColor(0, 0, 0, 1)
-            end
             overlay.title:SetText("<" .. titleText .. ">")
             overlay.title:SetTextColor(r, g, b, 0.7)
             overlay.title:Show()
@@ -641,7 +630,7 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.glowFrame:Hide()
 
     plate.hpText = plate.health:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.hpText, 10, "OUTLINE")
+    SetFSFont(plate.hpText, 10, "OUTLINE, SLUG")
     plate.hpText:SetPoint("RIGHT", plate.health, -2, 0)
 
     plate.highlight = plate.health:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -652,7 +641,7 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.highlight:Hide()
 
     plate.name = plate:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.name, 12, "OUTLINE")
+    SetFSFont(plate.name, 12, "OUTLINE, SLUG")
     plate.name:SetPoint("BOTTOM", plate.health, "TOP", 0, 4)
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)

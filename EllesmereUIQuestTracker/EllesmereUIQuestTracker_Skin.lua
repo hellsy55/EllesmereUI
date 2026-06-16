@@ -109,12 +109,13 @@ end
 
 local function ApplyShadow(fs)
     if not fs then return end
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("questTracker") then
-        fs:SetShadowColor(0, 0, 0, 0.8)
-        fs:SetShadowOffset(1, -1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
+    local useShadow = (EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("questTracker")) and true or false
+    -- 12.0.7: instance shadows no longer render; shadow must ride a FontObject.
+    -- These are Blizzard objective-tracker strings, so capture and restore the
+    -- current font face around PrimeFontShadow to preserve Blizzard's typeface.
+    local _pf, _ps, _pfl = fs:GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, useShadow) end
+    if _pf then fs:SetFont(_pf, _ps, _pfl) end
 end
 
 -- Registry of every FontString we've styled. Lets us re-template in bulk

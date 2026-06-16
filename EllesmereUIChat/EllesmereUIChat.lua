@@ -47,6 +47,7 @@ local CHAT_DEFAULTS = {
             tabFontSize = 10,
             sidebarVisibility = "always",
             hideBorders = false,
+            forceOnScreen = false,
             showFriends = true,
             showCopy = true,
             showPortals = true,
@@ -124,8 +125,8 @@ local function GetOutlineFlag()
     if mode == "__global" then
         return (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("chat")) or ""
     end
-    if mode == "outline" then return "OUTLINE" end
-    if mode == "thick" then return "THICKOUTLINE" end
+    if mode == "outline" then return "OUTLINE, SLUG" end
+    if mode == "thick" then return "THICKOUTLINE, SLUG" end
     return ""
 end
 
@@ -411,6 +412,17 @@ local function ApplyChatPosition()
     cf1:ClearAllPoints()
     cf1:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, px or 0, py or 0)
     _cfIgnoreSetPoint = false
+end
+
+-- Force Chat on Screen: when the saved preference is on, keep ChatFrame1 clamped to
+-- the screen; otherwise allow it to be dragged off-screen (the default). Applied at
+-- load and whenever the Chat options toggle changes. Persists via the chat DB.
+function ECHAT.ApplyForceOnScreen()
+    local cf1 = _G.ChatFrame1
+    if not cf1 then return end
+    local cfg = ECHAT.DB()
+    local force = cfg and cfg.forceOnScreen == true or false
+    cf1:SetClampedToScreen(force)
 end
 
 -- Chat frame size: Blizzard is sole authority for chat sizing.
@@ -794,12 +806,11 @@ local function CreatePortalFlyout()
             labelFrame:SetAllPoints()
             labelFrame:SetFrameLevel(cd:GetFrameLevel() + 2)
             local label = labelFrame:CreateFontString(nil, "OVERLAY", nil)
-            label:SetFont(GetFont(), 8, "OUTLINE")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
+            label:SetFont(GetFont(), 8, "OUTLINE, SLUG")
             label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
             label:SetTextColor(1, 1, 1, 0.9)
             label:SetText(short)
-            label:SetShadowOffset(1, -1)
-            label:SetShadowColor(0, 0, 0, 1)
         end
 
         -- Hover highlight (HIGHLIGHT layer auto-shows on mouseover)
@@ -2993,6 +3004,7 @@ initFrame:SetScript("OnEvent", function(self)
         ECHAT.ApplyLockChatSize()
         ECHAT.ApplyBackground()
         ECHAT.ApplyFonts()
+        ECHAT.ApplyForceOnScreen()
         if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
     end
 
@@ -3000,7 +3012,9 @@ initFrame:SetScript("OnEvent", function(self)
     --  9-12. Chat positioning: Blizzard / Edit Mode owns position+size.
     --        No reparenting, no hooks, no unlock registration.
     ---------------------------------------------------------------------------
-    ChatFrame1:SetClampedToScreen(false)
+    -- Clamp state follows the saved "Force Chat on Screen" preference (default off:
+    -- chat may be dragged off-screen). Toggled from the Chat options panel.
+    ECHAT.ApplyForceOnScreen()
 
     -- One-time overlay informing user that chat is now Edit Mode controlled
     do

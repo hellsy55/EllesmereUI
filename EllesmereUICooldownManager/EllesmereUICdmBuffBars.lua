@@ -108,17 +108,13 @@ local function GetOutline()
     if EllesmereUI and EllesmereUI.GetFontOutlineFlag then
         return EllesmereUI.GetFontOutlineFlag("cdm")
     end
-    return "OUTLINE"
+    return "OUTLINE, SLUG"
 end
 local function SetFont(fs, size)
     if not (fs and fs.SetFont) then return end
+    local useShadow = EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, useShadow) end
     fs:SetFont(GetFont(), size, GetOutline())
-    if EllesmereUI and EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("cdm") then
-        fs:SetShadowColor(0, 0, 0, 1)
-        fs:SetShadowOffset(1, -1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 -------------------------------------------------------------------------------

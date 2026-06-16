@@ -27,10 +27,10 @@ initFrame:SetScript("OnEvent", function(self)
     local floor = math.floor
 
     local function GetOutline()
-        return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+        return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
     end
     local function GetUseShadow()
-        return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+        return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames")
     end
 
     ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ initFrame:SetScript("OnEvent", function(self)
         menuFrame:SetPoint("TOPLEFT", sortBtn, "BOTTOMLEFT", 0, -2)
 
         local mY = -2
-        local FONT = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local FONT = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
 
         -- Radio items: Group, Role
         local radioItems = {
@@ -512,9 +512,14 @@ initFrame:SetScript("OnEvent", function(self)
         ["striped"]         = "Striped",
         ["stripedReversed"] = "Striped Reversed",
         ["clean"]           = "Clean (Flat)",
-        ["blizzard"]        = "Blizzard",
+        ["blizzard"]        = "Classic WoW",          -- DB key stays "blizzard"; label only
+        ["blizzardModern"]  = "Default Blizz Frames", -- compound: solid base + tiled stripes (shield only)
+        ["healBlizzModern"] = "Default Blizz Frames", -- heal-absorb only: louis-absorb.png texture
     }
-    local absorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard" }
+    -- Shield absorb dropdown shows every style including Blizzard (Modern).
+    local absorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard", "blizzardModern" }
+    -- Heal absorb shares the values table but EXCLUDES Blizzard (Modern).
+    local healAbsorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard", "healBlizzModern" }
 
     local growthValues = {
         DOWN  = "Down",
@@ -546,7 +551,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- Returns the new y offset after the row.
     local function BuildPreviewModeRow(parent, y)
         local ROW_H = 50
-        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
         local contentPad = EllesmereUI.CONTENT_PAD or 45
 
         y = y - 10
@@ -556,10 +561,8 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - ROW_H
 
         local modeLabel = modeRow:CreateFontString(nil, "OVERLAY")
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(modeLabel, GetOutline() == "" and GetUseShadow()) end
         modeLabel:SetFont(fontPath, 14, GetOutline())
-        if GetOutline() == "" and GetUseShadow() then
-            modeLabel:SetShadowOffset(1, -1); modeLabel:SetShadowColor(0, 0, 0, 1)
-        end
         modeLabel:SetPoint("TOP", modeRow, "TOP", 0, 0)
         modeLabel:SetText(EllesmereUI.L("Preview Mode"))
         modeLabel:SetTextColor(1, 1, 1, 0.6)
@@ -890,6 +893,8 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return SVal("healthBarTexture", "atrocity") end,
               setValue=function(v) SSet("healthBarTexture", v) end },
             { type="slider", text="Fill Opacity", min=10, max=100, step=1,
+              disabled=function() return SVal("healthColorMode", "class") == "dark" end,
+              disabledTooltip="Not available in Dark Mode", rawTooltip=true,
               getValue=function() return SVal("healthBarOpacity", 100) end,
               setValue=function(v) SSet("healthBarOpacity", v) end });  y = y - h
 
@@ -922,9 +927,16 @@ initFrame:SetScript("OnEvent", function(self)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            -- Blocking overlay: dim + non-clickable + tooltip unless Fill Color is Custom.
+            local block = CreateFrame("Frame", nil, swatch)
+            block:SetAllPoints()
+            block:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            block:EnableMouse(true)
+            block:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(swatch, "Only available with Custom fill color") end)
+            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateSwatchVis()
-                local mode = SVal("healthColorMode", "class")
-                swatch:SetAlpha(mode == "custom" and 1 or 0.3)
+                local enabled = SVal("healthColorMode", "class") == "custom"
+                if enabled then swatch:SetAlpha(1); block:Hide() else swatch:SetAlpha(0.3); block:Show() end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateSwatchVis)
             UpdateSwatchVis()
@@ -945,6 +957,19 @@ initFrame:SetScript("OnEvent", function(self)
                 end, false, 20)
             bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgSwatch
+            -- Blocking overlay: dim + non-clickable + tooltip in Dark Mode (no background).
+            local bgBlock = CreateFrame("Frame", nil, bgSwatch)
+            bgBlock:SetAllPoints()
+            bgBlock:SetFrameLevel(bgSwatch:GetFrameLevel() + 10)
+            bgBlock:EnableMouse(true)
+            bgBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSwatch, "Not available in Dark Mode") end)
+            bgBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateBgSwatchVis()
+                local dark = SVal("healthColorMode", "class") == "dark"
+                if dark then bgSwatch:SetAlpha(0.3); bgBlock:Show() else bgSwatch:SetAlpha(1); bgBlock:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateBgSwatchVis)
+            UpdateBgSwatchVis()
         end
 
         ns._editTargets = ns._editTargets or {}
@@ -1077,13 +1102,18 @@ initFrame:SetScript("OnEvent", function(self)
                   SSet("absorbStyle", v)
                   if v == "clean" then
                       SSet("absorbOpacity", 30)
-                  else
+                  elseif v ~= "blizzardModern" then
+                      -- Blizzard (Modern) hardcodes color + opacity in the
+                      -- renderer; leave the user's saved opacity untouched.
                       SSet("absorbOpacity", 90)
                   end
                   EllesmereUI:RefreshPage()
               end },
             { type="slider", text="Absorb Opacity", min=5, max=100, step=1,
-              disabled=function() return SVal("absorbStyle", "none") == "none" end,
+              disabled=function()
+                  local st = SVal("absorbStyle", "none")
+                  return st == "none" or st == "blizzardModern"
+              end,
               disabledTooltip="Absorb Style",
               getValue=function() return SVal("absorbOpacity", 90) end,
               setValue=function(v) SSet("absorbOpacity", v) end });  y = y - h
@@ -1104,8 +1134,20 @@ initFrame:SetScript("OnEvent", function(self)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            -- Blocking overlay: BuildColorSwatch has no built-in disabled state,
+            -- so a mouse-enabled frame over it intercepts clicks whenever the
+            -- color is not user-editable (no absorb, or the hardcoded-color
+            -- "Blizzard (Modern)" style).
+            local swatchBlock = CreateFrame("Frame", nil, swatch)
+            swatchBlock:SetAllPoints()
+            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            swatchBlock:EnableMouse(true)
+            swatchBlock:Hide()
             local function UpdateAbsorbSwatchVis()
-                swatch:SetAlpha(SVal("absorbStyle", "none") == "none" and 0.3 or 1)
+                local st = SVal("absorbStyle", "none")
+                local off = (st == "none" or st == "blizzardModern")
+                swatch:SetAlpha(off and 0.3 or 1)
+                if off then swatchBlock:Show() else swatchBlock:Hide() end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
             UpdateAbsorbSwatchVis()
@@ -1119,6 +1161,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="dropdown", label="Placement",
                       values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
                       order = { "overlay", "right", "left" },
+                      disabled = function() return SVal("absorbStyle", "none") == "blizzardModern" end,
+                      disabledTooltip = "Default Blizz Frames uses a fixed placement",
+                      rawTooltip = true,
                       get=function() return SVal("absorbEdgeMode", "overlay") end,
                       set=function(v) SSet("absorbEdgeMode", v) end },
                 },
@@ -1174,7 +1219,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 3: Heal Absorb Style (+ color swatch) | Heal Absorb Opacity
         local healAbsorbRow
         healAbsorbRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Heal Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+            { type="dropdown", text="Heal Absorb Style", values=absorbStyleValues, order=healAbsorbStyleOrder,
               getValue=function() return SVal("healAbsorbStyle", "clean") end,
               setValue=function(v)
                   SSet("healAbsorbStyle", v)
@@ -1207,8 +1252,18 @@ initFrame:SetScript("OnEvent", function(self)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            -- Blocking overlay: disabled for "none" and the hardcoded-white
+            -- "Default Blizz Frames" (healBlizzModern) heal style.
+            local swatchBlock = CreateFrame("Frame", nil, swatch)
+            swatchBlock:SetAllPoints()
+            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            swatchBlock:EnableMouse(true)
+            swatchBlock:Hide()
             local function UpdateHealAbsorbSwatchVis()
-                swatch:SetAlpha(SVal("healAbsorbStyle", "clean") == "none" and 0.3 or 1)
+                local st = SVal("healAbsorbStyle", "clean")
+                local off = (st == "none" or st == "healBlizzModern")
+                swatch:SetAlpha(off and 0.3 or 1)
+                if off then swatchBlock:Show() else swatchBlock:Hide() end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
             UpdateHealAbsorbSwatchVis()
@@ -1224,6 +1279,9 @@ initFrame:SetScript("OnEvent", function(self)
                       order = { "overlay", "right", "left" },
                       get=function() return SVal("healAbsorbEdgeMode", "overlay") end,
                       set=function(v) SSet("healAbsorbEdgeMode", v) end },
+                    { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+                      get=function() return SVal("healAbsorbBgOpacity", 25) end,
+                      set=function(v) SSet("healAbsorbBgOpacity", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
@@ -2558,12 +2616,8 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.25)
                 end
                 local lbl = btn:CreateFontString(nil, "OVERLAY")
-                lbl:SetFont(EllesmereUI.GetFontPath(), 13, GetOutline())
-                if GetUseShadow() then
-                    lbl:SetShadowOffset(1, -1); lbl:SetShadowColor(0, 0, 0, 0.8)
-                else
-                    lbl:SetShadowOffset(0, 0)
-                end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, GetUseShadow()) end
+                lbl:SetFont(EllesmereUI.GetFontPath("raidFrames"), 13, GetOutline())
                 lbl:SetPoint("CENTER", btn, "CENTER", 0, 0)
                 lbl:SetText("Move Frames")
 
@@ -2749,12 +2803,8 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.MakeBorder(kbBtn, 1, 1, 1, 0.25)
                 end
                 local kbLbl = kbBtn:CreateFontString(nil, "OVERLAY")
-                kbLbl:SetFont(EllesmereUI.GetFontPath(), 13, GetOutline())
-                if GetUseShadow() then
-                    kbLbl:SetShadowOffset(1, -1); kbLbl:SetShadowColor(0, 0, 0, 0.8)
-                else
-                    kbLbl:SetShadowOffset(0, 0)
-                end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(kbLbl, GetUseShadow()) end
+                kbLbl:SetFont(EllesmereUI.GetFontPath("raidFrames"), 13, GetOutline())
                 kbLbl:SetPoint("CENTER")
 
                 local function FormatKey(key)
@@ -2889,12 +2939,8 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.25)
                 end
                 local lbl = btn:CreateFontString(nil, "OVERLAY")
-                lbl:SetFont(EllesmereUI.GetFontPath(), 13, GetOutline())
-                if GetUseShadow() then
-                    lbl:SetShadowOffset(1, -1); lbl:SetShadowColor(0, 0, 0, 0.8)
-                else
-                    lbl:SetShadowOffset(0, 0)
-                end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, GetUseShadow()) end
+                lbl:SetFont(EllesmereUI.GetFontPath("raidFrames"), 13, GetOutline())
                 lbl:SetPoint("CENTER", btn, "CENTER", 0, 0)
                 lbl:SetText("Move Frames")
 
@@ -3067,11 +3113,13 @@ initFrame:SetScript("OnEvent", function(self)
             end  -- close do (eyeball)
 
             row, h = W:DualRow(parent, y,
-                { type="toggle", text="Enable Targeted Spells",
-                  getValue=function() return SVal("tsRaidEnabled", true) end,
-                  setValue=function(v) SSet("tsRaidEnabled", v); TSApply(); EllesmereUI:RefreshPage() end },
+                { type="dropdown", text="Show Targeted Spells",
+                  values={ never="Never", whenHealing="When Healing", always="Always" },
+                  order={ "never", "whenHealing", "always" },
+                  getValue=function() return SVal("tsRaidMode", "never") end,
+                  setValue=function(v) SSet("tsRaidMode", v); TSApply(); EllesmereUI:RefreshPage() end },
                 { type="slider", text="Icon Size", min=12, max=48, step=1,
-                  disabled=function() return not SVal("tsRaidEnabled", true) end,
+                  disabled=function() return SVal("tsRaidMode", "never") == "never" end,
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return SVal("tsRaidIconSize", 24) end,
                   setValue=function(v) SSet("tsRaidIconSize", v); TSApply() end });  y = y - h
@@ -3103,7 +3151,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             row, h = W:DualRow(parent, y,
                 { type="dropdown", text="Icon Position", values=tsPositionValues, order=tsPositionOrder,
-                  disabled=function() return not SVal("tsRaidEnabled", true) end,
+                  disabled=function() return SVal("tsRaidMode", "never") == "never" end,
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return string.lower(SVal("tsRaidPosition", "center")) end,
                   setValue=function(v)
@@ -3113,7 +3161,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI:RefreshPage()
                   end },
                 { type="dropdown", text="Growth Direction", values=tsGrowValues, order=tsGrowOrder,
-                  disabled=function() return not SVal("tsRaidEnabled", true) end,
+                  disabled=function() return SVal("tsRaidMode", "never") == "never" end,
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return SVal("tsRaidGrowDirection", "CENTER") end,
                   setValue=function(v) SSet("tsRaidGrowDirection", v); TSApply() end });  y = y - h
@@ -3136,11 +3184,11 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = cogBtn
                 cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-                cogBtn:SetAlpha(SVal("tsRaidEnabled", true) and 0.4 or 0.15)
+                cogBtn:SetAlpha((SVal("tsRaidMode", "never") ~= "never") and 0.4 or 0.15)
                 local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
                 cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
                 cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(SVal("tsRaidEnabled", true) and 0.4 or 0.15) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha((SVal("tsRaidMode", "never") ~= "never") and 0.4 or 0.15) end)
                 cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
             end
 
@@ -3219,7 +3267,7 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue = function() local c = SGet("statusColorOffline"); if c then return c.r, c.g, c.b end return 0x66/255, 0x66/255, 0x66/255 end,
                   setValue = function(r, g, b) SWrite("statusColorOffline", { r=r, g=g, b=b }); ReloadAndUpdate() end },
                 { tooltip = "Dead", hasAlpha = false,
-                  getValue = function() local c = SGet("statusColorDead"); if c then return c.r, c.g, c.b end return 0x6D/255, 0x31/255, 0x31/255 end,
+                  getValue = function() local c = SGet("statusColorDead"); if c then return c.r, c.g, c.b end return 0x24/255, 0x17/255, 0x17/255 end,
                   setValue = function(r, g, b) SWrite("statusColorDead", { r=r, g=g, b=b }); ReloadAndUpdate() end },
               } });  y = y - h
 
@@ -3874,6 +3922,29 @@ initFrame:SetScript("OnEvent", function(self)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+
+            -- Inline cog: Hide Empty Groups
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Show Groups",
+                rows = {
+                    { type="toggle", label="Hide Empty Groups",
+                      tooltip="Collapse subgroups that have no members so the remaining groups close ranks. For example, if only groups 1, 2, 3 and 6 have players, they show with no gaps instead of leaving empty space where groups 4 and 5 would be. Real raid frames only.",
+                      get=function() return SVal("hideEmptyGroups", true) end,
+                      set=function(v) SSet("hideEmptyGroups", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
 
 
@@ -4282,11 +4353,13 @@ initFrame:SetScript("OnEvent", function(self)
             end  -- close do (eyeball)
 
             row, h = W:DualRow(parent, y,
-                { type="toggle", text="Enable Targeted Spells",
-                  getValue=function() return SVal("tsEnabled", true) end,
-                  setValue=function(v) SSet("tsEnabled", v); TSApply(); EllesmereUI:RefreshPage() end },
+                { type="dropdown", text="Show Targeted Spells",
+                  values={ never="Never", whenHealing="When Healing", always="Always" },
+                  order={ "never", "whenHealing", "always" },
+                  getValue=function() return SVal("tsMode", "whenHealing") end,
+                  setValue=function(v) SSet("tsMode", v); TSApply(); EllesmereUI:RefreshPage() end },
                 { type="slider", text="Icon Size", min=12, max=48, step=1,
-                  disabled=function() return not SVal("tsEnabled", true) end,
+                  disabled=function() return SVal("tsMode", "whenHealing") == "never" end,
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return SVal("tsIconSize", 24) end,
                   setValue=function(v) SSet("tsIconSize", v); TSApply() end });  y = y - h
@@ -4318,7 +4391,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             row, h = W:DualRow(parent, y,
                 { type="dropdown", text="Icon Position", values=tsPositionValues, order=tsPositionOrder,
-                  disabled=function() return not SVal("tsEnabled", true) end,
+                  disabled=function() return SVal("tsMode", "whenHealing") == "never" end,
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return string.lower(SVal("tsPosition", "center")) end,
                   setValue=function(v)
@@ -4328,7 +4401,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI:RefreshPage()
                   end },
                 { type="dropdown", text="Growth Direction", values=tsGrowValues, order=tsGrowOrder,
-                  disabled=function() return not SVal("tsEnabled", true) end,
+                  disabled=function() return SVal("tsMode", "whenHealing") == "never" end,
                   disabledTooltip="Enable Targeted Spells",
                   getValue=function() return SVal("tsGrowDirection", "CENTER") end,
                   setValue=function(v) SSet("tsGrowDirection", v); TSApply() end });  y = y - h
@@ -4351,11 +4424,11 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = cogBtn
                 cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-                cogBtn:SetAlpha(SVal("tsEnabled", true) and 0.4 or 0.15)
+                cogBtn:SetAlpha((SVal("tsMode", "whenHealing") ~= "never") and 0.4 or 0.15)
                 local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
                 cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
                 cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(SVal("tsEnabled", true) and 0.4 or 0.15) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha((SVal("tsMode", "whenHealing") ~= "never") and 0.4 or 0.15) end)
                 cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
             end
         end
@@ -4367,7 +4440,7 @@ initFrame:SetScript("OnEvent", function(self)
         --  Synced sections get a blocking overlay per-section.
         -------------------------------------------------------------------
         local CPAD = EllesmereUI.CONTENT_PAD or 10
-        local FONT = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local FONT = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
 
         local syncOverlays = {}
         ns._syncOverlays = syncOverlays
@@ -5225,7 +5298,7 @@ initFrame:SetScript("OnEvent", function(self)
         ns._testMode = true
 
         local PP = EllesmereUI.PanelPP or EllesmereUI.PP
-        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
         local accentColor = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
         local s = db.profile
 
@@ -5297,8 +5370,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         local function MakeFont(p, size, r, g, b, a)
             local fs = p:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, true) end
             fs:SetFont(fontPath, size, "")
-            fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
             fs:SetTextColor(r or 1, g or 1, b or 1, a or 1)
             return fs
         end

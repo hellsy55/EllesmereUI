@@ -505,8 +505,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Keybind text (top-right, mirrors real button HotKey position)
             local keybindFS = bf:CreateFontString(nil, "OVERLAY")
-            keybindFS:SetFont(DEFAULT_FONT, 12, "OUTLINE")
-            keybindFS:SetShadowOffset(0, 0)
+            EllesmereUI.ApplyIconTextFont(keybindFS, DEFAULT_FONT, 12, "actionBars")
             keybindFS:SetTextColor(1, 1, 1)
             keybindFS:SetPoint("TOPRIGHT", bf, "TOPRIGHT", -1, -3)
             keybindFS:SetPoint("TOPLEFT", bf, "TOPLEFT", 4, -3)
@@ -516,16 +515,15 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Count / charges text (bottom-right, mirrors real button Count position)
             local countFS = bf:CreateFontString(nil, "OVERLAY")
-            countFS:SetFont(DEFAULT_FONT, 12, "OUTLINE")
-            countFS:SetShadowOffset(0, 0)
+            EllesmereUI.ApplyIconTextFont(countFS, DEFAULT_FONT, 12, "actionBars")
             countFS:SetTextColor(1, 1, 1)
             countFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
             countFS:SetText("")
 
             -- Macro name text (bottom-center, mirrors real button Name position)
             local macroFS = bf:CreateFontString(nil, "OVERLAY")
-            macroFS:SetFont(DEFAULT_FONT, 12, "OUTLINE")
-            macroFS:SetShadowOffset(0, 0)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(macroFS, false) end
+            macroFS:SetFont(DEFAULT_FONT, 12, "OUTLINE, SLUG")
             macroFS:SetTextColor(1, 1, 1)
             macroFS:SetPoint("BOTTOMLEFT", bf, "BOTTOMLEFT", 1, 4)
             macroFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
@@ -971,8 +969,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         keybindFS:SetText(hkText)
                     end
-                    keybindFS:SetFont(fontPath, scaledKBSize, "OUTLINE")
-                    keybindFS:SetShadowOffset(0, 0)
+                    EllesmereUI.ApplyIconTextFont(keybindFS, fontPath, scaledKBSize, "actionBars")
                     keybindFS:SetTextColor(kbColor.r, kbColor.g, kbColor.b)
                     -- Apply keybind X/Y offsets
                     local kbOX = (settings.keybindOffsetX or 0) * totalScale
@@ -991,8 +988,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         countFS:SetText(ctText)
                     end
-                    countFS:SetFont(fontPath, scaledCTSize, "OUTLINE")
-                    countFS:SetShadowOffset(0, 0)
+                    EllesmereUI.ApplyIconTextFont(countFS, fontPath, scaledCTSize, "actionBars")
                     countFS:SetTextColor(ctColor.r, ctColor.g, ctColor.b)
                     -- Apply charges X/Y offsets
                     local ctOX = (settings.countOffsetX or 0) * totalScale
@@ -1012,8 +1008,8 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                             macroFS:SetText(mcText)
                         end
-                        macroFS:SetFont(fontPath, scaledMCSize, "OUTLINE")
-                        macroFS:SetShadowOffset(0, 0)
+                        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(macroFS, false) end
+                        macroFS:SetFont(fontPath, scaledMCSize, "OUTLINE, SLUG")
                         macroFS:SetTextColor(mcColor.r, mcColor.g, mcColor.b)
                         local mcOX = (settings.macroOffsetX or 0) * totalScale
                         local mcOY = (settings.macroOffsetY or 0) * totalScale

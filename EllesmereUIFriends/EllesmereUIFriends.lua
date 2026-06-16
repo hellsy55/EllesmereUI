@@ -246,18 +246,16 @@ local function SkinRaidGroup(group)
         for i = 1, select("#", labelFrame:GetRegions()) do
             local region = select(i, labelFrame:GetRegions())
             if region and region:IsObjectType("FontString") then
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(region, true) end
                 region:SetFont(fontPath, 10, "")
                 region:SetTextColor(ar, ag, ab, 1)
-                region:SetShadowOffset(1, -1)
-                region:SetShadowColor(0, 0, 0, 0.9)
             end
         end
         local fontString = labelFrame.GetFontString and labelFrame:GetFontString()
         if fontString and fontString.SetFont then
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fontString, true) end
             fontString:SetFont(fontPath, 10, "")
             fontString:SetTextColor(ar, ag, ab, 1)
-            fontString:SetShadowOffset(1, -1)
-            fontString:SetShadowColor(0, 0, 0, 0.9)
         end
     end
 end
@@ -838,9 +836,8 @@ local function SkinFriendButton(button)
 
     local function ApplyFont(fs, size)
         if not fs or not fs.SetFont then return end
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, true) end
         fs:SetFont(fontPath, size, "")
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 0.8)
     end
 
     -- Tile background

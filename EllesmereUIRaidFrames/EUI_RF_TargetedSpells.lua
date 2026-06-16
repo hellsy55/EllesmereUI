@@ -536,14 +536,31 @@ local EVENTS = {
     "NAME_PLATE_UNIT_REMOVED",
 }
 
--- Active in a group, gated by the context's own enable toggle (tsRaidEnabled in
--- a raid, tsEnabled in a party). Both default on.
+-- Player's current spec is a healer? Live-checked (re-evaluated on
+-- PLAYER_SPECIALIZATION_CHANGED) so "When Healing" flips without a /reload.
+local function PlayerIsHealer()
+    local spec = GetSpecialization and GetSpecialization()
+    local role = spec and GetSpecializationRole and GetSpecializationRole(spec)
+    return role == "HEALER"
+end
+
+-- Resolve a 3-state mode (never | whenHealing | always) to an active boolean.
+local function ModeActive(mode)
+    if mode == "always" then return true end
+    if mode == "whenHealing" then return PlayerIsHealer() end
+    return false  -- "never" (or unset/unexpected)
+end
+
+-- Active in a group, gated by the context's own mode (tsRaidMode in a raid,
+-- tsMode in a party; default whenHealing). mode=never -- and whenHealing while
+-- not a healer -- both resolve inactive, so UpdateActive registers ZERO cast
+-- events (no idle cost). Re-evaluated on spec change via the standing frame.
 local function ShouldBeActive()
     local s = S()
     if not s then return false end
     if not IsInGroup() then return false end
-    if IsInRaid() then return s.tsRaidEnabled ~= false end
-    return s.tsEnabled ~= false
+    local mode = IsInRaid() and (s.tsRaidMode or "never") or (s.tsMode or "whenHealing")
+    return ModeActive(mode)
 end
 
 -- A cast can already be in flight when we start watching a plate (it spawned
@@ -589,8 +606,11 @@ ev:RegisterEvent("GROUP_ROSTER_UPDATE")
 ev:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")  -- combat-end backstop (no per-cast timer)
+ev:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")  -- re-gate "When Healing" on spec swap
 ev:SetScript("OnEvent", function(_, event, unit)
-    if event == "PLAYER_LOGIN" then
+    if event == "PLAYER_LOGIN" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        -- A spec change can flip whenHealing on/off; UpdateActive short-circuits
+        -- (registers nothing) when the resolved mode is still inactive.
         UpdateActive()
         return
     end
@@ -688,7 +708,7 @@ function ns.TS_RefreshPreview()
     local s = S()
     local frames = ns._partyPvFrames
     local on = ns._partyPvActive and frames and ns._tsPreviewVisible
-        and s and s.tsEnabled ~= false
+        and s and (s.tsMode or "whenHealing") ~= "never"
     if not on then
         StopPvTicker()
         for i = 1, #pvIcons do
@@ -759,7 +779,7 @@ function ns.TS_RefreshRaidPreview()
     local active, frames
     if ns._TSRaidPvState then active, frames = ns._TSRaidPvState() end
     local on = active and frames and ns._tsRaidPreviewVisible
-        and s and s.tsRaidEnabled ~= false
+        and s and (s.tsRaidMode or "never") ~= "never"
     if not on then
         StopRPvTicker()
         for i = 1, #rPvIcons do

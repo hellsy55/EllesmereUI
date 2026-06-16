@@ -1852,7 +1852,11 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
             -- (fromCascade=nil at the :1148 anchored-children pass) reads the
             -- already-shifted live bounds and the injection below adds the shift a
             -- second time -> continuous drift.
-            local shiftActive = targetKey == "ERB_ClassResource" and not isUnlocked
+            -- True whenever a temporary anchor-target shift is active for this
+            -- child's target (ERB "Shift Elements if No Resource"/"No Power").
+            -- The provider returns 0 for any non-shift target, so this stays a
+            -- no-op outside those features.
+            local shiftActive = not isUnlocked
                 and EllesmereUI._GetAnchorTargetShiftDir
                 and EllesmereUI._GetAnchorTargetShiftDir(targetKey, childKey) ~= 0
             -- Anchored CDM growth bars are positioned from their absolute saved
@@ -3321,7 +3325,7 @@ local function GetMeasure(idx)
     f._bg = bg
     -- Distance text
     local fs = f:CreateFontString(nil, "OVERLAY")
-    fs:SetFont(FONT_PATH, 9, "OUTLINE")
+    fs:SetFont(FONT_PATH, 9, "OUTLINE, SLUG")
     fs:SetTextColor(1, 1, 1, 1)
     f._label = fs
     -- Connector line (magenta)
@@ -4066,9 +4070,8 @@ local function CreateBlizzOwnedOverlay(def, parent)
     ov._brd = brd
     -- Label (always visible, same style as mover labels)
     local nameFs = ov:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameFs, true) end
     nameFs:SetFont(FONT_PATH, 10 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
-    nameFs:SetShadowOffset(1, -1)
-    nameFs:SetShadowColor(0, 0, 0, 0.8)
     nameFs:SetPoint("CENTER", ov, "CENTER", 0, 0)
     nameFs:SetTextColor(1, 1, 1, 0.75)
     nameFs:SetText(EllesmereUI.L(def.label))
@@ -4076,9 +4079,8 @@ local function CreateBlizzOwnedOverlay(def, parent)
     ov._nameFs = nameFs
     -- Action text (hidden at idle, fades in on hover)
     local actionFs = ov:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(actionFs, true) end
     actionFs:SetFont(FONT_PATH, 9 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
-    actionFs:SetShadowOffset(1, -1)
-    actionFs:SetShadowColor(0, 0, 0, 0.8)
     actionFs:SetPoint("TOP", nameFs, "BOTTOM", 0, -2)
     actionFs:SetTextColor(ar, ag, ab, 0.9)
     actionFs:SetText(EllesmereUI.L("Move via Blizz Edit Mode"))
@@ -4165,7 +4167,10 @@ local function ShowBlizzOwnedOverlays(parent)
                 ov = CreateBlizzOwnedOverlay(def, parent)
                 _blizzOwnedOverlays[def.label] = ov
             end
-            ov:SetFrameStrata("TOOLTIP")
+            -- Same strata as the regular movers (FULLSCREEN_DIALOG) but a lower level
+            -- (movers sit at unlockFrame+20), so non-Blizzard overlays always render
+            -- above these Blizzard Edit Mode overlays. Still above the dimmer (+1).
+            ov:SetFrameStrata("FULLSCREEN_DIALOG")
             ov:SetFrameLevel(parent:GetFrameLevel() + 15)
             ov:ClearAllPoints()
             if def.anchor then
@@ -4182,7 +4187,9 @@ local function ShowBlizzOwnedOverlays(parent)
                 ov = CreateBlizzOwnedOverlay(def, parent)
                 _blizzOwnedOverlays[def.label] = ov
             end
-            ov:SetFrameStrata("TOOLTIP")
+            -- FULLSCREEN_DIALOG (below movers at +20, above the dimmer at +1) so
+            -- non-Blizzard overlays always render above Blizzard Edit Mode overlays.
+            ov:SetFrameStrata("FULLSCREEN_DIALOG")
             ov:SetFrameLevel(parent:GetFrameLevel() + 15)
             ov:ClearAllPoints()
             ov:SetSize(def.fallbackW or 200, def.fallbackH or 40)
@@ -4263,9 +4270,8 @@ local function CreateMover(barKey)
     labelFrame:SetClipsChildren(true)
     labelFrame:SetFrameLevel(mover:GetFrameLevel() + 3)
     local nameFS = labelFrame:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameFS, true) end
     nameFS:SetFont(FONT_PATH, 10 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
-    nameFS:SetShadowOffset(1, -1)
-    nameFS:SetShadowColor(0, 0, 0, 0.8)
     nameFS:SetText(EllesmereUI.L(label))
     nameFS:SetTextColor(1, 1, 1, 0.75)
     nameFS:SetWordWrap(false)
@@ -4276,9 +4282,8 @@ local function CreateMover(barKey)
 
     -- Coordinate readout (shows during drag and selection, top-left of mover)
     local coordFS = labelFrame:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(coordFS, true) end
     coordFS:SetFont(FONT_PATH, 9 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
-    coordFS:SetShadowOffset(1, -1)
-    coordFS:SetShadowColor(0, 0, 0, 0.8)
     coordFS:SetTextColor(1, 1, 1, 0.7)
     coordFS:SetPoint("TOPLEFT", mover, "TOPLEFT", 3, -2)
     coordFS:Hide()
@@ -4324,33 +4329,29 @@ local function CreateMover(barKey)
 
     -- Font strings inside each button (accent colored, drop shadow)
     local wmFS = wmBtn:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(wmFS, true) end
     wmFS:SetFont(FONT_PATH, 9, "")
-    wmFS:SetShadowOffset(1, -1)
-    wmFS:SetShadowColor(0, 0, 0, 0.8)
     wmFS:SetTextColor(ar, ag, ab, 0.85)
     wmFS:SetText(EllesmereUI.L(WM_TEXT))
     wmFS:SetPoint("CENTER")
 
     local hmFS = hmBtn:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(hmFS, true) end
     hmFS:SetFont(FONT_PATH, 9, "")
-    hmFS:SetShadowOffset(1, -1)
-    hmFS:SetShadowColor(0, 0, 0, 0.8)
     hmFS:SetTextColor(ar, ag, ab, 0.85)
     hmFS:SetText(EllesmereUI.L(HM_TEXT))
     hmFS:SetPoint("CENTER")
 
     local atFS = atBtn:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(atFS, true) end
     atFS:SetFont(FONT_PATH, 9, "")
-    atFS:SetShadowOffset(1, -1)
-    atFS:SetShadowColor(0, 0, 0, 0.8)
     atFS:SetTextColor(ar, ag, ab, 0.85)
     atFS:SetText(EllesmereUI.L(AT_TEXT))
     atFS:SetPoint("CENTER")
 
     local gdFS = gdBtn:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(gdFS, true) end
     gdFS:SetFont(FONT_PATH, 9, "")
-    gdFS:SetShadowOffset(1, -1)
-    gdFS:SetShadowColor(0, 0, 0, 0.8)
     gdFS:SetTextColor(ar, ag, ab, 0.85)
     gdFS:SetText(EllesmereUI.L(GD_TEXT))
     gdFS:SetPoint("CENTER")
@@ -4482,9 +4483,8 @@ local function CreateMover(barKey)
 
     -- Pick mode instruction text (shown when in pick mode, replaces all other text)
     local pickFS = labelFrame:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(pickFS, true) end
     pickFS:SetFont(FONT_PATH, 10 + (UIParent:GetEffectiveScale() < 0.6 and 1 or 0), "")
-    pickFS:SetShadowOffset(1, -1)
-    pickFS:SetShadowColor(0, 0, 0, 0.8)
     pickFS:SetTextColor(1, 1, 1, 0.85)
     pickFS:SetPoint("CENTER", mover, "CENTER")
     pickFS:SetJustifyH("CENTER")
@@ -5084,9 +5084,8 @@ local function CreateMover(barKey)
 
         local ddY = -4
         local titleFS = growDropdownFrame:CreateFontString(nil, "OVERLAY")
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(titleFS, true) end
         titleFS:SetFont(FONT_PATH, 10, "")
-        titleFS:SetShadowOffset(1, -1)
-        titleFS:SetShadowColor(0, 0, 0, 0.8)
         titleFS:SetTextColor(1, 1, 1, 0.40)
         titleFS:SetJustifyH("LEFT")
         titleFS:SetPoint("TOPLEFT", growDropdownFrame, "TOPLEFT", 10, ddY - 4)
@@ -5156,9 +5155,8 @@ local function CreateMover(barKey)
             hl:SetAllPoints()
             hl:SetColorTexture(1, 1, 1, 0)
             local lbl = item:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, true) end
             lbl:SetFont(FONT_PATH, 11, "")
-            lbl:SetShadowOffset(1, -1)
-            lbl:SetShadowColor(0, 0, 0, 0.8)
             lbl:SetJustifyH("LEFT")
             lbl:SetPoint("LEFT", item, "LEFT", 10, 0)
             lbl:SetText(EllesmereUI.L(entry.label))
@@ -6084,7 +6082,7 @@ local function CreateMover(barKey)
                     local ddY = -4
                     -- Title
                     local titleFS = anchorDropdownFrame:CreateFontString(nil, "OVERLAY")
-                    titleFS:SetFont(FONT_PATH, 10, "OUTLINE")
+                    titleFS:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
                     titleFS:SetTextColor(1, 1, 1, 0.40)
                     titleFS:SetJustifyH("LEFT")
                     titleFS:SetPoint("TOPLEFT", anchorDropdownFrame, "TOPLEFT", 10, ddY - 4)
@@ -6110,7 +6108,7 @@ local function CreateMover(barKey)
                         hl:SetAllPoints()
                         hl:SetColorTexture(1, 1, 1, 0)
                         local lbl = item:CreateFontString(nil, "OVERLAY")
-                        lbl:SetFont(FONT_PATH, 11, "OUTLINE")
+                        lbl:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
                         lbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
                         lbl:SetJustifyH("LEFT")
                         lbl:SetPoint("LEFT", item, "LEFT", 10, 0)
@@ -6194,7 +6192,7 @@ local function CreateMover(barKey)
                         rHl:SetAllPoints()
                         rHl:SetColorTexture(1, 1, 1, 0)
                         local rLbl = removeItem:CreateFontString(nil, "OVERLAY")
-                        rLbl:SetFont(FONT_PATH, 11, "OUTLINE")
+                        rLbl:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
                         rLbl:SetTextColor(0.9, 0.3, 0.3, 0.9)
                         rLbl:SetJustifyH("LEFT")
                         rLbl:SetPoint("LEFT", removeItem, "LEFT", 10, 0)
@@ -6342,7 +6340,7 @@ local function CreateMover(barKey)
     local snapDDBrd = EllesmereUI.MakeBorder(snapDD, 1, 1, 1, 0.20)
     snapDD._brd = snapDDBrd
     local snapDDLbl = snapDD:CreateFontString(nil, "OVERLAY")
-    snapDDLbl:SetFont(FONT_PATH, 12, "OUTLINE")
+    snapDDLbl:SetFont(FONT_PATH, 12, "OUTLINE, SLUG")
     snapDDLbl:SetTextColor(1, 1, 1, 0.50)
     snapDDLbl:SetJustifyH("LEFT")
     snapDDLbl:SetWordWrap(false)
@@ -6444,7 +6442,7 @@ local function CreateMover(barKey)
 
         -- Title: "Snap Target"
         local titleLbl = snapMenu:CreateFontString(nil, "OVERLAY")
-        titleLbl:SetFont(FONT_PATH, 10, "OUTLINE")
+        titleLbl:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
         titleLbl:SetTextColor(1, 1, 1, 0.40)
         titleLbl:SetJustifyH("LEFT")
         titleLbl:SetPoint("TOPLEFT", snapMenu, "TOPLEFT", 10, yOff - 4)
@@ -6470,7 +6468,7 @@ local function CreateMover(barKey)
             hl:SetAllPoints()
             hl:SetColorTexture(1, 1, 1, 0)
             local lbl = item:CreateFontString(nil, "OVERLAY")
-            lbl:SetFont(FONT_PATH, 11, "OUTLINE")
+            lbl:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
             lbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
             lbl:SetJustifyH("LEFT")
             lbl:SetPoint("LEFT", item, "LEFT", 10, 0)
@@ -6559,7 +6557,7 @@ local function CreateMover(barKey)
             rgHl:SetAllPoints()
             rgHl:SetColorTexture(1, 1, 1, 0)
             local rgLbl = rgItem:CreateFontString(nil, "OVERLAY")
-            rgLbl:SetFont(FONT_PATH, 11, "OUTLINE")
+            rgLbl:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
             rgLbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
             rgLbl:SetJustifyH("LEFT")
             rgLbl:SetPoint("LEFT", rgItem, "LEFT", 10, 0)
@@ -6605,7 +6603,7 @@ local function CreateMover(barKey)
                     sHl:SetAllPoints()
                     sHl:SetColorTexture(1, 1, 1, isSel and 0.04 or 0)
                     local sLbl = si:CreateFontString(nil, "OVERLAY")
-                    sLbl:SetFont(FONT_PATH, 11, "OUTLINE")
+                    sLbl:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
                     sLbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
                     sLbl:SetJustifyH("LEFT")
                     sLbl:SetPoint("LEFT", si, "LEFT", 10, 0)
@@ -6795,7 +6793,11 @@ local function CreateMover(barKey)
                 settingsMapping = EllesmereUI._ELEMENT_SETTINGS_MAP["TBB_"]
             end
         end
-        if settingsMapping then
+        -- Queue Status is a Blizzard-owned element with no EUI settings page; its
+        -- "Element Options" opens Blizzard Edit Mode instead of navigating to a tab
+        -- (the same action as clicking a Blizzard Edit Mode overlay in unlock mode).
+        local opensEditMode = (barKey == "QueueStatus")
+        if settingsMapping or opensEditMode then
             local optItem = CreateFrame("Button", nil, cogMenu)
             optItem:SetHeight(ITEM_H)
             optItem:SetPoint("TOPLEFT", cogMenu, "TOPLEFT", 1, yOff)
@@ -6806,9 +6808,8 @@ local function CreateMover(barKey)
             optHl:SetAllPoints()
             optHl:SetColorTexture(1, 1, 1, 0)
             local optLbl = optItem:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(optLbl, true) end
             optLbl:SetFont(FONT_PATH, 11, "")
-            optLbl:SetShadowOffset(1, -1)
-            optLbl:SetShadowColor(0, 0, 0, 0.8)
             optLbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
             optLbl:SetJustifyH("LEFT")
             optLbl:SetPoint("LEFT", optItem, "LEFT", 10, 0)
@@ -6823,15 +6824,25 @@ local function CreateMover(barKey)
             end)
             optItem:SetScript("OnClick", function()
                 CloseCogMenu()
-                ns.RequestClose(true, function()
-                    EllesmereUI:NavigateToElementSettings(
-                        settingsMapping.module,
-                        settingsMapping.page,
-                        settingsMapping.sectionName,
-                        settingsMapping.preSelectFn,
-                        settingsMapping.highlightText
-                    )
-                end)
+                if opensEditMode then
+                    -- Open Blizzard Edit Mode, exactly as the Blizz-owned overlays do.
+                    if InCombatLockdown() then return end
+                    if EditModeManagerFrame then
+                        ns.RequestClose(false, function()
+                            ShowUIPanel(EditModeManagerFrame)
+                        end)
+                    end
+                else
+                    ns.RequestClose(true, function()
+                        EllesmereUI:NavigateToElementSettings(
+                            settingsMapping.module,
+                            settingsMapping.page,
+                            settingsMapping.sectionName,
+                            settingsMapping.preSelectFn,
+                            settingsMapping.highlightText
+                        )
+                    end)
+                end
             end)
             yOff = yOff - ITEM_H
 
@@ -6867,9 +6878,8 @@ local function CreateMover(barKey)
                 rowFrame:SetFrameLevel(cogMenu:GetFrameLevel() + 2)
 
                 local lbl = rowFrame:CreateFontString(nil, "OVERLAY")
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, true) end
                 lbl:SetFont(FONT_PATH, 11, "")
-                lbl:SetShadowOffset(1, -1)
-                lbl:SetShadowColor(0, 0, 0, 0.8)
                 lbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
                 lbl:SetJustifyH("LEFT")
                 lbl:SetPoint("LEFT", rowFrame, "LEFT", 10, 0)
@@ -6989,9 +6999,8 @@ local function CreateMover(barKey)
                     rowFrame:SetFrameLevel(cogMenu:GetFrameLevel() + 2)
 
                     local lbl = rowFrame:CreateFontString(nil, "OVERLAY")
+                    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, true) end
                     lbl:SetFont(FONT_PATH, 11, "")
-                    lbl:SetShadowOffset(1, -1)
-                    lbl:SetShadowColor(0, 0, 0, 0.8)
                     lbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
                     lbl:SetJustifyH("LEFT")
                     lbl:SetPoint("LEFT", rowFrame, "LEFT", 10, 0)
@@ -7112,9 +7121,8 @@ local function CreateMover(barKey)
         selElemHl:SetAllPoints()
         selElemHl:SetColorTexture(1, 1, 1, 0)
         local selElemLbl = selElemItem:CreateFontString(nil, "OVERLAY")
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(selElemLbl, true) end
         selElemLbl:SetFont(FONT_PATH, 11, "")
-        selElemLbl:SetShadowOffset(1, -1)
-        selElemLbl:SetShadowColor(0, 0, 0, 0.8)
         selElemLbl:SetJustifyH("LEFT")
         selElemLbl:SetPoint("LEFT", selElemItem, "LEFT", 10, 0)
         local curTgt = mover._snapTarget
@@ -7163,9 +7171,8 @@ local function CreateMover(barKey)
             hl:SetAllPoints()
             hl:SetColorTexture(1, 1, 1, 0)
             local lbl = item:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, true) end
             lbl:SetFont(FONT_PATH, 11, "")
-            lbl:SetShadowOffset(1, -1)
-            lbl:SetShadowColor(0, 0, 0, 0.8)
             lbl:SetTextColor(0.75, 0.75, 0.75, 0.9)
             lbl:SetJustifyH("LEFT")
             lbl:SetPoint("LEFT", item, "LEFT", 10, 0)
@@ -7442,7 +7449,7 @@ local function CreateHUD(parent)
     gridBtn._tex = gridTex
 
     local gridLabel = gridBtn:CreateFontString(nil, "OVERLAY")
-    gridLabel:SetFont(FONT_PATH, 10, "OUTLINE")
+    gridLabel:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
     gridLabel:SetJustifyH("RIGHT")
     gridLabel:SetPoint("RIGHT", gridTex, "LEFT", -5, 0)
     gridLabel:SetTextColor(1, 1, 1, GridHudAlpha())
@@ -7495,7 +7502,7 @@ local function CreateHUD(parent)
     darkOverlayBtn._tex = darkOverlayTex
 
     local darkOverlayLabel = darkOverlayBtn:CreateFontString(nil, "OVERLAY")
-    darkOverlayLabel:SetFont(FONT_PATH, 10, "OUTLINE")
+    darkOverlayLabel:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
     darkOverlayLabel:SetJustifyH("RIGHT")
     darkOverlayLabel:SetPoint("RIGHT", darkOverlayTex, "LEFT", -5, 0)
     darkOverlayLabel:SetTextColor(1, 1, 1, darkOverlaysEnabled and HUD_ON_ALPHA or HUD_OFF_ALPHA)
@@ -7530,7 +7537,7 @@ local function CreateHUD(parent)
     flashBtn._tex = flashTex
 
     local flashLabel = flashBtn:CreateFontString(nil, "OVERLAY")
-    flashLabel:SetFont(FONT_PATH, 10, "OUTLINE")
+    flashLabel:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
     flashLabel:SetJustifyH("RIGHT")
     flashLabel:SetPoint("RIGHT", flashTex, "LEFT", -5, 0)
     flashLabel:SetTextColor(1, 1, 1, flashlightEnabled and HUD_ON_ALPHA or HUD_OFF_ALPHA)
@@ -7564,7 +7571,7 @@ local function CreateHUD(parent)
     magnetBtn._tex = magnetTex
 
     local magnetLabel = magnetBtn:CreateFontString(nil, "OVERLAY")
-    magnetLabel:SetFont(FONT_PATH, 10, "OUTLINE")
+    magnetLabel:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
     magnetLabel:SetJustifyH("LEFT")
     magnetLabel:SetPoint("LEFT", magnetTex, "RIGHT", 5, 0)
     magnetLabel:SetTextColor(1, 1, 1, snapEnabled and HUD_ON_ALPHA or HUD_OFF_ALPHA)
@@ -7603,7 +7610,7 @@ local function CreateHUD(parent)
     coordBtn._tex = coordTex
 
     local coordLabel = coordBtn:CreateFontString(nil, "OVERLAY")
-    coordLabel:SetFont(FONT_PATH, 10, "OUTLINE")
+    coordLabel:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
     coordLabel:SetJustifyH("LEFT")
     coordLabel:SetPoint("LEFT", coordTex, "RIGHT", 1, 0)
     coordLabel:SetTextColor(1, 1, 1, coordsEnabled and HUD_ON_ALPHA or HUD_OFF_ALPHA)
@@ -7650,7 +7657,7 @@ local function CreateHUD(parent)
     hoverBtn._tex = hoverTex
 
     local hoverLabel = hoverBtn:CreateFontString(nil, "OVERLAY")
-    hoverLabel:SetFont(FONT_PATH, 10, "OUTLINE")
+    hoverLabel:SetFont(FONT_PATH, 10, "OUTLINE, SLUG")
     hoverLabel:SetJustifyH("LEFT")
     hoverLabel:SetPoint("LEFT", hoverTex, "RIGHT", 5, 0)
     hoverLabel:SetTextColor(1, 1, 1, hoverBarEnabled and HUD_ON_ALPHA or HUD_OFF_ALPHA)
@@ -7701,7 +7708,7 @@ local function CreateHUD(parent)
         bg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
 
         local lbl = btn:CreateFontString(nil, "OVERLAY")
-        lbl:SetFont(FONT_PATH, BTN_FONT, "OUTLINE")
+        lbl:SetFont(FONT_PATH, BTN_FONT, "OUTLINE, SLUG")
         lbl:SetPoint("CENTER")
         lbl:SetText(EllesmereUI.L("Save & Exit"))
         lbl:SetTextColor(eg.r, eg.g, eg.b, 0.7)
@@ -8836,7 +8843,7 @@ function ns.ShowUnlockTip()
 
         -- Message
         local msg = tip:CreateFontString(nil, "OVERLAY")
-        msg:SetFont(FONT_PATH, 12, "OUTLINE")
+        msg:SetFont(FONT_PATH, 12, "OUTLINE, SLUG")
         msg:SetTextColor(1, 1, 1, 0.85)
         msg:SetPoint("TOP", tip, "TOP", 0, -17)
         msg:SetWidth(TIP_W - 30)

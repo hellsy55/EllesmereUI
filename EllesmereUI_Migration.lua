@@ -739,6 +739,26 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "rf_targeted_spells_bool_to_mode_v1",
+    scope       = "profile",
+    description = "Convert RaidFrames PARTY Targeted Spells tsEnabled boolean to tsMode (false->never, true->whenHealing; nil leaves the default). Raid is NOT migrated -- it hard-defaults to never.",
+    body = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        if type(rf) ~= "table" then return end
+        -- Self-gating on the new key being absent keeps this idempotent and never
+        -- clobbers a value the user has since chosen.
+        if rf.tsMode == nil then
+            if rf.tsEnabled == false then rf.tsMode = "never"
+            elseif rf.tsEnabled == true then rf.tsMode = "whenHealing" end
+            -- tsEnabled == nil: leave unset so DeepMergeDefaults applies the default.
+        end
+        -- Raid is intentionally NOT migrated: it hard-defaults to "never" for all
+        -- users (existing tsRaidEnabled is ignored), so tsRaidMode is left unset
+        -- here and DeepMergeDefaults applies the "never" default.
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "basics_minimap_round_to_circle",
     scope       = "profile",
     description = "Rename minimap.shape value 'round' to 'circle'.",
@@ -2286,6 +2306,26 @@ EllesmereUI.RegisterMigration({
         -- (The Bags sync enable that used to live here moved into the
         -- mirror-group reset migration below, which seeds the default
         -- Bags group after wiping the old-format sync links.)
+    end,
+})
+
+-- The Bags "Default Open to OneBag" boolean became a three-way "Default Bag
+-- Type" dropdown (all / onebag / multibag). Seed the new key from the legacy
+-- boolean so existing users keep their OneBag default, then drop the old key.
+-- Runs AFTER bags_to_profile_v1 (registered above) so the legacy key already
+-- lives in the per-profile bags table. Imported profiles skip this migration
+-- (they inherit migration flags), so the import path forward-copies the legacy
+-- key in ApplyProfileData (EllesmereUI_Profiles.lua) before DeepMergeDefaults.
+EllesmereUI.RegisterMigration({
+    id          = "bags_default_bag_type_v1",
+    scope       = "profile",
+    description = "Convert legacy bagDefaultOneBag boolean into the bagDefaultBagType string (all/onebag/multibag).",
+    body = function(ctx)
+        local bags = ctx.profile.addons and ctx.profile.addons.EllesmereUIBags
+        if not bags then return end                       -- fresh profile: defaults handle it
+        if bags.bagDefaultBagType ~= nil then return end  -- already migrated (idempotent)
+        bags.bagDefaultBagType = (bags.bagDefaultOneBag == true) and "onebag" or "all"
+        bags.bagDefaultOneBag = nil                       -- drop the legacy key
     end,
 })
 
