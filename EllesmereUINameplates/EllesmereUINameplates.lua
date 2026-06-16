@@ -59,7 +59,7 @@ local function GetFont()
     return (p and p.font) or defaults.font
 end
 local function GetNPOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE"
+    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE, SLUG"
 end
 local function GetNPUseShadow()
     return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("nameplates")
@@ -67,13 +67,11 @@ end
 local function SetFSFont(fs, size, flags)
   if not (fs and fs.SetFont) then return end
   local f = flags or GetNPOutline()
-  fs:SetFont(GetFont(), size or 11, f)
-  if f == "" then
-    fs:SetShadowOffset(1, -1)
-    fs:SetShadowColor(0, 0, 0, 1)
-  else
-    fs:SetShadowOffset(0, 0)
+  -- 12.0.7: drop shadows only render from a FontObject; prime before SetFont.
+  if EllesmereUI and EllesmereUI.PrimeFontShadow then
+    EllesmereUI.PrimeFontShadow(fs, f == "")
   end
+  fs:SetFont(GetFont(), size or 11, f)
 end
 
 ns.GetFont = GetFont
@@ -124,6 +122,7 @@ function ns._appendDisplayPresetKeys(t)
         "dpsHasAggro", "dpsNearAggro", "offTankAggroEnabled", "offTankAggro",
         "targetArrowDouble", "targetArrowStyle", "targetArrowColor", "targetArrowClassColor",
         "auraStackTextSize", "auraStackTextColor",
+        "auraStackTextPosition", "auraStackTextX", "auraStackTextY",
         "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
         "raidMarkerPos", "classificationSlot",
     }) do t[#t + 1] = k end
@@ -148,6 +147,7 @@ local defaults = {
     caster  = { r = 0.231, g = 0.510, b = 0.965 },
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
+    darkenEnemiesOOC = true,
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
     classicTankAggro = false,
@@ -159,7 +159,14 @@ local defaults = {
     offTankAggroEnabled = true,
     interruptReady = { r = 0.92, g = 0.35, b = 0.20 },  
     castBar = { r = 0.70, g = 0.40, b = 0.90 },
+    interruptMidCastEnabled = false,
+    interruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
     castBarUninterruptible = { r = 0.45, g = 0.45, b = 0.45 },
+    castBarImportant = { r = 1, g = 0.2, b = 0.2 },
+    importantCastColorEnabled = false,
+    castBarShieldEnabled = true,
+    interruptedFlashEnabled = true,
+    interruptedFlashColor = { r = 0.8, g = 0.0, b = 0.0 },
     healthBarHeight = 17,
     friendlyNameOnly = true,
     friendlyNameOnlyYOffset = -20,
@@ -207,9 +214,14 @@ local defaults = {
     buffTimerPosition = "topleft",
     ccTimerPosition = "topleft",
     auraDurationTextSize = 11,
+    auraDurationTextX = 0,
+    auraDurationTextY = 0,
     auraDurationTextColor = { r = 1, g = 1, b = 1 },
     auraStackTextSize = 11,
     auraStackTextColor = { r = 1, g = 1, b = 1 },
+    auraStackTextPosition = "bottomright",
+    auraStackTextX = 0,
+    auraStackTextY = 0,
     debuffSlot = "top",
     buffSlot = "left",
     ccSlot = "right",
@@ -217,6 +229,11 @@ local defaults = {
     sideAuraXOffset = 2,
     nameYOffset = 0,
     auraSpacing = 2,
+    -- Per-element icon spacing (gap between icons). All default to the legacy
+    -- auraSpacing value (2) so existing users are completely unaffected.
+    debuffSpacing = 2,
+    buffSpacing = 2,
+    ccSpacing = 2,
     debuffIconSize = 26,
     buffIconSize = 24,
     buffTextSize = 12,
@@ -265,9 +282,13 @@ local defaults = {
     focusCastHeight = 100,
     questMobColorEnabled = false,
     questMobColor = { r = 0.157, g = 0.855, b = 0.475 },
+    replaceQuestIconWithObjective = false,
+    questObjectiveTextSize = 14,
     showCastIcon = true,
     castIconScale = 1,
     castbarIconInWidth = false,
+    castIconOnRight = false,
+    castIconFullSize = false,
     bgAlpha = 1.0,
     bgColor = { r = 0.12, g = 0.12, b = 0.12 },
     hoverColor = { r = 1, g = 1, b = 1 },
@@ -624,20 +645,86 @@ function ns.GetCastIconInWidth()
     if p and p.castbarIconInWidth ~= nil then return p.castbarIconInWidth end
     return defaults.castbarIconInWidth
 end
+-- "Icon on Right": place the cast spell icon on the right of the bars.
+function ns.GetCastIconOnRight()
+    if p and p.castIconOnRight ~= nil then return p.castIconOnRight end
+    return defaults.castIconOnRight
+end
+-- "Full Sized": icon is a square the combined height of the health + cast bar,
+-- flush from the top of the health bar to the bottom of the cast bar.
+function ns.GetCastIconFullSize()
+    if p and p.castIconFullSize ~= nil then return p.castIconFullSize end
+    return defaults.castIconFullSize
+end
 
 -- Position + size the cast bar within `footprintW`, accounting for the
--- icon-in-width setting. The icon (castIconFrame) is anchored TOPRIGHT -> cast
--- TOPLEFT, so shifting the bar right by the icon width lands the icon inside
--- the footprint's left edge automatically. iconW uses the icon's rendered size
+-- icon-in-width setting. A full-size icon spans the health band too (which the
+-- cast bar cannot reserve), so in-width applies only at normal size. Left icon:
+-- shift the bar right into the reserved gap. Right icon: keep the left edge
+-- fixed and narrow only the right edge. iconW uses the icon's rendered size
 -- (castH * icon scale) so a scaled icon reserves the right amount of space.
 function ns.LayoutCastBar(plate, footprintW, castH)
     local iconW = 0
-    if GetShowCastIcon() and ns.GetCastIconInWidth() then
+    local shiftX = 0
+    if GetShowCastIcon() and ns.GetCastIconInWidth() and not ns.GetCastIconFullSize() then
         iconW = castH * (GetCastIconScale() or 1)
+        if not ns.GetCastIconOnRight() then
+            shiftX = iconW
+        end
     end
     plate.cast:ClearAllPoints()
     plate.cast:SetSize(math.max(1, footprintW - iconW), castH)
-    plate.cast:SetPoint("TOPLEFT", plate.health, "BOTTOMLEFT", iconW, 0)
+    plate.cast:SetPoint("TOPLEFT", plate.health, "BOTTOMLEFT", shiftX, 0)
+end
+
+-- Size + anchor the cast spell icon for the current side / full-size settings.
+-- Always a square. Normal: cast-bar height, hangs off the bar's left (default)
+-- or right edge, top-aligned with the cast bar, scaled by the Scale setting.
+-- Full: a (healthH + castH) square anchored to a cast BOTTOM corner -- the
+-- zero-gap bar stack lands the top edge flush with the health top -- with scale
+-- forced to 1 so it stays flush to both bar edges. The icon's frame level is
+-- fixed at creation (health+1), so this never touches it. Clean profile
+-- numbers only (no secret values).
+function ns.LayoutCastIcon(plate, castH)
+    local icon = plate.castIconFrame
+    local onRight = ns.GetCastIconOnRight()
+    icon:ClearAllPoints()
+    if ns.GetCastIconFullSize() then
+        local side = GetHealthBarHeight() + castH
+        icon:SetScale(1)
+        icon:SetSize(side, side)
+        if onRight then
+            icon:SetPoint("BOTTOMLEFT", plate.cast, "BOTTOMRIGHT", 0, 0)
+        else
+            icon:SetPoint("BOTTOMRIGHT", plate.cast, "BOTTOMLEFT", 0, 0)
+        end
+    else
+        icon:SetScale(GetCastIconScale() or 1)
+        icon:SetSize(castH, castH)
+        if onRight then
+            icon:SetPoint("TOPLEFT", plate.cast, "TOPRIGHT", 0, 0)
+        else
+            icon:SetPoint("TOPRIGHT", plate.cast, "TOPLEFT", 0, 0)
+        end
+    end
+end
+
+-- How far the cast icon protrudes past the bar edge on its side, plus that side
+-- ("left"/"right"). The target arrow + side-slot core icons reserve this so
+-- they never land under the icon. Returns 0 for the legacy default (left,
+-- normal) and for in-width-tucked icons, so existing layouts are unchanged.
+-- All inputs are clean profile numbers, safe to add.
+function ns.GetCastIconReserve()
+    if not GetShowCastIcon() then return 0, nil end
+    local onRight = ns.GetCastIconOnRight()
+    local side = onRight and "right" or "left"
+    if ns.GetCastIconFullSize() then
+        return GetHealthBarHeight() + GetCastBarHeight(), side
+    end
+    if onRight and not ns.GetCastIconInWidth() then
+        return GetCastBarHeight() * (GetCastIconScale() or 1), side
+    end
+    return 0, side
 end
 local function GetKickTickEnabled()
     if p and p.kickTickEnabled ~= nil then return p.kickTickEnabled end
@@ -649,7 +736,17 @@ local function GetKickTickColor()
     return c.r, c.g, c.b
 end
 ns.GetKickTickColor = GetKickTickColor
-local function GetAuraSpacing()
+-- Optional element ("debuffs", "buffs", "ccs") selects per-element spacing;
+-- no arg falls back to the legacy global auraSpacing. Kept as a single function
+-- (not a second local) to respect this file's 200-local cap.
+local function GetAuraSpacing(element)
+    if element == "debuffs" then
+        return (p and p.debuffSpacing) or defaults.debuffSpacing
+    elseif element == "buffs" then
+        return (p and p.buffSpacing) or defaults.buffSpacing
+    elseif element == "ccs" then
+        return (p and p.ccSpacing) or defaults.ccSpacing
+    end
     return (p and p.auraSpacing) or defaults.auraSpacing
 end
 ns.GetAuraSpacing = GetAuraSpacing
@@ -1360,36 +1457,43 @@ PositionArrowsOutsideAuras = function(plate)
     if not plate.leftArrow then return end
     if not plate.leftArrow:IsShown() then return end
     local debuffSlot, buffSlot, ccSlot = GetAuraSlots()
-    local gap = GetAuraSpacing()
     local sideOff = GetSideAuraXOffset()
     -- Track the furthest pixel extent on each side (accounts for per-slot X offsets)
     local leftExtent, rightExtent = 0, 0
+    -- Cast spell icon: reserve on its side so the arrow + the (pushed) side-slot
+    -- core icons all clear it. Settings-driven (not icon:IsShown) so the arrow
+    -- holds steady across cast start/stop. Clean profile numbers, never secrets.
+    local iconRes, iconSide = ns.GetCastIconReserve()
+    local leftPush = (iconRes > 0 and iconSide == "left") and iconRes or 0
+    local rightPush = (iconRes > 0 and iconSide == "right") and iconRes or 0
+    if leftPush > 0 then leftExtent = math.max(leftExtent, leftPush) end
+    if rightPush > 0 then rightExtent = math.max(rightExtent, rightPush) end
     local debuffSz = GetDebuffIconSize()
     local buffSz = GetBuffIconSize()
     local ccSz = GetCCIconSize()
-    leftExtent, rightExtent = AddSideExtent(debuffSlot, plate.debuffs or {}, 6, debuffSz, "debuffSlot", gap, sideOff, leftExtent, rightExtent)
-    leftExtent, rightExtent = AddSideExtent(buffSlot, plate.buffs or {}, 4, buffSz, "buffSlot", gap, sideOff, leftExtent, rightExtent)
-    leftExtent, rightExtent = AddSideExtent(ccSlot, plate.cc or {}, 2, ccSz, "ccSlot", gap, sideOff, leftExtent, rightExtent)
+    leftExtent, rightExtent = AddSideExtent(debuffSlot, plate.debuffs or {}, 6, debuffSz, "debuffSlot", GetAuraSpacing("debuffs"), sideOff, leftExtent, rightExtent)
+    leftExtent, rightExtent = AddSideExtent(buffSlot, plate.buffs or {}, 4, buffSz, "buffSlot", GetAuraSpacing("buffs"), sideOff, leftExtent, rightExtent)
+    leftExtent, rightExtent = AddSideExtent(ccSlot, plate.cc or {}, 2, ccSz, "ccSlot", GetAuraSpacing("ccs"), sideOff, leftExtent, rightExtent)
     -- Account for raid marker in side slots
     local rmPos = GetRaidMarkerPos()
     if rmPos == "left" and plate.raidFrame and plate.raidFrame:IsShown() then
         local rmSz = GetRaidMarkerSize()
         local rxOff = select(1, GetAuraSlotOffsets("raidMarker"))
-        leftExtent = math.max(leftExtent, sideOff + rmSz - rxOff)
+        leftExtent = math.max(leftExtent, sideOff + leftPush + rmSz - rxOff)
     elseif rmPos == "right" and plate.raidFrame and plate.raidFrame:IsShown() then
         local rmSz = GetRaidMarkerSize()
         local rxOff = select(1, GetAuraSlotOffsets("raidMarker"))
-        rightExtent = math.max(rightExtent, sideOff + rmSz + rxOff)
+        rightExtent = math.max(rightExtent, sideOff + rightPush + rmSz + rxOff)
     end
     -- Account for classification icon in side slots
     local clSlot = GetClassificationSlot()
     local clSz = GetRareEliteIconSize()
     if clSlot == "left" and plate.classFrame and plate.classFrame:IsShown() then
         local cxOff = select(1, GetAuraSlotOffsets("classification"))
-        leftExtent = math.max(leftExtent, sideOff + clSz - cxOff)
+        leftExtent = math.max(leftExtent, sideOff + leftPush + clSz - cxOff)
     elseif clSlot == "right" and plate.classFrame and plate.classFrame:IsShown() then
         local cxOff = select(1, GetAuraSlotOffsets("classification"))
-        rightExtent = math.max(rightExtent, sideOff + clSz + cxOff)
+        rightExtent = math.max(rightExtent, sideOff + rightPush + clSz + cxOff)
     end
     plate.leftArrow:ClearAllPoints()
     plate.rightArrow:ClearAllPoints()
@@ -1711,7 +1815,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.raidFrame = CreateFrame("Frame", nil, plate)
     local rmSize = GetRaidMarkerSize()
     PP.Size(plate.raidFrame, rmSize, rmSize)
-    plate.raidFrame:SetFrameLevel(plate.health:GetFrameLevel() + 6)
+    -- +8 keeps the marker above the name/health text frames (healthTextFrame
+    -- sits at health+7) so the raid target icon renders on top of the text.
+    plate.raidFrame:SetFrameLevel(plate.health:GetFrameLevel() + 8)
     plate.raidFrame:Hide()
     plate.raid = plate.raidFrame:CreateTexture(nil, "ARTWORK")
     plate.raid:SetAllPoints()
@@ -1747,8 +1853,11 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     -- Parented to cast (auto-hides with cast) and anchored to cast (same frame
     -- = single-pass layout resolve, no cross-frame jitter).
     plate.castIconFrame = CreateFrame("Frame", nil, plate.cast)
-    plate.castIconFrame:SetSize(CAST_H, CAST_H)
-    plate.castIconFrame:SetPoint("TOPRIGHT", plate.cast, "TOPLEFT", 0, 0)
+    -- Lift above the health bar (level 10) once, so a full-size icon (which
+    -- spans up into the health band) is never occluded by the health bar.
+    -- Harmless for the normal case (the icon sits below the health bar there).
+    plate.castIconFrame:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    ns.LayoutCastIcon(plate, CAST_H)
     AddBorder(plate.castIconFrame)
     plate.castIcon = plate.castIconFrame:CreateTexture(nil, "ARTWORK")
     plate.castIcon:SetPoint("TOPLEFT", plate.castIconFrame, "TOPLEFT", 1, -1)
@@ -1783,12 +1892,29 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.kickPositioner = CreateFrame("StatusBar", nil, plate.kickClip)
     plate.kickPositioner:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickPositioner:GetStatusBarTexture():SetAlpha(0)
+    -- Pixel-snap OFF on the fill texture. The tick sits at positioner_width +
+    -- marker_width; if either fill snaps its edge to the pixel grid
+    -- independently, round(a) + round(b) flips by 1px as one width crosses a
+    -- pixel boundary while the other does not, even though
+    -- (elapsed + CD remaining) / total is invariant -- that is the jitter.
+    -- Belt-and-suspenders only: the load-bearing unsnap is after each
+    -- SetFillStyle in UpdateKickTick (SetFillStyle re-mints the inner fill to
+    -- snap-ON and the global SetStatusBarTexture hook will not re-fire on a bar
+    -- it has already cached).
+    if plate.kickPositioner:GetStatusBarTexture().SetSnapToPixelGrid then
+        plate.kickPositioner:GetStatusBarTexture():SetSnapToPixelGrid(false)
+        plate.kickPositioner:GetStatusBarTexture():SetTexelSnappingBias(0)
+    end
     plate.kickPositioner:SetPoint("CENTER", plate.cast)
     plate.kickPositioner:SetFrameLevel(plate.cast:GetFrameLevel() + 1)
     plate.kickPositioner:Hide()
     plate.kickMarker = CreateFrame("StatusBar", nil, plate.kickClip)
     plate.kickMarker:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.kickMarker:GetStatusBarTexture():SetAlpha(0)
+    if plate.kickMarker:GetStatusBarTexture().SetSnapToPixelGrid then
+        plate.kickMarker:GetStatusBarTexture():SetSnapToPixelGrid(false)
+        plate.kickMarker:GetStatusBarTexture():SetTexelSnappingBias(0)
+    end
     plate.kickMarker:SetPoint("LEFT", plate.kickPositioner:GetStatusBarTexture(), "RIGHT")
     plate.kickMarker:SetSize(1, 1) -- sized later in UpdateKickTick
     plate.kickMarker:SetFrameLevel(plate.cast:GetFrameLevel() + 2)
@@ -1799,6 +1925,21 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.kickTick:SetPoint("TOP", plate.kickMarker, "TOP", 0, 0)
     plate.kickTick:SetPoint("BOTTOM", plate.kickMarker, "BOTTOM", 0, 0)
     plate.kickTick:SetPoint("LEFT", plate.kickMarker:GetStatusBarTexture(), "RIGHT")
+    -- Interrupt-ready mid-cast fill: colors the cast-bar segment from the
+    -- "kick ready here" point to the cast end (the window during which the
+    -- player's interrupt will be available) when the kick is on cooldown now
+    -- but comes off cooldown before the cast finishes. It rides the SAME
+    -- kickMarker geometry as the tick: the "ready in time" two-secret-duration
+    -- test is resolved purely by where the marker texture edge lands. When the
+    -- kick will NOT be ready in time the fill left/right anchors cross and it
+    -- collapses to zero width, so it self-hides with no Lua branch on a secret.
+    -- It lives on plate.cast at ARTWORK sublevel 1 so it sits above the bar
+    -- fill but below the OVERLAY cast text and below the uninterruptible grey
+    -- overlay (sublevel 2). Anchors are (re)applied per cast in UpdateKickTick.
+    plate.kickReadyFill = plate.cast:CreateTexture(nil, "ARTWORK", nil, 1)
+    plate.kickReadyFill:SetColorTexture(1, 1, 1, 1)
+    plate.kickReadyFill:SetAlpha(0)
+    plate.kickReadyFill:Hide()
     -- Cast bar text: three independent fixed zones
     -- [castName LEFT 50%] [castTarget CENTER-RIGHT 25%] [castTimer RIGHT 15%]
     plate.castName = plate.cast:CreateFontString(nil, "OVERLAY")
@@ -1894,14 +2035,14 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         d.countCarrier:SetAllPoints(d)
         d.countCarrier:SetFrameLevel(d.cd:GetFrameLevel() + 1)
         d.count = d.countCarrier:CreateFontString(nil, "OVERLAY")
-        SetFSFont(d.count, 11, "OUTLINE")
+        SetFSFont(d.count, 11, "OUTLINE, SLUG")
         PP.Point(d.count, "BOTTOMRIGHT", d, "BOTTOMRIGHT", 1, 1)
         d.count:SetJustifyH("RIGHT")
         local cdRegions = { d.cd:GetRegions() }
         for _, region in ipairs(cdRegions) do
             if region:GetObjectType() == "FontString" then
                 d.cd.text = region
-                SetFSFont(region, 11, "OUTLINE")
+                SetFSFont(region, 11, "OUTLINE, SLUG")
                 region:ClearAllPoints()
                 PP.Point(region, "TOPLEFT", d, "TOPLEFT", -3, 4)
                 region:SetJustifyH("LEFT")
@@ -1940,13 +2081,13 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         b.countCarrier:SetAllPoints(b)
         b.countCarrier:SetFrameLevel(b.cd:GetFrameLevel() + 1)
         b.count = b.countCarrier:CreateFontString(nil, "OVERLAY")
-        SetFSFont(b.count, 9, "OUTLINE")
+        SetFSFont(b.count, 9, "OUTLINE, SLUG")
         PP.Point(b.count, "BOTTOMRIGHT", b, "BOTTOMRIGHT", 2, -2)
         local bCdRegions = { b.cd:GetRegions() }
         for _, region in ipairs(bCdRegions) do
             if region:GetObjectType() == "FontString" then
                 b.cd.text = region
-                SetFSFont(region, 12, "OUTLINE")
+                SetFSFont(region, 12, "OUTLINE, SLUG")
                 region:ClearAllPoints()
                 region:SetPoint("CENTER", b, "CENTER", 0, 0)
                 break
@@ -1981,7 +2122,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         for _, region in ipairs(cdRegions) do
             if region:GetObjectType() == "FontString" then
                 c.cd.text = region
-                SetFSFont(region, 12, "OUTLINE")
+                SetFSFont(region, 12, "OUTLINE, SLUG")
                 region:ClearAllPoints()
                 region:SetPoint("CENTER", c, "CENTER", 0, 0)
                 break
@@ -2979,6 +3120,16 @@ local function DarkenColor(r, g, b, factor)
     factor = factor or 0.60
     return r * factor, g * factor, b * factor
 end
+-- Out-of-combat darkening, gated by the "Darken Enemies Out of Combat" option.
+-- When on (default), enemies confirmed in combat (a clean boolean) keep full
+-- colour while out-of-combat / secret states darken; when off, never darkened.
+local function MaybeDarken(r, g, b, inCombat)
+    local on = (p and p.darkenEnemiesOOC)
+    if on == nil then on = defaults.darkenEnemiesOOC end
+    if not on then return r, g, b end
+    if type(inCombat) == "boolean" and inCombat then return r, g, b end
+    return DarkenColor(r, g, b)
+end
 -- Cached threat-context state — updated at zone transitions and spec changes
 local _inThreatContent = false
 local _isTankRole      = false
@@ -3014,6 +3165,11 @@ end
 --  Cached per unit; invalidated on QUEST_LOG_UPDATE and NAME_PLATE_UNIT_REMOVED.
 -------------------------------------------------------------------------------
 local questMobCache = {}
+-- Parallel cache of verified-clean "objectives remaining" strings, keyed by
+-- unit. Populated only when replaceQuestIconWithObjective is ON; shares the
+-- exact invalidation lifecycle as questMobCache. Stored on ns (not a new
+-- file-scope local) because this file is near the Lua 5.1 local cap.
+ns._questObjText = ns._questObjText or {}
 local QUEST_LINE_TYPES
 if Enum and Enum.TooltipDataLineType then
     QUEST_LINE_TYPES = {
@@ -3065,6 +3221,45 @@ local function IsQuestMob(unit)
             end)
             if ok and isIncomplete then
                 questMobCache[unit] = true
+                -- Optional progress extraction for the icon-replace feature.
+                -- Fully gated by the setting: nothing here runs when OFF.
+                -- Isolated in its own pcall so a secret/tainted leftText can
+                -- never disturb the boolean decision above. We never branch on
+                -- the (possibly secret) values; the count ("current/required")
+                -- or percentage string escapes only if it is clean (issecretvalue
+                -- + a strict digit pattern, both inside the pcall); otherwise
+                -- nothing is cached and the icon is used.
+                if p and p.replaceQuestIconWithObjective == true then
+                    local okN, rem = pcall(function()
+                        local txt = line.leftText or ""
+                        local c1, c2 = txt:match("(%d+)/(%d+)")
+                        if c1 and c2 and c1 ~= c2 then
+                            local s = c1 .. "/" .. c2
+                            if (not issecretvalue or not issecretvalue(s))
+                               and s:match("^%d+/%d+$") then
+                                return s
+                            end
+                        end
+                        -- Percent-based objective (e.g. "50%") has no
+                        -- current/required pair; show the percentage itself.
+                        -- Same clean-value gate as the count path: the string
+                        -- escapes only when verifiably non-secret.
+                        local pct = txt:match("(%d+)%%")
+                        if pct and pct ~= "100" then
+                            local s = pct .. "%"
+                            if (not issecretvalue or not issecretvalue(s))
+                               and s:match("^%d+%%$") then
+                                return s
+                            end
+                        end
+                        return nil
+                    end)
+                    if okN and type(rem) == "string" then
+                        ns._questObjText[unit] = rem
+                    else
+                        ns._questObjText[unit] = nil
+                    end
+                end
                 return true
             end
         end
@@ -3074,6 +3269,24 @@ local function IsQuestMob(unit)
 end
 ns.IsQuestMob = IsQuestMob
 
+-- Thin reader for the icon-replace feature. Returns a clean digit string or nil.
+function ns.GetQuestObjectiveText(unit)
+    return ns._questObjText[unit]
+end
+
+-- Live refresh for the options toggle. Wiping BOTH caches is required because
+-- IsQuestMob short-circuits on questMobCache[unit] ~= nil; a unit cached while
+-- the setting was OFF would never get its objective text extracted otherwise.
+function ns.RefreshQuestObjective()
+    wipe(questMobCache)
+    wipe(ns._questObjText)
+    for _, plate in pairs(ns.plates) do
+        if plate.UpdateClassification then
+            plate:UpdateClassification()
+        end
+    end
+end
+
 -- Invalidate quest cache on quest log changes (throttled to avoid
 -- recoloring all plates on every QUEST_LOG_UPDATE burst).
 local questCacheWatcher = CreateFrame("Frame")
@@ -3081,6 +3294,7 @@ questCacheWatcher:RegisterEvent("QUEST_LOG_UPDATE")
 ns._questDirty = false
 questCacheWatcher:SetScript("OnEvent", function()
     wipe(questMobCache)
+    wipe(ns._questObjText)
     if not ns._questDirty then
         ns._questDirty = true
         C_Timer.After(0.5, function()
@@ -3211,22 +3425,14 @@ local function GetReactionColor(unit)
         local plvlClean = playerLevel and not (issecretvalue and issecretvalue(playerLevel))
         if lvlClean and (level == -1 or (plvlClean and level >= playerLevel + 1)) then
             local c = _C("miniboss")
-            if type(inCombat) == "boolean" and inCombat then
-                return c.r, c.g, c.b
-            else
-                return DarkenColor(c.r, c.g, c.b)
-            end
+            return MaybeDarken(c.r, c.g, c.b, inCombat)
         end
     end
     -- 8. Caster
     local unitClass = UnitClassBase and UnitClassBase(unit)
     if unitClass == "PALADIN" then
         local c = _C("caster")
-        if type(inCombat) == "boolean" and inCombat then
-            return c.r, c.g, c.b
-        else
-            return DarkenColor(c.r, c.g, c.b)
-        end
+        return MaybeDarken(c.r, c.g, c.b, inCombat)
     end
     -- 9. Tank has aggro (if enabled) below focus/caster/miniboss
     if isThreatUnit and _isTankRole and threatStatus >= 3 then
@@ -3239,10 +3445,7 @@ local function GetReactionColor(unit)
     end
     -- 10. Fallback: enemy in combat / out of combat
     local eic = _C("enemyInCombat")
-    if type(inCombat) == "boolean" and inCombat then
-        return eic.r, eic.g, eic.b
-    end
-    return DarkenColor(eic.r, eic.g, eic.b)
+    return MaybeDarken(eic.r, eic.g, eic.b, inCombat)
 end
 local hookedUFs = {}
 local hookedHighlights = {}
@@ -3549,18 +3752,14 @@ ns._npAppearanceGen = ns._npAppearanceGen or 1
 function NameplateFrame:ApplyAppearance()
     self:SetSize(1, 1)
     local castH = GetCastBarHeight()
-    local gap = GetAuraSpacing()
     self.health:ClearAllPoints()
     self.health:SetPoint("CENTER", self, "CENTER", 0, GetNameplateYOffset())
     self.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     self.absorb:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     ns.LayoutCastBar(self, ns.GetHealthBarWidth(), castH)
-    self.castIconFrame:SetSize(castH, castH)
-    self.castIconFrame:ClearAllPoints()
-    self.castIconFrame:SetPoint("TOPRIGHT", self.cast, "TOPLEFT", 0, 0)
+    ns.LayoutCastIcon(self, castH)
     local showIcon = GetShowCastIcon()
     if showIcon then
-        self.castIconFrame:SetScale(GetCastIconScale())
         self.castIconFrame:Show()
     else
         self.castIconFrame:Hide()
@@ -3614,8 +3813,13 @@ function NameplateFrame:ApplyAppearance()
     -- Aura duration/stack text settings (unified across debuffs, buffs, CCs)
     local auraDurSize = (p and p.auraDurationTextSize) or defaults.auraDurationTextSize
     local auraDurColor = (p and p.auraDurationTextColor) or defaults.auraDurationTextColor
+    local auraDurX = (p and p.auraDurationTextX) or defaults.auraDurationTextX
+    local auraDurY = (p and p.auraDurationTextY) or defaults.auraDurationTextY
     local auraStackSize = (p and p.auraStackTextSize) or defaults.auraStackTextSize
     local auraStackColor = (p and p.auraStackTextColor) or defaults.auraStackTextColor
+    local auraStackX = (p and p.auraStackTextX) or defaults.auraStackTextX
+    local auraStackY = (p and p.auraStackTextY) or defaults.auraStackTextY
+    local auraStackPos = (p and p.auraStackTextPosition) or defaults.auraStackTextPosition
     local debuffTPos = (p and p.debuffTimerPosition) or (p and p.auraTextPosition) or defaults.debuffTimerPosition
     local buffTPos   = (p and p.buffTimerPosition)   or (p and p.auraTextPosition) or defaults.buffTimerPosition
     local ccTPos     = (p and p.ccTimerPosition)     or (p and p.auraTextPosition) or defaults.ccTimerPosition
@@ -3630,29 +3834,60 @@ function NameplateFrame:ApplyAppearance()
         if cd and cd.SetHideCountdownNumbers then
             cd:SetHideCountdownNumbers(false)
         end
-        SetFSFont(durText, auraDurSize, "OUTLINE")
+        SetFSFont(durText, auraDurSize, "OUTLINE, SLUG")
         durText:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
         durText:ClearAllPoints()
         if pos == "center" then
-            durText:SetPoint("CENTER", auraFrame, "CENTER", 0, 0)
+            durText:SetPoint("CENTER", auraFrame, "CENTER", auraDurX, auraDurY)
             durText:SetJustifyH("CENTER")
         elseif pos == "topright" then
-            PP.Point(durText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3, 4)
+            PP.Point(durText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3 + auraDurX, 4 + auraDurY)
+            durText:SetJustifyH("RIGHT")
+        elseif pos == "bottomleft" then
+            PP.Point(durText, "BOTTOMLEFT", auraFrame, "BOTTOMLEFT", -3 + auraDurX, -4 + auraDurY)
+            durText:SetJustifyH("LEFT")
+        elseif pos == "bottomright" then
+            PP.Point(durText, "BOTTOMRIGHT", auraFrame, "BOTTOMRIGHT", 3 + auraDurX, -4 + auraDurY)
             durText:SetJustifyH("RIGHT")
         else
-            PP.Point(durText, "TOPLEFT", auraFrame, "TOPLEFT", -3, 4)
+            PP.Point(durText, "TOPLEFT", auraFrame, "TOPLEFT", -3 + auraDurX, 4 + auraDurY)
             durText:SetJustifyH("LEFT")
+        end
+    end
+    local function ApplyStackPosition(countText, auraFrame, pos)
+        if pos == "none" then
+            countText:Hide()
+            return
+        end
+        countText:Show()
+        countText:ClearAllPoints()
+        if pos == "center" then
+            countText:SetPoint("CENTER", auraFrame, "CENTER", auraStackX, auraStackY)
+            countText:SetJustifyH("CENTER")
+        elseif pos == "topright" then
+            PP.Point(countText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3 + auraStackX, 4 + auraStackY)
+            countText:SetJustifyH("RIGHT")
+        elseif pos == "bottomleft" then
+            PP.Point(countText, "BOTTOMLEFT", auraFrame, "BOTTOMLEFT", -3 + auraStackX, -4 + auraStackY)
+            countText:SetJustifyH("LEFT")
+        elseif pos == "topleft" then
+            PP.Point(countText, "TOPLEFT", auraFrame, "TOPLEFT", -3 + auraStackX, 4 + auraStackY)
+            countText:SetJustifyH("LEFT")
+        else
+            PP.Point(countText, "BOTTOMRIGHT", auraFrame, "BOTTOMRIGHT", 3 + auraStackX, -4 + auraStackY)
+            countText:SetJustifyH("RIGHT")
         end
     end
     for i = 1, #self.debuffs do
         if self.debuffs[i] and self.debuffs[i].cd and self.debuffs[i].cd.text then
-            SetFSFont(self.debuffs[i].cd.text, auraDurSize, "OUTLINE")
+            SetFSFont(self.debuffs[i].cd.text, auraDurSize, "OUTLINE, SLUG")
             self.debuffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
             ApplyTimerPosition(self.debuffs[i].cd.text, self.debuffs[i], debuffTPos)
         end
         if self.debuffs[i] and self.debuffs[i].count then
-            SetFSFont(self.debuffs[i].count, auraStackSize, "OUTLINE")
+            SetFSFont(self.debuffs[i].count, auraStackSize, "OUTLINE, SLUG")
             self.debuffs[i].count:SetTextColor(auraStackColor.r, auraStackColor.g, auraStackColor.b, 1)
+            ApplyStackPosition(self.debuffs[i].count, self.debuffs[i], auraStackPos)
         end
     end
     local debuffSz = GetDebuffIconSize()
@@ -3665,25 +3900,26 @@ function NameplateFrame:ApplyAppearance()
     for i = 1, 4 do
         PP.Size(self.buffs[i], buffSz, buffSz)
         if self.buffs[i].cd and self.buffs[i].cd.text then
-            SetFSFont(self.buffs[i].cd.text, auraDurSize, "OUTLINE")
+            SetFSFont(self.buffs[i].cd.text, auraDurSize, "OUTLINE, SLUG")
             self.buffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
             ApplyTimerPosition(self.buffs[i].cd.text, self.buffs[i], buffTPos)
         end
         if self.buffs[i].count then
-            SetFSFont(self.buffs[i].count, auraStackSize, "OUTLINE")
+            SetFSFont(self.buffs[i].count, auraStackSize, "OUTLINE, SLUG")
             self.buffs[i].count:SetTextColor(auraStackColor.r, auraStackColor.g, auraStackColor.b, 1)
+            ApplyStackPosition(self.buffs[i].count, self.buffs[i], auraStackPos)
         end
     end
-    PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffSz, gap, GetAuraSlotOffsets("buffSlot"))
+    PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffSz, GetAuraSpacing("buffs"), GetAuraSlotOffsets("buffSlot"))
     for i = 1, 2 do
         PP.Size(self.cc[i], ccSz, ccSz)
         if self.cc[i].cd and self.cc[i].cd.text then
-            SetFSFont(self.cc[i].cd.text, auraDurSize, "OUTLINE")
+            SetFSFont(self.cc[i].cd.text, auraDurSize, "OUTLINE, SLUG")
             self.cc[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
             ApplyTimerPosition(self.cc[i].cd.text, self.cc[i], ccTPos)
         end
     end
-    PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, gap, GetAuraSlotOffsets("ccSlot"))
+    PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, GetAuraSpacing("ccs"), GetAuraSlotOffsets("ccSlot"))
     if self.absorbForward then
         self.absorbForward:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     end
@@ -3733,6 +3969,7 @@ function NameplateFrame:ApplyHealthTextAppearance()
             if not ca[ci] then ca[ci] = {} end
             ca[ci].element = element
             ca[ci].fs = fs
+            ca[ci].slotKey = slot.key
         elseif element == "healthNumber" then
             local fs = self.hpNumber
             fs:SetParent(self.healthTextFrame)
@@ -3750,6 +3987,7 @@ function NameplateFrame:ApplyHealthTextAppearance()
             if not ca[ci] then ca[ci] = {} end
             ca[ci].element = element
             ca[ci].fs = fs
+            ca[ci].slotKey = slot.key
         elseif element == "healthPctNum" or element == "healthNumPct" then
             local fs = self.hpText
             fs:SetParent(self.healthTextFrame)
@@ -3767,6 +4005,7 @@ function NameplateFrame:ApplyHealthTextAppearance()
             if not ca[ci] then ca[ci] = {} end
             ca[ci].element = element
             ca[ci].fs = fs
+            ca[ci].slotKey = slot.key
         end
     end
 
@@ -3796,8 +4035,26 @@ function NameplateFrame:ApplyHealthTextAppearance()
         if not ca[ci] then ca[ci] = {} end
         ca[ci].element = topElement
         ca[ci].fs = fs
+        ca[ci].slotKey = "textSlotTop"
     end
     ca._count = ci
+    -- Per-slot health % decimal preference. Resolved here (appearance pass,
+    -- rare) and cached on each entry + an _anyDecimal flag so the per-tick
+    -- render in UpdateHealthValues stays lean.
+    local anyDec = false
+    for i = 1, ci do
+        local e = ca[i]
+        local el = e.element
+        if el == "healthPercent" or el == "healthPercentNoSign"
+           or el == "healthPctNum" or el == "healthNumPct" then
+            local dec = (p and e.slotKey and p[e.slotKey .. "PctDecimal"]) and true or false
+            e.pctDecimal = dec
+            if dec then anyDec = true end
+        else
+            e.pctDecimal = false
+        end
+    end
+    ca._anyDecimal = anyDec
 end
 
 function NameplateFrame:SetUnit(unit, nameplate)
@@ -3856,7 +4113,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
                 if pct ~= 100 then
                     local castH = math.floor(GetCastBarHeight() * pct / 100 + 0.5)
                     ns.LayoutCastBar(self, ns.GetHealthBarWidth(), castH)
-                    self.castIconFrame:SetSize(castH, castH)
+                    ns.LayoutCastIcon(self, castH)
                     self.castSpark:SetHeight(castH)
                     self.kickMarker:SetSize(GetHealthBarWidth(), castH)
                 end
@@ -3982,6 +4239,7 @@ function NameplateFrame:ClearUnit()
     self._castFallback = nil
     _fallbackPlates[self] = nil
     self._kickProtected = nil
+    self._castImportant = false
     self:HideKickTick()
     if self._interruptTimer then
         self._interruptTimer:Cancel()
@@ -3992,6 +4250,7 @@ function NameplateFrame:ClearUnit()
     self.highlight:Hide()
     self.raidFrame:Hide()
     self.classFrame:Hide()
+    if self.classText then self.classText:Hide() end
     if self.leftArrow then self.leftArrow:Hide() end
     if self.rightArrow then self.rightArrow:Hide() end
     HideClassPowerOnPlate(self)
@@ -4177,32 +4436,41 @@ function NameplateFrame:UpdateHealthValues()
     local ca = self._cachedHealthSlots
     if ca and ca._count > 0 then
         local pctText, pctNoSignText, numText
+        local pctTextDec, pctNoSignTextDec
+        local anyDec = ca._anyDecimal
         if UnitIsDeadOrGhost(unit) then
             pctText = "0%"
             pctNoSignText = "0"
             numText = "0"
+            if anyDec then pctTextDec = "0.0%"; pctNoSignTextDec = "0.0" end
         elseif UnitHealthPercent then
             local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
             pctText = string.format("%d%%", pctVal)
             pctNoSignText = string.format("%d", pctVal)
             numText = AbbreviateNumbers(UnitHealth(unit))
+            -- Decimal variants computed only when at least one slot opts in.
+            if anyDec then
+                pctTextDec = string.format("%.1f%%", pctVal)
+                pctNoSignTextDec = string.format("%.1f", pctVal)
+            end
         else
             pctText = ""
             pctNoSignText = ""
             numText = ""
+            if anyDec then pctTextDec = ""; pctNoSignTextDec = "" end
         end
         for si = 1, ca._count do
             local entry = ca[si]
             local el = entry.element
             local fs = entry.fs
             if el == "healthPercent" then
-                fs:SetText(pctText)
+                fs:SetText(entry.pctDecimal and pctTextDec or pctText)
             elseif el == "healthPercentNoSign" then
-                fs:SetText(pctNoSignText)
+                fs:SetText(entry.pctDecimal and pctNoSignTextDec or pctNoSignText)
             elseif el == "healthNumber" then
                 fs:SetText(numText)
             elseif el == "healthPctNum" or el == "healthNumPct" then
-                SetCombinedHealthText(fs, el, pctText, numText)
+                SetCombinedHealthText(fs, el, entry.pctDecimal and pctTextDec or pctText, numText)
             end
         end
     end
@@ -4318,10 +4586,37 @@ function NameplateFrame:UpdateClassification()
         self:UpdateNameWidth()
         return
     end
-    -- Quest mob indicator takes priority over elite/rare
+    -- Quest mob indicator takes priority over elite/rare.
+    -- When "Replace Quest Icon with Objective" is enabled and a clean remaining
+    -- count was cached for this unit, draw that number in place of the crosshair
+    -- icon; otherwise fall back to the existing icon untouched.
     if ns.IsQuestMob and ns.IsQuestMob(self.unit) then
-        self.class:SetAtlas("Crosshair_Quest_64")
+        local objText = (p and p.replaceQuestIconWithObjective == true)
+            and ns.GetQuestObjectiveText and ns.GetQuestObjectiveText(self.unit) or nil
+        if objText then
+            -- classFrame and classText are our own frames, custom keys are safe.
+            self.class:Hide()
+            if not self.classText then
+                self.classText = self.classFrame:CreateFontString(nil, "OVERLAY")
+                self.classText:SetPoint("CENTER", self.classFrame, "CENTER", 0, 0)
+                self.classText:SetJustifyH("CENTER")
+                self.classText:SetJustifyV("MIDDLE")
+            end
+            local fsz = (p and p.questObjectiveTextSize) or defaults.questObjectiveTextSize
+            SetFSFont(self.classText, fsz, GetNPOutline())
+            -- SetFormattedText("%s", ...) is the secret-safe text path; the value
+            -- was already verified clean (issecretvalue + ^%d+/%d+$) before caching.
+            self.classText:SetFormattedText("%s", objText)
+            self.classText:Show()
+        else
+            -- No clean count (quest-giver / percent / secret value) -> icon.
+            if self.classText then self.classText:Hide() end
+            self.class:Show()
+            self.class:SetAtlas("Crosshair_Quest_64")
+        end
     else
+        if self.classText then self.classText:Hide() end
+        self.class:Show()
         local c = UnitClassification(self.unit)
         if c == "elite" or c == "worldboss" then
             self.class:SetAtlas("nameplates-icon-elite-gold")
@@ -4346,12 +4641,16 @@ function NameplateFrame:UpdateClassification()
             cxOff, debuffY + cpPush + cyOff)
     elseif slot == "left" then
         local sideOff = GetSideAuraXOffset()
+        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconPush = (iconSide == "left") and iconRes or 0
         PP.Point(self.classFrame, "RIGHT", self.health, "LEFT",
-            -sideOff + cxOff, cyOff)
+            -sideOff - iconPush + cxOff, cyOff)
     elseif slot == "right" then
         local sideOff = GetSideAuraXOffset()
+        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconPush = (iconSide == "right") and iconRes or 0
         PP.Point(self.classFrame, "LEFT", self.health, "RIGHT",
-            sideOff + cxOff, cyOff)
+            sideOff + iconPush + cxOff, cyOff)
     elseif slot == "topleft" then
         PP.Point(self.classFrame, "BOTTOMLEFT", self.health, "TOPLEFT", -2 + cxOff, 2 + cpPush + cyOff)
     elseif slot == "topright" then
@@ -4463,16 +4762,23 @@ function NameplateFrame:UpdateRaidIcon()
             rxOff, debuffY + cpPush + ryOff)
     elseif pos == "left" then
         local sideOff = GetSideAuraXOffset()
+        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconPush = (iconSide == "left") and iconRes or 0
         PP.Point(self.raidFrame, "RIGHT", self.health, "LEFT",
-            -sideOff + rxOff, ryOff)
+            -sideOff - iconPush + rxOff, ryOff)
     elseif pos == "right" then
         local sideOff = GetSideAuraXOffset()
+        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconPush = (iconSide == "right") and iconRes or 0
         PP.Point(self.raidFrame, "LEFT", self.health, "RIGHT",
-            sideOff + rxOff, ryOff)
+            sideOff + iconPush + rxOff, ryOff)
     elseif pos == "topleft" then
         PP.Point(self.raidFrame, "BOTTOMLEFT", self.health, "TOPLEFT", -2 + rxOff, cpPush + ryOff)
     elseif pos == "topright" then
         PP.Point(self.raidFrame, "BOTTOMRIGHT", self.health, "TOPRIGHT", 2 + rxOff, cpPush + ryOff)
+    elseif pos == "bottom" then
+        -- Below the cast bar, centered (matches PositionAuraSlot "bottom" convention).
+        PP.Point(self.raidFrame, "TOP", self.cast, "BOTTOM", rxOff, -2 + ryOff)
     end
     self.raidFrame:Show()
     self:UpdateNameWidth()
@@ -4917,7 +5223,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
         end
         self._prevDebuffCount = debuffCount
         if debuffCount > 0 then
-            local spacing = GetAuraSpacing()
+            local spacing = GetAuraSpacing("debuffs")
             local debuffSz = GetDebuffIconSize()
             for i = 1, debuffCount do
                 PP.Size(self.debuffs[i], debuffSz, debuffSz)
@@ -5043,7 +5349,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
         self._prevBuffCount = buffCount
         -- Reposition buffs based on actual shown count
         if buffSlotVal ~= "none" and buffCount > 0 then
-            local spacing = GetAuraSpacing()
+            local spacing = GetAuraSpacing("buffs")
             local buffSz = GetBuffIconSize()
             for i = 1, buffCount do
                 PP.Size(self.buffs[i], buffSz, buffSz)
@@ -5134,7 +5440,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
         self._prevCCCount = ccShown
         -- Reposition CC based on actual shown count
         if ccSlotVal ~= "none" and ccShown > 0 then
-            local spacing = GetAuraSpacing()
+            local spacing = GetAuraSpacing("ccs")
             local ccSz = GetCCIconSize()
             for i = 1, ccShown do
                 PP.Size(self.cc[i], ccSz, ccSz)
@@ -5337,6 +5643,16 @@ function NameplateFrame:UpdateCast()
             kickProtected = false
         end
         self._kickProtected = kickProtected
+        -- Cache whether this cast is "important" (the game's flag) for the cast
+        -- bar colour. May be SECRET, so it is stored raw and only ever fed to a
+        -- boolean-curve evaluator (never branched on). pcall mirrors the glow
+        -- path (the spellID can be 0/invalid). Persists across interruptible
+        -- flips and the kick-cooldown ticker, which both reuse it via ApplyCastColor.
+        self._castImportant = false
+        if C_Spell and C_Spell.IsSpellImportant then
+            local impOK, imp = pcall(C_Spell.IsSpellImportant, castSpellID or 0)
+            if impOK then self._castImportant = imp end
+        end
         local cfg = p or defaults
         local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
         self.castBarOverlay:SetVertexColor(unintColor.r, unintColor.g, unintColor.b)
@@ -5424,27 +5740,66 @@ function NameplateFrame:ApplyCastColor(uninterruptible)
     local cfg = p or defaults
     local kickReadyTint = cfg.interruptReady or defaults.interruptReady
     local normalCastTint = cfg.castBar or defaults.castBar
+    -- Important Cast Color (opt-in): when enabled, a cast the game flags as
+    -- important shows the Important colour in place of the Interruptible colour.
+    -- The importance flag may be a SECRET boolean, so blend per channel via
+    -- EvaluateColorValueFromBoolean (ifTrue = Important, ifFalse = Interruptible)
+    -- instead of branching on it. Interrupt-on-CD still wins: ComputeCastBarTint
+    -- layers the kick-ready tint on top of whatever base tint we hand it, so an
+    -- interrupt on cooldown overrides the Important colour exactly as it overrides
+    -- the Interruptible colour. Uninterruptible casts keep their look because the
+    -- uninterruptible overlay draws over this fill regardless.
+    local importantOn = cfg.importantCastColorEnabled
+    if importantOn == nil then importantOn = defaults.importantCastColorEnabled end
+    if importantOn and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+        local imp = cfg.castBarImportant or defaults.castBarImportant
+        local isImp = self._castImportant
+        if type(isImp) == "nil" then isImp = false end
+        local ev = C_CurveUtil.EvaluateColorValueFromBoolean
+        normalCastTint = {
+            r = ev(isImp, imp.r, normalCastTint.r),
+            g = ev(isImp, imp.g, normalCastTint.g),
+            b = ev(isImp, imp.b, normalCastTint.b),
+        }
+    end
     local cr, cg, cb = ComputeCastBarTint(kickReadyTint, normalCastTint)
     self.cast:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
+    -- Shield icon is opt-out: when disabled, it never shows, even on
+    -- uninterruptible casts. The setting is a clean boolean, so it gates the
+    -- (possibly SECRET) uninterruptible flag without ever evaluating it.
+    local showShield = true
+    if cfg.castBarShieldEnabled ~= nil then showShield = cfg.castBarShieldEnabled end
     if self.castBarOverlay.SetAlphaFromBoolean then
         self.castBarOverlay:SetAlphaFromBoolean(uninterruptible)
-        self.castShieldFrame:SetAlphaFromBoolean(uninterruptible)
+        if showShield then
+            self.castShieldFrame:SetAlphaFromBoolean(uninterruptible)
+        else
+            self.castShieldFrame:SetAlpha(0)
+        end
     else
         local a = uninterruptible and 1 or 0
         self.castBarOverlay:SetAlpha(a)
-        self.castShieldFrame:SetAlpha(a)
+        self.castShieldFrame:SetAlpha(showShield and a or 0)
     end
 end
 function NameplateFrame:HideKickTick()
     self.kickPositioner:Hide()
     self.kickMarker:Hide()
+    self.kickReadyFill:Hide()
     if self._kickTicker then
         self._kickTicker:Cancel()
         self._kickTicker = nil
     end
 end
 function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
-    if not GetKickTickEnabled() or not GetActiveKickSpell() then
+    -- Two independent CLEAN toggles drive this geometry: the visible tick
+    -- (kickTickEnabled) and the interrupt-ready mid-cast fill
+    -- (interruptMidCastEnabled). Either one needs the positioner/marker
+    -- StatusBars built below; each visible element is gated on its own toggle.
+    local tickOn = GetKickTickEnabled()
+    local midOn = defaults.interruptMidCastEnabled
+    if p and p.interruptMidCastEnabled ~= nil then midOn = p.interruptMidCastEnabled end
+    if (not (tickOn or midOn)) or not GetActiveKickSpell() then
         self:HideKickTick()
         return
     end
@@ -5505,24 +5860,67 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
         if isChannel and not isEmpowered then
             self.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
             self.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Reverse)
+            -- LOAD-BEARING: SetFillStyle puts the inner fill back in the default
+            -- snap-ON state and the global SetStatusBarTexture unsnap hook will
+            -- NOT re-fire (it caches per StatusBar frame). Re-disable snap on the
+            -- current fill texture so positioner(elapsed) + marker(CD remaining)
+            -- stays an exact float and the tick does not dance on each re-pin.
+            local pt = self.kickPositioner:GetStatusBarTexture()
+            if pt and pt.SetSnapToPixelGrid then pt:SetSnapToPixelGrid(false); pt:SetTexelSnappingBias(0) end
+            local mt = self.kickMarker:GetStatusBarTexture()
+            if mt and mt.SetSnapToPixelGrid then mt:SetSnapToPixelGrid(false); mt:SetTexelSnappingBias(0) end
             self.kickMarker:ClearAllPoints()
             self.kickTick:ClearAllPoints()
             self.kickMarker:SetPoint("RIGHT", self.kickPositioner:GetStatusBarTexture(), "LEFT")
             self.kickTick:SetPoint("TOP", self.kickMarker, "TOP", 0, 0)
             self.kickTick:SetPoint("BOTTOM", self.kickMarker, "BOTTOM", 0, 0)
             self.kickTick:SetPoint("RIGHT", self.kickMarker:GetStatusBarTexture(), "LEFT")
+            -- Reverse fill (draining channel): the kick-ready point is the
+            -- marker texture LEFT edge; the "kick available" window runs from
+            -- the channel end (bar left) to that point. Not-in-time pushes the
+            -- marker edge past the left edge, crossing the anchors to zero width.
+            self.kickReadyFill:ClearAllPoints()
+            self.kickReadyFill:SetPoint("TOP", self.cast, "TOP", 0, 0)
+            self.kickReadyFill:SetPoint("BOTTOM", self.cast, "BOTTOM", 0, 0)
+            self.kickReadyFill:SetPoint("LEFT", self.cast, "LEFT", 0, 0)
+            self.kickReadyFill:SetPoint("RIGHT", self.kickMarker:GetStatusBarTexture(), "LEFT")
         else
             self.kickPositioner:SetFillStyle(Enum.StatusBarFillStyle.Standard)
             self.kickMarker:SetFillStyle(Enum.StatusBarFillStyle.Standard)
+            -- LOAD-BEARING: re-disable snap on the re-minted fill textures (see
+            -- the reverse branch) so the summed elapsed+remaining edge is exact
+            -- and the tick is stationary across every re-pin.
+            local pt = self.kickPositioner:GetStatusBarTexture()
+            if pt and pt.SetSnapToPixelGrid then pt:SetSnapToPixelGrid(false); pt:SetTexelSnappingBias(0) end
+            local mt = self.kickMarker:GetStatusBarTexture()
+            if mt and mt.SetSnapToPixelGrid then mt:SetSnapToPixelGrid(false); mt:SetTexelSnappingBias(0) end
             self.kickMarker:ClearAllPoints()
             self.kickTick:ClearAllPoints()
             self.kickMarker:SetPoint("LEFT", self.kickPositioner:GetStatusBarTexture(), "RIGHT")
             self.kickTick:SetPoint("TOP", self.kickMarker, "TOP", 0, 0)
             self.kickTick:SetPoint("BOTTOM", self.kickMarker, "BOTTOM", 0, 0)
             self.kickTick:SetPoint("LEFT", self.kickMarker:GetStatusBarTexture(), "RIGHT")
+            -- Standard fill (cast / empowered channel): the kick-ready point is
+            -- the marker texture RIGHT edge; the "kick available" window runs
+            -- from it to the cast end (bar right). Not-in-time pushes the marker
+            -- edge past the right edge, crossing the anchors to zero width.
+            self.kickReadyFill:ClearAllPoints()
+            self.kickReadyFill:SetPoint("TOP", self.cast, "TOP", 0, 0)
+            self.kickReadyFill:SetPoint("BOTTOM", self.cast, "BOTTOM", 0, 0)
+            self.kickReadyFill:SetPoint("LEFT", self.kickMarker:GetStatusBarTexture(), "RIGHT")
+            self.kickReadyFill:SetPoint("RIGHT", self.cast, "RIGHT", 0, 0)
         end
         self.kickPositioner:Show()
         self.kickMarker:Show()
+        -- Mid-cast fill: CLEAN DB color tint + CLEAN per-toggle visibility.
+        -- Its alpha (the SECRET on-CD x interruptible gate) is applied with the
+        -- tick alpha below. Geometry above runs whenever the tick OR the fill is
+        -- enabled; SetShown gates each element to its own toggle so one feature
+        -- never forces the other to appear.
+        local mc = (p and p.interruptMidCastColor) or defaults.interruptMidCastColor
+        self.kickReadyFill:SetVertexColor(mc.r, mc.g, mc.b, 1)
+        self.kickTick:SetShown(tickOn)
+        self.kickReadyFill:SetShown(midOn)
         -- Compute initial tick alpha immediately (avoids split-second delay
         -- from waiting for the first ticker fire at 0.1s).
         if interruptCD.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
@@ -5530,8 +5928,10 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
             local kickReady = interruptCD:IsZero()
             local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(kickReady, 0, interruptible)
             self.kickTick:SetAlpha(alpha)
+            self.kickReadyFill:SetAlpha(alpha)
         else
             self.kickTick:SetAlpha(0)
+            self.kickReadyFill:SetAlpha(0)
         end
         -- Ticker: tick ALPHA only at 10fps (kick-ready x interruptibility
         -- secret combine). Bar values are re-pinned as a PAIR by
@@ -5566,6 +5966,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel, isEmpowered)
                 local kickReady = icd:IsZero()
                 local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(kickReady, 0, interruptible)
                 self.kickTick:SetAlpha(alpha)
+                self.kickReadyFill:SetAlpha(alpha)
             end
         end)
         self._kickTicker = myTicker
@@ -5584,13 +5985,17 @@ end
 -- setup (reference implementations either snapshot both once or, like
 -- the pre-diet watcher here, always re-pin both together).
 function NameplateFrame:RefreshKickTick()
-    if not activeKickSpell or not (C_Spell and C_Spell.GetSpellCooldownDuration) then
+    if not GetActiveKickSpell() or not (C_Spell and C_Spell.GetSpellCooldownDuration) then
         self:HideKickTick()
         return
     end
-    local icd = C_Spell.GetSpellCooldownDuration(activeKickSpell)
+    local icd = C_Spell.GetSpellCooldownDuration(GetActiveKickSpell())
     if not icd then
-        self:HideKickTick()
+        -- Transient read miss during an ongoing cast: skip this refresh and
+        -- keep the current tick/fill rather than hiding. Hiding here (and
+        -- re-showing on the next SPELL_UPDATE_COOLDOWN) is what made the tick
+        -- and the kick-ready bar blink during the player's rotation. Genuine
+        -- cast-end is handled by the cast-stop/interrupt paths, not here.
         return
     end
     if UnitCastingDuration and self.unit then
@@ -5606,7 +6011,7 @@ function NameplateFrame:RefreshKickTick()
             castDuration = UnitCastingDuration(self.unit)
         end
         if not castDuration then
-            self:HideKickTick()
+            -- Transient read miss (see above): skip, do not hide.
             return
         end
         self.kickPositioner:SetValue(castDuration:GetElapsedDuration())
@@ -5616,6 +6021,7 @@ function NameplateFrame:RefreshKickTick()
         local interruptible = C_CurveUtil.EvaluateColorValueFromBoolean(self._kickProtected, 0, 1)
         local alpha = C_CurveUtil.EvaluateColorValueFromBoolean(icd:IsZero(), 0, interruptible)
         self.kickTick:SetAlpha(alpha)
+        self.kickReadyFill:SetAlpha(alpha)
     end
 end
 function NameplateFrame:ShowInterrupted(interrupterGUID)
@@ -5632,11 +6038,21 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     self:HideKickTick()
     self:ApplyScale()
 
+    -- If the interrupted flash effect is disabled, end the cast like a normal
+    -- stop (hide the bar) without the flash + held "Interrupted" text.
+    local flashOn = defaults.interruptedFlashEnabled
+    if p and p.interruptedFlashEnabled ~= nil then flashOn = p.interruptedFlashEnabled end
+    if not flashOn then
+        self.cast:Hide()
+        return
+    end
+
     self._interrupted = true
     self.cast:SetReverseFill(false)
     self.cast:SetMinMaxValues(0, 1)
     self.cast:SetValue(1)
-    self.cast:GetStatusBarTexture():SetVertexColor(0.8, 0.0, 0.0)
+    local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
+    self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
     self.castName:SetText("Interrupted")
 
     -- Show interrupter name (class-colored) in cast target position
@@ -6108,6 +6524,7 @@ local function RefreshThreatContextAndPlateColors()
     -- Unit tokens are recycled across zone/instance transitions; clear any
     -- stale quest-mob decisions that were made under a different context.
     wipe(questMobCache)
+    wipe(ns._questObjText)
     for _, plate in pairs(ns.plates) do
         plate:UpdateHealthColor()
     end
@@ -6261,6 +6678,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
         end
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         questMobCache[unit] = nil
+        ns._questObjText[unit] = nil
         -- Restore Blizzard UnitFrame elements so the recycled nameplate is clean
         local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
         if nameplate then
@@ -6349,7 +6767,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
                     castH = math.floor(castH * focusPct / 100 + 0.5)
                 end
                 ns.LayoutCastBar(plate, ns.GetHealthBarWidth(), castH)
-                plate.castIconFrame:SetSize(castH, castH)
+                ns.LayoutCastIcon(plate, castH)
                 plate.castSpark:SetHeight(castH)
                 plate.kickMarker:SetHeight(castH)
             end
@@ -6485,6 +6903,7 @@ do
         "showCastTimer", "castTimerSize", "castTimerColor", "targetScale",
         "debuffSlot", "buffSlot", "ccSlot",
         "debuffYOffset", "sideAuraXOffset", "auraSpacing",
+        "debuffSpacing", "buffSpacing", "ccSpacing",
         "debuffTimerPosition", "buffTimerPosition", "ccTimerPosition",
         "auraDurationTextSize", "auraDurationTextColor",
     }

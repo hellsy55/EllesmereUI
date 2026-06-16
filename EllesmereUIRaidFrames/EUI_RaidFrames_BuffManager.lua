@@ -799,7 +799,7 @@ function ns.BM_CreateIndicators(button, health, d, PP)
             f._bdr = bdr
         end
 
-        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
 
         -- Carrier frame above cooldown swipe AND border for text elements
         local textCarrier = CreateFrame("Frame", nil, f)
@@ -809,13 +809,13 @@ function ns.BM_CreateIndicators(button, health, d, PP)
 
         local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1, -1)
-        countFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
+        EllesmereUI.ApplyIconTextFont(countFS, fontPath, 8, "raidFrames")
         countFS:SetTextColor(1, 1, 1)
         f._count = countFS
 
         local durFS = textCarrier:CreateFontString(nil, "OVERLAY")
         durFS:SetPoint("CENTER", f, "CENTER", 0, 0)
-        durFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
+        EllesmereUI.ApplyIconTextFont(durFS, fontPath, 8, "raidFrames")
         durFS:SetTextColor(1, 1, 1)
         durFS:Hide()
         f._durText = durFS
@@ -868,7 +868,7 @@ function ns.BM_CreateIndicators(button, health, d, PP)
     -- by the custom indicator system above). Mirrors the defensive icon
     -- sub-structure (texture + reverse cooldown swipe + PP border).
     local simplePool = {}
-    local fontPathS = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fontPathS = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     for i = 1, BMSIMPLE_CAP do
         local f = CreateFrame("Frame", nil, health)
         f:SetFrameLevel(button:GetFrameLevel() + ns.LVL_AURA)
@@ -1438,7 +1438,7 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
     local cap = #d.bmSimpleIcons
     local maxBuffs = bs.maxBuffs or 10
     if maxBuffs > cap then maxBuffs = cap end
-    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
 
     if not d.bmSimpleActiveIDs then d.bmSimpleActiveIDs = {} else wipe(d.bmSimpleActiveIDs) end
     local seen = d._bmSimpleSeen
@@ -1513,7 +1513,7 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
                         local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                         if cdText then
                             local dtc = bs.durTextColor or { r = 1, g = 1, b = 1 }
-                            cdText:SetFont(fp, bs.durTextSize or 8, "OUTLINE, SLUG")
+                            EllesmereUI.ApplyIconTextFont(cdText, fp, bs.durTextSize or 8, "raidFrames")
                             cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                             cdText:ClearAllPoints()
                             cdText:SetPoint("CENTER", icon, "CENTER", bs.durTextOffsetX or 0, bs.durTextOffsetY or 0)
@@ -1855,8 +1855,8 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 local sSz = (ind.stacksTextSize or 8) * iscale
                                 local sOX = (ind.stacksOffsetX or 0) * iscale
                                 local sOY = (ind.stacksOffsetY or 0) * iscale
-                                local fontPath3 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                f._count:SetFont(fontPath3, sSz, "OUTLINE, SLUG")
+                                local fontPath3 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                                EllesmereUI.ApplyIconTextFont(f._count, fontPath3, sSz, "raidFrames")
                                 f._count:SetTextColor(sc2.r, sc2.g, sc2.b)
                                 f._count:ClearAllPoints()
                                 f._count:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1 + sOX, -1 + sOY)
@@ -2048,8 +2048,8 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                         local cdText = f._cooldown.GetCountdownFontString and f._cooldown:GetCountdownFontString()
                                         if cdText then
                                             local tc = ind.durationTextColor or { r=1, g=1, b=1 }
-                                            local fontPath2 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                            cdText:SetFont(fontPath2, ind.durationTextSize or 8, "OUTLINE, SLUG")
+                                            local fontPath2 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                                            EllesmereUI.ApplyIconTextFont(cdText, fontPath2, ind.durationTextSize or 8, "raidFrames")
                                             cdText:SetTextColor(tc.r, tc.g, tc.b)
                                             cdText:ClearAllPoints()
                                             cdText:SetPoint("CENTER", f, "CENTER", ind.durationTextOffsetX or 0, ind.durationTextOffsetY or 0)
@@ -2321,14 +2321,14 @@ function ns.BM_CreatePreviewIndicators(f, health, PP)
         fr._textCarrier = textCarrier
         local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", fr, "BOTTOMRIGHT", 1, -1)
-        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-        countFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+        EllesmereUI.ApplyIconTextFont(countFS, fontPath, 8, "raidFrames")
         countFS:SetTextColor(1, 1, 1)
         fr._count = countFS
 
         local durFS = textCarrier:CreateFontString(nil, "OVERLAY")
         durFS:SetPoint("CENTER", fr, "CENTER", 0, 0)
-        durFS:SetFont(fontPath, 8, "OUTLINE, SLUG")
+        EllesmereUI.ApplyIconTextFont(durFS, fontPath, 8, "raidFrames")
         durFS:SetTextColor(1, 1, 1)
         durFS:Hide()
         fr._durText = durFS
@@ -2575,8 +2575,8 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                         local sc = ind.stacksTextColor or { r=1, g=1, b=1 }
                                         local sOX = (ind.stacksOffsetX or 0) * iscale
                                         local sOY = (ind.stacksOffsetY or 0) * iscale
-                                        local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                        fr._count:SetFont(fp, sSz, "OUTLINE, SLUG")
+                                        local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                                        EllesmereUI.ApplyIconTextFont(fr._count, fp, sSz, "raidFrames")
                                         fr._count:SetTextColor(sc.r, sc.g, sc.b)
                                         fr._count:ClearAllPoints()
                                         fr._count:SetPoint("BOTTOMRIGHT", fr, "BOTTOMRIGHT", 1 + sOX, -1 + sOY)
@@ -2605,8 +2605,8 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                             -- kept; only the icon texture/swipe are zeroed).
                                             if ind.showDurationText and fr._durText then
                                                 local dtc = ind.durationTextColor or { r=1, g=1, b=1 }
-                                                local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                                fr._durText:SetFont(fp, ind.durationTextSize or 8, "OUTLINE, SLUG")
+                                                local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                                                EllesmereUI.ApplyIconTextFont(fr._durText, fp, ind.durationTextSize or 8, "raidFrames")
                                                 fr._durText:SetTextColor(dtc.r, dtc.g, dtc.b)
                                                 fr._durText:ClearAllPoints()
                                                 fr._durText:SetPoint("CENTER", fr, "CENTER",
@@ -2814,13 +2814,9 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
 
     -- Name text
     local nameFS = health:CreateFontString(nil, "OVERLAY")
-    local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameFS, outline == "" and (not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames"))) end
     nameFS:SetFont(fontPath, s.nameSize or 10, outline)
-    if outline == "" and (not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()) then
-        nameFS:SetShadowOffset(1, -1); nameFS:SetShadowColor(0, 0, 0, 1)
-    else
-        nameFS:SetShadowOffset(0, 0)
-    end
     nameFS:SetWordWrap(false)
     local npos = s.namePosition or "center"
     nameFS:SetShown(npos ~= "none" and not s.topNameBarEnabled)
@@ -2998,7 +2994,7 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
                         local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                         if cdText then
                             local dtc = bs.durTextColor or { r=1, g=1, b=1 }
-                            cdText:SetFont(fontPath, bs.durTextSize or 8, "OUTLINE, SLUG")
+                            EllesmereUI.ApplyIconTextFont(cdText, fontPath, bs.durTextSize or 8, "raidFrames")
                             cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                             cdText:ClearAllPoints()
                             cdText:SetPoint("CENTER", icon, "CENTER", bs.durTextOffsetX or 0, bs.durTextOffsetY or 0)
@@ -3053,7 +3049,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         EllesmereUI:RefreshPage(true)
     end
 
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     local _, h
     local PAD = 20  -- consistent left/right padding for creation bar + settings
     local s = db.profile
@@ -4097,14 +4093,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
 
         -- Name text (real sizes, SetScale handles the magnification)
         local nameFS = health:CreateFontString(nil, "OVERLAY")
-        local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+        local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameFS, outline == "" and (not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames"))) end
         nameFS:SetFont(fontPath, s.nameSize or 10, outline)
-        if outline == "" and (not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()) then
-            nameFS:SetShadowOffset(1, -1)
-            nameFS:SetShadowColor(0, 0, 0, 1)
-        else
-            nameFS:SetShadowOffset(0, 0)
-        end
         nameFS:SetWordWrap(false)
 
         -- Name position (exact match of AnchorNameText logic)

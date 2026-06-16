@@ -8,6 +8,15 @@ local EUI = EllesmereUI
 local _emptyP = {}
 local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
 
+-- The bank has no MultiBank view, so both the OneBag and MultiBag default
+-- types open the bank to its consolidated OneBank/OneWarbank view; only the
+-- "all" default opens the categorized All-Tabs view. Resolver lives in the
+-- main bags file (EUI._GetBagDefaultType) and honors the legacy boolean.
+local function BankDefaultsToOne()
+    if not EUI._GetBagDefaultType then return false end
+    return EUI._GetBagDefaultType() ~= "all"
+end
+
 -------------------------------------------------------------------------------
 --  Constants
 -------------------------------------------------------------------------------
@@ -37,7 +46,7 @@ local function GetBankSidebarWidth()
     return collapsed and SIDEBAR_W_COLLAPSED or SIDEBAR_W
 end
 
-local BANK_FONT = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+local BANK_FONT = (EUI.GetFontPath and EUI.GetFontPath("bags")) or "Fonts\\FRIZQT__.TTF"
 local function SetBankFont(fs, size) fs:SetFont(BANK_FONT, size, "") end
 local GetUpgradeTrack = EUI.GetUpgradeTrack
 local ITEM_CLASS_WEAPON = Enum.ItemClass.Weapon
@@ -1093,7 +1102,7 @@ local function GetOrCreateBankSlot(idx)
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
-        countFS:SetFont(BANK_FONT, countSize, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(countFS, BANK_FONT, countSize, "bags")
         countFS:ClearAllPoints()
         countFS:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     end
@@ -1105,7 +1114,7 @@ local function GetOrCreateBankSlot(idx)
         btn.ItemLevelText:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
         btn.ItemLevelText:SetTextColor(1, 1, 1, 1)
     end
-    btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE")
+    btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE, SLUG")
     btn.ItemLevelText:SetText("")
 
     -- Empty bg
@@ -1164,8 +1173,8 @@ local function RefreshBankTextSizes()
     local countSize = BP().bagCountFontSize or 11
     local ilvlSize = BP().itemlevelFontSize or 12
     for _, btn in pairs(_bankSlots) do
-        if btn.Count then btn.Count:SetFont(BANK_FONT, countSize, "OUTLINE") end
-        if btn.ItemLevelText then btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE") end
+        if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, BANK_FONT, countSize, "bags") end
+        if btn.ItemLevelText then btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE, SLUG") end
     end
 end
 EUI_Bank.RefreshTextSizes = RefreshBankTextSizes
@@ -1798,7 +1807,7 @@ function BuildBankSidebar()
     -- View indices: 0 = All Bank Tabs, -1 = OneBank, -2 = All Warbank Tabs, -3 = OneWarbank
     -- >0 = individual tab index in _allTabs
 
-    local defaultOneBag = BP().bagDefaultOneBag
+    local defaultOneBag = BankDefaultsToOne()
     if not _warbandOnly then
         if defaultOneBag then
             RenderSidebarEntry(-1, "OneBank", 1542860, charUsed, _selectedView == -1)
@@ -1922,7 +1931,7 @@ eventFrame:SetScript("OnEvent", function(_, event)
             and C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.AccountBanker)
             or false
         if _warbandOnly then
-            local defaultOneBag = BP().bagDefaultOneBag
+            local defaultOneBag = BankDefaultsToOne()
             _selectedView = defaultOneBag and -3 or -2
         end
         -- Position
@@ -2055,7 +2064,7 @@ loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterAllEvents()
     -- Apply default view based on setting
-    if BP().bagDefaultOneBag then
+    if BankDefaultsToOne() then
         _selectedView = -1
     end
     -- Register for Escape close

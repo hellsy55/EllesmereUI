@@ -1238,15 +1238,21 @@ function ns.CC_ApplyBindings()
             if mt then
                 globalBtn:SetAttribute("type-" .. suffix, "macro")
                 globalBtn:SetAttribute("macrotext-" .. suffix, mt)
-                hoverSetLines[#hoverSetLines + 1] = string.format(
-                    [[self:SetBindingClick(true, %q, %q, %q)]],
-                    hb.b.key, gbName, suffix)
-                hoverClearLines[#hoverClearLines + 1] = string.format(
-                    [[self:ClearBinding(%q)]], hb.b.key)
             else
                 globalBtn:SetAttribute("type-" .. suffix, aType)
             end
             globalBtn:SetAttribute("unit-" .. suffix, "mouseover")
+            -- Route the key/button to the global button for EVERY action type, not
+            -- just spell/macro. Hovercast "Context Menu" (togglemenu) and "Target"
+            -- bindings previously set their attributes but were never bound to a
+            -- click, so the keypress did nothing. The global button is a
+            -- SecureActionButton, which the 12.0.7 SecureUnitButton menu gate does
+            -- NOT touch, so togglemenu opens the menu here once the click is routed.
+            hoverSetLines[#hoverSetLines + 1] = string.format(
+                [[self:SetBindingClick(true, %q, %q, %q)]],
+                hb.b.key, gbName, suffix)
+            hoverClearLines[#hoverClearLines + 1] = string.format(
+                [[self:ClearBinding(%q)]], hb.b.key)
         end
     end
 
@@ -1585,9 +1591,9 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
     local cc = GetClickCastDB()
     if not cc then return 0 end
 
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-    local outlineFlag = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
-    local useShadow = not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+    local outlineFlag = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
+    local useShadow = not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames")
     local accentColor = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
 
     -- The page root bypasses the scroll system (like BM does)
@@ -1620,10 +1626,8 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
 
     local function MakeFont(p, size, r, g, b, a)
         local fs = p:CreateFontString(nil, "OVERLAY")
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outlineFlag == "" and useShadow) end
         fs:SetFont(fontPath, size, outlineFlag)
-        if outlineFlag == "" and useShadow then
-            fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-        end
         fs:SetTextColor(r or 1, g or 1, b or 1, a or 1)
         return fs
     end

@@ -70,6 +70,59 @@ end
 EllesmereUI.RefreshKickAbility = RefreshKickAbility
 EllesmereUI.ComputeCastBarTint = ComputeCastBarTint
 
+-- Unit context-menu fallback.
+-- 12.0.7 added a gate to the secure SecureUnitButton_OnClick handler: a
+-- "menu"/"togglemenu" click is dropped when C_ClickBindings.GetBindingType(button)
+-- returns None -- always the case for EllesmereUI click-cast bindings, since we
+-- register no C_ClickBindings. That silently kills the unit context menu for EVERY
+-- key/mouse binding routed through our SecureUnitButton frames (12.0.5 has no gate,
+-- so it works there). This insecure OnClick POST-HOOK (installed via HookScript,
+-- never SetScript) re-opens the menu in Lua and never touches any other action -- it
+-- bails unless the click's effective action is the menu. It installs on all client
+-- versions: on 12.0.7+ it is the only thing that opens the menu; on 12.0.5 the secure
+-- menu still fires too, but the menu manager simply re-opens it (the redundant build
+-- is invisible on a click-rate action), so there is no harmful double-open.
+function EllesmereUI.OpenUnitMenuFallback(self, button)
+    if not (SecureButton_GetModifiedAttribute and C_ClickBindings and C_ClickBindings.GetBindingType
+            and Enum and Enum.ClickBindingType and UnitPopup_OpenMenu) then
+        return
+    end
+    -- Resolve the SAME effective action the secure handler used for this exact
+    -- button (honors modifiers and the *type wildcard), so a spell/macro bind on
+    -- any button -- type "spell"/"macro" -- is never intercepted. Only the bare
+    -- context menu proceeds.
+    local action = SecureButton_GetModifiedAttribute(self, "type", button)
+    if action ~= "menu" and action ~= "togglemenu" then return end
+    local mods = (C_ClickBindings.MakeModifiers and C_ClickBindings.MakeModifiers())
+              or (MakeModifiers and MakeModifiers()) or 0
+    -- Only step in when the secure menu was suppressed (gated). If it still fires
+    -- (binding type ~= None) we do nothing, so there is never a double-open.
+    if C_ClickBindings.GetBindingType(button, mods) ~= Enum.ClickBindingType.None then return end
+    local unit = (SecureButton_GetModifiedUnit and SecureButton_GetModifiedUnit(self, button))
+              or self:GetAttribute("unit")
+    if not unit then return end
+    if issecretvalue and issecretvalue(unit) then return end
+    if not UnitExists(unit) then return end
+    -- Resolve the menu type the same way the secure togglemenu action does.
+    local lu = string.lower(unit)
+    local utype = string.match(lu, "^([a-z]+)%d+$") or lu
+    local which
+    if utype == "party" then which = "PARTY"
+    elseif utype == "raid" then which = "RAID_PLAYER"
+    elseif utype == "boss" then which = "BOSS"
+    elseif utype == "focus" then which = "FOCUS"
+    elseif utype == "arena" or utype == "arenapet" then which = "ARENAENEMY"
+    elseif UnitIsUnit(lu, "player") then which = "SELF"
+    elseif UnitIsUnit(lu, "vehicle") then which = "VEHICLE"
+    elseif UnitIsUnit(lu, "pet") then which = "PET"
+    elseif UnitIsPlayer(lu) then
+        if UnitInRaid(lu) then which = "RAID_PLAYER"
+        elseif UnitInParty(lu) then which = "PARTY"
+        else which = "PLAYER" end
+    else which = "TARGET" end
+    pcall(UnitPopup_OpenMenu, which, { unit = lu })
+end
+
 local kickFrame = CreateFrame("Frame")
 kickFrame:RegisterEvent("PLAYER_LOGIN")
 kickFrame:RegisterEvent("SPELLS_CHANGED")

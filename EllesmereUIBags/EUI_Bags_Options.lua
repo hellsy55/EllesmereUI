@@ -11,6 +11,7 @@ local BAGS_DEFAULTS = {
     profile = {
         bagScale              = 1,
         bagColumns            = 12,
+        bagAutoSize           = false,
         bagCatTitleSize       = 11,
         bagCountFontSize      = 11,
         itemlevelFontSize     = 12,
@@ -28,7 +29,8 @@ local BAGS_DEFAULTS = {
         bagShowPinRecentTips  = true,
         bagShowSortIcon       = true,
         bagHideRandomize      = false,
-        bagDefaultOneBag      = false,
+        bagDefaultBagType     = "all",   -- "all" | "onebag" | "multibag"
+        bagDefaultOneBag      = false,   -- legacy; migrated to bagDefaultBagType
         bagNestByExpansion    = false,
         bagHideOneBagWarning  = false,
         bagHideAddCategory    = false,
@@ -125,7 +127,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Reposition info label
             do
-                local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+                local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("bags")) or "Fonts\\FRIZQT__.TTF"
                 local infoFrame = CreateFrame("Frame", nil, parent)
                 infoFrame:SetSize(parent:GetWidth(), 34)
                 infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 10)
@@ -172,8 +174,41 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Category Title Size | Default Open to OneBag
+            -- Auto-Size to Fit | Default Bag Type
             _, h = W:DualRow(parent, y,
+                { type="toggle", text="Auto-Size to Fit",
+                  tooltip="Grow the bag window (more columns + taller, keeping its shape) so all of the active tab's slots are visible without scrolling. It only grows while open -- switching to a bigger tab enlarges it, smaller tabs keep the size -- and resets when you close the bags. Never smaller than your normal size.",
+                  getValue=function() return db.profile.bagAutoSize == true end,
+                  setValue=function(v)
+                      db.profile.bagAutoSize = v
+                      if _G.EUI_Bags then
+                          _G.EUI_Bags._asCols = nil
+                          _G.EUI_Bags._asMaxW = nil
+                          _G.EUI_Bags._asMaxH = nil
+                          if _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                      end
+                  end },
+                { type="dropdown", text="Default Bag Type",
+                  tooltip="Which view bags (and the bank) open to by default. The bank has no MultiBag view, so MultiBag opens the bank to OneBank.",
+                  values = { all="All Items", onebag="OneBag", multibag="MultiBag" },
+                  order  = { "all", "onebag", "multibag" },
+                  getValue=function()
+                      local t = db.profile.bagDefaultBagType
+                      if t == "all" or t == "onebag" or t == "multibag" then return t end
+                      return db.profile.bagDefaultOneBag and "onebag" or "all"
+                  end,
+                  setValue=function(v)
+                      db.profile.bagDefaultBagType = v
+                      if _G.EUI_Bags and _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
+                          _G.EUI_Bags:RefreshInventory()
+                      end
+                      EllesmereUI:RefreshPage()
+                  end }
+            ); y = y - h
+
+            -- Category Title Size | Show Item Level (+ inline cog: Gear Track Rank)
+            local ilvlRow
+            ilvlRow, h = W:DualRow(parent, y,
                 { type="slider", text="Category Title Size", min=8, max=16, step=1,
                   tooltip="Font size for category titles in the sidebar and content grid.",
                   getValue=function() return db.profile.bagCatTitleSize or 11 end,
@@ -181,17 +216,64 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagCatTitleSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
-                { type="toggle", text="Default Open to OneBag",
-                  tooltip="Open bags and bank to the OneBag/OneBank view by default instead of categorized views.",
-                  getValue=function() return db.profile.bagDefaultOneBag == true end,
+                { type="toggle", text="Show Item Level",
+                  tooltip="Display item levels on equipment items in the inventory.",
+                  getValue=function() return db.profile.showItemlevelInBags ~= false end,
                   setValue=function(v)
-                      db.profile.bagDefaultOneBag = v
-                      if _G.EUI_Bags and _G.EUI_Bags:IsVisible() and _G.EUI_Bags.RefreshInventory then
-                          _G.EUI_Bags:RefreshInventory()
-                      end
-                      EllesmereUI:RefreshPage()
+                      db.profile.showItemlevelInBags = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                      EllesmereUI:RefreshPage()  -- refresh the cog's disabled state
                   end }
             ); y = y - h
+
+            -- Inline cog on Show Item Level (right region): Show Gear Track Rank
+            -- (gated by Show Item Level; the rank only renders when ilvl is shown).
+            do
+                local _, ilCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Item Level Options",
+                    rows = {
+                        { type="toggle", label="Show Gear Track Rank",
+                          get=function() return db.profile.bagShowTrackRank or false end,
+                          set=function(v)
+                              db.profile.bagShowTrackRank = v
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                          end },
+                    },
+                })
+                local rightRgn = ilvlRow._rightRegion
+                local ilCog = CreateFrame("Button", nil, rightRgn)
+                ilCog:SetSize(26, 26)
+                ilCog:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
+                ilCog:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+                local ilCogTex = ilCog:CreateTexture(nil, "OVERLAY")
+                ilCogTex:SetAllPoints()
+                ilCogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function ilCogOff() return db.profile.showItemlevelInBags == false end
+                ilCog:SetAlpha(ilCogOff() and 0.15 or 0.4)
+                ilCog:SetScript("OnEnter", function(self)
+                    if ilCogOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Item Level"))
+                    else self:SetAlpha(0.7) end
+                end)
+                ilCog:SetScript("OnLeave", function(self)
+                    self:SetAlpha(ilCogOff() and 0.15 or 0.4)
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+                ilCog:SetScript("OnClick", function(self)
+                    if not ilCogOff() then ilCogShow(self) end
+                end)
+                local ilBlock = CreateFrame("Frame", nil, ilCog)
+                ilBlock:SetAllPoints(); ilBlock:SetFrameLevel(ilCog:GetFrameLevel() + 10); ilBlock:EnableMouse(true)
+                ilBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(ilCog, EllesmereUI.DisabledTooltip("Show Item Level"))
+                end)
+                ilBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                if ilCogOff() then ilBlock:Show() else ilBlock:Hide() end
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    if ilCogOff() then ilCog:SetAlpha(0.15); ilBlock:Show()
+                    else ilCog:SetAlpha(0.4); ilBlock:Hide() end
+                end)
+            end
 
             -- Enabled Categories | Enabled Currencies
             local catCurrRow
@@ -319,24 +401,6 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Show Item Level | Show Gear Track Rank
-            local bagsRow
-            bagsRow, h = W:DualRow(parent, y,
-                { type="toggle", text="Show Item Level",
-                  tooltip="Display item levels on equipment items in the inventory.",
-                  getValue=function() return db.profile.showItemlevelInBags ~= false end,
-                  setValue=function(v)
-                      db.profile.showItemlevelInBags = v
-                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end },
-                { type="toggle", text="Show Gear Track Rank",
-                  tooltip="Display the upgrade track rank number on the bottom-right of gear items.",
-                  getValue=function() return db.profile.bagShowTrackRank or false end,
-                  setValue=function(v)
-                      db.profile.bagShowTrackRank = v
-                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end }
-            ); y = y - h
 
             -- Item Count Text Size | Item Level Text Size
             _, h = W:DualRow(parent, y,
@@ -420,7 +484,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, pinCogShow = EllesmereUI.BuildCogPopup({
                     title = "Pinned Items Options",
                     rows = {
-                        { type="toggle", label="Show in OneBag",
+                        { type="toggle", label="Show in OneBag/MultiBag",
                           get=function() return db.profile.bagPinnedInOneBag ~= false end,
                           set=function(v)
                               db.profile.bagPinnedInOneBag = v
@@ -468,7 +532,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, recentCogShow = EllesmereUI.BuildCogPopup({
                     title = "Recent Items Options",
                     rows = {
-                        { type="toggle", label="Show in OneBag",
+                        { type="toggle", label="Show in OneBag/MultiBag",
                           get=function() return db.profile.bagRecentInOneBag == true end,
                           set=function(v)
                               db.profile.bagRecentInOneBag = v
@@ -548,8 +612,8 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Hide OneBag Warning | Hide Randomize Button
             _, h = W:DualRow(parent, y,
-                { type="toggle", text="Hide OneBag Warning",
-                  tooltip="Hide the warning text at the top of the OneBag view.",
+                { type="toggle", text="Hide OneBag/MultiBag Warning",
+                  tooltip="Hide the warning text at the top of the OneBag and MultiBag views.",
                   getValue=function() return db.profile.bagHideOneBagWarning == true end,
                   setValue=function(v)
                       db.profile.bagHideOneBagWarning = v

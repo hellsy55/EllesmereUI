@@ -593,19 +593,14 @@ local locationFrame, locationBg
 
 local function GetMinimapFont()
     local path = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap") or STANDARD_TEXT_FONT
-    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap") or "OUTLINE"
+    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap") or "OUTLINE, SLUG"
     return path, flag
 end
 
 local function ApplyMinimapFont(fs, size)
     local path, flag = GetMinimapFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("minimap")) end
     fs:SetFont(path, size, flag)
-    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("minimap") then
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 0.8)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 -- Cache clock CVars so we don't read them every second
@@ -1222,8 +1217,8 @@ local function ShowVaultTooltip(anchor)
     local tt = GetVaultTooltip()
 
     -- Apply user's current font to all FontStrings
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-    local fontFlags = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap")) or "Fonts\\FRIZQT__.TTF"
+    local fontFlags = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap")) or ""
     tt._title:SetFont(fontPath, 11, fontFlags)
     for r = 1, 3 do
         _vaultTTRows[r][0]:SetFont(fontPath, 11, fontFlags)
@@ -1480,12 +1475,11 @@ local function CreateMinimapPortalFlyout()
             labelFrame:SetAllPoints()
             labelFrame:SetFrameLevel(cd:GetFrameLevel() + 2)
             local label = labelFrame:CreateFontString(nil, "OVERLAY", nil)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
             label:SetFont(fontPath, 8, "OUTLINE")
             label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
             label:SetTextColor(1, 1, 1, 0.9)
             label:SetText(short)
-            label:SetShadowOffset(1, -1)
-            label:SetShadowColor(0, 0, 0, 1)
         end
 
         local hover = btn:CreateTexture(nil, "HIGHLIGHT")
@@ -1874,7 +1868,7 @@ local FTT_MAX_FAV = 20
 local FTT_MAX_GLD = 20
 local FTT_MAX_FRD = 15
 local function FTT_FONT()
-    return (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
+    return (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap")) or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
 end
 
 local function GetFriendsTT()
@@ -3559,9 +3553,8 @@ do
                 hl:SetColorTexture(1, 1, 1, 0.08)
 
                 local label = btn:CreateFontString(nil, "OVERLAY")
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
                 label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-                label:SetShadowOffset(1, -1)
-                label:SetShadowColor(0, 0, 0, 1)
                 label:SetPoint("LEFT", btn, "LEFT", 10, 0)
                 label:SetTextColor(0.9, 0.9, 0.9)
                 label:SetText(item.text)
@@ -3608,9 +3601,8 @@ do
                 hl:SetColorTexture(1, 1, 1, 0.08)
 
                 local label = btn:CreateFontString(nil, "OVERLAY")
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
                 label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-                label:SetShadowOffset(1, -1)
-                label:SetShadowColor(0, 0, 0, 1)
                 label:SetPoint("LEFT", btn, "LEFT", 10, 0)
                 label:SetTextColor(0.9, 0.9, 0.9)
                 label:SetText(item.text)

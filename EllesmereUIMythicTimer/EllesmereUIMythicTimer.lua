@@ -780,11 +780,12 @@ local function SetFS(fs, size, flags)
 end
 local function ApplyShadow(fs)
     if not fs then return end
-    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("mythicTimer") then
-        fs:SetShadowColor(0, 0, 0, 0.8); fs:SetShadowOffset(1, -1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
+    local useShadow = EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("mythicTimer")
+    -- Font is set elsewhere (SetFS) and ApplyShadow runs after it, so capture
+    -- and restore the current font around PrimeFontShadow's SetFontObject.
+    local _pf, _ps, _pfl = fs:GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, useShadow) end
+    if _pf then fs:SetFont(_pf, _ps, _pfl) end
 end
 
 -- SetText with skip-if-unchanged. Avoids the per-tick SetText call (and

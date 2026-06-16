@@ -4718,44 +4718,26 @@ function EllesmereUI._applyCharSheetTextSizes()
             if GetFFD(slot).itemLevelLabel then
                 local flags = ""
                 if itemLevelOutline then
-                    flags = "OUTLINE"
+                    flags = "OUTLINE, SLUG"
                 end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).itemLevelLabel, itemLevelShadow) end
                 GetFFD(slot).itemLevelLabel:SetFont(fontPath, itemLevelSize, flags)
-                -- Apply shadow effect if enabled
-                if itemLevelShadow then
-                    GetFFD(slot).itemLevelLabel:SetShadowColor(0, 0, 0, 1)
-                    GetFFD(slot).itemLevelLabel:SetShadowOffset(1, -1)
-                else
-                    GetFFD(slot).itemLevelLabel:SetShadowColor(0, 0, 0, 0)
-                end
             end
             if GetFFD(slot).upgradeTrackLabel then
                 local flags = ""
                 if upgradeTrackOutline then
-                    flags = "OUTLINE"
+                    flags = "OUTLINE, SLUG"
                 end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).upgradeTrackLabel, upgradeTrackShadow) end
                 GetFFD(slot).upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, flags)
-                -- Apply shadow effect if enabled
-                if upgradeTrackShadow then
-                    GetFFD(slot).upgradeTrackLabel:SetShadowColor(0, 0, 0, 1)
-                    GetFFD(slot).upgradeTrackLabel:SetShadowOffset(1, -1)
-                else
-                    GetFFD(slot).upgradeTrackLabel:SetShadowColor(0, 0, 0, 0)
-                end
             end
             if GetFFD(slot).enchantLabel then
                 local flags = ""
                 if enchantOutline then
-                    flags = "OUTLINE"
+                    flags = "OUTLINE, SLUG"
                 end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).enchantLabel, enchantShadow) end
                 GetFFD(slot).enchantLabel:SetFont(fontPath, enchantSize, flags)
-                -- Apply shadow effect if enabled
-                if enchantShadow then
-                    GetFFD(slot).enchantLabel:SetShadowColor(0, 0, 0, 1)
-                    GetFFD(slot).enchantLabel:SetShadowOffset(1, -1)
-                else
-                    GetFFD(slot).enchantLabel:SetShadowColor(0, 0, 0, 0)
-                end
             end
         end
     end

@@ -35,9 +35,8 @@ initFrame:SetScript("OnEvent", function(self)
     local function SetPVFont(fs, font, size)
         if not (fs and fs.SetFont) then return end
         local f = GetABROptOutline()
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, f == "") end
         fs:SetFont(font, size, f)
-        if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-        else fs:SetShadowOffset(0, 0) end
     end
 
     ---------------------------------------------------------------------------

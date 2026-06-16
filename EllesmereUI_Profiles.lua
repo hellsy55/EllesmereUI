@@ -922,6 +922,27 @@ function EllesmereUI.ApplyProfileData(profileData)
                     if profile.targettarget == nil then profile.targettarget = DeepCopy(profile.totPet) end
                     if profile.focustarget  == nil then profile.focustarget  = DeepCopy(profile.totPet) end
                 end
+                -- Pre-MultiBag imports carry the legacy bagDefaultOneBag boolean
+                -- but no bagDefaultBagType. The conversion migration is SKIPPED for
+                -- imported profiles (inherited migration flags), so forward-copy
+                -- here BEFORE DeepMergeDefaults fills the "all" default and masks
+                -- the legacy key from the resolver.
+                if entry.folder == "EllesmereUIBags"
+                    and profile.bagDefaultBagType == nil and profile.bagDefaultOneBag == true then
+                    profile.bagDefaultBagType = "onebag"
+                end
+                -- Pre-tsMode imports carry tsEnabled/tsRaidEnabled booleans but no
+                -- tsMode/tsRaidMode. The bool->mode migration is SKIPPED for imported
+                -- profiles (inherited migration flags), so forward-copy here BEFORE
+                -- DeepMergeDefaults fills the tsMode default and masks the legacy keys.
+                -- Party only: raid hard-defaults to "never" (not migrated), so leave
+                -- tsRaidMode unset and let DeepMergeDefaults apply the default.
+                if entry.folder == "EllesmereUIRaidFrames" then
+                    if profile.tsMode == nil then
+                        if profile.tsEnabled == false then profile.tsMode = "never"
+                        elseif profile.tsEnabled == true then profile.tsMode = "whenHealing" end
+                    end
+                end
                 if db._profileDefaults then
                     EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                 end
@@ -1548,8 +1569,28 @@ function EllesmereUI.ExportCurrentProfile(includeLayout)
     return EXPORT_PREFIX .. encoded
 end
 
+-- Profile import strings that require the NaowhUI addon to be enabled.
+-- Exact full-string match only (stored as set keys for O(1) lookup). Importing
+-- one of these while NaowhUI is disabled is rejected with a requirement notice.
+-- Populate with the protected export strings (each begins with "!EUI_").
+EllesmereUI.NAOWH_REQUIRED_STRINGS = {
+    -- ["temp"] = true,
+}
+
 function EllesmereUI.DecodeImportString(importStr)
     if not importStr or #importStr < 5 then return nil, "Invalid string" end
+    -- Check for NaowhUI installation to ensure profile import works correctly.
+    -- Checked before any decode work so the requirement notice takes priority
+    -- over format/version errors. Uses the standard check (GetAddOnEnableState > 0).
+    if EllesmereUI.NAOWH_REQUIRED_STRINGS[importStr] then
+        local enabled = true
+        if C_AddOns and C_AddOns.GetAddOnEnableState then
+            enabled = (C_AddOns.GetAddOnEnableState("NaowhUI", UnitName("player")) or 0) > 0
+        end
+        if not enabled then
+            return nil, "This profile requires NaowhUI Addon to be installed"
+        end
+    end
     -- Detect old CDM bar layout strings (format removed in 5.1.2)
     if importStr:sub(1, 9) == "!EUICDM_" then
         return nil, "This is an old CDM Bar Layout string. This format is no longer supported. Use the standard profile import instead."

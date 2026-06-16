@@ -66,13 +66,8 @@ initFrame:SetScript("OnEvent", function(self)
     end
     local function SetPVFont(fs, font, size)
         if not (fs and fs.SetFont) then return end
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, GetCDMOptUseShadow()) end
         fs:SetFont(font, size, GetCDMOptOutline())
-        if GetCDMOptUseShadow() then
-            fs:SetShadowColor(0, 0, 0, 1)
-            fs:SetShadowOffset(1, -1)
-        else
-            fs:SetShadowOffset(0, 0)
-        end
     end
     local function MakeTextInput(parent, label, yOffset, getValue, setValue)
         local ROW_H = 50
@@ -5708,79 +5703,62 @@ initFrame:SetScript("OnEvent", function(self)
                 mH = mH + ITEM_H
             end
 
-            -- Racial abilities
-            local _pRace = ns._playerRace
-            local _pClass = ns._playerClass
-            local racialList = _pRace and ns.RACE_RACIALS and ns.RACE_RACIALS[_pRace]
-            if racialList then
-                for _, rEntry in ipairs(racialList) do
-                    local rSid = type(rEntry) == "table" and rEntry[1] or rEntry
-                    local reqClass = type(rEntry) == "table" and rEntry.class or nil
-                    local excludeClass = type(rEntry) == "table" and rEntry.notClass or nil
-                    local classOk = (not reqClass or reqClass == _pClass)
-                        and (not excludeClass or excludeClass ~= _pClass)
-                    if classOk then
-                        local inBook = C_SpellBook and C_SpellBook.IsSpellInSpellBook and C_SpellBook.IsSpellInSpellBook(rSid)
-                        if not inBook then rSid = nil end
-                    else
-                        rSid = nil
-                    end
-                    if rSid then
-                        local rName = C_Spell.GetSpellName(rSid)
-                        local rTex = C_Spell.GetSpellTexture(rSid)
-                        if rName then
-                            local isAdded = alreadyOnBar[rSid]
-                            local rOtherBar = not isAdded and usedOnOtherBar[rSid]
-                            local rIsDisabled = isAdded or rOtherBar
-                            local ri = CreateFrame("Button", nil, inner)
-                            ri:SetHeight(ITEM_H)
-                            ri:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
-                            ri:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
-                            ri:SetFrameLevel(menu:GetFrameLevel() + 2)
-                            local riLbl = ri:CreateFontString(nil, "OVERLAY")
-                            riLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                            riLbl:SetPoint("LEFT", 10, 0)
-                            riLbl:SetJustifyH("LEFT")
-                            riLbl:SetText(rName)
-                            if rTex then
-                                local riIco = ri:CreateTexture(nil, "ARTWORK")
-                                riIco:SetSize(ITEM_H - 2, ITEM_H - 2)
-                                riIco:SetPoint("RIGHT", ri, "RIGHT", -6, 0)
-                                riIco:SetTexture(rTex)
-                                riIco:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                                if rIsDisabled then riIco:SetDesaturated(true); riIco:SetAlpha(0.4) end
-                            end
-                            local riHl = ri:CreateTexture(nil, "ARTWORK")
-                            riHl:SetAllPoints(); riHl:SetColorTexture(1, 1, 1, 0); riHl:SetAlpha(0)
-                            if rIsDisabled then
-                                riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
-                                local rTooltipName = isAdded and (bd and (bd.name or bd.key) or barKey) or rOtherBar
-                                ri:SetScript("OnEnter", function()
-                                    EllesmereUI.ShowWidgetTooltip(ri, "Already on " .. rTooltipName)
-                                end)
-                                ri:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                            else
-                                riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                                ri:SetScript("OnEnter", function()
-                                    riLbl:SetTextColor(1, 1, 1, 1)
-                                    riHl:SetColorTexture(1, 1, 1, hlA); riHl:SetAlpha(1)
-                                end)
-                                ri:SetScript("OnLeave", function()
-                                    riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                                    riHl:SetAlpha(0)
-                                end)
-                                ri:SetScript("OnClick", function()
-                                    menu:Hide()
-                                    EnsureAssignedSpells(barKey)
-                                    ns.AddTrackedSpell(barKey, rSid)
-                                    RefreshCDPreview()
-                                end)
-                            end
-                            allItems[#allItems + 1] = ri
-                            mH = mH + ITEM_H
-                        end
-                    end
+            -- Racial ability: one generic "Racial" entry that follows the
+            -- character's race. Adds this character's active racial spell ID;
+            -- ns.NormalizeRacialAssignments rewrites it on every other race so
+            -- a shared profile only needs the racial added once.
+            local rSid = ns._activeRacialSpellID
+            if rSid then
+                local rTex = C_Spell.GetSpellTexture(rSid)
+                local isAdded = alreadyOnBar[rSid]
+                local rOtherBar = not isAdded and usedOnOtherBar[rSid]
+                local rIsDisabled = isAdded or rOtherBar
+                local ri = CreateFrame("Button", nil, inner)
+                ri:SetHeight(ITEM_H)
+                ri:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+                ri:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+                ri:SetFrameLevel(menu:GetFrameLevel() + 2)
+                local riLbl = ri:CreateFontString(nil, "OVERLAY")
+                riLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                riLbl:SetPoint("LEFT", 10, 0)
+                riLbl:SetJustifyH("LEFT")
+                riLbl:SetText(EllesmereUI.L("Racial"))
+                if rTex then
+                    local riIco = ri:CreateTexture(nil, "ARTWORK")
+                    riIco:SetSize(ITEM_H - 2, ITEM_H - 2)
+                    riIco:SetPoint("RIGHT", ri, "RIGHT", -6, 0)
+                    riIco:SetTexture(rTex)
+                    riIco:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    if rIsDisabled then riIco:SetDesaturated(true); riIco:SetAlpha(0.4) end
                 end
+                local riHl = ri:CreateTexture(nil, "ARTWORK")
+                riHl:SetAllPoints(); riHl:SetColorTexture(1, 1, 1, 0); riHl:SetAlpha(0)
+                if rIsDisabled then
+                    riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
+                    local rTooltipName = isAdded and (bd and (bd.name or bd.key) or barKey) or rOtherBar
+                    ri:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(ri, "Already on " .. rTooltipName)
+                    end)
+                    ri:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                else
+                    riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                    ri:SetScript("OnEnter", function()
+                        riLbl:SetTextColor(1, 1, 1, 1)
+                        riHl:SetColorTexture(1, 1, 1, hlA); riHl:SetAlpha(1)
+                    end)
+                    ri:SetScript("OnLeave", function()
+                        riLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                        riHl:SetAlpha(0)
+                    end)
+                    ri:SetScript("OnClick", function()
+                        menu:Hide()
+                        EnsureAssignedSpells(barKey)
+                        ns.AddTrackedSpell(barKey, rSid)
+                        RefreshCDPreview()
+                    end)
+                end
+                allItems[#allItems + 1] = ri
+                mH = mH + ITEM_H
             end
 
             -- "Potions & Healthstone" flyout subnav
@@ -7493,8 +7471,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local scB = bd.stackCountB or 1
                         local scX = bd.stackCountX or 0
                         local scY = (bd.stackCountY or 0) + 2
-                        slot._stackText:SetFont(scFont, scSize, "OUTLINE, SLUG")
-                        slot._stackText:SetShadowOffset(0, 0)
+                        EllesmereUI.ApplyIconTextFont(slot._stackText, scFont, scSize, "cdm")
                         slot._stackText:SetTextColor(scR, scG, scB)
                         slot._stackText:ClearAllPoints()
                         slot._stackText:SetPoint("BOTTOMRIGHT", slot, "BOTTOMRIGHT", scX, scY)
@@ -7514,8 +7491,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Keybind text preview (mirror live: our CDM font + outline,slug)
                 if slot._keybindText then
-                    slot._keybindText:SetFont(FONT_PATH, bd.keybindSize or 10, "OUTLINE, SLUG")
-                    slot._keybindText:SetShadowOffset(0, 0)
+                    EllesmereUI.ApplyIconTextFont(slot._keybindText, FONT_PATH, bd.keybindSize or 10, "cdm")
                     slot._keybindText:ClearAllPoints()
                     local kx = bd.keybindOffsetX or 2
                     local ky = bd.keybindOffsetY or -2
@@ -10089,6 +10065,17 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end });  y = y - h
 
+        -- Hide Items if Missing
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Items if Missing",
+              tooltip = "Hide consumable items (potions, healthstone) from the bar when you have none in your bags, instead of showing them dimmed. They reappear automatically once you have the item again.",
+              getValue=function() return BD().hideItemsIfMissing == true end,
+              setValue=function(v)
+                  BD().hideItemsIfMissing = v
+                  if ns.FullCDMRebuild then ns.FullCDMRebuild("hide_missing_toggle") end
+              end },
+            { type="label", text="" });  y = y - h
+
         end -- custom_buff extras guard
 
         return math.abs(y)
@@ -10231,9 +10218,8 @@ initFrame:SetScript("OnEvent", function(self)
             local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")
                              or "Fonts\\FRIZQT__.TTF"
             local label = _buffBarOverlay:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
             label:SetFont(fontPath, 10, "")
-            label:SetShadowOffset(1, -1)
-            label:SetShadowColor(0, 0, 0, 0.8)
             label:SetText(EllesmereUI.L("Buff Bar"))
             label:SetTextColor(1, 1, 1, 0.75)
             label:SetPoint("CENTER")

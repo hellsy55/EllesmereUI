@@ -325,12 +325,8 @@ local function ApplyFont(fs, size)
     if not fs then return end
     local font = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or "Fonts/FRIZQT__.TTF"
     local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("blizzardSkin") or ""
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, flag == "") end
     fs:SetFont(font, size or 12, flag)
-    if flag == "" then
-        fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 local function CreateSolidTexture(parent, layer, sublevel, r, g, b, a)

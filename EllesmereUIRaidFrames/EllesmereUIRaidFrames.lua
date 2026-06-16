@@ -212,6 +212,7 @@ local ABSORB_STYLE_TEX = {
     stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
     clean           = "Interface\\Buttons\\WHITE8X8",
     blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+    healBlizzModern = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\louis-absorb.png",
 }
 local ABSORB_STYLE_ALPHA = {
     striped         = 0.8,
@@ -351,6 +352,7 @@ local defaults = {
         showSelfLast     = false,
         mergeGroups      = false,
         visibleGroups    = { true, true, true, true, true, true, false, false },
+        hideEmptyGroups  = true,     -- collapse subgroups with no members (raid only, real frames)
 
         -- Visibility
         showWhenSolo     = false,
@@ -460,6 +462,8 @@ local defaults = {
         -- shared absorbFromRightEdge boolean.)
         absorbEdgeMode     = "overlay",
         healAbsorbEdgeMode = "overlay",
+        -- Black backing behind the heal-absorb texture (all styles); 0 = off.
+        healAbsorbBgOpacity = 25,
         -- Absorb Bar: solid bar above the frame, fills from the right edge
         absorbBarEnabled = false,
         absorbBarHeight  = 4,
@@ -529,7 +533,7 @@ local defaults = {
         dispelColorBleed   = { r = 0.75,  g = 0.15,  b = 0.15 },
         -- Health background status tint (Status Colors swatch in Extras).
         statusColorOffline = { r = 0x66/255, g = 0x66/255, b = 0x66/255 },  -- #666666
-        statusColorDead    = { r = 0x6D/255, g = 0x31/255, b = 0x31/255 },  -- #6D3131
+        statusColorDead    = { r = 0x24/255, g = 0x17/255, b = 0x17/255 },  -- #241717
 
         -- Buff Manager (indicator-centric model)
         bmIndicators      = {},  -- { [specKey] = { indicator1, indicator2, ... } }
@@ -615,14 +619,16 @@ local defaults = {
         -- tsRaid* = raid. Independent on purpose: tsRaid* keys are NOT in
         -- PARTY_KEY_SECTION, so they stay outside the raid/party section
         -- sync system.
-        tsEnabled   = true,
+        tsEnabled   = true,   -- legacy boolean; superseded by tsMode (kept harmless)
+        tsMode      = "whenHealing",  -- never | whenHealing | always
         tsIconSize  = 24,
         tsPosition  = "center",
         tsGrowDirection = "CENTER",
         tsOffsetX   = 0,
         tsOffsetY   = 0,
         tsMaxIcons  = 3,
-        tsRaidEnabled   = true,
+        tsRaidEnabled   = true,   -- legacy boolean; superseded by tsRaidMode (kept harmless)
+        tsRaidMode      = "never",  -- raid hard-defaults OFF (NOT migrated from tsRaidEnabled)
         tsRaidIconSize  = 24,
         tsRaidPosition  = "center",
         tsRaidGrowDirection = "CENTER",
@@ -882,22 +888,17 @@ end
 --  Font helper (matches UF/CDM pattern)
 -------------------------------------------------------------------------------
 local function GetOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
 end
 local function GetUseShadow()
-    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames")
 end
 local function ApplyFont(fs, size)
     if not (fs and fs.SetFont) then return end
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     local outline = GetOutline()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outline == "" and GetUseShadow()) end
     fs:SetFont(fontPath, size, outline)
-    if outline == "" and GetUseShadow() then
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -1101,7 +1102,7 @@ function ns._ApplyHealthBg(d, health, s, unit)
     local bg = d.bg
     if UnitIsDeadOrGhost(unit) then
         if bg then
-            local c = s.statusColorDead or { r = 0x6D/255, g = 0x31/255, b = 0x31/255 }
+            local c = s.statusColorDead or { r = 0x24/255, g = 0x17/255, b = 0x17/255 }
             bg:ClearAllPoints(); bg:SetAllPoints(health)
             bg:SetColorTexture(c.r, c.g, c.b, 1)
         end
@@ -1359,14 +1360,69 @@ local function GetPowerColor(unit)
 end
 
 -------------------------------------------------------------------------------
---  Absorb style application (matches UF exactly)
+--  Absorb style application
+--  Single-fill styles match the unit-frame look. The RaidFrames-only compound
+--  "Blizzard (Modern)" style layers a tiled stripe fill over a solid base, so
+--  RF diverges from the UnitFrames module (which still offers only "Blizzard").
 -------------------------------------------------------------------------------
+
+-- Configure ONE absorb StatusBar for the compound "Blizzard (Modern)" style:
+-- a tiled 9196ff striped fill over an opaque c6c8ff solid base. The base is our
+-- own texture (._modernBase, colored once at creation); here we re-establish the
+-- striped fill (the bar's fill is shared with the other styles, so it must be
+-- restored when switching back to modern) and anchor the base to the fill rect
+-- so it rides the same clip/mask geometry the secret SetValue drives -- no Lua
+-- math on the secret. Colors are hardcoded; this style ignores user color/opacity.
+ns.ApplyModernAbsorbBar = function(bar, mask)
+    if not bar then return end
+    bar:SetStatusBarTexture(ABSORB_STYLE_TEX.striped)
+    bar:SetStatusBarColor(0.569, 0.588, 1.0, 1)
+    local fill = bar:GetStatusBarTexture()
+    if fill then
+        fill:SetDrawLayer("ARTWORK", 1)
+        fill:SetHorizTile(true)
+        fill:SetVertTile(true)
+        if mask then fill:AddMaskTexture(mask) end
+        local base = bar._modernBase
+        if base then base:SetAllPoints(fill); base:Show() end
+    end
+end
+
+-- Hide the modern solid base whenever a non-modern style is applied so that
+-- switching away from "Blizzard (Modern)" leaves no stale layer behind.
+ns.HideModernAbsorbBase = function(bar)
+    if bar and bar._modernBase then bar._modernBase:Hide() end
+end
+
 local function ApplyAbsorbStyle(absorbBar, style, settings)
     if not absorbBar then return end
+    local mask = absorbBar._absorbMask
+    local fw = absorbBar._forward
+
+    -- "Default Blizz Frames": forward (missing-health shield) = compound modern
+    -- texture (c6c8ff base + 9196ff stripes); backfill (overshield over existing
+    -- health) = flat 10% white overlay instead of the texture.
+    if style == "blizzardModern" then
+        if fw then ns.ApplyModernAbsorbBar(fw, mask) end
+        ns.HideModernAbsorbBase(absorbBar)
+        absorbBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        absorbBar:SetStatusBarColor(1, 1, 1, 0.10)
+        local bfFill = absorbBar:GetStatusBarTexture()
+        if bfFill then
+            bfFill:SetDrawLayer("ARTWORK", 1)
+            bfFill:SetHorizTile(false); bfFill:SetVertTile(false)
+            if mask then bfFill:AddMaskTexture(mask) end
+        end
+        return
+    end
+
+    -- Every other style is a single fill texture; ensure the modern base is off.
+    ns.HideModernAbsorbBase(absorbBar)
+    if fw then ns.HideModernAbsorbBase(fw) end
+
     local tex = ABSORB_STYLE_TEX[style] or "Interface\\Buttons\\WHITE8X8"
     local alpha = settings and (settings.absorbOpacity or 90) / 100 or (ABSORB_STYLE_ALPHA[style] or 0.8)
     local ac = settings and settings.absorbColor or { r = 1, g = 1, b = 1 }
-    local mask = absorbBar._absorbMask
     absorbBar:SetStatusBarTexture(tex)
     absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
     local tiled = (style == "striped" or style == "stripedReversed")
@@ -1377,7 +1433,6 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
         fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
     end
-    local fw = absorbBar._forward
     if fw then
         fw:SetStatusBarTexture(tex)
         fw:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
@@ -1396,6 +1451,8 @@ ns.ApplyHealAbsorbStyle = function(haBar, style, settings)
     local tex = ABSORB_STYLE_TEX[style] or "Interface\\Buttons\\WHITE8X8"
     local alpha = settings and (settings.healAbsorbOpacity or 75) / 100 or 0.65
     local hc = settings and settings.healAbsorbColor or { r = 0.8, g = 0.15, b = 0.15 }
+    -- "Default Blizz Frames" heal style: hardcoded white (its color swatch is disabled).
+    if style == "healBlizzModern" then hc = { r = 1, g = 1, b = 1 } end
     local mask = haBar._absorbMask
     haBar:SetStatusBarTexture(tex)
     haBar:SetStatusBarColor(hc.r, hc.g, hc.b, alpha)
@@ -1437,6 +1494,14 @@ local function CreateAbsorbBar(button, healthBar)
     backfillBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     local bfFill = backfillBar:GetStatusBarTexture()
     if bfFill then bfFill:SetDrawLayer("ARTWORK", 1); bfFill:AddMaskTexture(absorbMask) end
+    -- Compound "Blizzard (Modern)" solid base (c6c8ff): drawn BEHIND the striped
+    -- fill (ARTWORK sublevel 0 < fill sublevel 1). Masked once here; shown only
+    -- when that style is active and re-anchored to the fill rect each update.
+    local bfBase = backfillBar:CreateTexture(nil, "ARTWORK", nil, 0)
+    bfBase:SetColorTexture(0.776, 0.784, 1.0, 1)
+    if absorbMask then bfBase:AddMaskTexture(absorbMask) end
+    bfBase:Hide()
+    backfillBar._modernBase = bfBase
     backfillBar:SetStatusBarColor(1, 1, 1, 0.8)
     backfillBar:SetReverseFill(true)
     backfillBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
@@ -1453,6 +1518,12 @@ local function CreateAbsorbBar(button, healthBar)
     forwardBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     local fwFill = forwardBar:GetStatusBarTexture()
     if fwFill then fwFill:SetDrawLayer("ARTWORK", 1); fwFill:AddMaskTexture(absorbMask) end
+    -- Modern solid base (c6c8ff) for the forward bar (see backfill above).
+    local fwBase = forwardBar:CreateTexture(nil, "ARTWORK", nil, 0)
+    fwBase:SetColorTexture(0.776, 0.784, 1.0, 1)
+    if absorbMask then fwBase:AddMaskTexture(absorbMask) end
+    fwBase:Hide()
+    forwardBar._modernBase = fwBase
     forwardBar:SetStatusBarColor(1, 1, 1, 0.8)
     forwardBar:SetReverseFill(false)
     forwardBar:SetWidth(healthBar:GetWidth())
@@ -1460,6 +1531,49 @@ local function CreateAbsorbBar(button, healthBar)
     -- Match backfill: absorb renders above heal absorb/heal prediction and max health.
     forwardBar:SetFrameLevel(healthBar:GetFrameLevel() + 3)
     forwardBar:Hide()
+
+    -- "Default Blizz Frames" spark: a fixed 16px soft glow (cast_spark.tga, ADD blend)
+    -- centered on the shield's left edge (the current-HP seam) -- half over health, half
+    -- over the shield. It lives on its own non-clipping host above the shield so the
+    -- health-side half isn't clipped by missClip; its CENTER is pinned to the forward
+    -- bar's LEFT edge so it tracks the seam. It is itself a StatusBar fed the absorb with
+    -- a tiny max, so ANY shield fills it 100% and no shield collapses it to nothing --
+    -- self-gating off the secret absorb just like the shield bars, no boolean/mask.
+    local sparkHost = CreateFrame("Frame", nil, healthBar)
+    sparkHost:SetAllPoints(healthBar)
+    sparkHost:SetClipsChildren(true)
+    sparkHost:SetFrameLevel(healthBar:GetFrameLevel() + 4)
+    -- Invisible gate bar (16px, centered on the seam): fed the absorb with a tiny max so
+    -- its fill is binary -- a full 16px when ANY shield exists, zero when none. Only its
+    -- fill GEOMETRY is used; it self-gates off the secret absorb like the shield bars.
+    local gateBar = CreateFrame("StatusBar", nil, sparkHost)
+    gateBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    gateBar:SetStatusBarColor(1, 1, 1, 0)
+    gateBar:SetSize(16, healthBar:GetHeight())
+    gateBar:SetMinMaxValues(0, 1)
+    gateBar:SetValue(0)
+    gateBar:SetPoint("CENTER", forwardBar, "LEFT", -1, 0)
+    -- The visible spark: a cast_spark glow laid over the gate's fill rect, so it shows at
+    -- a full 16px with any shield and collapses to nothing without one (cast_spark.tga
+    -- renders as a plain texture but not as a StatusBar fill, hence the split).
+    local edgeSpark = sparkHost:CreateTexture(nil, "OVERLAY")
+    edgeSpark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
+    edgeSpark:SetBlendMode("ADD")
+    edgeSpark:SetAllPoints(gateBar:GetStatusBarTexture())
+    edgeSpark:Hide()
+    forwardBar._edgeSpark = edgeSpark
+    forwardBar._edgeGate = gateBar
+    -- Overshield spark: when the absorb overshields, the backfill spreads left over your
+    -- existing health; this rides the backfill's LEFT edge (the inner edge of the whole
+    -- shield). Shown only while overshielding; the seam spark hides then, so only one
+    -- spark is ever visible. Re-anchored to the backfill fill each update.
+    local bfSpark = sparkHost:CreateTexture(nil, "OVERLAY")
+    bfSpark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
+    bfSpark:SetBlendMode("ADD")
+    bfSpark:SetSize(16, healthBar:GetHeight())
+    bfSpark:SetPoint("CENTER", forwardBar, "LEFT", -1, 0)
+    bfSpark:Hide()
+    forwardBar._bfSpark = bfSpark
 
     -- Absorb Bar: solid bar above the frame showing the shield amount,
     -- filling from the right edge. Always created (hidden) so toggling the
@@ -1556,7 +1670,11 @@ local function CreateAbsorbBar(button, healthBar)
         hpCalc = CreateUnitHealPredictionCalculator()
         if hpCalc.SetMaximumHealthMode then
             hpCalc:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.WithAbsorbs)
-            hpCalc:SetDamageAbsorbClampMode(Enum.UnitDamageAbsorbClampMode.MaximumHealth)
+            -- Missing Health clamp: GetDamageAbsorbs' 2nd return is then the standard
+            -- "overshield" boolean (absorb exceeds your empty health) -- consistent in
+            -- and out of combat. Bars are fed the FULL absorb (UnitGetTotalAbsorbs) so
+            -- overflow/backfill still renders.
+            hpCalc:SetDamageAbsorbClampMode(Enum.UnitDamageAbsorbClampMode.MissingHealth)
         end
     end
 
@@ -1574,6 +1692,16 @@ local function CreateAbsorbBar(button, healthBar)
     healAbsorbBar:SetHeight(healthBar:GetHeight())
     healAbsorbBar:SetFrameLevel(healthBar:GetFrameLevel() + 1)
     healAbsorbBar:Hide()
+
+    -- Black backing behind the heal-absorb texture (all styles; opacity user-set via
+    -- healAbsorbBgOpacity). Drawn UNDER the fill (ARTWORK sublevel 1 < the fill's 2),
+    -- masked + SetAllPoints'd to the fill rect each update so it tracks the secret
+    -- heal-absorb amount and collapses to nothing when there is none.
+    local haBg = healAbsorbBar:CreateTexture(nil, "ARTWORK", nil, 1)
+    haBg:SetColorTexture(0, 0, 0, 0.25)
+    if absorbMask then haBg:AddMaskTexture(absorbMask) end
+    haBg:Hide()
+    healAbsorbBar._bg = haBg
 
     -- Heal prediction bar: extends from current HP edge into missing health
     healPredBar = CreateFrame("StatusBar", nil, missClip)
@@ -1644,17 +1772,23 @@ local function UpdateAbsorb(button, unit)
     if not styleOn and not barOn then
         ab:Hide()
         if fw then fw:Hide() end
+        if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
+        if fw and fw._bfSpark then fw._bfSpark:Hide() end
         if ha then ha:Hide() end
         if topBar then topBar:Hide() end
         return
     end
 
-    local maxHealth, absorbAmt
+    local maxHealth, absorbAmt, isClamped
     if calc and UnitGetDetailedHealPrediction then
         UnitGetDetailedHealPrediction(unit, nil, calc)
         calc:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.Default)
         maxHealth = calc:GetMaximumHealth()
-        absorbAmt = calc:GetDamageAbsorbs()
+        -- 2nd return (Missing Health clamp) = secret-safe overshield boolean.
+        local _, clampedBool = calc:GetDamageAbsorbs()
+        isClamped = clampedBool
+        -- Bars get the FULL absorb so the overflow/backfill renders correctly.
+        absorbAmt = (UnitGetTotalAbsorbs and UnitGetTotalAbsorbs(unit)) or 0
     else
         maxHealth = UnitHealthMax(unit) or 0
         absorbAmt = (UnitGetTotalAbsorbs and UnitGetTotalAbsorbs(unit)) or 0
@@ -1680,6 +1814,8 @@ local function UpdateAbsorb(button, unit)
     if not styleOn then
         ab:Hide()
         if fw then fw:Hide() end
+        if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
+        if fw and fw._bfSpark then fw._bfSpark:Hide() end
         if ha then ha:Hide() end
         return
     end
@@ -1713,6 +1849,40 @@ local function UpdateAbsorb(button, unit)
     -- the forward bar (overlay-only) is not needed.
     if (s.absorbEdgeMode or "overlay") ~= "overlay" and fw then fw:Hide() end
 
+    -- "Default Blizz Frames": standard backfill + forward absorb (backfill = 10% white
+    -- overshield, forward = modern texture). The spark always rides the LEFT edge of the
+    -- shield: the seam spark (current-HP edge) self-gates on "has shield" and hides while
+    -- overshielding; the overshield spark rides the backfill's left edge and shows only
+    -- while overshielding. isClamped (the Missing-Health-clamp overshield boolean) flips
+    -- between them secret-safely, so exactly one is ever visible.
+    if absStyle == "blizzardModern" then
+        if fw then
+            local fmb = fw._modernBase
+            if fmb then fmb:SetAllPoints(fw:GetStatusBarTexture()) end
+            -- Seam spark: full 16px when any shield (binary gate), hidden while overshielding.
+            local g, sp = fw._edgeGate, fw._edgeSpark
+            if g and sp then
+                g:SetHeight(hpH)
+                g:SetValue(absorbAmt)
+                sp:SetAllPoints(g:GetStatusBarTexture())
+                if sp.SetAlphaFromBoolean then sp:SetAlphaFromBoolean(isClamped, 0, 1) else sp:SetAlpha(1) end
+                sp:Show()
+            end
+            -- Overshield spark: ride the backfill's left edge; shown only while overshielding.
+            local bsp = fw._bfSpark
+            if bsp then
+                bsp:SetSize(16, hpH)
+                bsp:ClearAllPoints()
+                bsp:SetPoint("CENTER", ab:GetStatusBarTexture(), "LEFT", -1, 0)
+                if bsp.SetAlphaFromBoolean then bsp:SetAlphaFromBoolean(isClamped, 1, 0) else bsp:SetAlpha(0) end
+                bsp:Show()
+            end
+        end
+    elseif fw and fw._edgeSpark then
+        fw._edgeSpark:Hide()
+        if fw._bfSpark then fw._bfSpark:Hide() end
+    end
+
     -- Heal absorb: feed directly without Lua comparison
     if ha then
         local haStyle = s.healAbsorbStyle or "clean"
@@ -1730,6 +1900,13 @@ local function UpdateAbsorb(button, unit)
             ha:SetMinMaxValues(0, maxHealth)
             ha:SetValue(healAbsorbAmt)
             ha:Show()
+            -- Black backing: track the heal-absorb fill rect, opacity from settings.
+            local hbg = ha._bg
+            if hbg then
+                hbg:SetColorTexture(0, 0, 0, (s.healAbsorbBgOpacity or 25) / 100)
+                hbg:SetAllPoints(ha:GetStatusBarTexture())
+                hbg:Show()
+            end
         end
     end
 
@@ -2239,7 +2416,7 @@ local function StyleButton(button)
         if PP then PP.CreateBorder(dbBorder, 0, 0, 0, 1, 1) end
 
         -- Text carrier above cooldown swipe AND border
-        local dbFontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local dbFontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
         local dbTextLevel = math.max(cooldown:GetFrameLevel() + 2, dbBorder:GetFrameLevel() + 1)
         local dbDurCarrier = CreateFrame("Frame", nil, icon)
         dbDurCarrier:SetAllPoints()
@@ -2248,14 +2425,14 @@ local function StyleButton(button)
         -- Stack count text
         local dbCountFS = dbDurCarrier:CreateFontString(nil, "OVERLAY")
         dbCountFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
-        dbCountFS:SetFont(dbFontPath, 8, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(dbCountFS, dbFontPath, 8, "raidFrames")
         dbCountFS:SetTextColor(1, 1, 1)
         icon._count = dbCountFS
 
         -- Duration text
         local dbDurFS = dbDurCarrier:CreateFontString(nil, "OVERLAY")
         dbDurFS:SetPoint("CENTER", icon, "CENTER", 0, 0)
-        dbDurFS:SetFont(dbFontPath, 8, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(dbDurFS, dbFontPath, 8, "raidFrames")
         dbDurFS:SetTextColor(1, 1, 1)
         dbDurFS:Hide()
         icon._durText = dbDurFS
@@ -2392,10 +2569,10 @@ local function StyleButton(button)
         local defDurCarrier = CreateFrame("Frame", nil, defIcon)
         defDurCarrier:SetAllPoints()
         defDurCarrier:SetFrameLevel(defCD:GetFrameLevel() + 2)
-        local defDurFontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local defDurFontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
         local defDurFS = defDurCarrier:CreateFontString(nil, "OVERLAY")
         defDurFS:SetPoint("CENTER", defIcon, "CENTER", 0, 0)
-        defDurFS:SetFont(defDurFontPath, 8, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(defDurFS, defDurFontPath, 8, "raidFrames")
         defDurFS:SetTextColor(1, 1, 1)
         defDurFS:Hide()
         defIcon._durText = defDurFS
@@ -2747,6 +2924,10 @@ local function StyleButton(button)
     -- disable transition). Right-click must never break.
     button:SetAttribute("*type1", "target")
     button:SetAttribute("*type2", "togglemenu")
+    -- 12.0.7 gates the secure unit menu; reopen it in Lua when suppressed.
+    if EllesmereUI.OpenUnitMenuFallback then
+        button:HookScript("OnClick", EllesmereUI.OpenUnitMenuFallback)
+    end
 
     -- Hover ping support. Without this, a mouseover ping over our frame falls
     -- through to the 3D world behind it, because the ping system only targets a
@@ -3133,6 +3314,11 @@ local SATED_DEBUFFS = {
 local function IsDisplayDebuff(unit, auraData)
     local iid = auraData.auraInstanceID
     if not iid then return false end
+    -- Permanently hidden debuffs -- never shown, no toggle. Inlined (no file-scope
+    -- table) to stay under the 200-local cap. Secret-safe: skip when spellId is
+    -- secret. 1254550 = Arcane Empowerment, 308312 = Time Trial Practice.
+    local hsid = auraData.spellId
+    if hsid and not issecretvalue(hsid) and (hsid == 1254550 or hsid == 308312) then return false end
     local s = db and db.profile
     local mode = s and s.debuffFilter or "all"
     if mode == "none" then return false end
@@ -3170,10 +3356,32 @@ local function ApplyDebuffIcon(icon, auraData, unit, s)
     local borderSz = s.debuffBorderSize or 1
     if icon._borderFrame and PP then
         if borderSz > 0 then
+            -- A typed (dispellable) debuff carries a non-nil dispelName even when
+            -- the name itself is a secret value (other players' debuffs inside
+            -- instances); physical debuffs have a nil dispelName. So this nil
+            -- check is the secret-safe "is it dispellable" test.
             local dispelName = auraData.dispelName
             local dc
-            if dispelName and not issecretvalue(dispelName) then
-                dc = GetDispelColor(dispelName, s)
+            if dispelName ~= nil then
+                if not issecretvalue(dispelName) then
+                    -- Clean string: direct per-type color lookup.
+                    dc = GetDispelColor(dispelName, s)
+                else
+                    -- Secret dispel type: resolve through Blizzard's color curve
+                    -- so the user's custom dispel color still applies without ever
+                    -- reading the secret (same route as the health-bar dispel border).
+                    if not ns._dispelCurve then ns._RebuildDispelCurves() end
+                    local curve = (s == ns._scaledPartyProxy) and ns._dispelCurveParty or ns._dispelCurve
+                    local iid = auraData.auraInstanceID
+                    if curve and iid and C_UnitAuras.GetAuraDispelTypeColor then
+                        local col = C_UnitAuras.GetAuraDispelTypeColor(unit, iid, curve)
+                        if col then
+                            local sc = ns._dispelScratch
+                            sc.r, sc.g, sc.b = col:GetRGB()
+                            dc = sc
+                        end
+                    end
+                end
             end
             if dc then
                 PP.UpdateBorder(icon._borderFrame, borderSz, dc.r, dc.g, dc.b, 1)
@@ -3234,8 +3442,8 @@ local function ApplyDebuffIcon(icon, auraData, unit, s)
                 local cdText = icon._cooldown.GetCountdownFontString and icon._cooldown:GetCountdownFontString()
                 if cdText then
                     local dtc = s.debuffDurTextColor or { r = 1, g = 1, b = 1 }
-                    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                    cdText:SetFont(fp, s.debuffDurTextSize or 8, "OUTLINE")
+                    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                    EllesmereUI.ApplyIconTextFont(cdText, fp, s.debuffDurTextSize or 8, "raidFrames")
                     cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                     cdText:ClearAllPoints()
                     cdText:SetPoint("CENTER", icon, "CENTER", s.debuffDurTextOffsetX or 0, s.debuffDurTextOffsetY or 0)
@@ -3284,12 +3492,12 @@ local function RenderDebuffs(d, s, unit)
     local shown = 0
 
     -- Apply font/position settings once per render (not per-aura)
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     for _, icon in ipairs(d.debuffIcons) do
         -- Stacks font
         if icon._count and s.debuffShowStacks then
             local stc = s.debuffStacksTextColor or { r=1, g=1, b=1 }
-            icon._count:SetFont(fontPath, s.debuffStacksTextSize or 8, "OUTLINE")
+            EllesmereUI.ApplyIconTextFont(icon._count, fontPath, s.debuffStacksTextSize or 8, "raidFrames")
             icon._count:SetTextColor(stc.r, stc.g, stc.b)
             icon._count:ClearAllPoints()
             icon._count:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",
@@ -3547,8 +3755,8 @@ local function UpdateDefensives(button, unit, updateInfo)
                             local cdText = cd.GetCountdownFontString and cd:GetCountdownFontString()
                             if cdText then
                                 local dtc = s.defDurTextColor or { r = 1, g = 1, b = 1 }
-                                local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                cdText:SetFont(fp, s.defDurTextSize or 8, "OUTLINE")
+                                local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                                EllesmereUI.ApplyIconTextFont(cdText, fp, s.defDurTextSize or 8, "raidFrames")
                                 cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                                 cdText:ClearAllPoints()
                                 cdText:SetPoint("CENTER", icon, "CENTER", s.defDurTextOffsetX or 0, s.defDurTextOffsetY or 0)
@@ -4687,6 +4895,10 @@ FB.EnsureBuilt = function()
         b:SetAttribute("*type1", "target")
         b:SetAttribute("*type2", "togglemenu")
         b:RegisterForClicks("AnyUp")
+        -- 12.0.7 gates the secure unit menu; reopen it in Lua when suppressed.
+        if EllesmereUI.OpenUnitMenuFallback then
+            b:HookScript("OnClick", EllesmereUI.OpenUnitMenuFallback)
+        end
         b:Hide()
 
         local bg = b:CreateTexture(nil, "BACKGROUND")
@@ -5089,9 +5301,8 @@ FB.SetMoverShown = function(owner, show, frameName, labelText)
             EllesmereUI.MakeBorder(m, ar or 1, ag or 1, ab or 1, 0.6)
         end
         local lbl = m:CreateFontString(nil, "OVERLAY")
-        lbl:SetFont(EllesmereUI.GetFontPath(), 11, "")
-        lbl:SetShadowOffset(1, -1)
-        lbl:SetShadowColor(0, 0, 0, 0.8)
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, true) end
+        lbl:SetFont(EllesmereUI.GetFontPath("raidFrames"), 11, "")
         lbl:SetTextColor(1, 1, 1, 0.75)
         lbl:SetPoint("CENTER", m, "CENTER")
         lbl:SetWordWrap(false)
@@ -6222,11 +6433,26 @@ local function LayoutGroups()
         if unitGrowth == "UP"   then hdrAnchor = "BOTTOMLEFT"; hdrOffY = -groupH end
         if unitGrowth == "LEFT" then hdrAnchor = "TOPRIGHT";   hdrOffX = groupW  end
 
+        -- "Hide Empty Groups": collapse subgroups that currently have no
+        -- members so the remaining groups close ranks (e.g. show 1/2/3/6
+        -- instead of 1/2/3 then a gap where 4/5 would be then 6). Real frames
+        -- only; needs live raid roster data, so it is skipped outside a raid
+        -- (GetRaidRosterInfo returns nil there) to avoid hiding every group
+        -- when solo or in a party.
+        local occupied
+        if s.hideEmptyGroups ~= false and IsInRaid() then
+            occupied = {}
+            for ri = 1, GetNumGroupMembers() or 0 do
+                local _, _, sub = GetRaidRosterInfo(ri)
+                if sub then occupied[sub] = true end
+            end
+        end
+
         local visSlot = 0  -- running counter for visible groups (collapses gaps)
         for group = 1, 8 do
             local hdr = separatedHdrs[group]
             if hdr then
-                if vg[group] == false then
+                if vg[group] == false or (occupied and not occupied[group]) then
                     if hdr:IsShown() then hdr:Hide() end
                 else
                     local x = PixelSnap(visSlot * stepX - minX + hdrOffX)
@@ -7604,6 +7830,7 @@ do
             "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode",
             "absorbBarEnabled", "absorbBarHeight", "absorbBarColor",
             "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
+            "healAbsorbBgOpacity",
         },
         powerBar = {
             "showPowerBar", "powerHeight", "powerBgDarkness", "powerBgColor",
@@ -8683,8 +8910,8 @@ local function PvAuraApply(frameIndex, auraType, slotIndex)
         if showDurText and dtColor then
             local cdText = icon._cooldown.GetCountdownFontString and icon._cooldown:GetCountdownFontString()
             if cdText then
-                local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                cdText:SetFont(fontPath, dtSize, "OUTLINE")
+                local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                EllesmereUI.ApplyIconTextFont(cdText, fontPath, dtSize, "raidFrames")
                 cdText:SetTextColor(dtColor.r, dtColor.g, dtColor.b)
                 cdText:ClearAllPoints()
                 cdText:SetPoint("CENTER", icon, "CENTER", dtOX, dtOY)
@@ -8879,8 +9106,8 @@ local function PvAuraTick()
                             local cdText = icon._cooldown.GetCountdownFontString and icon._cooldown:GetCountdownFontString()
                             if cdText then
                                 local dtc = s2.debuffDurTextColor or { r = 1, g = 1, b = 1 }
-                                local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                                cdText:SetFont(fp, s2.debuffDurTextSize or 8, "OUTLINE")
+                                local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                                EllesmereUI.ApplyIconTextFont(cdText, fp, s2.debuffDurTextSize or 8, "raidFrames")
                                 cdText:SetTextColor(dtc.r, dtc.g, dtc.b)
                                 cdText:ClearAllPoints()
                                 cdText:SetPoint("CENTER", icon, "CENTER",
@@ -8952,8 +9179,8 @@ local function PvAuraTick()
                     local ic = f and f._pvDebuffs and f._pvDebuffs[info.slot]
                     if ic and ic._count then
                         local stc = s2.debuffStacksTextColor or { r = 1, g = 1, b = 1 }
-                        local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                        ic._count:SetFont(fp, s2.debuffStacksTextSize or 8, "OUTLINE")
+                        local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+                        EllesmereUI.ApplyIconTextFont(ic._count, fp, s2.debuffStacksTextSize or 8, "raidFrames")
                         ic._count:SetTextColor(stc.r, stc.g, stc.b)
                         ic._count:ClearAllPoints()
                         ic._count:SetPoint("BOTTOMRIGHT", ic, "BOTTOMRIGHT",
@@ -9275,7 +9502,7 @@ ns.RefreshPvAuraVisuals = function()
     local _PP = EllesmereUI.PanelPP or EllesmereUI.PP
     local _pvFrames = PvFrames()
     local _reanchor = ns._PvAuraReanchorFrame
-    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
 
     local dbBdrSz = s2.debuffBorderSize or 1
     local dbBdrC = s2.debuffBorderColor or { r = 0, g = 0, b = 0 }
@@ -9317,7 +9544,7 @@ ns.RefreshPvAuraVisuals = function()
                         if dbShowDurText then
                             local cdText = ic._cooldown.GetCountdownFontString and ic._cooldown:GetCountdownFontString()
                             if cdText then
-                                cdText:SetFont(fp, dbDtSz, "OUTLINE")
+                                EllesmereUI.ApplyIconTextFont(cdText, fp, dbDtSz, "raidFrames")
                                 cdText:SetTextColor(dbDtC.r, dbDtC.g, dbDtC.b)
                                 cdText:ClearAllPoints()
                                 cdText:SetPoint("CENTER", ic, "CENTER", dbDtOX, dbDtOY)
@@ -9325,7 +9552,7 @@ ns.RefreshPvAuraVisuals = function()
                         end
                     end
                     if ic._count and ic._count:GetText() ~= "" then
-                        ic._count:SetFont(fp, sSz, "OUTLINE")
+                        EllesmereUI.ApplyIconTextFont(ic._count, fp, sSz, "raidFrames")
                         ic._count:SetTextColor(stc.r, stc.g, stc.b)
                         ic._count:ClearAllPoints()
                         ic._count:SetPoint("BOTTOMRIGHT", ic, "BOTTOMRIGHT", 1 + sOX, -1 + sOY)
@@ -9352,7 +9579,7 @@ ns.RefreshPvAuraVisuals = function()
                         if defShowDurText then
                             local cdText = ic._cooldown.GetCountdownFontString and ic._cooldown:GetCountdownFontString()
                             if cdText then
-                                cdText:SetFont(fp, defDtSz, "OUTLINE")
+                                EllesmereUI.ApplyIconTextFont(cdText, fp, defDtSz, "raidFrames")
                                 cdText:SetTextColor(defDtC.r, defDtC.g, defDtC.b)
                                 cdText:ClearAllPoints()
                                 cdText:SetPoint("CENTER", ic, "CENTER", defDtOX, defDtOY)
@@ -9448,6 +9675,13 @@ local function CreatePreviewFrame(index)
     backfillBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     local bfFill = backfillBar:GetStatusBarTexture()
     if bfFill then bfFill:SetDrawLayer("ARTWORK", 1); bfFill:AddMaskTexture(absorbMask) end
+    -- Modern compound absorb base (preview): mirrors the live frame's solid c6c8ff
+    -- base drawn under the striped fill. Anchored to the fill at render time.
+    local bfBase = backfillBar:CreateTexture(nil, "ARTWORK", nil, 0)
+    bfBase:SetColorTexture(0.776, 0.784, 1.0, 1)
+    if absorbMask then bfBase:AddMaskTexture(absorbMask) end
+    bfBase:Hide()
+    backfillBar._modernBase = bfBase
     backfillBar:SetStatusBarColor(1, 1, 1, 0.3)
     backfillBar:SetReverseFill(true)
     backfillBar:SetPoint("TOPRIGHT", health, "TOPRIGHT", 0, 0)
@@ -9464,6 +9698,12 @@ local function CreatePreviewFrame(index)
     forwardBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     local fwFill = forwardBar:GetStatusBarTexture()
     if fwFill then fwFill:SetDrawLayer("ARTWORK", 1); fwFill:AddMaskTexture(absorbMask) end
+    -- Modern compound absorb base (preview) for the forward bar.
+    local fwBase = forwardBar:CreateTexture(nil, "ARTWORK", nil, 0)
+    fwBase:SetColorTexture(0.776, 0.784, 1.0, 1)
+    if absorbMask then fwBase:AddMaskTexture(absorbMask) end
+    fwBase:Hide()
+    forwardBar._modernBase = fwBase
     forwardBar:SetStatusBarColor(1, 1, 1, 0.3)
     forwardBar:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
     forwardBar:SetPoint("BOTTOMLEFT", health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
@@ -9473,6 +9713,36 @@ local function CreatePreviewFrame(index)
     forwardBar:SetFrameLevel(health:GetFrameLevel() + 3)
     forwardBar:SetMinMaxValues(0, 100)
     forwardBar:Hide()
+
+    -- "Default Blizz Frames" spark (preview): mirrors live -- a fixed 16px cast_spark
+    -- glow on a non-clipping host above the shield, CENTER pinned to the forward bar's
+    -- LEFT edge (the seam). Gated by the preview's plain absorb compare in the renderer.
+    local sparkHost = CreateFrame("Frame", nil, health)
+    sparkHost:SetAllPoints(health)
+    sparkHost:SetClipsChildren(true)
+    sparkHost:SetFrameLevel(health:GetFrameLevel() + 4)
+    local gateBar = CreateFrame("StatusBar", nil, sparkHost)
+    gateBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    gateBar:SetStatusBarColor(1, 1, 1, 0)
+    gateBar:SetSize(16, health:GetHeight())
+    gateBar:SetMinMaxValues(0, 1)
+    gateBar:SetValue(0)
+    gateBar:SetPoint("CENTER", forwardBar, "LEFT", -1, 0)
+    local edgeSpark = sparkHost:CreateTexture(nil, "OVERLAY")
+    edgeSpark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
+    edgeSpark:SetBlendMode("ADD")
+    edgeSpark:SetAllPoints(gateBar:GetStatusBarTexture())
+    edgeSpark:Hide()
+    forwardBar._edgeSpark = edgeSpark
+    forwardBar._edgeGate = gateBar
+    -- Overshield spark (preview): rides the backfill's left edge while overshielding.
+    local bfSpark = sparkHost:CreateTexture(nil, "OVERLAY")
+    bfSpark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
+    bfSpark:SetBlendMode("ADD")
+    bfSpark:SetSize(16, health:GetHeight())
+    bfSpark:SetPoint("CENTER", forwardBar, "LEFT", -1, 0)
+    bfSpark:Hide()
+    forwardBar._bfSpark = bfSpark
 
     -- Heal absorb bar (preview): red overlay eating into filled health from HP edge
     do
@@ -9489,6 +9759,12 @@ local function CreatePreviewFrame(index)
         ha:SetFrameLevel(health:GetFrameLevel() + 1)
         ha:SetMinMaxValues(0, 100)
         ha._mask = absorbMask
+        -- Black backing behind the heal-absorb texture (preview; mirrors live).
+        local haBg = ha:CreateTexture(nil, "ARTWORK", nil, 1)
+        haBg:SetColorTexture(0, 0, 0, 0.25)
+        if absorbMask then haBg:AddMaskTexture(absorbMask) end
+        haBg:Hide()
+        ha._bg = haBg
         ha:Hide()
         f._healAbsorbBar = ha
     end
@@ -9786,17 +10062,17 @@ local function CreatePreviewFrame(index)
         local countCarrier = CreateFrame("Frame", nil, di)
         countCarrier:SetAllPoints()
         countCarrier:SetFrameLevel(math.max(cd:GetFrameLevel() + 2, dbdr:GetFrameLevel() + 1))
-        local fpInit = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+        local fpInit = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
         local countFS = countCarrier:CreateFontString(nil, "OVERLAY")
         countFS:SetPoint("BOTTOMRIGHT", di, "BOTTOMRIGHT", 1, -1)
-        countFS:SetFont(fpInit, 8, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(countFS, fpInit, 8, "raidFrames")
         countFS:SetTextColor(1, 1, 1)
         countFS:SetText("")
         di._count = countFS
         -- Duration text (on same carrier above cooldown swipe)
         local durFS = countCarrier:CreateFontString(nil, "OVERLAY")
         durFS:SetPoint("CENTER", di, "CENTER", 0, 0)
-        durFS:SetFont(fpInit, 8, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(durFS, fpInit, 8, "raidFrames")
         durFS:SetTextColor(1, 1, 1)
         durFS:Hide()
         di._durText = durFS
@@ -10158,39 +10434,57 @@ local function ApplyPreviewData(f, index)
             end
         end
         if absStyle ~= "none" and absorbAmt > 0 then
+            local modern = (absStyle == "blizzardModern")
             local tex = ABSORB_STYLE_TEX[absStyle] or "Interface\\Buttons\\WHITE8X8"
             local alpha = (s.absorbOpacity or 90) / 100
             local tiled = (absStyle == "striped" or absStyle == "stripedReversed")
             local hpW = w
             local hpH = healthH
             local mask = f._absorbBar._mask
-
-            -- Apply style to backfill bar
             local ac = s.absorbColor or { r = 1, g = 1, b = 1 }
-            f._absorbBar:SetStatusBarTexture(tex)
-            f._absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
+
             f._absorbBar:SetWidth(hpW)
             f._absorbBar:SetHeight(hpH)
-            local bfFill = f._absorbBar:GetStatusBarTexture()
-            if bfFill then
-                bfFill:SetDrawLayer("ARTWORK", 1)
-                bfFill:SetHorizTile(tiled)
-                bfFill:SetVertTile(tiled)
-                if mask then bfFill:AddMaskTexture(mask) end
-            end
+            if fw then fw:SetWidth(hpW); fw:SetHeight(hpH) end
 
-            -- Apply style to forward bar
-            if fw then
-                fw:SetStatusBarTexture(tex)
-                fw:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
-                fw:SetWidth(hpW)
-                fw:SetHeight(hpH)
-                local fwFill = fw:GetStatusBarTexture()
-                if fwFill then
-                    fwFill:SetDrawLayer("ARTWORK", 1)
-                    fwFill:SetHorizTile(tiled)
-                    fwFill:SetVertTile(tiled)
-                    if mask then fwFill:AddMaskTexture(mask) end
+            if modern then
+                -- Forward = modern texture; backfill = flat 10% white overshield (mirrors live).
+                if fw then ns.ApplyModernAbsorbBar(fw, mask) end
+                ns.HideModernAbsorbBase(f._absorbBar)
+                f._absorbBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+                f._absorbBar:SetStatusBarColor(1, 1, 1, 0.10)
+                local bfFill = f._absorbBar:GetStatusBarTexture()
+                if bfFill then
+                    bfFill:SetDrawLayer("ARTWORK", 1)
+                    bfFill:SetHorizTile(false); bfFill:SetVertTile(false)
+                    if mask then bfFill:AddMaskTexture(mask) end
+                end
+            else
+                ns.HideModernAbsorbBase(f._absorbBar)
+                if fw then ns.HideModernAbsorbBase(fw) end
+
+                -- Apply style to backfill bar
+                f._absorbBar:SetStatusBarTexture(tex)
+                f._absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
+                local bfFill = f._absorbBar:GetStatusBarTexture()
+                if bfFill then
+                    bfFill:SetDrawLayer("ARTWORK", 1)
+                    bfFill:SetHorizTile(tiled)
+                    bfFill:SetVertTile(tiled)
+                    if mask then bfFill:AddMaskTexture(mask) end
+                end
+
+                -- Apply style to forward bar
+                if fw then
+                    fw:SetStatusBarTexture(tex)
+                    fw:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
+                    local fwFill = fw:GetStatusBarTexture()
+                    if fwFill then
+                        fwFill:SetDrawLayer("ARTWORK", 1)
+                        fwFill:SetHorizTile(tiled)
+                        fwFill:SetVertTile(tiled)
+                        if mask then fwFill:AddMaskTexture(mask) end
+                    end
                 end
             end
 
@@ -10203,9 +10497,42 @@ local function ApplyPreviewData(f, index)
                 fw:SetValue(absorbAmt)
                 fw:Show()
             end
+
+            -- "Default Blizz Frames": seam spark + overshield spark (preview values are
+            -- plain numbers, so overshield is a normal compare instead of isClamped).
+            if modern then
+                if fw then
+                    local fmb = fw._modernBase
+                    if fmb then fmb:SetAllPoints(fw:GetStatusBarTexture()) end
+                    local previewOver = absorbAmt > (100 - (healthPct or 100))
+                    local g, sp = fw._edgeGate, fw._edgeSpark
+                    if g and sp then
+                        g:SetHeight(hpH)
+                        g:SetValue(absorbAmt)
+                        sp:SetAllPoints(g:GetStatusBarTexture())
+                        sp:SetAlpha(previewOver and 0 or 1)
+                        sp:Show()
+                    end
+                    local bsp = fw._bfSpark
+                    if bsp then
+                        bsp:SetSize(16, hpH)
+                        bsp:ClearAllPoints()
+                        bsp:SetPoint("CENTER", f._absorbBar:GetStatusBarTexture(), "LEFT", -1, 0)
+                        bsp:SetAlpha(previewOver and 1 or 0)
+                        bsp:Show()
+                    end
+                end
+            elseif fw and fw._edgeSpark then
+                fw._edgeSpark:Hide()
+                if fw._bfSpark then fw._bfSpark:Hide() end
+            end
         else
             f._absorbBar:Hide()
             if fw then fw:Hide() end
+            ns.HideModernAbsorbBase(f._absorbBar)
+            if fw then ns.HideModernAbsorbBase(fw) end
+            if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
+            if fw and fw._bfSpark then fw._bfSpark:Hide() end
         end
         -- Position clip frames + backfill based on shield absorb placement
         -- (mirrors the live ReanchorAbsorbToFill).
@@ -10259,6 +10586,7 @@ local function ApplyPreviewData(f, index)
             local haTex = ABSORB_STYLE_TEX[haStyle] or "Interface\\Buttons\\WHITE8X8"
             local haAlpha = (s.healAbsorbOpacity or 75) / 100
             local hc = s.healAbsorbColor or { r = 0.8, g = 0.15, b = 0.15 }
+            if haStyle == "healBlizzModern" then hc = { r = 1, g = 1, b = 1 } end
             local tiled = (haStyle == "striped" or haStyle == "stripedReversed")
             local hpW = w
             local hpH = healthH
@@ -10277,6 +10605,12 @@ local function ApplyPreviewData(f, index)
             f._healAbsorbBar:SetMinMaxValues(0, 100)
             f._healAbsorbBar:SetValue(haAmt)
             f._healAbsorbBar:Show()
+            local hbg = f._healAbsorbBar._bg
+            if hbg then
+                hbg:SetColorTexture(0, 0, 0, (s.healAbsorbBgOpacity or 25) / 100)
+                hbg:SetAllPoints(f._healAbsorbBar:GetStatusBarTexture())
+                hbg:Show()
+            end
         else
             f._healAbsorbBar:Hide()
         end
@@ -10882,7 +11216,7 @@ local function ApplyPreviewData(f, index)
             if ft then ft:SetAlpha(0) end
         end
         if f._bg then
-            local c = s.statusColorDead or { r = 0x6D/255, g = 0x31/255, b = 0x31/255 }
+            local c = s.statusColorDead or { r = 0x24/255, g = 0x17/255, b = 0x17/255 }
             f._bg:ClearAllPoints(); f._bg:SetAllPoints(f._health)
             f._bg:SetColorTexture(c.r, c.g, c.b, 1)
         end
@@ -11645,7 +11979,7 @@ ns._ShowSizePreview = function(tier)
     end
 
     -- Font for names
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     local nameSize = s.nameSize or 10
 
     -- Normalize origin over MOVER_GROUPS (matching real LayoutGroups container)
@@ -11771,13 +12105,8 @@ ns._ShowSizePreview = function(tier)
                 f._nameText:Hide()
             else
             local name = NAMES[((i - 1) % #NAMES) + 1]
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._nameText, GetOutline() == "" and GetUseShadow()) end
             f._nameText:SetFont(fontPath, nameSize, GetOutline())
-            if GetOutline() == "" and GetUseShadow() then
-                f._nameText:SetShadowOffset(1, -1)
-                f._nameText:SetShadowColor(0, 0, 0, 1)
-            else
-                f._nameText:SetShadowOffset(0, 0)
-            end
             f._nameText:SetText(name)
             f._nameText:SetWidth(bw * 0.75)
             -- Name color
@@ -11794,13 +12123,8 @@ ns._ShowSizePreview = function(tier)
 
         -- Top Name Bar text (size/anchor/align/visibility set by LayoutTopNameBar)
         if f._topNameBarText and s.topNameBarEnabled then
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._topNameBarText, GetOutline() == "" and GetUseShadow()) end
             f._topNameBarText:SetFont(fontPath, s.topNameBarTextSize or 11, GetOutline())
-            if GetOutline() == "" and GetUseShadow() then
-                f._topNameBarText:SetShadowOffset(1, -1)
-                f._topNameBarText:SetShadowColor(0, 0, 0, 1)
-            else
-                f._topNameBarText:SetShadowOffset(0, 0)
-            end
             f._topNameBarText:SetText(NAMES[((i - 1) % #NAMES) + 1])
             if (s.topNameBarTextColorMode or "class") == "custom" then
                 local c = s.topNameBarTextColor or { r = 1, g = 1, b = 1 }

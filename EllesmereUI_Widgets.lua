@@ -4044,7 +4044,27 @@ local function BuildCogPopup(opts)
                     end
                 end)
 
-                rowWidgets[#rowWidgets + 1] = { type = 'dropdown', btn = ddBtn, lbl = ddLbl, get = row.get, values = row.values, refresh = ddBtn._ddRefresh }
+                -- Disabled overlay for dropdown (mirrors slider/input handling)
+                local ddDis
+                if row.disabled then
+                    ddDis = CreateFrame("Frame", nil, pf)
+                    ddDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
+                    ddDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    ddDis:SetHeight(DROPDOWN_ROW_H)
+                    ddDis:SetFrameLevel(pf:GetFrameLevel() + 10)
+                    ddDis:EnableMouse(true)
+                    local disTex = SolidTex(ddDis, "OVERLAY", 0.06, 0.08, 0.10, 0.70)
+                    disTex:SetAllPoints()
+                    ddDis:SetScript("OnEnter", function(self)
+                        local tip = ResolveDisabledTip(row)
+                        if tip and EllesmereUI.ShowWidgetTooltip then
+                            EllesmereUI.ShowWidgetTooltip(self, tip)
+                        end
+                    end)
+                    ddDis:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
+                end
+
+                rowWidgets[#rowWidgets + 1] = { type = 'dropdown', btn = ddBtn, lbl = ddLbl, get = row.get, values = row.values, refresh = ddBtn._ddRefresh, disOverlay = ddDis, disCheck = row.disabled }
                 curY = curY - DROPDOWN_ROW_H
             elseif row.type == 'colorpicker' then
                 local lbl = MakeFont(pf, 11, nil, 1, 1, 1); lbl:SetAlpha(0.6)
@@ -4500,6 +4520,11 @@ local function BuildCogPopup(opts)
                     end
                     if rw.updateSwatch then rw.updateSwatch() end
                 elseif rw.type == 'dropdown' then
+                    if rw.disOverlay and rw.disCheck then
+                        local dis
+                        if type(rw.disCheck) == "function" then dis = rw.disCheck() else dis = rw.disCheck end
+                        if dis then rw.disOverlay:Show() else rw.disOverlay:Hide() end
+                    end
                     if rw.lbl and rw.get and rw.values then
                         rw.lbl:SetText(EllesmereUI.L(DDText(rw.values[rw.get()]) or tostring(rw.get())))
                         if rw.refresh then rw.refresh() end
@@ -5188,12 +5213,14 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
     local ppScale = EllesmereUI.GetPopupScale and EllesmereUI.GetPopupScale() or 1
     menu:SetScale(ppScale)
 
-    -- Restore or initialize checked state for this key-set
-    if not _multiApplyCheckedState[cacheKey] then
-        _multiApplyCheckedState[cacheKey] = {}
-        for _, key in ipairs(keys) do
-            _multiApplyCheckedState[cacheKey][key] = true
-        end
+    -- Reset the checked state to all-true on every open. It is intentionally NOT
+    -- carried over between opens: a prior per-operation deselection must never
+    -- silently persist to another source unit or another sync icon (the shared
+    -- state previously left the Player frame excluded, so a Bar Background sync
+    -- from Target/Focus would skip the player with no visible cue).
+    _multiApplyCheckedState[cacheKey] = {}
+    for _, key in ipairs(keys) do
+        _multiApplyCheckedState[cacheKey][key] = true
     end
     local checked = _multiApplyCheckedState[cacheKey]
 
@@ -6543,7 +6570,7 @@ function EllesmereUI.BuildUnlockPlaceholder(opts)
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras"))
         or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
     local label = f:CreateFontString(nil, "OVERLAY")
-    label:SetFont(fontPath, 10, "OUTLINE")
+    label:SetFont(fontPath, 10, "OUTLINE, SLUG")
     label:SetText(EllesmereUI.L(opts.text or "Move in Unlock Mode"))
     label:SetTextColor(1, 1, 1, 0.9)
     label:SetPoint("CENTER")

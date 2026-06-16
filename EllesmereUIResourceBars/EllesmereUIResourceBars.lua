@@ -106,9 +106,8 @@ end
 local function SetRBFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
     local f = GetRBOutline()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, f == "") end
     fs:SetFont(font, size, f)
-    if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else fs:SetShadowOffset(0, 0) end
 end
 
 -- PowerType enum values (Enum.PowerType)
@@ -694,6 +693,10 @@ local DEFAULTS = {
             thresholdR = 1.0, thresholdG = 0.2, thresholdB = 0.2, thresholdA = 1,
             thresholdSpecs = {},
             expandIfNoResource = false,
+            -- Shift elements anchored to the power bar when the spec has no
+            -- primary power (e.g. BM/MM Hunter, whose Focus shows as the class
+            -- resource bar). "None" / "Up" / "Down". Visual-only.
+            shiftElementsIfNoPower = "None",
         },
         secondary = {
             enabled     = true,
@@ -2607,6 +2610,23 @@ local function BuildBars()
            and EllesmereUI.PropagateAnchorChain then
             ERB._shiftWasActive = active
             EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+        end
+    end
+
+    -- "Shift Elements if No Power": same re-cascade for the power bar. The
+    -- power-present/absent transition (e.g. a Hunter swapping specs) keeps the
+    -- frame at the same size, so neither OnSizeChanged nor the move-hook fires
+    -- automatically -- trigger the cascade explicitly. Gated so a None-forever
+    -- profile schedules ZERO anchor work, and never fired during unlock mode.
+    do
+        local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
+        local active = pp ~= nil and (pp.shiftElementsIfNoPower == "Up"
+            or pp.shiftElementsIfNoPower == "Down")
+        if (active or ERB._shiftWasActivePower)
+           and not EllesmereUI._unlockActive
+           and EllesmereUI.PropagateAnchorChain then
+            ERB._shiftWasActivePower = active
+            EllesmereUI.PropagateAnchorChain("ERB_Power")
         end
     end
 end
@@ -5208,8 +5228,8 @@ local function LayoutTotemBar()
     local zoom = 0.055
     local timerSize = tb.timerSize or 11
     local scaledTimerSize = math.max(6, math.floor(timerSize / iconScale + 0.5))
-    local fontPath = EllesmereUI.GetFont and EllesmereUI.GetFont() or STANDARD_TEXT_FONT
-    local outlineMode = EllesmereUI.GetOutline and EllesmereUI.GetOutline() or "OUTLINE"
+    local fontPath = GetRBFont()
+    local outlineMode = GetRBOutline()
 
     wipe(_totemActiveSet)
     for i, btn in ipairs(buttons) do
@@ -5676,11 +5696,14 @@ function ERB:OnInitialize()
     _G._ERB_GetPrimaryPowerType = GetPrimaryPowerType
     _G._ERB_PowerColors = POWER_COLORS
 
-    -- "Shift Elements if No Resource": a direction signal the shared anchor
-    -- engine consults to temporarily move elements anchored to the class
-    -- resource bar when the spec has no class resource. Visual-only; never
-    -- written to saved positions. Direction the shift WOULD apply (ignores
-    -- unlock state): +1 = Up, -1 = Down, 0 = none.
+    -- "Shift Elements if No Resource" / "Shift Elements if No Power": direction
+    -- signals the shared anchor engine consults to temporarily move elements
+    -- anchored to the class resource bar (when the spec has no class resource)
+    -- or the power bar (when the spec has no primary power, e.g. BM/MM Hunter
+    -- whose Focus shows as the class resource bar, OR when the power bar is
+    -- disabled outright). Visual-only; never written to saved positions.
+    -- Direction the shift WOULD apply (ignores unlock state):
+    -- +1 = Up, -1 = Down, 0 = none.
     local function ResolveShiftDir()
         local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
         if not sp or not sp.enabled then return 0 end
@@ -5689,21 +5712,42 @@ function ERB:OnInitialize()
         if GetSecondaryResource() then return 0 end
         return (mode == "Up") and 1 or -1
     end
+    local function ResolveShiftDirPower()
+        local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
+        if not pp then return 0 end
+        local mode = pp.shiftElementsIfNoPower
+        if mode ~= "Up" and mode ~= "Down" then return 0 end
+        -- Fires whenever the power bar leaves an empty slot: globally disabled,
+        -- disabled for the CURRENT spec via the spec picker, or the spec has no
+        -- primary power. The power frame is created unconditionally and kept at
+        -- full height / zero alpha when not shown, so anchored children and the
+        -- shift magnitude (target height) stay correct. Only an enabled,
+        -- spec-allowed bar that actually has power suppresses the shift.
+        if pp.enabled ~= false and not IsSpecDisabled(pp) and GetPrimaryPowerType() then return 0 end
+        return (mode == "Up") and 1 or -1
+    end
     -- Consulted inside ApplyAnchorPosition. Returns 0 while unlock mode is
     -- active so the layout shows normal (and movers capture true positions).
     EllesmereUI._GetAnchorTargetShiftDir = function(targetKey, childKey)
-        if targetKey ~= "ERB_ClassResource" then return 0 end
         if EllesmereUI._unlockActive then return 0 end
-        return ResolveShiftDir()
+        if targetKey == "ERB_ClassResource" then return ResolveShiftDir() end
+        if targetKey == "ERB_Power" then return ResolveShiftDirPower() end
+        return 0
     end
     -- Whether a shift WOULD apply outside unlock mode (unlock entry uses this to
     -- decide whether to un-shift before snapshotting positions). None = false.
-    _G._ERB_ShiftWantsApply = function() return ResolveShiftDir() ~= 0 end
+    _G._ERB_ShiftWantsApply = function()
+        return ResolveShiftDir() ~= 0 or ResolveShiftDirPower() ~= 0
+    end
     -- Re-apply the shift after unlock mode closes (PropagateAnchorChain is a
     -- no-op while unlocked, so this runs on exit). Gated so None = zero work.
     _G._ERB_RestoreShift = function()
-        if ResolveShiftDir() ~= 0 and EllesmereUI.PropagateAnchorChain then
+        if not EllesmereUI.PropagateAnchorChain then return end
+        if ResolveShiftDir() ~= 0 then
             EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+        end
+        if ResolveShiftDirPower() ~= 0 then
+            EllesmereUI.PropagateAnchorChain("ERB_Power")
         end
     end
 

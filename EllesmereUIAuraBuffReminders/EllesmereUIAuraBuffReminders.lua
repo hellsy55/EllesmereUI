@@ -74,9 +74,8 @@ local _cachedOutline
 local function SetABRFont(fs, font, size)
     if not (fs and fs.SetFont) then return end
     if not _cachedOutline then _cachedOutline = GetABROutline() end
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, _cachedOutline == "") end
     fs:SetFont(font, size, _cachedOutline)
-    if _cachedOutline == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else fs:SetShadowOffset(0, 0) end
 end
 
 -------------------------------------------------------------------------------
@@ -3514,11 +3513,8 @@ do
         warnFS = warnFrame:CreateFontString(nil, "OVERLAY")
         local font = ResolveFontPath()
         local outline = GetABROutline()
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(warnFS, outline == "" and GetABRUseShadow()) end
         warnFS:SetFont(font, 48, outline)
-        if outline == "" and GetABRUseShadow() then
-            warnFS:SetShadowOffset(1, -1)
-            warnFS:SetShadowColor(0, 0, 0, 1)
-        end
         warnFS:SetPoint("CENTER")
         warnFS:SetText("LOW MANA")
         -- Breathe animation: fade between 60% and 100% alpha

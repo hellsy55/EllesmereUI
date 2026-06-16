@@ -101,12 +101,8 @@ end
 local function SetFont(fs, size)
     if not (fs and fs.SetFont) then return end
     local font, flags = GetDMFont(), GetDMOutline()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, flags == "") end
     fs:SetFont(font, size, flags)
-    if flags == "" then
-        fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 local function PhysicalPixels(val)
