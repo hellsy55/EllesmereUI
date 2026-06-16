@@ -516,6 +516,51 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
+        -- Show Omnium Folio (expansion landing page button) | inline X/Y cog
+        local omniumRow
+        omniumRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Omnium Folio",
+              tooltip="Show the expansion landing page (Omnium Folio) button at the bottom-left of the minimap. Use the cog to nudge its position.",
+              getValue=function() local m = MinimapDB(); return m and m.showOmniumFolio ~= false end,
+              setValue=function(v)
+                  local m = MinimapDB(); if not m then return end
+                  m.showOmniumFolio = v
+                  RefreshMinimap()
+              end },
+            { type="slider", text="Omnium Folio Scale", min=0.5, max=1.5, step=0.05,
+              getValue=function() local m = MinimapDB(); return (m and m.omniumFolioScale) or 0.75 end,
+              setValue=function(v)
+                  local m = MinimapDB(); if not m then return end
+                  m.omniumFolioScale = v
+                  RefreshMinimap()
+              end });  y = y - h
+        do
+            local rgn = omniumRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Omnium Folio Position",
+                rows = {
+                    { type="slider", label="X", min=-200, max=200, step=1,
+                      get=function() local m=MinimapDB(); return (m and m.omniumFolioX) or 0 end,
+                      set=function(v) local m=MinimapDB(); if not m then return end m.omniumFolioX=v; RefreshMinimap() end },
+                    { type="slider", label="Y", min=-200, max=200, step=1,
+                      get=function() local m=MinimapDB(); return (m and m.omniumFolioY) or 0 end,
+                      set=function(v) local m=MinimapDB(); if not m then return end m.omniumFolioY=v; RefreshMinimap() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
+
         y = y - 10
 
         -- EXTRAS section header

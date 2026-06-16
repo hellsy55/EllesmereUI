@@ -765,6 +765,14 @@ end
 local function SetClickAttr(frame, parsed, actionType, spellOrMacro, macrotext)
     local prefix = ModPrefixForAttr(parsed.modifiers)
     local suffix = tostring(parsed.buttonNum)
+    -- 12.0.7 gates a raw "togglemenu" on unit buttons (and an insecure reopen
+    -- taints its protected items). Route the menu through the secure proxy via
+    -- the ungated "click" action instead.
+    if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
+        frame:SetAttribute(prefix .. "type" .. suffix, "click")
+        frame:SetAttribute(prefix .. "clickbutton" .. suffix, EllesmereUI.GetSecureMenuProxy(frame))
+        return
+    end
     frame:SetAttribute(prefix .. "type" .. suffix, actionType)
     if actionType == "spell" then
         frame:SetAttribute(prefix .. "spell" .. suffix, spellOrMacro or "")
@@ -779,11 +787,18 @@ local function ClearClickAttr(frame, parsed)
     frame:SetAttribute(prefix .. "type" .. suffix, nil)
     frame:SetAttribute(prefix .. "spell" .. suffix, nil)
     frame:SetAttribute(prefix .. "macrotext" .. suffix, nil)
+    frame:SetAttribute(prefix .. "clickbutton" .. suffix, nil)
 end
 
 -- Apply keyboard binding attributes on a frame (virtual button suffix).
 local function SetKeyAttr(frame, idx, actionType, spellOrMacro, macrotext)
     local suffix = "eui_" .. idx
+    -- Route a "menu" keybind through the secure proxy (see SetClickAttr).
+    if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
+        frame:SetAttribute("type-" .. suffix, "click")
+        frame:SetAttribute("clickbutton-" .. suffix, EllesmereUI.GetSecureMenuProxy(frame))
+        return
+    end
     frame:SetAttribute("type-" .. suffix, actionType)
     if actionType == "spell" then
         frame:SetAttribute("spell-" .. suffix, spellOrMacro or "")
@@ -798,6 +813,7 @@ local function ClearKeyAttrs(frame, count)
         frame:SetAttribute("type-" .. suffix, nil)
         frame:SetAttribute("spell-" .. suffix, nil)
         frame:SetAttribute("macrotext-" .. suffix, nil)
+        frame:SetAttribute("clickbutton-" .. suffix, nil)
     end
 end
 
@@ -985,9 +1001,15 @@ local function DoUnregisterFrame(frame)
     end
     ClearKeyAttrs(frame, lastBindingCount)
 
-    -- Restore default click behavior (target + menu)
+    -- Restore default click behavior (target + menu). The menu goes through the
+    -- secure SecureActionButton proxy (12.0.7 gates a raw togglemenu on unit
+    -- buttons, and an insecure reopen taints the menu's protected items).
     frame:SetAttribute("type1", "target")
-    frame:SetAttribute("type2", "togglemenu")
+    if EllesmereUI.AttachSecureUnitMenu then
+        EllesmereUI.AttachSecureUnitMenu(frame)
+    else
+        frame:SetAttribute("type2", "togglemenu")
+    end
     -- Fully revert the click registration and remove our secure OnEnter/OnLeave
     -- wraps so the frame behaves exactly as it did before click-casting touched
     -- it. Right-click must never be left broken after a disable.

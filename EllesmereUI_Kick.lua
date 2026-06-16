@@ -70,57 +70,58 @@ end
 EllesmereUI.RefreshKickAbility = RefreshKickAbility
 EllesmereUI.ComputeCastBarTint = ComputeCastBarTint
 
--- Unit context-menu fallback.
--- 12.0.7 added a gate to the secure SecureUnitButton_OnClick handler: a
--- "menu"/"togglemenu" click is dropped when C_ClickBindings.GetBindingType(button)
--- returns None -- always the case for EllesmereUI click-cast bindings, since we
--- register no C_ClickBindings. That silently kills the unit context menu for EVERY
--- key/mouse binding routed through our SecureUnitButton frames (12.0.5 has no gate,
--- so it works there). This insecure OnClick POST-HOOK (installed via HookScript,
--- never SetScript) re-opens the menu in Lua and never touches any other action -- it
--- bails unless the click's effective action is the menu. It installs on all client
--- versions: on 12.0.7+ it is the only thing that opens the menu; on 12.0.5 the secure
--- menu still fires too, but the menu manager simply re-opens it (the redundant build
--- is invisible on a click-rate action), so there is no harmful double-open.
-function EllesmereUI.OpenUnitMenuFallback(self, button)
-    if not (SecureButton_GetModifiedAttribute and C_ClickBindings and C_ClickBindings.GetBindingType
-            and Enum and Enum.ClickBindingType and UnitPopup_OpenMenu) then
-        return
+-- Secure unit context menu (12.0.7+).
+-- 12.0.7 gates SecureUnitButton_OnClick: a "menu"/"togglemenu" action is silently
+-- dropped unless C_ClickBindings has a binding for that button (the default
+-- RightButton -> OpenContextMenu interaction is missing for many users / wiped by
+-- click-cast setups). Re-opening the menu from insecure Lua instead TAINTS it, so
+-- its protected items (Set Focus -> FocusUnit, Follow, etc.) throw
+-- ADDON_ACTION_FORBIDDEN. The only way the protected items work is a SECURE open.
+--
+-- Fix: route right-click through the UN-gated "click" secure action to a hidden
+-- child SecureActionButton, whose own SecureActionButton_OnClick (NOT gated -- only
+-- SecureUnitButton_OnClick is) runs "togglemenu" securely. "useparent-unit" makes
+-- the proxy resolve the unit from the parent unit button, so it works for static
+-- frames AND header-managed (party/raid) frames whose unit changes. Call
+-- AttachSecureUnitMenu(frame) on any unit button that needs a right-click menu
+-- instead of setting *type2 = "togglemenu".
+local menuProxies = setmetatable({}, { __mode = "k" })
+
+-- Create (once) and return the hidden SecureActionButton proxy for a unit button.
+-- Use this when wiring a SPECIFIC click/key binding to the menu -- it does NOT
+-- touch the frame's own type attributes (so it won't clobber other bindings).
+function EllesmereUI.GetSecureMenuProxy(frame)
+    if not frame then return end
+    local proxy = menuProxies[frame]
+    if not proxy then
+        proxy = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+        proxy:SetSize(1, 1)
+        proxy:SetAlpha(0)
+        proxy:EnableMouse(false)          -- never catches real mouse; only the secure click delegate reaches it
+        proxy:RegisterForClicks("AnyUp")
+        proxy:SetAttribute("type", "togglemenu")
+        -- The secure resolver looks up type by BUTTON SUFFIX (RightButton -> type2);
+        -- the bare "type" may not fall back, so set every button explicitly.
+        for i = 1, 5 do proxy:SetAttribute("type" .. i, "togglemenu") end
+        proxy:SetAttribute("useparent-unit", true)
+        -- Act on mouse-up regardless of the "cast on key down" CVar. Without this,
+        -- SecureActionButton_OnClick's clickAction gate skips the menu action on the
+        -- up-click when ActionButtonUseKeyDown is on (the delegate fires an up).
+        proxy:SetAttribute("useOnKeyDown", false)
+        menuProxies[frame] = proxy
     end
-    -- Resolve the SAME effective action the secure handler used for this exact
-    -- button (honors modifiers and the *type wildcard), so a spell/macro bind on
-    -- any button -- type "spell"/"macro" -- is never intercepted. Only the bare
-    -- context menu proceeds.
-    local action = SecureButton_GetModifiedAttribute(self, "type", button)
-    if action ~= "menu" and action ~= "togglemenu" then return end
-    local mods = (C_ClickBindings.MakeModifiers and C_ClickBindings.MakeModifiers())
-              or (MakeModifiers and MakeModifiers()) or 0
-    -- Only step in when the secure menu was suppressed (gated). If it still fires
-    -- (binding type ~= None) we do nothing, so there is never a double-open.
-    if C_ClickBindings.GetBindingType(button, mods) ~= Enum.ClickBindingType.None then return end
-    local unit = (SecureButton_GetModifiedUnit and SecureButton_GetModifiedUnit(self, button))
-              or self:GetAttribute("unit")
-    if not unit then return end
-    if issecretvalue and issecretvalue(unit) then return end
-    if not UnitExists(unit) then return end
-    -- Resolve the menu type the same way the secure togglemenu action does.
-    local lu = string.lower(unit)
-    local utype = string.match(lu, "^([a-z]+)%d+$") or lu
-    local which
-    if utype == "party" then which = "PARTY"
-    elseif utype == "raid" then which = "RAID_PLAYER"
-    elseif utype == "boss" then which = "BOSS"
-    elseif utype == "focus" then which = "FOCUS"
-    elseif utype == "arena" or utype == "arenapet" then which = "ARENAENEMY"
-    elseif UnitIsUnit(lu, "player") then which = "SELF"
-    elseif UnitIsUnit(lu, "vehicle") then which = "VEHICLE"
-    elseif UnitIsUnit(lu, "pet") then which = "PET"
-    elseif UnitIsPlayer(lu) then
-        if UnitInRaid(lu) then which = "RAID_PLAYER"
-        elseif UnitInParty(lu) then which = "PARTY"
-        else which = "PLAYER" end
-    else which = "TARGET" end
-    pcall(UnitPopup_OpenMenu, which, { unit = lu })
+    return proxy
+end
+
+-- Route a unit button's default RIGHT-CLICK to the secure menu proxy via the
+-- ungated "click" action. Clears any specific type2 so the wildcard governs.
+function EllesmereUI.AttachSecureUnitMenu(frame)
+    if not frame then return end
+    local proxy = EllesmereUI.GetSecureMenuProxy(frame)
+    frame:SetAttribute("type2", nil)
+    frame:SetAttribute("*type2", "click")
+    frame:SetAttribute("*clickbutton2", proxy)
+    return proxy
 end
 
 local kickFrame = CreateFrame("Frame")

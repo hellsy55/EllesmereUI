@@ -2917,15 +2917,18 @@ local function StyleButton(button)
     -- Secure click: left=target, right=menu
     button:RegisterForClicks("AnyUp")
     button:SetAttribute("type1", "target")
-    button:SetAttribute("type2", "togglemenu")
-    -- Wildcard fallbacks so target + context menu always survive even if the
-    -- click-cast engine later clears the explicit type1/type2 (e.g. on a
-    -- disable transition). Right-click must never break.
+    -- Wildcard fallback so left-click target always survives even if the
+    -- click-cast engine later clears the explicit type1 (e.g. on a disable
+    -- transition).
     button:SetAttribute("*type1", "target")
-    button:SetAttribute("*type2", "togglemenu")
-    -- 12.0.7 gates the secure unit menu; reopen it in Lua when suppressed.
-    if EllesmereUI.OpenUnitMenuFallback then
-        button:HookScript("OnClick", EllesmereUI.OpenUnitMenuFallback)
+    -- 12.0.7 gates SecureUnitButton's togglemenu; route right-click securely
+    -- through a SecureActionButton proxy so the menu (and its protected items
+    -- like Set Focus) work without taint. (Sets *type2 = "click" -> proxy.)
+    if EllesmereUI.AttachSecureUnitMenu then
+        EllesmereUI.AttachSecureUnitMenu(button)
+    else
+        button:SetAttribute("type2", "togglemenu")
+        button:SetAttribute("*type2", "togglemenu")
     end
 
     -- Hover ping support. Without this, a mouseover ping over our frame falls
@@ -4891,11 +4894,13 @@ FB.EnsureBuilt = function()
         b._fbUnit = "boss" .. i
         b:SetAttribute("unit", b._fbUnit)
         b:SetAttribute("*type1", "target")
-        b:SetAttribute("*type2", "togglemenu")
         b:RegisterForClicks("AnyUp")
-        -- 12.0.7 gates the secure unit menu; reopen it in Lua when suppressed.
-        if EllesmereUI.OpenUnitMenuFallback then
-            b:HookScript("OnClick", EllesmereUI.OpenUnitMenuFallback)
+        -- 12.0.7 gates SecureUnitButton's togglemenu; route right-click securely
+        -- through a SecureActionButton proxy so the menu works without taint.
+        if EllesmereUI.AttachSecureUnitMenu then
+            EllesmereUI.AttachSecureUnitMenu(b)
+        else
+            b:SetAttribute("*type2", "togglemenu")
         end
         b:Hide()
 

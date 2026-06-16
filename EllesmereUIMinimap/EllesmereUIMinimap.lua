@@ -48,6 +48,10 @@ local defaults = {
             mouseoverExtraBtns   = false,  -- extra buttons only show on minimap mouseover
             greatVaultExtraInfo  = true,
             hideAddonCompartment = false,
+            showOmniumFolio      = true,   -- expansion landing page button (bottom-left)
+            omniumFolioX         = 0,
+            omniumFolioY         = 0,
+            omniumFolioScale     = 0.75,
             hideAddonButtons     = false,
             addonBtnSize         = 24,
             interactableBtnSize  = 21,
@@ -809,6 +813,9 @@ local flyoutBlacklist = {
     MinimapZoomOut   = true,
     MinimapBackdrop  = true,
     GameTimeFrame    = true,
+    -- Core Blizzard feature button (expansion/landing page); keep it on the
+    -- minimap surface instead of sweeping it into the addon-button flyout.
+    ExpansionLandingPageMinimapButton = true,
 }
 
 -- Persistently hide a minimap button via Show hook
@@ -2773,6 +2780,55 @@ local function CaptureBlizzardMinimap()
     p._capturedOnce = true
 end
 
+-- Expansion landing page button ("Omnium Folio"). Kept off the addon-button
+-- flyout (see flyoutBlacklist); we anchor it to the minimap's bottom-left and
+-- raise it above the minimap. We do NOT force it visible -- Blizzard controls
+-- when the current landing page button appears (so we never display a stale
+-- old-expansion button). The setting only HIDES it when off.
+-- It is a plain (non-secure) Blizzard button, so SetParent/SetPoint are safe.
+local _omniumFolioHooked = false
+local function PositionOmniumFolio(btn)
+    if not btn or not Minimap then return end
+    local mp = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    if not mp then return end
+    if btn:GetParent() ~= Minimap then btn:SetParent(Minimap) end
+    btn:SetFrameStrata(Minimap:GetFrameStrata())
+    btn:SetFrameLevel((Minimap:GetFrameLevel() or 0) + 10)
+    btn:SetScale(mp.omniumFolioScale or 0.75)
+    btn:ClearAllPoints()
+    btn:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", mp.omniumFolioX or 0, mp.omniumFolioY or 0)
+end
+
+local function ApplyOmniumFolio()
+    local btn = _G.ExpansionLandingPageMinimapButton
+    if not btn or not Minimap then return end
+    local mp = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    if not mp then return end
+
+    -- One-time Show hook: when OFF, re-hide whenever Blizzard shows it; when ON,
+    -- just enforce our bottom-left position (never force it visible).
+    if not _omniumFolioHooked then
+        _omniumFolioHooked = true
+        hooksecurefunc(btn, "Show", function(self)
+            local m = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+            if not m then return end
+            if m.showOmniumFolio == false then
+                self:Hide()
+            else
+                PositionOmniumFolio(self)
+            end
+        end)
+    end
+
+    if mp.showOmniumFolio == false then
+        btn:Hide()
+        return
+    end
+    -- Enabled: position/raise only -- do NOT force Show(). Blizzard decides
+    -- whether the current landing page button is shown.
+    PositionOmniumFolio(btn)
+end
+
 local function ApplyMinimap()
     if TEMP_DISABLED.minimap then return end
     if InCombatLockdown() then QueueApplyAll(); return end
@@ -3426,6 +3482,8 @@ local function ApplyMinimap()
 
     -- Mark module as active so persistent hooks know they can fire
     GetFFD(minimap).active = true
+
+    ApplyOmniumFolio()
 end
 
 

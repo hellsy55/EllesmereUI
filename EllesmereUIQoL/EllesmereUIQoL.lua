@@ -640,60 +640,89 @@ qolFrame:SetScript("OnEvent", function(self)
         local lastClickTime  = 0
         local lastClickEntry = nil
         local DOUBLE_CLICK_THRESHOLD = 0.4
+        local installed = false   -- hooks are installed ONCE, on first enable
+        local roleFrame           -- classic role-check listener (created on install)
 
-        hooksecurefunc("LFGListSearchEntry_OnClick", function(entry, button)
-            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            if button == "RightButton" then return end
+        -- Hooks/listeners are installed only when Quick Signup is turned on, so
+        -- nothing touches the LFG execution path unless the feature is in use.
+        -- hooksecurefunc/HookScript can't be undone, so the bodies keep their
+        -- setting guard for the toggle-off-after-enable case; the role-check
+        -- event is registered/unregistered live for true zero cost when off.
+        local function InstallQuickSignupHooks()
+            if installed then return end
+            installed = true
 
-            local panel = LFGListFrame and LFGListFrame.SearchPanel
-            if not panel then return end
-            if not LFGListSearchPanelUtil_CanSelectResult(entry.resultID) then return end
-            if not panel.SignUpButton or not panel.SignUpButton:IsEnabled() then return end
+            hooksecurefunc("LFGListSearchEntry_OnClick", function(entry, button)
+                if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+                if button == "RightButton" then return end
 
-            local now = GetTime()
-            if lastClickEntry == entry.resultID and (now - lastClickTime) < DOUBLE_CLICK_THRESHOLD then
-                if panel.selectedResult ~= entry.resultID then
-                    LFGListSearchPanel_SelectResult(panel, entry.resultID)
+                local panel = LFGListFrame and LFGListFrame.SearchPanel
+                if not panel then return end
+                if not LFGListSearchPanelUtil_CanSelectResult(entry.resultID) then return end
+                if not panel.SignUpButton or not panel.SignUpButton:IsEnabled() then return end
+
+                local now = GetTime()
+                if lastClickEntry == entry.resultID and (now - lastClickTime) < DOUBLE_CLICK_THRESHOLD then
+                    if panel.selectedResult ~= entry.resultID then
+                        LFGListSearchPanel_SelectResult(panel, entry.resultID)
+                    end
+                    LFGListSearchPanel_SignUp(panel)
+                    lastClickEntry = nil
+                    lastClickTime  = 0
+                else
+                    lastClickEntry = entry.resultID
+                    lastClickTime  = now
                 end
-                LFGListSearchPanel_SignUp(panel)
-                lastClickEntry = nil
-                lastClickTime  = 0
-            else
-                lastClickEntry = entry.resultID
-                lastClickTime  = now
-            end
-        end)
+            end)
 
-        -- Auto-accept role check for Quick Signup. Holding Shift skips the
-        -- auto-accept so the dialog stays open (e.g. to type a signup note).
-        LFGListApplicationDialog:HookScript("OnShow", function(self)
-            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            if self.SignUpButton:IsEnabled() and not IsShiftKeyDown() then
-                self.SignUpButton:Click()
+            -- Auto-accept role check for Quick Signup. Holding Shift skips the
+            -- auto-accept so the dialog stays open (e.g. to type a signup note).
+            if LFGListApplicationDialog then
+                LFGListApplicationDialog:HookScript("OnShow", function(self)
+                    if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+                    if self.SignUpButton:IsEnabled() and not IsShiftKeyDown() then
+                        self.SignUpButton:Click()
+                    end
+                end)
             end
-        end)
 
-        -- Classic Dungeon Finder role check for Quick Signup
-        local roleFrame = CreateFrame("Frame")
-        roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
-        roleFrame:SetScript("OnEvent", function()
-            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            if not UnitInParty("player") then return end
-            -- Holding Shift skips the auto role-check accept
-            if IsShiftKeyDown() then return end
-            local leader, tank, healer, dps = GetLFGRoles()
-            if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
+            -- Classic Dungeon Finder role check for Quick Signup
+            roleFrame = CreateFrame("Frame")
+            roleFrame:SetScript("OnEvent", function()
+                if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+                if not UnitInParty("player") then return end
+                -- Holding Shift skips the auto role-check accept
+                if IsShiftKeyDown() then return end
+                local leader, tank, healer, dps = GetLFGRoles()
+                if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
+                    LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
+                end
+                if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
+                    LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
+                end
+                if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
+                    LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
+                end
+                LFDRoleCheckPopupAcceptButton:Enable()
+                LFDRoleCheckPopupAcceptButton:Click()
+            end)
+        end
+
+        -- Called at load and from the options toggle. Installs the hooks on
+        -- first enable; toggles the role-check event registration to match.
+        EllesmereUI._applyQuickSignup = function()
+            local on = EllesmereUIDB and EllesmereUIDB.quickSignup
+            if on then InstallQuickSignupHooks() end
+            if roleFrame then
+                if on then
+                    roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
+                else
+                    roleFrame:UnregisterEvent("LFG_ROLE_CHECK_SHOW")
+                end
             end
-            if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
-            end
-            if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
-            end
-            LFDRoleCheckPopupAcceptButton:Enable()
-            LFDRoleCheckPopupAcceptButton:Click()
-        end)
+        end
+
+        EllesmereUI._applyQuickSignup()
     end
 
     ---------------------------------------------------------------------------

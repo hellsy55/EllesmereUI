@@ -1172,6 +1172,9 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.quickSignup = v
+                  if EllesmereUI._applyQuickSignup then
+                      EllesmereUI._applyQuickSignup()
+                  end
               end },
             { type="toggle", text="Persistent Signup Note",
               tooltip="Keeps your note text in the Sign Up dialog instead of clearing it each time you open it.",
@@ -1303,6 +1306,8 @@ initFrame:SetScript("OnEvent", function(self)
             if _G._EUI_ResetUpgradeCalc then _G._EUI_ResetUpgradeCalc() end
             if _G._EBS_ResetCursor then _G._EBS_ResetCursor() end
             if EllesmereUI._applyHideBlizzardPartyFrame then EllesmereUI._applyHideBlizzardPartyFrame() end
+            if EllesmereUI._applyQuickSignup then EllesmereUI._applyQuickSignup() end
+            if EllesmereUI._applyPersistSignupNote then EllesmereUI._applyPersistSignupNote() end
             EllesmereUI:InvalidatePageCache()
         end,
     })

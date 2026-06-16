@@ -8666,10 +8666,13 @@ function InitializeFrames()
 
     local function SetupUnitMenu(frame, unit)
         frame:RegisterForClicks("AnyUp")
-        frame:SetAttribute("*type2", "togglemenu")
-        -- 12.0.7 gates the secure unit menu; reopen it in Lua when suppressed.
-        if EllesmereUI.OpenUnitMenuFallback then
-            frame:HookScript("OnClick", EllesmereUI.OpenUnitMenuFallback)
+        -- 12.0.7 gates SecureUnitButton's togglemenu; route right-click securely
+        -- through a SecureActionButton proxy so the menu (and its protected items
+        -- like Set Focus) work without taint.
+        if EllesmereUI.AttachSecureUnitMenu then
+            EllesmereUI.AttachSecureUnitMenu(frame)
+        else
+            frame:SetAttribute("*type2", "togglemenu")
         end
         frame:HookScript("OnEnter", UnitFrame_OnEnter)
         frame:HookScript("OnLeave", UnitFrame_OnLeave)
