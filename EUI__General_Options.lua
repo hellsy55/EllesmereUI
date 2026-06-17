@@ -29,11 +29,13 @@ local IS_STANDALONE = type(ADDON_NAME) == "string" and ADDON_NAME:find("Standalo
 -------------------------------------------------------------------------------
 --  What's New? page -- interactive patch notes in three tiers of importance:
 --    1) hero cards (two per row), 2) small clickable listings, 3) fix lines.
---  Content lives in EllesmereUI._WHATSNEW_PATCHES (newest patch first). Every
---  hero/listing entry deep-links to the setting it changed via
+--  Content lives in EllesmereUI._WHATSNEW_PATCHES (newest patch first). A
+--  hero/listing entry with a `nav` deep-links to the setting it changed via
 --  EllesmereUI:NavigateToElementSettings (opens the page + green-pulses the
---  control). Defined at file scope (namespace function) so it adds no locals
---  or upvalues to the deferred options closure below.
+--  control); an entry with NO `nav` renders as a static, non-clickable card
+--  (for automatic behavior that has no setting to open). Defined at file scope
+--  (namespace function) so it adds no locals or upvalues to the deferred
+--  options closure below.
 -------------------------------------------------------------------------------
 function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     local PP  = EllesmereUI.PanelPP
@@ -109,15 +111,23 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         descFs:SetJustifyH("LEFT"); descFs:SetJustifyV("TOP"); descFs:SetWordWrap(true)
         descFs:SetText(entry.desc or "")
 
-        card:SetScript("OnEnter", function()
-            bg:SetColorTexture(0.11, 0.13, 0.15, 0.50); brd:SetColor(1, 1, 1, 0.22)
-            titleFs:SetAlpha(1)
-        end)
-        card:SetScript("OnLeave", function()
-            bg:SetColorTexture(0.06, 0.08, 0.10, 0.50); brd:SetColor(1, 1, 1, 0.12)
-            titleFs:SetAlpha(0.9)
-        end)
-        card:SetScript("OnClick", function() GoTo(entry.nav) end)
+        -- Clickable only when the entry has a nav target. An entry with no nav
+        -- (automatic behavior with no setting to open -- e.g. party frames in
+        -- arena) renders as a static card: no hover lift, no click, and mouse
+        -- disabled so nothing invites a click that would go nowhere.
+        if entry.nav and entry.nav.module then
+            card:SetScript("OnEnter", function()
+                bg:SetColorTexture(0.11, 0.13, 0.15, 0.50); brd:SetColor(1, 1, 1, 0.22)
+                titleFs:SetAlpha(1)
+            end)
+            card:SetScript("OnLeave", function()
+                bg:SetColorTexture(0.06, 0.08, 0.10, 0.50); brd:SetColor(1, 1, 1, 0.12)
+                titleFs:SetAlpha(0.9)
+            end)
+            card:SetScript("OnClick", function() GoTo(entry.nav) end)
+        else
+            card:EnableMouse(false)
+        end
     end
 
     -- Tier 2: a clickable small listing -- title + subtitle, no card chrome, a
@@ -144,13 +154,19 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         subFs:SetJustifyH("LEFT"); subFs:SetWordWrap(false)
         subFs:SetText(entry.desc or "")
 
-        row:SetScript("OnEnter", function()
-            hov:SetAlpha(1); titleFs:SetAlpha(1)
-        end)
-        row:SetScript("OnLeave", function()
-            hov:SetAlpha(0); titleFs:SetAlpha(0.9)
-        end)
-        row:SetScript("OnClick", function() GoTo(entry.nav) end)
+        -- Clickable only when the entry has a nav target (see MakeHeroCard); a
+        -- nav-less listing renders static with no hover or click.
+        if entry.nav and entry.nav.module then
+            row:SetScript("OnEnter", function()
+                hov:SetAlpha(1); titleFs:SetAlpha(1)
+            end)
+            row:SetScript("OnLeave", function()
+                hov:SetAlpha(0); titleFs:SetAlpha(0.9)
+            end)
+            row:SetScript("OnClick", function() GoTo(entry.nav) end)
+        else
+            row:EnableMouse(false)
+        end
         return ROW_H
     end
 
@@ -196,8 +212,11 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         if PP.DisablePixelSnap then PP.DisablePixelSnap(uline) end
         y = y - 48
 
-        -- Tier 1: hero cards, two per row.
-        local heroes = SortByModule(patch.heroes or {})
+        -- Tier 1: hero cards, two per row. Heroes render in AUTHORED order (the
+        -- order they appear in the patch's `heroes` table) -- NOT module-sorted
+        -- like features/fixes -- so each patch can headline whatever matters most
+        -- first. Reorder the entries in _WHATSNEW_PATCHES to reorder the cards.
+        local heroes = patch.heroes or {}
         if #heroes > 0 then
             local cardW = math.floor((totalW - CARD_GAP) / 2)
             local CARD_H = 96
@@ -248,6 +267,80 @@ end
 --  EllesmereUI:NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "8.2.0",
+        heroes = {
+            {
+                module = "Raid Frames",
+                title = "Party Frames in Arena",
+                desc  = "Your party frames now show in arenas instead of raid frames, so small-group styling applies and addons that anchor to party frames keep working.",
+                -- No nav: automatic behavior with no setting to open (static card).
+            },
+            {
+                module = "Cooldown Manager",
+                title = "Tracking Bar Size-Matching",
+                desc  = "Cooldown tracking bars can now match the width and height of other interface elements in Unlock Mode.",
+                -- No nav: Unlock Mode action with no setting to open (static card).
+            },
+            {
+                module = "Cooldown Manager",
+                title = "Group Tracking Bars",
+                desc  = "Pick which tracking bars chain together and share width and height, with a per-bar checklist.",
+                nav   = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "Bar Grouping", highlight = "Group Tracking" },
+            },
+            {
+                module = "Nameplates",
+                title = "Cropped Icons",
+                desc  = "Make debuff, buff, and crowd-control aura icons rectangular instead of square.",
+                nav   = { module = "EllesmereUINameplates", page = "Display", section = "CORE POSITIONS", highlight = "" },
+            },
+        },
+        features = {
+            {
+                module = "Cooldown Manager",
+                title = "Bloodlust & Heroism Bars",
+                desc  = "Add Bloodlust or Heroism to a Custom Auras bar as a self-timed 40-second icon.",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Bar Layout", highlight = "" },
+            },
+            {
+                module = "Nameplates",
+                title = "Boss & Neutral Colors",
+                desc  = "Bosses get their own color, split from mini-bosses, and neutral enemies get a custom one.",
+                nav   = { module = "EllesmereUINameplates", page = "Colors", section = "ENEMY COLORS", highlight = "Enemy Types" },
+            },
+            {
+                module = "Nameplates",
+                title = "DPS \"No Aggro\" Color",
+                desc  = "Highlight enemies you do not have threat on while in a group.",
+                nav   = { module = "EllesmereUINameplates", page = "Colors", section = "THREAT COLORS (INSTANCES ONLY)", highlight = "No Aggro" },
+            },
+            {
+                module = "Resource Bars",
+                title = "Player Cast Bar Background",
+                desc  = "Set the Player cast bar's background color and opacity.",
+                nav   = { module = "EllesmereUIResourceBars", page = "Cast Bar", section = "DISPLAY", highlight = "Background" },
+            },
+            {
+                module = "Nameplates",
+                title = "Cast Bar Borders",
+                desc  = "Outline enemy cast bars with an adjustable-thickness border in your own color.",
+                nav   = { module = "EllesmereUINameplates", page = "Display", section = "BARS", highlight = "Cast Bar Border" },
+            },
+        },
+        fixes = {
+            { module = "Nameplates", text = "Raid target markers now show behind aura icons instead of overlapping them." },
+            { module = "Nameplates", text = "Neutral units now show in the enemy-in-combat color while actively in combat." },
+            { module = "Nameplates", text = "Aggro color toggles are now clearly labeled \"Tank:\" and \"DPS:\"." },
+            { module = "Unit Frames", text = "Cropped aura icons in the options preview now show at the correct height." },
+            { module = "Unit Frames", text = "Clicking a buff or debuff icon in the preview to jump to its setting now works after turning buffs on or changing the debuff count." },
+            { module = "Unlock Mode", text = "Movers for deleted or hidden elements no longer reappear as ghosts when opening Unlock Mode or after combat." },
+            { module = "Unlock Mode", text = "Size-matching to an element that cannot be matched now shows a clear message instead of doing nothing." },
+            { module = "Cooldown Manager", text = "Fixed a phantom 40-second Bloodlust bar appearing in the open world after leaving a dungeon while Sated." },
+            { module = "Damage Meters", text = "Bars reserve more space for the amount text so numbers stay readable next to long names." },
+            { module = "Bloodlust", text = "Fixed the active-buff overlay falsely reappearing when zoning or logging in while Sated." },
+            { module = "Raid Frames", text = "Nicknames from raid-tracker addons now show in the standalone build." },
+        },
+    },
     {
         version = "8.1.9",
         heroes = {},
@@ -598,7 +691,7 @@ initFrame:SetScript("OnEvent", function(self)
             for _, entry in ipairs(OPTIMIZED_CVARS) do
                 SetCVarSafe(entry[1], entry[2])
             end
-            -- Contrast boost: if current contrast ≤ 55, add 10
+            -- Contrast boost: if current contrast <= 55, add 10
             local curContrast = tonumber(GetCVar("Contrast")) or 50
             if curContrast <= 55 then
                 SetCVarSafe("Contrast", curContrast + 10)

@@ -759,6 +759,24 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "nameplates_miniboss_boss_color_split_v1",
+    scope       = "profile",
+    description = "Split nameplate mini-boss/boss colors: seed the new 'boss' color from the user's existing 'miniboss' color so bosses keep their current color until changed.",
+    body = function(ctx)
+        -- Self-gating on boss == nil keeps this idempotent and never clobbers a
+        -- value the user has since chosen. Only copies when the user actually
+        -- customized miniboss; an unset miniboss leaves boss unset too, so
+        -- DeepMergeDefaults applies the (shared) default to both. The import
+        -- path forward-copies the same way in ApplyProfileData.
+        local np = ctx.profile.addons and ctx.profile.addons.EllesmereUINameplates
+        if type(np) ~= "table" then return end
+        if np.boss == nil and type(np.miniboss) == "table" then
+            np.boss = { r = np.miniboss.r, g = np.miniboss.g, b = np.miniboss.b }
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "basics_minimap_round_to_circle",
     scope       = "profile",
     description = "Rename minimap.shape value 'round' to 'circle'.",

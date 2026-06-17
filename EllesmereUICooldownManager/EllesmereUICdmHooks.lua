@@ -1383,6 +1383,42 @@ local function QueueCustomBuffUpdate()
     _customBuffDirty = true
     _customBuffFrame:Show()
 end
+ns.QueueCustomBuffUpdate = QueueCustomBuffUpdate
+
+-- Bloodlust on a Custom Auras (icon) bar reuses the potion-preset machinery:
+-- the Sated-debuff rising edge (detected in CdmBuffBars) emulates a "cast" of
+-- the lust buff, so the existing self-timed icon + reverse swipe renders it with
+-- no duplicate display code. Both faction IDs are flagged so a profile shared
+-- across factions still resolves (only the bar's own ID is actually tracked).
+local LUST_PRESET_SPELLS = { [2825] = true, [32182] = true }
+ns.IsLustPresetSpell = function(sid) return LUST_PRESET_SPELLS[sid] == true end
+
+-- Called from the lust listener's rising edge: mark the lust buff as "just cast"
+-- so UpdateCustomBuffBars starts its 40s self-timed icon. A no-op for any bar not
+-- tracking it (the pending flag is wiped each pass).
+function ns.SignalLustCast()
+    _pendingCastIDs[2825]  = true
+    _pendingCastIDs[32182] = true
+    QueueCustomBuffUpdate()
+end
+
+-- True if any enabled Custom Auras (custom_buff) bar tracks the lust buff, so the
+-- shared Sated listener stays armed even with no Tracking Bar lust bar present.
+function ns.AnyCustomAuraLust()
+    local p = ECME and ECME.db and ECME.db.profile
+    if not (p and p.cdmBars and p.cdmBars.bars) then return false end
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and bd.barType == "custom_buff" then
+            local sd = ns.GetBarSpellData and ns.GetBarSpellData(bd.key)
+            if sd and sd.assignedSpells then
+                for _, sid in ipairs(sd.assignedSpells) do
+                    if LUST_PRESET_SPELLS[sid] then return true end
+                end
+            end
+        end
+    end
+    return false
+end
 
 local _spellCastListener = CreateFrame("Frame")
 _spellCastListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")

@@ -2878,7 +2878,7 @@ local function CreateDMWindow(winIdx)
             ApplyBarTexture(bar.fill, texPath, texKey)
             bar.fill:SetAlpha(c.barFillAlpha or 1)
             SetDMFont(bar.pos, leftFS); SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
-            bar.label:SetWidth(math.max(20, (frame:GetWidth() or 200) * 0.75))
+            bar.label:SetWidth(math.max(20, (frame:GetWidth() or 200) * 0.60))
             W._stickyClassCache = nil  -- force icon/color rebuild
         end
         bar.row:Show()
@@ -2954,7 +2954,7 @@ local function CreateDMWindow(winIdx)
             local showIcon = (c.iconStyle or "spec") ~= "none"
             local showClassColor = c.showClassColor ~= false; local texPath, texKey = GetBarTexturePath()
             local rowWidth = viewport:GetWidth() or 200
-            local labelMaxW = math.max(20, rowWidth * 0.75)
+            local labelMaxW = math.max(20, rowWidth * 0.60)
             local isDeaths = (W.curDMType == Enum.DamageMeterType.Deaths)
             local isCount = (W.curDMType == Enum.DamageMeterType.Interrupts or W.curDMType == Enum.DamageMeterType.Dispels)
             -- Deaths: reverse to chronological (API returns most recent first)

@@ -4151,6 +4151,14 @@ local function SetAuraIconCrop(icon, cropped, w, h)
         icon:SetTexCoord(AURA_ZOOM, 1 - AURA_ZOOM, AURA_ZOOM, 1 - AURA_ZOOM)
     end
 end
+-- Exposed so the options live preview can apply the exact same crop math
+-- (rectangular height = 80% of width + aspect-preserving texcoord trim).
+ns.AURA_CROP_HEIGHT = AURA_CROP_HEIGHT
+ns.SetAuraIconCrop = SetAuraIconCrop
+function ns.GetAuraCropHeight(cropped, w)
+    if cropped then return math_floor(w * AURA_CROP_HEIGHT + 0.5) end
+    return w
+end
 
 -- Apply cooldown text + stack count settings to all existing buttons in an aura
 -- container. Called from ReloadFrames to live-update without /reload.

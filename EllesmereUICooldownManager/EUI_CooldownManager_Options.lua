@@ -1693,6 +1693,18 @@ initFrame:SetScript("OnEvent", function(self)
     ns.HideTBBPlaceholders = HideTBBPlaceholder
     ns.ShowTBBPlaceholders = UpdateTBBPlaceholder
     EllesmereUI:RegisterOnHide(HideTBBPlaceholder)
+    -- Re-show placeholders when the panel re-opens onto the Tracking Bars page.
+    -- Exiting unlock mode back to the SAME page it was opened from skips
+    -- SelectPage (currentPage == restorePage in EUI_UnlockMode close), so the
+    -- page-restore hook that normally calls ShowTBBPlaceholders never fires --
+    -- the panel just re-Shows. This OnShow re-asserts the placeholders then.
+    EllesmereUI:RegisterOnShow(function()
+        local am = EllesmereUI.GetActiveModule and EllesmereUI:GetActiveModule()
+        local ap = EllesmereUI.GetActivePage and EllesmereUI:GetActivePage()
+        if am == "EllesmereUICooldownManager" and ap == PAGE_BUFF_BARS then
+            UpdateTBBPlaceholder()
+        end
+    end)
 
     -- Buff spell picker for tracked buff bars (reuses CDM buff spell list)
     local _tbbSpellPickerMenu
@@ -2876,24 +2888,20 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "Bar Grouping", y);  y = y - h
 
-        -- Group Tracking Bars toggle | Grouped Grow Direction dropdown
-        _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Group Tracking Bars",
-              getValue = function()
-                  local t = ns.GetTrackedBuffBars()
-                  return t and t.groupEnabled
-              end,
-              setValue = function(v)
-                  local t = ns.GetTrackedBuffBars()
-                  if t then t.groupEnabled = v end
-                  ns.BuildTrackedBuffBars()
-                  EllesmereUI:RefreshPage()
-              end },
+        -- Group Tracking Bars (per-bar checkbox dropdown) | Grouped Grow Direction
+        -- The checkbox dropdown lists every bar; checked bars chain together and
+        -- share width/height, unchecked bars are independent. Grow/spacing apply
+        -- to the chain and only matter once 2+ bars are checked.
+        local grpRow
+        grpRow, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Group Tracking Bars",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end, setValue = function() end },
             { type = "dropdown", text = "Grouped Grow Direction",
               values = { DOWN = "Down", UP = "Up", LEFT = "Left", RIGHT = "Right" },
               order = { "DOWN", "UP", "LEFT", "RIGHT" },
-              disabled = function() return not ns.GetTrackedBuffBars().groupEnabled end,
-              disabledTooltip = "Group Tracking Bars",
+              disabled = function() return ns.TBBGroupedCount() < 2 end,
+              disabledTooltip = "Group 2 or more Tracking Bars",
               getValue = function()
                   local t = ns.GetTrackedBuffBars()
                   return t and t.groupGrowDirection or "DOWN"
@@ -2906,11 +2914,45 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Replace the dummy left dropdown with the per-bar grouped checkbox dropdown
+        do
+            local leftRgn = grpRow._leftRegion
+            if leftRgn._control then leftRgn._control:Hide() end
+            local t = ns.GetTrackedBuffBars()
+            local grpItems = {}
+            for idx, b in ipairs(t.bars or {}) do
+                local nm = b.name or ("Bar " .. idx)
+                if not b.popularKey and b.spellID and b.spellID > 0 then
+                    local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(b.spellID)
+                    if info and info.name then nm = info.name end
+                end
+                grpItems[#grpItems + 1] = { key = tostring(idx), label = nm }
+            end
+            local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                leftRgn, 210, leftRgn:GetFrameLevel() + 2,
+                grpItems,
+                function(k)
+                    local tt = ns.GetTrackedBuffBars()
+                    return ns.TBBBarGrouped(tt.bars and tt.bars[tonumber(k)])
+                end,
+                function(k, v)
+                    local tt = ns.GetTrackedBuffBars()
+                    local b = tt.bars and tt.bars[tonumber(k)]
+                    if b then b.grouped = v and true or false end
+                    ns.BuildTrackedBuffBars()
+                    EllesmereUI:RefreshPage()
+                end)
+            PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+            leftRgn._control = cbDD
+            leftRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbRefresh)
+        end
+
         -- Bar Spacing slider | empty label
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Bar Spacing", min = -2, max = 20, step = 1,
-              disabled = function() return not ns.GetTrackedBuffBars().groupEnabled end,
-              disabledTooltip = "Group Tracking Bars",
+              disabled = function() return ns.TBBGroupedCount() < 2 end,
+              disabledTooltip = "Group 2 or more Tracking Bars",
               getValue = function()
                   local t = ns.GetTrackedBuffBars()
                   return t and t.groupSpacing or 2
@@ -2930,7 +2972,17 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
 
         -- Height | Width
+        -- The whole group shares one width/height, so a grouped member inherits
+        -- the group ANCHOR's match-lock: if the anchor is size-matched, every
+        -- member's slider is disabled (match wins) instead of silently fighting it.
         local tbbKey = "TBB_" .. _tbbSelectedBar
+        do
+            local selBd = SelectedTBB()
+            if selBd and ns.TBBBarGrouped(selBd) then
+                local ai = ns.TBBGroupAnchorIndex()
+                if ai then tbbKey = "TBB_" .. ai end
+            end
+        end
         local thDis, thTip, thRaw = EllesmereUI.MatchGuard(tbbKey, "Height")
         local twDis, twTip, twRaw = EllesmereUI.MatchGuard(tbbKey, "Width")
         local hwRow
@@ -2942,6 +2994,13 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.height = v
+                  -- Grouped bars share height: write every other checked bar too.
+                  if ns.TBBBarGrouped(bd) then
+                      local t = ns.GetTrackedBuffBars()
+                      for _, b in ipairs(t.bars or {}) do
+                          if b ~= bd and ns.TBBBarGrouped(b) then b.height = v end
+                      end
+                  end
                   ns.BuildTrackedBuffBars()
                   EllesmereUI:RefreshPage()
               end },
@@ -2952,6 +3011,13 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.width = v
+                  -- Grouped bars share width: write every other checked bar too.
+                  if ns.TBBBarGrouped(bd) then
+                      local t = ns.GetTrackedBuffBars()
+                      for _, b in ipairs(t.bars or {}) do
+                          if b ~= bd and ns.TBBBarGrouped(b) then b.width = v end
+                      end
+                  end
                   ns.BuildTrackedBuffBars()
                   EllesmereUI:RefreshPage()
               end }
@@ -5942,9 +6008,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             local _, _pClass = UnitClass("player")
             for _, preset in ipairs(ns.BUFF_BAR_PRESETS) do
-                -- tbbOnly presets (e.g. debuff-driven Bloodlust) are not
-                -- cooldown-trackable, so they are excluded from this picker.
-                if (not preset.class or preset.class == _pClass) and not preset.tbbOnly then
+                -- tbbOnly presets are excluded here UNLESS they opt in via
+                -- customAuraToo (debuff-driven Bloodlust: rendered as a 40s
+                -- self-timed icon, armed off the Sated edge instead of a cast).
+                if (not preset.class or preset.class == _pClass)
+                    and (not preset.tbbOnly or preset.customAuraToo) then
                     local primaryID = preset.spellIDs and preset.spellIDs[1]
                     local isAdded = primaryID and alreadyTracked[primaryID]
 
@@ -5989,6 +6057,9 @@ initFrame:SetScript("OnEvent", function(self)
                             menu:Hide()
                             EnsureAssignedSpells(barKey)
                             ns.AddPresetToBar(barKey, preset)
+                            -- Arm the shared Sated listener now (debuff-driven
+                            -- presets like Bloodlust); no-op for cooldown presets.
+                            if ns.UpdateLustListener then ns.UpdateLustListener() end
                             RefreshCDPreview()
                         end)
                     end

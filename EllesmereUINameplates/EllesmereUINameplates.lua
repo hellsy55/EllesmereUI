@@ -120,11 +120,13 @@ function ns._appendDisplayPresetKeys(t)
         "textSlotTopColor", "textSlotRightColor", "textSlotLeftColor", "textSlotCenterColor",
         "tankHasAggroEnabled", "tankHasAggro", "classicTankAggro",
         "dpsHasAggro", "dpsNearAggro", "offTankAggroEnabled", "offTankAggro",
+        "dpsNoAggroEnabled", "dpsNoAggro",
         "targetArrowDouble", "targetArrowStyle", "targetArrowColor", "targetArrowClassColor",
         "auraStackTextSize", "auraStackTextColor",
         "auraStackTextPosition", "auraStackTextX", "auraStackTextY",
         "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
         "raidMarkerPos", "classificationSlot",
+        "debuffCropIcons", "buffCropIcons", "ccCropIcons",
     }) do t[#t + 1] = k end
 end
 
@@ -146,6 +148,7 @@ local defaults = {
     targetOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
     caster  = { r = 0.231, g = 0.510, b = 0.965 },
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
+    boss = { r = 0.518, g = 0.243, b = 0.984 },
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
     darkenEnemiesOOC = true,
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
@@ -157,6 +160,8 @@ local defaults = {
     dpsHasAggro = { r = 1.00, g = 0.50, b = 0.00 },
     offTankAggro = { r = 0.188, g = 0.761, b = 0.812 },
     offTankAggroEnabled = true,
+    dpsNoAggro = { r = 0.35, g = 0.75, b = 0.35 },
+    dpsNoAggroEnabled = false,
     interruptReady = { r = 0.92, g = 0.35, b = 0.20 },  
     castBar = { r = 0.70, g = 0.40, b = 0.90 },
     interruptMidCastEnabled = false,
@@ -235,6 +240,12 @@ local defaults = {
     debuffSpacing = 2,
     buffSpacing = 2,
     ccSpacing = 2,
+    -- Cropped icons: trim the icon top/bottom so it becomes rectangular
+    -- (height = 80% of width), mirroring the Unit Frames "Cropped Icons"
+    -- option. Off by default so existing layouts are unchanged.
+    debuffCropIcons = false,
+    buffCropIcons = false,
+    ccCropIcons = false,
     debuffIconSize = 26,
     buffIconSize = 24,
     buffTextSize = 12,
@@ -296,6 +307,8 @@ local defaults = {
     hoverAlpha = 0.3,
     castBgAlpha = 0.9,
     castBgColor = { r = 0.1, g = 0.1, b = 0.1 },
+    castBorderSize = 0,
+    castBorderColor = { r = 0, g = 0, b = 0 },
     hashLineEnabled = false,
     hashLinePercent = 30,
     hashLineColor = { r = 1, g = 1, b = 1 },
@@ -901,6 +914,52 @@ local function GetCCIconSize()
     return GetSlotSize(slot)
 end
 ns.GetCCIconSize = GetCCIconSize
+-- Cropped aura icons (mirrors the Unit Frames "Cropped Icons" option). When
+-- on, the icon frame is made rectangular (height = 80% of width) and the
+-- texture is trimmed top/bottom so the artwork is never squished. The
+-- horizontal zoom stays at the nameplate aura default (0.08) so an uncropped
+-- icon is pixel-identical to before. Wrapped in a do/end + ns functions so no
+-- new main-chunk locals are added (this file is near the Lua 5.1 local cap).
+do
+    local AURA_CROP_HEIGHT = 0.80
+    local AURA_ZOOM = 0.08
+    function ns.GetAuraCrop(element)
+        if element == "debuffs" then
+            return (p and p.debuffCropIcons) or defaults.debuffCropIcons
+        elseif element == "buffs" then
+            return (p and p.buffCropIcons) or defaults.buffCropIcons
+        elseif element == "ccs" then
+            return (p and p.ccCropIcons) or defaults.ccCropIcons
+        end
+        return false
+    end
+    -- Frame height for a given icon width: shorter when cropped, square when not.
+    function ns.GetAuraCropHeight(cropped, w)
+        if cropped then return math.floor(w * AURA_CROP_HEIGHT + 0.5) end
+        return w
+    end
+    -- Texcoord trim. Cropped scales the vertical span to the rectangle's aspect
+    -- so the texture keeps its proportions; uncropped is the original square zoom.
+    function ns.SetAuraIconCrop(icon, cropped, w, h)
+        if not icon then return end
+        if cropped and w and h and w > 0 then
+            local uSpan = 1 - 2 * AURA_ZOOM
+            local vSpan = uSpan * (h / w)
+            local v0 = 0.5 - vSpan / 2
+            icon:SetTexCoord(AURA_ZOOM, 1 - AURA_ZOOM, v0, 1 - v0)
+        else
+            icon:SetTexCoord(AURA_ZOOM, 1 - AURA_ZOOM, AURA_ZOOM, 1 - AURA_ZOOM)
+        end
+    end
+    -- Size + crop a single aura slot and its icon together so they never drift
+    -- out of sync. Returns the applied width and height for spacing/positioning.
+    function ns.ApplyAuraSlotCrop(slot, cropped, sizeW)
+        local h = ns.GetAuraCropHeight(cropped, sizeW)
+        PP.Size(slot, sizeW, h)
+        ns.SetAuraIconCrop(slot.icon, cropped, sizeW, h)
+        return sizeW, h
+    end
+end
 local function GetTargetGlowStyle()
     if p and p.targetGlowStyle then return p.targetGlowStyle end
     return defaults.targetGlowStyle
@@ -1274,7 +1333,11 @@ local GetClassPowerTopPush
 local function PositionAuraSlot(frames, count, slot, plate, sizeW, sizeH, gap, xOff, yOff)
     xOff = xOff or 0
     yOff = yOff or 0
-    local spacing = gap + sizeW  -- center-to-center distance
+    local spacing = gap + sizeW  -- horizontal center-to-center distance
+    -- Vertical center-to-center distance. Cropped icons are shorter, so
+    -- vertically stacked slots (topleft/topright "up") pack tighter. sizeH
+    -- falls back to sizeW for square (uncropped) icons.
+    local spacingV = gap + (sizeH or sizeW)
     -- Profile reads, anchor resolution, and growth lookups are invariant
     -- across the icon loop: resolve once per slot branch, loop only the
     -- ClearAllPoints + PP.Point calls. GetClassPowerTopPush keeps its
@@ -1330,7 +1393,7 @@ local function PositionAuraSlot(frames, count, slot, plate, sizeW, sizeH, gap, x
             local idx = i - 1  -- 0 for icon 1, so it never moves
             if growth == "up" then
                 PP.Point(frames[i], "BOTTOMLEFT", plate.health, "TOPLEFT",
-                    baseX, baseY + idx * spacing)
+                    baseX, baseY + idx * spacingV)
             elseif growth == "right" then
                 PP.Point(frames[i], "BOTTOMLEFT", plate.health, "TOPLEFT",
                     baseX + idx * spacing, baseY)
@@ -1353,7 +1416,7 @@ local function PositionAuraSlot(frames, count, slot, plate, sizeW, sizeH, gap, x
             local idx = i - 1  -- 0 for icon 1, so it never moves
             if growth == "up" then
                 PP.Point(frames[i], "BOTTOMRIGHT", plate.health, "TOPRIGHT",
-                    baseX, baseY + idx * spacing)
+                    baseX, baseY + idx * spacingV)
             elseif growth == "left" then
                 PP.Point(frames[i], "BOTTOMRIGHT", plate.health, "TOPRIGHT",
                     baseX - idx * spacing, baseY)
@@ -1825,8 +1888,14 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.raidFrame = CreateFrame("Frame", nil, plate)
     local rmSize = GetRaidMarkerSize()
     PP.Size(plate.raidFrame, rmSize, rmSize)
-    -- +8 keeps the marker above the name/health text frames (healthTextFrame
-    -- sits at health+7) so the raid target icon renders on top of the text.
+    -- Match the aura icons' strata (MEDIUM) so the two render in the SAME group
+    -- and frame level decides ordering: the marker (health+8 = 18) sits below
+    -- the aura icons (level 800) and is guaranteed to render BEHIND them.
+    -- Without an explicit strata the marker stays in the plate's flattened
+    -- render layer (SetFlattensRenderLayers) and composites ON TOP of the
+    -- strata-promoted aura icons regardless of frame level. The +8 still keeps
+    -- it above the name/health text frames (those are at health+6/+7).
+    plate.raidFrame:SetFrameStrata("MEDIUM")
     plate.raidFrame:SetFrameLevel(plate.health:GetFrameLevel() + 8)
     plate.raidFrame:Hide()
     plate.raid = plate.raidFrame:CreateTexture(nil, "ARTWORK")
@@ -1854,6 +1923,31 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     local _cbg = (p and p.castBgColor) or defaults.castBgColor
     local _cba = (p and p.castBgAlpha) or defaults.castBgAlpha
     plate.castBG:SetColorTexture(_cbg.r, _cbg.g, _cbg.b, _cba)
+    -- Cast bar border: pixel-perfect PP.CreateBorder, lazy-created (off by
+    -- default at size 0, so it costs nothing unless the user enables it).
+    -- Mirrors the nameplate health border. The border is a child of plate.cast
+    -- so it shows/hides with the cast bar automatically.
+    function plate:ApplyCastBorder()
+        if not PP or not PP.CreateBorder then return end
+        local sz = (p and p.castBorderSize) or defaults.castBorderSize or 0
+        if sz and sz > 0 then
+            if PP.GetBorders(plate.cast) then
+                PP.SetBorderSize(plate.cast, sz)
+                PP.ShowBorder(plate.cast)
+            else
+                local cc = (p and p.castBorderColor) or defaults.castBorderColor
+                PP.CreateBorder(plate.cast, cc.r, cc.g, cc.b, 1, sz, "OVERLAY", 7)
+            end
+        elseif PP.GetBorders(plate.cast) then
+            PP.HideBorder(plate.cast)
+        end
+    end
+    function plate:ApplyCastBorderColor()
+        if not PP or not PP.GetBorders or not PP.GetBorders(plate.cast) then return end
+        local cc = (p and p.castBorderColor) or defaults.castBorderColor
+        PP.SetBorderColor(plate.cast, cc.r, cc.g, cc.b, 1)
+    end
+    plate:ApplyCastBorder()
     plate.castLeftBorder = plate.cast:CreateTexture(nil, "OVERLAY", nil, 7)
     plate.castLeftBorder:SetColorTexture(0, 0, 0, 1)
     plate.castLeftBorder:SetWidth(1)
@@ -2214,6 +2308,18 @@ function ns.RefreshBorderColor()
     ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
     for _, plate in pairs(ns.plates) do
         if plate.ApplyBorderColor then plate:ApplyBorderColor() end
+    end
+end
+function ns.RefreshCastBorder()
+    ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
+    for _, plate in pairs(ns.plates) do
+        if plate.ApplyCastBorder then plate:ApplyCastBorder() end
+    end
+end
+function ns.RefreshCastBorderColor()
+    ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
+    for _, plate in pairs(ns.plates) do
+        if plate.ApplyCastBorderColor then plate:ApplyCastBorderColor() end
     end
 end
 function ns.RefreshNameplateYOffset()
@@ -3413,13 +3519,15 @@ local function GetReactionColor(unit)
             return focusC.r, focusC.g, focusC.b
         end
     end
-    -- 5. Neutral
+    -- 5. Neutral (colored as an enemy while in combat with them)
     local reaction = UnitReaction(unit, "player")
-    if reaction and reaction == 4 then
-        local c = _C("neutral")
-        return c.r, c.g, c.b
-    end
-    if UnitCanAttack("player", unit) and not UnitIsEnemy(unit, "player") then
+    local isNeutral = (reaction and reaction == 4)
+        or (UnitCanAttack("player", unit) and not UnitIsEnemy(unit, "player"))
+    if isNeutral then
+        if UnitAffectingCombat(unit) then
+            local c = _C("enemyInCombat")
+            return c.r, c.g, c.b
+        end
         local c = _C("neutral")
         return c.r, c.g, c.b
     end
@@ -3431,16 +3539,26 @@ local function GetReactionColor(unit)
             return c.r, c.g, c.b
         end
     end
-    -- 7. Miniboss
+    -- 7. Boss / Mini-boss
     local inCombat = UnitAffectingCombat(unit)
     local classification = UnitClassification(unit)
     if classification == "elite" or classification == "worldboss" or classification == "rareelite" then
-        local level = UnitLevel(unit)
-        local playerLevel = UnitLevel("player")
+        -- Effective level (handles level scaling / Chromie time), not raw level.
+        local level = UnitEffectiveLevel(unit)
+        local playerLevel = UnitEffectiveLevel("player")
         local lvlClean = level and not (issecretvalue and issecretvalue(level))
         local plvlClean = playerLevel and not (issecretvalue and issecretvalue(playerLevel))
         if lvlClean and (level == -1 or (plvlClean and level >= playerLevel + 1)) then
-            local c = _C("miniboss")
+            -- Tier by effective-level delta (how the game ranks instance mobs):
+            -- ?? (skull) or player+2 and up = boss; player+1 = mini-boss. World
+            -- bosses are always bosses; a flagged lieutenant is always a mini-boss.
+            local isBoss = (classification == "worldboss")
+                or (level == -1)
+                or (plvlClean and level >= playerLevel + 2)
+            if level ~= -1 and UnitIsLieutenant and UnitIsLieutenant(unit) then
+                isBoss = false
+            end
+            local c = _C(isBoss and "boss" or "miniboss")
             return MaybeDarken(c.r, c.g, c.b, inCombat)
         end
     end
@@ -3459,7 +3577,16 @@ local function GetReactionColor(unit)
             return c.r, c.g, c.b
         end
     end
-    -- 10. Fallback: enemy in combat / out of combat
+    -- 10. Non-tank no aggro (if enabled) below focus/caster/miniboss
+    if isThreatUnit and not _isTankRole and threatStatus < 2 and IsInGroup() then
+        local enabled = defaults.dpsNoAggroEnabled
+        if db.dpsNoAggroEnabled ~= nil then enabled = db.dpsNoAggroEnabled end
+        if enabled then
+            local c = _C("dpsNoAggro")
+            return c.r, c.g, c.b
+        end
+    end
+    -- 11. Fallback: enemy in combat / out of combat
     local eic = _C("enemyInCombat")
     return MaybeDarken(eic.r, eic.g, eic.b, inCombat)
 end
@@ -3909,12 +4036,18 @@ function NameplateFrame:ApplyAppearance()
     local debuffSz = GetDebuffIconSize()
     local buffSz = GetBuffIconSize()
     local ccSz = GetCCIconSize()
+    local debuffCrop = ns.GetAuraCrop("debuffs")
+    local buffCrop = ns.GetAuraCrop("buffs")
+    local ccCrop = ns.GetAuraCrop("ccs")
+    local debuffH = ns.GetAuraCropHeight(debuffCrop, debuffSz)
+    local buffH = ns.GetAuraCropHeight(buffCrop, buffSz)
+    local ccH = ns.GetAuraCropHeight(ccCrop, ccSz)
     local debuffSlot, buffSlot, ccSlot = GetAuraSlots()
     for i = 1, #self.debuffs do
-        PP.Size(self.debuffs[i], debuffSz, debuffSz)
+        ns.ApplyAuraSlotCrop(self.debuffs[i], debuffCrop, debuffSz)
     end
     for i = 1, 4 do
-        PP.Size(self.buffs[i], buffSz, buffSz)
+        ns.ApplyAuraSlotCrop(self.buffs[i], buffCrop, buffSz)
         if self.buffs[i].cd and self.buffs[i].cd.text then
             SetFSFont(self.buffs[i].cd.text, auraDurSize, "OUTLINE, SLUG")
             self.buffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
@@ -3926,16 +4059,16 @@ function NameplateFrame:ApplyAppearance()
             ApplyStackPosition(self.buffs[i].count, self.buffs[i], auraStackPos)
         end
     end
-    PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffSz, GetAuraSpacing("buffs"), GetAuraSlotOffsets("buffSlot"))
+    PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffH, GetAuraSpacing("buffs"), GetAuraSlotOffsets("buffSlot"))
     for i = 1, 2 do
-        PP.Size(self.cc[i], ccSz, ccSz)
+        ns.ApplyAuraSlotCrop(self.cc[i], ccCrop, ccSz)
         if self.cc[i].cd and self.cc[i].cd.text then
             SetFSFont(self.cc[i].cd.text, auraDurSize, "OUTLINE, SLUG")
             self.cc[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
             ApplyTimerPosition(self.cc[i].cd.text, self.cc[i], ccTPos)
         end
     end
-    PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccSz, GetAuraSpacing("ccs"), GetAuraSlotOffsets("ccSlot"))
+    PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccH, GetAuraSpacing("ccs"), GetAuraSlotOffsets("ccSlot"))
     if self.absorbForward then
         self.absorbForward:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     end
@@ -3946,6 +4079,8 @@ function NameplateFrame:ApplyAppearance()
     ns.ApplyAbsorbStyle(self)
     self:ApplyBorder()
     self:ApplyBorderColor()
+    if self.ApplyCastBorder then self:ApplyCastBorder() end
+    if self.ApplyCastBorderColor then self:ApplyCastBorderColor() end
     self:ApplyHealthTextAppearance()
     if ns.RefreshCastOverlay then ns.RefreshCastOverlay(self) end
 end
@@ -5184,6 +5319,12 @@ function NameplateFrame:UpdateAuras(updateInfo)
         -- stale pending). Updated ids also refresh their texture for
         -- parity with a full repaint.
         local updated = updateInfo.updatedAuraInstanceIDs
+        local dCrop, dCzW, dCzH
+        if updated then
+            dCrop = ns.GetAuraCrop("debuffs")
+            dCzW = GetDebuffIconSize()
+            dCzH = ns.GetAuraCropHeight(dCrop, dCzW)
+        end
         for i = 1, #skipIDs do
             local slot = self.debuffs[i]
             local id = skipIDs[i]
@@ -5201,6 +5342,9 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 for j = 1, #updated do
                     if updated[j] == id then
                         RawSetTex(slot.icon, skipAuras[i].icon)
+                        -- SetTexture resets texcoord; re-apply the crop so a
+                        -- hot-path texture swap never reverts a cropped icon.
+                        ns.SetAuraIconCrop(slot.icon, dCrop, dCzW, dCzH)
                         break
                     end
                 end
@@ -5217,7 +5361,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             local id = skipIDs[i]
             local slot = self.debuffs[i]
             RawSetTex(slot.icon, aura.icon)
-            slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            -- Texcoord (square or cropped) is applied in the size loop below.
             if C_UnitAuras_GetAuraAppDisplayCount then
                 slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
             end
@@ -5240,11 +5384,13 @@ function NameplateFrame:UpdateAuras(updateInfo)
         self._prevDebuffCount = debuffCount
         if debuffCount > 0 then
             local spacing = GetAuraSpacing("debuffs")
+            local cropped = ns.GetAuraCrop("debuffs")
             local debuffSz = GetDebuffIconSize()
+            local debuffH = ns.GetAuraCropHeight(cropped, debuffSz)
             for i = 1, debuffCount do
-                PP.Size(self.debuffs[i], debuffSz, debuffSz)
+                ns.ApplyAuraSlotCrop(self.debuffs[i], cropped, debuffSz)
             end
-            PositionAuraSlot(self.debuffs, debuffCount, debuffSlotVal, self, debuffSz, debuffSz, spacing, GetAuraSlotOffsets("debuffSlot"))
+            PositionAuraSlot(self.debuffs, debuffCount, debuffSlotVal, self, debuffSz, debuffH, spacing, GetAuraSlotOffsets("debuffSlot"))
         end
         -- Pandemic glow registration for shown debuffs (zero work when off)
         if GetPandemicGlow() then
@@ -5303,6 +5449,12 @@ function NameplateFrame:UpdateAuras(updateInfo)
         -- not store _durationObj -- parity with the arm path). Dispel
         -- glow state persists with the unchanged aura.
         local updated = updateInfo.updatedAuraInstanceIDs
+        local bCrop, bCzW, bCzH
+        if updated then
+            bCrop = ns.GetAuraCrop("buffs")
+            bCzW = GetBuffIconSize()
+            bCzH = ns.GetAuraCropHeight(bCrop, bCzW)
+        end
         for i = 1, #skipIDs do
             local slot = self.buffs[i]
             local id = skipIDs[i]
@@ -5319,6 +5471,9 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 for j = 1, #updated do
                     if updated[j] == id then
                         RawSetTex(slot.icon, skipAuras[i].icon)
+                        -- SetTexture resets texcoord; re-apply the crop so a
+                        -- hot-path texture swap never reverts a cropped icon.
+                        ns.SetAuraIconCrop(slot.icon, bCrop, bCzW, bCzH)
                         break
                     end
                 end
@@ -5337,7 +5492,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             local id = skipIDs[i]
             local slot = self.buffs[i]
             RawSetTex(slot.icon, aura.icon)
-            slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            -- Texcoord (square or cropped) is applied in the size loop below.
             if C_UnitAuras_GetAuraAppDisplayCount then
                 slot.count:SetText(C_UnitAuras_GetAuraAppDisplayCount(unit, id, 2, 1000) or "")
             end
@@ -5366,11 +5521,13 @@ function NameplateFrame:UpdateAuras(updateInfo)
         -- Reposition buffs based on actual shown count
         if buffSlotVal ~= "none" and buffCount > 0 then
             local spacing = GetAuraSpacing("buffs")
+            local cropped = ns.GetAuraCrop("buffs")
             local buffSz = GetBuffIconSize()
+            local buffH = ns.GetAuraCropHeight(cropped, buffSz)
             for i = 1, buffCount do
-                PP.Size(self.buffs[i], buffSz, buffSz)
+                ns.ApplyAuraSlotCrop(self.buffs[i], cropped, buffSz)
             end
-            PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffSz, spacing, GetAuraSlotOffsets("buffSlot"))
+            PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffH, spacing, GetAuraSlotOffsets("buffSlot"))
         end
     end
     end -- rebuildB
@@ -5407,6 +5564,12 @@ function NameplateFrame:UpdateAuras(updateInfo)
         -- Same membership: re-arm cooldowns only (CC slots have no count
         -- text and do not store _durationObj -- parity with the arm path)
         local updated = updateInfo.updatedAuraInstanceIDs
+        local cCrop, cCzW, cCzH
+        if updated then
+            cCrop = ns.GetAuraCrop("ccs")
+            cCzW = GetCCIconSize()
+            cCzH = ns.GetAuraCropHeight(cCrop, cCzW)
+        end
         for i = 1, #skipIDs do
             local slot = self.cc[i]
             local id = skipIDs[i]
@@ -5420,6 +5583,9 @@ function NameplateFrame:UpdateAuras(updateInfo)
                 for j = 1, #updated do
                     if updated[j] == id then
                         RawSetTex(slot.icon, skipAuras[i].icon)
+                        -- SetTexture resets texcoord; re-apply the crop so a
+                        -- hot-path texture swap never reverts a cropped icon.
+                        ns.SetAuraIconCrop(slot.icon, cCrop, cCzW, cCzH)
                         break
                     end
                 end
@@ -5436,7 +5602,7 @@ function NameplateFrame:UpdateAuras(updateInfo)
             local id = skipIDs[i]
             local slot = self.cc[i]
             RawSetTex(slot.icon, aura.icon)
-            slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            -- Texcoord (square or cropped) is applied in the size loop below.
             slot.icon:Show()
             local cd = slot.cd
             if cd and C_UnitAuras_GetAuraDuration then
@@ -5457,11 +5623,13 @@ function NameplateFrame:UpdateAuras(updateInfo)
         -- Reposition CC based on actual shown count
         if ccSlotVal ~= "none" and ccShown > 0 then
             local spacing = GetAuraSpacing("ccs")
+            local cropped = ns.GetAuraCrop("ccs")
             local ccSz = GetCCIconSize()
+            local ccH = ns.GetAuraCropHeight(cropped, ccSz)
             for i = 1, ccShown do
-                PP.Size(self.cc[i], ccSz, ccSz)
+                ns.ApplyAuraSlotCrop(self.cc[i], cropped, ccSz)
             end
-            PositionAuraSlot(self.cc, ccShown, ccSlotVal, self, ccSz, ccSz, spacing, GetAuraSlotOffsets("ccSlot"))
+            PositionAuraSlot(self.cc, ccShown, ccSlotVal, self, ccSz, ccH, spacing, GetAuraSlotOffsets("ccSlot"))
         end
     end
     end -- rebuildC
@@ -6909,7 +7077,7 @@ do
     -- Split into two tables and concatenated to stay under Lua 5.1's
     -- per-function constant limit.
     ns._displayPresetKeys = {
-        "showBorder", "borderSize", "borderColor", "targetGlowStyle", "showTargetArrows",
+        "showBorder", "borderSize", "borderColor", "castBorderSize", "castBorderColor", "targetGlowStyle", "showTargetArrows",
         "showClassPower", "classPowerPos", "classPowerYOffset", "classPowerXOffset", "classPowerScale",
         "classPowerClassColors", "classPowerCustomColor", "classPowerGap",
         "textSlotTop", "textSlotRight", "textSlotLeft", "textSlotCenter",

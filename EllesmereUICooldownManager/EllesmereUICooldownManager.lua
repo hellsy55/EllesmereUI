@@ -338,7 +338,8 @@ local BUFF_BAR_PRESETS = {
                        or  "Interface\\Icons\\ability_shaman_heroism",
         spellIDs = { (UnitFactionGroup("player") == "Horde") and 2825 or 32182 },
         duration = 40,
-        tbbOnly  = true,  -- TBB-only; debuff-driven, not a cooldown-usable preset
+        tbbOnly  = true,  -- not a cooldown-usable preset (kept out of the CD/utility picker)
+        customAuraToo = true,  -- but allowed on Custom Auras (icon) bars; debuff-driven 40s window
     },
     {
         key      = "lights_potential",

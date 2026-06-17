@@ -10,6 +10,16 @@ local ERF = EllesmereUI.Lite.NewAddon(ADDON_NAME)
 ns.ERF = ERF
 _G.EllesmereUIRaidFrames = ERF
 
+-- The addon name external nickname providers (TimelineReminders, NSRT) key us by.
+-- Full suite = the brand "EllesmereUI" (the parent addon they registered support
+-- for). Standalone build = our own renamed folder name (ADDON_NAME, e.g.
+-- "EUIStandaloneRaidFrames"), which is exactly the per-addon key TR fires for the
+-- standalone. The word "Standalone" is never touched by the standalone token
+-- rename, so this detection is rename-immune; the "EllesmereUI" literal is only
+-- reached in the suite, where it is correct. On ns (not a new file-scope local)
+-- since this file sits at the Lua 5.1 200-local cap.
+ns.NICK_ADDON = ADDON_NAME:find("Standalone") and ADDON_NAME or "EllesmereUI"
+
 -------------------------------------------------------------------------------
 --  Frame-level layout (offsets above the button / preview-frame level).
 --  All aura VISUALS share one band ABOVE the threat/dispel/base border so the
@@ -1179,7 +1189,7 @@ local function ResolveDisplayName(unit)
     -- checked first to keep the normal Ambiguate path for un-nicknamed units.
     local TR = TimelineReminders
     if TR and TR.GetNickname and TR.HasNickname and TR.NicknamesEnabledForAddOn then
-        local okGate, enabled = pcall(TR.NicknamesEnabledForAddOn, TR, "EllesmereUI")
+        local okGate, enabled = pcall(TR.NicknamesEnabledForAddOn, TR, ns.NICK_ADDON)
         if okGate and enabled then
             local okHas, has = pcall(TR.HasNickname, TR, unit)
             if okHas and has then
@@ -6020,6 +6030,55 @@ function ns._BuildPartyClassNameList(includePlayer, sortByRole, roleOrder, class
     return table.concat(names, ",")
 end
 
+-- Build the party header's nameList for ARENA, where the header is bound to
+-- raid1-5. showPlayer cannot exclude the player in a raid group and the static
+-- self button cannot reorder them, but a NAMELIST can do both: omit the player
+-- (Hide Self) and order them first or last (Show Self First / Self Last). The
+-- rest follow role order (ROLE mode) else raid index. Names come from
+-- GetRaidRosterInfo, the same source the secure header matches against. Bails to
+-- nil -- the index-order fallback with everyone visible -- while any name is
+-- still unresolved, so a half-built roster never hides a teammate.
+function ns._BuildArenaNameList(hideSelf, selfFirst, selfLast, sortByRole, roleOrder)
+    if not IsInRaid() then return nil end
+    local pri
+    if sortByRole then
+        pri = {}
+        for p, r in ipairs(roleOrder) do pri[r] = p end
+    end
+    local members = {}
+    local n = GetNumGroupMembers()
+    for i = 1, n do
+        local name = GetRaidRosterInfo(i)
+        if not name or name == UNKNOWNOBJECT then return nil end
+        local unit = "raid" .. i
+        local isPlayer = UnitIsUnit(unit, "player")
+        if not (hideSelf and isPlayer) then
+            local rp = 99
+            if pri then rp = pri[UnitGroupRolesAssigned(unit)] or 99 end
+            members[#members + 1] = {
+                name = name,
+                isPlayer = isPlayer,
+                rolePri = rp,
+                index = i,
+            }
+        end
+    end
+    if #members == 0 then return nil end
+    table.sort(members, function(a, b)
+        -- Player to the top (self-first) or bottom (self-last) when either is
+        -- set. Exactly one of a/b is the player in that branch, so XOR-ing with
+        -- selfLast flips top vs bottom.
+        if (selfFirst or selfLast) and a.isPlayer ~= b.isPlayer then
+            return a.isPlayer ~= selfLast
+        end
+        if sortByRole and a.rolePri ~= b.rolePri then return a.rolePri < b.rolePri end
+        return a.index < b.index
+    end)
+    local names = {}
+    for _, m in ipairs(members) do names[#names + 1] = m.name end
+    return table.concat(names, ",")
+end
+
 -------------------------------------------------------------------------------
 --  Apply sort attributes to all headers. Show Self First (raid) uses a per-group
 --  nameList on the player's own subgroup so the secure header itself puts the
@@ -7226,6 +7285,17 @@ end
 -------------------------------------------------------------------------------
 local framesVisible = false
 
+-- True when the player is inside an arena instance. Arena puts you in a RAID
+-- group, but we deliberately show our PARTY frames there (the party header is
+-- bound to raid1-5 via showRaid=true) so small-group styling applies and
+-- external trackers that anchor to our party frames keep working. Detection is
+-- by instance type and must be checked BEFORE any IsInRaid() branch, since
+-- arena makes IsInRaid() return true.
+ns._InArena = function()
+    local _, instanceType = IsInInstance()
+    return instanceType == "arena"
+end
+
 local function UpdateVisibility()
     if not containerFrame then return end
     if InCombatLockdown() then return end
@@ -7243,11 +7313,15 @@ local function UpdateVisibility()
     if not ns._sizePreviewTier and not ns._partyPvActive then containerFrame:SetAlpha(1) end
 
     local s = db.profile
+    -- Arena hides the raid frames. The player is in a raid group there, but
+    -- arena shows our party frames instead (see _UpdatePartyVisibility), so the
+    -- raid container must stay hidden even though IsInRaid() returns true.
+    local inArena = ns._InArena()
     local visible = false
-    if IsInRaid() then
+    if IsInRaid() and not inArena then
         visible = true
     elseif IsInGroup() then
-        visible = false  -- party frames handle group visibility
+        visible = false  -- party frames handle group visibility (incl. arena)
     else
         visible = s.showWhenSolo
     end
@@ -7420,9 +7494,11 @@ local function OnEvent(self, event, arg1, ...)
         if not inCombat and framesVisible and ns._ApplySortToHeaders then
             ns._ApplySortToHeaders()
         end
-        -- Party Prioritize Class orders via a role-aware nameList, so a role
-        -- change must rebuild it (native role sort updates itself; this does not).
-        if not inCombat and ns._partyFramesVisible and db.profile.partyPrioritizeClass
+        -- Party Prioritize Class and the arena self-order nameList are both
+        -- role-aware, so a role change must rebuild them (native role sort
+        -- updates itself; these do not).
+        if not inCombat and ns._partyFramesVisible
+            and (db.profile.partyPrioritizeClass or ns._InArena())
             and ns._LayoutPartyFrames then
             ns._LayoutPartyFrames()
         end
@@ -7629,7 +7705,8 @@ local function OnEvent(self, event, arg1, ...)
                     ns._rosterDirtyInCombat = true
                     return
                 end
-                if ns._partyFramesVisible and db.profile.partyPrioritizeClass
+                if ns._partyFramesVisible
+                    and (db.profile.partyPrioritizeClass or ns._InArena())
                     and ns._LayoutPartyFrames then
                     ns._LayoutPartyFrames()
                 end
@@ -8084,7 +8161,12 @@ ns._CreatePartyHeader = function()
     hdr:SetAttribute("xOffset", 0)
     hdr:SetAttribute("yOffset", -cs)
     hdr:SetAttribute("groupFilter", "1,2,3,4,5,6,7,8")
-    hdr:SetAttribute("showRaid", false)
+    -- showRaid=true so the header binds raid1-5 inside an arena, where the team
+    -- is a raid group. Inert in a normal 5-man party (no raid units exist), so
+    -- it only takes effect when the header is actually shown in a raid group --
+    -- which we do only for arena (see _UpdatePartyVisibility). Outside arena the
+    -- header is hidden in a real raid, so this never shows 40 raid units.
+    hdr:SetAttribute("showRaid", true)
     hdr:SetAttribute("showParty", true)
     hdr:SetAttribute("showPlayer", true)
     hdr:SetAttribute("showSolo", s.partyShowWhenSolo or false)
@@ -8187,7 +8269,13 @@ ns._PositionPartySlots = function(bw, bh, cs, unitGrowth)
     local pSelfLast = s.partySelfLast
     if pSelfLast == nil then pSelfLast = s.showSelfLast end
     local hideSelf = s.partyHideSelf
-    local useSelf = (pSelfFirst or pSelfLast) and not hideSelf and IsInGroup()
+    -- Arena binds the header to raid1-5, which always includes the player, and
+    -- showPlayer=false cannot exclude the player in a raid group. The static
+    -- self button would then duplicate the player, so disable it in arena and
+    -- let the header show the player natively (in arena showPlayer reduces to
+    -- "not hideSelf" in _LayoutPartyFrames; the arena nameList -- not showPlayer
+    -- -- is what omits the player when Hide Self is on).
+    local useSelf = (pSelfFirst or pSelfLast) and not hideSelf and IsInGroup() and not ns._InArena()
 
     -- The header's own size feeds the first child's centered anchor
     -- (point=TOP centers on header width; point=LEFT centers on height).
@@ -8325,7 +8413,10 @@ ns._LayoutPartyFrames = function()
         local sortByRole = pSortMode == "ROLE"
         local roleOrder = s.partyRoleOrder or s.roleOrder or { "TANK", "HEALER", "DAMAGER" }
         -- showPlayer is false when the self button owns the player (useSelf) or
-        -- when hiding self; true only for a normal in-header player frame.
+        -- when hiding self; true only for a normal in-header player frame. In
+        -- arena useSelf is forced false (no self button), so this reduces to
+        -- "show the player unless Hide Self" -- and the arena nameList below
+        -- keeps membership consistent by omitting the player when Hide Self.
         local wantShowPlayer = not hideSelf and not useSelf
 
         -- Prioritize Class drives the header with an explicit nameList ordered by
@@ -8333,7 +8424,18 @@ ns._LayoutPartyFrames = function()
         -- groupFilter is cleared, so we clear it and let showParty/showPlayer pick
         -- members. When off, fall back to the native groupBy/sortMethod path.
         local wantGroupBy, wantSortMethod, wantGroupingOrder, wantNameList, wantGroupFilter
-        if s.partyPrioritizeClass then
+        if ns._InArena() then
+            -- Arena runs on raid1-5, where Prioritize Class cannot work (it
+            -- iterates party1-4) and neither the self button nor showPlayer can
+            -- order or hide the player. A raid-token nameList does both: it
+            -- honors Show Self First / Self Last / Hide Self and still shows
+            -- every teammate (bailing to native order until names resolve).
+            local pSelfFirst = s.partyShowSelfFirst
+            if pSelfFirst == nil then pSelfFirst = s.showSelfFirst end
+            local pSelfLast = s.partySelfLast
+            if pSelfLast == nil then pSelfLast = s.showSelfLast end
+            wantNameList = ns._BuildArenaNameList(hideSelf, pSelfFirst, pSelfLast, sortByRole, roleOrder)
+        elseif s.partyPrioritizeClass then
             wantNameList = ns._BuildPartyClassNameList(wantShowPlayer, sortByRole, roleOrder, s.partyClassOrder)
         end
         if wantNameList then
@@ -8388,8 +8490,12 @@ ns._UpdatePartyVisibility = function()
     if not ns._sizePreviewTier and ns._partyContainerFrame then ns._partyContainerFrame:SetAlpha(1) end
 
     local s = db.profile
+    -- Arena shows party frames even though IsInRaid() is true (the team is a
+    -- raid group). The header binds raid1-5 via showRaid=true; the raid
+    -- container is hidden in arena by UpdateVisibility.
+    local inArena = ns._InArena()
     local visible = false
-    if IsInGroup() and not IsInRaid() then
+    if IsInGroup() and (inArena or not IsInRaid()) then
         visible = true
     elseif not IsInGroup() then
         visible = s.partyShowWhenSolo
@@ -13091,7 +13197,7 @@ function ERF:OnEnable()
             -- CallbackHandler passes the event name as the first callback argument.
             -- Toggle fires for every addon checkbox in TR, so filter on ours.
             TR.RegisterCallback("EllesmereUI", "TimelineReminders_NicknameToggle", function(_, _, addOnName)
-                if addOnName == "EllesmereUI" and ns.RefreshAllNames then ns.RefreshAllNames() end
+                if addOnName == ns.NICK_ADDON and ns.RefreshAllNames then ns.RefreshAllNames() end
             end)
             TR.RegisterCallback("EllesmereUI", "TimelineReminders_NicknameUpdate", function()
                 if ns.RefreshAllNames then ns.RefreshAllNames() end

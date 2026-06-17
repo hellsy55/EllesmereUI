@@ -943,6 +943,15 @@ function EllesmereUI.ApplyProfileData(profileData)
                         elseif profile.tsEnabled == true then profile.tsMode = "whenHealing" end
                     end
                 end
+                -- Pre-split imports carry the legacy single miniboss color but no
+                -- boss color. The mini-boss/boss split migration is SKIPPED for
+                -- imported profiles (inherited migration flags), so forward-copy
+                -- here BEFORE DeepMergeDefaults fills the DEFAULT boss color and
+                -- changes the user's boss nameplates.
+                if entry.folder == "EllesmereUINameplates"
+                    and profile.boss == nil and type(profile.miniboss) == "table" then
+                    profile.boss = DeepCopy(profile.miniboss)
+                end
                 if db._profileDefaults then
                     EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                 end

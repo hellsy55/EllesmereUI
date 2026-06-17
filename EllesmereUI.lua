@@ -3954,6 +3954,11 @@ function EllesmereUI.MakeUnlockElement(opts)
         linkedDimensions  = opts.linkedDimensions,
         noAnchorTarget    = opts.noAnchorTarget,
         noAnchorTo        = opts.noAnchorTo,
+        -- allowMatchSource: show the width/height MATCH buttons even when resize is
+        -- disabled (noResize), so the element can size-match TO another element.
+        -- noSizeMatchTarget: other elements may NOT size-match TO this one.
+        allowMatchSource  = opts.allowMatchSource,
+        noSizeMatchTarget = opts.noSizeMatchTarget,
     }
 end
 
@@ -8807,7 +8812,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.1.9"
+EllesmereUI.VERSION = "8.2.0"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -836,6 +836,25 @@ initFrame:SetScript("OnEvent", function(self)
                 castParts.bg:SetColorTexture(cbgC.r, cbgC.g, cbgC.b, cbgA)
             end
 
+            -- Cast bar border (pixel-perfect, mirrors the real nameplates)
+            do
+                local cbSz = DBVal("castBorderSize") or defaults.castBorderSize or 0
+                local cbC = (DB() and DB().castBorderColor) or defaults.castBorderColor
+                if PP and PP.CreateBorder then
+                    if cbSz and cbSz > 0 then
+                        if PP.GetBorders(cast) then
+                            PP.SetBorderColor(cast, cbC.r, cbC.g, cbC.b, 1)
+                            PP.SetBorderSize(cast, cbSz)
+                            PP.ShowBorder(cast)
+                        else
+                            PP.CreateBorder(cast, cbC.r, cbC.g, cbC.b, 1, cbSz, "OVERLAY", 7)
+                        end
+                    elseif PP.GetBorders(cast) then
+                        PP.HideBorder(cast)
+                    end
+                end
+            end
+
             -- Border style toggle
             local bOn = DBVal("showBorder")
             if bOn == nil then bOn = defaults.showBorder end
@@ -880,6 +899,15 @@ initFrame:SetScript("OnEvent", function(self)
             local debuffSpacing = debuffGap + debuffSz
             local buffSpacing   = buffGap + buffSz
             local ccSpacing     = ccGap + ccSz
+
+            -- Cropped icons (mirror the runtime): rectangular height (80% of
+            -- width) + matching texcoord trim. Off by default.
+            local debuffCrop = DBVal("debuffCropIcons") or defaults.debuffCropIcons
+            local buffCrop   = DBVal("buffCropIcons")   or defaults.buffCropIcons
+            local ccCrop     = DBVal("ccCropIcons")     or defaults.ccCropIcons
+            local debuffH = ns.GetAuraCropHeight(debuffCrop, debuffSz)
+            local buffH   = ns.GetAuraCropHeight(buffCrop, buffSz)
+            local ccH     = ns.GetAuraCropHeight(ccCrop, ccSz)
 
             -- Arrow visibility is deferred until after auras are placed
             -- (arrows go OUTSIDE the outermost side aura)
@@ -1275,6 +1303,11 @@ initFrame:SetScript("OnEvent", function(self)
             local function PlaceInSlot(frame, slotName, index, count, iconW, iconH, slotSpacing, sxOff, syOff)
                 sxOff = sxOff or 0
                 syOff = syOff or 0
+                -- Vertical center-to-center distance. Cropped icons are shorter,
+                -- so vertically stacked slots (topleft/topright "up") pack
+                -- tighter. slotSpacing is the horizontal (gap + width) distance;
+                -- swap the width term for the height term. Equal when uncropped.
+                local slotSpacingV = slotSpacing - iconW + iconH
                 frame:ClearAllPoints()
                 if slotName == "top" then
                     -- Anchor auras to whichever FontString is in the top slot
@@ -1304,7 +1337,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local baseX = -2 + sxOff
                     local baseY = debuffY + cpPush + syOff
                     if growth == "up" then
-                        frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT", baseX, baseY + idx * slotSpacing)
+                        frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT", baseX, baseY + idx * slotSpacingV)
                     elseif growth == "right" then
                         frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT", baseX + idx * slotSpacing, baseY)
                     else
@@ -1316,7 +1349,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local baseX = 2 + sxOff
                     local baseY = debuffY + cpPush + syOff
                     if growth == "up" then
-                        frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", baseX, baseY + idx * slotSpacing)
+                        frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", baseX, baseY + idx * slotSpacingV)
                     elseif growth == "left" then
                         frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", baseX - idx * slotSpacing, baseY)
                     else
@@ -1421,12 +1454,13 @@ initFrame:SetScript("OnEvent", function(self)
                     debuffs[i]:Hide()
                 else
                     debuffs[i]:Show()
-                    debuffs[i]:SetSize(Snap(debuffSz), Snap(debuffSz))
+                    debuffs[i]:SetSize(Snap(debuffSz), Snap(debuffH))
+                    ns.SetAuraIconCrop(debuffs[i].icon, debuffCrop, debuffSz, debuffH)
                     debuffs[i].durationText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
                     debuffs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
                     ApplyTimerPos(debuffs[i].durationText, debuffs[i], debuffTPos)
                     ApplyStackPos(debuffs[i].stackText, debuffs[i])
-                    PlaceInSlot(debuffs[i], debuffSlotVal, i, PV_CONST.DEBUFF_COUNT, debuffSz, debuffSz, debuffSpacing, debuffXOff, debuffYOff)
+                    PlaceInSlot(debuffs[i], debuffSlotVal, i, PV_CONST.DEBUFF_COUNT, debuffSz, debuffH, debuffSpacing, debuffXOff, debuffYOff)
                 end
             end
 
@@ -1439,11 +1473,12 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 else
                     buffs[i]:Show()
-                    buffs[i]:SetSize(Snap(buffSz), Snap(buffSz))
+                    buffs[i]:SetSize(Snap(buffSz), Snap(buffH))
+                    ns.SetAuraIconCrop(buffs[i].icon, buffCrop, buffSz, buffH)
                     buffs[i].durationText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
                     buffs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
                     ApplyTimerPos(buffs[i].durationText, buffs[i], buffTPos)
-                    PlaceInSlot(buffs[i], buffSlotVal, i, PV_CONST.BUFF_COUNT, buffSz, buffSz, buffSpacing, buffXOff, buffYOff)
+                    PlaceInSlot(buffs[i], buffSlotVal, i, PV_CONST.BUFF_COUNT, buffSz, buffH, buffSpacing, buffXOff, buffYOff)
                     -- Dispel glow preview (always stop first to pick up color/style changes)
                     if showDispelGlowPreview and DBVal("dispelGlow") == true then
                         if buffs[i].dispelGlow and buffs[i].dispelGlow.active then
@@ -1462,11 +1497,12 @@ initFrame:SetScript("OnEvent", function(self)
                     ccs[i]:Hide()
                 else
                     ccs[i]:Show()
-                    ccs[i]:SetSize(Snap(ccSz), Snap(ccSz))
+                    ccs[i]:SetSize(Snap(ccSz), Snap(ccH))
+                    ns.SetAuraIconCrop(ccs[i].icon, ccCrop, ccSz, ccH)
                     ccs[i].durationText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
                     ccs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
                     ApplyTimerPos(ccs[i].durationText, ccs[i], ccTPos)
-                    PlaceInSlot(ccs[i], ccSlotVal, i, PV_CONST.CC_COUNT, ccSz, ccSz, ccSpacing, ccXOff, ccYOff)
+                    PlaceInSlot(ccs[i], ccSlotVal, i, PV_CONST.CC_COUNT, ccSz, ccH, ccSpacing, ccXOff, ccYOff)
                 end
             end
 
@@ -3553,15 +3589,17 @@ initFrame:SetScript("OnEvent", function(self)
                 local ds, bs, cs = ns.GetAuraSlots()
                 if bs ~= "none" then
                     local buffSz = ns.GetBuffIconSize()
+                    local buffH = ns.GetAuraCropHeight(ns.GetAuraCrop("buffs"), buffSz)
                     local bxOff, byOff = ns.GetSlotOffsets(bs)
-                    ns.PositionAuraSlot(plate.buffs, 4, bs, plate, buffSz, buffSz, ns.GetAuraSpacing("buffs"), bxOff, byOff)
+                    ns.PositionAuraSlot(plate.buffs, 4, bs, plate, buffSz, buffH, ns.GetAuraSpacing("buffs"), bxOff, byOff)
                 else
                     for i = 1, 4 do plate.buffs[i]:Hide() end
                 end
                 if cs ~= "none" then
                     local ccSz = ns.GetCCIconSize()
+                    local ccH = ns.GetAuraCropHeight(ns.GetAuraCrop("ccs"), ccSz)
                     local cxOff, cyOff = ns.GetSlotOffsets(cs)
-                    ns.PositionAuraSlot(plate.cc, 2, cs, plate, ccSz, ccSz, ns.GetAuraSpacing("ccs"), cxOff, cyOff)
+                    ns.PositionAuraSlot(plate.cc, 2, cs, plate, ccSz, ccH, ns.GetAuraSpacing("ccs"), cxOff, cyOff)
                 else
                     for i = 1, 2 do plate.cc[i]:Hide() end
                 end
@@ -4176,6 +4214,25 @@ initFrame:SetScript("OnEvent", function(self)
                 pf._tToggle = tToggle
                 pf._toggleSnap = tToggleSnap
 
+                -- Optional "Cropped Icons" toggle row. Unlike the generic toggle
+                -- above, this gets its OWN row below the data/grow rows so it can
+                -- coexist with the Grow row on aura slots. Wired via
+                -- pf._cropGet / pf._cropSet; repositioned per show.
+                local cropLabel = MakeFont(pf, 12, nil, 1, 1, 1)
+                cropLabel:SetAlpha(0.6)
+                cropLabel:SetText(EllesmereUI.L("Cropped Icons"))
+                cropLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, G_ROW_Y - GROWTH_ROW_H / 2)
+                cropLabel:Hide()
+                pf._cropLabel = cropLabel
+                local cropToggle, _, cropToggleSnap = EllesmereUI.BuildToggleControl(pf, pf:GetFrameLevel() + 5,
+                    function() return pf._cropGet and pf._cropGet() or false end,
+                    function(v) if pf._cropSet then pf._cropSet(v) end end,
+                    { sizeRatio = 0.8, noAnim = true })
+                cropToggle:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, G_ROW_Y - GROWTH_ROW_H / 2)
+                cropToggle:Hide()
+                pf._cropToggle = cropToggle
+                pf._cropToggleSnap = cropToggleSnap
+
                 -- Layout constants stored for height calc
                 pf._TOP_PAD = TOP_PAD; pf._TITLE_H = TITLE_H; pf._TITLE_GAP = TITLE_GAP
                 pf._GAP = GAP; pf._SLIDER_H = SLIDER_H; pf._SIDE_PAD = SIDE_PAD
@@ -4225,6 +4282,7 @@ initFrame:SetScript("OnEvent", function(self)
             local hasSpacing = opts.spacingGet ~= nil
             local hasGrowth = opts.growthGet ~= nil
             local hasToggle = opts.toggleGet ~= nil
+            local hasCrop = opts.cropGet ~= nil
             if hasSize then
                 -- Rebuild size slider if range changed
                 local sStep = opts.sizeStep or 1
@@ -4312,6 +4370,20 @@ initFrame:SetScript("OnEvent", function(self)
                 cogPopup._tToggle:Hide()
             end
 
+            -- Show/hide Cropped Icons row (its own row, below Grow when present)
+            if hasCrop then
+                cogPopup._cropGet = opts.cropGet
+                cogPopup._cropSet = opts.cropSet
+                cogPopup._cropLabel:Show()
+                cogPopup._cropToggle:Show()
+                if cogPopup._cropToggleSnap then cogPopup._cropToggleSnap() end
+            else
+                cogPopup._cropGet = nil
+                cogPopup._cropSet = nil
+                cogPopup._cropLabel:Hide()
+                cogPopup._cropToggle:Hide()
+            end
+
             -- Row order: cogs that pass sizeFirst (core position / core text
             -- position) put Size at the top; everyone else keeps X, Y, Size.
             -- Spacing (when present) follows Size. Grow / toggle always sit in
@@ -4354,6 +4426,15 @@ initFrame:SetScript("OnEvent", function(self)
                 p._tLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, nextY - GRH / 2)
                 p._tToggle:ClearAllPoints()
                 p._tToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, nextY - GRH / 2)
+                -- Cropped Icons sits in its own row: below Grow/toggle when one
+                -- is present, otherwise directly after the data rows.
+                local cropRowIndex = #seq + 1
+                if hasGrowth or hasToggle then cropRowIndex = #seq + 2 end
+                local cropY = rowY(cropRowIndex)
+                p._cropLabel:ClearAllPoints()
+                p._cropLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, cropY - GRH / 2)
+                p._cropToggle:ClearAllPoints()
+                p._cropToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, cropY - GRH / 2)
             end
 
             -- Compute height based on visible rows
@@ -4378,6 +4459,8 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasGrowth then h = h + gap + p._GROWTH_ROW_H end
                 -- Grow and toggle are mutually exclusive and share the same slot.
                 if hasToggle then h = h + gap + p._GROWTH_ROW_H end
+                -- Cropped Icons always occupies its own extra row.
+                if hasCrop then h = h + gap + p._GROWTH_ROW_H end
                 h = h + p._TOP_PAD
                 cogPopup:SetHeight(h)
             end
@@ -4463,20 +4546,25 @@ initFrame:SetScript("OnEvent", function(self)
                     opts.growthSet    = function(v) DB()[growthKey] = v; RefreshAllSlots(); UpdatePreview() end
                     opts.growthValues = growthValues
                 end
-                -- Spacing: only for multi-icon aura elements (debuffs/buffs/CCs).
-                -- Maps the slot's currently assigned element to its spacing key.
+                -- Spacing + Cropped Icons: only for multi-icon aura elements
+                -- (debuffs/buffs/CCs). Both map the slot's currently assigned
+                -- element to its per-element key.
                 local element = GetElementAtPosition(posKey)
-                local spacingKey
+                local spacingKey, cropKey
                 if element == "debuffs" then
-                    spacingKey = "debuffSpacing"
+                    spacingKey = "debuffSpacing"; cropKey = "debuffCropIcons"
                 elseif element == "buffs" then
-                    spacingKey = "buffSpacing"
+                    spacingKey = "buffSpacing"; cropKey = "buffCropIcons"
                 elseif element == "ccs" then
-                    spacingKey = "ccSpacing"
+                    spacingKey = "ccSpacing"; cropKey = "ccCropIcons"
                 end
                 if spacingKey then
                     opts.spacingGet = function() return DBVal(spacingKey) or defaults[spacingKey] end
                     opts.spacingSet = function(v) DB()[spacingKey] = v; RefreshAllSlots(); UpdatePreview() end
+                end
+                if cropKey then
+                    opts.cropGet = function() return DBVal(cropKey) or defaults[cropKey] end
+                    opts.cropSet = function(v) DB()[cropKey] = v; RefreshAllSlots(); UpdatePreview() end
                 end
                 ShowCogPopup(self, opts)
             end)
@@ -5060,7 +5148,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Row 4: Cast Bar Background Opacity (+ inline color swatch) | (empty)
+        -- Row 4: Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
         local castBgRow
         castBgRow, h = W:DualRow(parent, y,
             { type="slider", text="Cast Background", min=0, max=100, step=1,
@@ -5075,7 +5163,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 UpdatePreview()
               end },
-            { type="label", text="" });  y = y - h
+            { type="slider", text="Cast Bar Border", min=0, max=4, step=1,
+              tooltip="Pixel-perfect border around the cast bar. Set to 0 for no border.",
+              getValue=function() return DBVal("castBorderSize") or defaults.castBorderSize end,
+              setValue=function(v)
+                DB().castBorderSize = v
+                ns.RefreshCastBorder()
+                UpdatePreview()
+              end });  y = y - h
         do
             local leftRgn = castBgRow._leftRegion
             local castBgColorGet = function()
@@ -5094,6 +5189,23 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(castBgSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
             leftRgn._lastInline = castBgSwatch
             EllesmereUI.RegisterWidgetRefresh(function() castBgUpdateSwatch() end)
+        end
+        -- Inline color swatch on Cast Bar Border (right region)
+        do
+            local rightRgn = castBgRow._rightRegion
+            local castBorderColorGet = function()
+                local c = (DB() and DB().castBorderColor) or defaults.castBorderColor
+                return c.r, c.g, c.b
+            end
+            local castBorderColorSet = function(r, g, b)
+                DB().castBorderColor = { r = r, g = g, b = b }
+                ns.RefreshCastBorderColor()
+                UpdatePreview()
+            end
+            local cbSwatch, cbUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, castBorderColorGet, castBorderColorSet, nil, 20)
+            PP.Point(cbSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            rightRgn._lastInline = cbSwatch
+            EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -7064,6 +7176,12 @@ initFrame:SetScript("OnEvent", function(self)
                     DB().enemyInCombat = { r = r, g = g, b = b }
                     RefreshAllPlates()
                   end },
+                { tooltip = "Neutral",
+                  getValue = function() return DBColor("neutral") end,
+                  setValue = function(r, g, b)
+                    DB().neutral = { r = r, g = g, b = b }
+                    RefreshAllPlates()
+                  end },
                 { tooltip = "Spell Casters",
                   getValue = function() return DBColor("caster") end,
                   setValue = function(r, g, b)
@@ -7074,6 +7192,12 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue = function() return DBColor("miniboss") end,
                   setValue = function(r, g, b)
                     DB().miniboss = { r = r, g = g, b = b }
+                    RefreshAllPlates()
+                  end },
+                { tooltip = "Bosses",
+                  getValue = function() return DBColor("boss") end,
+                  setValue = function(r, g, b)
+                    DB().boss = { r = r, g = g, b = b }
                     RefreshAllPlates()
                   end },
               } },
@@ -7661,7 +7785,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
               } });  y = y - h
 
-        -- Row 2: Show Special "Has Aggro" Color (left) ---- Classic Tank Aggro (right)
+        -- Disabled-state helpers (shared across Row 2 / Row 3 swatches)
         local function isTankHasAggroDisabled()
             local db = DB()
             if db and db.tankHasAggroEnabled ~= nil then return not db.tankHasAggroEnabled end
@@ -7672,18 +7796,29 @@ initFrame:SetScript("OnEvent", function(self)
             if db and db.classicTankAggro ~= nil then return not db.classicTankAggro end
             return not defaults.classicTankAggro
         end
+        local function isOffTankDisabled()
+            local db = DB()
+            if db and db.offTankAggroEnabled ~= nil then return not db.offTankAggroEnabled end
+            return not defaults.offTankAggroEnabled
+        end
+        local function isDpsNoAggroDisabled()
+            local db = DB()
+            if db and db.dpsNoAggroEnabled ~= nil then return not db.dpsNoAggroEnabled end
+            return not defaults.dpsNoAggroEnabled
+        end
 
-        local tankDualFrame
-        tankDualFrame, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Special \"Has Aggro\" Color",
-              tooltip="Shows a special color for non caster/mini-boss enemies when you have aggro on them.",
+        -- Row 2: DPS: Show Special "No Aggro" Color (left) ---- Classic Tank Aggro (right)
+        local dpsDualFrame
+        dpsDualFrame, h = W:DualRow(parent, y,
+            { type="toggle", text="DPS: Show Special \"No Aggro\" Color",
+              tooltip="Shows a special color for non caster/mini-boss enemies when you do not have aggro on them.",
               getValue=function()
                 local db = DB()
-                if db and db.tankHasAggroEnabled ~= nil then return db.tankHasAggroEnabled end
-                return defaults.tankHasAggroEnabled
+                if db and db.dpsNoAggroEnabled ~= nil then return db.dpsNoAggroEnabled end
+                return defaults.dpsNoAggroEnabled
               end,
               setValue=function(v)
-                DB().tankHasAggroEnabled = v
+                DB().dpsNoAggroEnabled = v
                 RefreshAllPlates()
                 EllesmereUI:RefreshPage()
               end },
@@ -7696,6 +7831,76 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                 DB().classicTankAggro = v
+                RefreshAllPlates()
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
+
+        -- Inline "No Aggro" color swatch next to left toggle
+        do
+            local leftRgn = dpsDualFrame._leftRegion
+            local dpsNoAggroColorGet = function() return DBColor("dpsNoAggro") end
+            local dpsNoAggroColorSet = function(r, g, b)
+                DB().dpsNoAggro = { r = r, g = g, b = b }
+                RefreshAllPlates()
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, dpsNoAggroColorGet, dpsNoAggroColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isDpsNoAggroDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isDpsNoAggroDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Inline "Has Aggro" color swatch next to Classic Tank Aggro toggle
+        do
+            local rightRgn = dpsDualFrame._rightRegion
+            local aggroColorGet = function() return DBColor("tankHasAggro") end
+            local aggroColorSet = function(r, g, b)
+                DB().tankHasAggro = { r = r, g = g, b = b }
+                RefreshAllPlates()
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, aggroColorGet, aggroColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isClassicTankAggroDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isClassicTankAggroDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Row 3: Tank: Show Special "Has Aggro" Color (left) ---- Tank: Show Special "Off-Tank" Color (right)
+        local tankDualFrame
+        tankDualFrame, h = W:DualRow(parent, y,
+            { type="toggle", text="Tank: Show Special \"Has Aggro\" Color",
+              tooltip="Shows a special color for non caster/mini-boss enemies when you have aggro on them.",
+              getValue=function()
+                local db = DB()
+                if db and db.tankHasAggroEnabled ~= nil then return db.tankHasAggroEnabled end
+                return defaults.tankHasAggroEnabled
+              end,
+              setValue=function(v)
+                DB().tankHasAggroEnabled = v
+                RefreshAllPlates()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text="Tank: Show Special \"Off-Tank\" Color",
+              tooltip="Shows a special color for nameplates that another tank in your raid has aggro on.",
+              getValue=function()
+                local db = DB()
+                if db and db.offTankAggroEnabled ~= nil then return db.offTankAggroEnabled end
+                return defaults.offTankAggroEnabled
+              end,
+              setValue=function(v)
+                DB().offTankAggroEnabled = v
                 RefreshAllPlates()
                 EllesmereUI:RefreshPage()
               end });  y = y - h
@@ -7721,60 +7926,16 @@ initFrame:SetScript("OnEvent", function(self)
             swatch:EnableMouse(not off)
         end
 
-        -- Inline "Has Aggro" color swatch next to Classic Tank Aggro toggle
+        -- Inline "Off-Tank" color swatch next to right toggle
         do
             local rightRgn = tankDualFrame._rightRegion
-            local aggroColorGet = function() return DBColor("tankHasAggro") end
-            local aggroColorSet = function(r, g, b)
-                DB().tankHasAggro = { r = r, g = g, b = b }
-                RefreshAllPlates()
-            end
-            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, aggroColorGet, aggroColorSet, nil, 20)
-            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = isClassicTankAggroDisabled()
-                swatch:SetAlpha(off and 0.15 or 1)
-                swatch:EnableMouse(not off)
-                updateSwatch()
-            end)
-            local off = isClassicTankAggroDisabled()
-            swatch:SetAlpha(off and 0.15 or 1)
-            swatch:EnableMouse(not off)
-        end
-
-        -- Row 3: Off-Tank Aggro (left only)
-        local function isOffTankDisabled()
-            local db = DB()
-            if db and db.offTankAggroEnabled ~= nil then return not db.offTankAggroEnabled end
-            return not defaults.offTankAggroEnabled
-        end
-
-        local offTankRow
-        offTankRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Special \"Off-Tank\" Color",
-              tooltip="Shows a special color for nameplates that another tank in your raid has aggro on.",
-              getValue=function()
-                local db = DB()
-                if db and db.offTankAggroEnabled ~= nil then return db.offTankAggroEnabled end
-                return defaults.offTankAggroEnabled
-              end,
-              setValue=function(v)
-                DB().offTankAggroEnabled = v
-                RefreshAllPlates()
-                EllesmereUI:RefreshPage()
-              end },
-            { type="label", text="" });  y = y - h
-
-        -- Inline color swatch
-        do
-            local leftRgn = offTankRow._leftRegion
             local otColorGet = function() return DBColor("offTankAggro") end
             local otColorSet = function(r, g, b)
                 DB().offTankAggro = { r = r, g = g, b = b }
                 RefreshAllPlates()
             end
-            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, otColorGet, otColorSet, nil, 20)
-            PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, otColorGet, otColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
             EllesmereUI.RegisterWidgetRefresh(function()
                 local off = isOffTankDisabled()
                 swatch:SetAlpha(off and 0.15 or 1)

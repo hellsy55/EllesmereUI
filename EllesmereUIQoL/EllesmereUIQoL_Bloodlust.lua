@@ -106,6 +106,7 @@ local buffOverlay, buffTex, buffCooldown, buffDurationFS  -- the 40s active-lust
 local _satedActive = false
 local _satedWasPresent = false  -- rising-edge baseline so only a FRESH debuff arms the buff window
 local _buffExpiry = 0           -- GetTime() when the 40s active-buff window ends
+local _buffZoneGuard = 0        -- suppress rising edges until this time (set on zone-in)
 local UpdateVisibility  -- forward declaration (referenced by PollSated below)
 local FormatTime        -- forward declaration (shared by the debuff text and the buff overlay)
 
@@ -577,13 +578,20 @@ end
 --  is registered solely while the tracker is enabled.
 -------------------------------------------------------------------------------
 local _eventFrame
-local function _onEvent(_, event)
+local function _onEvent(_, event, _, updateInfo)
     if event == "UNIT_AURA" then
         local was = _satedWasPresent
         local present = _refreshSated()
         _satedWasPresent = present
-        -- Rising edge = lust was just cast. Arm the 40s active-buff overlay.
-        if present and not was then _showBuffOverlay() end
+        -- Rising edge = lust was just cast. Arm the 40s active-buff overlay ONLY
+        -- on a genuine incremental application: never on a full aura refresh
+        -- (zone/login resends every aura) and never inside the post-zone grace
+        -- window, so a Sated debuff we already carry when zoning out of a dungeon
+        -- can't re-pop the overlay.
+        local isFull = updateInfo and updateInfo.isFullUpdate
+        if present and not was and not isFull and GetTime() >= _buffZoneGuard then
+            _showBuffOverlay()
+        end
     elseif event == "PLAYER_DEAD" then
         -- Buffs drop on death; hide the active-lust overlay even if 40s remain.
         _hideBuffOverlay()
@@ -603,8 +611,10 @@ local function _onEvent(_, event)
     elseif event == "PLAYER_ENTERING_WORLD" then
         _refreshSated()
         -- Baseline the edge tracker so a debuff already present on login/zone-in
-        -- is NOT mistaken for a fresh cast (no buff overlay reconstruction).
+        -- is NOT mistaken for a fresh cast (no buff overlay reconstruction), and
+        -- suppress edges briefly while the zone's aura table settles.
         _satedWasPresent = _satedActive
+        _buffZoneGuard = GetTime() + 1.5
         _refreshEncounterState()
         _refreshKeystoneState()
     end

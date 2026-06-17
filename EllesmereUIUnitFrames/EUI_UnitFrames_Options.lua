@@ -2622,6 +2622,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local showB = s.showBuffs and (s.buffAnchor or "topleft") ~= "none"
                 if showB and visibleBuffCount > 0 then
                     local buffSize = s.buffSize or 22
+                    local buffCrop = s.buffCropIcons or false
+                    local buffH = ns.GetAuraCropHeight(buffCrop, buffSize)
                     local buffGap = 1
                     local bOffX = s.buffOffsetX or 0
                     -- Preview intentionally ignores the Y offset (real frames still honor it).
@@ -2641,8 +2643,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local anchorMap = {
                         topleft     = { pt = "TOPLEFT",     ox = bOffX,                        oy = buffGap + bOffY },
                         topright    = { pt = "TOPRIGHT",    ox = bOffX,                        oy = buffGap + bOffY },
-                        bottomleft  = { pt = "BOTTOMLEFT",  ox = bOffX,                        oy = -(buffSize + buffGap) + bOffY },
-                        bottomright = { pt = "BOTTOMRIGHT", ox = bOffX,                        oy = -(buffSize + buffGap) + bOffY },
+                        bottomleft  = { pt = "BOTTOMLEFT",  ox = bOffX,                        oy = -(buffH + buffGap) + bOffY },
+                        bottomright = { pt = "BOTTOMRIGHT", ox = bOffX,                        oy = -(buffH + buffGap) + bOffY },
                         left        = { pt = "LEFT",        ox = -(buffGap) + bOffX,           oy = bOffY },
                         right       = { pt = "RIGHT",       ox = buffGap + bOffX,              oy = bOffY },
                     }
@@ -2652,8 +2654,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local dx, dy = 0, 0
                     if gDir == "right" then dx = buffSize + buffGap
                     elseif gDir == "left" then dx = -(buffSize + buffGap)
-                    elseif gDir == "up" then dy = buffSize + buffGap
-                    elseif gDir == "down" then dy = -(buffSize + buffGap)
+                    elseif gDir == "up" then dy = buffH + buffGap
+                    elseif gDir == "down" then dy = -(buffH + buffGap)
                     else dx = buffSize + buffGap end
 
                     -- Determine justifyH for SetPoint (which corner of the icon anchors)
@@ -2670,11 +2672,11 @@ initFrame:SetScript("OnEvent", function(self)
                     -- ClearAllPoints + SetPoint causes a one-frame gap that makes icons blink.
                     -- Also guard Show()/Hide() -- calling Show() on an already-visible frame
                     -- triggers a re-render that causes a shutter effect.
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. buffSize
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. buffSize .. buffH
                     for i, bf in ipairs(buffIcons) do
                         if i <= visibleBuffCount then
                             if bf._anchorKey ~= anchorKey then
-                                PP.Size(bf, buffSize, buffSize)
+                                PP.Size(bf, buffSize, buffH)
                                 bf:ClearAllPoints()
                                 if i == 1 then
                                     PP.Point(bf, justH, pf, am.pt, am.ox, am.oy)
@@ -2684,7 +2686,11 @@ initFrame:SetScript("OnEvent", function(self)
                                 bf._anchorKey = anchorKey
                             end
                             if not bf:IsShown() then bf:Show() end
-                            if bf._iconTex then bf._iconTex:SetTexture(_previewBuffIcons[i] or 135932) end
+                            if bf._iconTex then
+                                bf._iconTex:SetTexture(_previewBuffIcons[i] or 135932)
+                                -- SetTexture resets texcoord, so re-apply the crop each update.
+                                ns.SetAuraIconCrop(bf._iconTex, buffCrop, buffSize, buffH)
+                            end
                         else
                             if bf:IsShown() then bf:Hide() end
                         end
@@ -2692,7 +2698,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Add buff height to header when buffs are above or below the frame
                     if ba == "topleft" or ba == "topright" or ba == "bottomleft" or ba == "bottomright" or ba == "left" or ba == "right" then
-                        buffExtra = buffSize + buffGap + 2
+                        buffExtra = buffH + buffGap + 2
                     end
                 else
                     for _, bf in ipairs(buffIcons) do if bf:IsShown() then bf:Hide() end end
@@ -2722,6 +2728,10 @@ initFrame:SetScript("OnEvent", function(self)
                 if unitKey == "boss" then visibleDebuffCount = math.min(#debuffIcons, 3) end
                 if dAnc ~= "none" and visibleDebuffCount > 0 then
                     local debuffSize = effectiveDebuffSize
+                    -- Crop never applies in simple boss mode (runtime parity: it
+                    -- passes nil crop and frame-height-matches those icons).
+                    local debuffCrop = (not simpleOn) and (s.debuffCropIcons or false) or false
+                    local debuffH = ns.GetAuraCropHeight(debuffCrop, debuffSize)
                     local debuffGap = 1
                     local dOffX = s.debuffOffsetX or 0
                     -- Preview intentionally ignores the Y offset (real frames still honor it).
@@ -2738,8 +2748,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local anchorMap = {
                         topleft     = { pt = "TOPLEFT",     ox = dOffX,                         oy = debuffGap + dOffY },
                         topright    = { pt = "TOPRIGHT",    ox = dOffX,                         oy = debuffGap + dOffY },
-                        bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,                         oy = -(debuffSize + debuffGap) + dOffY },
-                        bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,                         oy = -(debuffSize + debuffGap) + dOffY },
+                        bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,                         oy = -(debuffH + debuffGap) + dOffY },
+                        bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,                         oy = -(debuffH + debuffGap) + dOffY },
                         left        = { pt = "LEFT",        ox = -(debuffGap) + dOffX,          oy = dOffY },
                         right       = { pt = "RIGHT",       ox = debuffGap + dOffX,             oy = dOffY },
                     }
@@ -2748,8 +2758,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local dx, dy = 0, 0
                     if gDir == "right" then dx = debuffSize + debuffGap
                     elseif gDir == "left" then dx = -(debuffSize + debuffGap)
-                    elseif gDir == "up" then dy = debuffSize + debuffGap
-                    elseif gDir == "down" then dy = -(debuffSize + debuffGap)
+                    elseif gDir == "up" then dy = debuffH + debuffGap
+                    elseif gDir == "down" then dy = -(debuffH + debuffGap)
                     else dx = debuffSize + debuffGap end
 
                     local justH = "BOTTOMLEFT"
@@ -2772,11 +2782,12 @@ initFrame:SetScript("OnEvent", function(self)
                     local simpleIconPt   = (simpleMode == "right") and "TOPLEFT"  or "TOPRIGHT"
                     local simpleParentPt = (simpleMode == "right") and "TOPRIGHT" or "TOPLEFT"
                     local simpleEdgeSign = (simpleMode == "right") and 1 or -1
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. (s.debuffOffsetX or 0)
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. (s.debuffOffsetX or 0)
                     for i, df in ipairs(debuffIcons) do
                         if i <= visibleDebuffCount then
                             if df._anchorKey ~= anchorKey then
-                                PP.Size(df, debuffSize, debuffSize)
+                                PP.Size(df, debuffSize, debuffH)
+                                if df._iconTex then ns.SetAuraIconCrop(df._iconTex, debuffCrop, debuffSize, debuffH) end
                                 df:ClearAllPoints()
                                 if i == 1 then
                                     if useSimpleBossAnchor then
@@ -2802,7 +2813,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Add debuff height to header when debuffs are above or below the frame
                     local debuffGap2 = 1
                     if dAnc == "topleft" or dAnc == "topright" or dAnc == "bottomleft" or dAnc == "bottomright" or dAnc == "left" or dAnc == "right" then
-                        debuffExtra = effectiveDebuffSize + debuffGap2 + 2
+                        debuffExtra = debuffH + debuffGap2 + 2
                     end
                 else
                     for _, df in ipairs(debuffIcons) do if df:IsShown() then df:Hide() end end
@@ -9254,14 +9265,21 @@ initFrame:SetScript("OnEvent", function(self)
             if pv._nameFS and pv._nameFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._nameFS, "nameText", true, textLevel) end
             if pv._hpFS and pv._hpFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._hpFS, "healthText", true, textLevel) end
             if pv._centerFS and pv._centerFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._centerFS, "centerText", true, textLevel) end
+            -- Create an overlay for EVERY buff/debuff frame, not just the ones
+            -- shown right now. Each overlay is a child of its icon frame with
+            -- SetAllPoints, so it hides/shows and re-anchors with the icon. The
+            -- old ":IsShown()" guard tied clickability to the icon's visibility
+            -- at header-build time -- enabling buffs or changing the debuff count
+            -- afterwards (header is cached, not rebuilt) left the newly shown
+            -- icons with no overlay, so they weren't clickable.
             if pv._buffIcons then
                 for i = 1, #pv._buffIcons do
-                    if pv._buffIcons[i] and pv._buffIcons[i]:IsShown() then CreateHitOverlay(pv._buffIcons[i], "buffIcon", false, baseLevel) end
+                    if pv._buffIcons[i] then CreateHitOverlay(pv._buffIcons[i], "buffIcon", false, baseLevel) end
                 end
             end
             if pv._debuffIcons then
                 for i = 1, #pv._debuffIcons do
-                    if pv._debuffIcons[i] and pv._debuffIcons[i]:IsShown() then CreateHitOverlay(pv._debuffIcons[i], "debuffIcon", false, baseLevel) end
+                    if pv._debuffIcons[i] then CreateHitOverlay(pv._debuffIcons[i], "debuffIcon", false, baseLevel) end
                 end
             end
             if pv._btbFrame then

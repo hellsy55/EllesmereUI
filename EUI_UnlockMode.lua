@@ -985,7 +985,8 @@ local function ValidateStoredLinks()
         for childKey, targetKey in pairs(wm) do
             if not elems[childKey] or not elems[targetKey] then
                 wm[childKey] = nil
-            elseif elems[childKey].noResize or elems[targetKey].noResize then
+            elseif (elems[childKey].noResize and not elems[childKey].allowMatchSource)
+                or elems[targetKey].noResize then
                 wm[childKey] = nil
             end
         end
@@ -996,7 +997,8 @@ local function ValidateStoredLinks()
         for childKey, targetKey in pairs(hm) do
             if not elems[childKey] or not elems[targetKey] then
                 hm[childKey] = nil
-            elseif elems[childKey].noResize or elems[targetKey].noResize then
+            elseif (elems[childKey].noResize and not elems[childKey].allowMatchSource)
+                or elems[targetKey].noResize then
                 hm[childKey] = nil
             end
         end
@@ -4394,84 +4396,54 @@ local function CreateMover(barKey)
     }
     local canGrow = _GROW_KEYS[barKey] or barKey:sub(1, 4) == "CDM_"
 
-    -- Layout: position action link buttons + dividers centered below name
+    -- Match-source capability: the width/height MATCH buttons may appear even when
+    -- drag/manual resize is disabled (noResize), if the element opts in via
+    -- allowMatchSource. (TBB tracking bars size via their own CDM sliders, so their
+    -- resize inputs stay off, but they may still size-MATCH to another element.)
+    local canMatchSource = canResize or (elem and elem.allowMatchSource) or false
+
+    -- Single source of truth for which action-row link buttons are active, in
+    -- left-to-right order. The layout, the hover show/hide, and the hover-box
+    -- width calc all read this so they never drift apart. `fb` = fallback width.
+    local function ActiveLinks()
+        local t = {}
+        if canMatchSource then
+            t[#t + 1] = { btn = wmBtn, fs = wmFS, fb = 50 }
+            t[#t + 1] = { btn = hmBtn, fs = hmFS, fb = 55 }
+        end
+        if canAnchorTo then
+            t[#t + 1] = { btn = atBtn, fs = atFS, fb = 45 }
+        end
+        if canGrow then
+            t[#t + 1] = { btn = gdBtn, fs = gdFS, fb = 30 }
+        end
+        return t
+    end
+
+    -- Layout: position action link buttons + dividers centered below name.
+    -- Unified dynamic layout: lay out exactly the buttons ActiveLinks() reports,
+    -- with one divider between each adjacent pair. This renders the existing
+    -- cases pixel-identically and naturally handles match-buttons-without-resize.
     local function LayoutActionRow()
         local gap = 8
-        local atW = canAnchorTo and (atFS:GetStringWidth() or 45) or 0
-        if not canResize then
-            if canGrow and canAnchorTo then
-                local gdW = gdFS:GetStringWidth() or 30
-                local totalW = atW + gap + 1 + gap + gdW
-                local startX = -totalW / 2
-                atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
-                atBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + atW / 2, -4)
-                div3:ClearAllPoints()
-                div3:SetPoint("TOP", nameFS, "BOTTOM", startX + atW + gap + 0.5, -6)
-                gdBtn:SetSize(gdW + 4, 14); gdBtn:ClearAllPoints()
-                gdBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + atW + gap + 1 + gap + gdW / 2, -4)
-            elseif canGrow then
-                local gdW = gdFS:GetStringWidth() or 30
-                gdBtn:SetSize(gdW + 4, 14); gdBtn:ClearAllPoints()
-                gdBtn:SetPoint("TOP", nameFS, "BOTTOM", 0, -4)
-            elseif canAnchorTo then
-                atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
-                atBtn:SetPoint("TOP", nameFS, "BOTTOM", 0, -4)
-            end
-            return
+        local items = ActiveLinks()
+        if #items == 0 then return end
+        local divs = { div1, div2, div3 }
+        local totalW = 0
+        for i, it in ipairs(items) do
+            it.w = it.fs:GetStringWidth() or it.fb
+            totalW = totalW + it.w
+            if i < #items then totalW = totalW + gap + 1 + gap end
         end
-        local wmW = wmFS:GetStringWidth() or 50
-        local hmW = hmFS:GetStringWidth() or 55
-        if canGrow then
-            local gdW = gdFS:GetStringWidth() or 30
-            -- Build items list dynamically based on what's available
-            local items = {}
-            items[#items + 1] = { btn = wmBtn, fs = wmFS, w = wmW }
-            items[#items + 1] = { btn = hmBtn, fs = hmFS, w = hmW }
-            if canAnchorTo then
-                items[#items + 1] = { btn = atBtn, fs = atFS, w = atW }
-            end
-            items[#items + 1] = { btn = gdBtn, fs = gdFS, w = gdW }
-            local divs = { div1, div2, div3 }
-            local totalW = 0
-            for i, it in ipairs(items) do
-                totalW = totalW + it.w
-                if i < #items then totalW = totalW + gap + 1 + gap end
-            end
-            local startX = -totalW / 2
-            local x = startX
-            for i, it in ipairs(items) do
-                it.btn:SetSize(it.w + 4, 14); it.btn:ClearAllPoints()
-                it.btn:SetPoint("TOP", nameFS, "BOTTOM", x + it.w / 2, -4)
-                x = x + it.w
-                if i < #items and divs[i] then
-                    divs[i]:ClearAllPoints()
-                    divs[i]:SetPoint("TOP", nameFS, "BOTTOM", x + gap + 0.5, -6)
-                    x = x + gap + 1 + gap
-                end
-            end
-        else
-            if canAnchorTo then
-                local totalW = wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW
-                local startX = -totalW / 2
-                wmBtn:SetSize(wmW + 4, 14); wmBtn:ClearAllPoints()
-                wmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW / 2, -4)
-                div1:ClearAllPoints()
-                div1:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 0.5, -6)
-                hmBtn:SetSize(hmW + 4, 14); hmBtn:ClearAllPoints()
-                hmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW / 2, -4)
-                div2:ClearAllPoints()
-                div2:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 0.5, -6)
-                atBtn:SetSize(atW + 4, 14); atBtn:ClearAllPoints()
-                atBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW / 2, -4)
-            else
-                local totalW = wmW + gap + 1 + gap + hmW
-                local startX = -totalW / 2
-                wmBtn:SetSize(wmW + 4, 14); wmBtn:ClearAllPoints()
-                wmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW / 2, -4)
-                div1:ClearAllPoints()
-                div1:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 0.5, -6)
-                hmBtn:SetSize(hmW + 4, 14); hmBtn:ClearAllPoints()
-                hmBtn:SetPoint("TOP", nameFS, "BOTTOM", startX + wmW + gap + 1 + gap + hmW / 2, -4)
+        local x = -totalW / 2
+        for i, it in ipairs(items) do
+            it.btn:SetSize(it.w + 4, 14); it.btn:ClearAllPoints()
+            it.btn:SetPoint("TOP", nameFS, "BOTTOM", x + it.w / 2, -4)
+            x = x + it.w
+            if i < #items and divs[i] then
+                divs[i]:ClearAllPoints()
+                divs[i]:SetPoint("TOP", nameFS, "BOTTOM", x + gap + 0.5, -6)
+                x = x + gap + 1 + gap
             end
         end
     end
@@ -4614,29 +4586,30 @@ local function CreateMover(barKey)
             nameFS:SetWidth(curTextW)
         end
 
-        -- Action links: show on hover
-        if canResize then
-            wmBtn:SetAlpha(s); hmBtn:SetAlpha(s)
-            div1:SetAlpha(s); div2:SetAlpha(s)
-            if s > 0.01 then
-                wmBtn:Show(); hmBtn:Show(); div1:Show(); div2:Show()
+        -- Action links: show on hover. Visibility is built from the same
+        -- ActiveLinks() list as the layout, so match buttons appear for
+        -- allowMatchSource elements and the dividers always match the buttons.
+        local links = ActiveLinks()
+        local activeBtn = {}
+        for _, it in ipairs(links) do activeBtn[it.btn] = true end
+        local function _linkVis(btn)
+            if activeBtn[btn] then
+                btn:SetAlpha(s)
+                if s > 0.01 then btn:Show() else btn:Hide() end
             else
-                wmBtn:Hide(); hmBtn:Hide(); div1:Hide(); div2:Hide()
+                btn:Hide()
             end
-        else
-            wmBtn:Hide(); hmBtn:Hide(); div1:Hide(); div2:Hide()
         end
-        if canAnchorTo then
-            atBtn:SetAlpha(s)
-            if s > 0.01 then atBtn:Show() else atBtn:Hide() end
-        else
-            atBtn:Hide()
-        end
-        if canGrow then
-            gdBtn:SetAlpha(s); div3:SetAlpha(s)
-            if s > 0.01 then gdBtn:Show(); div3:Show() else gdBtn:Hide(); div3:Hide() end
-        else
-            gdBtn:Hide(); div3:Hide()
+        _linkVis(wmBtn); _linkVis(hmBtn); _linkVis(atBtn); _linkVis(gdBtn)
+        local nDivs = #links > 0 and (#links - 1) or 0
+        local divsV = { div1, div2, div3 }
+        for i = 1, 3 do
+            if i <= nDivs then
+                divsV[i]:SetAlpha(s)
+                if s > 0.01 then divsV[i]:Show() else divsV[i]:Hide() end
+            else
+                divsV[i]:Hide()
+            end
         end
 
         -- Cog: same show/hide as links
@@ -4720,25 +4693,12 @@ local function CreateMover(barKey)
             local nameW = nameFS:GetStringWidth() or 0
             local nameH = nameFS:GetStringHeight() or 10
             local rowW = 0
-            if canResize then
-                local wmW = wmFS:GetStringWidth() or 50
-                local hmW = hmFS:GetStringWidth() or 55
-                local atW = atFS:GetStringWidth() or 45
-                local gdW = gdFS:GetStringWidth() or 30
+            do
+                local links = ActiveLinks()
                 local gap = 8
-                if canGrow then
-                    rowW = wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW + gap + 1 + gap + gdW
-                else
-                    rowW = wmW + gap + 1 + gap + hmW + gap + 1 + gap + atW
-                end
-            else
-                local atW = atFS:GetStringWidth() or 45
-                local gdW = gdFS:GetStringWidth() or 30
-                local gap = 8
-                if canGrow then
-                    rowW = atW + gap + 1 + gap + gdW
-                else
-                    rowW = atW
+                for i, it in ipairs(links) do
+                    rowW = rowW + (it.fs:GetStringWidth() or it.fb)
+                    if i < #links then rowW = rowW + gap + 1 + gap end
                 end
             end
             local contentW = math.max(nameW, rowW)
@@ -5308,6 +5268,19 @@ local function CreateMover(barKey)
         local bk = self._barKey
         local b = GetBarFrame(bk)
         local elem = registeredElements[bk]
+
+        -- Stale / intentionally-hidden registrations (e.g. a deleted CDM tracking
+        -- bar whose TBB_<idx> element is never unregistered, or a grouped non-anchor
+        -- bar) must NOT be shown. Mirror the CreateMover guard so the blanket
+        -- `for _, m in pairs(movers) do m:Sync() end` loops (open fade-in, combat
+        -- resume) can't re-show a mover that CreateMover intentionally hid. Action
+        -- bars resolve elem == nil (they live in BAR_LOOKUP), so this is a no-op
+        -- for them; isHidden is read live, so an un-hidden element still syncs.
+        if elem and ((elem.isHidden and elem.isHidden())
+                  or (elem.isAnchored and elem.isAnchored())) then
+            self:Hide()
+            return
+        end
 
         -- For registered elements without a live frame, use getSize + loadPosition
         if not b and elem then
@@ -5938,6 +5911,14 @@ local function CreateMover(barKey)
                 local targetKey = self._barKey
 
                 if pickMode == "widthMatch" then
+                    local tEl = registeredElements[targetKey]
+                    if tEl and tEl.noSizeMatchTarget then
+                        CancelPickMode()
+                        FlashRedBorder(self)
+                        local tLabel = GetBarLabel(targetKey) or targetKey
+                        RejectH.ShowTooltip("Elements cannot size match to\n" .. tLabel)
+                        return
+                    end
                     if RejectH.IsActionBar(sourceKey) and not RejectH.IsActionBar(targetKey) then
                         CancelPickMode()
                         FlashRedBorder(self)
@@ -5967,6 +5948,14 @@ local function CreateMover(barKey)
                     return
 
                 elseif pickMode == "heightMatch" then
+                    local tEl = registeredElements[targetKey]
+                    if tEl and tEl.noSizeMatchTarget then
+                        CancelPickMode()
+                        FlashRedBorder(self)
+                        local tLabel = GetBarLabel(targetKey) or targetKey
+                        RejectH.ShowTooltip("Elements cannot size match to\n" .. tLabel)
+                        return
+                    end
                     local hdb = MatchH.GetHeightMatchDB()
                     if hdb and MatchH.WouldCreateCycle(hdb, sourceKey, targetKey) then
                         CancelPickMode()
@@ -9649,11 +9638,12 @@ local function ResumeAfterCombat()
         EllesmereUI._reapplyForceEdgePreserve = false
     end
 
-    -- Re-sync and show all movers
+    -- Re-sync all movers (Sync shows live ones and hides stale/hidden ones).
     for _, m in pairs(movers) do
         m:Sync()
-        m:SetAlpha(darkOverlaysEnabled and 1 or MOVER_ALPHA)
-        m:Show()
+        if m:IsShown() then
+            m:SetAlpha(darkOverlaysEnabled and 1 or MOVER_ALPHA)
+        end
     end
     SortMoverFrameLevels()
     if unlockFrame and unlockFrame._anchorLineDriver then

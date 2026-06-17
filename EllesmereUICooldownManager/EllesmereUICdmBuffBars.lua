@@ -182,6 +182,7 @@ local TBB_DEFAULT_BAR = {
     spellID   = 0,
     name      = "New Bar",
     enabled   = true,
+    grouped   = true,   -- per-bar "Group Tracking Bars" checkbox; checked bars chain + share width/height
     height    = 24,
     width     = 270,
     verticalOrientation = false,
@@ -239,7 +240,20 @@ function ns.GetTrackedBuffBars()
     if not prof.trackedBuffBars then
         prof.trackedBuffBars = { selectedBar = 1, bars = {} }
     end
-    return prof.trackedBuffBars
+    local tbb = prof.trackedBuffBars
+    -- Live migration: the old single "Group Tracking Bars" toggle (tbb.groupEnabled)
+    -- becomes a per-bar `grouped` checkbox. Convert once per spec table: toggle
+    -- ENABLED -> every bar checked; toggle DISABLED or never-set -> every bar
+    -- unchecked. TBB config is per-spec/per-profile so there is no SavedVariables
+    -- migration pass; this read-time convert is idempotent (guarded by the flag,
+    -- then the legacy boolean is cleared so later per-bar edits are never stomped).
+    if not tbb._groupMigrated then
+        local checked = (tbb.groupEnabled == true)
+        for _, b in ipairs(tbb.bars or {}) do b.grouped = checked end
+        tbb.groupEnabled = nil
+        tbb._groupMigrated = true
+    end
+    return tbb
 end
 
 function ns.GetTBBPositions()
@@ -272,6 +286,13 @@ function ns.AddTrackedBuffBar()
     newBar.name = "Bar " .. (#tbb.bars + 1)
     newBar.popularKey = nil
     newBar.spellIDs = nil
+    -- A new bar joins the group only if EVERY existing bar is already checked,
+    -- otherwise it starts unchecked (independent). Vacuously true for the 1st bar.
+    local allGrouped = true
+    for _, b in ipairs(tbb.bars) do
+        if not ns.TBBBarGrouped(b) then allGrouped = false; break end
+    end
+    newBar.grouped = allGrouped
     tbb.bars[#tbb.bars + 1] = newBar
     tbb.selectedBar = #tbb.bars
 
@@ -322,6 +343,68 @@ local tbbTickFrame
 local _tbbRebuildPending = false
 
 function ns.GetTBBFrame(idx) return tbbFrames[idx] end
+
+-------------------------------------------------------------------------------
+--  Per-bar grouping helpers
+--  A bar is "grouped" (checked) when cfg.grouped ~= false (default checked).
+--  All checked bars form ONE group in index order: the first ENABLED checked
+--  bar is the group anchor (owns the position/mover), later checked bars chain
+--  to it and share its width/height. Unchecked bars are fully independent.
+-------------------------------------------------------------------------------
+function ns.TBBBarGrouped(cfg)
+    return cfg ~= nil and cfg.grouped ~= false
+end
+
+-- Index of the group anchor = first enabled, checked bar (or nil if none).
+function ns.TBBGroupAnchorIndex()
+    local t = ns.GetTrackedBuffBars()
+    for i, c in ipairs(t.bars or {}) do
+        if c.enabled ~= false and ns.TBBBarGrouped(c) then return i end
+    end
+    return nil
+end
+
+-- Count of checked bars (regardless of enabled) -- drives the grow/spacing gate.
+function ns.TBBGroupedCount()
+    local t = ns.GetTrackedBuffBars()
+    local n = 0
+    for _, c in ipairs(t.bars or {}) do
+        if ns.TBBBarGrouped(c) then n = n + 1 end
+    end
+    return n
+end
+
+-- Fan a width/height change from a grouped bar out to every other grouped bar:
+-- write each sibling's LOGICAL cfg.width/cfg.height (NOT the icon-inclusive total)
+-- and resize its frame using that sibling's OWN icon math. Used by the options
+-- sliders, unlock drag-resize, and size-MATCH (so width-matching the group anchor
+-- matches the whole group). Re-entrancy guarded so a sibling write can't recurse.
+local _tbbGroupSizing = false
+function ns.PropagateTBBGroupSize(srcIdx, dim, value)
+    if _tbbGroupSizing then return end
+    local t = ns.GetTrackedBuffBars()
+    local bars = t.bars
+    if not bars then return end
+    local src = bars[srcIdx]
+    if not (src and ns.TBBBarGrouped(src)) then return end
+    _tbbGroupSizing = true
+    for i, c in ipairs(bars) do
+        if i ~= srcIdx and ns.TBBBarGrouped(c) then
+            c[dim] = value
+            local f = tbbFrames[i]
+            if f then
+                local hasIcon = (c.iconDisplay or "none") ~= "none"
+                local isVert = c.verticalOrientation
+                if dim == "width" then
+                    f:SetWidth(hasIcon and not isVert and (value + (c.height or 24)) or value)
+                else
+                    f:SetHeight(hasIcon and isVert and (value + (c.width or 270)) or value)
+                end
+            end
+        end
+    end
+    _tbbGroupSizing = false
+end
 
 function ns.HasBuffBars()
     if not ECME or not ECME.db then return false end
@@ -1151,6 +1234,8 @@ end
 local SATED_DEBUFFS = { 57723, 57724, 80354, 95809, 160455, 264689, 390435, 428628 }
 local _lustExpiry   = 0
 local _satedPresent = false
+local _lustZoneGuard = 0          -- suppress rising edges until this time (set on zone-in)
+local _lustListenerActive = false -- baseline _satedPresent only on (re)enable, not every rebuild
 local _lustListener
 
 local function _playerHasSated()
@@ -1170,19 +1255,59 @@ local function _ensureLustListener(enable)
     if enable then
         if not _lustListener then
             _lustListener = CreateFrame("Frame")
-            _lustListener:SetScript("OnEvent", function()
+            _lustListener:SetScript("OnEvent", function(_, event, _, updateInfo)
+                if event == "PLAYER_ENTERING_WORLD" then
+                    -- Zone/login aura refresh: re-baseline WITHOUT arming and
+                    -- suppress edges briefly. A Sated debuff we already carry
+                    -- (e.g. zoning out of a dungeon) must never read as a fresh
+                    -- cast and pop a phantom 40s bar in the open world.
+                    _satedPresent = _playerHasSated()
+                    _lustZoneGuard = GetTime() + 1.5
+                    return
+                end
                 local present = _playerHasSated()
-                if present and not _satedPresent then
+                -- Arm ONLY on a genuine incremental application: not a full aura
+                -- refresh (zone/login resends every aura), and not inside the
+                -- post-zone grace window.
+                local isFull = updateInfo and updateInfo.isFullUpdate
+                if present and not _satedPresent and not isFull
+                    and GetTime() >= _lustZoneGuard then
                     _lustExpiry = GetTime() + 40  -- rising edge: lust just went out
+                    -- Drive any Custom Auras (icon) lust display sharing this edge.
+                    if ns.SignalLustCast then ns.SignalLustCast() end
                 end
                 _satedPresent = present
             end)
         end
-        _satedPresent = _playerHasSated()
-        _lustListener:RegisterUnitEvent("UNIT_AURA", "player")
-    elseif _lustListener then
+        -- Baseline only on the OFF->ON transition. Re-baselining on every
+        -- BuildTrackedBuffBars (which fires during zone changes, sometimes while
+        -- the aura table is momentarily empty) could set _satedPresent=false and
+        -- let the debuff's reappearance look like a fresh cast.
+        if not _lustListenerActive then
+            _satedPresent = _playerHasSated()
+            _lustListener:RegisterUnitEvent("UNIT_AURA", "player")
+            _lustListener:RegisterEvent("PLAYER_ENTERING_WORLD")
+            _lustListenerActive = true
+        end
+    elseif _lustListener and _lustListenerActive then
         _lustListener:UnregisterAllEvents()
+        _lustListenerActive = false
     end
+end
+
+-- Arm the shared Sated listener if EITHER a Tracking Bar lust bar OR a Custom
+-- Auras (icon) lust display is enabled. Authoritative (scans the DB), so it is
+-- safe to call from any rebuild/toggle path.
+function ns.UpdateLustListener()
+    local any = false
+    local tbb = ns.GetTrackedBuffBars and ns.GetTrackedBuffBars()
+    if tbb and tbb.bars then
+        for _, cfg in ipairs(tbb.bars) do
+            if cfg.enabled ~= false and cfg.popularKey == "bloodlust" then any = true; break end
+        end
+    end
+    if not any and ns.AnyCustomAuraLust then any = ns.AnyCustomAuraLust() end
+    _ensureLustListener(any)
 end
 
 -- Self-driven display for the lust bar: fill + timer come from our own 40s
@@ -1561,10 +1686,13 @@ function ns.BuildTrackedBuffBars()
                 bar._nameSet = displayName and displayName ~= "" or false
             end
 
-            -- Saved position / grouping
-            local groupEnabled = tbb.groupEnabled
-            if groupEnabled and lastGroupedBar then
-                -- Grouped: position relative to previous enabled bar
+            -- Saved position / grouping. Only CHECKED (cfg.grouped) bars chain;
+            -- the first checked bar takes the independent branch (its own saved
+            -- pos) and becomes the anchor, later checked bars chain to it.
+            -- Unchecked bars always fall to the independent branch.
+            local barGrouped = ns.TBBBarGrouped(cfg)
+            if barGrouped and lastGroupedBar then
+                -- Grouped: position relative to previous grouped bar
                 local growDir = (tbb.groupGrowDirection or "DOWN"):upper()
                 local spacing = tbb.groupSpacing or 2
                 bar:ClearAllPoints()
@@ -1595,7 +1723,7 @@ function ns.BuildTrackedBuffBars()
                 end
             end
 
-            if tbb.groupEnabled then lastGroupedBar = bar end
+            if barGrouped then lastGroupedBar = bar end
             bar._tbbReady    = true
             bar._isPassive   = nil
             bar._stackCount  = 0
@@ -1621,8 +1749,10 @@ function ns.BuildTrackedBuffBars()
         tbbTickFrame:Hide()
     end
 
-    -- Start/stop the player-only Sated-debuff listener that drives the lust bar.
-    _ensureLustListener(anyLust)
+    -- Start/stop the player-only Sated-debuff listener that drives the lust
+    -- displays. Goes through the arbiter so a Custom Auras (icon) lust display
+    -- keeps the listener armed even when no Tracking Bar lust bar exists.
+    ns.UpdateLustListener()
 
     -- Unlock mode
     if ns.RegisterTBBUnlockElements then ns.RegisterTBBUnlockElements() end
@@ -1643,7 +1773,10 @@ function ns.RegisterTBBUnlockElements()
     local bars = tbb and tbb.bars
     if not bars or #bars == 0 then return end
 
-    local groupEnabled = tbb.groupEnabled
+    -- Group anchor (first enabled checked bar) owns the group mover; the other
+    -- checked members hide theirs. Computed per build so it tracks checkbox edits.
+    local anchorIdx = ns.TBBGroupAnchorIndex()
+    local groupedCount = ns.TBBGroupedCount()
     local elements = {}
     for i, cfg in ipairs(bars) do
         local idx = i
@@ -1652,20 +1785,32 @@ function ns.RegisterTBBUnlockElements()
         if bar then
             elements[#elements + 1] = MK({
                 key   = "TBB_" .. posKey,
-                label = groupEnabled and idx == 1
+                label = (idx == anchorIdx and groupedCount >= 2)
                     and "Tracking Bar Group"
                     or ("Tracking Bar: " .. (cfg.name or ("Bar " .. idx))),
                 group = "Cooldown Manager",
                 order = 650,
                 noAnchorTarget = true,
                 noResize = true,
+                -- Tracking bars may size-MATCH to other elements (allowMatchSource),
+                -- but other elements may NOT match to them (noSizeMatchTarget): a
+                -- tracking bar's size is driven by its own CDM sliders / dynamic
+                -- content, so it should never be used as a sizing reference.
+                allowMatchSource  = true,
+                noSizeMatchTarget = true,
                 isHidden = function()
                     local t = ns.GetTrackedBuffBars()
                     local b = t and t.bars
                     if not b or idx > #b then return true end
-                    -- When grouping, only bar 1 shows a mover
-                    if t.groupEnabled and idx > 1 then return true end
-                    return false
+                    local c = b[idx]
+                    -- Unchecked bars always show their own mover.
+                    if not ns.TBBBarGrouped(c) then return false end
+                    -- Checked bars: only the group anchor shows a mover (it moves
+                    -- the whole group). Hide every other checked member -- enabled
+                    -- OR disabled (a disabled member re-enables straight into the
+                    -- chain, so its own mover would be a phantom). When no checked
+                    -- bar is enabled the anchor is nil and all are hidden.
+                    return idx ~= ns.TBBGroupAnchorIndex()
                 end,
                 getFrame = function() return tbbFrames[idx] end,
                 getSize  = function()
@@ -1700,8 +1845,15 @@ function ns.RegisterTBBUnlockElements()
                     local f = tbbFrames[idx]
                     local PPt = EllesmereUI and EllesmereUI.PP
                     w = PPt and PPt.Snap(w) or math.floor(w + 0.5)
-                    if EllesmereUI._unlockActive then
+                    -- Persist during unlock (manual) AND during match propagation,
+                    -- so a width match TO another element survives the next
+                    -- BuildTrackedBuffBars instead of reverting to the slider value.
+                    if EllesmereUI._unlockActive or EllesmereUI._propagatingMatch then
                         c.width = w
+                        -- Grouped bars share width: fan this out to the rest of the
+                        -- group (covers unlock drag-resize AND a width-MATCH on the
+                        -- group anchor, both of which route through here).
+                        ns.PropagateTBBGroupSize(idx, "width", w)
                     end
                     if f then
                         local totalW = hasIcon and not isVert and (w + (c.height or 24)) or w
@@ -1721,8 +1873,10 @@ function ns.RegisterTBBUnlockElements()
                     local PPt = EllesmereUI and EllesmereUI.PP
                     h = PPt and PPt.Snap(h) or math.floor(h + 0.5)
                     local f = tbbFrames[idx]
-                    if EllesmereUI._unlockActive then
+                    -- Persist during unlock AND match propagation (see setWidth).
+                    if EllesmereUI._unlockActive or EllesmereUI._propagatingMatch then
                         c.height = h
+                        ns.PropagateTBBGroupSize(idx, "height", h)
                     end
                     if f then
                         local totalH = hasIcon and isVert and (h + (c.width or 200)) or h
@@ -1732,6 +1886,21 @@ function ns.RegisterTBBUnlockElements()
                 savePos = function(_, point, relPoint, x, y)
                     local pos = ns.GetTBBPositions()
                     pos[posKey] = { point = point, relPoint = relPoint, x = x, y = y }
+                    -- The group is dragged via the anchor's mover, but its saved
+                    -- position is keyed by the anchor's INDEX. If the anchor later
+                    -- changes (the first checked bar is unchecked or disabled) the
+                    -- new anchor would read a stale per-index coordinate and the
+                    -- group would teleport. Mirror the group origin into every
+                    -- checked member's key so whichever bar becomes the anchor
+                    -- reads the current position.
+                    if idx == ns.TBBGroupAnchorIndex() and ns.TBBGroupedCount() >= 2 then
+                        local t = ns.GetTrackedBuffBars()
+                        for j, c in ipairs(t.bars or {}) do
+                            if j ~= idx and ns.TBBBarGrouped(c) then
+                                pos[tostring(j)] = { point = point, relPoint = relPoint, x = x, y = y }
+                            end
+                        end
+                    end
                     if not EllesmereUI._unlockActive then
                         local f = tbbFrames[idx]
                         if f then
