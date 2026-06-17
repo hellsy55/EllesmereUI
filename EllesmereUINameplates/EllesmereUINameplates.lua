@@ -176,6 +176,7 @@ local defaults = {
     showFriendlyNPCs = false,
     showNPCTitles = true,
     showFriendlyPlayers = true,
+    friendlyClickThrough = false,
     friendlyShowDefaultNames = false,
     classColorFriendly = true,
     friendlyBarColor = { r = 0.314, g = 0.800, b = 0.408 },
@@ -692,10 +693,19 @@ function ns.LayoutCastIcon(plate, castH)
     if ns.GetCastIconFullSize() then
         local side = GetHealthBarHeight() + castH
         icon:SetScale(1)
-        icon:SetSize(side, side)
+        -- Link the icon's three shared edges DIRECTLY to the bar edges instead of
+        -- deriving them from its own size: top = health top, bottom = cast bottom,
+        -- inner side = the bars' outer edge. Anchored to the exact same points the
+        -- health/cast borders use, those edges resolve to identical positions and
+        -- pixel-snap together, so they stay flush and shift as ONE unit under
+        -- nameplate motion instead of each rounding independently. SetWidth keeps
+        -- the icon square (its height is fixed by the top/bottom anchors = side).
+        icon:SetWidth(side)
         if onRight then
+            icon:SetPoint("TOPLEFT", plate.health, "TOPRIGHT", 0, 0)
             icon:SetPoint("BOTTOMLEFT", plate.cast, "BOTTOMRIGHT", 0, 0)
         else
+            icon:SetPoint("TOPRIGHT", plate.health, "TOPLEFT", 0, 0)
             icon:SetPoint("BOTTOMRIGHT", plate.cast, "BOTTOMLEFT", 0, 0)
         end
     else
@@ -2425,6 +2435,12 @@ local function SetupAuraCVars()
         SetCVar("nameplateMinAlphaDistance", -100000)
         SetCVar("nameplateMaxDistance", 60)
         SetCVar("nameplateMaxScale", 1)
+        -- Neutralize Blizzard's selected-target scaling. The EUI plate is a child
+        -- of the base nameplate, so Blizzard scaling the selected plate shows
+        -- through our own SetScale (same reason min/max are pinned to 1). Pinning
+        -- this to 1 makes the "Scale Target Nameplate" slider the sole authority,
+        -- so at 100% the target plate does not change size at all.
+        SetCVar("nameplateSelectedScale", 1)
         SetCVar("nameplateTargetBehindMaxDistance", 30)
         SetCVar("clampTargetNameplateToScreen", 1)
         if showPlayers then

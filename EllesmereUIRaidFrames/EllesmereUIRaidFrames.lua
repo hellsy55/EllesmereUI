@@ -4044,8 +4044,23 @@ local function RegisterPrivateAuraSlots(button, unit)
     local parentStrata = button:GetFrameStrata()
     local fixedStrata = PA_STRATA_FIX[parentStrata] or "DIALOG"
 
+    -- Countdown text scale-trick: Blizzard draws the timer/stack text as a child
+    -- of the slot frame, so its on-screen size follows the frame's SCALE, not the
+    -- iconInfo pixel size. With the frame left at scale 1 and only iconInfo driving
+    -- the icon size, the text rendered at a fixed size regardless of icon size --
+    -- huge on small icons, tiny on big ones (the "all over the place" sizing).
+    -- Scaling the frame by (size / 32) makes the text track the icon size; the icon
+    -- dimension is compensated back to a constant 32 local units so the rendered
+    -- icon stays exactly paSize pixels. SetPoint offsets and spacing live in the
+    -- frame's local (pre-scale) space, so they are divided by the same factor.
+    local ts = sz / 32
+    if ts <= 0 then ts = 1 end
+    local comp = 32               -- icon size in local units; renders at comp*ts = paSize px
+    local oxL, oyL, spcL = ox / ts, oy / ts, spc / ts
+
     for i, paFrame in ipairs(d.privateAuraFrames) do
-        paFrame:SetSize(slotSz, slotSz)
+        paFrame:SetScale(ts)
+        paFrame:SetSize(slotSz / ts, slotSz / ts)
         paFrame:SetFrameStrata(fixedStrata)
         paFrame:SetFrameLevel(button:GetFrameLevel() + ns.LVL_AURA)
         paFrame:ClearAllPoints()
@@ -4054,34 +4069,34 @@ local function RegisterPrivateAuraSlots(button, unit)
             -- Private auras anchor flush to the health bar edge (no 1px inset),
             -- matching the debuff/role icon displays.
             if pos == "topleft" then
-                paFrame:SetPoint("TOPLEFT", health, "TOPLEFT", ox, oy)
+                paFrame:SetPoint("TOPLEFT", health, "TOPLEFT", oxL, oyL)
             elseif pos == "top" then
-                paFrame:SetPoint("TOP", health, "TOP", ox, oy)
+                paFrame:SetPoint("TOP", health, "TOP", oxL, oyL)
             elseif pos == "topright" then
-                paFrame:SetPoint("TOPRIGHT", health, "TOPRIGHT", ox, oy)
+                paFrame:SetPoint("TOPRIGHT", health, "TOPRIGHT", oxL, oyL)
             elseif pos == "left" then
-                paFrame:SetPoint("LEFT", health, "LEFT", ox, oy)
+                paFrame:SetPoint("LEFT", health, "LEFT", oxL, oyL)
             elseif pos == "center" then
-                paFrame:SetPoint("CENTER", health, "CENTER", ox, oy)
+                paFrame:SetPoint("CENTER", health, "CENTER", oxL, oyL)
             elseif pos == "right" then
-                paFrame:SetPoint("RIGHT", health, "RIGHT", ox, oy)
+                paFrame:SetPoint("RIGHT", health, "RIGHT", oxL, oyL)
             elseif pos == "bottomright" then
-                paFrame:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", ox, oy)
+                paFrame:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", oxL, oyL)
             elseif pos == "bottom" then
-                paFrame:SetPoint("BOTTOM", health, "BOTTOM", ox, oy)
+                paFrame:SetPoint("BOTTOM", health, "BOTTOM", oxL, oyL)
             else
-                paFrame:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", ox, oy)
+                paFrame:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", oxL, oyL)
             end
         else
             local prev = d.privateAuraFrames[i - 1]
             if grow == "RIGHT" then
-                paFrame:SetPoint("LEFT", prev, "RIGHT", spc, 0)
+                paFrame:SetPoint("LEFT", prev, "RIGHT", spcL, 0)
             elseif grow == "LEFT" then
-                paFrame:SetPoint("RIGHT", prev, "LEFT", -spc, 0)
+                paFrame:SetPoint("RIGHT", prev, "LEFT", -spcL, 0)
             elseif grow == "UP" then
-                paFrame:SetPoint("BOTTOM", prev, "TOP", 0, spc)
+                paFrame:SetPoint("BOTTOM", prev, "TOP", 0, spcL)
             elseif grow == "DOWN" then
-                paFrame:SetPoint("TOP", prev, "BOTTOM", 0, -spc)
+                paFrame:SetPoint("TOP", prev, "BOTTOM", 0, -spcL)
             end
         end
 
@@ -4089,8 +4104,8 @@ local function RegisterPrivateAuraSlots(button, unit)
 
         -- Register per-slot anchor
         local iconInfoTbl = {
-            iconWidth  = sz,
-            iconHeight = sz,
+            iconWidth  = comp,
+            iconHeight = comp,
             iconAnchor = {
                 point         = "CENTER",
                 relativeTo    = paFrame,
@@ -4100,10 +4115,12 @@ local function RegisterPrivateAuraSlots(button, unit)
             },
         }
         -- Scale Blizzard's native border 1:1 to OUR icon size. The border art is
-        -- authored for a 32px icon, so iconSize/32*2 makes it fit any size. Letting 
+        -- authored for a 32px icon, so iconSize/32*2 makes it fit any size. Letting
         -- Blizzard draw the border also means empty slots show nothing. the border
-        -- only appears when Blizzard actually renders an icon there.
-        iconInfoTbl.borderScale = sz / 32 * 2
+        -- only appears when Blizzard actually renders an icon there. Divide by the
+        -- frame scale (ts) so the visible border stays identical to the pre-scale-
+        -- trick size -- otherwise the frame scaling would enlarge it on top.
+        iconInfoTbl.borderScale = (sz / 32 * 2) / ts
         local ok, anchorID = pcall(function()
             return C_UnitAuras_AddPrivateAuraAnchor({
                 unitToken     = unit,
@@ -8882,11 +8899,18 @@ local function PvAuraApply(frameIndex, auraType, slotIndex)
     if icon._cooldown then
         local showSwipe, showDurText, dtColor, dtSize, dtOX, dtOY
         if auraType == "pa" then
-            -- Private auras: swipe always on, text controlled by paShowCountdown
+            -- Private auras: swipe always on, text controlled by paShowCountdown.
+            -- Real frames now scale the slot frame by (paSize / 32) so Blizzard's
+            -- countdown text tracks the icon size. The preview can't use Blizzard
+            -- rendering, so mirror that proportionality: size the fake timer font
+            -- to the same fraction of the icon (~0.44, calibrated so the default
+            -- icon size keeps the prior ~8px look). Keeps preview and live frames
+            -- visually matched as paSize changes. Centered, like Blizzard's text.
             showSwipe = true
             showDurText = s2.paShowCountdown ~= false
             dtColor = { r = 1, g = 1, b = 1 }
-            dtSize = 8
+            local paSz = s2.paSize or 18
+            dtSize = math.max(1, math.floor(paSz * 8 / 18 + 0.5))
             dtOX = 0
             dtOY = 0
         elseif auraType == "db" then

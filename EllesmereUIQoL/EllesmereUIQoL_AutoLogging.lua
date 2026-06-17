@@ -20,14 +20,24 @@ local LEGACY_DUNGEON_IDS = {
     [658]  = true,  -- Pit of Saron
 }
 
+-- Current-tier raids whose instance ID falls BELOW the retail threshold.
+-- Instance map IDs are NOT chronological: some current raids reuse a low ID
+-- (e.g. Sporefall is 1592, lower than legacy raids), so the threshold alone
+-- would wrongly exclude them. Whitelist those explicitly.
+local CURRENT_RAID_IDS = {
+    [1592] = true,  -- Sporefall
+}
+
 -- LFR difficulty IDs (regular + timewalking).
 local LFR_DIFFICULTIES = { [7] = true, [17] = true }
 
--- Raid difficulty -> trigger key.
+-- Raid difficulty -> trigger key. 233 = Mythic (Flexible Raiding), the newer
+-- flexible Mythic difficulty used by current raids alongside the fixed-20 id 16.
 local RAID_DIFF_KEYS = {
-    [16] = "logMythic",
-    [15] = "logHeroic",
-    [14] = "logNormal",
+    [16]  = "logMythic",
+    [233] = "logMythic",
+    [15]  = "logHeroic",
+    [14]  = "logNormal",
 }
 
 -- Defaults: everything on except Scenarios.
@@ -74,7 +84,7 @@ local function ZoneShouldBeLogged()
         return GetTrigger(c, "logLFR")
     end
 
-    if zoneType == "raid" and mapID >= RETAIL_RAID_THRESHOLD then
+    if zoneType == "raid" and (mapID >= RETAIL_RAID_THRESHOLD or CURRENT_RAID_IDS[mapID]) then
         local key = RAID_DIFF_KEYS[diff]
         if key then return GetTrigger(c, key) end
         return true  -- timewalking and other unrecognised raid difficulties

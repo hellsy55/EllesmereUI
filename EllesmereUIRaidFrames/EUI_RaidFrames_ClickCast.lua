@@ -773,6 +773,16 @@ local function SetClickAttr(frame, parsed, actionType, spellOrMacro, macrotext)
         frame:SetAttribute(prefix .. "clickbutton" .. suffix, EllesmereUI.GetSecureMenuProxy(frame))
         return
     end
+    -- 12.0.7 also gates a raw "target" on unit buttons. Plain unmodified
+    -- left-click (button 1) still targets natively via Blizzard's default
+    -- Interaction click-binding, so leave that one direct; route every OTHER
+    -- target binding (other buttons / modifiers) through the ungated "click"
+    -- proxy. Keeps the change scoped to users who rebound target off left-click.
+    if actionType == "target" and (suffix ~= "1" or prefix ~= "") and EllesmereUI.GetSecureTargetProxy then
+        frame:SetAttribute(prefix .. "type" .. suffix, "click")
+        frame:SetAttribute(prefix .. "clickbutton" .. suffix, EllesmereUI.GetSecureTargetProxy(frame))
+        return
+    end
     frame:SetAttribute(prefix .. "type" .. suffix, actionType)
     if actionType == "spell" then
         frame:SetAttribute(prefix .. "spell" .. suffix, spellOrMacro or "")
@@ -797,6 +807,13 @@ local function SetKeyAttr(frame, idx, actionType, spellOrMacro, macrotext)
     if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
         frame:SetAttribute("type-" .. suffix, "click")
         frame:SetAttribute("clickbutton-" .. suffix, EllesmereUI.GetSecureMenuProxy(frame))
+        return
+    end
+    -- A "target" keybind is never plain left-click, so it always hits the 12.0.7
+    -- gate -- route it through the ungated "click" proxy (see SetClickAttr).
+    if actionType == "target" and EllesmereUI.GetSecureTargetProxy then
+        frame:SetAttribute("type-" .. suffix, "click")
+        frame:SetAttribute("clickbutton-" .. suffix, EllesmereUI.GetSecureTargetProxy(frame))
         return
     end
     frame:SetAttribute("type-" .. suffix, actionType)

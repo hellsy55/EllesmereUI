@@ -2669,6 +2669,16 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Friendly Names Not Clickable",
+              tooltip="Make friendly player and NPC nameplates click-through so their names never block your mouse or cause accidental friendly targeting.\n\nUse this when friendly names get in the way of clicking the world or the enemy nameplates behind them.",
+              getValue=function() return DBVal("friendlyClickThrough") == true end,
+              setValue=function(v)
+                DB().friendlyClickThrough = v
+                if ns.UpdateFriendlyClickThrough then ns.UpdateFriendlyClickThrough() end
+              end },
+            { type="label", text="" });  y = y - h
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------

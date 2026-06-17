@@ -113,6 +113,34 @@ function EllesmereUI.GetSecureMenuProxy(frame)
     return proxy
 end
 
+-- Same idea as GetSecureMenuProxy but for the "target" action. 12.0.7 gates a
+-- raw "target" on unit buttons unless the button has a default ClickBindings
+-- Interaction binding -- only plain unmodified left-click has one, so every other
+-- target binding (other buttons, modifiers, keybinds) resolves to None and is
+-- dropped. Routing those through this ungated SecureActionButton proxy restores
+-- them. Used only for non-left-click target bindings (see ClickCast).
+local targetProxies = setmetatable({}, { __mode = "k" })
+function EllesmereUI.GetSecureTargetProxy(frame)
+    if not frame then return end
+    local proxy = targetProxies[frame]
+    if not proxy then
+        proxy = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+        proxy:SetSize(1, 1)
+        proxy:SetAlpha(0)
+        proxy:EnableMouse(false)          -- never catches real mouse; only the secure click delegate reaches it
+        proxy:RegisterForClicks("AnyUp")
+        proxy:SetAttribute("type", "target")
+        -- type looked up by button SUFFIX (RightButton -> type2); set every button.
+        for i = 1, 5 do proxy:SetAttribute("type" .. i, "target") end
+        proxy:SetAttribute("useparent-unit", true)
+        -- Act on the up-click regardless of the "cast on key down" CVar (same
+        -- clickAction gate that bit the menu proxy).
+        proxy:SetAttribute("useOnKeyDown", false)
+        targetProxies[frame] = proxy
+    end
+    return proxy
+end
+
 -- Route a unit button's default RIGHT-CLICK to the secure menu proxy via the
 -- ungated "click" action. Clears any specific type2 so the wildcard governs.
 function EllesmereUI.AttachSecureUnitMenu(frame)

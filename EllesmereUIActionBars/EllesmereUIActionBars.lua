@@ -2333,6 +2333,24 @@ do
         if _dispatcherSetup then return end
         _dispatcherSetup = true
         local dispatcher = CreateFrame("Frame")
+        -- Desaturation curves: secret-safe duration -> 0/1 via EvaluateRemainingDuration,
+        -- so we never compare secret cooldown/charge numbers ourselves.
+        --   desatCurveAny  : 1 for any active cooldown (normal spells; GCD filtered via isOnGCD)
+        --   desatCurveReal : 1 only when the cooldown is longer than the GCD. Used for charge
+        --                    spells -- a banked charge shows only a GCD-length cooldown on the
+        --                    main cooldown so it stays colored; at 0 charges the longer recharge
+        --                    drives the main cooldown and it desaturates.
+        local desatCurveAny, desatCurveReal
+        if C_CurveUtil and C_CurveUtil.CreateCurve then
+            desatCurveAny = C_CurveUtil.CreateCurve()
+            desatCurveAny:SetType(Enum.LuaCurveType.Step)
+            desatCurveAny:AddPoint(0, 0)
+            desatCurveAny:AddPoint(0.001, 1)
+            desatCurveReal = C_CurveUtil.CreateCurve()
+            desatCurveReal:SetType(Enum.LuaCurveType.Step)
+            desatCurveReal:AddPoint(0, 0)
+            desatCurveReal:AddPoint(1.6, 1)
+        end
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_STATE")
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_USABLE")
@@ -2369,22 +2387,48 @@ do
                                 local action = btn:GetAttribute("action")
                                 if action and HasAction(action) then
                                     local cd = btn.cooldown
-                                    local cdInfo
+                                    local cdInfo, durObj
                                     if cd then
                                         cdInfo = C_ActionBar.GetActionCooldown(action)
                                         if cdInfo and cdInfo.isActive then
-                                            local dur = C_ActionBar.GetActionCooldownDuration(action)
-                                            if dur then cd:SetCooldownFromDurationObject(dur) end
+                                            durObj = C_ActionBar.GetActionCooldownDuration(action)
+                                            if durObj then cd:SetCooldownFromDurationObject(durObj) end
                                         else
                                             cd:Clear()
                                         end
                                     end
-                                    -- Desaturate icons on real cooldown (not GCD)
+                                    -- Charges fetched once here and reused by both the
+                                    -- desaturation and charge-cooldown updates below, so the
+                                    -- desaturation fix adds no redundant per-button API calls.
+                                    local chargeInfo = C_ActionBar.GetActionCharges(action)
+                                    -- Desaturate on a real cooldown, but NOT on the GCD (and NOT
+                                    -- while a charge spell still has a charge banked). isOnGCD is
+                                    -- reliable for plain spells but reads FALSE during the GCD for
+                                    -- charge spells AND items (on-use trinkets/consumables), so for
+                                    -- those we classify by the main-cooldown DURATION instead --
+                                    -- secret-safe via curves, and a GCD-length cooldown reads as 0:
+                                    --  * charge spells (maxCharges > 1) and items use the "real CD"
+                                    --    curve (a banked charge / a ready trinket only shows the GCD
+                                    --    on the main cooldown so it stays colored; the real recharge
+                                    --    or trinket cooldown is longer and desaturates).
+                                    --  * plain spells keep the original isOnGCD gate so they
+                                    --    desaturate for the whole cooldown, not just past the GCD.
                                     if EAB.db.profile.desaturateOnCooldown then
                                         local icon = btn.icon
                                         if icon then
-                                            local onRealCD = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
-                                            icon:SetDesaturated(onRealCD or false)
+                                            local val = 0
+                                            if cdInfo and cdInfo.isActive and durObj and durObj.EvaluateRemainingDuration then
+                                                local useRealCurve = chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1
+                                                if not useRealCurve and GetActionInfo(action) == "item" then
+                                                    useRealCurve = true
+                                                end
+                                                if useRealCurve then
+                                                    if desatCurveReal then val = durObj:EvaluateRemainingDuration(desatCurveReal, 0) end
+                                                elseif not cdInfo.isOnGCD then
+                                                    if desatCurveAny then val = durObj:EvaluateRemainingDuration(desatCurveAny, 0) end
+                                                end
+                                            end
+                                            icon:SetDesaturation(val or 0)
                                         end
                                     end
                                     -- Update count text (charges, item stacks, etc.)
@@ -2394,8 +2438,7 @@ do
                                         local display = C_ActionBar.GetActionDisplayCount(action)
                                         btn.Count:SetText(display or "")
                                     end
-                                    -- Update charge cooldown
-                                    local chargeInfo = C_ActionBar.GetActionCharges(action)
+                                    -- Update charge cooldown (chargeInfo fetched once above)
                                     if chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1 then
                                         local chargeCd = btn.chargeCooldown
                                         if chargeCd then

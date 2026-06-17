@@ -249,6 +249,41 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.1.9",
+        heroes = {},
+        features = {
+            {
+                module = "Bags",
+                title = "Quest Item Highlight",
+                desc  = "Quest items get a gold border; items that start a quest get a corner marker.",
+                nav   = { module = "EllesmereUIBags", page = "Bags", section = "DISPLAY", highlight = "" },
+            },
+            {
+                module = "Minimap",
+                title = "Omnium Folio Button",
+                desc  = "Adds the expansion landing page (Omnium Folio) button to the minimap, with scale and position controls.",
+                nav   = { module = "EllesmereUIMinimap", page = "Minimap", section = "ICONS AND BUTTONS", highlight = "Show Omnium Folio" },
+            },
+            {
+                module = "Nameplates",
+                title = "Friendly Names Not Clickable",
+                desc  = "Make friendly player and NPC nameplates click-through so their names never block your mouse or cause accidental targeting.",
+                nav   = { module = "EllesmereUINameplates", page = "General", section = "OTHER NAMEPLATES", highlight = "Friendly Names Not Clickable" },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Spells with charges and on-use trinkets now desaturate correctly while on cooldown." },
+            { module = "Bags", text = "Dragging items no longer drops them in the wrong slot when the window scale isn't 100%." },
+            { module = "Raid Frames", text = "Boss debuff countdown text now scales consistently with the icon size." },
+            { module = "Raid Frames", text = "Non-Left Click bindings work for Targeting players via Hovercast again after the 12.0.7 change." },
+            { module = "Nameplates", text = "Scale Target Nameplate is now the only control that resizes your target's plate; at 100% it no longer changes size." },
+            { module = "Nameplates", text = "Full-height cast bar spell icon stays flush with the bars as nameplates move." },
+            { module = "Auto Logging", text = "Auto combat logging now triggers for current Mythic (Flexible) raids." },
+            { module = "Context Menu", text = "Fixed a Lua error when setting focus directly from the right-click menu." },
+            { module = "Shifter", text = "Fixed an error sometimes thrown after leaving a group you joined via Group Finder." },
+        },
+    },
+    {
         version = "8.1.7",
         heroes = {
             {

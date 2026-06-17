@@ -1824,11 +1824,17 @@ _itemDragFrame:SetScript("OnUpdate", function(self)
     -- BEFORE OnUpdate in the same frame. If they consumed the item,
     -- GetCursorInfo returns nil and we exit immediately.
     if GetCursorInfo() ~= "item" then return end
-    local scale = UIParent:GetEffectiveScale()
-    local cx, cy = GetCursorPosition()
-    cx, cy = cx / scale, cy / scale
+    -- Convert the cursor into each target button's OWN coordinate space.
+    -- GetRect() returns values in the button's effective-scale units, so the raw
+    -- cursor must be divided by btn:GetEffectiveScale() (NOT UIParent's scale).
+    -- The two only match when the bag window scale is 1.0; at any other window
+    -- scale the button's effective scale differs and the old UIParent-based math
+    -- landed the hit-test on the wrong slot (items dropped into a random slot).
+    local rawCx, rawCy = GetCursorPosition()
     for _, btn in pairs(itemSlots) do
         if btn:IsShown() and btn:GetParent():IsShown() then
+            local es = btn:GetEffectiveScale()
+            local cx, cy = rawCx / es, rawCy / es
             local l, b, w, h = btn:GetRect()
             if l and b and cx >= l and cx <= l + w and cy >= b and cy <= b + h then
                 local destBag = btn:GetParent():GetID()
@@ -1846,6 +1852,8 @@ _itemDragFrame:SetScript("OnUpdate", function(self)
     if bankSlots and bankFrame:IsVisible() then
         for _, btn in pairs(bankSlots) do
             if btn:IsShown() and btn:GetParent():IsShown() then
+                local es = btn:GetEffectiveScale()
+                local cx, cy = rawCx / es, rawCy / es
                 local l, b, w, h = btn:GetRect()
                 if l and b and cx >= l and cx <= l + w and cy >= b and cy <= b + h then
                     local destBag = btn:GetParent():GetID()
@@ -2683,11 +2691,14 @@ EnterAssignSelectMode = function(catKey)
 
     -- Hit-test: find item button under cursor
     local function FindBtnUnderCursor()
-        local scale = UIParent:GetEffectiveScale()
-        local cx, cy = GetCursorPosition()
-        cx, cy = cx / scale, cy / scale
+        -- Divide the cursor by each button's OWN effective scale; GetRect() is in
+        -- the button's scale units, so UIParent's scale only matches at 100% window
+        -- scale (see the drop-on-release handler for the full explanation).
+        local rawCx, rawCy = GetCursorPosition()
         for _, btn in pairs(itemSlots) do
             if btn:IsShown() and btn:GetParent():IsShown() then
+                local es = btn:GetEffectiveScale()
+                local cx, cy = rawCx / es, rawCy / es
                 local l, b, w, h = btn:GetRect()
                 if l and b and w and h and cx >= l and cx <= l + w and cy >= b and cy <= b + h then
                     return btn
@@ -2821,11 +2832,14 @@ EnterPinSelectMode = function()
 
     -- Hit-test: find the item button under the cursor
     local function FindBtnUnderCursor()
-        local scale = UIParent:GetEffectiveScale()
-        local cx, cy = GetCursorPosition()
-        cx, cy = cx / scale, cy / scale
+        -- Divide the cursor by each button's OWN effective scale; GetRect() is in
+        -- the button's scale units, so UIParent's scale only matches at 100% window
+        -- scale (see the drop-on-release handler for the full explanation).
+        local rawCx, rawCy = GetCursorPosition()
         for _, btn in pairs(itemSlots) do
             if btn:IsShown() and btn:GetParent():IsShown() then
+                local es = btn:GetEffectiveScale()
+                local cx, cy = rawCx / es, rawCy / es
                 local l, b, w, h = btn:GetRect()
                 if l and b and w and h and cx >= l and cx <= l + w and cy >= b and cy <= b + h then
                     return btn
@@ -3075,7 +3089,12 @@ end
 -- Compute drop zone: which button the cursor is over and which zone (above/group/below).
 -- Returns: targetCatIdx, mode ("above", "below", "group"), targetBtn
 local function ComputeDropZone()
-    local scale = UIParent:GetEffectiveScale()
+    -- Sidebar buttons carry the sidebar's effective scale, so the cursor must be
+    -- divided by that (NOT UIParent's) to match btn:GetTop()/GetBottom(). At any
+    -- bag window scale other than 100% the old UIParent math mapped the cursor to
+    -- the wrong category row. Mirrors ComputeDropTarget above.
+    local sidebar = EUI_Bags._sidebar
+    local scale = (sidebar and sidebar:GetEffectiveScale()) or UIParent:GetEffectiveScale()
     local _, cy = GetCursorPosition()
     local cursorY = cy / scale
 

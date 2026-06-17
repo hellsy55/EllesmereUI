@@ -1028,6 +1028,43 @@ function ns.RefreshFriendlyColors()
 end
 
 -------------------------------------------------------------------------------
+--  Friendly nameplate click-through
+--  Make friendly nameplates (players AND NPCs) non-clickable so their names
+--  never intercept mouse input or cause accidental friendly targeting. We do
+--  NOT resize the plate (which would distort visuals) -- instead we shrink the
+--  click hit-test rectangle to nothing via a large positive inset on every
+--  edge. An inset of 0 restores the natural (fully clickable) hit rect.
+--  The hit-test API is protected in combat, so we gate on InCombatLockdown and
+--  retry once on combat end. The retry listener is only registered while a
+--  change is actually pending, so this costs nothing when idle.
+-------------------------------------------------------------------------------
+local CLICK_THROUGH_INSET = 10000
+local clickThroughApplied = false
+local clickThroughRetry = CreateFrame("Frame")
+
+local function ApplyFriendlyClickThrough()
+    if not (C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets
+            and Enum and Enum.NamePlateType) then
+        return
+    end
+    local fp = FP()
+    local on = fp and fp.friendlyClickThrough == true
+    -- Never applied and feature is off: leave Blizzard's hit rect untouched.
+    if not on and not clickThroughApplied then return end
+    if InCombatLockdown() then
+        clickThroughRetry:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    clickThroughRetry:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    local inset = on and CLICK_THROUGH_INSET or 0
+    C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, inset, inset, inset, inset)
+    clickThroughApplied = on
+end
+ns.UpdateFriendlyClickThrough = ApplyFriendlyClickThrough
+
+clickThroughRetry:SetScript("OnEvent", function() ApplyFriendlyClickThrough() end)
+
+-------------------------------------------------------------------------------
 --  System enable / disable  (called from toggle setValue and on login)
 -------------------------------------------------------------------------------
 function ns.UpdateFriendlyNameplateSystem()
@@ -1163,6 +1200,9 @@ function ns.UpdateFriendlyNameplateSystem()
         -- Not in health-bar mode — restore fonts (covers disabled + name-only-off)
         RestoreFriendlyFontOverride()
     end
+
+    -- Apply friendly click-through (independent of player/NPC plate mode).
+    ApplyFriendlyClickThrough()
 end
 
 -------------------------------------------------------------------------------
