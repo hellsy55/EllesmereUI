@@ -2730,6 +2730,7 @@ local function SkinCharacterSheet()
     local TILES_TILE_STEP = TILES_TILE_H + TILES_TILE_GAP
 
     local _titlesBuilt = false
+    local _titlesOrder = {}  -- cached alphabetical index order; rebuilt with the button list
 
     -- One-time factory: creates a reusable button with once-bound scripts.
     -- Data travels via btn._titleIndex / btn._titleName, so scripts never
@@ -2787,6 +2788,24 @@ local function SkinCharacterSheet()
                 end
             end
         end
+
+        -- Sort alphabetically by title name; "No Title" (-1) is pinned first.
+        -- Title names carry a "%s" player-name placeholder (prefix or suffix) plus
+        -- surrounding spaces; strip them so the sort keys on the meaningful word
+        -- (e.g. "%s the Kingslayer" -> "the kingslayer", "Bloodsail Admiral %s"
+        -- -> "bloodsail admiral"). Computed once here, not per search keystroke.
+        local function SortKey(idx)
+            local name = titleButtons[idx].btn._titleName or ""
+            name = name:gsub("%%s", " "):gsub("^%s+", ""):gsub("%s+$", "")
+            return name:lower()
+        end
+        wipe(_titlesOrder)
+        for idx in pairs(titleButtons) do _titlesOrder[#_titlesOrder + 1] = idx end
+        table.sort(_titlesOrder, function(a, b)
+            if a == -1 then return true end
+            if b == -1 then return false end
+            return SortKey(a) < SortKey(b)
+        end)
     end
 
     -- Filter: show/hide + reposition visible buttons by current search text.
@@ -2796,12 +2815,7 @@ local function SkinCharacterSheet()
         local searchText = (titlesSearchBox:GetText() or ""):lower()
         local yOffset = 0
 
-        -- Sort keys so layout order is deterministic; "No Title" first.
-        local ordered = {}
-        for idx in pairs(titleButtons) do ordered[#ordered + 1] = idx end
-        table.sort(ordered)
-
-        for _, idx in ipairs(ordered) do
+        for _, idx in ipairs(_titlesOrder) do
             local btnData = titleButtons[idx]
             local btn = btnData.btn
             local name = (idx == -1) and "No Title" or (btn._titleName or "")
@@ -2833,6 +2847,7 @@ local function SkinCharacterSheet()
     _titlesInvalidator:RegisterEvent("KNOWN_TITLES_UPDATE")
     _titlesInvalidator:SetScript("OnEvent", function()
         _titlesBuilt = false
+        wipe(_titlesOrder)
         for idx, data in pairs(titleButtons) do
             if data.btn then data.btn:Hide() end
             titleButtons[idx] = nil
@@ -4703,44 +4718,26 @@ function EllesmereUI._applyCharSheetTextSizes()
             if GetFFD(slot).itemLevelLabel then
                 local flags = ""
                 if itemLevelOutline then
-                    flags = "OUTLINE"
+                    flags = "OUTLINE, SLUG"
                 end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).itemLevelLabel, itemLevelShadow) end
                 GetFFD(slot).itemLevelLabel:SetFont(fontPath, itemLevelSize, flags)
-                -- Apply shadow effect if enabled
-                if itemLevelShadow then
-                    GetFFD(slot).itemLevelLabel:SetShadowColor(0, 0, 0, 1)
-                    GetFFD(slot).itemLevelLabel:SetShadowOffset(1, -1)
-                else
-                    GetFFD(slot).itemLevelLabel:SetShadowColor(0, 0, 0, 0)
-                end
             end
             if GetFFD(slot).upgradeTrackLabel then
                 local flags = ""
                 if upgradeTrackOutline then
-                    flags = "OUTLINE"
+                    flags = "OUTLINE, SLUG"
                 end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).upgradeTrackLabel, upgradeTrackShadow) end
                 GetFFD(slot).upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, flags)
-                -- Apply shadow effect if enabled
-                if upgradeTrackShadow then
-                    GetFFD(slot).upgradeTrackLabel:SetShadowColor(0, 0, 0, 1)
-                    GetFFD(slot).upgradeTrackLabel:SetShadowOffset(1, -1)
-                else
-                    GetFFD(slot).upgradeTrackLabel:SetShadowColor(0, 0, 0, 0)
-                end
             end
             if GetFFD(slot).enchantLabel then
                 local flags = ""
                 if enchantOutline then
-                    flags = "OUTLINE"
+                    flags = "OUTLINE, SLUG"
                 end
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).enchantLabel, enchantShadow) end
                 GetFFD(slot).enchantLabel:SetFont(fontPath, enchantSize, flags)
-                -- Apply shadow effect if enabled
-                if enchantShadow then
-                    GetFFD(slot).enchantLabel:SetShadowColor(0, 0, 0, 1)
-                    GetFFD(slot).enchantLabel:SetShadowOffset(1, -1)
-                else
-                    GetFFD(slot).enchantLabel:SetShadowColor(0, 0, 0, 0)
-                end
             end
         end
     end

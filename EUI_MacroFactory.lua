@@ -1125,15 +1125,21 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                             self:SetFrameLevel(menuFrame:GetFrameLevel() + 2); self:SetAlpha(1)
                             local _, cy = GetCursorPosition()
                             local sc = menuFrame:GetEffectiveScale(); cy = cy / sc
-                            local from = self._cbIndex; local to = from
+                            local from = self._cbIndex
+                            -- Same logic as insertion line: skip the dragged row
+                            local mT = menuFrame:GetTop() or 0
+                            local iI = #cbItems
                             for ri, rf in ipairs(rowFrames) do
-                                if rf._baseY then
-                                    local rm = (menuFrame:GetTop() or 0) + rf._baseY - MH / 2
-                                    if cy > rm then to = ri; break end
-                                    to = ri
+                                if rf ~= self and rf._baseY then
+                                    local rm = mT + rf._baseY - MH / 2
+                                    if cy > rm then iI = ri; break end
+                                    iI = ri + 1
                                 end
                             end
-                            to = math.max(1, math.min(to, #cbItems))
+                            iI = math.max(1, math.min(iI, #cbItems + 1))
+                            -- Adjust for index shift from table.remove
+                            if from < iI then iI = iI - 1 end
+                            local to = math.max(1, math.min(iI, #cbItems))
                             if from ~= to then
                                 local db = GetDB()
                                 if not db.order then db.order = {}; for oi = 1, #cbItems do db.order[oi] = oi end end

@@ -72,7 +72,7 @@ initFrame:SetScript("OnEvent", function(self)
             infoLabel:SetTextColor(1, 1, 1, 0.75)
             infoLabel:SetPoint("CENTER")
             infoLabel:SetJustifyH("CENTER")
-            infoLabel:SetText("Reposition this element within Blizzard Edit Mode")
+            infoLabel:SetText(EllesmereUI.L("Reposition this element within Blizzard Edit Mode"))
             y = y - 40
         end
 
@@ -256,7 +256,7 @@ initFrame:SetScript("OnEvent", function(self)
             local label = EllesmereUI.MakeFont(rgn, 14, nil,
                 EllesmereUI.TEXT_WHITE_R, EllesmereUI.TEXT_WHITE_G, EllesmereUI.TEXT_WHITE_B)
             PP.Point(label, "LEFT", rgn, "LEFT", SIDE_PAD, 0)
-            label:SetText("Quest Item Hotkey")
+            label:SetText(EllesmereUI.L("Quest Item Hotkey"))
 
             local kbBtn = CreateFrame("Button", nil, rgn)
             PP.Size(kbBtn, KB_W, KB_H)
@@ -295,7 +295,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if listening then return end
                 listening = true
-                kbLbl:SetText("Press a key...")
+                kbLbl:SetText(EllesmereUI.L("Press a key..."))
                 kbBtn:EnableKeyboard(true)
             end)
             kbBtn:SetScript("OnKeyDown", function(self, key)

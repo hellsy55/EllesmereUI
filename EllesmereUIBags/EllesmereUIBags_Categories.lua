@@ -6,6 +6,10 @@
 -------------------------------------------------------------------------------
 
 local CategoryManager = {}
+-- Profile access helper (DB created in EUI_Bags_Options.lua, loaded first per TOC)
+local EUI = EllesmereUI
+local _emptyP = {}
+local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
 
 -- Enum.ItemClass numeric IDs (locale-independent)
 local IC = Enum.ItemClass
@@ -48,12 +52,10 @@ local DEFAULT_CATEGORIES = {
 --  (renames, reorder, grouping). Saved state keyed by default name.
 -------------------------------------------------------------------------------
 function CategoryManager:InitCategories()
-    if not EllesmereUIDB then EllesmereUIDB = {} end
-
     -- User state: { [defaultName] = { rename, groupName, groupNameCustom } }
-    local userState = EllesmereUIDB.bagCategoryState or {}
+    local userState = BP().bagCategoryState or {}
     -- User order: list of default names in display order
-    local userOrder = EllesmereUIDB.bagCategoryOrder
+    local userOrder = BP().bagCategoryOrder
 
     -- Build ordered list of default names
     -- Index DEFAULT_CATEGORIES by name for fast lookup
@@ -63,7 +65,7 @@ function CategoryManager:InitCategories()
     end
     -- Index user-created custom categories by key
     local userCatByKey = {}
-    local userCats = EllesmereUIDB.bagUserCategories
+    local userCats = BP().bagUserCategories
     if userCats then
         for _, uc in ipairs(userCats) do
             userCatByKey[uc.key] = uc
@@ -214,7 +216,6 @@ end
 
 -- Save user state (renames, grouping) and order back to DB
 function CategoryManager:SaveState()
-    if not EllesmereUIDB then EllesmereUIDB = {} end
     local cats = self._categories
     if not cats then return end
 
@@ -240,8 +241,8 @@ function CategoryManager:SaveState()
             userState[cat._defaultName] = entry
         end
     end
-    EllesmereUIDB.bagCategoryState = userState
-    EllesmereUIDB.bagCategoryOrder = userOrder
+    BP().bagCategoryState = userState
+    BP().bagCategoryOrder = userOrder
 
     -- Rebuild user-created categories list from runtime state
     local ucList = {}
@@ -250,7 +251,7 @@ function CategoryManager:SaveState()
             ucList[#ucList + 1] = { key = cat._defaultName, name = cat._defaultName, icon = cat.icon }
         end
     end
-    EllesmereUIDB.bagUserCategories = #ucList > 0 and ucList or nil
+    BP().bagUserCategories = #ucList > 0 and ucList or nil
 end
 
 -------------------------------------------------------------------------------
@@ -419,7 +420,7 @@ function CategoryManager:ClassifyAll(items)
     local total = 0
 
     -- Disabled categories: items route to catch-all instead (keyed by _defaultName)
-    local disabledCats = EllesmereUIDB and EllesmereUIDB.bagDisabledCategories
+    local disabledCats = BP().bagDisabledCategories
     local catchAllIdx
     wipe(_claDisabledIdxSet)
     local disabledIdxSet
@@ -641,18 +642,17 @@ end
 -- Create a new user category. Returns the new category index.
 function CategoryManager:AddCustomCategory(name)
     if not name or name == "" then return nil end
-    if not EllesmereUIDB then EllesmereUIDB = {} end
-    if not EllesmereUIDB.bagUserCategories then EllesmereUIDB.bagUserCategories = {} end
+    if not BP().bagUserCategories then BP().bagUserCategories = {} end
 
     -- Generate a unique key
     local maxN = 0
-    for _, uc in ipairs(EllesmereUIDB.bagUserCategories) do
+    for _, uc in ipairs(BP().bagUserCategories) do
         local n = tonumber(uc.key:match("Custom_(%d+)"))
         if n and n > maxN then maxN = n end
     end
     local key = "Custom_" .. (maxN + 1)
 
-    EllesmereUIDB.bagUserCategories[#EllesmereUIDB.bagUserCategories + 1] = { key = key, name = name }
+    BP().bagUserCategories[#BP().bagUserCategories + 1] = { key = key, name = name }
 
     -- Insert into runtime list before catch-all
     local cats = self:GetCategories()
@@ -691,8 +691,8 @@ function CategoryManager:RemoveCustomCategory(catIndex)
     table.remove(cats, catIndex)
 
     -- Remove from disabled list
-    if EllesmereUIDB.bagDisabledCategories then
-        EllesmereUIDB.bagDisabledCategories[key] = nil
+    if BP().bagDisabledCategories then
+        BP().bagDisabledCategories[key] = nil
     end
 
     self:SaveState()

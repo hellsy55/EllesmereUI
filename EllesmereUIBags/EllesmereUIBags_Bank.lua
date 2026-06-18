@@ -4,12 +4,24 @@
 --  Visually matches the Bags module with sidebar, search, and sorting
 -------------------------------------------------------------------------------
 local EUI = EllesmereUI
+-- Profile access helper (DB created in EUI_Bags_Options.lua, loaded first per TOC)
+local _emptyP = {}
+local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
+
+-- The bank has no MultiBank view, so both the OneBag and MultiBag default
+-- types open the bank to its consolidated OneBank/OneWarbank view; only the
+-- "all" default opens the categorized All-Tabs view. Resolver lives in the
+-- main bags file (EUI._GetBagDefaultType) and honors the legacy boolean.
+local function BankDefaultsToOne()
+    if not EUI._GetBagDefaultType then return false end
+    return EUI._GetBagDefaultType() ~= "all"
+end
 
 -------------------------------------------------------------------------------
 --  Constants
 -------------------------------------------------------------------------------
 local SLOT_SIZE, SPACING = 34, 4
-local _canUseCache = {}  -- [itemID] = bool, stable per session
+local _canUseCache = {}  -- [itemID] = true (usable) | false (unusable), via tooltip red-text scan
 local HEADER_H    = 35
 local FOOTER_H    = 32
 local SIDEBAR_W   = 160
@@ -30,11 +42,11 @@ local _allTabs = {}        -- populated on bank open: { bagID, name, isWarband, 
 local _warbandOnly = false -- true when opened via portable warbank (AccountBanker interaction)
 
 local function GetBankSidebarWidth()
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bankSidebarCollapsed
+    local collapsed = BP().bankSidebarCollapsed
     return collapsed and SIDEBAR_W_COLLAPSED or SIDEBAR_W
 end
 
-local BANK_FONT = (EUI.GetFontPath and EUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+local BANK_FONT = (EUI.GetFontPath and EUI.GetFontPath("bags")) or "Fonts\\FRIZQT__.TTF"
 local function SetBankFont(fs, size) fs:SetFont(BANK_FONT, size, "") end
 local GetUpgradeTrack = EUI.GetUpgradeTrack
 local ITEM_CLASS_WEAPON = Enum.ItemClass.Weapon
@@ -549,9 +561,8 @@ EUI_Bank:SetScript("OnMouseUp", function(self, button)
         self._moving = nil
         -- Save position
         local point, _, relPoint, x, y = self:GetPoint(1)
-        if point and not EllesmereUIDB then EllesmereUIDB = {} end
         if point then
-            EllesmereUIDB.bankPosition = { point = point, relativePoint = relPoint, x = x, y = y }
+            BP().bankPosition = { point = point, relativePoint = relPoint, x = x, y = y }
         end
     end
 end)
@@ -625,7 +636,7 @@ collapseBtn._icon:SetTexture(ARROW_ICON)
 collapseBtn._icon:SetAlpha(0.4)
 
 local function UpdateBankCollapseArrow()
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bankSidebarCollapsed
+    local collapsed = BP().bankSidebarCollapsed
     collapseBtn:ClearAllPoints()
     if collapsed then
         collapseBtn._icon:SetRotation(math.pi)
@@ -639,7 +650,7 @@ UpdateBankCollapseArrow()
 
 collapseBtn:SetScript("OnEnter", function(self)
     self._icon:SetAlpha(0.9)
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bankSidebarCollapsed
+    local collapsed = BP().bankSidebarCollapsed
     if EUI.ShowWidgetTooltip then
         EUI.ShowWidgetTooltip(self, collapsed and "Expand Sidebar" or "Collapse Sidebar")
     end
@@ -649,14 +660,13 @@ collapseBtn:SetScript("OnLeave", function(self)
     if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
 end)
 collapseBtn:SetScript("OnClick", function()
-    if not EllesmereUIDB then EllesmereUIDB = {} end
     -- Determine which edge to preserve based on screen position
     local center = EUI_Bank:GetCenter()
     local screenW = UIParent:GetWidth()
     local onRightSide = center and screenW and (center > screenW / 2)
     local oldWidth = onRightSide and EUI_Bank:GetWidth() or nil
 
-    EllesmereUIDB.bankSidebarCollapsed = not EllesmereUIDB.bankSidebarCollapsed
+    BP().bankSidebarCollapsed = not BP().bankSidebarCollapsed
     UpdateBankCollapseArrow()
     sidebar:SetWidth(GetBankSidebarWidth())
     EUI_Bank:RefreshBank()
@@ -669,8 +679,7 @@ collapseBtn:SetScript("OnClick", function()
             local point, rel, relPoint, x, y = EUI_Bank:GetPoint()
             EUI_Bank:ClearAllPoints()
             EUI_Bank:SetPoint(point, rel, relPoint, x + shift, y)
-            if not EllesmereUIDB then EllesmereUIDB = {} end
-            EllesmereUIDB.bankPosition = { point = point, relativePoint = relPoint, x = x + shift, y = y }
+            BP().bankPosition = { point = point, relativePoint = relPoint, x = x + shift, y = y }
         end
     end
 end)
@@ -1067,7 +1076,7 @@ local function GetOrCreateBankSlot(idx)
     local pt = btn.PushedTexture or btn:GetPushedTexture()
     if pt then
         pt:SetAtlas(nil)
-        pt:SetTexture("Interface\\AddOns\\EllesmereUIActionBars\\Media\\highlight-3.png")
+        pt:SetTexture("Interface\\AddOns\\EllesmereUIBags\\Media\\highlight-3.png")
         pt:SetTexCoord(0, 1, 0, 1)
         pt:ClearAllPoints(); pt:SetAllPoints(btn)
         pt:SetVertexColor(0.973, 0.839, 0.604, 1)
@@ -1089,23 +1098,23 @@ local function GetOrCreateBankSlot(idx)
     textOverlay:SetFrameLevel((btn.Cooldown and btn.Cooldown:GetFrameLevel() or btn:GetFrameLevel()) + 2)
     btn._textOverlay = textOverlay
 
-    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
+    local countSize = BP().bagCountFontSize or 11
     local countFS = btn.Count
     if countFS then
         countFS:SetParent(textOverlay)
-        countFS:SetFont(BANK_FONT, countSize, "OUTLINE")
+        EllesmereUI.ApplyIconTextFont(countFS, BANK_FONT, countSize, "bags")
         countFS:ClearAllPoints()
         countFS:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     end
 
     -- Item level text (top-left, gear only)
-    local ilvlSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    local ilvlSize = BP().itemlevelFontSize or 12
     if not btn.ItemLevelText then
         btn.ItemLevelText = textOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
         btn.ItemLevelText:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
         btn.ItemLevelText:SetTextColor(1, 1, 1, 1)
     end
-    btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE")
+    btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE, SLUG")
     btn.ItemLevelText:SetText("")
 
     -- Empty bg
@@ -1161,11 +1170,11 @@ end
 
 -- Fast font size update for bank slots (mirrors bags RefreshTextSizes)
 local function RefreshBankTextSizes()
-    local countSize = EllesmereUIDB and EllesmereUIDB.bagCountFontSize or 11
-    local ilvlSize = EllesmereUIDB and EllesmereUIDB.itemlevelFontSize or 12
+    local countSize = BP().bagCountFontSize or 11
+    local ilvlSize = BP().itemlevelFontSize or 12
     for _, btn in pairs(_bankSlots) do
-        if btn.Count then btn.Count:SetFont(BANK_FONT, countSize, "OUTLINE") end
-        if btn.ItemLevelText then btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE") end
+        if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, BANK_FONT, countSize, "bags") end
+        if btn.ItemLevelText then btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, "OUTLINE, SLUG") end
     end
 end
 EUI_Bank.RefreshTextSizes = RefreshBankTextSizes
@@ -1465,11 +1474,31 @@ function EUI_Bank:RefreshBank()
                     if btn._textOverlay then btn.IconOverlay:SetParent(btn._textOverlay) end
                 else btn.IconOverlay:SetAlpha(0) end
             end
-            if btn.icon and info and info.itemID and itemLink and IsEquippableItem(itemLink) then
+            if btn.icon and info and info.itemID then
                 local id = info.itemID
                 local canUse = _canUseCache[id]
-                if canUse == nil and C_PlayerInfo and C_PlayerInfo.CanUseItem then
-                    canUse = C_PlayerInfo.CanUseItem(id)
+                if canUse == nil then
+                    canUse = true
+                    if IsEquippableItem(id) or C_Item.GetItemSpell(id) then
+                        local tip = C_TooltipInfo.GetItemByID(id)
+                        if tip and tip.lines then
+                            for _, row in ipairs(tip.lines) do
+                                local lc = row.leftColor
+                                if lc and lc.r == 1 and lc.g < 0.2 and lc.b < 0.2
+                                   and row.leftText ~= ITEM_SCRAPABLE_NOT
+                                   and row.leftText ~= CANNOT_UNEQUIP_COMBAT
+                                   and row.leftText ~= ITEM_DISENCHANT_NOT_DISENCHANTABLE then
+                                    canUse = false
+                                    break
+                                end
+                                local rc = row.rightColor
+                                if rc and rc.r == 1 and rc.g < 0.2 and rc.b < 0.2 then
+                                    canUse = false
+                                    break
+                                end
+                            end
+                        end
+                    end
                     _canUseCache[id] = canUse
                 end
                 if canUse == false then
@@ -1492,15 +1521,15 @@ function EUI_Bank:RefreshBank()
             -- Item level (gear only)
             if btn.ItemLevelText then
                 if itemLink and IsGearItem(itemLink) then
-                    local showIlvl = not EllesmereUIDB or EllesmereUIDB.showItemlevelInBags ~= false
+                    local showIlvl = BP().showItemlevelInBags ~= false
                     if showIlvl then
                         local _, _, _, ilvl = GetItemInfo(itemLink)
                         btn.ItemLevelText:SetText(ilvl or "")
                         local r, g, b
                         if GetUpgradeTrack then
                             local rankText, trackColor = GetUpgradeTrack(itemLink)
-                            if EllesmereUIDB and EllesmereUIDB.itemlevelUseCustomColor and EllesmereUIDB.itemlevelCustomColor then
-                                r, g, b = EllesmereUIDB.itemlevelCustomColor.r, EllesmereUIDB.itemlevelCustomColor.g, EllesmereUIDB.itemlevelCustomColor.b
+                            if BP().itemlevelUseCustomColor and BP().itemlevelCustomColor then
+                                r, g, b = BP().itemlevelCustomColor.r, BP().itemlevelCustomColor.g, BP().itemlevelCustomColor.b
                             elseif rankText and rankText ~= "" and trackColor then
                                 r, g, b = trackColor.r, trackColor.g, trackColor.b
                             end
@@ -1595,7 +1624,7 @@ end
 --  Sidebar Build
 -------------------------------------------------------------------------------
 function BuildBankSidebar()
-    local collapsed = EllesmereUIDB and EllesmereUIDB.bankSidebarCollapsed
+    local collapsed = BP().bankSidebarCollapsed
     local sidebarW = GetBankSidebarWidth()
     local y = 0
     local ar, ag, ab = GetAccentRGB()
@@ -1634,7 +1663,7 @@ function BuildBankSidebar()
         btn._count:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
         btn:SetScript("OnEnter", function(self)
             if not self._isSelected then self._bg:SetColorTexture(1, 1, 1, 0.06) end
-            if (EllesmereUIDB and EllesmereUIDB.bankSidebarCollapsed) and EUI.ShowWidgetTooltip then
+            if (BP().bankSidebarCollapsed) and EUI.ShowWidgetTooltip then
                 EUI.ShowWidgetTooltip(self, (self._entryName or "?") .. " (" .. (self._entryCount or 0) .. ")")
             end
         end)
@@ -1778,7 +1807,7 @@ function BuildBankSidebar()
     -- View indices: 0 = All Bank Tabs, -1 = OneBank, -2 = All Warbank Tabs, -3 = OneWarbank
     -- >0 = individual tab index in _allTabs
 
-    local defaultOneBag = EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag
+    local defaultOneBag = BankDefaultsToOne()
     if not _warbandOnly then
         if defaultOneBag then
             RenderSidebarEntry(-1, "OneBank", 1542860, charUsed, _selectedView == -1)
@@ -1902,13 +1931,13 @@ eventFrame:SetScript("OnEvent", function(_, event)
             and C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.AccountBanker)
             or false
         if _warbandOnly then
-            local defaultOneBag = EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag
+            local defaultOneBag = BankDefaultsToOne()
             _selectedView = defaultOneBag and -3 or -2
         end
         -- Position
         EUI_Bank:ClearAllPoints()
-        if EllesmereUIDB and EllesmereUIDB.bankPosition then
-            local pos = EllesmereUIDB.bankPosition
+        if BP().bankPosition then
+            local pos = BP().bankPosition
             EUI_Bank:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
         else
             EUI_Bank:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 15, -100)
@@ -1918,7 +1947,7 @@ eventFrame:SetScript("OnEvent", function(_, event)
             EUI_Bank._searchBox:SetText("")
             EUI_Bank._searchBox:ClearFocus()
         end
-        local bankScale = EllesmereUIDB and EllesmereUIDB.bagScale or 1
+        local bankScale = BP().bagScale or 1
         EUI_Bank:SetScale(bankScale)
         EUI_Bank:Show()
         -- Auto-open bags alongside bank if not already visible
@@ -2035,7 +2064,7 @@ loader:RegisterEvent("PLAYER_LOGIN")
 loader:SetScript("OnEvent", function(self)
     self:UnregisterAllEvents()
     -- Apply default view based on setting
-    if EllesmereUIDB and EllesmereUIDB.bagDefaultOneBag then
+    if BankDefaultsToOne() then
         _selectedView = -1
     end
     -- Register for Escape close

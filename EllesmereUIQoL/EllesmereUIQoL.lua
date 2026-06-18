@@ -640,60 +640,89 @@ qolFrame:SetScript("OnEvent", function(self)
         local lastClickTime  = 0
         local lastClickEntry = nil
         local DOUBLE_CLICK_THRESHOLD = 0.4
+        local installed = false   -- hooks are installed ONCE, on first enable
+        local roleFrame           -- classic role-check listener (created on install)
 
-        hooksecurefunc("LFGListSearchEntry_OnClick", function(entry, button)
-            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            if button == "RightButton" then return end
+        -- Hooks/listeners are installed only when Quick Signup is turned on, so
+        -- nothing touches the LFG execution path unless the feature is in use.
+        -- hooksecurefunc/HookScript can't be undone, so the bodies keep their
+        -- setting guard for the toggle-off-after-enable case; the role-check
+        -- event is registered/unregistered live for true zero cost when off.
+        local function InstallQuickSignupHooks()
+            if installed then return end
+            installed = true
 
-            local panel = LFGListFrame and LFGListFrame.SearchPanel
-            if not panel then return end
-            if not LFGListSearchPanelUtil_CanSelectResult(entry.resultID) then return end
-            if not panel.SignUpButton or not panel.SignUpButton:IsEnabled() then return end
+            hooksecurefunc("LFGListSearchEntry_OnClick", function(entry, button)
+                if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+                if button == "RightButton" then return end
 
-            local now = GetTime()
-            if lastClickEntry == entry.resultID and (now - lastClickTime) < DOUBLE_CLICK_THRESHOLD then
-                if panel.selectedResult ~= entry.resultID then
-                    LFGListSearchPanel_SelectResult(panel, entry.resultID)
+                local panel = LFGListFrame and LFGListFrame.SearchPanel
+                if not panel then return end
+                if not LFGListSearchPanelUtil_CanSelectResult(entry.resultID) then return end
+                if not panel.SignUpButton or not panel.SignUpButton:IsEnabled() then return end
+
+                local now = GetTime()
+                if lastClickEntry == entry.resultID and (now - lastClickTime) < DOUBLE_CLICK_THRESHOLD then
+                    if panel.selectedResult ~= entry.resultID then
+                        LFGListSearchPanel_SelectResult(panel, entry.resultID)
+                    end
+                    LFGListSearchPanel_SignUp(panel)
+                    lastClickEntry = nil
+                    lastClickTime  = 0
+                else
+                    lastClickEntry = entry.resultID
+                    lastClickTime  = now
                 end
-                LFGListSearchPanel_SignUp(panel)
-                lastClickEntry = nil
-                lastClickTime  = 0
-            else
-                lastClickEntry = entry.resultID
-                lastClickTime  = now
-            end
-        end)
+            end)
 
-        -- Auto-accept role check for Quick Signup
-        LFGListApplicationDialog:HookScript("OnShow", function(self)
-            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            local shiftBypass = EllesmereUIDB.quickSignupAutoRoleShift and IsShiftKeyDown()
-            if self.SignUpButton:IsEnabled() and not shiftBypass then
-                self.SignUpButton:Click()
+            -- Auto-accept role check for Quick Signup. Holding Shift skips the
+            -- auto-accept so the dialog stays open (e.g. to type a signup note).
+            if LFGListApplicationDialog then
+                LFGListApplicationDialog:HookScript("OnShow", function(self)
+                    if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+                    if self.SignUpButton:IsEnabled() and not IsShiftKeyDown() then
+                        self.SignUpButton:Click()
+                    end
+                end)
             end
-        end)
 
-        -- Classic Dungeon Finder role check for Quick Signup
-        local roleFrame = CreateFrame("Frame")
-        roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
-        roleFrame:SetScript("OnEvent", function()
-            if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
-            if not UnitInParty("player") then return end
-            -- Skip if Shift is held and shift-bypass is enabled
-            if EllesmereUIDB.quickSignupAutoRoleShift and IsShiftKeyDown() then return end
-            local leader, tank, healer, dps = GetLFGRoles()
-            if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
+            -- Classic Dungeon Finder role check for Quick Signup
+            roleFrame = CreateFrame("Frame")
+            roleFrame:SetScript("OnEvent", function()
+                if not (EllesmereUIDB and EllesmereUIDB.quickSignup) then return end
+                if not UnitInParty("player") then return end
+                -- Holding Shift skips the auto role-check accept
+                if IsShiftKeyDown() then return end
+                local leader, tank, healer, dps = GetLFGRoles()
+                if LFDRoleCheckPopupRoleButtonTank.checkButton:IsEnabled() then
+                    LFDRoleCheckPopupRoleButtonTank.checkButton:SetChecked(tank)
+                end
+                if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
+                    LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
+                end
+                if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
+                    LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
+                end
+                LFDRoleCheckPopupAcceptButton:Enable()
+                LFDRoleCheckPopupAcceptButton:Click()
+            end)
+        end
+
+        -- Called at load and from the options toggle. Installs the hooks on
+        -- first enable; toggles the role-check event registration to match.
+        EllesmereUI._applyQuickSignup = function()
+            local on = EllesmereUIDB and EllesmereUIDB.quickSignup
+            if on then InstallQuickSignupHooks() end
+            if roleFrame then
+                if on then
+                    roleFrame:RegisterEvent("LFG_ROLE_CHECK_SHOW")
+                else
+                    roleFrame:UnregisterEvent("LFG_ROLE_CHECK_SHOW")
+                end
             end
-            if LFDRoleCheckPopupRoleButtonHealer.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonHealer.checkButton:SetChecked(healer)
-            end
-            if LFDRoleCheckPopupRoleButtonDPS.checkButton:IsEnabled() then
-                LFDRoleCheckPopupRoleButtonDPS.checkButton:SetChecked(dps)
-            end
-            LFDRoleCheckPopupAcceptButton:Enable()
-            LFDRoleCheckPopupAcceptButton:Click()
-        end)
+        end
+
+        EllesmereUI._applyQuickSignup()
     end
 
     ---------------------------------------------------------------------------
@@ -735,61 +764,10 @@ qolFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Hide Blizzard Party / Raid Manager frame
+    --  Implementation moved to the parent (EllesmereUI_BlizzardParty.lua) so the
+    --  Raid Frames module shares the exact same logic + saved setting. The QoL
+    --  options toggle still drives it via EllesmereUI._applyHideBlizzardPartyFrame.
     ---------------------------------------------------------------------------
-    do
-        local hookedMgr = false
-
-        local _partyHiddenParent
-        local _partyOrigParent
-
-        local function ApplyHideBlizzardPartyFrame()
-            local shouldHide = EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame
-            local mgr = CompactRaidFrameManager or _G["CompactRaidFrameManager"]
-            if not mgr then return end
-
-            if shouldHide then
-                if not _partyHiddenParent then
-                    _partyHiddenParent = CreateFrame("Frame")
-                    _partyHiddenParent:Hide()
-                end
-                if not _partyOrigParent then
-                    _partyOrigParent = mgr:GetParent()
-                end
-                if not InCombatLockdown() then
-                    mgr:SetParent(_partyHiddenParent)
-                end
-                if not hookedMgr then
-                    hookedMgr = true
-                    local regenFrame = CreateFrame("Frame")
-                    regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-                    regenFrame:SetScript("OnEvent", function()
-                        if EllesmereUIDB and EllesmereUIDB.hideBlizzardPartyFrame then
-                            if mgr:GetParent() ~= _partyHiddenParent then
-                                mgr:SetParent(_partyHiddenParent)
-                            end
-                        end
-                    end)
-                end
-            else
-                if _partyOrigParent and not InCombatLockdown() then
-                    mgr:SetParent(_partyOrigParent)
-                    mgr:Show()
-                end
-            end
-        end
-
-        EllesmereUI._applyHideBlizzardPartyFrame = ApplyHideBlizzardPartyFrame
-
-        local initFrame = CreateFrame("Frame")
-        initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        initFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-        initFrame:SetScript("OnEvent", function(self, event)
-            if event == "PLAYER_ENTERING_WORLD" then
-                self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-            end
-            ApplyHideBlizzardPartyFrame()
-        end)
-    end
 
     ---------------------------------------------------------------------------
     --  Hide Talking Head Frame
@@ -1110,12 +1088,8 @@ do
         end
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
             statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag("extras"))
-            if EllesmereUI.GetFontUseShadow("extras") then
-                statsText:SetShadowOffset(1, -1)
-            else
-                statsText:SetShadowOffset(0, 0)
-            end
         end
         local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
         local scale = 1.0
@@ -1131,12 +1105,8 @@ do
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
             local fontSize = math.floor(12 * scale + 0.5)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
             statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag("extras"))
-            if EllesmereUI.GetFontUseShadow("extras") then
-                statsText:SetShadowOffset(1, -1)
-            else
-                statsText:SetShadowOffset(0, 0)
-            end
         end
         for _, ev in ipairs({
             "UNIT_STATS", "COMBAT_RATING_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
@@ -1188,7 +1158,6 @@ do
         local FONT = EllesmereUI.GetFontPath("extras")
         local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
         local LABEL_SIZE = FONT_SIZE - 2
-        local SHADOW_X, SHADOW_Y = 1, -1
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
         fpsFrame:SetSize(60, 20)
         fpsFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 10, -10)
@@ -1198,8 +1167,8 @@ do
 
         local function MakeFS(size)
             local f = fpsFrame:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f, EllesmereUI.GetFontUseShadow("extras")) end
             f:SetFont(FONT, size, EllesmereUI.GetFontOutlineFlag("extras"))
-            if EllesmereUI.GetFontUseShadow("extras") then f:SetShadowOffset(SHADOW_X, SHADOW_Y) else f:SetShadowOffset(0, 0) end
             f:SetTextColor(1, 1, 1, 1)
             return f
         end
@@ -1396,7 +1365,9 @@ do
                 savePos = function(key, point, relPoint, x, y)
                     if not EllesmereUIDB then EllesmereUIDB = {} end
                     if not point then return end
-                    EllesmereUIDB.secondaryStatsPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    -- Scale lives in this same table; carry it over so a drag doesn't wipe it.
+                    local prev = EllesmereUIDB.secondaryStatsPos
+                    EllesmereUIDB.secondaryStatsPos = { point = point, relPoint = relPoint, x = x, y = y, scale = prev and prev.scale }
                     if not EllesmereUI._unlockActive then
                         local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
                         if f then
@@ -1633,9 +1604,26 @@ do
             end)
             return
         end
-        if EllesmereUIDB and EllesmereUIDB.disableRightClickTarget then
+        local db = EllesmereUIDB
+        local enemy = db and db.disableRightClickTarget
+        local allyCombat = db and db.disableRightClickTargetAllyCombat
+        if enemy or allyCombat then
+            -- Build the mouseover condition from the two independent toggles.
+            -- Enemies fire everywhere. Allies only fire while the player is in
+            -- combat (the [combat] conditional), so right clicking friendly NPCs
+            -- such as vendors and quest givers still works out of combat.
+            local macro = ""
+            if enemy then macro = macro .. "[@mouseover,harm,nodead]1;" end
+            if allyCombat then macro = macro .. "[@mouseover,help,nodead,combat]1;" end
+            macro = macro .. "0"
             SecureStateDriverManager:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
-            RegisterStateDriver(stateFrame, "mov", "[@mouseover,harm,nodead]1;0")
+            -- [combat] needs regen events so the state re-evaluates on combat
+            -- enter/exit even when the mouseover unit has not changed.
+            if allyCombat then
+                SecureStateDriverManager:RegisterEvent("PLAYER_REGEN_DISABLED")
+                SecureStateDriverManager:RegisterEvent("PLAYER_REGEN_ENABLED")
+            end
+            RegisterStateDriver(stateFrame, "mov", macro)
             stateFrame:SetAttribute("_onstate-mov", [[
                 if newstate == 1 then
                     self:SetBindingClick(1, "BUTTON2", "EUI_MouseLookBtn")
@@ -1667,7 +1655,8 @@ do
     local function CreateCrosshair()
         if crosshairFrame then return end
         crosshairFrame = CreateFrame("Frame", "EUI_CharacterCrosshair", UIParent)
-        crosshairFrame:SetFrameStrata("HIGH")
+        -- MEDIUM sits above gameplay HUD but below DIALOG/HIGH panels (talents, character, etc.).
+        crosshairFrame:SetFrameStrata("MEDIUM")
         crosshairFrame:SetFrameLevel(100)
         crosshairFrame:EnableMouse(false)
         crosshairFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -1746,8 +1735,8 @@ do
             coordFrame:SetPoint("BOTTOM", WorldMapFrame.ScrollContainer, "BOTTOM", 0, 10)
 
             local PP = EllesmereUI.PanelPP
-            local fp = EllesmereUI.GetFontPath()
-            local outF = EllesmereUI.GetFontOutlineFlag()
+            local fp = EllesmereUI.GetFontPath("extras")
+            local outF = EllesmereUI.GetFontOutlineFlag("extras")
             local sz = (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
 
             local divider = coordFrame:CreateTexture(nil, "OVERLAY")
@@ -1755,19 +1744,19 @@ do
             PP.Size(divider, 2, sz)
             divider:SetPoint("BOTTOM", coordFrame, "BOTTOM", 0, 0)
 
-            local useShadow = EllesmereUI.GetFontUseShadow()
+            local useShadow = EllesmereUI.GetFontUseShadow("extras")
 
             local cursorFS = coordFrame:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(cursorFS, useShadow) end
             cursorFS:SetFont(fp, sz, outF)
             cursorFS:SetTextColor(1, 1, 1, 0.9)
-            cursorFS:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
             cursorFS:SetJustifyH("RIGHT")
             cursorFS:SetPoint("RIGHT", divider, "LEFT", -10, 0)
 
             local playerFS = coordFrame:CreateFontString(nil, "OVERLAY")
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(playerFS, useShadow) end
             playerFS:SetFont(fp, sz, outF)
             playerFS:SetTextColor(1, 1, 1, 0.9)
-            playerFS:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
             playerFS:SetJustifyH("LEFT")
             playerFS:SetPoint("LEFT", divider, "RIGHT", 10, 0)
 
@@ -1833,14 +1822,14 @@ do
                 CreateCoordFrame()
                 if coordFrame then
                     local PP = EllesmereUI.PanelPP
-                    local fp = EllesmereUI.GetFontPath()
-                    local outF = EllesmereUI.GetFontOutlineFlag()
-                    local useShadow = EllesmereUI.GetFontUseShadow()
+                    local fp = EllesmereUI.GetFontPath("extras")
+                    local outF = EllesmereUI.GetFontOutlineFlag("extras")
+                    local useShadow = EllesmereUI.GetFontUseShadow("extras")
                     local sz = (EllesmereUIDB and EllesmereUIDB.mapCoordsTextSize) or 12
+                    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(coordText.cursor, useShadow) end
                     coordText.cursor:SetFont(fp, sz, outF)
-                    coordText.cursor:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
+                    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(coordText.player, useShadow) end
                     coordText.player:SetFont(fp, sz, outF)
-                    coordText.player:SetShadowOffset(useShadow and 1 or 0, useShadow and -1 or 0)
                     PP.Size(coordText.divider, 2, sz)
                     coordFrame:Show()
                 end

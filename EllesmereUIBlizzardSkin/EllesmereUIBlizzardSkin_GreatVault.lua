@@ -92,7 +92,7 @@ local function BuildThemeContext()
     return {
         accent = { r = r, g = g, b = b },
         borderAPI = EllesmereUI.PP or EllesmereUI.PanelPP,
-        fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT,
+        fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT,
         reskin = EllesmereUI.RESKIN or DEFAULT_RESKIN,
     }
 end
@@ -149,10 +149,9 @@ end
 local function ApplyFont(fontString, theme, size, r, g, b, a, flags)
     if not fontString then return end
 
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fontString, true) end
     fontString:SetFont((theme and theme.fontPath) or STANDARD_TEXT_FONT, size, flags or "")
     fontString:SetTextColor(r or 1, g or 1, b or 1, a or 1)
-    fontString:SetShadowOffset(1, -1)
-    fontString:SetShadowColor(0, 0, 0, 0.9)
 end
 
 local function EnsureBackdrop(frame, theme, alpha)

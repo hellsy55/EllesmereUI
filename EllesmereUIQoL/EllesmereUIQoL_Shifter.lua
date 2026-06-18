@@ -118,14 +118,111 @@ local function SavePos(name, point, relPoint, x, y)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Secure repositioning (for PROTECTED frames)
+--
+--  A plain frame:SetPoint() / StartMoving() / SetMovable() called from insecure
+--  addon code TAINTS the frame's execution. That is invisible on most panels,
+--  but PVEFrame parents the LFGList applicant viewer, which does secret-value
+--  comparisons in 12.0 -- a tainted tree throws "attempt to compare a secret
+--  number" there. So protected frames are NEVER touched with those calls; we
+--  run ClearAllPoints/SetPoint inside a SecureHandler restricted-environment
+--  snippet instead, which executes securely and never taints the frame.
+--  Parented to UIParent so self:GetParent() inside the snippet IS UIParent.
+-------------------------------------------------------------------------------
+local securePositioner = CreateFrame("Frame", nil, UIParent, "SecureHandlerBaseTemplate")
+local function SecureSetPoint(frame, point, relPoint, x, y)
+    if InCombatLockdown() then return false end
+    securePositioner:SetFrameRef("f", frame)
+    securePositioner:SetAttribute("p", point)
+    securePositioner:SetAttribute("rp", relPoint)
+    securePositioner:SetAttribute("x", x)
+    securePositioner:SetAttribute("y", y)
+    securePositioner:Execute([[
+        local f = self:GetFrameRef("f")
+        if not f then return end
+        f:ClearAllPoints()
+        f:SetPoint(self:GetAttribute("p"), self:GetParent(), self:GetAttribute("rp"), self:GetAttribute("x"), self:GetAttribute("y"))
+    ]])
+    return true
+end
+
 local function ApplyPosition(frame, name)
     if InCombatLockdown() and frame:IsProtected() then return end
     local pos = tempPos[frame] or GetSavedPos(name)
     if not pos or not pos.point then return end
-    GetFFD(frame)._shIgnoreSP = true
-    frame:ClearAllPoints()
-    frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
-    GetFFD(frame)._shIgnoreSP = false
+    local ffd = GetFFD(frame)
+    ffd._shIgnoreSP = true
+    if frame:IsProtected() then
+        SecureSetPoint(frame, pos.point, pos.relPoint, pos.x, pos.y)
+    else
+        frame:ClearAllPoints()
+        frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+    end
+    ffd._shIgnoreSP = false
+end
+
+-------------------------------------------------------------------------------
+--  Cursor-delta drag (for PROTECTED frames)
+--
+--  We can't StartMoving a protected frame without tainting it, so for those we
+--  track the cursor ourselves and reposition the frame live via SecureSetPoint
+--  each update. Position is stored center-relative to UIParent (scale-clean).
+--  Only one protected frame can be dragged at a time.
+-------------------------------------------------------------------------------
+local secureDrag = {}  -- { frame, name, mode, cursorX, cursorY, startX, startY, curX, curY }
+local secureDragUpdater = CreateFrame("Frame")
+secureDragUpdater:Hide()
+
+local function StopSecureDrag()
+    secureDragUpdater:Hide()
+    local frame = secureDrag.frame
+    if not frame then return end
+    if secureDrag.curX then
+        if secureDrag.mode == "save" then
+            SavePos(secureDrag.name, "CENTER", "CENTER", secureDrag.curX, secureDrag.curY)
+            tempPos[frame] = nil
+        else
+            tempPos[frame] = { point = "CENTER", relPoint = "CENTER", x = secureDrag.curX, y = secureDrag.curY }
+        end
+    end
+    secureDrag.frame = nil
+end
+
+secureDragUpdater:SetScript("OnUpdate", function()
+    local frame = secureDrag.frame
+    if not frame then secureDragUpdater:Hide(); return end
+    if InCombatLockdown() then StopSecureDrag(); return end
+    local cx, cy = GetCursorPosition()
+    local es = frame:GetEffectiveScale()
+    local ues = UIParent:GetEffectiveScale()
+    local ucx, ucy = UIParent:GetCenter()
+    local newScreenX = secureDrag.startX + (cx - secureDrag.cursorX)
+    local newScreenY = secureDrag.startY + (cy - secureDrag.cursorY)
+    -- Keep the frame's center on screen (protected frames skip SetClampedToScreen).
+    local sw, sh = GetScreenWidth() * ues, GetScreenHeight() * ues
+    if newScreenX < 0 then newScreenX = 0 elseif newScreenX > sw then newScreenX = sw end
+    if newScreenY < 0 then newScreenY = 0 elseif newScreenY > sh then newScreenY = sh end
+    local x = (newScreenX - ucx * ues) / es
+    local y = (newScreenY - ucy * ues) / es
+    secureDrag.curX, secureDrag.curY = x, y
+    local ffd = GetFFD(frame)
+    ffd._shIgnoreSP = true
+    SecureSetPoint(frame, "CENTER", "CENTER", x, y)
+    ffd._shIgnoreSP = false
+end)
+
+local function StartSecureDrag(frame, name, mode)
+    local fcx, fcy = frame:GetCenter()
+    if not fcx then return end
+    local es = frame:GetEffectiveScale()
+    secureDrag.frame = frame
+    secureDrag.name = name
+    secureDrag.mode = mode
+    secureDrag.cursorX, secureDrag.cursorY = GetCursorPosition()
+    secureDrag.startX, secureDrag.startY = fcx * es, fcy * es
+    secureDrag.curX, secureDrag.curY = nil, nil
+    secureDragUpdater:Show()
 end
 
 -------------------------------------------------------------------------------
@@ -136,10 +233,12 @@ local function HookFrame(frame, name)
     if ffd._shHooked then return end
     ffd._shHooked = true
 
-    if InCombatLockdown() and frame:IsProtected() then
-        deferredMovable[#deferredMovable + 1] = frame
-        eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    else
+    -- Non-protected frames use the cheap native StartMoving path. Protected
+    -- frames are NEVER made movable / SetMovable'd / StartMoving'd / SetPoint'd
+    -- by insecure code (it taints them); they drag via the secure cursor-delta
+    -- path above. SetMovable is only needed for StartMoving, so protected frames
+    -- skip it entirely.
+    if not frame:IsProtected() then
         frame:SetMovable(true)
         frame:SetClampedToScreen(true)
     end
@@ -148,25 +247,36 @@ local function HookFrame(frame, name)
     local headerName = DRAG_HEADERS[name]
     local dragTarget = (headerName and _G[headerName]) or frame
 
-    local dragging  -- "save" | "temp" | nil
+    local dragging  -- non-protected only: "save" | "temp" | nil
 
     dragTarget:HookScript("OnMouseDown", function(_, button)
         if not IsEnabled() then return end
         if button ~= "LeftButton" then return end
         if InCombatLockdown() and frame:IsProtected() then return end
         local noShift = EllesmereUIDB and EllesmereUIDB.shifterNoShift
+        local mode
         if IsShiftKeyDown() or noShift then
-            dragging = "save"
+            mode = "save"
         elseif IsControlKeyDown() then
-            dragging = "temp"
+            mode = "temp"
         else
             return
         end
-        frame:StartMoving()
+        if frame:IsProtected() then
+            StartSecureDrag(frame, name, mode)
+        else
+            dragging = mode
+            frame:StartMoving()
+        end
     end)
 
     dragTarget:HookScript("OnMouseUp", function(_, button)
-        if button ~= "LeftButton" or not dragging then return end
+        if button ~= "LeftButton" then return end
+        if frame:IsProtected() then
+            if secureDrag.frame == frame then StopSecureDrag() end
+            return
+        end
+        if not dragging then return end
         frame:StopMovingOrSizing()
         frame:SetUserPlaced(false)
         local p, _, rp, x, y = frame:GetPoint(1)
@@ -189,12 +299,14 @@ local function HookFrame(frame, name)
     end)
 
     frame:HookScript("OnHide", function()
+        if secureDrag.frame == frame then StopSecureDrag() end
         tempPos[frame] = nil
     end)
 
     hooksecurefunc(frame, "SetPoint", function()
         if not IsEnabled() then return end
         if ffd._shIgnoreSP then return end
+        if secureDrag.frame == frame then return end  -- don't fight an active drag
         if InCombatLockdown() and frame:IsProtected() then return end
         if tempPos[frame] or GetSavedPos(name) then
             ApplyPosition(frame, name)

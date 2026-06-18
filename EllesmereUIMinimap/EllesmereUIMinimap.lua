@@ -27,6 +27,7 @@ local defaults = {
         minimap = {
             enabled       = true,
             shape         = "square",
+            rotateMinimap = false,
             borderSize    = 1,
             showCoords    = false,
             coordPrecision = 0,
@@ -35,6 +36,7 @@ local defaults = {
             hideZoneText  = false,
             zoneInside    = false,
             scrollZoom    = true,
+            openMicroMenuOnMiddleClick = true,
             savedZoom     = 0,
             hideZoomButtons      = true,
             hideTrackingButton   = true,
@@ -44,8 +46,13 @@ local defaults = {
             hideCraftingOrder    = false,
             friendsMaxRows       = 0,   -- 0 = no cap; else cap per section, show "...and N more"
             hideExtraBtns        = { greatVault = false, portals = false, friendsOnline = false, groupButton = false },
+            mouseoverExtraBtns   = false,  -- extra buttons only show on minimap mouseover
             greatVaultExtraInfo  = true,
             hideAddonCompartment = false,
+            showOmniumFolio      = true,   -- expansion landing page button (bottom-left)
+            omniumFolioX         = 0,
+            omniumFolioY         = 0,
+            omniumFolioScale     = 0.75,
             hideAddonButtons     = false,
             addonBtnSize         = 24,
             interactableBtnSize  = 21,
@@ -170,6 +177,11 @@ local cachedAddonButtons = {}
 local _addonVisible = {}       -- persistent: tracks whether each addon WANTS its button visible
 local _suppressVisTrack = false -- flag to suppress tracking during our own Show/Hide calls
 local flyoutOwnedFrames = {}
+
+-- Mouseover Extra Buttons: re-evaluator, assigned by the controller further down.
+-- Forward-declared here so the flyout panels (created earlier than the
+-- controller) can trigger a re-evaluate from their OnShow/OnHide hooks.
+local MO_Evaluate
 
 -------------------------------------------------------------------------------
 --  Minimap Button Flyout
@@ -374,6 +386,9 @@ local function LayoutFlyoutButtons()
             icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
             icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
             pcall(icon.SetTexCoord, icon, 0.05, 0.95, 0.05, 0.95)
+            -- Foreign button icon: SetTexCoord was its only snap trigger and
+            -- that hook is no longer global, so disable snap on it once here.
+            if EllesmereUI.PP then EllesmereUI.PP.DisablePixelSnap(icon) end
         end
         -- Add atlas ring border overlay
         if not GetFFD(btn).flyoutRing then
@@ -424,6 +439,9 @@ local function EnsureFlyoutPanel()
         flyoutPanel:SetPoint("BOTTOMLEFT", flyoutToggle, "BOTTOMRIGHT", 2, 0)
         flyoutPanel:SetClampedToScreen(true)
         flyoutOwnedFrames[flyoutPanel] = true
+        -- Keep the mouseover stack in sync while this flyout opens/closes.
+        flyoutPanel:HookScript("OnShow", function() if MO_Evaluate then MO_Evaluate() end end)
+        flyoutPanel:HookScript("OnHide", function() if MO_Evaluate then MO_Evaluate() end end)
     end
 end
 
@@ -580,19 +598,14 @@ local locationFrame, locationBg
 
 local function GetMinimapFont()
     local path = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap") or STANDARD_TEXT_FONT
-    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap") or "OUTLINE"
+    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap") or "OUTLINE, SLUG"
     return path, flag
 end
 
 local function ApplyMinimapFont(fs, size)
     local path, flag = GetMinimapFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("minimap")) end
     fs:SetFont(path, size, flag)
-    if EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("minimap") then
-        fs:SetShadowOffset(1, -1)
-        fs:SetShadowColor(0, 0, 0, 0.8)
-    else
-        fs:SetShadowOffset(0, 0)
-    end
 end
 
 -- Cache clock CVars so we don't read them every second
@@ -801,6 +814,9 @@ local flyoutBlacklist = {
     MinimapZoomOut   = true,
     MinimapBackdrop  = true,
     GameTimeFrame    = true,
+    -- Core Blizzard feature button (expansion/landing page); keep it on the
+    -- minimap surface instead of sweeping it into the addon-button flyout.
+    ExpansionLandingPageMinimapButton = true,
 }
 
 -- Persistently hide a minimap button via Show hook
@@ -1209,8 +1225,8 @@ local function ShowVaultTooltip(anchor)
     local tt = GetVaultTooltip()
 
     -- Apply user's current font to all FontStrings
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-    local fontFlags = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap")) or "Fonts\\FRIZQT__.TTF"
+    local fontFlags = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("minimap")) or ""
     tt._title:SetFont(fontPath, 11, fontFlags)
     for r = 1, 3 do
         _vaultTTRows[r][0]:SetFont(fontPath, 11, fontFlags)
@@ -1467,12 +1483,11 @@ local function CreateMinimapPortalFlyout()
             labelFrame:SetAllPoints()
             labelFrame:SetFrameLevel(cd:GetFrameLevel() + 2)
             local label = labelFrame:CreateFontString(nil, "OVERLAY", nil)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
             label:SetFont(fontPath, 8, "OUTLINE")
             label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
             label:SetTextColor(1, 1, 1, 0.9)
             label:SetText(short)
-            label:SetShadowOffset(1, -1)
-            label:SetShadowColor(0, 0, 0, 1)
         end
 
         local hover = btn:CreateTexture(nil, "HIGHLIGHT")
@@ -1672,6 +1687,11 @@ local function CreateMinimapPortalFlyout()
     end)
 
     EllesmereUI.RegisterEscapeClose(flyout)
+
+    -- Keep the mouseover stack shown while this flyout is open; re-evaluate when
+    -- it closes so the stack can hide if the mouse has already moved away.
+    flyout:HookScript("OnShow", function() if MO_Evaluate then MO_Evaluate() end end)
+    flyout:HookScript("OnHide", function() if MO_Evaluate then MO_Evaluate() end end)
 
     _portalFlyout = flyout
     return flyout
@@ -1885,7 +1905,7 @@ local FTT_HDR_H   = 16
 local FTT_GAP     = 2
 local FTT_DIV_PAD = 5   -- padding above and below the divider line
 local function FTT_FONT()
-    return (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
+    return (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("minimap")) or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
 end
 
 -- Hover-stable hide: small grace period so cursor can travel from button to tooltip
@@ -2580,6 +2600,104 @@ local function SyncIndicatorVisibility()
     end
 end
 
+-------------------------------------------------------------------------------
+--  Mouseover Extra Buttons
+--  When enabled, the extra buttons (Great Vault, M+ Portals, Friends Online,
+--  Group Button) only show while the mouse is over the minimap or one of the
+--  buttons. Either flyout being open keeps the stack shown until it closes.
+--  Event-driven: minimap + button OnEnter/OnLeave drive it, with a small
+--  deferred hide so crossing the tiny gaps between frames doesn't flicker.
+-------------------------------------------------------------------------------
+local _moActive  = false   -- mouseover mode currently engaged
+local _moButtons = {}      -- extra buttons under control this layout
+local _moHooked  = {}      -- frames whose OnEnter/OnLeave we've already hooked
+local _moHideTimer = nil
+
+local function MO_OverAny()
+    if Minimap and Minimap:IsMouseOver() then return true end
+    if _portalFlyout and _portalFlyout:IsShown() then return true end
+    if flyoutPanel and flyoutPanel:IsShown() then return true end
+    for i = 1, #_moButtons do
+        local b = _moButtons[i]
+        if b:IsShown() and b:IsMouseOver() then return true end
+    end
+    return false
+end
+
+local function MO_Apply(show)
+    local a = show and 1 or 0
+    for i = 1, #_moButtons do _moButtons[i]:SetAlpha(a) end
+end
+
+local function MO_CancelHide()
+    if _moHideTimer then _moHideTimer:Cancel(); _moHideTimer = nil end
+end
+
+-- Assign the forward-declared upvalue so the flyout OnShow/OnHide hooks above
+-- (defined earlier in the file) can drive a re-evaluate.
+MO_Evaluate = function()
+    if not _moActive then return end
+    MO_CancelHide()
+    if MO_OverAny() then
+        MO_Apply(true)
+    else
+        -- Brief delay bridges the gap between adjacent frames (minimap -> button,
+        -- button -> button) so crossing it doesn't flash the stack off and on.
+        _moHideTimer = C_Timer.NewTimer(0.12, function()
+            _moHideTimer = nil
+            if _moActive and not MO_OverAny() then MO_Apply(false) end
+        end)
+    end
+end
+
+local function MO_HookFrame(frame)
+    if not frame or _moHooked[frame] then return end
+    _moHooked[frame] = true
+    frame:HookScript("OnEnter", function()
+        if _moActive then MO_CancelHide(); MO_Apply(true) end
+    end)
+    frame:HookScript("OnLeave", function()
+        if _moActive then MO_Evaluate() end
+    end)
+end
+
+-- Rebuild the managed-button list from the current profile + hide state, hook
+-- the minimap/buttons (once), and set the initial alpha. Called at the end of
+-- every indicator layout so the list reflects current visibility.
+local function MO_Refresh(p)
+    wipe(_moButtons)
+    local heb = (p and p.hideExtraBtns) or {}
+    if p and p.mouseoverExtraBtns then
+        if _greatVaultBtn and not heb.greatVault then _moButtons[#_moButtons + 1] = _greatVaultBtn end
+        if _customIndicators.friends and not heb.friendsOnline then _moButtons[#_moButtons + 1] = _customIndicators.friends end
+        if _portalBtn and not heb.portals then _moButtons[#_moButtons + 1] = _portalBtn end
+        if flyoutToggle and not heb.groupButton then _moButtons[#_moButtons + 1] = flyoutToggle end
+        -- Ungrouped addon buttons count as extra buttons for this setting too.
+        for _, btn in ipairs(cachedAddonButtons) do
+            if _addonVisible[btn] ~= false and IsUngrouped(btn) then
+                _moButtons[#_moButtons + 1] = btn
+            end
+        end
+    end
+    _moActive = (#_moButtons > 0)
+    if _moActive then
+        MO_HookFrame(Minimap)
+        for i = 1, #_moButtons do MO_HookFrame(_moButtons[i]) end
+        MO_Evaluate()
+    else
+        MO_CancelHide()
+        -- Restore full alpha (harmless on buttons hidden by hideExtraBtns).
+        if _greatVaultBtn then _greatVaultBtn:SetAlpha(1) end
+        if _customIndicators.friends then _customIndicators.friends:SetAlpha(1) end
+        if _portalBtn then _portalBtn:SetAlpha(1) end
+        if flyoutToggle then flyoutToggle:SetAlpha(1) end
+        -- Restore ungrouped addon buttons we may have dimmed.
+        for _, btn in ipairs(cachedAddonButtons) do
+            if IsUngrouped(btn) then btn:SetAlpha(1) end
+        end
+    end
+end
+
 local function LayoutIndicatorFrames(minimap, p, circleMode)
     local flvl = minimap:GetFrameLevel() + 10
 
@@ -2654,7 +2772,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
 
     if circleMode then
         -- Circle layout: horizontal row around the clock
-        if ci.tracking then
+        if ci.tracking and not p.hideTrackingButton then
             ci.tracking:ClearAllPoints()
             if clockBg and p.showClock then
                 ci.tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
@@ -2662,6 +2780,8 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.tracking:SetPoint("TOP", minimap, "TOP", -20, -3)
             end
             ci.tracking:Show()
+        elseif ci.tracking then
+            ci.tracking:Hide()
         end
 
         if ci.calendar and not p.hideGameTime then
@@ -2690,11 +2810,13 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         -- Square layout: vertical stack on the left side
         local y = 0
 
-        if ci.tracking then
+        if ci.tracking and not p.hideTrackingButton then
             ci.tracking:ClearAllPoints()
             ci.tracking:SetPoint("TOPRIGHT", minimap, "TOPLEFT", 0, y)
             ci.tracking:Show()
             y = y - sz
+        elseif ci.tracking then
+            ci.tracking:Hide()
         end
 
         if ci.calendar and not p.hideGameTime then
@@ -2788,6 +2910,9 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                     icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 3, -3)
                     icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 3)
                     pcall(icon.SetTexCoord, icon, 0.05, 0.95, 0.05, 0.95)
+                    -- Foreign button icon: SetTexCoord was its only snap trigger
+                    -- and that hook is no longer global, so disable snap once here.
+                    if EllesmereUI.PP then EllesmereUI.PP.DisablePixelSnap(icon) end
                 end
                 -- Black square background
                 if not GetFFD(btn).ungroupBg then
@@ -2907,7 +3032,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local heb = p.hideExtraBtns or {}
     local freeMove = p.freeMoveBtns
     local fmTargets = {}
-    if ci.tracking then fmTargets[#fmTargets + 1] = ci.tracking end
+    if ci.tracking and not p.hideTrackingButton then fmTargets[#fmTargets + 1] = ci.tracking end
     if ci.calendar and not p.hideGameTime then fmTargets[#fmTargets + 1] = ci.calendar end
     if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
     if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
@@ -2927,6 +3052,10 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             ApplyBtnOffset(frame)
         end
     end
+
+    -- Mouseover Extra Buttons: apply after layout so the managed-button list and
+    -- their alpha reflect the current shown/hidden state.
+    MO_Refresh(p)
 end
 
 local function RestoreIndicatorFrames()
@@ -2984,12 +3113,65 @@ local function CaptureBlizzardMinimap()
     p._capturedOnce = true
 end
 
+-- Expansion landing page button ("Omnium Folio"). Kept off the addon-button
+-- flyout (see flyoutBlacklist); we anchor it to the minimap's bottom-left and
+-- raise it above the minimap. We do NOT force it visible -- Blizzard controls
+-- when the current landing page button appears (so we never display a stale
+-- old-expansion button). The setting only HIDES it when off.
+-- It is a plain (non-secure) Blizzard button, so SetParent/SetPoint are safe.
+local _omniumFolioHooked = false
+local function PositionOmniumFolio(btn)
+    if not btn or not Minimap then return end
+    local mp = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    if not mp then return end
+    if btn:GetParent() ~= Minimap then btn:SetParent(Minimap) end
+    btn:SetFrameStrata(Minimap:GetFrameStrata())
+    btn:SetFrameLevel((Minimap:GetFrameLevel() or 0) + 10)
+    btn:SetScale(mp.omniumFolioScale or 0.75)
+    btn:ClearAllPoints()
+    btn:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", mp.omniumFolioX or 0, mp.omniumFolioY or 0)
+end
+
+local function ApplyOmniumFolio()
+    local btn = _G.ExpansionLandingPageMinimapButton
+    if not btn or not Minimap then return end
+    local mp = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    if not mp then return end
+
+    -- One-time Show hook: when OFF, re-hide whenever Blizzard shows it; when ON,
+    -- just enforce our bottom-left position (never force it visible).
+    if not _omniumFolioHooked then
+        _omniumFolioHooked = true
+        hooksecurefunc(btn, "Show", function(self)
+            local m = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+            if not m then return end
+            if m.showOmniumFolio == false then
+                self:Hide()
+            else
+                PositionOmniumFolio(self)
+            end
+        end)
+    end
+
+    if mp.showOmniumFolio == false then
+        btn:Hide()
+        return
+    end
+    -- Enabled: position/raise only -- do NOT force Show(). Blizzard decides
+    -- whether the current landing page button is shown.
+    PositionOmniumFolio(btn)
+end
+
 local function ApplyMinimap()
     if TEMP_DISABLED.minimap then return end
     if InCombatLockdown() then QueueApplyAll(); return end
 
     local p = EBS.db.profile.minimap
     p.enabled = true
+
+    -- Rotate Minimap: enforce the CVar to match our setting. Default off keeps
+    -- it at 0; turning it on sets 1. Runs out of combat (ApplyMinimap defers).
+    SetCVar("rotateMinimap", p.rotateMinimap and "1" or "0")
 
     local minimap = Minimap
     if not minimap then return end
@@ -3060,6 +3242,9 @@ local function ApplyMinimap()
         blocker:SetPropagateMouseMotion(true)
         blocker:SetScript("OnMouseUp", function(_, btn)
             if btn == "MiddleButton" and EBS._ToggleMicroMenu then
+                -- Gated by the "Open Micro Menu on Middle Click" toggle (read live)
+                local mp = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+                if mp and mp.openMicroMenuOnMiddleClick == false then return end
                 EBS._ToggleMicroMenu()
             end
         end)
@@ -3630,6 +3815,8 @@ local function ApplyMinimap()
 
     -- Mark module as active so persistent hooks know they can fire
     GetFFD(minimap).active = true
+
+    ApplyOmniumFolio()
 end
 
 
@@ -3757,9 +3944,8 @@ do
                 hl:SetColorTexture(1, 1, 1, 0.08)
 
                 local label = btn:CreateFontString(nil, "OVERLAY")
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
                 label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-                label:SetShadowOffset(1, -1)
-                label:SetShadowColor(0, 0, 0, 1)
                 label:SetPoint("LEFT", btn, "LEFT", 10, 0)
                 label:SetTextColor(0.9, 0.9, 0.9)
                 label:SetText(item.text)
@@ -3806,9 +3992,8 @@ do
                 hl:SetColorTexture(1, 1, 1, 0.08)
 
                 local label = btn:CreateFontString(nil, "OVERLAY")
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
                 label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-                label:SetShadowOffset(1, -1)
-                label:SetShadowColor(0, 0, 0, 1)
                 label:SetPoint("LEFT", btn, "LEFT", 10, 0)
                 label:SetTextColor(0.9, 0.9, 0.9)
                 label:SetText(item.text)

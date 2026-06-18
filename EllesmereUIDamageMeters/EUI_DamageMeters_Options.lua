@@ -117,7 +117,7 @@ initFrame:SetScript("OnEvent", function(self)
         local bgRow
         bgRow, h = W:DualRow(parent, y,
             { type="slider", text="Background Opacity",
-              min = 0, max = 1, step = 0.05,
+              min = 0, max = 1, step = 0.01,
               getValue = function() return Cfg("bgAlpha") or 0.75 end,
               setValue = function(v) Set("bgAlpha", v); if ns.ApplyBackground then ns.ApplyBackground() end end },
             { type="toggle", text="Always Show Player",
@@ -161,7 +161,7 @@ initFrame:SetScript("OnEvent", function(self)
             local rrLabel
             for i = 1, rgn:GetNumRegions() do
                 local reg = select(i, rgn:GetRegions())
-                if reg and reg.GetText and reg:GetText() == "Refresh Rate" then
+                if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Refresh Rate" then
                     rrLabel = reg
                     break
                 end
@@ -171,7 +171,7 @@ initFrame:SetScript("OnEvent", function(self)
             else
                 suffix:SetPoint("LEFT", rgn, "LEFT", 150, 0)
             end
-            suffix:SetText("(seconds)")
+            suffix:SetText(EllesmereUI.L("(seconds)"))
         end
 
         do
@@ -223,7 +223,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if listening then return end
                 listening = true
-                kbLbl:SetText("Press a key...")
+                kbLbl:SetText(EllesmereUI.L("Press a key..."))
                 kbBtn:EnableKeyboard(true)
             end)
 
@@ -300,7 +300,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return Cfg("hdrHeight") or 22 end,
               setValue = function(v) Set("hdrHeight", v); ApplyHdr(); Refresh() end },
             { type="slider", text="Opacity",
-              min = 0, max = 1, step = 0.05,
+              min = 0, max = 1, step = 0.01,
               getValue = function() return Cfg("hdrBgAlpha") or 1 end,
               setValue = function(v) Set("hdrBgAlpha", v); ApplyHdr() end })
         -- Inline color swatch on Opacity
@@ -585,14 +585,14 @@ initFrame:SetScript("OnEvent", function(self)
                     end },
               } },
             { type="slider", text="Opacity",
-              min = 0, max = 1, step = 0.05,
+              min = 0, max = 1, step = 0.01,
               getValue = function() return Cfg("barFillAlpha") or 1 end,
               setValue = function(v) Set("barFillAlpha", v); Refresh() end })
         y = y - h
 
         -- Bar Spacing | Icon Style
         _, h = W:DualRow(parent, y,
-            { type="slider", text="Spacing", min = 0, max = 10, step = 1,
+            { type="slider", text="Spacing", min = -1, max = 10, step = 1,
               getValue = function() return Cfg("barSpacing") or 2 end,
               setValue = function(v) Set("barSpacing", v); Refresh() end },
             { type="dropdown", text="Icon Style",
@@ -603,7 +603,13 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         -- Border Style (+ cog) | Border Size (+ inline swatch)
+        -- Shadow (Glow rendered behind) needs Show Behind support, which DM lacks,
+        -- so it is excluded from the Damage Meters border-style dropdown.
         local texValues, texOrder = EllesmereUI.GetBorderTextureDropdown()
+        texValues.shadow = nil
+        for i = #texOrder, 1, -1 do
+            if texOrder[i] == "shadow" then table.remove(texOrder, i) end
+        end
         local bsRow
         bsRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Border Style",
@@ -625,7 +631,7 @@ initFrame:SetScript("OnEvent", function(self)
                   ApplyBrd(); EllesmereUI:RefreshPage()
               end },
             { type="slider", text="Border Size",
-              min=0, max=4, step=1, trackWidth=120,
+              min=0, max=4, step=1,
               getValue=function() return Cfg("borderSize") or 1 end,
               setValue=function(v) Set("borderSize", v); ApplyBrd() end })
         y = y - h
@@ -717,21 +723,42 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
         end
 
-        -- Show Breakdown on Hover (+ inline cog) | Breakdown Bar Texture
+        -- Show Breakdown on Hover (+ inline cog) | Background (opacity + swatch)
         local bdRow
         bdRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Breakdown on Hover",
               getValue = function() return Cfg("showHoverTooltip") ~= false end,
               setValue = function(v) Set("showHoverTooltip", v) end },
-            { type="dropdown", text="Hover Breakdown Texture",
-              values = matchTexValues, order = matchTexOrder,
-              getValue = function() return Cfg("breakdownBarTexture") or "match" end,
-              setValue = function(v) Set("breakdownBarTexture", v); Refresh() end })
+            { type="slider", text="Background",
+              min = 0, max = 1, step = 0.01,
+              getValue = function() return Cfg("barBgAlpha") or 0 end,
+              setValue = function(v) Set("barBgAlpha", v); if ns.ApplyBarBg then ns.ApplyBarBg() end end })
+        -- Inline color swatch on Background (right region)
+        do
+            local rgn = bdRow._rightRegion
+            local ctrl = rgn._control
+            local barBgSwatch, barBgSwatchRefresh = EllesmereUI.BuildColorSwatch(
+                rgn, bdRow:GetFrameLevel() + 3,
+                function()
+                    return (Cfg("barBgR") or 0), (Cfg("barBgG") or 0), (Cfg("barBgB") or 0)
+                end,
+                function(r, g, b)
+                    Set("barBgR", r); Set("barBgG", g); Set("barBgB", b)
+                    if ns.ApplyBarBg then ns.ApplyBarBg() end
+                end,
+                false, 20)
+            PP.Point(barBgSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            EllesmereUI.RegisterWidgetRefresh(function() barBgSwatchRefresh() end)
+        end
         do
             local rgn = bdRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Breakdown Settings",
                 rows = {
+                    { type = "dropdown", label = "Bar Texture",
+                      values = matchTexValues, order = matchTexOrder,
+                      get = function() return Cfg("breakdownBarTexture") or "match" end,
+                      set = function(v) Set("breakdownBarTexture", v); Refresh() end },
                     { type = "slider", label = "Scale", min = 80, max = 150, step = 1,
                       get = function() return (Cfg("hoverTooltipScale") or 100) end,
                       set = function(v) Set("hoverTooltipScale", v) end },
@@ -766,8 +793,8 @@ initFrame:SetScript("OnEvent", function(self)
         local hnRow
         hnRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Number Format",
-              values = { [0] = "DPS", [1] = "Damage", [2] = "Damage (DPS)" },
-              order = { 0, 1, 2 },
+              values = { [0] = "DPS", [1] = "Damage", [2] = "Damage (DPS)", [3] = "Damage | DPS" },
+              order = { 0, 1, 2, 3 },
               getValue = function() return Cfg("numberFormat") or 2 end,
               setValue = function(v) Set("numberFormat", v); Refresh() end },
             { type="toggle", text="Hide Rank Numbers",
@@ -782,7 +809,7 @@ initFrame:SetScript("OnEvent", function(self)
             local hnLabel
             for i = 1, rgn:GetNumRegions() do
                 local reg = select(i, rgn:GetRegions())
-                if reg and reg.GetText and reg:GetText() == "Hide Rank Numbers" then
+                if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Hide Rank Numbers" then
                     hnLabel = reg
                     break
                 end
@@ -952,7 +979,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="multiSwatch", text="Timer Text Color",
               disabled = function() return not Cfg("standaloneTimer") end,
-              disabledTooltip = "Standalone Combat Timer to be enabled",
+              disabledTooltip = "Standalone Combat Timer",
               swatches = {
                   { tooltip = "Custom Color",
                     hasAlpha = false,
@@ -1003,7 +1030,8 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v) Set("standaloneTimerSize", v); ApplySAT() end },
                     { type = "toggle", label = "Align Text Left",
                       disabled = function() return (Cfg("standaloneTimerAnchor") or "free") ~= "free" end,
-                      disabledTooltip = "Anchor to Windows set to Free Move",
+                      disabledTooltip = "Available only when Anchor to Windows is set to Free Move.",
+                      rawTooltip = true,
                       get = function()
                           local anchor = Cfg("standaloneTimerAnchor") or "free"
                           if anchor ~= "free" then
@@ -1034,7 +1062,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="label", text="Hold Shift+Click to Freely Move Standalone Timer" },
             { type="dropdown", text="Anchor to Windows",
               disabled = function() return not Cfg("standaloneTimer") end,
-              disabledTooltip = "Standalone Combat Timer to be enabled",
+              disabledTooltip = "Standalone Combat Timer",
               values = { free = "Free Move", topleft = "Top Left", topright = "Top Right",
                          bottomleft = "Bottom Left", bottomright = "Bottom Right" },
               order = { "free", "topleft", "topright", "bottomleft", "bottomright" },
@@ -1106,12 +1134,12 @@ initFrame:SetScript("OnEvent", function(self)
         iconVisRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Grow Direction",
               tooltip = "Direction the icon strip grows as new spells are cast.",
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              disabled = iconOff, disabledTooltip = "Icon History",
               values = shGrowValues, order = shGrowOrder,
               getValue = function() return SHDB().growDirection or "LEFT" end,
               setValue = function(v) SHDB().growDirection = v; RefreshSH() end },
             { type = "dropdown", text = "Visibility Options",
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              disabled = iconOff, disabledTooltip = "Icon History",
               values = { __placeholder = "..." }, order = { "__placeholder" },
               getValue = function() return "__placeholder" end,
               setValue = function() end }
@@ -1134,13 +1162,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Icon Size",
               min = 20, max = 60, step = 1,
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconSize or 36 end,
               setValue = function(v) SHDB().iconSize = v; RefreshSH() end },
             { type = "slider", text = "Max Icons",
               tooltip = "Maximum number of spell icons to display.",
               min = 1, max = 10, step = 1,
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconCount or 5 end,
               setValue = function(v) SHDB().iconCount = v; RefreshSH() end }
         );  y = y - h
@@ -1149,12 +1177,12 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Icon Spacing",
               min = 0, max = 10, step = 1,
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconSpacing or 1 end,
               setValue = function(v) SHDB().iconSpacing = v; RefreshSH() end },
             { type = "slider", text = "Opacity",
-              min = 0.1, max = 1, step = 0.05,
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              min = 0.1, max = 1, step = 0.01,
+              disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconOpacity or 1 end,
               setValue = function(v) SHDB().iconOpacity = v; RefreshSH() end }
         );  y = y - h
@@ -1168,7 +1196,7 @@ initFrame:SetScript("OnEvent", function(self)
         local shAnimOrder = { "none", "slide", "fly" }
         _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Animation Style",
-              disabled = iconOff, disabledTooltip = "Enable Icon History",
+              disabled = iconOff, disabledTooltip = "Icon History",
               values = shAnimValues, order = shAnimOrder,
               getValue = function() return SHDB().iconAnimation or "slide" end,
               setValue = function(v) SHDB().iconAnimation = v end },
@@ -1196,7 +1224,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "dropdown", text = "Visibility Options",
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               values = { __placeholder = "..." }, order = { "__placeholder" },
               getValue = function() return "__placeholder" end,
               setValue = function() end }
@@ -1219,12 +1247,12 @@ initFrame:SetScript("OnEvent", function(self)
         local bgRow
         bgRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Background Opacity",
-              min = 0, max = 1, step = 0.05,
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              min = 0, max = 1, step = 0.01,
+              disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().bgAlpha or 0.25 end,
               setValue = function(v) SHDB().bgAlpha = v; RefreshSH() end },
             { type = "toggle", text = "Hide Top Bar",
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().hideTopBar end,
               setValue = function(v) SHDB().hideTopBar = v; RefreshSH() end }
         );  y = y - h
@@ -1245,7 +1273,7 @@ initFrame:SetScript("OnEvent", function(self)
             block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10)
             block:EnableMouse(true)
             block:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Enable Bar History"))
+                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Bar History"))
             end)
             block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()
@@ -1263,13 +1291,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Bar Height",
               min = 12, max = 32, step = 1,
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().shBarHeight or 18 end,
               setValue = function(v) SHDB().shBarHeight = v; RefreshSH() end },
             { type = "slider", text = "Max Bars",
               tooltip = "Maximum number of bars to display. Window height adjusts automatically.",
               min = 1, max = 10, step = 1,
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().maxBars or 5 end,
               setValue = function(v) SHDB().maxBars = v; RefreshSH() end }
         );  y = y - h
@@ -1278,13 +1306,13 @@ initFrame:SetScript("OnEvent", function(self)
         local textRow
         textRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Bar Texture",
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               values = matchTexValues, order = matchTexOrder,
               getValue = function() return SHDB().spellHistoryBarTexture or "match" end,
               setValue = function(v) SHDB().spellHistoryBarTexture = v; RefreshSH() end },
             { type = "slider", text = "Text Size",
               min = 8, max = 16, step = 1,
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().textSize or 11 end,
               setValue = function(v) SHDB().textSize = v; RefreshSH() end }
         );  y = y - h
@@ -1292,7 +1320,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 5: Bar Color | Opacity
         _, h = W:DualRow(parent, y,
             { type = "multiSwatch", text = "Bar Color",
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              disabled = barOff, disabledTooltip = "Bar History",
               swatches = {
                   { tooltip = "Class Color",
                     hasAlpha = false,
@@ -1349,8 +1377,8 @@ initFrame:SetScript("OnEvent", function(self)
                     end },
               } },
             { type = "slider", text = "Opacity",
-              min = 0.1, max = 1, step = 0.05,
-              disabled = barOff, disabledTooltip = "Enable Bar History",
+              min = 0.1, max = 1, step = 0.01,
+              disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().barOpacity or 1 end,
               setValue = function(v) SHDB().barOpacity = v; RefreshSH() end }
         );  y = y - h
@@ -1412,7 +1440,7 @@ initFrame:SetScript("OnEvent", function(self)
                 block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10)
                 block:EnableMouse(true)
                 block:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Enable Bar History"))
+                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Bar History"))
                 end)
                 block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 return block

@@ -1,0 +1,5 @@
+# Locale files contain accented / CJK / Cyrillic characters and MUST be stored
+# as UTF-8 with LF line endings. This is a deliberate exception to the repo's
+# ASCII-only convention for code; never edit these with a tool that rewrites
+# them as UTF-16 (e.g. PowerShell Out-File without -Encoding utf8).
+Locales/*.lua text working-tree-encoding=UTF-8 eol=LF

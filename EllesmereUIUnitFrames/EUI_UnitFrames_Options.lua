@@ -1,13 +1,14 @@
 -------------------------------------------------------------------------------
 --  EUI_UnitFrames_Options.lua
 --  Registers the Unit Frames module with EllesmereUI
---  2 tabs: Frame Display, Mini Frame Edit
+--  4 tabs: Main Frames, Boss Frames, Mini Frames, Blizzard Aura Frames
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 
-local PAGE_DISPLAY   = "Frame Display"
-local PAGE_MINI      = "Mini Frame Edit"
-local PAGE_AURAS     = "Player Buffs & Debuffs"
+local PAGE_DISPLAY   = "Main Frames"
+local PAGE_BOSS      = "Boss Frames"
+local PAGE_MINI      = "Mini Frames"
+local PAGE_AURAS     = "Blizzard Aura Frames"
 local PAGE_UNLOCK    = "Unlock Mode"
 
 local initFrame = CreateFrame("Frame")
@@ -41,9 +42,8 @@ initFrame:SetScript("OnEvent", function(self)
     local function SetPVFont(fs, font, size)
         if not (fs and fs.SetFont) then return end
         local f = GetUFOptOutline()
+        if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, f == "") end
         fs:SetFont(font, size, f)
-        if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
-        else fs:SetShadowOffset(0, 0) end
     end
 
     ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     local showCombatIndicatorPreview = false
     -- Preview hover-highlight hint text (shared across Single/Multi tabs)
-    local _ufPreviewHintFS_display     -- hint FontString for Frame Display
+    local _ufPreviewHintFS_display     -- hint FontString for the Main Frames page
     local _displayHeaderBaseH = 0      -- display header height WITHOUT hint
 
     local function IsPreviewHintDismissed()
@@ -114,7 +114,8 @@ initFrame:SetScript("OnEvent", function(self)
         ["player"]       = "Player",
         ["target"]       = "Target",
         ["focus"]        = "Focus",
-        ["targettarget"] = "Focus Target / Target of Target",
+        ["targettarget"] = "Target of Target",
+        ["focustarget"]  = "Focus Target",
         ["pet"]          = "Pet",
         ["boss"]         = "Boss",
     }
@@ -126,6 +127,7 @@ initFrame:SetScript("OnEvent", function(self)
         ["target"]       = "right",
         ["focus"]        = "right",
         ["targettarget"] = "left",
+        ["focustarget"]  = "left",
         ["pet"]          = "left",
         ["boss"]         = "right",
     }
@@ -138,7 +140,8 @@ initFrame:SetScript("OnEvent", function(self)
         player       = function() return db.profile.player end,
         target       = function() return db.profile.target end,
         focus        = function() return db.profile.focus end,
-        targettarget = function() return db.profile.totPet end,
+        targettarget = function() return db.profile.targettarget end,
+        focustarget  = function() return db.profile.focustarget end,
         pet          = function() return db.profile.pet end,
         boss         = function() return db.profile.boss end,
     }
@@ -148,7 +151,8 @@ initFrame:SetScript("OnEvent", function(self)
         player       = "Player",
         target       = "Target",
         focus        = "Focus",
-        targettarget = "Focus Target / Target of Target",
+        targettarget = "Target of Target",
+        focustarget  = "Focus Target",
         pet          = "Pet",
         boss         = "Boss",
     }
@@ -165,21 +169,24 @@ initFrame:SetScript("OnEvent", function(self)
     local healthDisplayOrder = { "both", "curhpshort", "perhp" }
 
     ---------------------------------------------------------------------------
-    --  Health bar texture dropdown values (built from ns tables)
+    --  Health bar texture dropdown  built LIVE each render (mirrors
+    --  GetBorderTextureDropdown) so SharedMedia textures registered by other
+    --  addons after login ALWAYS appear. The shared ns tables are also kept
+    --  current by an LSM registration callback, so late packs are never missed.
     ---------------------------------------------------------------------------
-    -- Append SharedMedia textures so the dropdown includes SM entries
-    if EllesmereUI.AppendSharedMediaTextures then
-        EllesmereUI.AppendSharedMediaTextures(
-            ns.healthBarTextureNames or {},
-            ns.healthBarTextureOrder or {},
-            nil,
-            ns.healthBarTextures
-        )
-    end
+    local function BuildBarTexDropdown()
+        -- Refresh the shared snapshot from LSM (registers this consumer for the
+        -- late-registration callback on first call; idempotent thereafter).
+        if EllesmereUI.AppendSharedMediaTextures then
+            EllesmereUI.AppendSharedMediaTextures(
+                ns.healthBarTextureNames or {},
+                ns.healthBarTextureOrder or {},
+                nil,
+                ns.healthBarTextures
+            )
+        end
 
-    local hbtValues = {}
-    local hbtOrder = {}
-    do
+        local hbtValues, hbtOrder = {}, {}
         local texNames = ns.healthBarTextureNames or {}
         local texOrder2 = ns.healthBarTextureOrder or {}
         for _, key in ipairs(texOrder2) do
@@ -230,6 +237,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end,
         }
+        return hbtValues, hbtOrder
     end
 
     ---------------------------------------------------------------------------
@@ -280,9 +288,13 @@ initFrame:SetScript("OnEvent", function(self)
         ["curhpshort"]   = "Health #",
         ["perhpnum"]     = "Health % | #",
         ["both"]         = "Health # | %",
+        ["absorb"]       = "Absorb Amount",
+        ["absorbshort"]  = "Absorb Short (230k)",
+        ["group"]        = "Group Number",
         ["none"]         = "None",
     }
     local healthTextOrder = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both" }
+    local healthTextOrderPlayer = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "absorb", "absorbshort", "group" }
 
     -- Text bar (BTB) text dropdown values (includes power options)
     local btbTextValues = {
@@ -453,6 +465,30 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- === MASK ===
+        if shape == "none" then
+            -- "None": remove mask, border, and background
+            if pFrame._previewBg then pFrame._previewBg:Hide() end
+            if pFrame._shapeMask then
+                for _, tex in ipairs(texList) do pcall(tex.RemoveMaskTexture, tex, pFrame._shapeMask) end
+                pFrame._shapeMask:Hide()
+            end
+            if pFrame._shapeBorderTex then pFrame._shapeBorderTex:Hide() end
+            if pFrame._sqBorderTexs then
+                for _, t in ipairs(pFrame._sqBorderTexs) do t:Hide() end
+            end
+            if pFrame._previewTex then
+                pFrame._previewTex:ClearAllPoints()
+                pFrame._previewTex:SetPoint("TOPLEFT", pFrame, "TOPLEFT", 0, 0)
+                pFrame._previewTex:SetPoint("BOTTOMRIGHT", pFrame, "BOTTOMRIGHT", 0, 0)
+            end
+            if pFrame._previewModel then
+                pFrame._previewModel:ClearAllPoints()
+                pFrame._previewModel:SetPoint("TOPLEFT", pFrame, "TOPLEFT", 0, 0)
+                pFrame._previewModel:SetPoint("BOTTOMRIGHT", pFrame, "BOTTOMRIGHT", 0, 0)
+            end
+            return
+        end
+        if pFrame._previewBg then pFrame._previewBg:Show() end
         local maskPath = PORTRAIT_MASKS_P[shape]
         if maskPath then
             if not pFrame._shapeMask then
@@ -560,6 +596,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Detached portrait shape dropdown values
     local detPortraitShapeValues = {
+        ["none"]     = "None",
         ["portrait"] = "Portrait",
         ["circle"]   = "Circle",
         ["square"]   = "Square",
@@ -568,7 +605,7 @@ initFrame:SetScript("OnEvent", function(self)
         ["hexagon"]  = "Hexagon",
         ["shield"]   = "Shield",
     }
-    local detPortraitShapeOrder = { "portrait", "circle", "square", "csquare", "diamond", "hexagon", "shield" }
+    local detPortraitShapeOrder = { "none", "portrait", "circle", "square", "csquare", "diamond", "hexagon", "shield" }
 
     -- Text Bar position dropdown values
     local btbPositionValues = {
@@ -661,6 +698,7 @@ initFrame:SetScript("OnEvent", function(self)
         _previewCreatureNames.focus        = PREVIEW_ENEMY_NAMES[math.random(#PREVIEW_ENEMY_NAMES)]
         _previewCreatureNames.pet          = PREVIEW_ENEMY_NAMES[math.random(#PREVIEW_ENEMY_NAMES)]
         _previewCreatureNames.targettarget = PREVIEW_ENEMY_NAMES[math.random(#PREVIEW_ENEMY_NAMES)]
+        _previewCreatureNames.focustarget  = PREVIEW_ENEMY_NAMES[math.random(#PREVIEW_ENEMY_NAMES)]
         _previewCreatureNames.boss         = PREVIEW_BOSS_NAMES[math.random(#PREVIEW_BOSS_NAMES)]
         -- Randomize player cast spell (validate cast time via API, skip instants)
         local _, classToken = UnitClass("player")
@@ -704,6 +742,25 @@ initFrame:SetScript("OnEvent", function(self)
 
 
     local function BuildUnitPreview(parent, unitKey, side)
+        -- Preview fill coloring with optional additive gradient (mirrors real frames).
+        local function PV_FillColor(tex, texPath, br, bg, bb, gEnabled, gColor, gDir, alpha)
+            if not tex then return end
+            if gEnabled then
+                local gr, gg, gbb = 0.20, 0.20, 0.80
+                if gColor then gr, gg, gbb = gColor.r, gColor.g, gColor.b end
+                if texPath then tex:SetTexture(texPath) else tex:SetColorTexture(1, 1, 1, 1) end
+                tex:SetVertexColor(1, 1, 1, 1)
+                -- A gradient overrides the texture's region alpha, so Bar Opacity
+                -- is baked into the gradient endpoint alphas.
+                local a = alpha or 1
+                tex:SetGradient(gDir or "HORIZONTAL", CreateColor(br, bg, bb, a), CreateColor(gr, gg, gbb, a))
+            elseif texPath then
+                tex:SetTexture(texPath)
+                tex:SetVertexColor(br, bg, bb, 1)
+            else
+                tex:SetColorTexture(br, bg, bb, 1)
+            end
+        end
         local p = db.profile
         local settings
         if unitKey == "player" then settings = p.player
@@ -711,14 +768,15 @@ initFrame:SetScript("OnEvent", function(self)
         elseif unitKey == "focus" then settings = p.focus
         elseif unitKey == "pet" then settings = p.pet
         elseif unitKey == "boss" then settings = p.boss
-        elseif unitKey == "targettarget" then settings = p.totPet
+        elseif unitKey == "targettarget" then settings = p.targettarget
+        elseif unitKey == "focustarget" then settings = p.focustarget
         else settings = p.player end
 
         side = side or "left"
 
         -- Mini frames (ToT/FoT/Pet) don't render power bars, debuffs, or
         -- castbars at runtime, so the preview must match.
-        local isMiniPreview = (unitKey == "targettarget" or unitKey == "pet")
+        local isMiniPreview = (unitKey == "targettarget" or unitKey == "focustarget" or unitKey == "pet")
         local noPowerPreview = isMiniPreview
         local noDebuffPreview = isMiniPreview
         local noCastbarPreview = isMiniPreview
@@ -829,9 +887,10 @@ initFrame:SetScript("OnEvent", function(self)
                 return portraitModel
             end
 
-            -- Track last applied mode+style to avoid redundant re-init
+            -- Track last applied mode+style+zoom to avoid redundant re-init
             local _lastAppliedMode = nil
             local _lastAppliedStyle = nil
+            local _lastAppliedZoom = nil
 
             local function ApplyPortraitMode()
                 -- Read settings fresh from DB so the closure never goes stale
@@ -842,21 +901,28 @@ initFrame:SetScript("OnEvent", function(self)
                 elseif unitKey == "focus" then curSettings = db.profile.focus
                 elseif unitKey == "pet" then curSettings = db.profile.pet
                 elseif unitKey == "boss" then curSettings = db.profile.boss
-                elseif unitKey == "targettarget" then curSettings = db.profile.totPet
+                elseif unitKey == "targettarget" then curSettings = db.profile.targettarget
+                elseif unitKey == "focustarget" then curSettings = db.profile.focustarget
                 else curSettings = db.profile.player end
                 local mode = curSettings.portraitMode or "2d"
                 local style = curSettings.classThemeStyle or "modern"
+                local zoom = (curSettings.portraitArtScale or 100) + (curSettings.portrait3dZoom or 100) * 1000
                 -- Skip if nothing changed -- avoids re-initializing PlayerModel
                 -- every Update() call which causes blinking and massive GPU cost
-                if mode == _lastAppliedMode and style == _lastAppliedStyle then return end
+                if mode == _lastAppliedMode and style == _lastAppliedStyle and zoom == _lastAppliedZoom then return end
                 _lastAppliedMode = mode
                 _lastAppliedStyle = style
+                _lastAppliedZoom = zoom
                 if mode == "3d" then
                     portraitFrame:Show()
                     portraitTex:Hide()
                     local pm = EnsurePreviewModel()
                     pm:SetUnit("player")
                     pm:SetCamera(0)
+                    pm:SetPortraitZoom(1)
+                    pm:SetPosition(0, 0, 0)
+                    local camScale = (curSettings.portrait3dZoom or 100) / 100
+                    pm:SetCamDistanceScale(camScale)
                     pm:Show()
                 elseif mode == "class" then
                     portraitFrame:Show()
@@ -932,7 +998,7 @@ initFrame:SetScript("OnEvent", function(self)
             else
                 bgR, bgG, bgB = 17/255, 17/255, 17/255
             end
-            bgA = barOpacity
+            bgA = (settings.customBgAlpha or 100) / 100
         end
 
         -- Health bar
@@ -967,7 +1033,7 @@ initFrame:SetScript("OnEvent", function(self)
         healthFill:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
         healthFill:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
         healthFill:SetWidth(math.floor(frameW * (_previewHealthPct or 0.70) + 0.5))
-        healthFill:SetColorTexture(hR, hG, hB, 1)
+        PV_FillColor(healthFill, nil, hR, hG, hB, (not isDarkTheme) and settings.gradientEnabled, settings.gradientColor, settings.gradientDir, hA)
         healthFill:SetAlpha(hA)
         pf._healthFill = healthFill
         pf._hR, pf._hG, pf._hB, pf._hA = hR, hG, hB, hA
@@ -1035,6 +1101,14 @@ initFrame:SetScript("OnEvent", function(self)
                 local pct = _previewHealthPct or 0.70
                 local ppPct3 = _previewPowerPct or 0.85
                 return math.floor(pct * 100) .. "% | " .. math.floor(ppPct3 * 100) .. "%"
+            elseif content == "absorb" then
+                local maxHP = UnitHealthMax("player") or 1
+                return string.format("%d", math.floor(maxHP * 0.14))
+            elseif content == "absorbshort" then
+                local maxHP = UnitHealthMax("player") or 1
+                return AbbreviateNumbers(math.floor(maxHP * 0.14))
+            elseif content == "group" then
+                return "3"
             else
                 return ""
             end
@@ -1062,7 +1136,12 @@ initFrame:SetScript("OnEvent", function(self)
         local function PreviewPowerColor(fs, contentKey, usePowerColor)
             if not fs or not usePowerColor then return end
             if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-                fs:SetTextColor(0, 0, 1)
+                -- EUI global power color (player's current power), matching the
+                -- real frame -- not hardcoded blue.
+                local _, pToken = UnitPowerType("player")
+                local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                if info then fs:SetTextColor(info.r, info.g, info.b)
+                else fs:SetTextColor(1, 1, 1) end
             end
         end
         local function ApplyPreviewTextPositions(s, donorS)
@@ -1081,12 +1160,10 @@ initFrame:SetScript("OnEvent", function(self)
             local cyo = s.centerTextY or 0
 
 
-            -- Center text: if active, hide left/right
+            -- Each text position renders independently; Center no longer hides Left/Right.
+            centerFS:SetFont(PREVIEW_FONT, csz, GetUFOptOutline())
+            centerFS:ClearAllPoints()
             if cc ~= "none" then
-                leftFS:Hide()
-                rightFS:Hide()
-                centerFS:SetFont(PREVIEW_FONT, csz, GetUFOptOutline())
-                centerFS:ClearAllPoints()
                 centerFS:SetJustifyH("CENTER")
                 PP.Point(centerFS, "CENTER", textOverlay, "CENTER", cxo, cyo)
                 centerFS:SetText(PreviewTextForContent(cc, s))
@@ -1094,39 +1171,40 @@ initFrame:SetScript("OnEvent", function(self)
                 PreviewClassColor(centerFS, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             else
                 centerFS:Hide()
-                leftFS:SetFont(PREVIEW_FONT, lsz, GetUFOptOutline())
-                leftFS:ClearAllPoints()
-                if lc ~= "none" then
-                    leftFS:SetJustifyH("LEFT")
-                    PP.Point(leftFS, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
-                    -- Constrain width when opposing right text exists (matches live frame truncation)
-                    local barW = s.frameWidth or 181
-                    if rc ~= "none" then
-                        local UF_TEXT_PADDING = 10
-                        local ufTW = { both = 75, curhpshort = 38, perhp = 38, perpp = 38, curpp = 38, curhp_curpp = 75, perhp_perpp = 75 }
-                        local rightUsed = (ufTW[rc] or 0) + UF_TEXT_PADDING
-                        PP.Width(leftFS, math.max(barW - rightUsed - 10, 20))
-                    else
-                        leftFS:SetWidth(0)
-                    end
-                    leftFS:SetText(PreviewTextForContent(lc, s))
-                    leftFS:Show()
-                    PreviewClassColor(leftFS, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
-                else
-                    leftFS:Hide()
-                end
+            end
 
-                rightFS:SetFont(PREVIEW_FONT, rsz, GetUFOptOutline())
-                rightFS:ClearAllPoints()
+            leftFS:SetFont(PREVIEW_FONT, lsz, GetUFOptOutline())
+            leftFS:ClearAllPoints()
+            if lc ~= "none" then
+                leftFS:SetJustifyH("LEFT")
+                PP.Point(leftFS, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
+                -- Constrain width when opposing right text exists (matches live frame truncation)
+                local barW = s.frameWidth or 181
                 if rc ~= "none" then
-                    rightFS:SetJustifyH("RIGHT")
-                    PP.Point(rightFS, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                    rightFS:SetText(PreviewTextForContent(rc, s))
-                    rightFS:Show()
-                    PreviewClassColor(rightFS, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+                    local UF_TEXT_PADDING = 10
+                    local ufTW = { both = 75, curhpshort = 38, perhp = 38, perpp = 38, curpp = 38, curhp_curpp = 75, perhp_perpp = 75 }
+                    local rightUsed = (ufTW[rc] or 0) + UF_TEXT_PADDING
+                    PP.Width(leftFS, math.max(barW - rightUsed - 10, 20))
                 else
-                    rightFS:Hide()
+                    leftFS:SetWidth(0)
                 end
+                leftFS:SetText(PreviewTextForContent(lc, s))
+                leftFS:Show()
+                PreviewClassColor(leftFS, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
+            else
+                leftFS:Hide()
+            end
+
+            rightFS:SetFont(PREVIEW_FONT, rsz, GetUFOptOutline())
+            rightFS:ClearAllPoints()
+            if rc ~= "none" then
+                rightFS:SetJustifyH("RIGHT")
+                PP.Point(rightFS, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
+                rightFS:SetText(PreviewTextForContent(rc, s))
+                rightFS:Show()
+                PreviewClassColor(rightFS, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
+            else
+                rightFS:Hide()
             end
         end
         ApplyPreviewTextPositions(settings)
@@ -1168,8 +1246,8 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local powerOpacity = (settings.powerBarOpacity or 100) / 100
             powerBg:SetColorTexture(pbR, pbG, pbB, 1)
-            powerBg:SetAlpha(powerOpacity)
-            powerFill:SetColorTexture(pfR, pfG, pfB, 1)
+            powerBg:SetAlpha((settings.customPowerBgAlpha or 100) / 100)
+            PV_FillColor(powerFill, nil, pfR, pfG, pfB, settings.powerGradientEnabled, settings.powerGradientColor, settings.powerGradientDir, powerOpacity)
             powerFill:SetAlpha(powerOpacity)
             -- Initial anchor based on power position
             if initPpPos == "none" then
@@ -1201,8 +1279,7 @@ initFrame:SetScript("OnEvent", function(self)
             local texPath = (ns.healthBarTextures or {})[texKey]
 
             if texPath then
-                healthFill:SetTexture(texPath)
-                healthFill:SetVertexColor(hR, hG, hB, 1)
+                PV_FillColor(healthFill, texPath, hR, hG, hB, (not isDarkTheme) and settings.gradientEnabled, settings.gradientColor, settings.gradientDir, hA)
             end
             if pf._powerFill and powerH > 0 then
                 local txR, txG, txB
@@ -1217,13 +1294,7 @@ initFrame:SetScript("OnEvent", function(self)
                     else txR, txG, txB = 0, 0, 1 end
                 end
                 pf._pR, pf._pG, pf._pB = txR, txG, txB
-                if texPath then
-                    pf._powerFill:SetTexture(texPath)
-                    pf._powerFill:SetVertexColor(txR, txG, txB, 1)
-                else
-                    pf._powerFill:SetVertexColor(1, 1, 1, 1)
-                    pf._powerFill:SetColorTexture(txR, txG, txB, 1)
-                end
+                PV_FillColor(pf._powerFill, texPath, txR, txG, txB, settings.powerGradientEnabled, settings.powerGradientColor, settings.powerGradientDir, powerOpacity)
             end
         end
 
@@ -1233,8 +1304,20 @@ initFrame:SetScript("OnEvent", function(self)
         local castTimeFS, castTargetFS
         if shouldCreateCastbar then
             local initCH = (unitKey == "player") and (castbarH > 0 and castbarH or 14) or castbarH
+            -- Cast icon "part of the bar": when on, the bar (bg + border + fill)
+            -- shrinks from the left and the icon (anchored to the bar's left edge)
+            -- fills the freed space, keeping the right edge fixed -- exactly like
+            -- the real cast bar. Off = icon hangs outside the left, bar full width.
+            local pvCastIconW = initCH + 1
+            local pvCastIconInWidth
+            if unitKey == "player" then
+                pvCastIconInWidth = settings.showPlayerCastIcon ~= false and settings.playerCastbarIconInWidth ~= false
+            else
+                pvCastIconInWidth = settings.showCastIcon ~= false and settings.castbarIconInWidth ~= false
+            end
+            local pvBarW = pvCastIconInWidth and math.max(1, totalW - pvCastIconW) or totalW
             castbar = CreateFrame("Frame", nil, pf)
-            PP.Size(castbar, totalW, initCH)
+            PP.Size(castbar, pvBarW, initCH)
             local cbAnchor = power or health
             local cbOffset = 0
             if showPortrait and side == "right" then
@@ -1242,7 +1325,11 @@ initFrame:SetScript("OnEvent", function(self)
             elseif showPortrait and side == "left" then
                 cbOffset = -(portraitW / 2)
             end
-            PP.Point(castbar, "TOP", cbAnchor, "BOTTOM", cbOffset, 0)
+            -- Shift the narrower bar right by half the icon width so the footprint
+            -- stays centered where the full bar was (right edge unchanged).
+            castbar._cbAnchor = cbAnchor
+            castbar._cbOffset = cbOffset
+            PP.Point(castbar, "TOP", cbAnchor, "BOTTOM", cbOffset + (pvCastIconInWidth and (pvCastIconW / 2) or 0), 0)
             if castbarH > 0 then
                 totalH = totalH + castbarH
             end
@@ -1251,15 +1338,17 @@ initFrame:SetScript("OnEvent", function(self)
             local cbBg = castbar:CreateTexture(nil, "BACKGROUND")
             cbBg:SetAllPoints(castbar)
             cbBg:SetColorTexture(0, 0, 0, 0.5)
+            castbar._previewBgTex = cbBg
 
             -- Black borders via unified PP system
             PP.CreateBorder(castbar, 0, 0, 0, 1, 1, "OVERLAY", 0)
 
-            -- Cast fill (inset 1px from left, 1px from bottom to sit inside borders)
+            -- Cast fill fills the (possibly shortened) bar.
             castFill = castbar:CreateTexture(nil, "ARTWORK")
             PP.Point(castFill, "TOPLEFT", castbar, "TOPLEFT", 1, 0)
             PP.Point(castFill, "BOTTOMLEFT", castbar, "BOTTOMLEFT", 1, 1)
-            PP.Width(castFill, (totalW - 2) * (_previewCastFill or 0.6))
+            PP.Width(castFill, math.max(0, pvBarW - 2) * (_previewCastFill or 0.6))
+            -- Initial placeholder; real color + bar texture applied in the Update closure.
             castFill:SetColorTexture(0.114, 0.655, 0.514, 1)
 
             -- Cast spell name and icon -- class spell for player, generic for enemies
@@ -1330,6 +1419,8 @@ initFrame:SetScript("OnEvent", function(self)
             local iconSize = initCH + 1
             castIconFrame = CreateFrame("Frame", nil, pf)
             PP.Size(castIconFrame, iconSize, iconSize)
+            -- Icon hangs off the bar's left edge; when "part of the bar" is on the
+            -- bar is narrower + shifted right (above), so the icon sits inside.
             PP.Point(castIconFrame, "TOPRIGHT", castbar, "TOPLEFT", 1, 1)
             -- Black background
             local iconBg = castIconFrame:CreateTexture(nil, "BACKGROUND")
@@ -1588,16 +1679,24 @@ initFrame:SetScript("OnEvent", function(self)
         if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
             local absStyle = settings.showPlayerAbsorb
             local PREV_ABS_TEX = {
-                striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
-                clean    = "Interface\\Buttons\\WHITE8X8",
-                blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+                striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+                stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
+                clean           = "Interface\\Buttons\\WHITE8X8",
+                blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
             }
-            local PREV_ABS_ALPHA = { striped = 0.8, clean = 0.3, blizzard = 0.8 }
+            local PREV_ABS_ALPHA = { striped = 0.8, stripedReversed = 0.8, clean = (settings.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
             local tex   = PREV_ABS_TEX[absStyle] or PREV_ABS_TEX.striped
-            local alpha = PREV_ABS_ALPHA[absStyle] or 0.8
+            -- Effective opacity/color: mirrors GetAbsorbOpacity in EllesmereUIUnitFrames.lua
+            local alpha = settings.absorbOpacity and (settings.absorbOpacity / 100) or PREV_ABS_ALPHA[absStyle] or 0.8
+            local ac = settings.absorbColor or { r = 1, g = 1, b = 1 }
             absorbBar = CreateFrame("StatusBar", nil, health)
             absorbBar:SetStatusBarTexture(tex)
-            absorbBar:SetStatusBarColor(1, 1, 1, alpha)
+            local absFillTex = absorbBar:GetStatusBarTexture()
+            if absFillTex then
+                local absTiled = (absStyle == "stripedReversed")
+                absFillTex:SetHorizTile(absTiled); absFillTex:SetVertTile(absTiled)
+            end
+            absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
             if settings.healthReverseFill then
                 absorbBar:SetReverseFill(false)
                 PP.Point(absorbBar, "TOPLEFT", healthFill, "TOPLEFT", 0, 0)
@@ -1614,6 +1713,7 @@ initFrame:SetScript("OnEvent", function(self)
             absorbBar:SetFrameLevel(health:GetFrameLevel() + 1)
             if not absStyle or absStyle == "none" then absorbBar:Hide() end
         end
+        pf._absorbBar = absorbBar
 
         -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
         local buffIcons = {}
@@ -1663,6 +1763,39 @@ initFrame:SetScript("OnEvent", function(self)
                 tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
                 tex:SetTexture(previewDebuffIcons[i] or 136116)
                 df._iconTex = tex
+                -- Static fake cooldown swipe (huge duration parked at a fixed
+                -- fraction so the wedge never visibly moves) plus manual static
+                -- duration / stack text. Shown only on the boss preview in
+                -- pf:Update; sizing/visibility follow the boss aura settings.
+                local cd = CreateFrame("Cooldown", nil, df, "CooldownFrameTemplate")
+                cd:SetPoint("TOPLEFT", df, "TOPLEFT", 1, -1)
+                cd:SetPoint("BOTTOMRIGHT", df, "BOTTOMRIGHT", -1, 1)
+                cd:SetFrameLevel(df:GetFrameLevel() + 1)
+                cd:SetDrawEdge(false)
+                cd:SetDrawBling(false)
+                cd:SetReverse(false)
+                cd:SetDrawSwipe(true)
+                cd:SetSwipeColor(0, 0, 0, 0.6)
+                cd:SetHideCountdownNumbers(true)
+                local frac = 0.25 + (((i - 1) % 5) * 0.15)
+                cd:SetCooldown(GetTime() - 3600 * (1 - frac), 3600)
+                cd:Hide()
+                df._previewCD = cd
+                local textHost = CreateFrame("Frame", nil, df)
+                textHost:SetAllPoints(df)
+                textHost:SetFrameLevel(cd:GetFrameLevel() + 1)
+                local pvFontP = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
+                local durText = textHost:CreateFontString(nil, "OVERLAY", nil, 7)
+                EllesmereUI.ApplyIconTextFont(durText, pvFontP, 10, "unitFrames")
+                durText:SetPoint("CENTER", df, "CENTER", 0, 0)
+                durText:SetText(4 + ((i - 1) % 5) * 5)
+                durText:Hide()
+                df._durText = durText
+                local stackText = textHost:CreateFontString(nil, "OVERLAY", nil, 7)
+                EllesmereUI.ApplyIconTextFont(stackText, pvFontP, 14, "unitFrames")
+                stackText:SetText(2 + ((i - 1) % 5))
+                stackText:Hide()
+                df._stackText = stackText
                 debuffIcons[i] = df
                 if noDebuffPreview or (settings.debuffAnchor or "bottomleft") == "none" then df:Hide() end
             end
@@ -1678,7 +1811,7 @@ initFrame:SetScript("OnEvent", function(self)
         local disabledText = disabledOverlay:CreateFontString(nil, "OVERLAY")
         SetPVFont(disabledText, PREVIEW_FONT, 11)
         disabledText:SetTextColor(1, 1, 1)
-        disabledText:SetText("Disabled")
+        disabledText:SetText(EllesmereUI.L("Disabled"))
         -- Position overlay and text relative to pf/health (updated in Update and on show)
         local function SyncDisabledOverlay()
             disabledOverlay:ClearAllPoints()
@@ -1722,11 +1855,12 @@ initFrame:SetScript("OnEvent", function(self)
             elseif unitKey == "focus" then s = db.profile.focus
             elseif unitKey == "pet" then s = db.profile.pet
             elseif unitKey == "boss" then s = db.profile.boss
-            elseif unitKey == "targettarget" then s = db.profile.totPet
+            elseif unitKey == "targettarget" then s = db.profile.targettarget
+            elseif unitKey == "focustarget" then s = db.profile.focustarget
             else s = db.profile.player end
 
             -- Donor settings for mini frames (border/texture/font inherit from focus player)
-            local isMini = (unitKey == "pet" or unitKey == "boss" or unitKey == "targettarget")
+            local isMini = (unitKey == "pet" or unitKey == "boss" or unitKey == "targettarget" or unitKey == "focustarget")
             local ds = s
             if isMini then
                 local ef = db.profile.enabledFrames
@@ -1791,13 +1925,15 @@ initFrame:SetScript("OnEvent", function(self)
             local pSizeAdj = sp and (s.portraitSize or 0) or 0
             local pXOff = sp and (s.portraitX or 0) or 0
             local pYOff = sp and (s.portraitY or 0) or 0
-            if not isAttached then pSizeAdj = pSizeAdj + 10; pYOff = pYOff + 5 end
+            local pvIsInside = (side == "insideleft" or side == "insideright" or side == "insidecenter")
+            if not isAttached and not pvIsInside then pSizeAdj = pSizeAdj + 10; pYOff = pYOff + 5 end
             local portraitDim = bh2 + pSizeAdj  -- portrait width & height
             if portraitDim < 8 then portraitDim = 8 end
-            -- For attached, "top" falls back to default side
+            -- For attached, "top" and "inside*" fall back to default side
             local effectiveSide = side
-            if isAttached and side == "top" then
+            if isAttached and (side == "top" or pvIsInside) then
                 effectiveSide = unitSide[unitKey] or "left"
+                pvIsInside = false
             end
             local pw = (sp and isAttached and effectiveSide ~= "top") and portraitDim or 0
             local tw = fw + pw
@@ -1814,9 +1950,27 @@ initFrame:SetScript("OnEvent", function(self)
             local pvPwAbove = (pvPpPos == "above") and ph or 0
 
             if portraitFrame and sp then
-                PP.Size(portraitFrame, portraitDim, portraitDim)
-                if isAttached then
+                if pvIsInside then
+                    PP.Size(portraitFrame, portraitDim, bh2)
+                else
+                    PP.Size(portraitFrame, portraitDim, portraitDim)
+                end
+                if pvIsInside then
+                    -- Inside: portrait overlays the health bar
+                    PP.Point(health, "TOPLEFT", barArea, "TOPLEFT", 0, -cpAboveH - btbTopOff - pvPwAbove)
+                    portraitFrame:SetClipsChildren(true)
+                    if portraitFrame._previewBg then portraitFrame._previewBg:Hide() end
+                    if effectiveSide == "insideleft" then
+                        portraitFrame:SetPoint("TOPLEFT", health, "TOPLEFT", pXOff, pYOff)
+                    elseif effectiveSide == "insideright" then
+                        portraitFrame:SetPoint("TOPRIGHT", health, "TOPRIGHT", pXOff, pYOff)
+                    else -- insidecenter
+                        portraitFrame:SetPoint("TOP", health, "TOP", pXOff, pYOff)
+                    end
+                elseif isAttached then
                     -- Attached: portrait to barArea, then health to portrait
+                    portraitFrame:SetClipsChildren(true)
+                    if portraitFrame._previewBg then portraitFrame._previewBg:Show() end
                     if effectiveSide == "left" then
                         portraitFrame:SetPoint("TOPLEFT", barArea, "TOPLEFT", 0, 0)
                         PP.Point(health, "TOPLEFT", portraitFrame, "TOPRIGHT", 0, -cpAboveH - btbTopOff - pvPwAbove)
@@ -1826,6 +1980,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 else
                     -- Detached: health to barArea, then portrait floats
+                    if portraitFrame._previewBg then portraitFrame._previewBg:Show() end
                     PP.Point(health, "TOPLEFT", barArea, "TOPLEFT", 0, -cpAboveH - btbTopOff - pvPwAbove)
                     if effectiveSide == "top" then
                         -- Top: portrait centered above health bar
@@ -1918,13 +2073,9 @@ initFrame:SetScript("OnEvent", function(self)
                     local curTexKey = s.healthBarTexture or db.profile.healthBarTexture or "none"
                     local curTexPath = (ns.healthBarTextures or {})[curTexKey]
                     if healthFill then
-                        if curTexPath then
-                            healthFill:SetTexture(curTexPath)
-                            healthFill:SetVertexColor(uHR, uHG, uHB, 1)
-                        else
-                            healthFill:SetVertexColor(1, 1, 1, 1)
-                            healthFill:SetColorTexture(uHR, uHG, uHB, 1)
-                        end
+                        local hGA = s.healthBarOpacity or 90
+                        if hGA > 1.0 then hGA = hGA / 100 end
+                        PV_FillColor(healthFill, curTexPath, uHR, uHG, uHB, (not isDark) and s.gradientEnabled, s.gradientColor, s.gradientDir, hGA)
                     end
                     if pf._powerFill then
                         local pvFR, pvFG, pvFB
@@ -1957,7 +2108,7 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     local barOp = (s.healthBarOpacity or 90) / 100
                     hFillA = barOp
-                    hBgA   = barOp
+                    hBgA   = (s.customBgAlpha or 100) / 100
                 end
                 if healthFill then healthFill:SetAlpha(hFillA) end
                 if healthBgColor then healthBgColor:SetAlpha(hBgA) end
@@ -1976,6 +2127,11 @@ initFrame:SetScript("OnEvent", function(self)
                     pvPw = s.powerWidth
                 end
                 PP.Size(power, pvPw, ph)
+                if pvPpIsDet and db.profile.enableCustomBarStratas then
+                    power:SetFrameLevel(pf:GetFrameLevel() + 40)
+                elseif pvPpIsDet then
+                    power:SetFrameLevel(pf:GetFrameLevel() + 3)
+                end
                 power:ClearAllPoints()
                 if pvPpPos == "none" then
                     power:Hide()
@@ -2006,10 +2162,11 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Width(pf._powerFill, math.floor(pvPw * (_previewPowerPct or 0.85) + 0.5))
                 end
 
-                -- Apply power bar opacity from unified setting
+                -- Apply power bar opacity from unified setting. The fill's region alpha
+                -- is set AFTER PV_FillColor below (the texture/vertex call would otherwise
+                -- leave it at full opacity) -- mirrors ApplyPowerBarAlpha on the real frame.
                 local pOpacity = (s.powerBarOpacity or 100) / 100
-                if pf._powerFill then pf._powerFill:SetAlpha(pOpacity) end
-                if pf._powerBg then pf._powerBg:SetAlpha(pOpacity) end
+                if pf._powerBg then pf._powerBg:SetAlpha((s.customPowerBgAlpha or 100) / 100) end
 
                 -- Apply power bar colors
                 local pvPfR, pvPfG, pvPfB
@@ -2030,12 +2187,10 @@ initFrame:SetScript("OnEvent", function(self)
                 if pf._powerFill then
                     local curTK = s.healthBarTexture or db.profile.healthBarTexture or "none"
                     local curTP = (ns.healthBarTextures or {})[curTK]
-                    if curTP then
-                        pf._powerFill:SetTexture(curTP)
-                        pf._powerFill:SetVertexColor(pvPfR, pvPfG, pvPfB, 1)
-                    else
-                        pf._powerFill:SetColorTexture(pvPfR, pvPfG, pvPfB, 1)
-                    end
+                    PV_FillColor(pf._powerFill, curTP, pvPfR, pvPfG, pvPfB, s.powerGradientEnabled, s.powerGradientColor, s.powerGradientDir, pOpacity)
+                    -- Region alpha last (a gradient bakes opacity into its endpoints, so
+                    -- keep it at 1 then to avoid double-dimming) -- matches the real frame.
+                    pf._powerFill:SetAlpha(s.powerGradientEnabled and 1 or pOpacity)
                 end
                 if pf._powerBg then pf._powerBg:SetColorTexture(pvPbR, pvPbG, pvPbB, 1) end
             end
@@ -2076,7 +2231,12 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     ppPreviewFS:SetText(ppTxt)
                     if s.powerPercentTextPowerColor then
-                        ppPreviewFS:SetTextColor(0, 0, 1)
+                        -- EUI global power color (player's current power), matching
+                        -- the swatch and the real frame -- not hardcoded blue.
+                        local _, pToken = UnitPowerType("player")
+                        local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                        if info then ppPreviewFS:SetTextColor(info.r, info.g, info.b)
+                        else ppPreviewFS:SetTextColor(1, 1, 1) end
                     else
                         local ptc = s.powerTextColor
                         if ptc then
@@ -2119,14 +2279,19 @@ initFrame:SetScript("OnEvent", function(self)
                     local btbW2 = btbIsDetached and (s.btbWidth or 0) or 0
                     local btbTW = (btbW2 > 0 and btbIsDetached) and btbW2 or tw
                     PP.Size(btbFrame, btbTW, btbH2)
+                    if btbIsDetached and db.profile.enableCustomBarStratas then
+                        btbFrame:SetFrameLevel(pf:GetFrameLevel() + 50)
+                    elseif btbIsDetached then
+                        btbFrame:SetFrameLevel(pf:GetFrameLevel() + 3)
+                    end
                     btbFrame:ClearAllPoints()
                     local btbPvAnchor = (pvPpIsAtt and power and power:IsShown()) and power or health
                     if btbPos == "top" then
                         PP.Point(btbFrame, "BOTTOM", health, "TOP", cbOff, 0)
                     elseif btbPos == "detached_top" then
-                        btbFrame:SetPoint("BOTTOM", health, "TOP", s.btbX or 0, 15 + (s.btbY or 0))
+                        btbFrame:SetPoint("BOTTOM", pf, "TOP", s.btbX or 0, 15 + (s.btbY or 0))
                     elseif btbPos == "detached_bottom" then
-                        btbFrame:SetPoint("TOP", btbPvAnchor, "BOTTOM", s.btbX or 0, -15 + (s.btbY or 0))
+                        btbFrame:SetPoint("TOP", pf, "BOTTOM", s.btbX or 0, -15 + (s.btbY or 0))
                     else
                         PP.Point(btbFrame, "TOP", btbPvAnchor, "BOTTOM", cbOff, 0)
                     end
@@ -2142,8 +2307,28 @@ initFrame:SetScript("OnEvent", function(self)
 
             if castbar then
                 if ch > 0 then
-                    castbar:SetSize(tw, ch)
+                    -- Cast icon "part of the bar": shrink the bar from the left +
+                    -- shift it right so the icon sits inside the width (right edge
+                    -- fixed); otherwise full width with the icon hanging outside.
+                    local ciInWidth
+                    if unitKey == "player" then
+                        ciInWidth = s.showPlayerCastIcon ~= false and s.playerCastbarIconInWidth ~= false
+                    else
+                        ciInWidth = s.showCastIcon ~= false and s.castbarIconInWidth ~= false
+                    end
+                    local ciIconW = ch + 1
+                    local ciBarW = ciInWidth and math.max(1, tw - ciIconW) or tw
+                    castbar:SetSize(ciBarW, ch)
+                    -- Anchoring is applied once below (the authoritative anchor
+                    -- that accounts for bottom-text-bar / attached-power cases),
+                    -- including the icon-in-width rightward shift.
                     castbar:Show()
+                    -- Re-apply background color/alpha from settings so the preview
+                    -- updates live when Bar Background is changed.
+                    if castbar._previewBgTex then
+                        local cbgC = s.castBgColor
+                        castbar._previewBgTex:SetColorTexture(cbgC and cbgC.r or 0, cbgC and cbgC.g or 0, cbgC and cbgC.b or 0, s.castBgAlpha or 0.5)
+                    end
                     if castFill then
                         castFill:ClearAllPoints()
                         if s.castReverseFill then
@@ -2153,7 +2338,7 @@ initFrame:SetScript("OnEvent", function(self)
                             PP.Point(castFill, "TOPLEFT", castbar, "TOPLEFT", 1, 0)
                             PP.Point(castFill, "BOTTOMLEFT", castbar, "BOTTOMLEFT", 1, 1)
                         end
-                        castFill:SetWidth(math.floor((tw - 2) * (_previewCastFill or 0.6) + 0.5))
+                        castFill:SetWidth(math.floor(math.max(0, ciBarW - 2) * (_previewCastFill or 0.6) + 0.5))
                         -- Update fill color from per-unit settings (class colored only for player)
                         local fillC
                         if unitKey == "player" and s.castbarClassColored then
@@ -2161,15 +2346,21 @@ initFrame:SetScript("OnEvent", function(self)
                             if classToken then fillC = RAID_CLASS_COLORS[classToken] end
                         end
                         if not fillC then fillC = s.castbarFillColor end
+                        -- Cast fill reuses the unit's health bar texture (matches real frames).
+                        -- WHITE8X8 fallback ensures PV_FillColor always sets vertex color fresh.
+                        local cbTexKey = s.healthBarTexture or db.profile.healthBarTexture or "none"
+                        local cbTexPath = (ns.healthBarTextures or {})[cbTexKey] or "Interface\\Buttons\\WHITE8X8"
                         if fillC then
-                            castFill:SetColorTexture(fillC.r, fillC.g, fillC.b, 1)
+                            PV_FillColor(castFill, cbTexPath, fillC.r, fillC.g, fillC.b, nil, nil, nil, 1)
                         else
                             local gc = db.profile.castbarColor or { r=0.114, g=0.655, b=0.514 }
-                            castFill:SetColorTexture(gc.r, gc.g, gc.b, 1)
+                            PV_FillColor(castFill, cbTexPath, gc.r, gc.g, gc.b, nil, nil, nil, 1)
                         end
                     end
                     if castIconFrame then
                         castIconFrame:SetSize(ch + 1, ch + 1)
+                        castIconFrame:ClearAllPoints()
+                        PP.Point(castIconFrame, "TOPRIGHT", castbar, "TOPLEFT", 1, 1)
                         -- Check showCastIcon / showPlayerCastIcon
                         local showIcon
                         if unitKey == "player" then
@@ -2237,7 +2428,10 @@ initFrame:SetScript("OnEvent", function(self)
                     local pvBtbVisible = (btbFrame and s.bottomTextBar and btbPos == "bottom")
                     local cbAnchorFrame = pvBtbVisible and btbFrame or ((pvPpIsAtt and power and power:IsShown()) and power or health)
                     local cbAnchorOff = pvBtbVisible and 0 or cbOff
-                    PP.Point(castbar, "TOP", cbAnchorFrame, "BOTTOM", cbAnchorOff, 0)
+                    -- Icon-in-width: shift the (narrowed) bar right by half the icon
+                    -- width so its right edge stays flush under the frame and the
+                    -- icon sits inside the footprint's left edge (matches the real frame).
+                    PP.Point(castbar, "TOP", cbAnchorFrame, "BOTTOM", cbAnchorOff + (ciInWidth and (ciIconW / 2) or 0), 0)
                 else
                     castbar:Hide()
                     if castIconFrame then castIconFrame:Hide() end
@@ -2384,13 +2578,22 @@ initFrame:SetScript("OnEvent", function(self)
                 local absS = s.showPlayerAbsorb
                 if absS and absS ~= "none" then
                     local _paTex = {
-                        striped  = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
-                        clean    = "Interface\\Buttons\\WHITE8X8",
-                        blizzard = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
+                        striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
+                        stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
+                        clean           = "Interface\\Buttons\\WHITE8X8",
+                        blizzard        = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\blizzard.tga",
                     }
-                    local _paAlpha = { striped = 0.8, clean = (s.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
+                    local _paAlpha = { striped = 0.8, stripedReversed = 0.8, clean = (s.absorbCleanAlpha or 30) / 100, blizzard = 0.8 }
+                    -- Effective opacity/color: mirrors GetAbsorbOpacity in EllesmereUIUnitFrames.lua
+                    local _paA = s.absorbOpacity and (s.absorbOpacity / 100) or _paAlpha[absS] or 0.8
+                    local _paC = s.absorbColor or { r = 1, g = 1, b = 1 }
                     absorbBar:SetStatusBarTexture(_paTex[absS] or _paTex.striped)
-                    absorbBar:SetStatusBarColor(1, 1, 1, _paAlpha[absS] or 0.8)
+                    local _paFill = absorbBar:GetStatusBarTexture()
+                    if _paFill then
+                        local _paTiled = (absS == "stripedReversed")
+                        _paFill:SetHorizTile(_paTiled); _paFill:SetVertTile(_paTiled)
+                    end
+                    absorbBar:SetStatusBarColor(_paC.r, _paC.g, _paC.b, _paA)
                     absorbBar:ClearAllPoints()
                     if s.healthReverseFill then
                         absorbBar:SetReverseFill(false)
@@ -2414,12 +2617,17 @@ initFrame:SetScript("OnEvent", function(self)
             if #buffIcons > 0 then
                 local maxBuf = s.maxBuffs or 4
                 local visibleBuffCount = math.min(2, maxBuf)
+                -- Boss preview always shows exactly 2 buffs regardless of Max Count.
+                if unitKey == "boss" then visibleBuffCount = math.min(#buffIcons, 2) end
                 local showB = s.showBuffs and (s.buffAnchor or "topleft") ~= "none"
                 if showB and visibleBuffCount > 0 then
                     local buffSize = s.buffSize or 22
+                    local buffCrop = s.buffCropIcons or false
+                    local buffH = ns.GetAuraCropHeight(buffCrop, buffSize)
                     local buffGap = 1
                     local bOffX = s.buffOffsetX or 0
-                    local bOffY = s.buffOffsetY or 0
+                    -- Preview intentionally ignores the Y offset (real frames still honor it).
+                    local bOffY = 0
                     local ba = s.buffAnchor or "topleft"
                     local bg = s.buffGrowth or "auto"
 
@@ -2435,8 +2643,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local anchorMap = {
                         topleft     = { pt = "TOPLEFT",     ox = bOffX,                        oy = buffGap + bOffY },
                         topright    = { pt = "TOPRIGHT",    ox = bOffX,                        oy = buffGap + bOffY },
-                        bottomleft  = { pt = "BOTTOMLEFT",  ox = bOffX,                        oy = -(buffSize + buffGap) + bOffY },
-                        bottomright = { pt = "BOTTOMRIGHT", ox = bOffX,                        oy = -(buffSize + buffGap) + bOffY },
+                        bottomleft  = { pt = "BOTTOMLEFT",  ox = bOffX,                        oy = -(buffH + buffGap) + bOffY },
+                        bottomright = { pt = "BOTTOMRIGHT", ox = bOffX,                        oy = -(buffH + buffGap) + bOffY },
                         left        = { pt = "LEFT",        ox = -(buffGap) + bOffX,           oy = bOffY },
                         right       = { pt = "RIGHT",       ox = buffGap + bOffX,              oy = bOffY },
                     }
@@ -2446,8 +2654,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local dx, dy = 0, 0
                     if gDir == "right" then dx = buffSize + buffGap
                     elseif gDir == "left" then dx = -(buffSize + buffGap)
-                    elseif gDir == "up" then dy = buffSize + buffGap
-                    elseif gDir == "down" then dy = -(buffSize + buffGap)
+                    elseif gDir == "up" then dy = buffH + buffGap
+                    elseif gDir == "down" then dy = -(buffH + buffGap)
                     else dx = buffSize + buffGap end
 
                     -- Determine justifyH for SetPoint (which corner of the icon anchors)
@@ -2464,11 +2672,11 @@ initFrame:SetScript("OnEvent", function(self)
                     -- ClearAllPoints + SetPoint causes a one-frame gap that makes icons blink.
                     -- Also guard Show()/Hide() -- calling Show() on an already-visible frame
                     -- triggers a re-render that causes a shutter effect.
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. buffSize
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. buffSize .. buffH
                     for i, bf in ipairs(buffIcons) do
                         if i <= visibleBuffCount then
                             if bf._anchorKey ~= anchorKey then
-                                PP.Size(bf, buffSize, buffSize)
+                                PP.Size(bf, buffSize, buffH)
                                 bf:ClearAllPoints()
                                 if i == 1 then
                                     PP.Point(bf, justH, pf, am.pt, am.ox, am.oy)
@@ -2478,7 +2686,11 @@ initFrame:SetScript("OnEvent", function(self)
                                 bf._anchorKey = anchorKey
                             end
                             if not bf:IsShown() then bf:Show() end
-                            if bf._iconTex then bf._iconTex:SetTexture(_previewBuffIcons[i] or 135932) end
+                            if bf._iconTex then
+                                bf._iconTex:SetTexture(_previewBuffIcons[i] or 135932)
+                                -- SetTexture resets texcoord, so re-apply the crop each update.
+                                ns.SetAuraIconCrop(bf._iconTex, buffCrop, buffSize, buffH)
+                            end
                         else
                             if bf:IsShown() then bf:Hide() end
                         end
@@ -2486,7 +2698,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Add buff height to header when buffs are above or below the frame
                     if ba == "topleft" or ba == "topright" or ba == "bottomleft" or ba == "bottomright" or ba == "left" or ba == "right" then
-                        buffExtra = buffSize + buffGap + 2
+                        buffExtra = buffH + buffGap + 2
                     end
                 else
                     for _, bf in ipairs(buffIcons) do if bf:IsShown() then bf:Hide() end end
@@ -2500,8 +2712,10 @@ initFrame:SetScript("OnEvent", function(self)
             if #debuffIcons > 0 and not noDebuffPreview then
                 local dAnc = s.debuffAnchor or "bottomleft"
                 local effectiveDebuffSize = s.debuffSize or 22
-                if unitKey == "boss" and s.simpleDebuffs ~= false then
-                    dAnc = "left"
+                local simpleMode = (unitKey == "boss") and ns.GetBossSimpleDebuffMode(s) or "none"
+                local simpleOn = simpleMode ~= "none"
+                if simpleOn then
+                    dAnc = simpleMode  -- "left" or "right"
                     local pvPowerPos = s.powerPosition or "below"
                     local pvPowerIsAtt = (pvPowerPos == "below" or pvPowerPos == "above")
                     local pvPowerH = pvPowerIsAtt and (s.powerHeight or 0) or 0
@@ -2510,11 +2724,18 @@ initFrame:SetScript("OnEvent", function(self)
                 local maxDeb = s.maxDebuffs or 10
                 local previewDebuffLimit = 5
                 local visibleDebuffCount = math.min(#debuffIcons, maxDeb, previewDebuffLimit)
+                -- Boss preview always shows exactly 3 debuffs regardless of Max Count.
+                if unitKey == "boss" then visibleDebuffCount = math.min(#debuffIcons, 3) end
                 if dAnc ~= "none" and visibleDebuffCount > 0 then
                     local debuffSize = effectiveDebuffSize
+                    -- Crop never applies in simple boss mode (runtime parity: it
+                    -- passes nil crop and frame-height-matches those icons).
+                    local debuffCrop = (not simpleOn) and (s.debuffCropIcons or false) or false
+                    local debuffH = ns.GetAuraCropHeight(debuffCrop, debuffSize)
                     local debuffGap = 1
                     local dOffX = s.debuffOffsetX or 0
-                    local dOffY = s.debuffOffsetY or 0
+                    -- Preview intentionally ignores the Y offset (real frames still honor it).
+                    local dOffY = 0
                     local dg = s.debuffGrowth or "auto"
 
                     local autoGrowth = {
@@ -2527,8 +2748,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local anchorMap = {
                         topleft     = { pt = "TOPLEFT",     ox = dOffX,                         oy = debuffGap + dOffY },
                         topright    = { pt = "TOPRIGHT",    ox = dOffX,                         oy = debuffGap + dOffY },
-                        bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,                         oy = -(debuffSize + debuffGap) + dOffY },
-                        bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,                         oy = -(debuffSize + debuffGap) + dOffY },
+                        bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,                         oy = -(debuffH + debuffGap) + dOffY },
+                        bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,                         oy = -(debuffH + debuffGap) + dOffY },
                         left        = { pt = "LEFT",        ox = -(debuffGap) + dOffX,          oy = dOffY },
                         right       = { pt = "RIGHT",       ox = debuffGap + dOffX,             oy = dOffY },
                     }
@@ -2537,8 +2758,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local dx, dy = 0, 0
                     if gDir == "right" then dx = debuffSize + debuffGap
                     elseif gDir == "left" then dx = -(debuffSize + debuffGap)
-                    elseif gDir == "up" then dy = debuffSize + debuffGap
-                    elseif gDir == "down" then dy = -(debuffSize + debuffGap)
+                    elseif gDir == "up" then dy = debuffH + debuffGap
+                    elseif gDir == "down" then dy = -(debuffH + debuffGap)
                     else dx = debuffSize + debuffGap end
 
                     local justH = "BOTTOMLEFT"
@@ -2554,23 +2775,29 @@ initFrame:SetScript("OnEvent", function(self)
                     -- top of the health bar (not pf, which includes the cast
                     -- bar) so the icons align with the bar area, matching
                     -- the runtime layout.
-                    local useSimpleBossAnchor = (unitKey == "boss" and s.simpleDebuffs ~= false)
+                    local useSimpleBossAnchor = simpleOn
                     local bossSimpleAnchorFrame = useSimpleBossAnchor and health or pf
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. (useSimpleBossAnchor and "S" or "N")
+                    -- Simple mode side: Left pins the column to the frame's left edge
+                    -- (icons grow left), Right pins to the right edge (icons grow right).
+                    local simpleIconPt   = (simpleMode == "right") and "TOPLEFT"  or "TOPRIGHT"
+                    local simpleParentPt = (simpleMode == "right") and "TOPRIGHT" or "TOPLEFT"
+                    local simpleEdgeSign = (simpleMode == "right") and 1 or -1
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. (s.debuffOffsetX or 0)
                     for i, df in ipairs(debuffIcons) do
                         if i <= visibleDebuffCount then
                             if df._anchorKey ~= anchorKey then
-                                PP.Size(df, debuffSize, debuffSize)
+                                PP.Size(df, debuffSize, debuffH)
+                                if df._iconTex then ns.SetAuraIconCrop(df._iconTex, debuffCrop, debuffSize, debuffH) end
                                 df:ClearAllPoints()
                                 if i == 1 then
                                     if useSimpleBossAnchor then
-                                        PP.Point(df, "TOPRIGHT", bossSimpleAnchorFrame, "TOPLEFT", -debuffGap, 0)
+                                        PP.Point(df, simpleIconPt, bossSimpleAnchorFrame, simpleParentPt, simpleEdgeSign * debuffGap + dOffX, dOffY)
                                     else
                                         PP.Point(df, justH, pf, am.pt, am.ox, am.oy)
                                     end
                                 else
                                     if useSimpleBossAnchor then
-                                        PP.Point(df, "TOPRIGHT", debuffIcons[1], "TOPRIGHT", -(i - 1) * (debuffSize + debuffGap), 0)
+                                        PP.Point(df, simpleIconPt, debuffIcons[1], simpleIconPt, simpleEdgeSign * (i - 1) * (debuffSize + debuffGap), 0)
                                     else
                                         PP.Point(df, justH, debuffIcons[1], justH, dx * (i - 1), dy * (i - 1))
                                     end
@@ -2586,10 +2813,70 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Add debuff height to header when debuffs are above or below the frame
                     local debuffGap2 = 1
                     if dAnc == "topleft" or dAnc == "topright" or dAnc == "bottomleft" or dAnc == "bottomright" or dAnc == "left" or dAnc == "right" then
-                        debuffExtra = effectiveDebuffSize + debuffGap2 + 2
+                        debuffExtra = debuffH + debuffGap2 + 2
                     end
                 else
                     for _, df in ipairs(debuffIcons) do if df:IsShown() then df:Hide() end end
+                end
+            end
+
+            -- Fake static cooldown swipe + duration text + stack text on the boss
+            -- debuff preview icons (mirrors the live boss aura buttons). Sizing and
+            -- visibility follow the boss aura settings so the new Simple Text Size /
+            -- Show Cooldown Text / Stack controls live-update here.
+            do
+                local showExtras = (unitKey == "boss") and not noDebuffPreview
+                local showCDText, cdTextSize, cdTOffX, cdTOffY, stackTextSize, stackTOffX, stackTOffY
+                if showExtras then
+                    if ns.GetBossSimpleDebuffMode(s) ~= "none" then
+                        showCDText = s.simpleDebuffShowCooldownText
+                        cdTextSize = s.simpleDebuffCooldownTextSize or 14
+                        cdTOffX = s.simpleDebuffCooldownTextOffsetX or 0
+                        cdTOffY = s.simpleDebuffCooldownTextOffsetY or 0
+                    else
+                        showCDText = s.debuffShowCooldownText
+                        cdTextSize = s.debuffCooldownTextSize or 10
+                        cdTOffX = s.debuffCooldownTextOffsetX or 0
+                        cdTOffY = s.debuffCooldownTextOffsetY or 0
+                    end
+                    stackTextSize = s.debuffStackTextSize or 14
+                    stackTOffX = s.debuffStackTextOffsetX or 0
+                    stackTOffY = s.debuffStackTextOffsetY or 0
+                end
+                local fontP = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
+                for i = 1, #debuffIcons do
+                    local df = debuffIcons[i]
+                    local cd, dt, st = df._previewCD, df._durText, df._stackText
+                    if showExtras and df:IsShown() then
+                        if cd and not cd:IsShown() then cd:Show() end
+                        if dt then
+                            if showCDText then
+                                EllesmereUI.ApplyIconTextFont(dt, fontP, cdTextSize, "unitFrames")
+                                dt:ClearAllPoints()
+                                dt:SetPoint("CENTER", df, "CENTER", cdTOffX, cdTOffY)
+                                dt:Show()
+                            else
+                                dt:Hide()
+                            end
+                        end
+                        -- Stack text on a single icon only (most debuffs are
+                        -- unstacked); icon 2 matches the in-game preview.
+                        if st then
+                            if i == 2 then
+                                EllesmereUI.ApplyIconTextFont(st, fontP, stackTextSize, "unitFrames")
+                                st:SetText(3)
+                                st:ClearAllPoints()
+                                st:SetPoint("BOTTOMRIGHT", df, "BOTTOMRIGHT", -1 + stackTOffX, stackTOffY)
+                                st:Show()
+                            else
+                                st:Hide()
+                            end
+                        end
+                    else
+                        if cd then cd:Hide() end
+                        if dt then dt:Hide() end
+                        if st then st:Hide() end
+                    end
                 end
             end
 
@@ -2831,6 +3118,7 @@ initFrame:SetScript("OnEvent", function(self)
         pf._castIconFrame = castIconFrame
         pf._castNameFS = castNameFS2
         pf._castTimeFS = castTimeFS
+        pf._castTargetFS = castTargetFS
         pf._nameFS = leftFS
         pf._hpFS = rightFS
         pf._centerFS = centerFS
@@ -2952,12 +3240,19 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Unified settings builder  (shared settings for Frame Display)
+    --  Unified settings builder  (shared settings for the Main Frames page)
     ---------------------------------------------------------------------------
     local UNIT_SUPPORTS = {
         powerHeight          = { player=true, target=true, focus=true },
         showPlayerAbsorb     = { player=true, target=true, focus=true },
         absorbCleanAlpha     = { player=true, target=true, focus=true },
+        absorbOpacity        = { player=true, target=true, focus=true },
+        absorbColor          = { player=true, target=true, focus=true },
+        absorbEdgeMode       = { player=true, target=true, focus=true },
+        healAbsorbStyle      = { player=true, target=true, focus=true },
+        healAbsorbOpacity    = { player=true, target=true, focus=true },
+        healAbsorbColor      = { player=true, target=true, focus=true },
+        healAbsorbEdgeMode   = { player=true, target=true, focus=true },
         showBuffs            = { player=true, target=true, focus=true },
         combatIndicatorStyle   = { player=true },
         combatIndicatorColor   = { player=true },
@@ -2976,9 +3271,11 @@ initFrame:SetScript("OnEvent", function(self)
         maxBuffs             = { player=true, target=true, focus=true },
         showPlayerCastbar    = { player=true },
         showPlayerCastIcon   = { player=true },
+        playerCastbarIconInWidth = { player=true },
         playerCastbarHeight  = { player=true },
         showCastbar          = { target=true, focus=true },
         showCastIcon         = { target=true, focus=true },
+        castbarIconInWidth   = { target=true, focus=true },
         castbarHeight        = { target=true, focus=true },
         castbarHideWhenInactive = { player=true, target=true, focus=true },
         castSpellNameSize    = { player=true, target=true, focus=true },
@@ -2990,6 +3287,8 @@ initFrame:SetScript("OnEvent", function(self)
         showCastDuration     = { player=true, target=true, focus=true },
         showCastTarget       = { player=true, target=true, focus=true },
         castbarFillColor     = { player=true, target=true, focus=true },
+        castbarInterruptReadyColor = { target=true, focus=true },
+        castbarKickTickEnabled     = { target=true, focus=true },
         showClassPowerBar    = { player=true },
         lockClassPowerToFrame= { player=true },
         classPowerStyle      = { player=true },
@@ -3091,19 +3390,28 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
         -- Helper: build a standard cog button on a region
-        local function MakeCogBtn(rgn, showFn, anchorTo, iconPath)
+        local function MakeCogBtn(rgn, showFn, anchorTo, iconPath, disabledFn)
             local cogBtn = CreateFrame("Button", nil, rgn)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", anchorTo or rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
             cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+            local function isOff() return disabledFn and disabledFn() or false end
+            cogBtn:SetScript("OnEnter", function(self) if not isOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) if not isOff() then self:SetAlpha(0.4) end end)
+            cogBtn:SetScript("OnClick", function(self) if not isOff() then showFn(self) end end)
+            -- Disabled state (cog alpha 0.15 disabled / 0.4 enabled, per the
+            -- inline-controls pattern); re-evaluated on page refresh.
+            local function applyCogState()
+                local off = isOff()
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                cogBtn:EnableMouse(not off)
+            end
+            applyCogState()
+            if disabledFn then EllesmereUI.RegisterWidgetRefresh(applyCogState) end
             return cogBtn
         end
 
@@ -3277,13 +3585,18 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 2: Bar Texture | Dark Mode
-            _, h = W:DualRow(parent, y,
+        -- Row 2: Bar Texture (per-unit + sync) | Dark Mode
+        -- healthBarTexture is per-unit (drives health/power/cast/absorb). The global
+        -- db.profile.healthBarTexture remains as the inherited fallback for any unit
+        -- that hasn't set its own, so existing setups are unchanged until overridden.
+        local barTexRow
+        local hbtValues, hbtOrder = BuildBarTexDropdown()
+        barTexRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
-                  getValue=function() return db.profile.healthBarTexture or "none" end,
+                  getValue=function() return SVal("healthBarTexture", db.profile.healthBarTexture or "none") end,
                   setValue=function(v)
-                      db.profile.healthBarTexture = v
-                      ReloadAndUpdate(); UpdatePreview()
+                      SSet("healthBarTexture", v)
+                      UpdatePreview(); EllesmereUI:RefreshPage()
                   end },
                 { type="toggle", text="Dark Mode",
                   getValue=function() return db.profile.darkTheme end,
@@ -3292,6 +3605,40 @@ initFrame:SetScript("OnEvent", function(self)
                       ReloadAndUpdate(); UpdatePreview()
                       EllesmereUI:RefreshPage()
                   end });  y = y - h
+        -- Sync icon: Bar Texture (left region) -- pushes this unit's texture to frames
+        do
+            local rgn = barTexRow._leftRegion
+            local function ApplyTexTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local tex = src.healthBarTexture or db.profile.healthBarTexture or "none"
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        UNIT_DB_MAP[key]().healthBarTexture = tex
+                    end
+                end
+                ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Bar Texture to all Frames",
+                onClick = function() ApplyTexTo(GROUP_UNIT_ORDER) end,
+                isSynced = function()
+                    local g = db.profile.healthBarTexture or "none"
+                    local srcTex = UNIT_DB_MAP[selectedUnit]().healthBarTexture or g
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().healthBarTexture or g) ~= srcTex then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys) ApplyTexTo(checkedKeys) end,
+                },
+            })
+        end
 
         -- Row 3: Border Style (+ cog) | Border (slider + double inline swatches)
         local sharedScaleBorderRow
@@ -3306,13 +3653,10 @@ initFrame:SetScript("OnEvent", function(self)
                   SSet("borderTextureOffsetY", nil)
                   SSet("borderTextureShiftX", nil)
                   SSet("borderTextureShiftY", nil)
-                  if v ~= "solid" then
-                      SSet("borderColor", { r = 1, g = 1, b = 1 })
-                      SSet("borderAlpha", 1)
-                  else
-                      SSet("borderColor", { r = 0, g = 0, b = 0 })
-                      SSet("borderAlpha", 1)
-                  end
+                  local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                  SSet("borderColor", _bcol)
+                  SSet("borderAlpha", 1)
+                  SSet("borderBehind", _bbehind)
                   local defSz = EllesmereUI.GetBorderDefaultSize("unitframes", v)
                   if defSz then SSet("borderSize", defSz) end
                   ReloadAndUpdate()
@@ -3377,6 +3721,9 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           SSet("borderTextureShiftY", v == 0 and nil or v); ReloadAndUpdate()
                       end },
+                    { type = "toggle", label = "Show Behind",
+                      get = function() return SVal("borderBehind", false) end,
+                      set = function(v) SSet("borderBehind", v); ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
                 },
             })
             local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -3399,6 +3746,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local oy = SGet("borderTextureOffsetY")
                     local sx = SGet("borderTextureShiftX")
                     local sy = SGet("borderTextureShiftY")
+                    local bh = SGet("borderBehind")
                     local bc = SGet("borderColor")
                     local ba = SGet("borderAlpha")
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
@@ -3408,6 +3756,7 @@ initFrame:SetScript("OnEvent", function(self)
                             UNIT_DB_MAP[key]().borderTextureOffsetY = oy
                             UNIT_DB_MAP[key]().borderTextureShiftX = sx
                             UNIT_DB_MAP[key]().borderTextureShiftY = sy
+                            UNIT_DB_MAP[key]().borderBehind = bh
                             if bc then UNIT_DB_MAP[key]().borderColor = { r=bc.r, g=bc.g, b=bc.b } end
                             UNIT_DB_MAP[key]().borderAlpha = ba
                         end
@@ -3420,12 +3769,14 @@ initFrame:SetScript("OnEvent", function(self)
                     local oy = SGet("borderTextureOffsetY")
                     local sx = SGet("borderTextureShiftX")
                     local sy = SGet("borderTextureShiftY")
+                    local bh = SGet("borderBehind") or false
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
                         if (UNIT_DB_MAP[key]().borderTexture or "solid") ~= bt then return false end
                         if UNIT_DB_MAP[key]().borderTextureOffset ~= ox then return false end
                         if UNIT_DB_MAP[key]().borderTextureOffsetY ~= oy then return false end
                         if UNIT_DB_MAP[key]().borderTextureShiftX ~= sx then return false end
                         if UNIT_DB_MAP[key]().borderTextureShiftY ~= sy then return false end
+                        if (UNIT_DB_MAP[key]().borderBehind or false) ~= bh then return false end
                     end
                     return true
                 end,
@@ -3440,6 +3791,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local oy = SGet("borderTextureOffsetY")
                         local sx = SGet("borderTextureShiftX")
                         local sy = SGet("borderTextureShiftY")
+                        local bh = SGet("borderBehind")
                         local bc = SGet("borderColor")
                         local ba = SGet("borderAlpha")
                         for _, key in ipairs(checkedKeys) do
@@ -3448,6 +3800,7 @@ initFrame:SetScript("OnEvent", function(self)
                             UNIT_DB_MAP[key]().borderTextureOffsetY = oy
                             UNIT_DB_MAP[key]().borderTextureShiftX = sx
                             UNIT_DB_MAP[key]().borderTextureShiftY = sy
+                            UNIT_DB_MAP[key]().borderBehind = bh
                             if bc then UNIT_DB_MAP[key]().borderColor = { r=bc.r, g=bc.g, b=bc.b } end
                             UNIT_DB_MAP[key]().borderAlpha = ba
                         end
@@ -3592,6 +3945,31 @@ initFrame:SetScript("OnEvent", function(self)
                   ReloadAndUpdate()
               end });  y = y - h
 
+        -- Cog on Frame Strata: custom bar stratas for detached power/text bar
+        do
+            local strataRgn = _
+            if strataRgn and strataRgn._rightRegion then strataRgn = strataRgn._rightRegion end
+            local barStrataValues = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
+            local barStrataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Detached Bar Stratas",
+                rows = {
+                    { type="toggle", label="Custom Bar Stratas",
+                      get=function() return db.profile.enableCustomBarStratas or false end,
+                      set=function(v) db.profile.enableCustomBarStratas = v; ReloadAndUpdate() end },
+                    { type="dropdown", label="Detached Power Bar", values=barStrataValues, order=barStrataOrder,
+                      get=function() return db.profile.detachedPowerStrata or "HIGH" end,
+                      set=function(v) db.profile.detachedPowerStrata = v; ReloadAndUpdate() end },
+                    { type="dropdown", label="Detached Text Bar", values=barStrataValues, order=barStrataOrder,
+                      get=function() return db.profile.detachedTextBarStrata or "DIALOG" end,
+                      set=function(v) db.profile.detachedTextBarStrata = v; ReloadAndUpdate() end },
+                },
+            })
+            if strataRgn then
+                MakeCogBtn(strataRgn, cogShow)
+            end
+        end
+
         _, h = W:Spacer(parent, y, 20); y = y - h
 
         -------------------------------------------------------------------
@@ -3613,9 +3991,17 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                   SSet("portraitStyle", v)
+                  -- Auto-set shape to "none" when entering detached + 3D
+                  if v == "detached" and SVal("portraitMode", "2d") == "3d" then
+                      UNIT_DB_MAP[selectedUnit]().detachedPortraitShape = "none"
+                  end
                   -- Reset detached-only settings when leaving detached mode
                   if v ~= "detached" then
                       UNIT_DB_MAP[selectedUnit]().portraitSize = 0
+                      local side = UNIT_DB_MAP[selectedUnit]().portraitSide
+                      if side == "top" or side == "insideleft" or side == "insideright" or side == "insidecenter" then
+                          UNIT_DB_MAP[selectedUnit]().portraitSide = "left"
+                      end
                   end
                   UNIT_DB_MAP[selectedUnit]().showPortrait = (v ~= "none")
                   UpdatePreview()
@@ -3623,7 +4009,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="dropdown", text="Art Style", values=portraitArtValues, order=portraitArtOrder,
               disabled=function() return SVal("portraitStyle", "attached") == "none" end,
-              disabledTooltip="Portrait Mode is set to None",
+              disabledTooltip="Portrait Mode is set to None", rawTooltip=true,
               getValue=function()
                   local v = SGet("portraitMode")
                   if v == "class" then return SVal("classThemeStyle", "modern") end
@@ -3643,6 +4029,9 @@ initFrame:SetScript("OnEvent", function(self)
                                   EllesmereUIDB.dismissed3DWarning = true
                                   UNIT_DB_MAP[selectedUnit]().portraitMode = "3d"
                                   UNIT_DB_MAP[selectedUnit]().showPortrait = true
+                                  if UNIT_DB_MAP[selectedUnit]().portraitStyle == "detached" then
+                                      UNIT_DB_MAP[selectedUnit]().detachedPortraitShape = "none"
+                                  end
                                   ReloadAndUpdate(); UpdatePreview()
                                   if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
                               end,
@@ -3655,6 +4044,20 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   UNIT_DB_MAP[selectedUnit]().portraitMode = v
                   UNIT_DB_MAP[selectedUnit]().showPortrait = true
+                  -- Auto-set shape to "none" when entering 3D + detached
+                  if v == "3d" and UNIT_DB_MAP[selectedUnit]().portraitStyle == "detached" then
+                      UNIT_DB_MAP[selectedUnit]().detachedPortraitShape = "none"
+                  end
+                  -- 3D-only options: reset when leaving 3D
+                  if v ~= "3d" then
+                      if UNIT_DB_MAP[selectedUnit]().detachedPortraitShape == "none" then
+                          UNIT_DB_MAP[selectedUnit]().detachedPortraitShape = "portrait"
+                      end
+                      local side = UNIT_DB_MAP[selectedUnit]().portraitSide
+                      if side == "insideleft" or side == "insideright" or side == "insidecenter" then
+                          UNIT_DB_MAP[selectedUnit]().portraitSide = "left"
+                      end
+                  end
                   ReloadAndUpdate(); UpdatePreview()
               end });  y = y - h
         -- Sync icon: Portrait Mode (Style)
@@ -3731,20 +4134,42 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Row 2: Size + Position
-        local portraitLocationValues = { ["left"] = "Left", ["right"] = "Right", ["top"] = "Top" }
-        local portraitLocationOrder = { "left", "right", "top" }
+        local portraitLocationValues = {
+            ["left"] = "Left", ["right"] = "Right", ["top"] = "Top",
+            ["insideleft"] = "Inside Left", ["insideright"] = "Inside Right", ["insidecenter"] = "Inside Center",
+        }
+        local portraitLocationOrder = { "left", "right", "top", "insideleft", "insideright", "insidecenter" }
         local sharedSizePosRow
         sharedSizePosRow, h = W:DualRow(parent, y,
-            { type="slider", text="Size", min=-20, max=40, step=1,
-              disabled=function() return SVal("portraitStyle", "attached") ~= "detached" end,
-              disabledTooltip="Only available when Portrait Mode is Detached",
+            { type="slider", text="Size", min=-20, max=100, step=1,
+              disabled=function()
+                  local style = SVal("portraitStyle", "attached")
+                  local side = SVal("portraitSide", "left")
+                  local isInside = side == "insideleft" or side == "insideright" or side == "insidecenter"
+                  return style ~= "detached" and not isInside
+              end,
+              disabledTooltip="Only available in Detached or Inside modes", rawTooltip=true,
               getValue=function() return SVal("portraitSize", 0) end,
               setValue=function(v) SSet("portraitSize", v); UpdatePreview() end },
             { type="dropdown", text="Position", values=portraitLocationValues, order=portraitLocationOrder,
               disabled=function() return SVal("portraitStyle", "attached") == "none" end,
-              disabledTooltip="Portrait Mode is set to None",
-              itemDisabled=function(v) return v == "top" and SVal("portraitStyle", "attached") == "attached" end,
-              itemDisabledTooltip=function(v) if v == "top" then return "Top position is only available in Detached mode" end end,
+              disabledTooltip="Portrait Mode is set to None", rawTooltip=true,
+              itemDisabled=function(v)
+                  local pStyle = SVal("portraitStyle", "attached")
+                  if v == "top" and pStyle == "attached" then return true end
+                  if v == "insideleft" or v == "insideright" or v == "insidecenter" then
+                      if SVal("portraitMode", "2d") ~= "3d" then return true end
+                      if pStyle ~= "detached" then return true end
+                  end
+                  return false
+              end,
+              itemDisabledTooltip=function(v)
+                  if v == "top" then return "Top position is only available in Detached mode" end
+                  if v == "insideleft" or v == "insideright" or v == "insidecenter" then
+                      if SVal("portraitMode", "2d") ~= "3d" then return "Inside positions require 3D Art Style" end
+                      return "Inside positions require Detached mode"
+                  end
+              end,
               getValue=function() return SVal("portraitSide", "left") end,
               setValue=function(v) SSet("portraitSide", v); UpdatePreview() end });  y = y - h
         -- Sync icons: Portrait Size (left) and Portrait Side (right)
@@ -3779,6 +4204,19 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 },
             })
+            -- Zoom cog on Size slider
+            local _, zoomCogShow = EllesmereUI.BuildCogPopup({
+                title = "Portrait Zoom",
+                rows = {
+                    { type="slider", label="2D Zoom", min=50, max=100, step=1,
+                      get=function() return SVal("portraitArtScale", 100) end,
+                      set=function(v) SSet("portraitArtScale", v); UpdatePreview() end },
+                    { type="slider", label="3D Zoom", min=100, max=300, step=1,
+                      get=function() return SVal("portrait3dZoom", 100) end,
+                      set=function(v) SSet("portrait3dZoom", v); UpdatePreview() end },
+                },
+            })
+            MakeCogBtn(rgn, zoomCogShow)
         end
         do
             local rgn = sharedSizePosRow._rightRegion
@@ -3825,9 +4263,6 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-100, max=100, step=1,
                       get=function() return SVal("portraitY", 0) end,
                       set=function(v) SSet("portraitY", v); UpdatePreview() end },
-                    { type="slider", label="Art Scale", min=50, max=200, step=1,
-                      get=function() return SVal("portraitArtScale", 100) end,
-                      set=function(v) SSet("portraitArtScale", v); UpdatePreview() end },
                 },
             })
             local posCogShow = posCogShowRaw
@@ -3841,7 +4276,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if SVal("portraitStyle", "attached") == "detached" then
                     self:SetAlpha(0.7)
                 else
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Portrait Mode is set to Detached"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires Portrait Mode to be set to Detached."))
                 end
             end)
             cogBtn:SetScript("OnLeave", function(self) UpdatePosCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -3856,13 +4291,15 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Shape", values=detPortraitShapeValues, order=detPortraitShapeOrder,
               disabled=function() return SVal("portraitStyle", "attached") ~= "detached" end,
               disabledTooltip="This option is only available when Portrait Mode is Detached.",
+              itemDisabled=function(v) return v == "none" and SVal("portraitMode", "2d") ~= "3d" end,
+              itemDisabledTooltip=function(v) if v == "none" then return "None shape requires 3D Art Style" end end,
               getValue=function() return SVal("detachedPortraitShape", "portrait") end,
               setValue=function(v)
                   SSet("detachedPortraitShape", v); UpdatePreview()
               end },
             { type="multiSwatch", text="Shape Border",
               disabled=function() return SVal("portraitStyle", "attached") ~= "detached" end,
-              disabledTooltip="Only available when Portrait Mode is Detached",
+              disabledTooltip="Only available when Portrait Mode is Detached", rawTooltip=true,
               swatches = {
                 { tooltip = "Custom Color",
                   hasAlpha = false,
@@ -3932,7 +4369,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if SVal("portraitStyle", "attached") == "detached" then
                     self:SetAlpha(0.7)
                 else
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Only available when Portrait Mode is Detached"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option is only available when Portrait Mode is Detached."))
                 end
             end)
             cogBtn:SetScript("OnLeave", function(self) UpdateDetShapeCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -4048,7 +4485,7 @@ initFrame:SetScript("OnEvent", function(self)
         local ufhDis, ufhTip, ufhRaw = EllesmereUI.MatchGuard(selectedUnit, "Height")
         local ufwDis, ufwTip, ufwRaw = EllesmereUI.MatchGuard(selectedUnit, "Width")
         sharedSizeRow, h = W:DualRow(parent, y,
-            { type="slider", text="Bar Height", min=15, max=100, step=1,
+            { type="slider", text="Health Bar Height", min=15, max=100, step=1,
               disabled=ufhDis, disabledTooltip=ufhTip, rawTooltip=ufhRaw,
               getValue=function() return SVal("healthHeight", 46) end,
               setValue=function(v) SSet("healthHeight", v) end },
@@ -4061,7 +4498,7 @@ initFrame:SetScript("OnEvent", function(self)
             local rgn = sharedSizeRow._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Bar Height to all Frames",
+                tooltip = "Apply Health Bar Height to all Frames",
                 onClick = function()
                     local v = UNIT_DB_MAP[selectedUnit]().healthHeight or 46
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
@@ -4088,6 +4525,19 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 },
             })
+        end
+        -- Reverse Fill cog on Bar Height (left region)
+        do
+            local rgn = sharedSizeRow._leftRegion
+            local _, revCogShow = EllesmereUI.BuildCogPopup({
+                title = "Health Bar Fill",
+                rows = {
+                    { type="toggle", label="Reverse Fill",
+                      get=function() return SVal("healthReverseFill", false) end,
+                      set=function(v) SSet("healthReverseFill", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            MakeCogBtn(rgn, revCogShow)
         end
         do
             local rgn = sharedSizeRow._rightRegion
@@ -4122,20 +4572,21 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 2: Bar Color (multiSwatch) + Bar Opacity (slider)
+        -- Row 2: Bar Color (multiSwatch) + Bar Background (slider + inline swatch)
         local sharedHealthColorRow
         sharedHealthColorRow, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Bar Color",
               swatches = {
-                { tooltip = "Bar Background",
-                  hasAlpha = false,
+                { tooltip = "Gradient End Color", hasAlpha = false,
+                  disabled = function() return not SVal("gradientEnabled", false) end,
+                  disabledTooltip = function() return "Gradient" end,
                   getValue = function()
-                      local c = SGet("customBgColor")
+                      local c = SGet("gradientColor")
                       if c then return c.r, c.g, c.b end
-                      return 17/255, 17/255, 17/255
+                      return 0.20, 0.20, 0.80
                   end,
                   setValue = function(r, g, b)
-                      UNIT_DB_MAP[selectedUnit]().customBgColor = { r=r, g=g, b=b }
+                      UNIT_DB_MAP[selectedUnit]().gradientColor = { r=r, g=g, b=b }
                       ReloadAndUpdate(); UpdatePreview()
                   end },
                 { tooltip = "Custom Colored Fill",
@@ -4181,41 +4632,57 @@ initFrame:SetScript("OnEvent", function(self)
                       return SVal("healthClassColored", true) and 1 or 0.3
                   end },
               } },
-            { type="slider", text="Bar Opacity", min=10, max=100, step=1,
-              disabled=function() return db.profile.darkTheme end,
-              disabledTooltip="Bar Opacity is disabled in Dark Mode.",
-              getValue=function() return SVal("healthBarOpacity", 90) end,
-              setValue=function(v)
-                  SSet("healthBarOpacity", v)
-                  UpdatePreview()
-              end });  y = y - h
-        -- Sync icons: Bar Color (left) and Bar Opacity (right)
+            { type="slider", text="Bar Background", min=0, max=100, step=1,
+              getValue=function() return SVal("customBgAlpha", 100) end,
+              setValue=function(v) SSet("customBgAlpha", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+        -- Inline color swatch on Bar Background (right region)
         do
-            local rgn = sharedHealthColorRow._leftRegion
+            local rgn = sharedHealthColorRow._rightRegion
+            local bgSwGet = function()
+                local c = SGet("customBgColor")
+                if c then return c.r, c.g, c.b end
+                return 17/255, 17/255, 17/255
+            end
+            local bgSwSet = function(r, g, b)
+                UNIT_DB_MAP[selectedUnit]().customBgColor = { r=r, g=g, b=b }
+                ReloadAndUpdate(); UpdatePreview()
+            end
+            local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
+            PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = bgSw
+            RegisterWidgetRefresh(function() bgSwUpdate() end)
+        end
+        -- Sync icon: Bar Background (right) -- background color + opacity
+        do
+            local rgn = sharedHealthColorRow._rightRegion
+            local function ApplyBgTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local bc = src.customBgColor or { r=17/255, g=17/255, b=17/255 }
+                local bgA = src.customBgAlpha or 100
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.customBgColor = { r=bc.r, g=bc.g, b=bc.b }
+                        d.customBgAlpha = bgA
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Bar Color to all Frames",
-                onClick = function()
-                    local src = UNIT_DB_MAP[selectedUnit]()
-                    local cc = src.healthClassColored or false
-                    local fc = src.customFillColor
-                    local bc = src.customBgColor or { r=17/255, g=17/255, b=17/255 }
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then
-                            local d = UNIT_DB_MAP[key]()
-                            d.healthClassColored = cc
-                            if fc then d.customFillColor = { r=fc.r, g=fc.g, b=fc.b }
-                            else d.customFillColor = nil end
-                            d.customBgColor = { r=bc.r, g=bc.g, b=bc.b }
-                        end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
+                tooltip = "Apply Bar Background to all Frames",
+                onClick = function() ApplyBgTo(GROUP_UNIT_ORDER) end,
                 isSynced = function()
                     local src = UNIT_DB_MAP[selectedUnit]()
-                    local cc = src.healthClassColored or false
+                    local function colEq(a, b)
+                        if a == nil and b == nil then return true end
+                        if a == nil or b == nil then return false end
+                        return a.r == b.r and a.g == b.g and a.b == b.b
+                    end
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().healthClassColored or false) ~= cc then return false end
+                        local d = UNIT_DB_MAP[key]()
+                        if not colEq(d.customBgColor, src.customBgColor) then return false end
+                        if (d.customBgAlpha or 100) ~= (src.customBgAlpha or 100) then return false end
                     end
                     return true
                 end,
@@ -4224,25 +4691,107 @@ initFrame:SetScript("OnEvent", function(self)
                     elementKeys   = GROUP_UNIT_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local src = UNIT_DB_MAP[selectedUnit]()
-                        local cc = src.healthClassColored or false
-                        local fc = src.customFillColor
-                        local bc = src.customBgColor or { r=17/255, g=17/255, b=17/255 }
-                        for _, key in ipairs(checkedKeys) do
-                            local d = UNIT_DB_MAP[key]()
-                            d.healthClassColored = cc
-                            if fc then d.customFillColor = { r=fc.r, g=fc.g, b=fc.b }
-                            else d.customFillColor = nil end
-                            d.customBgColor = { r=bc.r, g=bc.g, b=bc.b }
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
+                    onApply       = function(checkedKeys) ApplyBgTo(checkedKeys) end,
                 },
             })
         end
+        -- Sync icon: Bar Color (left) -- fill/class color and gradient
         do
-            local rgn = sharedHealthColorRow._rightRegion
+            local rgn = sharedHealthColorRow._leftRegion
+            local function ApplyColorTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local cc = src.healthClassColored or false
+                local fc = src.customFillColor
+                local gEn = src.gradientEnabled or false
+                local gDir = src.gradientDir or "HORIZONTAL"
+                local gc = src.gradientColor
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.healthClassColored = cc
+                        if fc then d.customFillColor = { r=fc.r, g=fc.g, b=fc.b }
+                        else d.customFillColor = nil end
+                        d.gradientEnabled = gEn
+                        d.gradientDir = gDir
+                        if gc then d.gradientColor = { r=gc.r, g=gc.g, b=gc.b }
+                        else d.gradientColor = nil end
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Bar Color to all Frames",
+                onClick = function() ApplyColorTo(GROUP_UNIT_ORDER) end,
+                isSynced = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local function colEq(a, b)
+                        if a == nil and b == nil then return true end
+                        if a == nil or b == nil then return false end
+                        return a.r == b.r and a.g == b.g and a.b == b.b
+                    end
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        local d = UNIT_DB_MAP[key]()
+                        if (d.healthClassColored or false) ~= (src.healthClassColored or false) then return false end
+                        if not colEq(d.customFillColor, src.customFillColor) then return false end
+                        if (d.gradientEnabled or false) ~= (src.gradientEnabled or false) then return false end
+                        if not colEq(d.gradientColor, src.gradientColor) then return false end
+                        if (d.gradientDir or "HORIZONTAL") ~= (src.gradientDir or "HORIZONTAL") then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys) ApplyColorTo(checkedKeys) end,
+                },
+            })
+        end
+        -- Gradient cog on Bar Color (left region)
+        do
+            local rgn = sharedHealthColorRow._leftRegion
+            local _, gradCogShow = EllesmereUI.BuildCogPopup({
+                title = "Gradient Settings",
+                rows = {
+                    { type="toggle", label="Enable Gradient",
+                      get=function() return SVal("gradientEnabled", false) end,
+                      set=function(v) SSet("gradientEnabled", v); ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage() end },
+                    { type="dropdown", label="Gradient Direction",
+                      values={ HORIZONTAL="Horizontal", VERTICAL="Vertical" }, order={ "HORIZONTAL", "VERTICAL" },
+                      get=function() return SVal("gradientDir", "HORIZONTAL") end,
+                      set=function(v) SSet("gradientDir", v); ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage() end },
+                },
+            })
+            MakeCogBtn(rgn, gradCogShow)
+        end
+
+        -- Row 3: Bar Opacity + Left Text
+        local sharedTextRow
+        sharedTextRow, h = W:DualRow(parent, y,
+            { type="slider", text="Bar Opacity", min=10, max=100, step=1,
+              disabled=function() return db.profile.darkTheme end,
+              disabledTooltip="Dark Mode", requireState="disabled",
+              getValue=function() return SVal("healthBarOpacity", 90) end,
+              setValue=function(v)
+                  SSet("healthBarOpacity", v)
+                  UpdatePreview()
+              end },
+            { type="dropdown", text="Left Text", values=healthTextValues, order=selectedUnit == "player" and healthTextOrderPlayer or healthTextOrder,
+              getValue=function() return SVal("leftTextContent", "name") end,
+              setValue=function(v)
+                  SSet("leftTextContent", v)
+                  if v ~= "none" then
+                      if SGet("rightTextContent") == v then SSet("rightTextContent", "none") end
+                      if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
+                  end
+                  UpdatePreview(); EllesmereUI:RefreshPage()
+              end,
+            });  y = y - h
+        -- Sync icon: Bar Opacity (left)
+        do
+            local rgn = sharedTextRow._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Bar Opacity to all Frames",
@@ -4273,53 +4822,42 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
-
-        -- Row 3: Left Text + Right Text
-        local sharedTextRow
-        sharedTextRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Left Text", values=healthTextValues, order=healthTextOrder,
-              getValue=function() return SVal("leftTextContent", "name") end,
-              setValue=function(v)
-                  SSet("leftTextContent", v)
-                  if v ~= "none" then
-                      if SGet("rightTextContent") == v then SSet("rightTextContent", "none") end
-                      if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
-                  end
-                  UpdatePreview(); EllesmereUI:RefreshPage()
-              end,
-              disabled=function() return SVal("centerTextContent", "none") ~= "none" end,
-              disabledTooltip="This option is disabled while a Center Text is selected.",
-            },
-            { type="dropdown", text="Right Text", values=healthTextValues, order=healthTextOrder,
-              getValue=function() return SVal("rightTextContent", "both") end,
-              setValue=function(v)
-                  SSet("rightTextContent", v)
-                  if v ~= "none" then
-                      if SGet("leftTextContent") == v then SSet("leftTextContent", "none") end
-                      if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
-                  end
-                  UpdatePreview(); EllesmereUI:RefreshPage()
-              end,
-              disabled=function() return SVal("centerTextContent", "none") ~= "none" end,
-              disabledTooltip="This option is disabled while a Center Text is selected.",
-            });  y = y - h
-        -- Sync icons: Left Text (left) and Right Text (right)
+        -- Sync icon: Left Text (right)
         do
-            local rgn = sharedTextRow._leftRegion
+            local rgn = sharedTextRow._rightRegion
+            local function ApplyLeftTextTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local v = src.leftTextContent or "name"
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.leftTextContent = ((v == "absorb" or v == "absorbshort" or v == "group") and key ~= "player") and "none" or v
+                        d.leftTextClassColor = src.leftTextClassColor
+                        d.leftTextColorR, d.leftTextColorG, d.leftTextColorB = src.leftTextColorR, src.leftTextColorG, src.leftTextColorB
+                        d.leftTextSize = src.leftTextSize
+                        d.leftTextX, d.leftTextY = src.leftTextX, src.leftTextY
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Left Text to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().leftTextContent or "name"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().leftTextContent = v end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
+                onClick = function() ApplyLeftTextTo(GROUP_UNIT_ORDER) end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().leftTextContent or "name"
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local v = src.leftTextContent or "name"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().leftTextContent or "name") ~= v then return false end
+                        local d = UNIT_DB_MAP[key]()
+                        local expected = ((v == "absorb" or v == "absorbshort" or v == "group") and key ~= "player") and "none" or v
+                        if (d.leftTextContent or "name") ~= expected then return false end
+                        if (d.leftTextClassColor or false) ~= (src.leftTextClassColor or false) then return false end
+                        if (d.leftTextColorR or 1) ~= (src.leftTextColorR or 1) then return false end
+                        if (d.leftTextColorG or 1) ~= (src.leftTextColorG or 1) then return false end
+                        if (d.leftTextColorB or 1) ~= (src.leftTextColorB or 1) then return false end
+                        if (d.leftTextSize or 0) ~= (src.leftTextSize or 0) then return false end
+                        if (d.leftTextX or 0) ~= (src.leftTextX or 0) then return false end
+                        if (d.leftTextY or 0) ~= (src.leftTextY or 0) then return false end
                     end
                     return true
                 end,
@@ -4328,90 +4866,76 @@ initFrame:SetScript("OnEvent", function(self)
                     elementKeys   = GROUP_UNIT_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().leftTextContent or "name"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().leftTextContent = v end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
+                    onApply       = function(checkedKeys) ApplyLeftTextTo(checkedKeys) end,
                 },
             })
         end
+        -- Inline color swatches on Left Text (right region): Custom + Class, mirroring
+        -- the CDM Border Size double-swatch. The class swatch sets leftTextClassColor;
+        -- the custom swatch opens the picker (and switches back from class when active).
         do
-            local rgn = sharedTextRow._rightRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Right Text to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().rightTextContent or "both"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().rightTextContent = v end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            local leftRgn = sharedTextRow._rightRegion
+            local ltAnchor = leftRgn._lastInline or leftRgn._control
+            -- Class Colored swatch (nearest the control): shows the player's class color.
+            local ltClassSwatch, ltUpdateClassSwatch = EllesmereUI.BuildColorSwatch(
+                leftRgn, leftRgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
                 end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().rightTextContent or "both"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().rightTextContent or "both") ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().rightTextContent or "both"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().rightTextContent = v end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
-        end
-        -- Color swatch on Left Text
-        do
-            local leftRgn = sharedTextRow._leftRegion
+                function() end, nil, 20)
+            PP.Point(ltClassSwatch, "RIGHT", ltAnchor, "LEFT", -8, 0)
+            ltClassSwatch:SetScript("OnClick", function()
+                if SVal("leftTextContent", "name") == "none" then return end
+                SSet("leftTextClassColor", true); UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            ltClassSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ltClassSwatch, "Class Colored") end)
+            ltClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            -- Custom Colored swatch (left of the class swatch): opens the color picker.
             local ltSwGet = function()
-                local r = SVal("leftTextColorR", 1); local g = SVal("leftTextColorG", 1); local b = SVal("leftTextColorB", 1)
-                return r, g, b
+                return SVal("leftTextColorR", 1), SVal("leftTextColorG", 1), SVal("leftTextColorB", 1)
             end
             local ltSwSet = function(r, g, b)
                 SSet("leftTextColorR", r); SSet("leftTextColorG", g); SSet("leftTextColorB", b)
                 UpdatePreview()
             end
             local ltSwatch, ltUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, ltSwGet, ltSwSet, nil, 20)
-            PP.Point(ltSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            PP.Point(ltSwatch, "RIGHT", ltClassSwatch, "LEFT", -8, 0)
             leftRgn._lastInline = ltSwatch
-            local ltSwBlock = CreateFrame("Frame", nil, ltSwatch)
-            ltSwBlock:SetAllPoints(); ltSwBlock:SetFrameLevel(ltSwatch:GetFrameLevel() + 10); ltSwBlock:EnableMouse(true)
-            ltSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ltSwatch, EllesmereUI.DisabledTooltip("Left Text")) end)
-            ltSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
+            local ltOrigClick = ltSwatch:GetScript("OnClick")
+            ltSwatch:SetScript("OnClick", function(self, ...)
+                if SVal("leftTextContent", "name") == "none" then return end
+                if SVal("leftTextClassColor", false) then
+                    SSet("leftTextClassColor", false); UpdatePreview(); EllesmereUI:RefreshPage(); return
+                end
+                if ltOrigClick then ltOrigClick(self, ...) end
+            end)
+            ltSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ltSwatch, "Custom Colored") end)
+            ltSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateLtSwatches()
                 local isNone = SVal("leftTextContent", "name") == "none"
                 local isClass = SVal("leftTextClassColor", false)
-                if isNone or isClass then ltSwatch:SetAlpha(0.3); ltSwBlock:Show() else ltSwatch:SetAlpha(1); ltSwBlock:Hide() end
-                ltUpdateSwatch()
-            end)
-            local ltInitOff = SVal("leftTextContent", "name") == "none" or SVal("leftTextClassColor", false)
-            ltSwatch:SetAlpha(ltInitOff and 0.3 or 1)
-            if ltInitOff then ltSwBlock:Show() else ltSwBlock:Hide() end
+                ltSwatch:SetAlpha((isClass or isNone) and 0.3 or 1)
+                ltClassSwatch:SetAlpha((isClass and not isNone) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() ltUpdateSwatch(); ltUpdateClassSwatch(); UpdateLtSwatches() end)
+            UpdateLtSwatches()
         end
-        -- Cogwheel on Left Text
+        -- Cogwheel on Left Text (right region)
         do
-            local leftRgn = sharedTextRow._leftRegion
+            local leftRgn = sharedTextRow._rightRegion
             local _, leftCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Left Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return SVal("leftTextClassColor", false) end,
-                      set=function(v) SSet("leftTextClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("leftTextSize", SDB().textSize or 12) end,
                       set=function(v) SSet("leftTextSize", v); UpdatePreview() end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-150, max=150, step=1,
                       get=function() return SVal("leftTextX", 0) end,
                       set=function(v) SSet("leftTextX", v); UpdatePreview() end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("leftTextY", 0) end,
                       set=function(v) SSet("leftTextY", v); UpdatePreview() end },
                 },
@@ -4433,50 +4957,138 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateLeftCogState()
             RegisterWidgetRefresh(UpdateLeftCogState)
         end
-        -- Color swatch on Right Text
+        -- Row 4: Right Text + Center Text
+        local sharedCenterTextRow
+        sharedCenterTextRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Right Text", values=healthTextValues, order=selectedUnit == "player" and healthTextOrderPlayer or healthTextOrder,
+              getValue=function() return SVal("rightTextContent", "both") end,
+              setValue=function(v)
+                  SSet("rightTextContent", v)
+                  if v ~= "none" then
+                      if SGet("leftTextContent") == v then SSet("leftTextContent", "none") end
+                      if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
+                  end
+                  UpdatePreview(); EllesmereUI:RefreshPage()
+              end,
+            },
+            { type="dropdown", text="Center Text", values=healthTextValues, order=selectedUnit == "player" and healthTextOrderPlayer or healthTextOrder,
+              getValue=function() return SVal("centerTextContent", "none") end,
+              setValue=function(v)
+                  SSet("centerTextContent", v)
+                  ReloadAndUpdate(); UpdatePreview()
+              end });  y = y - h
+        -- Sync icon: Right Text (left)
         do
-            local rightRgn = sharedTextRow._rightRegion
+            local rgn = sharedCenterTextRow._leftRegion
+            local function ApplyRightTextTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local v = src.rightTextContent or "both"
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.rightTextContent = ((v == "absorb" or v == "absorbshort" or v == "group") and key ~= "player") and "none" or v
+                        d.rightTextClassColor = src.rightTextClassColor
+                        d.rightTextColorR, d.rightTextColorG, d.rightTextColorB = src.rightTextColorR, src.rightTextColorG, src.rightTextColorB
+                        d.rightTextSize = src.rightTextSize
+                        d.rightTextX, d.rightTextY = src.rightTextX, src.rightTextY
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Right Text to all Frames",
+                onClick = function() ApplyRightTextTo(GROUP_UNIT_ORDER) end,
+                isSynced = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local v = src.rightTextContent or "both"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        local d = UNIT_DB_MAP[key]()
+                        local expected = ((v == "absorb" or v == "absorbshort" or v == "group") and key ~= "player") and "none" or v
+                        if (d.rightTextContent or "both") ~= expected then return false end
+                        if (d.rightTextClassColor or false) ~= (src.rightTextClassColor or false) then return false end
+                        if (d.rightTextColorR or 1) ~= (src.rightTextColorR or 1) then return false end
+                        if (d.rightTextColorG or 1) ~= (src.rightTextColorG or 1) then return false end
+                        if (d.rightTextColorB or 1) ~= (src.rightTextColorB or 1) then return false end
+                        if (d.rightTextSize or 0) ~= (src.rightTextSize or 0) then return false end
+                        if (d.rightTextX or 0) ~= (src.rightTextX or 0) then return false end
+                        if (d.rightTextY or 0) ~= (src.rightTextY or 0) then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys) ApplyRightTextTo(checkedKeys) end,
+                },
+            })
+        end
+        -- Inline color swatches on Right Text (left region): Custom + Class (CDM Border
+        -- Size double-swatch pattern). Class swatch sets rightTextClassColor; custom
+        -- swatch opens the picker (and switches back from class when active).
+        do
+            local rightRgn = sharedCenterTextRow._leftRegion
+            local rtAnchor = rightRgn._lastInline or rightRgn._control
+            local rtClassSwatch, rtUpdateClassSwatch = EllesmereUI.BuildColorSwatch(
+                rightRgn, rightRgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(rtClassSwatch, "RIGHT", rtAnchor, "LEFT", -8, 0)
+            rtClassSwatch:SetScript("OnClick", function()
+                if SVal("rightTextContent", "both") == "none" then return end
+                SSet("rightTextClassColor", true); UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            rtClassSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(rtClassSwatch, "Class Colored") end)
+            rtClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local rtSwGet = function()
-                local r = SVal("rightTextColorR", 1); local g = SVal("rightTextColorG", 1); local b = SVal("rightTextColorB", 1)
-                return r, g, b
+                return SVal("rightTextColorR", 1), SVal("rightTextColorG", 1), SVal("rightTextColorB", 1)
             end
             local rtSwSet = function(r, g, b)
                 SSet("rightTextColorR", r); SSet("rightTextColorG", g); SSet("rightTextColorB", b)
                 UpdatePreview()
             end
             local rtSwatch, rtUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, rtSwGet, rtSwSet, nil, 20)
-            PP.Point(rtSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+            PP.Point(rtSwatch, "RIGHT", rtClassSwatch, "LEFT", -8, 0)
             rightRgn._lastInline = rtSwatch
-            local rtSwBlock = CreateFrame("Frame", nil, rtSwatch)
-            rtSwBlock:SetAllPoints(); rtSwBlock:SetFrameLevel(rtSwatch:GetFrameLevel() + 10); rtSwBlock:EnableMouse(true)
-            rtSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(rtSwatch, EllesmereUI.DisabledTooltip("Right Text")) end)
-            rtSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
+            local rtOrigClick = rtSwatch:GetScript("OnClick")
+            rtSwatch:SetScript("OnClick", function(self, ...)
+                if SVal("rightTextContent", "both") == "none" then return end
+                if SVal("rightTextClassColor", false) then
+                    SSet("rightTextClassColor", false); UpdatePreview(); EllesmereUI:RefreshPage(); return
+                end
+                if rtOrigClick then rtOrigClick(self, ...) end
+            end)
+            rtSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(rtSwatch, "Custom Colored") end)
+            rtSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateRtSwatches()
                 local isNone = SVal("rightTextContent", "both") == "none"
                 local isClass = SVal("rightTextClassColor", false)
-                if isNone or isClass then rtSwatch:SetAlpha(0.3); rtSwBlock:Show() else rtSwatch:SetAlpha(1); rtSwBlock:Hide() end
-                rtUpdateSwatch()
-            end)
-            local rtInitOff = SVal("rightTextContent", "both") == "none" or SVal("rightTextClassColor", false)
-            rtSwatch:SetAlpha(rtInitOff and 0.3 or 1)
-            if rtInitOff then rtSwBlock:Show() else rtSwBlock:Hide() end
+                rtSwatch:SetAlpha((isClass or isNone) and 0.3 or 1)
+                rtClassSwatch:SetAlpha((isClass and not isNone) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() rtUpdateSwatch(); rtUpdateClassSwatch(); UpdateRtSwatches() end)
+            UpdateRtSwatches()
         end
-        -- Cogwheel on Right Text
+        -- Cogwheel on Right Text (left region)
         do
-            local rightRgn = sharedTextRow._rightRegion
+            local rightRgn = sharedCenterTextRow._leftRegion
             local _, rightCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Right Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return SVal("rightTextClassColor", false) end,
-                      set=function(v) SSet("rightTextClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("rightTextSize", SDB().textSize or 12) end,
                       set=function(v) SSet("rightTextSize", v); UpdatePreview() end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-150, max=150, step=1,
                       get=function() return SVal("rightTextX", 0) end,
                       set=function(v) SSet("rightTextX", v); UpdatePreview() end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("rightTextY", 0) end,
                       set=function(v) SSet("rightTextY", v); UpdatePreview() end },
                 },
@@ -4498,40 +5110,42 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateRightCogState()
             RegisterWidgetRefresh(UpdateRightCogState)
         end
-
-        -- Row 4: Center Text + Reverse Fill
-        local sharedCenterTextRow
-        sharedCenterTextRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Center Text", values=healthTextValues, order=healthTextOrder,
-              getValue=function() return SVal("centerTextContent", "none") end,
-              setValue=function(v)
-                  SSet("centerTextContent", v)
-                  if v ~= "none" then
-                      SSet("leftTextContent", "none")
-                      SSet("rightTextContent", "none")
-                  end
-                  ReloadAndUpdate(); UpdatePreview()
-              end },
-            { type="toggle", text="Reverse Fill",
-              getValue=function() return SVal("healthReverseFill", false) end,
-              setValue=function(v) SSet("healthReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        -- Sync icon: Center Text (left)
+        -- Sync icon: Center Text (right)
         do
-            local rgn = sharedCenterTextRow._leftRegion
+            local rgn = sharedCenterTextRow._rightRegion
+            local function ApplyCenterTextTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local v = src.centerTextContent or "none"
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.centerTextContent = ((v == "absorb" or v == "absorbshort" or v == "group") and key ~= "player") and "none" or v
+                        d.centerTextClassColor = src.centerTextClassColor
+                        d.centerTextColorR, d.centerTextColorG, d.centerTextColorB = src.centerTextColorR, src.centerTextColorG, src.centerTextColorB
+                        d.centerTextSize = src.centerTextSize
+                        d.centerTextX, d.centerTextY = src.centerTextX, src.centerTextY
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Center Text to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().centerTextContent or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().centerTextContent = v end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
+                onClick = function() ApplyCenterTextTo(GROUP_UNIT_ORDER) end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().centerTextContent or "none"
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local v = src.centerTextContent or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().centerTextContent or "none") ~= v then return false end
+                        local d = UNIT_DB_MAP[key]()
+                        local expected = ((v == "absorb" or v == "absorbshort" or v == "group") and key ~= "player") and "none" or v
+                        if (d.centerTextContent or "none") ~= expected then return false end
+                        if (d.centerTextClassColor or false) ~= (src.centerTextClassColor or false) then return false end
+                        if (d.centerTextColorR or 1) ~= (src.centerTextColorR or 1) then return false end
+                        if (d.centerTextColorG or 1) ~= (src.centerTextColorG or 1) then return false end
+                        if (d.centerTextColorB or 1) ~= (src.centerTextColorB or 1) then return false end
+                        if (d.centerTextSize or 0) ~= (src.centerTextSize or 0) then return false end
+                        if (d.centerTextX or 0) ~= (src.centerTextX or 0) then return false end
+                        if (d.centerTextY or 0) ~= (src.centerTextY or 0) then return false end
                     end
                     return true
                 end,
@@ -4540,58 +5154,74 @@ initFrame:SetScript("OnEvent", function(self)
                     elementKeys   = GROUP_UNIT_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().centerTextContent or "none"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().centerTextContent = v end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
+                    onApply       = function(checkedKeys) ApplyCenterTextTo(checkedKeys) end,
                 },
             })
         end
-        -- Color swatch on Center Text
+        -- Inline color swatches on Center Text (right region): Custom + Class (CDM Border
+        -- Size double-swatch pattern). Class swatch sets centerTextClassColor; custom
+        -- swatch opens the picker (and switches back from class when active).
         do
-            local ctrRgn = sharedCenterTextRow._leftRegion
+            local ctrRgn = sharedCenterTextRow._rightRegion
+            local ctAnchor = ctrRgn._lastInline or ctrRgn._control
+            local ctClassSwatch, ctUpdateClassSwatch = EllesmereUI.BuildColorSwatch(
+                ctrRgn, ctrRgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(ctClassSwatch, "RIGHT", ctAnchor, "LEFT", -8, 0)
+            ctClassSwatch:SetScript("OnClick", function()
+                if SVal("centerTextContent", "none") == "none" then return end
+                SSet("centerTextClassColor", true); UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            ctClassSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ctClassSwatch, "Class Colored") end)
+            ctClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local ctSwGet = function()
-                local r = SVal("centerTextColorR", 1); local g = SVal("centerTextColorG", 1); local b = SVal("centerTextColorB", 1)
-                return r, g, b
+                return SVal("centerTextColorR", 1), SVal("centerTextColorG", 1), SVal("centerTextColorB", 1)
             end
             local ctSwSet = function(r, g, b)
                 SSet("centerTextColorR", r); SSet("centerTextColorG", g); SSet("centerTextColorB", b)
                 UpdatePreview()
             end
             local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(ctrRgn, ctrRgn:GetFrameLevel() + 5, ctSwGet, ctSwSet, nil, 20)
-            PP.Point(ctSwatch, "RIGHT", ctrRgn._lastInline or ctrRgn._control, "LEFT", -8, 0)
+            PP.Point(ctSwatch, "RIGHT", ctClassSwatch, "LEFT", -8, 0)
             ctrRgn._lastInline = ctSwatch
-            local ctSwBlock = CreateFrame("Frame", nil, ctSwatch)
-            ctSwBlock:SetAllPoints(); ctSwBlock:SetFrameLevel(ctSwatch:GetFrameLevel() + 10); ctSwBlock:EnableMouse(true)
-            ctSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ctSwatch, EllesmereUI.DisabledTooltip("Center Text")) end)
-            ctSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
+            local ctOrigClick = ctSwatch:GetScript("OnClick")
+            ctSwatch:SetScript("OnClick", function(self, ...)
+                if SVal("centerTextContent", "none") == "none" then return end
+                if SVal("centerTextClassColor", false) then
+                    SSet("centerTextClassColor", false); UpdatePreview(); EllesmereUI:RefreshPage(); return
+                end
+                if ctOrigClick then ctOrigClick(self, ...) end
+            end)
+            ctSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(ctSwatch, "Custom Colored") end)
+            ctSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateCtSwatches()
                 local isNone = SVal("centerTextContent", "none") == "none"
                 local isClass = SVal("centerTextClassColor", false)
-                if isNone or isClass then ctSwatch:SetAlpha(0.3); ctSwBlock:Show() else ctSwatch:SetAlpha(1); ctSwBlock:Hide() end
-                ctUpdateSwatch()
-            end)
-            local ctInitOff = SVal("centerTextContent", "none") == "none" or SVal("centerTextClassColor", false)
-            ctSwatch:SetAlpha(ctInitOff and 0.3 or 1)
-            if ctInitOff then ctSwBlock:Show() else ctSwBlock:Hide() end
+                ctSwatch:SetAlpha((isClass or isNone) and 0.3 or 1)
+                ctClassSwatch:SetAlpha((isClass and not isNone) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() ctUpdateSwatch(); ctUpdateClassSwatch(); UpdateCtSwatches() end)
+            UpdateCtSwatches()
         end
         -- Cogwheel on Center Text
         do
-            local ctrRgn = sharedCenterTextRow._leftRegion
+            local ctrRgn = sharedCenterTextRow._rightRegion
             local _, centerCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Center Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return SVal("centerTextClassColor", false) end,
-                      set=function(v) SSet("centerTextClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("centerTextSize", SDB().textSize or 12) end,
                       set=function(v) SSet("centerTextSize", v); UpdatePreview() end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-150, max=150, step=1,
                       get=function() return SVal("centerTextX", 0) end,
                       set=function(v) SSet("centerTextX", v); UpdatePreview() end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("centerTextY", 0) end,
                       set=function(v) SSet("centerTextY", v); UpdatePreview() end },
                 },
@@ -4632,7 +5262,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 1: Bar Height + Bar Position
         local sharedPowerRow1
         sharedPowerRow1, h = W:DualRow(parent, y,
-            { type="slider", text="Bar Height", min=0, max=30, step=1,
+            { type="slider", text="Power Bar Height", min=0, max=30, step=1,
               getValue=function() return SValSupported("powerHeight", 6) end,
               setValue=function(v) SSetSupported("powerHeight", v); ReloadAndUpdate(); UpdatePreview() end },
             { type="dropdown", text="Bar Position", values=ppPosValues, order=ppPosOrder,
@@ -4681,7 +5311,7 @@ initFrame:SetScript("OnEvent", function(self)
             local rgn = sharedPowerRow1._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Bar Height to all Frames",
+                tooltip = "Apply Power Bar Height to all Frames",
                 onClick = function()
                     local v = UNIT_DB_MAP[selectedUnit]().powerHeight or 6
                     for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerHeight = v end
@@ -4706,6 +5336,19 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 },
             })
+        end
+        -- Reverse Fill cog on Bar Height (left region)
+        do
+            local rgn = sharedPowerRow1._leftRegion
+            local _, revCogShow = EllesmereUI.BuildCogPopup({
+                title = "Power Bar Fill",
+                rows = {
+                    { type="toggle", label="Reverse Fill",
+                      get=function() return SVal("powerReverseFill", false) end,
+                      set=function(v) SSet("powerReverseFill", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            MakeCogBtn(rgn, revCogShow)
         end
         do
             local rgn = sharedPowerRow1._rightRegion
@@ -4782,7 +5425,7 @@ initFrame:SetScript("OnEvent", function(self)
             fmtCogBtn:SetScript("OnEnter", function(self)
                 local fmt = SVal("powerTextFormat", "perpp")
                 if fmt == "none" or fmt == "curpp" then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show % is only available for formats that display a percentage."))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option is only available for formats that display a percentage."))
                 else self:SetAlpha(0.7) end
             end)
             fmtCogBtn:SetScript("OnLeave", function(self) UpdateFmtCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -4886,20 +5529,21 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 3: Bar Color (multiSwatch) + Power Bar Opacity (slider)
+        -- Row 3: Bar Color (multiSwatch) + Bar Background (slider + inline swatch)
         local sharedPowerRow3
         sharedPowerRow3, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Bar Color",
               swatches = {
-                { tooltip = "Bar Background",
-                  hasAlpha = false,
+                { tooltip = "Gradient End Color", hasAlpha = false,
+                  disabled = function() return not SVal("powerGradientEnabled", false) end,
+                  disabledTooltip = function() return "Gradient" end,
                   getValue = function()
-                      local c = SGet("customPowerBgColor")
+                      local c = SGet("powerGradientColor")
                       if c then return c.r, c.g, c.b end
-                      return 17/255, 17/255, 17/255
+                      return 0.20, 0.20, 0.80
                   end,
                   setValue = function(r, g, b)
-                      UNIT_DB_MAP[selectedUnit]().customPowerBgColor = { r=r, g=g, b=b }
+                      UNIT_DB_MAP[selectedUnit]().powerGradientColor = { r=r, g=g, b=b }
                       ReloadAndUpdate(); UpdatePreview()
                   end },
                 { tooltip = "Custom Colored Fill",
@@ -4943,104 +5587,155 @@ initFrame:SetScript("OnEvent", function(self)
                       return SVal("powerPercentPowerColor", true) and 1 or 0.3
                   end },
               } },
-            { type="slider", text="Power Bar Opacity", min=10, max=100, step=1,
+            { type="slider", text="Bar Background", min=0, max=100, step=1,
+              getValue=function() return SVal("customPowerBgAlpha", 100) end,
+              setValue=function(v) SSet("customPowerBgAlpha", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+        -- Inline color swatch on Bar Background (right region)
+        do
+            local rgn = sharedPowerRow3._rightRegion
+            local bgSwGet = function()
+                local c = SGet("customPowerBgColor")
+                if c then return c.r, c.g, c.b end
+                return 17/255, 17/255, 17/255
+            end
+            local bgSwSet = function(r, g, b)
+                UNIT_DB_MAP[selectedUnit]().customPowerBgColor = { r=r, g=g, b=b }
+                ReloadAndUpdate(); UpdatePreview()
+            end
+            local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
+            PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = bgSw
+            RegisterWidgetRefresh(function() bgSwUpdate() end)
+        end
+        -- Sync icon: Bar Background (right) -- background color + opacity
+        do
+            local rgn = sharedPowerRow3._rightRegion
+            local function ApplyBgTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local bc = src.customPowerBgColor or { r=17/255, g=17/255, b=17/255 }
+                local bgA = src.customPowerBgAlpha or 100
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.customPowerBgColor = { r=bc.r, g=bc.g, b=bc.b }
+                        d.customPowerBgAlpha = bgA
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Bar Background to all Frames",
+                onClick = function() ApplyBgTo(GROUP_UNIT_ORDER) end,
+                isSynced = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local function colEq(a, b)
+                        if a == nil and b == nil then return true end
+                        if a == nil or b == nil then return false end
+                        return a.r == b.r and a.g == b.g and a.b == b.b
+                    end
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        local d = UNIT_DB_MAP[key]()
+                        if not colEq(d.customPowerBgColor, src.customPowerBgColor) then return false end
+                        if (d.customPowerBgAlpha or 100) ~= (src.customPowerBgAlpha or 100) then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys) ApplyBgTo(checkedKeys) end,
+                },
+            })
+        end
+        -- Sync icon: Bar Color (left) -- fill/power color and gradient
+        do
+            local rgn = sharedPowerRow3._leftRegion
+            local function ApplyColorTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local pc = src.powerPercentPowerColor
+                if pc == nil then pc = true end
+                local fc = src.customPowerFillColor
+                local gEn = src.powerGradientEnabled or false
+                local gDir = src.powerGradientDir or "HORIZONTAL"
+                local gc = src.powerGradientColor
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.powerPercentPowerColor = pc
+                        if fc then d.customPowerFillColor = { r=fc.r, g=fc.g, b=fc.b }
+                        else d.customPowerFillColor = nil end
+                        d.powerGradientEnabled = gEn
+                        d.powerGradientDir = gDir
+                        if gc then d.powerGradientColor = { r=gc.r, g=gc.g, b=gc.b }
+                        else d.powerGradientColor = nil end
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Bar Color to all Frames",
+                onClick = function() ApplyColorTo(GROUP_UNIT_ORDER) end,
+                isSynced = function()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local function colEq(a, b)
+                        if a == nil and b == nil then return true end
+                        if a == nil or b == nil then return false end
+                        return a.r == b.r and a.g == b.g and a.b == b.b
+                    end
+                    local v = src.powerPercentPowerColor
+                    if v == nil then v = true end
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        local d = UNIT_DB_MAP[key]()
+                        local ov = d.powerPercentPowerColor
+                        if ov == nil then ov = true end
+                        if ov ~= v then return false end
+                        if not colEq(d.customPowerFillColor, src.customPowerFillColor) then return false end
+                        if (d.powerGradientEnabled or false) ~= (src.powerGradientEnabled or false) then return false end
+                        if not colEq(d.powerGradientColor, src.powerGradientColor) then return false end
+                        if (d.powerGradientDir or "HORIZONTAL") ~= (src.powerGradientDir or "HORIZONTAL") then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys) ApplyColorTo(checkedKeys) end,
+                },
+            })
+        end
+        -- Gradient cog on Bar Color (left region)
+        do
+            local rgn = sharedPowerRow3._leftRegion
+            local _, gradCogShow = EllesmereUI.BuildCogPopup({
+                title = "Gradient Settings",
+                rows = {
+                    { type="toggle", label="Enable Gradient",
+                      get=function() return SVal("powerGradientEnabled", false) end,
+                      set=function(v) SSet("powerGradientEnabled", v); ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage() end },
+                    { type="dropdown", label="Gradient Direction",
+                      values={ HORIZONTAL="Horizontal", VERTICAL="Vertical" }, order={ "HORIZONTAL", "VERTICAL" },
+                      get=function() return SVal("powerGradientDir", "HORIZONTAL") end,
+                      set=function(v) SSet("powerGradientDir", v); ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage() end },
+                },
+            })
+            MakeCogBtn(rgn, gradCogShow)
+        end
+
+        -- Row 4: Bar Opacity + Text Color
+        local sharedPowerRow4
+        sharedPowerRow4, h = W:DualRow(parent, y,
+            { type="slider", text="Fill Opacity", min=10, max=100, step=1,
               getValue=function() return SVal("powerBarOpacity", 100) end,
               setValue=function(v)
                   SSet("powerBarOpacity", v)
                   UpdatePreview()
-              end });  y = y - h
-        -- Sync icons: Bar Color (left) and Power Bar Opacity (right)
-        do
-            local rgn = sharedPowerRow3._leftRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Bar Color to all Frames",
-                onClick = function()
-                    local src = UNIT_DB_MAP[selectedUnit]()
-                    local pc = src.powerPercentPowerColor
-                    if pc == nil then pc = true end
-                    local fc = src.customPowerFillColor
-                    local bc = src.customPowerBgColor or { r=17/255, g=17/255, b=17/255 }
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then
-                            local d = UNIT_DB_MAP[key]()
-                            d.powerPercentPowerColor = pc
-                            if fc then d.customPowerFillColor = { r=fc.r, g=fc.g, b=fc.b }
-                            else d.customPowerFillColor = nil end
-                            d.customPowerBgColor = { r=bc.r, g=bc.g, b=bc.b }
-                        end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerPercentPowerColor
-                    if v == nil then v = true end
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        local ov = UNIT_DB_MAP[key]().powerPercentPowerColor
-                        if ov == nil then ov = true end
-                        if ov ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local src = UNIT_DB_MAP[selectedUnit]()
-                        local pc = src.powerPercentPowerColor
-                        if pc == nil then pc = true end
-                        local fc = src.customPowerFillColor
-                        local bc = src.customPowerBgColor or { r=17/255, g=17/255, b=17/255 }
-                        for _, key in ipairs(checkedKeys) do
-                            local d = UNIT_DB_MAP[key]()
-                            d.powerPercentPowerColor = pc
-                            if fc then d.customPowerFillColor = { r=fc.r, g=fc.g, b=fc.b }
-                            else d.customPowerFillColor = nil end
-                            d.customPowerBgColor = { r=bc.r, g=bc.g, b=bc.b }
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
-        end
-        do
-            local rgn = sharedPowerRow3._rightRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Power Bar Opacity to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().powerBarOpacity = v end
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().powerBarOpacity or 100) ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerBarOpacity = v end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
-        end
-
-        -- Row 4: Text Color (multiSwatch: custom left, power colored right) + Reverse Fill
-        local sharedPowerRow4
-        sharedPowerRow4, h = W:DualRow(parent, y,
+              end },
             { type="multiSwatch", text="Text Color",
               swatches = {
                 { tooltip = "Custom Text Color",
@@ -5084,13 +5779,43 @@ initFrame:SetScript("OnEvent", function(self)
                   refreshAlpha = function()
                       return SVal("powerPercentTextPowerColor", false) and 1 or 0.3
                   end },
-              } },
-            { type="toggle", text="Reverse Fill",
-              getValue=function() return SVal("powerReverseFill", false) end,
-              setValue=function(v) SSet("powerReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        -- Sync icon: Text Color (left of row 4)
+              } });  y = y - h
+        -- Sync icon: Bar Opacity (left of row 4)
         do
             local rgn = sharedPowerRow4._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Bar Opacity to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().powerBarOpacity = v end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().powerBarOpacity or 100) ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerBarOpacity = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+        -- Sync icon: Text Color (right of row 4)
+        do
+            local rgn = sharedPowerRow4._rightRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Text Color to all Frames",
@@ -5134,7 +5859,135 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 5: Power Type override (player-only, spec-dependent)
+        -- Row 5: Power Border Style (+ cog) | Power Border Size (+ inline swatches)
+        local pbTexValues, pbTexOrder = EllesmereUI.GetBorderTextureDropdown()
+        local sharedPowerBorderRow
+        sharedPowerBorderRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Border Style",
+              disabled=function()
+                  local pos = SVal("powerPosition", "below")
+                  return pos ~= "detached_top" and pos ~= "detached_bottom"
+              end,
+              disabledTooltip="Border is only available when Power Bar is detached.", rawTooltip=true,
+              values=pbTexValues, order=pbTexOrder,
+              getValue=function() return SGet("powerBorderStyle") or "solid" end,
+              setValue=function(v)
+                  SSet("powerBorderStyle", v)
+                  SSet("powerBorderOffsetX", nil)
+                  SSet("powerBorderOffsetY", nil)
+                  SSet("powerBorderShiftX", nil)
+                  SSet("powerBorderShiftY", nil)
+                  if v ~= "solid" then
+                      SSet("powerBorderColor", { r = 1, g = 1, b = 1 })
+                      SSet("powerBorderAlpha", 1)
+                  else
+                      SSet("powerBorderColor", { r = 0, g = 0, b = 0 })
+                      SSet("powerBorderAlpha", 1)
+                  end
+                  local defSz = EllesmereUI.GetBorderDefaultSize("unitframes", v)
+                  if defSz then SSet("powerBorderSize", defSz) end
+                  ReloadAndUpdate()
+              end },
+            { type="slider", text="Border Size",
+              disabled=function()
+                  local pos = SVal("powerPosition", "below")
+                  return pos ~= "detached_top" and pos ~= "detached_bottom"
+              end,
+              disabledTooltip="Border is only available when Power Bar is detached.", rawTooltip=true,
+              min=0, max=4, step=1, trackWidth=120,
+              getValue=function() return SVal("powerBorderSize", 0) end,
+              setValue=function(v)
+                  SSet("powerBorderSize", v); ReloadAndUpdate()
+              end });  y = y - h
+        -- Cog for power border offset (left region)
+        do
+            local rgn = sharedPowerBorderRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Power Border Offset",
+                rows = {
+                    { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = SGet("powerBorderOffsetX")
+                          if v then return v end
+                          local tex = SGet("powerBorderStyle") or "solid"
+                          local sz = SVal("powerBorderSize", 0)
+                          local dox = EllesmereUI.GetBorderDefaults("unitframes", tex, sz)
+                          return dox
+                      end,
+                      set = function(v) SSet("powerBorderOffsetX", v); ReloadAndUpdate() end },
+                    { type = "slider", label = "Offset Y", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = SGet("powerBorderOffsetY")
+                          if v then return v end
+                          local tex = SGet("powerBorderStyle") or "solid"
+                          local sz = SVal("powerBorderSize", 0)
+                          local _, doy = EllesmereUI.GetBorderDefaults("unitframes", tex, sz)
+                          return doy
+                      end,
+                      set = function(v) SSet("powerBorderOffsetY", v); ReloadAndUpdate() end },
+                    { type = "slider", label = "Shift X", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = SGet("powerBorderShiftX")
+                          if v then return v end
+                          local tex = SGet("powerBorderStyle") or "solid"
+                          local sz = SVal("powerBorderSize", 0)
+                          local _, _, dsx = EllesmereUI.GetBorderDefaults("unitframes", tex, sz)
+                          return dsx
+                      end,
+                      set = function(v) SSet("powerBorderShiftX", v == 0 and nil or v); ReloadAndUpdate() end },
+                    { type = "slider", label = "Shift Y", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = SGet("powerBorderShiftY")
+                          if v then return v end
+                          local tex = SGet("powerBorderStyle") or "solid"
+                          local sz = SVal("powerBorderSize", 0)
+                          local _, _, _, dsy = EllesmereUI.GetBorderDefaults("unitframes", tex, sz)
+                          return dsy
+                      end,
+                      set = function(v) SSet("powerBorderShiftY", v == 0 and nil or v); ReloadAndUpdate() end },
+                    { type = "toggle", label = "Show Behind",
+                      get = function() return SVal("powerBorderBehind", false) end,
+                      set = function(v) SSet("powerBorderBehind", v); ReloadAndUpdate() end },
+                },
+            })
+            local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+            local function UpdatePBCogVis()
+                local pos = SVal("powerPosition", "below")
+                local isDet = (pos == "detached_top" or pos == "detached_bottom")
+                local tex = SGet("powerBorderStyle") or "solid"
+                if not isDet or tex == "solid" then cogBtn:Hide() else cogBtn:Show() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdatePBCogVis)
+            UpdatePBCogVis()
+        end
+        -- Inline swatches on Border Size (right region)
+        do
+            local rightRgn = sharedPowerBorderRow._rightRegion
+            local ctrl = rightRgn._lastInline or rightRgn._control
+            -- Border color swatch
+            local pbSwatch, updatePBSwatch = EllesmereUI.BuildColorSwatch(
+                rightRgn, sharedPowerBorderRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGet("powerBorderColor") or { r = 0, g = 0, b = 0 }
+                    return c.r, c.g, c.b, SVal("powerBorderAlpha", 1)
+                end,
+                function(r, g, b, a)
+                    UNIT_DB_MAP[selectedUnit]().powerBorderColor = { r=r, g=g, b=b }
+                    UNIT_DB_MAP[selectedUnit]().powerBorderAlpha = a
+                    ReloadAndUpdate()
+                end,
+                true, 20)
+            PP.Point(pbSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            pbSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(pbSwatch, "Border Color")
+            end)
+            pbSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            rightRgn._lastInline = pbSwatch
+            EllesmereUI.RegisterWidgetRefresh(function() updatePBSwatch() end)
+        end
+
+        -- Row 6: Power Type override (player-only, spec-dependent)
+        -- (was Row 5 before border rows were added)
         do
             local _, playerClass = UnitClass("player")
             -- Specs that offer an alternative power type on the player power bar.
@@ -5241,6 +6094,51 @@ initFrame:SetScript("OnEvent", function(self)
             else UNIT_DB_MAP[selectedUnit]().castbarHeight = v end
         end
 
+        -- Player-only hint: the cast bar configured here is a compact mini bar
+        -- shown under the player frame. The full-size player cast bar is owned by
+        -- the Resource & Cast Bars module, so deep-link the user straight to it.
+        -- (The page fully rebuilds when the unit dropdown changes, so gating on
+        -- selectedUnit here is enough -- it re-evaluates per unit.)
+        if selectedUnit == "player" then
+            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            ar, ag, ab = ar or 12/255, ag or 210/255, ab or 157/255
+            local accentHex = string.format("|cff%02x%02x%02x",
+                math.floor(ar * 255 + 0.5),
+                math.floor(ag * 255 + 0.5),
+                math.floor(ab * 255 + 0.5))
+            local hintText = "For player frame, this provides a simple, mini castbar below player frame. To edit the main player cast bar, "
+                .. accentHex .. "click here|r"
+            -- Full-width label (passing nil as the right slot expands the left
+            -- region to the whole row) so the text renders via the panel's own
+            -- widget path. A transparent button over the row makes the line
+            -- clickable -> Resource & Cast Bars > Cast Bar (accent "click here"
+            -- is the visual affordance).
+            local hintRow
+            hintRow, h = W:DualRow(parent, y, { type = "label", text = hintText }, nil)
+            -- The label is single-line by default; let this long hint wrap inside
+            -- the full-width row so "click here" stays on screen.
+            local lbl = hintRow._leftRegion and hintRow._leftRegion._label
+            if lbl then
+                lbl:SetJustifyH("LEFT")
+                lbl:SetWordWrap(true)
+                local rw = hintRow._leftRegion:GetWidth()
+                if not rw or rw < 80 then rw = 300 end
+                lbl:SetWidth(rw - 40)
+            end
+            local clickRgn = hintRow._leftRegion or hintRow
+            local linkBtn = CreateFrame("Button", nil, clickRgn)
+            linkBtn:SetAllPoints(clickRgn)
+            linkBtn:SetFrameLevel(clickRgn:GetFrameLevel() + 5)
+            linkBtn:SetScript("OnClick", function()
+                EllesmereUI:NavigateToElementSettings("EllesmereUIResourceBars", "Cast Bar")
+            end)
+            linkBtn:SetScript("OnEnter", function(self)
+                EllesmereUI.ShowWidgetTooltip(self, "Open Resource & Cast Bars > Cast Bar")
+            end)
+            linkBtn:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            y = y - h
+        end
+
         -- Row 1: Show Cast Bar (toggle + fill swatch) | Height (slider)
         local sharedCastRow1
         local cbKey = selectedUnit .. "Castbar"
@@ -5253,48 +6151,88 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=cbhDis, disabledTooltip=cbhTip, rawTooltip=cbhRaw,
               getValue=GetCastbarHeight,
               setValue=function(v) SetCastbarHeight(v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        -- Inline fill color swatch on Show Cast Bar
+        -- Inline cast color swatch(es) on Show Cast Bar
         do
             local leftRgn = sharedCastRow1._leftRegion
-            local cbSw = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
-                function()
-                    local c = SGetSupported("castbarFillColor")
-                    c = c or { r=1, g=0.7, b=0 }
-                    return c.r, c.g, c.b, 1
-                end,
-                function(r, g, b)
-                    UNIT_DB_MAP[selectedUnit]().castbarFillColor = { r=r, g=g, b=b }
-                    ReloadAndUpdate(); UpdatePreview()
-                end, false, 20)
-            cbSw:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -12, 0)
-            cbSw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Fill Color") end)
-            cbSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            leftRgn._lastInline = cbSw
+            local function AddCastColorSwatch(tooltip, colorKey, fallback, disabledFn)
+                local sw, updateSw = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                    function()
+                        local c = SGetSupported(colorKey)
+                        c = c or fallback
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        SSetSupported(colorKey, { r = r, g = g, b = b })
+                        ReloadAndUpdate(); UpdatePreview()
+                    end, false, 20)
+                PP.Point(sw, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, tooltip) end)
+                sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                leftRgn._lastInline = sw
+                -- Optional disabled gate: grey (0.3) + non-interactive when
+                -- disabledFn returns true. Used by the default-off Interrupt Ready
+                -- Mid-Cast swatch so it tracks its enable toggle in the cog.
+                if disabledFn then
+                    local function applySwState()
+                        local off = disabledFn()
+                        sw:SetAlpha(off and 0.3 or 1)
+                        sw:EnableMouse(not off)
+                        if updateSw then updateSw() end
+                    end
+                    applySwState()
+                    EllesmereUI.RegisterWidgetRefresh(applySwState)
+                end
+            end
+            if selectedUnit == "target" or selectedUnit == "focus" then
+                -- Inline swatches anchor right-to-left; add Mid-Cast first so it
+                -- sits rightmost, then CD, then interruptible (matches the
+                -- Interruptible / On CD / Mid-Cast order shown on Nameplates). The
+                -- Mid-Cast swatch greys out unless its enable toggle in the cog is on.
+                AddCastColorSwatch("Interrupt Ready Mid-Cast", "castbarInterruptMidCastColor", { r = 0.318, g = 0.820, b = 0.357 },
+                    function() return not SValSupported("castbarInterruptMidCastEnabled", false) end)
+                AddCastColorSwatch("Interrupt on CD", "castbarInterruptReadyColor", { r = 0.92, g = 0.35, b = 0.20 })
+                AddCastColorSwatch("Interruptible Cast", "castbarFillColor", { r = 0.863, g = 0.820, b = 0.639 })
+            else
+                AddCastColorSwatch("Fill Color", "castbarFillColor", { r = 1, g = 0.7, b = 0 })
+            end
         end
         -- Sync icon: Show Cast Bar + Fill Color (left region)
         do
             local rgn = sharedCastRow1._leftRegion
+            local isKickUnit = selectedUnit == "target" or selectedUnit == "focus"
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Show Cast Bar and Fill Color to all Frames",
+                tooltip = isKickUnit and "Apply Show Cast Bar and Cast Color to Target and Focus"
+                    or "Apply Show Cast Bar and Fill Color to all Frames",
                 onClick = function()
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                    local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
+                    for _, key in ipairs(keys) do
                         SetCastbarEnabled(key, v)
-                        if c then UNIT_DB_MAP[key]().castbarFillColor = { r=c.r, g=c.g, b=c.b } end
+                        if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
+                        if readyC then UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b } end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                    local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
+                    for _, key in ipairs(keys) do
                         if GetCastbarEnabled(key) ~= v then return false end
                         local kc = UNIT_DB_MAP[key]().castbarFillColor
                         if c and kc then
                             if kc.r ~= c.r or kc.g ~= c.g or kc.b ~= c.b then return false end
                         elseif c ~= kc then return false end
+                        if isKickUnit then
+                            local kr = UNIT_DB_MAP[key]().castbarInterruptReadyColor
+                            if readyC and kr then
+                                if kr.r ~= readyC.r or kr.g ~= readyC.g or kr.b ~= readyC.b then return false end
+                            elseif readyC ~= kr then return false end
+                        end
                     end
                     return true
                 end,
@@ -5306,14 +6244,69 @@ initFrame:SetScript("OnEvent", function(self)
                     onApply       = function(checkedKeys)
                         local v = GetCastbarEnabled(selectedUnit)
                         local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
+                        local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
                         for _, key in ipairs(checkedKeys) do
                             SetCastbarEnabled(key, v)
-                            if c then UNIT_DB_MAP[key]().castbarFillColor = { r=c.r, g=c.g, b=c.b } end
+                            if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
+                            if readyC and (key == "target" or key == "focus") then
+                                UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b }
+                            end
                         end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
             })
+        end
+        -- Inline cog on Show Cast Bar: Hide When Idle (all units) plus the
+        -- kick-ready tick (target/focus only). These stay out of the Show Cast
+        -- Bar sync icon on purpose -- they are per-unit detail settings.
+        do
+            local rgn = sharedCastRow1._leftRegion
+            local cogRows = {
+                { type = "toggle", label = "Hide When Idle",
+                  tooltip = "Only show the cast bar while a cast is in progress; hide it the rest of the time.",
+                  get = function()
+                      local v = UNIT_DB_MAP[selectedUnit]().castbarHideWhenInactive
+                      if v == nil then return true end
+                      return v
+                  end,
+                  set = function(v)
+                      UNIT_DB_MAP[selectedUnit]().castbarHideWhenInactive = v
+                      ReloadAndUpdate(); UpdatePreview()
+                  end },
+            }
+            if selectedUnit == "target" or selectedUnit == "focus" then
+                cogRows[#cogRows + 1] = { type = "toggle", label = "Show Kick Ready Mid-Cast Tick",
+                    tooltip = "Shows a small white tick mark on the cast bar at the point where the cast will be when your interrupt comes off cooldown.",
+                    get = function()
+                        local v = SGetSupported("castbarKickTickEnabled")
+                        if v == nil then return true end
+                        return v
+                    end,
+                    set = function(v)
+                        SSetSupported("castbarKickTickEnabled", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "toggle", label = "Show Kick Ready Mid-Cast Bar",
+                    tooltip = "When your interrupt is on cooldown now but will be ready before the enemy cast finishes, color the part of the cast bar during which your interrupt will be available. The color clears the instant your interrupt comes off cooldown.",
+                    get = function()
+                        local v = SGetSupported("castbarInterruptMidCastEnabled")
+                        if v == nil then return false end
+                        return v
+                    end,
+                    set = function(v)
+                        SSetSupported("castbarInterruptMidCastEnabled", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                        -- Refresh the page so the inline Mid-Cast color swatch
+                        -- greys/ungreys immediately; the cog popup stays open.
+                        EllesmereUI:RefreshPage()
+                    end }
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Cast Bar",
+                rows = cogRows,
+            })
+            MakeCogBtn(rgn, cogShow)
         end
         -- Sync icon: Cast Bar Height (right region)
         do
@@ -5356,7 +6349,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 2: Show Icon | Hide When Idle
+        -- Row 2: Show Icon | Bar Background (opacity slider + inline color swatch)
         local function GetShowIcon()
             if selectedUnit == "player" then
                 local v = UNIT_DB_MAP.player().showPlayerCastIcon
@@ -5375,23 +6368,14 @@ initFrame:SetScript("OnEvent", function(self)
                 UNIT_DB_MAP[selectedUnit]().showCastIcon = val
             end
         end
-        local function GetHideInactive()
-            local v = UNIT_DB_MAP[selectedUnit]().castbarHideWhenInactive
-            if v == nil then return true end
-            return v
-        end
-        local function SetHideInactive(val)
-            UNIT_DB_MAP[selectedUnit]().castbarHideWhenInactive = val
-        end
-
         local castRow2
         castRow2, h = W:DualRow(parent, y,
             { type="toggle", text="Show Icon",
               getValue=GetShowIcon,
               setValue=function(v) SetShowIcon(v); ReloadAndUpdate(); UpdatePreview() end },
-            { type="toggle", text="Hide When Idle",
-              getValue=GetHideInactive,
-              setValue=function(v) SetHideInactive(v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+            { type="slider", text="Bar Background", min=0, max=100, step=1,
+              getValue=function() return math.floor(SValSupported("castBgAlpha", 0.5) * 100 + 0.5) end,
+              setValue=function(v) UNIT_DB_MAP[selectedUnit]().castBgAlpha = v / 100; ReloadAndUpdate(); UpdatePreview() end });  y = y - h
         -- Sync icon: Show Icon (left)
         do
             local rgn = castRow2._leftRegion
@@ -5437,25 +6421,86 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
-        -- Sync icon: Hide When Idle (right)
+        -- Inline cog: "Make Icon Part of the Bar" on the Show Icon toggle.
+        -- Operates on the currently selected unit (player/target/focus).
+        do
+            local rgn = castRow2._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Cast Icon",
+                rows = {
+                    { type = "toggle", label = "Make Icon Part of the Bar",
+                      tooltip = "This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
+                      get = function()
+                          if selectedUnit == "player" then
+                              return UNIT_DB_MAP.player().playerCastbarIconInWidth ~= false
+                          end
+                          return UNIT_DB_MAP[selectedUnit]().castbarIconInWidth ~= false
+                      end,
+                      set = function(v)
+                          if selectedUnit == "player" then
+                              UNIT_DB_MAP.player().playerCastbarIconInWidth = v
+                          else
+                              UNIT_DB_MAP[selectedUnit]().castbarIconInWidth = v
+                          end
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
+                },
+            })
+            MakeCogBtn(rgn, cogShow)
+        end
+        -- Inline color swatch on Bar Background (right region). Defaults to the
+        -- cast bar's hardcoded background color (black) until the user sets one.
         do
             local rgn = castRow2._rightRegion
+            local bgSwGet = function()
+                local c = UNIT_DB_MAP[selectedUnit]().castBgColor
+                if c then return c.r, c.g, c.b end
+                return 0, 0, 0
+            end
+            local bgSwSet = function(r, g, b)
+                UNIT_DB_MAP[selectedUnit]().castBgColor = { r=r, g=g, b=b }
+                ReloadAndUpdate(); UpdatePreview()
+            end
+            local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
+            PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = bgSw
+            RegisterWidgetRefresh(function() bgSwUpdate() end)
+        end
+        -- Sync icon: Bar Background (right) -- background color + opacity
+        do
+            local rgn = castRow2._rightRegion
+            local function ApplyCastBgTo(keys)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local bc = src.castBgColor or { r=0, g=0, b=0 }
+                local bgA = src.castBgAlpha
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        d.castBgColor = { r=bc.r, g=bc.g, b=bc.b }
+                        d.castBgAlpha = bgA
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Hide When Idle to all Frames",
-                onClick = function()
-                    local v = GetHideInactive()
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        UNIT_DB_MAP[key]().castbarHideWhenInactive = v
-                    end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
+                tooltip = "Apply Bar Background to all Frames",
+                onClick = function() ApplyCastBgTo(GROUP_UNIT_ORDER) end,
                 isSynced = function()
-                    local v = GetHideInactive()
+                    local src = UNIT_DB_MAP[selectedUnit]()
+                    local function colEq(a, b)
+                        -- A nil color means "use the hardcoded default (black)", so a
+                        -- nil color and an explicit black must compare equal. Without
+                        -- this the icon never reads as synced after Apply to All (the
+                        -- source stays nil while the targets get an explicit black).
+                        local ar, ag, ab = a and a.r or 0, a and a.g or 0, a and a.b or 0
+                        local cr, cg, cb = b and b.r or 0, b and b.g or 0, b and b.b or 0
+                        return ar == cr and ag == cg and ab == cb
+                    end
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        local kv = UNIT_DB_MAP[key]().castbarHideWhenInactive
-                        if kv == nil then kv = true end
-                        if kv ~= v then return false end
+                        local d = UNIT_DB_MAP[key]()
+                        if not colEq(d.castBgColor, src.castBgColor) then return false end
+                        if (d.castBgAlpha or 0.5) ~= (src.castBgAlpha or 0.5) then return false end
                     end
                     return true
                 end,
@@ -5464,13 +6509,7 @@ initFrame:SetScript("OnEvent", function(self)
                     elementKeys   = GROUP_UNIT_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = GetHideInactive()
-                        for _, key in ipairs(checkedKeys) do
-                            UNIT_DB_MAP[key]().castbarHideWhenInactive = v
-                        end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
+                    onApply       = function(checkedKeys) ApplyCastBgTo(checkedKeys) end,
                 },
             })
         end
@@ -5762,7 +6801,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSet("bottomTextBar", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
             { type="dropdown", text="Position", values=btbPositionValues, order=btbPositionOrder,
               disabled=function() return not SVal("bottomTextBar", false) end,
-              disabledTooltip="Enable Text Bar is off",
+              disabledTooltip="Text Bar",
               getValue=function() return SVal("btbPosition", "bottom") end,
               setValue=function(v)
                   SSet("btbPosition", v); UpdatePreview()
@@ -5861,7 +6900,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local btbOn = SVal("bottomTextBar", false)
                 if not btbOn then
                     sw:SetAlpha(0.15); sw:Disable()
-                    sw._disabledTooltip = "Enable Text Bar is off"
+                    sw._disabledTooltip = "Text Bar"
                 else
                     sw:SetAlpha(1); sw:Enable()
                     sw._disabledTooltip = nil
@@ -5907,7 +6946,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnEnter", function(self)
                 local btbOff = not SVal("bottomTextBar", false)
                 if btbOff then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Text Bar is off"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Text Bar"))
                 else
                     local pos = SVal("btbPosition", "bottom")
                     if pos == "detached_top" or pos == "detached_bottom" then self:SetAlpha(0.7)
@@ -5925,7 +6964,7 @@ initFrame:SetScript("OnEvent", function(self)
         sharedBtbHeightRow, h = W:DualRow(parent, y,
             { type="slider", text="Height", min=0, max=40, step=1,
               disabled=function() return not SVal("bottomTextBar", false) end,
-              disabledTooltip="Enable Text Bar is off",
+              disabledTooltip="Text Bar",
               getValue=function() return SVal("bottomTextBarHeight", 16) end,
               setValue=function(v) SSet("bottomTextBarHeight", v); UpdatePreview() end },
             { type="slider", text="Width", min=0, max=400, step=1,
@@ -5935,7 +6974,7 @@ initFrame:SetScript("OnEvent", function(self)
                   return pos ~= "detached_top" and pos ~= "detached_bottom"
               end,
               disabledTooltip=function()
-                  if not SVal("bottomTextBar", false) then return "Enable Text Bar is off" end
+                  if not SVal("bottomTextBar", false) then return "Text Bar" end
                   return "This option requires the position setting to be detached"
               end,
               getValue=function() return SVal("btbWidth", 0) end,
@@ -6015,7 +7054,7 @@ initFrame:SetScript("OnEvent", function(self)
         sharedBtbTextRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Left Text", values=btbTextValues, order=btbTextOrder,
               disabled=function() return not SVal("bottomTextBar", false) end,
-              disabledTooltip="Enable Text Bar is off",
+              disabledTooltip="Text Bar",
               getValue=function() return SVal("btbLeftContent", "none") end,
               setValue=function(v)
                   SSet("btbLeftContent", v)
@@ -6027,7 +7066,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="dropdown", text="Right Text", values=btbTextValues, order=btbTextOrder,
               disabled=function() return not SVal("bottomTextBar", false) end,
-              disabledTooltip="Enable Text Bar is off",
+              disabledTooltip="Text Bar",
               getValue=function() return SVal("btbRightContent", "none") end,
               setValue=function(v)
                   SSet("btbRightContent", v)
@@ -6037,34 +7076,58 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   ReloadAndUpdate(); UpdatePreview()
               end });  y = y - h
-        -- Color swatch on BTB Left Text
+        -- Inline color swatches on BTB Left Text: Custom + Class (CDM Border Size
+        -- pattern). Power Color stays in the cog; the three modes are mutually exclusive.
         do
             local btbLRgn = sharedBtbTextRow._leftRegion
+            local function blOff() return SVal("btbLeftContent", "none") == "none" or not SVal("bottomTextBar", false) end
+            local blClassSwatch, blUpdateClassSwatch = EllesmereUI.BuildColorSwatch(
+                btbLRgn, btbLRgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(blClassSwatch, "RIGHT", btbLRgn._lastInline or btbLRgn._control, "LEFT", -8, 0)
+            blClassSwatch:SetScript("OnClick", function()
+                if blOff() then return end
+                SSet("btbLeftClassColor", true); SSet("btbLeftPowerColor", false)
+                UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            blClassSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(blClassSwatch, "Class Colored") end)
+            blClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local blSwGet = function()
-                local r = SVal("btbLeftColorR", 1); local g = SVal("btbLeftColorG", 1); local b = SVal("btbLeftColorB", 1)
-                return r, g, b
+                return SVal("btbLeftColorR", 1), SVal("btbLeftColorG", 1), SVal("btbLeftColorB", 1)
             end
             local blSwSet = function(r, g, b)
                 SSet("btbLeftColorR", r); SSet("btbLeftColorG", g); SSet("btbLeftColorB", b)
                 UpdatePreview()
             end
             local blSwatch, blUpdateSwatch = EllesmereUI.BuildColorSwatch(btbLRgn, btbLRgn:GetFrameLevel() + 5, blSwGet, blSwSet, nil, 20)
-            PP.Point(blSwatch, "RIGHT", btbLRgn._lastInline or btbLRgn._control, "LEFT", -8, 0)
+            PP.Point(blSwatch, "RIGHT", blClassSwatch, "LEFT", -8, 0)
             btbLRgn._lastInline = blSwatch
-            local blSwBlock = CreateFrame("Frame", nil, blSwatch)
-            blSwBlock:SetAllPoints(); blSwBlock:SetFrameLevel(blSwatch:GetFrameLevel() + 10); blSwBlock:EnableMouse(true)
-            blSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(blSwatch, EllesmereUI.DisabledTooltip("BTB Left Text")) end)
-            blSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
-                local isNone = SVal("btbLeftContent", "none") == "none" or not SVal("bottomTextBar", false)
+            local blOrigClick = blSwatch:GetScript("OnClick")
+            blSwatch:SetScript("OnClick", function(self, ...)
+                if blOff() then return end
+                if SVal("btbLeftClassColor", false) or SVal("btbLeftPowerColor", false) then
+                    SSet("btbLeftClassColor", false); SSet("btbLeftPowerColor", false)
+                    UpdatePreview(); EllesmereUI:RefreshPage(); return
+                end
+                if blOrigClick then blOrigClick(self, ...) end
+            end)
+            blSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(blSwatch, "Custom Colored") end)
+            blSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateBlSwatches()
+                local off = blOff()
                 local isClass = SVal("btbLeftClassColor", false)
                 local isPower = SVal("btbLeftPowerColor", false)
-                if isNone or isClass or isPower then blSwatch:SetAlpha(0.3); blSwBlock:Show() else blSwatch:SetAlpha(1); blSwBlock:Hide() end
-                blUpdateSwatch()
-            end)
-            local blInitOff = SVal("btbLeftContent", "none") == "none" or not SVal("bottomTextBar", false) or SVal("btbLeftClassColor", false) or SVal("btbLeftPowerColor", false)
-            blSwatch:SetAlpha(blInitOff and 0.3 or 1)
-            if blInitOff then blSwBlock:Show() else blSwBlock:Hide() end
+                blSwatch:SetAlpha((isClass or isPower or off) and 0.3 or 1)
+                blClassSwatch:SetAlpha((isClass and not off) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() blUpdateSwatch(); blUpdateClassSwatch(); UpdateBlSwatches() end)
+            UpdateBlSwatches()
         end
         -- Cogwheel on BTB Left Text
         do
@@ -6072,19 +7135,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, btbLeftCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "BTB Left Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return SVal("btbLeftClassColor", false) end,
-                      set=function(v) SSet("btbLeftClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="toggle", label="Power Color",
                       get=function() return SVal("btbLeftPowerColor", false) end,
-                      set=function(v) SSet("btbLeftPowerColor", v); UpdatePreview() end },
+                      set=function(v) SSet("btbLeftPowerColor", v); if v then SSet("btbLeftClassColor", false) end; UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("btbLeftSize", 11) end,
                       set=function(v) SSet("btbLeftSize", v); UpdatePreview() end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return SVal("btbLeftX", 0) end,
                       set=function(v) SSet("btbLeftX", v); UpdatePreview() end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return SVal("btbLeftY", 0) end,
                       set=function(v) SSet("btbLeftY", v); UpdatePreview() end },
                 },
@@ -6101,9 +7161,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local btbOff = not SVal("bottomTextBar", false)
                 local isNone = SVal("btbLeftContent", "none") == "none"
                 if btbOff then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Text Bar is off"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Text Bar"))
                 elseif isNone then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Left Text is set to None"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a text selection other than none."))
                 else self:SetAlpha(0.7) end
             end)
             btbLCogBtn:SetScript("OnLeave", function(self) UpdateBtbLCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -6111,34 +7171,58 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateBtbLCogState()
             RegisterWidgetRefresh(UpdateBtbLCogState)
         end
-        -- Color swatch on BTB Right Text
+        -- Inline color swatches on BTB Right Text: Custom + Class (Power Color stays in
+        -- the cog; the three modes are mutually exclusive).
         do
             local btbRRgn = sharedBtbTextRow._rightRegion
+            local function brOff() return SVal("btbRightContent", "none") == "none" or not SVal("bottomTextBar", false) end
+            local brClassSwatch, brUpdateClassSwatch = EllesmereUI.BuildColorSwatch(
+                btbRRgn, btbRRgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(brClassSwatch, "RIGHT", btbRRgn._lastInline or btbRRgn._control, "LEFT", -8, 0)
+            brClassSwatch:SetScript("OnClick", function()
+                if brOff() then return end
+                SSet("btbRightClassColor", true); SSet("btbRightPowerColor", false)
+                UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            brClassSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(brClassSwatch, "Class Colored") end)
+            brClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local brSwGet = function()
-                local r = SVal("btbRightColorR", 1); local g = SVal("btbRightColorG", 1); local b = SVal("btbRightColorB", 1)
-                return r, g, b
+                return SVal("btbRightColorR", 1), SVal("btbRightColorG", 1), SVal("btbRightColorB", 1)
             end
             local brSwSet = function(r, g, b)
                 SSet("btbRightColorR", r); SSet("btbRightColorG", g); SSet("btbRightColorB", b)
                 UpdatePreview()
             end
             local brSwatch, brUpdateSwatch = EllesmereUI.BuildColorSwatch(btbRRgn, btbRRgn:GetFrameLevel() + 5, brSwGet, brSwSet, nil, 20)
-            PP.Point(brSwatch, "RIGHT", btbRRgn._lastInline or btbRRgn._control, "LEFT", -8, 0)
+            PP.Point(brSwatch, "RIGHT", brClassSwatch, "LEFT", -8, 0)
             btbRRgn._lastInline = brSwatch
-            local brSwBlock = CreateFrame("Frame", nil, brSwatch)
-            brSwBlock:SetAllPoints(); brSwBlock:SetFrameLevel(brSwatch:GetFrameLevel() + 10); brSwBlock:EnableMouse(true)
-            brSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(brSwatch, EllesmereUI.DisabledTooltip("BTB Right Text")) end)
-            brSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
-                local isNone = SVal("btbRightContent", "none") == "none" or not SVal("bottomTextBar", false)
+            local brOrigClick = brSwatch:GetScript("OnClick")
+            brSwatch:SetScript("OnClick", function(self, ...)
+                if brOff() then return end
+                if SVal("btbRightClassColor", false) or SVal("btbRightPowerColor", false) then
+                    SSet("btbRightClassColor", false); SSet("btbRightPowerColor", false)
+                    UpdatePreview(); EllesmereUI:RefreshPage(); return
+                end
+                if brOrigClick then brOrigClick(self, ...) end
+            end)
+            brSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(brSwatch, "Custom Colored") end)
+            brSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateBrSwatches()
+                local off = brOff()
                 local isClass = SVal("btbRightClassColor", false)
                 local isPower = SVal("btbRightPowerColor", false)
-                if isNone or isClass or isPower then brSwatch:SetAlpha(0.3); brSwBlock:Show() else brSwatch:SetAlpha(1); brSwBlock:Hide() end
-                brUpdateSwatch()
-            end)
-            local brInitOff = SVal("btbRightContent", "none") == "none" or not SVal("bottomTextBar", false) or SVal("btbRightClassColor", false) or SVal("btbRightPowerColor", false)
-            brSwatch:SetAlpha(brInitOff and 0.3 or 1)
-            if brInitOff then brSwBlock:Show() else brSwBlock:Hide() end
+                brSwatch:SetAlpha((isClass or isPower or off) and 0.3 or 1)
+                brClassSwatch:SetAlpha((isClass and not off) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() brUpdateSwatch(); brUpdateClassSwatch(); UpdateBrSwatches() end)
+            UpdateBrSwatches()
         end
         -- Cogwheel on BTB Right Text
         do
@@ -6146,19 +7230,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, btbRightCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "BTB Right Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return SVal("btbRightClassColor", false) end,
-                      set=function(v) SSet("btbRightClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="toggle", label="Power Color",
                       get=function() return SVal("btbRightPowerColor", false) end,
-                      set=function(v) SSet("btbRightPowerColor", v); UpdatePreview() end },
+                      set=function(v) SSet("btbRightPowerColor", v); if v then SSet("btbRightClassColor", false) end; UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("btbRightSize", 11) end,
                       set=function(v) SSet("btbRightSize", v); UpdatePreview() end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return SVal("btbRightX", 0) end,
                       set=function(v) SSet("btbRightX", v); UpdatePreview() end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return SVal("btbRightY", 0) end,
                       set=function(v) SSet("btbRightY", v); UpdatePreview() end },
                 },
@@ -6175,9 +7256,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local btbOff = not SVal("bottomTextBar", false)
                 local isNone = SVal("btbRightContent", "none") == "none"
                 if btbOff then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Text Bar is off"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Text Bar"))
                 elseif isNone then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Right Text is set to None"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a text selection other than none."))
                 else self:SetAlpha(0.7) end
             end)
             btbRCogBtn:SetScript("OnLeave", function(self) UpdateBtbRCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -6252,7 +7333,7 @@ initFrame:SetScript("OnEvent", function(self)
         sharedBtbCenterRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Center Text", values=btbTextValues, order=btbTextOrder,
               disabled=function() return not SVal("bottomTextBar", false) end,
-              disabledTooltip="Enable Text Bar is off",
+              disabledTooltip="Text Bar",
               getValue=function() return SVal("btbCenterContent", "none") end,
               setValue=function(v)
                   SSet("btbCenterContent", v)
@@ -6264,37 +7345,61 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="dropdown", text="Class Icon", values=classIconValues, order=classIconOrder,
               disabled=function() return not SVal("bottomTextBar", false) end,
-              disabledTooltip="Enable Text Bar is off",
+              disabledTooltip="Text Bar",
               getValue=function() return SVal("btbClassIcon", "none") end,
               setValue=function(v) SSet("btbClassIcon", v); UpdatePreview() end });  y = y - h
-        -- Color swatch on BTB Center Text
+        -- Inline color swatches on BTB Center Text: Custom + Class (Power Color stays in
+        -- the cog; the three modes are mutually exclusive).
         do
             local btbCRgn = sharedBtbCenterRow._leftRegion
+            local function bcOff() return SVal("btbCenterContent", "none") == "none" or not SVal("bottomTextBar", false) end
+            local bcClassSwatch, bcUpdateClassSwatch = EllesmereUI.BuildColorSwatch(
+                btbCRgn, btbCRgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(bcClassSwatch, "RIGHT", btbCRgn._lastInline or btbCRgn._control, "LEFT", -8, 0)
+            bcClassSwatch:SetScript("OnClick", function()
+                if bcOff() then return end
+                SSet("btbCenterClassColor", true); SSet("btbCenterPowerColor", false)
+                UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            bcClassSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bcClassSwatch, "Class Colored") end)
+            bcClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local bcSwGet = function()
-                local r = SVal("btbCenterColorR", 1); local g = SVal("btbCenterColorG", 1); local b = SVal("btbCenterColorB", 1)
-                return r, g, b
+                return SVal("btbCenterColorR", 1), SVal("btbCenterColorG", 1), SVal("btbCenterColorB", 1)
             end
             local bcSwSet = function(r, g, b)
                 SSet("btbCenterColorR", r); SSet("btbCenterColorG", g); SSet("btbCenterColorB", b)
                 UpdatePreview()
             end
             local bcSwatch, bcUpdateSwatch = EllesmereUI.BuildColorSwatch(btbCRgn, btbCRgn:GetFrameLevel() + 5, bcSwGet, bcSwSet, nil, 20)
-            PP.Point(bcSwatch, "RIGHT", btbCRgn._lastInline or btbCRgn._control, "LEFT", -8, 0)
+            PP.Point(bcSwatch, "RIGHT", bcClassSwatch, "LEFT", -8, 0)
             btbCRgn._lastInline = bcSwatch
-            local bcSwBlock = CreateFrame("Frame", nil, bcSwatch)
-            bcSwBlock:SetAllPoints(); bcSwBlock:SetFrameLevel(bcSwatch:GetFrameLevel() + 10); bcSwBlock:EnableMouse(true)
-            bcSwBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bcSwatch, EllesmereUI.DisabledTooltip("BTB Center Text")) end)
-            bcSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
-                local isNone = SVal("btbCenterContent", "none") == "none" or not SVal("bottomTextBar", false)
+            local bcOrigClick = bcSwatch:GetScript("OnClick")
+            bcSwatch:SetScript("OnClick", function(self, ...)
+                if bcOff() then return end
+                if SVal("btbCenterClassColor", false) or SVal("btbCenterPowerColor", false) then
+                    SSet("btbCenterClassColor", false); SSet("btbCenterPowerColor", false)
+                    UpdatePreview(); EllesmereUI:RefreshPage(); return
+                end
+                if bcOrigClick then bcOrigClick(self, ...) end
+            end)
+            bcSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bcSwatch, "Custom Colored") end)
+            bcSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateBcSwatches()
+                local off = bcOff()
                 local isClass = SVal("btbCenterClassColor", false)
                 local isPower = SVal("btbCenterPowerColor", false)
-                if isNone or isClass or isPower then bcSwatch:SetAlpha(0.3); bcSwBlock:Show() else bcSwatch:SetAlpha(1); bcSwBlock:Hide() end
-                bcUpdateSwatch()
-            end)
-            local bcInitOff = SVal("btbCenterContent", "none") == "none" or not SVal("bottomTextBar", false) or SVal("btbCenterClassColor", false) or SVal("btbCenterPowerColor", false)
-            bcSwatch:SetAlpha(bcInitOff and 0.3 or 1)
-            if bcInitOff then bcSwBlock:Show() else bcSwBlock:Hide() end
+                bcSwatch:SetAlpha((isClass or isPower or off) and 0.3 or 1)
+                bcClassSwatch:SetAlpha((isClass and not off) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() bcUpdateSwatch(); bcUpdateClassSwatch(); UpdateBcSwatches() end)
+            UpdateBcSwatches()
         end
         -- Cogwheel on BTB Center Text
         do
@@ -6302,19 +7407,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, btbCenterCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "BTB Center Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return SVal("btbCenterClassColor", false) end,
-                      set=function(v) SSet("btbCenterClassColor", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="toggle", label="Power Color",
                       get=function() return SVal("btbCenterPowerColor", false) end,
-                      set=function(v) SSet("btbCenterPowerColor", v); UpdatePreview() end },
+                      set=function(v) SSet("btbCenterPowerColor", v); if v then SSet("btbCenterClassColor", false) end; UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return SVal("btbCenterSize", 11) end,
                       set=function(v) SSet("btbCenterSize", v); UpdatePreview() end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return SVal("btbCenterX", 0) end,
                       set=function(v) SSet("btbCenterX", v); UpdatePreview() end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return SVal("btbCenterY", 0) end,
                       set=function(v) SSet("btbCenterY", v); UpdatePreview() end },
                 },
@@ -6331,9 +7433,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local btbOff = not SVal("bottomTextBar", false)
                 local isNone = SVal("btbCenterContent", "none") == "none"
                 if btbOff then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Text Bar is off"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Text Bar"))
                 elseif isNone then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Center Text is set to None"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a text selection other than none."))
                 else self:SetAlpha(0.7) end
             end)
             btbCCogBtn:SetScript("OnLeave", function(self) UpdateBtbCCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -6373,9 +7475,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local btbOff = not SVal("bottomTextBar", false)
                 local isNone = SVal("btbClassIcon", "none") == "none"
                 if btbOff then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Enable Text Bar is off"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Text Bar"))
                 elseif isNone then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Icon is set to None"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a Class Icon other than None."))
                 else self:SetAlpha(0.7) end
             end)
             ciCogBtn:SetScript("OnLeave", function(self) UpdateCiCogState(); EllesmereUI.HideWidgetTooltip() end)
@@ -6472,7 +7574,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="multiSwatch", text="Fill Color",
               disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
-              disabledTooltip="Class Resource must be set to Modern",
+              disabledTooltip="Class Resource must be set to Modern", rawTooltip=true,
               swatches = {
                 { tooltip = "Custom Colored",
                   hasAlpha = false,
@@ -6544,7 +7646,7 @@ initFrame:SetScript("OnEvent", function(self)
             RegisterWidgetRefresh(UpdateEmptySwatch)
             emptySwatch:HookScript("OnEnter", function(self)
                 if SValSupported("classPowerStyle", "none") ~= "modern" then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Resource must be set to Modern"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires Class Resource to be set to Modern."))
                 else
                     EllesmereUI.ShowWidgetTooltip(self, "Empty Bar Color")
                 end
@@ -6628,7 +7730,7 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="dropdown", text="Position", values=classPowerPosValues, order=classPowerPosOrder,
               disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
-              disabledTooltip="Class Resource must be set to Modern",
+              disabledTooltip="Class Resource must be set to Modern", rawTooltip=true,
               getValue=function() return SValSupported("classPowerPosition", "top") end,
               setValue=function(v)
                   SSetSupported("classPowerPosition", v)
@@ -6639,7 +7741,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="slider", text="Size", min=4, max=30, step=1,
               disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
-              disabledTooltip="Class Resource must be set to Modern",
+              disabledTooltip="Class Resource must be set to Modern", rawTooltip=true,
               getValue=function() return SValSupported("classPowerSize", 8) end,
               setValue=function(v)
                   SSetSupported("classPowerSize", v)
@@ -6679,7 +7781,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             cpPosCogBtn:SetScript("OnEnter", function(self)
                 if SValSupported("classPowerStyle", "none") ~= "modern" then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Class Resource must be set to Modern"))
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires Class Resource to be set to Modern."))
                 elseif SValSupported("classPowerPosition", "top") == "above" then
                     EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a dropdown selection other than Above Health Bar"))
                 else self:SetAlpha(0.7) end
@@ -6756,7 +7858,7 @@ initFrame:SetScript("OnEvent", function(self)
         sharedClassResRow3, h = W:DualRow(parent, y,
             { type="slider", text="Bar Spacing", min=0, max=10, step=1,
               disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
-              disabledTooltip="Class Resource must be set to Modern",
+              disabledTooltip="Class Resource must be set to Modern", rawTooltip=true,
               getValue=function() return SValSupported("classPowerSpacing", 2) end,
               setValue=function(v)
                   SSetSupported("classPowerSpacing", v)
@@ -6765,7 +7867,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="colorpicker", text="Background Color", hasAlpha=true,
               disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
-              disabledTooltip="Class Resource must be set to Modern",
+              disabledTooltip="Class Resource must be set to Modern", rawTooltip=true,
               getValue=function()
                   local c = SGetSupported("classPowerBgColor")
                   c = c or { r=0.082, g=0.082, b=0.082, a=1.0 }
@@ -6858,220 +7960,22 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 
-        local sharedAddHeader
+        local sharedBuffDebuffHeader
         -------------------------------------------------------------------
-        --  ADDITIONAL SETTINGS
+        --  BUFFS AND DEBUFFS
         -------------------------------------------------------------------
-        sharedAddHeader, h = W:SectionHeader(parent, "ADDITIONAL SETTINGS", y); y = y - h
+        sharedBuffDebuffHeader, h = W:SectionHeader(parent, "BUFFS AND DEBUFFS", y); y = y - h
 
-        -- Row 1: Absorb Style + Combat Indicator
-        local _showAbsorbsCombat = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
-        if _showAbsorbsCombat then
-        local COMBAT_MEDIA_P = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
-        local combatIndValues = {
-            ["none"]="None", ["standard"]="Standard", ["class"]="Class Theme",
-            _menuOpts = { itemHeight = 32, icon = function(key)
-                if key == "none" then return nil end
-                local _, ct = UnitClass("player")
-                if not ct then return nil end
-                if key == "class" then
-                    local coords = CLASS_FULL_COORDS[ct]
-                    if not coords then return nil end
-                    return COMBAT_MEDIA_P .. "combat-indicator-class-custom.png", coords[1], coords[2], coords[3], coords[4]
-                else
-                    return COMBAT_MEDIA_P .. "combat-indicator-custom.png", 0, 1, 0, 1
-                end
-            end },
-        }
-        local combatIndOrder = { "none", "standard", "class" }
-        local absorbStyleValues = {
-            ["none"]="None", ["striped"]="Striped", ["clean"]="Clean (Flat)",
-            ["blizzard"]="Blizzard",
-        }
-        local absorbStyleOrder = { "none", "striped", "clean", "blizzard" }
-        local sharedAddRow1
-        sharedAddRow1, h = W:DualRow(parent, y,
-            { type="dropdown", text="Absorb Style",
-              values=absorbStyleValues, order=absorbStyleOrder,
-              getValue=function() return SValSupported("showPlayerAbsorb", "none") end,
-              setValue=function(v) SSetSupported("showPlayerAbsorb", v); ReloadAndUpdate(); UpdatePreview() end },
-            { type="dropdown", text="Combat Indicator", values=combatIndValues, order=combatIndOrder,
-              getValue=function() return SValSupported("combatIndicatorStyle", "class") end,
-              setValue=function(v) SSetSupported("combatIndicatorStyle", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        SApplySupport(sharedAddRow1._leftRegion, "showPlayerAbsorb")
-        SApplySupport(sharedAddRow1._rightRegion, "combatIndicatorStyle")
-        -- Inline cog for Absorb Style: Clean Opacity slider
-        do
-            local rgn = sharedAddRow1._leftRegion
-            local _, absorbCogShow = EllesmereUI.BuildCogPopup({
-                title = "Absorb Settings",
-                rows = {
-                    { type = "slider", label = "Clean Opacity", min = 5, max = 100, step = 1,
-                      get = function() return SValSupported("absorbCleanAlpha", 30) end,
-                      set = function(v) SSetSupported("absorbCleanAlpha", v); ReloadAndUpdate(); UpdatePreview() end },
-                },
-            })
-            local absorbCogBtn = CreateFrame("Button", nil, rgn)
-            absorbCogBtn:SetSize(26, 26)
-            absorbCogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = absorbCogBtn
-            absorbCogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            absorbCogBtn:SetAlpha(0.4)
-            local absorbCogTex = absorbCogBtn:CreateTexture(nil, "OVERLAY")
-            absorbCogTex:SetAllPoints(); absorbCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            absorbCogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
-            absorbCogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
-            absorbCogBtn:SetScript("OnClick", function(s) absorbCogShow(s) end)
+        -- When Buff/Debuff Display is "none", everything in that column is disabled.
+        local function BuffDisabled()
+            local s = UNIT_DB_MAP[selectedUnit]()
+            return s and s.showBuffs == false
         end
-        -- Sync icons: Show Absorbs (left) and Combat Indicator (right)
-        do
-            local rgn = sharedAddRow1._leftRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Absorb Style to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().showPlayerAbsorb = v end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().showPlayerAbsorb or "none") ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().showPlayerAbsorb = v end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
-        end
-        do
-            local rgn = sharedAddRow1._rightRegion
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Combat Indicator Style to all Frames",
-                onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
-                isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().combatIndicatorStyle or "class") ~= v then return false end
-                    end
-                    return true
-                end,
-                flashTargets = function() return { rgn } end,
-                multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
-                    elementLabels = SHORT_LABELS,
-                    getCurrentKey = function() return selectedUnit end,
-                    onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                    end,
-                },
-            })
+        local function DebuffDisabled()
+            return SValSupported("debuffAnchor", "bottomleft") == "none"
         end
 
-        -- Eyeball toggle + cog + swatch on combat indicator dropdown
-        do
-            local ciRgn = sharedAddRow1._rightRegion
-            local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
-            local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
-            local eyeBtn = CreateFrame("Button", nil, ciRgn)
-            eyeBtn:SetSize(26, 26)
-            eyeBtn:SetPoint("RIGHT", ciRgn._lastInline or ciRgn._control, "LEFT", -8, 0)
-            eyeBtn:SetFrameLevel(ciRgn:GetFrameLevel() + 5)
-            eyeBtn:SetAlpha(0.4)
-            ciRgn._lastInline = eyeBtn
-            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-            eyeTex:SetAllPoints()
-            local function RefreshCombatEye()
-                eyeTex:SetTexture(showCombatIndicatorPreview and EYE_INVISIBLE or EYE_VISIBLE)
-            end
-            RefreshCombatEye()
-            eyeBtn:SetScript("OnClick", function()
-                showCombatIndicatorPreview = not showCombatIndicatorPreview
-                RefreshCombatEye()
-                UpdatePreview()
-            end)
-            eyeBtn:SetScript("OnEnter", function(self)
-                self:SetAlpha(0.7)
-                EllesmereUI.ShowWidgetTooltip(self, showCombatIndicatorPreview and "Hide combat indicator preview" or "Show combat indicator preview")
-            end)
-            eyeBtn:SetScript("OnLeave", function(self)
-                self:SetAlpha(0.4)
-                EllesmereUI.HideWidgetTooltip()
-            end)
-
-            -- Cog popup for combat indicator settings
-            local combatPosValues = { ["portrait"]="Portrait", ["healthbar"]="Health Bar", ["textbar"]="Text Bar" }
-            local combatPosOrder = { "portrait", "healthbar", "textbar" }
-
-            local _, combatCogShowRaw = EllesmereUI.BuildCogPopup({
-                title = "Combat Indicator Settings",
-                rows = {
-                    { type="toggle", label="Class Colored",
-                      get=function() return SValSupported("combatIndicatorColor", "custom") == "classcolor" end,
-                      set=function(v) SSetSupported("combatIndicatorColor", v and "classcolor" or "custom"); ReloadAndUpdate(); UpdatePreview() end },
-                    { type="dropdown", label="Position", values=combatPosValues, order=combatPosOrder,
-                      get=function() return SValSupported("combatIndicatorPosition", "healthbar") end,
-                      set=function(v) SSetSupported("combatIndicatorPosition", v); ReloadAndUpdate(); UpdatePreview() end },
-                    { type="slider", label="Size", min=8, max=64, step=1,
-                      get=function() return SValSupported("combatIndicatorSize", 22) end,
-                      set=function(v) SSetSupported("combatIndicatorSize", v); ReloadAndUpdate(); UpdatePreview() end },
-                    { type="slider", label="X", min=-100, max=100, step=1,
-                      get=function() return SValSupported("combatIndicatorX", 0) end,
-                      set=function(v) SSetSupported("combatIndicatorX", v); ReloadAndUpdate(); UpdatePreview() end },
-                    { type="slider", label="Y", min=-100, max=100, step=1,
-                      get=function() return SValSupported("combatIndicatorY", 0) end,
-                      set=function(v) SSetSupported("combatIndicatorY", v); ReloadAndUpdate(); UpdatePreview() end },
-                },
-            })
-            local combatCogShow = combatCogShowRaw
-            MakeCogBtn(ciRgn, combatCogShow)
-
-            -- Inline color swatch for custom color
-            local combatSwatch = EllesmereUI.BuildColorSwatch(ciRgn, ciRgn:GetFrameLevel() + 5,
-                function()
-                    local cc = SGetSupported("combatIndicatorCustomColor")
-                    cc = cc or { r=1, g=1, b=1 }
-                    return cc.r, cc.g, cc.b, 1
-                end,
-                function(r, g, b)
-                    UNIT_DB_MAP[selectedUnit]().combatIndicatorCustomColor = { r=r, g=g, b=b }
-                    ReloadAndUpdate(); UpdatePreview()
-                end, false, 20)
-            combatSwatch:SetPoint("RIGHT", ciRgn._lastInline or ciRgn._control, "LEFT", -12, 0)
-            ciRgn._lastInline = combatSwatch
-
-            local function UpdateSwatchVisibility()
-                local colorMode = SValSupported("combatIndicatorColor", "custom")
-                local style = SValSupported("combatIndicatorStyle", "class")
-                if colorMode == "custom" and style ~= "none" then
-                    combatSwatch:Show()
-                else
-                    combatSwatch:Hide()
-                end
-            end
-            UpdateSwatchVisibility()
-            RegisterWidgetRefresh(UpdateSwatchVisibility)
-        end
-        end -- _showAbsorbsCombat
-
-        -- Row 2: Buffs Location | Icon Size + inline directions cog (X/Y)
+        -- Buffs: Location | Icon Size + inline directions cog (X/Y)
         local sharedAddRow2
         sharedAddRow2, h = W:DualRow(parent, y,
             { type="dropdown", text="Buff Display", values=buffAnchorValues, order=buffAnchorOrder,
@@ -7088,9 +7992,10 @@ initFrame:SetScript("OnEvent", function(self)
                       s.showBuffs = true
                       SwapAuraSlot(s, "buffAnchor", v)
                   end
-                  ReloadAndUpdate(); UpdatePreview()
+                  ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
               end },
-            { type="slider", text="Buff Size", min=10, max=50, step=1,
+            { type="slider", text="Buff Size", min=10, max=70, step=1,
+              disabled=BuffDisabled, disabledTooltip="Buff Display",
               getValue=function() return SValSupported("buffSize", 22) end,
               setValue=function(v) SSetSupported("buffSize", v) end });  y = y - h
         SApplySupport(sharedAddRow2._leftRegion, "showBuffs")
@@ -7155,15 +8060,15 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return SValSupported("maxBuffs", 4) end,
                       set=function(v) SSetSupported("maxBuffs", v) end },
-                    { type="toggle", label="Show Cooldown Text",
-                      get=function() return SValSupported("buffShowCooldownText", false) end,
-                      set=function(v) SSetSupported("buffShowCooldownText", v) end },
-                    { type="slider", label="Text Size", min=6, max=18, step=1,
-                      get=function() return SValSupported("buffCooldownTextSize", 10) end,
-                      set=function(v) SSetSupported("buffCooldownTextSize", v) end },
+                    { type="slider", label="Max Per Row", min=1, max=20, step=1,
+                      get=function() return SValSupported("buffMaxPerRow", nil) or SValSupported("maxBuffs", 4) end,
+                      set=function(v) SSetSupported("buffMaxPerRow", v) end },
+                    { type="toggle", label="Cropped Icons",
+                      get=function() return SValSupported("buffCropIcons", false) end,
+                      set=function(v) SSetSupported("buffCropIcons", v) end },
                 },
             })
-            MakeCogBtn(leftRgn, buffCogShow)
+            MakeCogBtn(leftRgn, buffCogShow, nil, nil, BuffDisabled)
         end
         -- Directions cog on Buff Icon Size (X/Y offsets)
         do
@@ -7171,18 +8076,78 @@ initFrame:SetScript("OnEvent", function(self)
             local _, buffPosCogShow = EllesmereUI.BuildCogPopup({
                 title = "Buff Position",
                 rows = {
-                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                    { type="slider", label="Offset X", min=-200, max=200, step=1,
                       get=function() return SValSupported("buffOffsetX", 0) end,
                       set=function(v) SSetSupported("buffOffsetX", v) end },
-                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                    { type="slider", label="Offset Y", min=-200, max=200, step=1,
                       get=function() return SValSupported("buffOffsetY", 0) end,
                       set=function(v) SSetSupported("buffOffsetY", v) end },
                 },
             })
-            MakeCogBtn(rightRgn, buffPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+            MakeCogBtn(rightRgn, buffPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON, BuffDisabled)
         end
 
-        -- Row 3: Debuffs Location | Icon Size + inline directions cog (X/Y)
+        -- Buffs row 2: Duration Text Size | Stack Size
+        -- Duration Size is gated by an inline "Show Cooldown Text" toggle (same
+        -- DB key as before); when off, the slider/cog/label are disabled.
+        local buffDurOff = function() return BuffDisabled() or not SValSupported("buffShowCooldownText", false) end
+        local buffDurTip = function() return BuffDisabled() and "Buff Display" or "Show Cooldown Text" end
+        local sharedBuffRow2
+        sharedBuffRow2, h = W:DualRow(parent, y,
+            { type="slider", text="Buff Duration Size", min=6, max=24, step=1, trackWidth=120,
+              disabled=buffDurOff, disabledTooltip=buffDurTip,
+              getValue=function() return SValSupported("buffCooldownTextSize", 10) end,
+              setValue=function(v) SSetSupported("buffCooldownTextSize", v) end },
+            { type="slider", text="Buff Stack Size", min=6, max=24, step=1,
+              disabled=BuffDisabled, disabledTooltip="Buff Display",
+              getValue=function() return SValSupported("buffStackTextSize", 14) end,
+              setValue=function(v) SSetSupported("buffStackTextSize", v) end });  y = y - h
+        -- Directions cog on Buff Duration Size (X/Y offsets) -- disabled with the row
+        do
+            local leftRgn = sharedBuffRow2._leftRegion
+            local _, buffDurCogShow = EllesmereUI.BuildCogPopup({
+                title = "Duration Text",
+                rows = {
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffCooldownTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("buffCooldownTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffCooldownTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("buffCooldownTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(leftRgn, buffDurCogShow, nil, EllesmereUI.DIRECTIONS_ICON, buffDurOff)
+        end
+        -- Inline "Show Cooldown Text" toggle on Buff Duration Size (always enabled)
+        EllesmereUI.BuildInlineToggle({
+            region   = sharedBuffRow2._leftRegion,
+            getValue = function() return SValSupported("buffShowCooldownText", false) end,
+            setValue = function(v) SSetSupported("buffShowCooldownText", v) end,
+            onToggle = function() EllesmereUI:RefreshPage() end,
+        })
+        -- Directions cog on Buff Stack Size (X/Y offsets)
+        do
+            local rightRgn = sharedBuffRow2._rightRegion
+            local _, buffStackPosCogShow = EllesmereUI.BuildCogPopup({
+                title = "Stack Position",
+                rows = {
+                    { type="dropdown", label="Position",
+                      values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
+                      order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                      get=function() return SValSupported("buffStackTextPosition", "bottomright") end,
+                      set=function(v) SSetSupported("buffStackTextPosition", v) end },
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffStackTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("buffStackTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("buffStackTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("buffStackTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(rightRgn, buffStackPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON, BuffDisabled)
+        end
+
+        -- Debuffs: Location | Icon Size + inline directions cog (X/Y)
         local sharedAddRow3
         sharedAddRow3, h = W:DualRow(parent, y,
             { type="dropdown", text="Debuff Display", values=buffAnchorValues, order=buffAnchorOrder,
@@ -7191,12 +8156,13 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                   SwapAuraSlot(UNIT_DB_MAP[selectedUnit](), "debuffAnchor", v)
-                  ReloadAndUpdate(); UpdatePreview()
+                  ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
               end },
-            { type="slider", text="Debuff Size", min=10, max=50, step=1,
+            { type="slider", text="Debuff Size", min=10, max=70, step=1,
+              disabled=DebuffDisabled, disabledTooltip="Debuff Display",
               getValue=function() return SValSupported("debuffSize", 22) end,
               setValue=function(v) SSetSupported("debuffSize", v) end });  y = y - h
-        -- Cog on Debuffs Location (Growth + Max Count + Show Own Only)
+        -- Cog on Debuffs Location (Growth + Max Count)
         do
             local leftRgn = sharedAddRow3._leftRegion
             local _, debuffCogShow = EllesmereUI.BuildCogPopup({
@@ -7208,18 +8174,15 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return SValSupported("maxDebuffs", 20) end,
                       set=function(v) SSetSupported("maxDebuffs", v) end },
-                    { type="toggle", label="Show Own Only",
-                      get=function() return SValSupported("onlyPlayerDebuffs", false) end,
-                      set=function(v) SSetSupported("onlyPlayerDebuffs", v) end },
-                    { type="toggle", label="Show Cooldown Text",
-                      get=function() return SValSupported("debuffShowCooldownText", false) end,
-                      set=function(v) SSetSupported("debuffShowCooldownText", v) end },
-                    { type="slider", label="Text Size", min=6, max=18, step=1,
-                      get=function() return SValSupported("debuffCooldownTextSize", 10) end,
-                      set=function(v) SSetSupported("debuffCooldownTextSize", v) end },
+                    { type="slider", label="Max Per Row", min=1, max=20, step=1,
+                      get=function() return SValSupported("debuffMaxPerRow", nil) or SValSupported("maxDebuffs", 20) end,
+                      set=function(v) SSetSupported("debuffMaxPerRow", v) end },
+                    { type="toggle", label="Cropped Icons",
+                      get=function() return SValSupported("debuffCropIcons", false) end,
+                      set=function(v) SSetSupported("debuffCropIcons", v) end },
                 },
             })
-            MakeCogBtn(leftRgn, debuffCogShow)
+            MakeCogBtn(leftRgn, debuffCogShow, nil, nil, DebuffDisabled)
         end
         -- Directions cog on Debuff Icon Size (X/Y offsets)
         do
@@ -7227,16 +8190,584 @@ initFrame:SetScript("OnEvent", function(self)
             local _, debuffPosCogShow = EllesmereUI.BuildCogPopup({
                 title = "Debuff Position",
                 rows = {
-                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                    { type="slider", label="Offset X", min=-200, max=200, step=1,
                       get=function() return SValSupported("debuffOffsetX", 0) end,
                       set=function(v) SSetSupported("debuffOffsetX", v) end },
-                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                    { type="slider", label="Offset Y", min=-200, max=200, step=1,
                       get=function() return SValSupported("debuffOffsetY", 0) end,
                       set=function(v) SSetSupported("debuffOffsetY", v) end },
                 },
             })
-            MakeCogBtn(rightRgn, debuffPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+            MakeCogBtn(rightRgn, debuffPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON, DebuffDisabled)
         end
+
+        -- Debuffs row 2: Duration Text Size | Stack Size
+        -- Duration Size is gated by an inline "Show Cooldown Text" toggle (same
+        -- DB key as before); when off, the slider/cog/label are disabled.
+        local debuffDurOff = function() return DebuffDisabled() or not SValSupported("debuffShowCooldownText", false) end
+        local debuffDurTip = function() return DebuffDisabled() and "Debuff Display" or "Show Cooldown Text" end
+        local sharedDebuffRow2
+        sharedDebuffRow2, h = W:DualRow(parent, y,
+            { type="slider", text="Debuff Duration Size", min=6, max=24, step=1, trackWidth=120,
+              disabled=debuffDurOff, disabledTooltip=debuffDurTip,
+              getValue=function() return SValSupported("debuffCooldownTextSize", 10) end,
+              setValue=function(v) SSetSupported("debuffCooldownTextSize", v) end },
+            { type="slider", text="Debuff Stack Size", min=6, max=24, step=1,
+              disabled=DebuffDisabled, disabledTooltip="Debuff Display",
+              getValue=function() return SValSupported("debuffStackTextSize", 14) end,
+              setValue=function(v) SSetSupported("debuffStackTextSize", v) end });  y = y - h
+        -- Directions cog on Debuff Duration Size (X/Y offsets) -- disabled with the row
+        do
+            local leftRgn = sharedDebuffRow2._leftRegion
+            local _, debuffDurCogShow = EllesmereUI.BuildCogPopup({
+                title = "Duration Text",
+                rows = {
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffCooldownTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("debuffCooldownTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffCooldownTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("debuffCooldownTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(leftRgn, debuffDurCogShow, nil, EllesmereUI.DIRECTIONS_ICON, debuffDurOff)
+        end
+        -- Inline "Show Cooldown Text" toggle on Debuff Duration Size (always enabled)
+        EllesmereUI.BuildInlineToggle({
+            region   = sharedDebuffRow2._leftRegion,
+            getValue = function() return SValSupported("debuffShowCooldownText", false) end,
+            setValue = function(v) SSetSupported("debuffShowCooldownText", v) end,
+            onToggle = function() EllesmereUI:RefreshPage() end,
+        })
+        -- Directions cog on Debuff Stack Size (X/Y offsets)
+        do
+            local rightRgn = sharedDebuffRow2._rightRegion
+            local _, debuffStackPosCogShow = EllesmereUI.BuildCogPopup({
+                title = "Stack Position",
+                rows = {
+                    { type="dropdown", label="Position",
+                      values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
+                      order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                      get=function() return SValSupported("debuffStackTextPosition", "bottomright") end,
+                      set=function(v) SSetSupported("debuffStackTextPosition", v) end },
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffStackTextOffsetX", 0) end,
+                      set=function(v) SSetSupported("debuffStackTextOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return SValSupported("debuffStackTextOffsetY", 0) end,
+                      set=function(v) SSetSupported("debuffStackTextOffsetY", v) end },
+                },
+            })
+            MakeCogBtn(rightRgn, debuffStackPosCogShow, nil, EllesmereUI.DIRECTIONS_ICON, DebuffDisabled)
+        end
+
+        -- Per-unit aura filters (NOT synced). Labels track the selected section
+        -- (Player/Target/Focus). Each is a multi-select checkbox dropdown; checked
+        -- options AND together into one Blizzard aura-filter string at runtime
+        -- (Own Only = PLAYER, Raid Frames = RAID, Important = IMPORTANT). "Own Only"
+        -- reuses the legacy onlyPlayerDebuffs key so existing settings carry over.
+        do
+            local filterItems = {
+                { key = "important",  label = "Important",   tooltip = "Shows only the spells Blizzard flags as Important" },
+                { key = "ownOnly",    label = "Own Only",    tooltip = "Shows only the Buffs/Debuffs you apply" },
+                { key = "raidFrames", label = "Raid Frames", tooltip = "Shows only the Buffs/Debuffs that appear on Raid Frames" },
+            }
+            local BUFF_FILTER_KEYS   = { ownOnly = "onlyPlayerBuffs",   important = "buffImportant",   raidFrames = "buffRaid" }
+            local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", important = "debuffImportant", raidFrames = "debuffRaid" }
+            -- "Own Only" is not offered for the PLAYER's debuffs (you rarely apply
+            -- your own debuffs to yourself); any stale onlyPlayerDebuffs value is
+            -- ignored at runtime (see ns.EUIAuraFilter).
+            local debuffFilterItems = filterItems
+            if selectedUnit == "player" then
+                debuffFilterItems = {}
+                for _, it in ipairs(filterItems) do
+                    if it.key ~= "ownOnly" then debuffFilterItems[#debuffFilterItems + 1] = it end
+                end
+            end
+            local unitLabel = UNIT_LABELS_SUP[selectedUnit] or "Player"
+            local filterRow
+            filterRow, h = W:DualRow(parent, y,
+                { type="dropdown", text=unitLabel.." Buff Filter",
+                  values={ __placeholder="..." }, order={ "__placeholder" },
+                  getValue=function() return "__placeholder" end, setValue=function() end },
+                { type="dropdown", text=unitLabel.." Debuff Filter",
+                  values={ __placeholder="..." }, order={ "__placeholder" },
+                  getValue=function() return "__placeholder" end, setValue=function() end });  y = y - h
+            -- Gray out + block a CB-dropdown when its column's Display is "none".
+            local function ApplyFilterDisabled(cbDD, label, isOff)
+                local function refresh()
+                    local off = isOff()
+                    cbDD:SetAlpha(off and 0.3 or 1)
+                    cbDD:EnableMouse(not off)
+                    if label then label:SetAlpha(off and 0.3 or 1) end
+                end
+                refresh()
+                RegisterWidgetRefresh(refresh)
+            end
+            -- Left slot: Buff Filter
+            do
+                local rgn = filterRow._leftRegion
+                if rgn._control then rgn._control:Hide() end
+                local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                    rgn, 210, rgn:GetFrameLevel() + 2, filterItems,
+                    function(k) return SValSupported(BUFF_FILTER_KEYS[k], false) end,
+                    function(k, v) SSetSupported(BUFF_FILTER_KEYS[k], v) end)
+                PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+                rgn._control = cbDD; rgn._lastInline = nil
+                RegisterWidgetRefresh(cbRefresh)
+                ApplyFilterDisabled(cbDD, rgn._label, BuffDisabled)
+            end
+            -- Right slot: Debuff Filter
+            do
+                local rgn = filterRow._rightRegion
+                if rgn._control then rgn._control:Hide() end
+                local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                    rgn, 210, rgn:GetFrameLevel() + 2, debuffFilterItems,
+                    function(k) return SValSupported(DEBUFF_FILTER_KEYS[k], false) end,
+                    function(k, v) SSetSupported(DEBUFF_FILTER_KEYS[k], v) end)
+                PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+                rgn._control = cbDD; rgn._lastInline = nil
+                RegisterWidgetRefresh(cbRefresh)
+                ApplyFilterDisabled(cbDD, rgn._label, DebuffDisabled)
+                -- Inline cog: Show Lust Debuff. NOT part of the filter system --
+                -- forces the Sated/Exhaustion (lust) debuff to show. Off by default.
+                local _, lustCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Debuff Extras",
+                    rows = {
+                        { type="toggle", label="Show Lust Debuff",
+                          get=function() return SValSupported("showLustDebuff", false) end,
+                          set=function(v) SSetSupported("showLustDebuff", v) end },
+                    },
+                })
+                MakeCogBtn(rgn, lustCogShow)
+            end
+        end
+
+        -- Dispel Overlay + Dispel Colors (player frame only; settings keys
+        -- mirror the Raid Frames dispel system 1:1)
+        if selectedUnit == "player" then
+            local dispelOverlayValues = {
+                none     = "None",
+                fill     = "Fill Overlay",
+                full     = "Full Overlay",
+                gradient = "Gradient Overlay",
+            }
+            local dispelOverlayOrder = { "none", "fill", "full", "gradient" }
+            local function DispelRefresh()
+                if ns.UpdatePlayerDispelOverlay then ns.UpdatePlayerDispelOverlay() end
+            end
+            local dispelRow
+            dispelRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Dispel Overlay", values=dispelOverlayValues, order=dispelOverlayOrder,
+                  getValue=function() return db.profile.dispelOverlay or "none" end,
+                  setValue=function(v) db.profile.dispelOverlay = v; DispelRefresh() end },
+                { type="multiSwatch", text="Dispel Colors",
+                  swatches = {
+                    { tooltip = "Magic", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorMagic; if c then return c.r, c.g, c.b end return 0.349, 0.475, 1.0 end,
+                      setValue = function(r, g, b) db.profile.dispelColorMagic = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Curse", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorCurse; if c then return c.r, c.g, c.b end return 0.636, 0.0, 0.64 end,
+                      setValue = function(r, g, b) db.profile.dispelColorCurse = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Disease", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorDisease; if c then return c.r, c.g, c.b end return 0.671, 0.384, 0.098 end,
+                      setValue = function(r, g, b) db.profile.dispelColorDisease = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Poison", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorPoison; if c then return c.r, c.g, c.b end return 0.0, 0.706, 0.286 end,
+                      setValue = function(r, g, b) db.profile.dispelColorPoison = { r=r, g=g, b=b }; DispelRefresh() end },
+                    { tooltip = "Bleed", hasAlpha = false,
+                      getValue = function() local c = db.profile.dispelColorBleed; if c then return c.r, c.g, c.b end return 0.75, 0.15, 0.15 end,
+                      setValue = function(r, g, b) db.profile.dispelColorBleed = { r=r, g=g, b=b }; DispelRefresh() end },
+                  } });  y = y - h
+            -- Inline cog on Dispel Overlay: Overlay Opacity
+            do
+                local rgn = dispelRow._leftRegion
+                local _, opShow = EllesmereUI.BuildCogPopup({
+                    title = "Dispel Overlay",
+                    rows = {
+                        { type="slider", label="Overlay Opacity", min=5, max=100, step=1,
+                          get=function() return db.profile.dispelOverlayOpacity or 100 end,
+                          set=function(v) db.profile.dispelOverlayOpacity = v; DispelRefresh() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) opShow(self) end)
+            end
+        end
+
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        -------------------------------------------------------------------
+        --  ABSORBS (player/target/focus -- mirrors the Raid Frames section)
+        -------------------------------------------------------------------
+        -- Declared outside the gate: the click-mapping table at the bottom of
+        -- this function references them (block-locals would be nil there).
+        local sharedAbsorbsHeader, absorbRow
+        local _supportsAbsorbs = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
+        if _supportsAbsorbs then
+        sharedAbsorbsHeader, h = W:SectionHeader(parent, "ABSORBS", y); y = y - h
+
+        local absorbStyleValues = {
+            ["none"]            = "None",
+            ["striped"]         = "Striped",
+            ["stripedReversed"] = "Striped Reversed",
+            ["clean"]           = "Clean (Flat)",
+            ["blizzard"]        = "Blizzard",
+        }
+        local absorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard" }
+
+        -- Effective absorb opacity: absorbOpacity once set, otherwise the
+        -- pre-split behavior (clean -> absorbCleanAlpha, other styles 80).
+        -- Must match GetAbsorbOpacity in EllesmereUIUnitFrames.lua.
+        local function EffAbsorbOpacity()
+            local v = SValSupported("absorbOpacity", nil)
+            if v then return v end
+            if SValSupported("showPlayerAbsorb", "none") == "clean" then
+                return SValSupported("absorbCleanAlpha", 30)
+            end
+            return 80
+        end
+
+        -- Row 1: Absorb Style (+ color swatch + placement cog) | Absorb Opacity
+        absorbRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+              getValue=function() return SValSupported("showPlayerAbsorb", "none") end,
+              setValue=function(v)
+                  if v == "clean" then
+                      UNIT_DB_MAP[selectedUnit]().absorbOpacity = 30
+                  else
+                      UNIT_DB_MAP[selectedUnit]().absorbOpacity = 90
+                  end
+                  SSetSupported("showPlayerAbsorb", v)
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Absorb Opacity", min=5, max=100, step=1,
+              disabled=function() return SValSupported("showPlayerAbsorb", "none") == "none" end,
+              disabledTooltip="Absorb Style",
+              getValue=EffAbsorbOpacity,
+              setValue=function(v) SSetSupported("absorbOpacity", v) end });  y = y - h
+        SApplySupport(absorbRow._leftRegion, "showPlayerAbsorb")
+        SApplySupport(absorbRow._rightRegion, "absorbOpacity")
+        -- Inline color swatch for absorb color
+        do
+            local rgn = absorbRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, absorbRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGetSupported("absorbColor")
+                    if c then return c.r, c.g, c.b, 1 end
+                    return 1, 1, 1, 1
+                end,
+                function(r, g, b)
+                    UNIT_DB_MAP[selectedUnit]().absorbColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateAbsorbSwatchVis()
+                swatch:SetAlpha(SValSupported("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
+            UpdateAbsorbSwatchVis()
+        end
+        -- Inline cog: absorb placement (overlay / right edge / left edge)
+        do
+            local rgn = absorbRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Absorb Rendering",
+                rows = {
+                    { type="dropdown", label="Placement",
+                      values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
+                      order = { "overlay", "right", "left" },
+                      get=function() return SValSupported("absorbEdgeMode", "overlay") end,
+                      set=function(v) SSetSupported("absorbEdgeMode", v) end },
+                },
+            })
+            MakeCogBtn(rgn, cogShow)
+        end
+        -- Sync icon: Absorb Style across all frames
+        do
+            local rgn = absorbRow._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Absorb Style to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().showPlayerAbsorb = v end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().showPlayerAbsorb or "none") ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().showPlayerAbsorb or "none"
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().showPlayerAbsorb = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+
+        -- Row 2: Heal Absorb Style (+ color swatch + placement cog) | Heal Absorb Opacity
+        local healAbsorbRow
+        healAbsorbRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Heal Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+              getValue=function() return SValSupported("healAbsorbStyle", "clean") end,
+              setValue=function(v)
+                  if v == "clean" then
+                      UNIT_DB_MAP[selectedUnit]().healAbsorbOpacity = 50
+                  else
+                      UNIT_DB_MAP[selectedUnit]().healAbsorbOpacity = 75
+                  end
+                  SSetSupported("healAbsorbStyle", v)
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Heal Absorb Opacity", min=5, max=100, step=1,
+              disabled=function() return SValSupported("healAbsorbStyle", "clean") == "none" end,
+              disabledTooltip="Heal Absorb Style",
+              getValue=function() return SValSupported("healAbsorbOpacity", 65) end,
+              setValue=function(v) SSetSupported("healAbsorbOpacity", v) end });  y = y - h
+        SApplySupport(healAbsorbRow._leftRegion, "healAbsorbStyle")
+        SApplySupport(healAbsorbRow._rightRegion, "healAbsorbOpacity")
+        -- Inline color swatch for heal absorb color
+        do
+            local rgn = healAbsorbRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, healAbsorbRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGetSupported("healAbsorbColor")
+                    if c then return c.r, c.g, c.b, 1 end
+                    return 0.8, 0.15, 0.15, 1
+                end,
+                function(r, g, b)
+                    UNIT_DB_MAP[selectedUnit]().healAbsorbColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateHealAbsorbSwatchVis()
+                swatch:SetAlpha(SValSupported("healAbsorbStyle", "clean") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
+            UpdateHealAbsorbSwatchVis()
+        end
+        -- Inline cog: heal absorb placement (independent of shield absorb)
+        do
+            local rgn = healAbsorbRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Heal Absorb Rendering",
+                rows = {
+                    { type="dropdown", label="Placement",
+                      values = { overlay = "Overlay", right = "From Right Edge", left = "From Left Edge" },
+                      order = { "overlay", "right", "left" },
+                      get=function() return SValSupported("healAbsorbEdgeMode", "overlay") end,
+                      set=function(v) SSetSupported("healAbsorbEdgeMode", v) end },
+                },
+            })
+            MakeCogBtn(rgn, cogShow)
+        end
+
+        _, h = W:Spacer(parent, y, 20); y = y - h
+        end -- _supportsAbsorbs
+
+        local sharedAddHeader
+        -------------------------------------------------------------------
+        --  EXTRAS
+        -------------------------------------------------------------------
+        sharedAddHeader, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
+
+        -- Row 1: Combat Indicator (absorb settings live in the ABSORBS section above)
+        -- Declared outside the gate: the click-mapping table at the bottom of
+        -- this function references it (a block-local would be nil there).
+        local sharedAddRow1
+        local _showAbsorbsCombat = (selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus")
+        if _showAbsorbsCombat then
+        local COMBAT_MEDIA_P = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
+        local combatIndValues = {
+            ["none"]="None", ["standard"]="Standard", ["class"]="Class Theme",
+            _menuOpts = { itemHeight = 32, icon = function(key)
+                if key == "none" then return nil end
+                local _, ct = UnitClass("player")
+                if not ct then return nil end
+                if key == "class" then
+                    local coords = CLASS_FULL_COORDS[ct]
+                    if not coords then return nil end
+                    return COMBAT_MEDIA_P .. "combat-indicator-class-custom.png", coords[1], coords[2], coords[3], coords[4]
+                else
+                    return COMBAT_MEDIA_P .. "combat-indicator-custom.png", 0, 1, 0, 1
+                end
+            end },
+        }
+        local combatIndOrder = { "none", "standard", "class" }
+        -- Enemy Colors helper: custom reaction colors for non-player units.
+        -- Global (one set shared by all frames); empty entries fall back to
+        -- Blizzard defaults. Consumed by the Enemy Colors multiSwatch in slot 2.
+        local function enemySwatch(key, defIdx, dr, dg, dbb, tip)
+            return {
+                tooltip = tip,
+                getValue = function()
+                    local ec = db.profile.enemyColors or {}
+                    local c = ec[key]
+                    if c then return c.r, c.g, c.b end
+                    local f = defIdx and FACTION_BAR_COLORS[defIdx]
+                    if f then return f.r, f.g, f.b end
+                    return dr, dg, dbb
+                end,
+                setValue = function(r, g, b)
+                    db.profile.enemyColors = db.profile.enemyColors or {}
+                    db.profile.enemyColors[key] = { r = r, g = g, b = b }
+                    if ns.ApplyEnemyColors then ns.ApplyEnemyColors() end
+                end,
+            }
+        end
+        sharedAddRow1, h = W:DualRow(parent, y,
+            { type="dropdown", text="Combat Indicator", values=combatIndValues, order=combatIndOrder,
+              getValue=function() return SValSupported("combatIndicatorStyle", "class") end,
+              setValue=function(v) SSetSupported("combatIndicatorStyle", v); ReloadAndUpdate(); UpdatePreview() end },
+            { type = "multiSwatch", text = "Enemy Colors",
+              swatches = {
+                  enemySwatch("hostile",  2,   0.78, 0.25, 0.25, "Hostile"),
+                  enemySwatch("neutral",  4,   0.85, 0.77, 0.36, "Neutral"),
+                  enemySwatch("friendly", 5,   0.29, 0.68, 0.30, "Friendly NPC"),
+                  enemySwatch("tapped",   nil, 0.6,  0.6,  0.6,  "Tapped"),
+              } });  y = y - h
+        SApplySupport(sharedAddRow1._leftRegion, "combatIndicatorStyle")
+        -- Sync icon: Combat Indicator
+        do
+            local rgn = sharedAddRow1._leftRegion
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Combat Indicator Style to all Frames",
+                onClick = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+                isSynced = function()
+                    local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if (UNIT_DB_MAP[key]().combatIndicatorStyle or "class") ~= v then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys)
+                        local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                },
+            })
+        end
+
+        -- Eyeball toggle + cog + swatch on combat indicator dropdown
+        do
+            local ciRgn = sharedAddRow1._leftRegion
+            local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
+            local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
+            local eyeBtn = CreateFrame("Button", nil, ciRgn)
+            eyeBtn:SetSize(26, 26)
+            eyeBtn:SetPoint("RIGHT", ciRgn._lastInline or ciRgn._control, "LEFT", -8, 0)
+            eyeBtn:SetFrameLevel(ciRgn:GetFrameLevel() + 5)
+            eyeBtn:SetAlpha(0.4)
+            ciRgn._lastInline = eyeBtn
+            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+            eyeTex:SetAllPoints()
+            local function RefreshCombatEye()
+                eyeTex:SetTexture(showCombatIndicatorPreview and EYE_INVISIBLE or EYE_VISIBLE)
+            end
+            RefreshCombatEye()
+            eyeBtn:SetScript("OnClick", function()
+                showCombatIndicatorPreview = not showCombatIndicatorPreview
+                RefreshCombatEye()
+                UpdatePreview()
+            end)
+            eyeBtn:SetScript("OnEnter", function(self)
+                self:SetAlpha(0.7)
+                EllesmereUI.ShowWidgetTooltip(self, showCombatIndicatorPreview and "Hide combat indicator preview" or "Show combat indicator preview")
+            end)
+            eyeBtn:SetScript("OnLeave", function(self)
+                self:SetAlpha(0.4)
+                EllesmereUI.HideWidgetTooltip()
+            end)
+
+            -- Cog popup for combat indicator settings
+            local combatPosValues = { ["portrait"]="Portrait", ["healthbar"]="Health Bar", ["textbar"]="Text Bar" }
+            local combatPosOrder = { "portrait", "healthbar", "textbar" }
+
+            local _, combatCogShowRaw = EllesmereUI.BuildCogPopup({
+                title = "Combat Indicator Settings",
+                rows = {
+                    { type="toggle", label="Class Colored",
+                      get=function() return SValSupported("combatIndicatorColor", "custom") == "classcolor" end,
+                      set=function(v) SSetSupported("combatIndicatorColor", v and "classcolor" or "custom"); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="dropdown", label="Position", values=combatPosValues, order=combatPosOrder,
+                      get=function() return SValSupported("combatIndicatorPosition", "healthbar") end,
+                      set=function(v) SSetSupported("combatIndicatorPosition", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="slider", label="Size", min=8, max=64, step=1,
+                      get=function() return SValSupported("combatIndicatorSize", 22) end,
+                      set=function(v) SSetSupported("combatIndicatorSize", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="slider", label="X Offset", min=-100, max=100, step=1,
+                      get=function() return SValSupported("combatIndicatorX", 0) end,
+                      set=function(v) SSetSupported("combatIndicatorX", v); ReloadAndUpdate(); UpdatePreview() end },
+                    { type="slider", label="Y Offset", min=-100, max=100, step=1,
+                      get=function() return SValSupported("combatIndicatorY", 0) end,
+                      set=function(v) SSetSupported("combatIndicatorY", v); ReloadAndUpdate(); UpdatePreview() end },
+                },
+            })
+            local combatCogShow = combatCogShowRaw
+            MakeCogBtn(ciRgn, combatCogShow)
+
+            -- Inline color swatch for custom color
+            local combatSwatch = EllesmereUI.BuildColorSwatch(ciRgn, ciRgn:GetFrameLevel() + 5,
+                function()
+                    local cc = SGetSupported("combatIndicatorCustomColor")
+                    cc = cc or { r=1, g=1, b=1 }
+                    return cc.r, cc.g, cc.b, 1
+                end,
+                function(r, g, b)
+                    UNIT_DB_MAP[selectedUnit]().combatIndicatorCustomColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            combatSwatch:SetPoint("RIGHT", ciRgn._lastInline or ciRgn._control, "LEFT", -12, 0)
+            ciRgn._lastInline = combatSwatch
+
+            local function UpdateSwatchVisibility()
+                local colorMode = SValSupported("combatIndicatorColor", "custom")
+                local style = SValSupported("combatIndicatorStyle", "class")
+                if colorMode == "custom" and style ~= "none" then
+                    combatSwatch:Show()
+                else
+                    combatSwatch:Hide()
+                end
+            end
+            UpdateSwatchVisibility()
+            RegisterWidgetRefresh(UpdateSwatchVisibility)
+        end
+        end -- _showAbsorbsCombat
 
         -- Row 4: Raid Marker toggle | Icon Size slider + inline directions cog (X/Y)
         local function raidMarkerOff()
@@ -7256,9 +8787,14 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSetSupported("raidMarkerSize", v) end });  y = y - h
         do
             local rgn = sharedAddRow4._rightRegion
+            local rmPosValues = { ["left"]="Left", ["center"]="Center", ["right"]="Right" }
+            local rmPosOrder  = { "left", "center", "right" }
             local _, rmCogShow = EllesmereUI.BuildCogPopup({
-                title = "Raid Marker Position",
+                title = "Raid Marker Settings",
                 rows = {
+                    { type="dropdown", label="Position", values=rmPosValues, order=rmPosOrder,
+                      get=function() return SValSupported("raidMarkerAlign", "right") end,
+                      set=function(v) SSetSupported("raidMarkerAlign", v) end },
                     { type="slider", label="X Offset", min=-200, max=200, step=1,
                       get=function() return SValSupported("raidMarkerX", 0) end,
                       set=function(v) SSetSupported("raidMarkerX", v) end },
@@ -7434,33 +8970,36 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         parent._sharedClickTargets = {
             healthBar    = { section = sharedBarsHeader,     target = sharedSizeRow },
+            absorbs      = { section = sharedAbsorbsHeader,  target = absorbRow, slotSide = "left" },
             powerBar     = { section = sharedPowerHeader,    target = sharedPowerRow1, slotSide = "left" },
             powerBarText = { section = sharedPowerHeader,    target = sharedPowerRow2, slotSide = "left" },
             portrait     = { section = sharedPortraitHeader, target = sharedPortraitModeRow, slotSide = "left" },
-            nameText     = { section = sharedBarsHeader,     target = sharedTextRow, slotSide = "left" },
-            healthText   = { section = sharedBarsHeader,     target = sharedTextRow, slotSide = "right" },
-            centerText   = { section = sharedBarsHeader,     target = sharedCenterTextRow, slotSide = "left" },
+            nameText     = { section = sharedBarsHeader,     target = sharedTextRow, slotSide = "right" },
+            healthText   = { section = sharedBarsHeader,     target = sharedCenterTextRow, slotSide = "left" },
+            centerText   = { section = sharedBarsHeader,     target = sharedCenterTextRow, slotSide = "right" },
             classResource= { section = sharedClassResHeader, target = sharedClassResRow, slotSide = "left" },
             btbBar       = { section = sharedBtbHeader,      target = sharedBtbToggleRow, slotSide = "left" },
             btbLeftText  = { section = sharedBtbHeader,      target = sharedBtbTextRow, slotSide = "left" },
             btbRightText = { section = sharedBtbHeader,      target = sharedBtbTextRow, slotSide = "right" },
             btbCenterText= { section = sharedBtbHeader,      target = sharedBtbCenterRow, slotSide = "left" },
             btbClassIcon = { section = sharedBtbHeader,      target = sharedBtbCenterRow, slotSide = "right" },
-            combatIndicator = { section = sharedAddHeader, target = sharedAddRow1, slotSide = "right" },
-            buffIcon     = { section = sharedAddHeader,      target = sharedAddRow2, slotSide = "left" },
-            debuffIcon   = { section = sharedAddHeader,      target = sharedAddRow3, slotSide = "left" },
+            combatIndicator = { section = sharedAddHeader, target = sharedAddRow1, slotSide = "left" },
+            buffIcon     = { section = sharedBuffDebuffHeader, target = sharedAddRow2, slotSide = "left" },
+            debuffIcon   = { section = sharedBuffDebuffHeader, target = sharedAddRow3, slotSide = "left" },
             raidMarker   = { section = sharedAddHeader,      target = sharedAddRow4, slotSide = "left" },
             leaderIndicator = { section = sharedAddHeader,   target = sharedAddRow5, slotSide = "left" },
             castBar      = { section = sharedCastHeader,     target = sharedCastRow1 },
             castIcon     = { section = sharedCastHeader,     target = sharedCastRow1 },
             castName     = { section = sharedCastHeader,     target = sharedCastRow1 },
+            castTime     = { section = sharedCastHeader,     target = castTextRow,   slotSide = "right" },
+            castTarget   = { section = sharedCastHeader,     target = castTargetRow, slotSide = "left" },
         }
 
         return y
     end  -- BuildSharedSettings
 
     ---------------------------------------------------------------------------
-    --  Frame Display page  (dropdown selector + shared/mini settings)
+    --  Main Frames page  (dropdown selector + shared/mini settings)
     ---------------------------------------------------------------------------
     local _displayHeaderBuilder
     local displayHeaderFixedH = 0
@@ -7490,11 +9029,17 @@ initFrame:SetScript("OnEvent", function(self)
                 unitLabels, unitOrder,
                 function() return selectedUnit end,
                 function(v)
+                    -- Preserve the user's scroll position across the unit swap
+                    -- (captured BEFORE the rebuild, since SetContentHeader's
+                    -- relayout can clobber the live scroll value). The settings
+                    -- list sits below the fixed content header, so the same
+                    -- offset lands on the same section for any unit.
+                    local savedScroll = EllesmereUI.GetContentScroll and EllesmereUI.GetContentScroll() or 0
                     selectedUnit = v
                     EllesmereUI:InvalidateContentHeaderCache()
                     EllesmereUI:SetContentHeader(_displayHeaderBuilder)
                     EllesmereUI:RefreshPage(true)
-                    EllesmereUI.SmoothScrollTo(0)
+                    EllesmereUI.SmoothScrollTo(savedScroll)
                 end
             )
             PP.Point(ddBtn, "TOP", hdr, "TOP", 0, fy)
@@ -7528,7 +9073,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if not _ufPreviewHintFS_display then
                     _ufPreviewHintFS_display = EllesmereUI.MakeFont(preview or hdr, 11, nil, 1, 1, 1)
                     _ufPreviewHintFS_display:SetAlpha(0.45)
-                    _ufPreviewHintFS_display:SetText("Click elements to scroll to and highlight their options")
+                    _ufPreviewHintFS_display:SetText(EllesmereUI.L("Click elements to scroll to and highlight their options"))
                 end
                 _ufPreviewHintFS_display:SetParent(preview or hdr)
                 _ufPreviewHintFS_display:ClearAllPoints()
@@ -7553,7 +9098,9 @@ initFrame:SetScript("OnEvent", function(self)
         if selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus" then
             y = BuildSharedSettings(parent, y)
         elseif selectedUnit == "targettarget" then
-            y = -BuildFoTToTOptions(W, parent, y)
+            y = -BuildFoTToTOptions(W, parent, y, db.profile.targettarget, "targettarget")
+        elseif selectedUnit == "focustarget" then
+            y = -BuildFoTToTOptions(W, parent, y, db.profile.focustarget, "focustarget")
         elseif selectedUnit == "pet" then
             y = -BuildPetOptions(W, parent, y)
         elseif selectedUnit == "boss" then
@@ -7698,6 +9245,13 @@ initFrame:SetScript("OnEvent", function(self)
             local baseLevel = (pv._health and pv._health:GetFrameLevel() or 20) + 15
             local textLevel = baseLevel + 10
             if pv._health then CreateHitOverlay(pv._health, "healthBar", false, baseLevel) end
+            -- Absorb segment: hit area follows the absorb bar's FILL texture
+            -- (the bar frame spans the whole health width), sitting above the
+            -- health overlay so the shield strip routes to the Absorbs section.
+            if pv._absorbBar and pv._absorbBar:IsShown() then
+                local absFill = pv._absorbBar:GetStatusBarTexture()
+                if absFill then CreateHitOverlay(absFill, "absorbs", false, baseLevel + 5) end
+            end
             if pv._power then CreateHitOverlay(pv._power, "powerBar", false, baseLevel) end
             if pv._portraitFrame and pv._portraitFrame:IsShown() then CreateHitOverlay(pv._portraitFrame, "portrait", false, baseLevel) end
             if pv._castbar then
@@ -7705,18 +9259,27 @@ initFrame:SetScript("OnEvent", function(self)
                 CreateHitOverlay(pv._castbar, "castBar", false, castLevel)
                 if pv._castIconFrame then CreateHitOverlay(pv._castIconFrame, "castIcon", false, castLevel) end
                 if pv._castNameFS then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._castNameFS, "castName", true, castLevel + 5) end
+                if pv._castTimeFS and pv._castTimeFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._castTimeFS, "castTime", true, castLevel + 5) end
+                if pv._castTargetFS and pv._castTargetFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._castTargetFS, "castTarget", true, castLevel + 5) end
             end
             if pv._nameFS and pv._nameFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._nameFS, "nameText", true, textLevel) end
             if pv._hpFS and pv._hpFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._hpFS, "healthText", true, textLevel) end
             if pv._centerFS and pv._centerFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._centerFS, "centerText", true, textLevel) end
+            -- Create an overlay for EVERY buff/debuff frame, not just the ones
+            -- shown right now. Each overlay is a child of its icon frame with
+            -- SetAllPoints, so it hides/shows and re-anchors with the icon. The
+            -- old ":IsShown()" guard tied clickability to the icon's visibility
+            -- at header-build time -- enabling buffs or changing the debuff count
+            -- afterwards (header is cached, not rebuilt) left the newly shown
+            -- icons with no overlay, so they weren't clickable.
             if pv._buffIcons then
                 for i = 1, #pv._buffIcons do
-                    if pv._buffIcons[i] and pv._buffIcons[i]:IsShown() then CreateHitOverlay(pv._buffIcons[i], "buffIcon", false, baseLevel) end
+                    if pv._buffIcons[i] then CreateHitOverlay(pv._buffIcons[i], "buffIcon", false, baseLevel) end
                 end
             end
             if pv._debuffIcons then
                 for i = 1, #pv._debuffIcons do
-                    if pv._debuffIcons[i] and pv._debuffIcons[i]:IsShown() then CreateHitOverlay(pv._debuffIcons[i], "debuffIcon", false, baseLevel) end
+                    if pv._debuffIcons[i] then CreateHitOverlay(pv._debuffIcons[i], "debuffIcon", false, baseLevel) end
                 end
             end
             if pv._btbFrame then
@@ -7820,7 +9383,7 @@ initFrame:SetScript("OnEvent", function(self)
                 setValue=function(v) settingsTable.frameWidth = v; ReloadAndUpdate() end }
         end
         sizeRow, h = W:DualRow(parent, y,
-            { type="slider", text="Bar Height", min=10, max=80, step=1,
+            { type="slider", text="Health Bar Height", min=10, max=80, step=1,
               disabled=mhDis, disabledTooltip=mhTip, rawTooltip=mhRaw,
               getValue=function() return settingsTable.healthHeight end,
               setValue=function(v) settingsTable.healthHeight = v; ReloadAndUpdate() end },
@@ -7881,9 +9444,9 @@ initFrame:SetScript("OnEvent", function(self)
                           return MVal("healthClassColored", false) and 1 or 0.3
                       end },
                   } },
-                { type="slider", text="Bar Opacity", min=10, max=100, step=1,
+                { type="slider", text=(unitKey == "boss") and "Fill Opacity" or "Bar Opacity", min=10, max=100, step=1,
                   disabled=function() return db.profile.darkTheme end,
-                  disabledTooltip="Bar Opacity is disabled in Dark Mode.",
+                  disabledTooltip="Dark Mode", requireState="disabled",
                   getValue=function() return MVal("healthBarOpacity", 90) end,
                   setValue=function(v) MSet("healthBarOpacity", v) end });  y = y - h
         end
@@ -7901,8 +9464,6 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
               end,
-              disabled=function() return MVal("centerTextContent", "none") ~= "none" end,
-              disabledTooltip="This option is disabled while a Center Text is selected.",
             },
             { type="dropdown", text="Right Text", values=healthTextValues, order=healthTextOrder,
               getValue=function() return MVal("rightTextContent", "none") end,
@@ -7914,12 +9475,26 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
               end,
-              disabled=function() return MVal("centerTextContent", "none") ~= "none" end,
-              disabledTooltip="This option is disabled while a Center Text is selected.",
             });  y = y - h
-        -- Inline swatch + cog on Left Text
+        -- Inline color swatches + cog on Left Text: Custom + Class (CDM Border Size pattern)
         do
             local rgn = textRow._leftRegion
+            local classSw, classSwUp = EllesmereUI.BuildColorSwatch(
+                rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(classSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            classSw:SetScript("OnClick", function()
+                if MVal("leftTextContent", "name") == "none" then return end
+                MSet("leftTextClassColor", true); EllesmereUI:RefreshPage()
+            end)
+            classSw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(classSw, "Class Colored") end)
+            classSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local swGet = function()
                 return MVal("leftTextColorR", 1), MVal("leftTextColorG", 1), MVal("leftTextColorB", 1)
             end
@@ -7928,35 +9503,37 @@ initFrame:SetScript("OnEvent", function(self)
                 ReloadAndUpdate()
             end
             local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
-            PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
             rgn._lastInline = sw
-            local blk = CreateFrame("Frame", nil, sw)
-            blk:SetAllPoints(); blk:SetFrameLevel(sw:GetFrameLevel() + 10); blk:EnableMouse(true)
-            blk:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Left Text")) end)
-            blk:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
+            local origClick = sw:GetScript("OnClick")
+            sw:SetScript("OnClick", function(self, ...)
+                if MVal("leftTextContent", "name") == "none" then return end
+                if MVal("leftTextClassColor", false) then
+                    MSet("leftTextClassColor", false); EllesmereUI:RefreshPage(); return
+                end
+                if origClick then origClick(self, ...) end
+            end)
+            sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Custom Colored") end)
+            sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdSwatches()
                 local isNone = MVal("leftTextContent", "name") == "none"
                 local isClass = MVal("leftTextClassColor", false)
-                if isNone or isClass then sw:SetAlpha(0.3); blk:Show() else sw:SetAlpha(1); blk:Hide() end
-                swUp()
-            end)
-            local initOff = MVal("leftTextContent", "name") == "none" or MVal("leftTextClassColor", false)
-            sw:SetAlpha(initOff and 0.3 or 1)
-            if initOff then blk:Show() else blk:Hide() end
+                sw:SetAlpha((isClass or isNone) and 0.3 or 1)
+                classSw:SetAlpha((isClass and not isNone) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() swUp(); classSwUp(); UpdSwatches() end)
+            UpdSwatches()
 
             local _, cogShowFn = EllesmereUI.BuildCogPopup({
                 title = "Left Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return MVal("leftTextClassColor", false) end,
-                      set=function(v) MSet("leftTextClassColor", v); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return MVal("leftTextSize", settingsTable.textSize or 12) end,
                       set=function(v) MSet("leftTextSize", v) end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return MVal("leftTextX", 0) end,
                       set=function(v) MSet("leftTextX", v) end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return MVal("leftTextY", 0) end,
                       set=function(v) MSet("leftTextY", v) end },
                 },
@@ -7975,9 +9552,25 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnClick", function(self) if MVal("leftTextContent", "name") ~= "none" then cogShowFn(self) end end)
             UpdCog(); RegisterWidgetRefresh(UpdCog)
         end
-        -- Inline swatch + cog on Right Text
+        -- Inline color swatches + cog on Right Text: Custom + Class (CDM Border Size pattern)
         do
             local rgn = textRow._rightRegion
+            local classSw, classSwUp = EllesmereUI.BuildColorSwatch(
+                rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(classSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            classSw:SetScript("OnClick", function()
+                if MVal("rightTextContent", "none") == "none" then return end
+                MSet("rightTextClassColor", true); EllesmereUI:RefreshPage()
+            end)
+            classSw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(classSw, "Class Colored") end)
+            classSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local swGet = function()
                 return MVal("rightTextColorR", 1), MVal("rightTextColorG", 1), MVal("rightTextColorB", 1)
             end
@@ -7986,35 +9579,37 @@ initFrame:SetScript("OnEvent", function(self)
                 ReloadAndUpdate()
             end
             local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
-            PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
             rgn._lastInline = sw
-            local blk = CreateFrame("Frame", nil, sw)
-            blk:SetAllPoints(); blk:SetFrameLevel(sw:GetFrameLevel() + 10); blk:EnableMouse(true)
-            blk:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Right Text")) end)
-            blk:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
+            local origClick = sw:GetScript("OnClick")
+            sw:SetScript("OnClick", function(self, ...)
+                if MVal("rightTextContent", "none") == "none" then return end
+                if MVal("rightTextClassColor", false) then
+                    MSet("rightTextClassColor", false); EllesmereUI:RefreshPage(); return
+                end
+                if origClick then origClick(self, ...) end
+            end)
+            sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Custom Colored") end)
+            sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdSwatches()
                 local isNone = MVal("rightTextContent", "none") == "none"
                 local isClass = MVal("rightTextClassColor", false)
-                if isNone or isClass then sw:SetAlpha(0.3); blk:Show() else sw:SetAlpha(1); blk:Hide() end
-                swUp()
-            end)
-            local initOff = MVal("rightTextContent", "none") == "none" or MVal("rightTextClassColor", false)
-            sw:SetAlpha(initOff and 0.3 or 1)
-            if initOff then blk:Show() else blk:Hide() end
+                sw:SetAlpha((isClass or isNone) and 0.3 or 1)
+                classSw:SetAlpha((isClass and not isNone) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() swUp(); classSwUp(); UpdSwatches() end)
+            UpdSwatches()
 
             local _, cogShowFn = EllesmereUI.BuildCogPopup({
                 title = "Right Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return MVal("rightTextClassColor", false) end,
-                      set=function(v) MSet("rightTextClassColor", v); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return MVal("rightTextSize", settingsTable.textSize or 12) end,
                       set=function(v) MSet("rightTextSize", v) end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return MVal("rightTextX", 0) end,
                       set=function(v) MSet("rightTextX", v) end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return MVal("rightTextY", 0) end,
                       set=function(v) MSet("rightTextY", v) end },
                 },
@@ -8041,18 +9636,30 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return MVal("centerTextContent", "none") end,
               setValue=function(v)
                 settingsTable.centerTextContent = v
-                if v ~= "none" then
-                    settingsTable.leftTextContent = "none"
-                    settingsTable.rightTextContent = "none"
-                end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Reverse Fill",
               getValue=function() return settingsTable.healthReverseFill end,
               setValue=function(v) settingsTable.healthReverseFill = v; ReloadAndUpdate() end });  y = y - h
-        -- Inline swatch + cog on Center Text
+        -- Inline color swatches + cog on Center Text: Custom + Class (CDM Border Size pattern)
         do
             local rgn = centerRow._leftRegion
+            local classSw, classSwUp = EllesmereUI.BuildColorSwatch(
+                rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local _, classFile = UnitClass("player")
+                    local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(classSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            classSw:SetScript("OnClick", function()
+                if MVal("centerTextContent", "none") == "none" then return end
+                MSet("centerTextClassColor", true); EllesmereUI:RefreshPage()
+            end)
+            classSw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(classSw, "Class Colored") end)
+            classSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local swGet = function()
                 return MVal("centerTextColorR", 1), MVal("centerTextColorG", 1), MVal("centerTextColorB", 1)
             end
@@ -8061,35 +9668,37 @@ initFrame:SetScript("OnEvent", function(self)
                 ReloadAndUpdate()
             end
             local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
-            PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
             rgn._lastInline = sw
-            local blk = CreateFrame("Frame", nil, sw)
-            blk:SetAllPoints(); blk:SetFrameLevel(sw:GetFrameLevel() + 10); blk:EnableMouse(true)
-            blk:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Center Text")) end)
-            blk:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            RegisterWidgetRefresh(function()
+            local origClick = sw:GetScript("OnClick")
+            sw:SetScript("OnClick", function(self, ...)
+                if MVal("centerTextContent", "none") == "none" then return end
+                if MVal("centerTextClassColor", false) then
+                    MSet("centerTextClassColor", false); EllesmereUI:RefreshPage(); return
+                end
+                if origClick then origClick(self, ...) end
+            end)
+            sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Custom Colored") end)
+            sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdSwatches()
                 local isNone = MVal("centerTextContent", "none") == "none"
                 local isClass = MVal("centerTextClassColor", false)
-                if isNone or isClass then sw:SetAlpha(0.3); blk:Show() else sw:SetAlpha(1); blk:Hide() end
-                swUp()
-            end)
-            local initOff = MVal("centerTextContent", "none") == "none" or MVal("centerTextClassColor", false)
-            sw:SetAlpha(initOff and 0.3 or 1)
-            if initOff then blk:Show() else blk:Hide() end
+                sw:SetAlpha((isClass or isNone) and 0.3 or 1)
+                classSw:SetAlpha((isClass and not isNone) and 1 or 0.3)
+            end
+            RegisterWidgetRefresh(function() swUp(); classSwUp(); UpdSwatches() end)
+            UpdSwatches()
 
             local _, cogShowFn = EllesmereUI.BuildCogPopup({
                 title = "Center Text Settings",
                 rows = {
-                    { type="toggle", label="Class Color",
-                      get=function() return MVal("centerTextClassColor", false) end,
-                      set=function(v) MSet("centerTextClassColor", v); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=24, step=1,
                       get=function() return MVal("centerTextSize", settingsTable.textSize or 12) end,
                       set=function(v) MSet("centerTextSize", v) end },
-                    { type="slider", label="X", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return MVal("centerTextX", 0) end,
                       set=function(v) MSet("centerTextX", v) end },
-                    { type="slider", label="Y", min=-30, max=30, step=1,
+                    { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return MVal("centerTextY", 0) end,
                       set=function(v) MSet("centerTextY", v) end },
                 },
@@ -8107,6 +9716,69 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnLeave", function(self) UpdCog(); EllesmereUI.HideWidgetTooltip() end)
             cogBtn:SetScript("OnClick", function(self) if MVal("centerTextContent", "none") ~= "none" then cogShowFn(self) end end)
             UpdCog(); RegisterWidgetRefresh(UpdCog)
+        end
+
+        -- POWER BAR section (only for mini units that render a power bar, i.e. boss).
+        -- Fill always uses the unit's power color (powerPercentPowerColor default on);
+        -- a height of 0 effectively hides the bar.
+        if opts.hasPowerBar then
+            local powerHeader
+            powerHeader, h = W:SectionHeader(parent, "POWER BAR", y); y = y - h
+
+            -- Row 1: Power Bar Height (+ Reverse Fill cog) | Above Health Bar toggle
+            local pwrRow1
+            pwrRow1, h = W:DualRow(parent, y,
+                { type="slider", text="Power Bar Height", min=0, max=30, step=1,
+                  getValue=function() return MVal("powerHeight", 6) end,
+                  setValue=function(v) MSet("powerHeight", v) end },
+                { type="toggle", text="Above Health Bar",
+                  getValue=function() return MVal("powerPosition", "below") == "above" end,
+                  setValue=function(v) MSet("powerPosition", v and "above" or "below") end });  y = y - h
+            -- Reverse Fill cog on Power Bar Height (left) -- mirrors Main Frames.
+            do
+                local rgn = pwrRow1._leftRegion
+                local _, revCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Power Bar Fill",
+                    rows = {
+                        { type="toggle", label="Reverse Fill",
+                          get=function() return MVal("powerReverseFill", false) end,
+                          set=function(v) MSet("powerReverseFill", v) end },
+                    },
+                })
+                MCogBtn(rgn, revCogShow)
+            end
+
+            -- Row 2: Bar Background (slider + inline color swatch) | Bar Opacity
+            local pwrRow2
+            pwrRow2, h = W:DualRow(parent, y,
+                { type="slider", text="Bar Background", min=0, max=100, step=1,
+                  getValue=function() return MVal("customPowerBgAlpha", 100) end,
+                  setValue=function(v) MSet("customPowerBgAlpha", v) end },
+                { type="slider", text="Fill Opacity", min=10, max=100, step=1,
+                  getValue=function() return MVal("powerBarOpacity", 100) end,
+                  setValue=function(v) MSet("powerBarOpacity", v) end });  y = y - h
+            -- Inline color swatch on Bar Background (left region)
+            do
+                local rgn = pwrRow2._leftRegion
+                local bgGet = function()
+                    local c = MGet("customPowerBgColor")
+                    if c then return c.r, c.g, c.b end
+                    return 17/255, 17/255, 17/255
+                end
+                local bgSet = function(r, g, b)
+                    settingsTable.customPowerBgColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate()
+                end
+                local bgSw, bgSwUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgGet, bgSet, false, 20)
+                PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = bgSw
+                RegisterWidgetRefresh(function() bgSwUp() end)
+            end
+        end
+
+        -- Extra section rendered at the very bottom, below the Power Bar (boss "Indicators").
+        if opts.afterPowerRow then
+            y = opts.afterPowerRow(W, parent, y)
         end
 
         return y, displayHeader, sizeRow, textHeader, textRow, enableRowFrame
@@ -8141,43 +9813,41 @@ initFrame:SetScript("OnEvent", function(self)
         cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
     end
 
-    BuildFoTToTOptions = function(W, parent, y)
+    -- Shared builder for the two independent mini frames (Target of Target,
+    -- Focus Target). settingsTable/unitKey select which one; each renders its
+    -- own single enable toggle + Show Portrait (right slot), Pet-style.
+    BuildFoTToTOptions = function(W, parent, y, settingsTable, unitKey)
+        settingsTable = settingsTable or db.profile.targettarget
+        unitKey = unitKey or "targettarget"
+        local enableText = (unitKey == "focustarget") and "Enable Focus Target" or "Enable Target of Target"
         local _, h
 
         local portraitRow
         local function enableRow(Ww, pp, yy)
-            local enableR, eh = Ww:DualRow(pp, yy,
-                { type="toggle", text="Enable Target of Target",
-                  getValue=function() return db.profile.enabledFrames.targettarget ~= false end,
+            portraitRow, h = Ww:DualRow(pp, yy,
+                { type="toggle", text=enableText,
+                  getValue=function() return db.profile.enabledFrames[unitKey] ~= false end,
                   setValue=function(v)
-                    db.profile.enabledFrames.targettarget = v
+                    db.profile.enabledFrames[unitKey] = v
                     ReloadAndUpdate()
                   end },
-                { type="toggle", text="Enable Focus Target",
-                  getValue=function() return db.profile.enabledFrames.focustarget ~= false end,
+                { type="toggle", text="Show Portrait",
+                  getValue=function() return settingsTable.showPortrait ~= false end,
                   setValue=function(v)
-                    db.profile.enabledFrames.focustarget = v
+                    settingsTable.showPortrait = v
                     ReloadAndUpdate()
                   end })
-            local ph
-            portraitRow, ph = Ww:DualRow(pp, yy - eh,
-                { type="toggle", text="Show Portrait",
-                  getValue=function() return db.profile.totPet.showPortrait ~= false end,
-                  setValue=function(v)
-                    db.profile.totPet.showPortrait = v
-                    ReloadAndUpdate()
-                  end },
-                { type="label", text="" })
-            AttachPortraitSideCog(portraitRow._leftRegion, db.profile.totPet)
-            return portraitRow, eh + ph
+            AttachPortraitSideCog(portraitRow._rightRegion, settingsTable)
+            return portraitRow, h
         end
 
         local displayHeader, sizeRow, textHeader, textRow
-        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.totPet, "totPet", enableRow)
+        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow)
 
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
             healthBar  = { section = displayHeader,  target = sizeRow },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
         }
@@ -8225,32 +9895,43 @@ initFrame:SetScript("OnEvent", function(self)
         local _, h
 
         -- Activate / Deactivate Boss Preview button -- matches the Party Mode
-        -- activate button: centered above the first section.
-        local activateBtnFrame, activateBtnLbl
+        -- activate button: centered above the first section. Disabled while Boss
+        -- Frames are turned off: the in-game preview rides on the real (now
+        -- disabled) boss frames and renders broken, so it must not be activatable.
+        local activateBtnFrame, activateBtnLbl, activateBtn
         local function PreviewLabel()
             return ns._bossPreviewActive and "Deactivate Boss Preview" or "Activate Boss Preview"
         end
+        local function BossFramesDisabled()
+            return db.profile.enabledFrames.boss == false
+        end
         activateBtnFrame, h = W:WideButton(parent, PreviewLabel(), y, function()
+            if BossFramesDisabled() then return end
             if not ns.SetBossPreview then return end
             ns.SetBossPreview(not ns._bossPreviewActive)
             if activateBtnLbl then activateBtnLbl:SetText(PreviewLabel()) end
         end);  y = y - h
         do
-            local btn = select(1, activateBtnFrame:GetChildren())
-            if btn then
-                for i = 1, btn:GetNumRegions() do
-                    local rgn = select(i, btn:GetRegions())
+            activateBtn = select(1, activateBtnFrame:GetChildren())
+            if activateBtn then
+                for i = 1, activateBtn:GetNumRegions() do
+                    local rgn = select(i, activateBtn:GetRegions())
                     if rgn and rgn.GetText and rgn:GetText() then
                         activateBtnLbl = rgn; break
                     end
                 end
             end
         end
-        if activateBtnLbl then
-            EllesmereUI.RegisterWidgetRefresh(function()
-                activateBtnLbl:SetText(PreviewLabel())
-            end)
+        local function UpdateActivateBtn()
+            local off = BossFramesDisabled()
+            if activateBtnLbl then activateBtnLbl:SetText(PreviewLabel()) end
+            if activateBtn then
+                activateBtn:SetAlpha(off and 0.4 or 1)
+                activateBtn:EnableMouse(not off)
+            end
         end
+        UpdateActivateBtn()
+        EllesmereUI.RegisterWidgetRefresh(UpdateActivateBtn)
 
         local portraitRow
         local function enableRow(Ww, pp, yy)
@@ -8260,7 +9941,13 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return db.profile.enabledFrames.boss ~= false end,
                   setValue=function(v)
                     db.profile.enabledFrames.boss = v
+                    -- Force-stop the in-game preview when disabling boss frames;
+                    -- it rides on the now-disabled frames and renders broken.
+                    if not v and ns._bossPreviewActive and ns.SetBossPreview then
+                        ns.SetBossPreview(false)
+                    end
                     ReloadAndUpdate()
+                    EllesmereUI:RefreshPage()
                   end },
                 { type="toggle", text="Show Portrait",
                   getValue=function() return db.profile.boss.showPortrait ~= false end,
@@ -8276,15 +9963,21 @@ initFrame:SetScript("OnEvent", function(self)
                     db.profile.boss.showCastIcon = v
                     ReloadAndUpdate()
                   end },
-                { type="slider", text="Vertical Spacing", min=20, max=200, step=1,
+                { type="slider", text="Vertical Spacing", min=-200, max=200, step=1,
                   getValue=function() return db.profile.bossSpacing or 80 end,
                   setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
-            return castRow, eh + ch
-        end
-
-        local function bossAfterSize(Ww, pp, yy)
-            local _, hh
-            local function BossCogBtn(rgn, showFn)
+            -- Inline cog: "Make Icon Part of the Bar" on the boss Show Cast Icon toggle.
+            do
+                local rgn = castRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Cast Icon",
+                    rows = {
+                        { type = "toggle", label = "Make Icon Part of the Bar",
+                          tooltip = "This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
+                          get = function() return db.profile.boss.castbarIconInWidth ~= false end,
+                          set = function(v) db.profile.boss.castbarIconInWidth = v; ReloadAndUpdate() end },
+                    },
+                })
                 local cogBtn = CreateFrame("Button", nil, rgn)
                 cogBtn:SetSize(26, 26)
                 cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
@@ -8296,49 +9989,145 @@ initFrame:SetScript("OnEvent", function(self)
                 cogTex:SetTexture(EllesmereUI.COGS_ICON)
                 cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
                 cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            end
+            local growthRow, gh = Ww:DualRow(pp, yy - eh - ch,
+                { type="dropdown", text="Stack Direction", values={ up="Up", down="Down" }, order={ "up", "down" },
+                  getValue=function() return db.profile.boss.bossStackDirection or "down" end,
+                  setValue=function(v) db.profile.boss.bossStackDirection = v; ReloadAndUpdate() end },
+                { type="slider", text="Cast Bar Height", min=1, max=40, step=1,
+                  getValue=function() return db.profile.boss.castbarHeight or 14 end,
+                  setValue=function(v) db.profile.boss.castbarHeight = v; ReloadAndUpdate() end })
+            -- Inline cast-background swatch + text-size cog on Cast Bar Height. Both
+            -- use nil-defaulted keys so existing boss frames are unchanged until set.
+            do
+                local rgn = growthRow._rightRegion
+                -- Background color swatch (RGB + alpha; default black 0.5)
+                local bgSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function()
+                        local c = db.profile.boss.castBgColor or { r = 0, g = 0, b = 0 }
+                        return c.r, c.g, c.b, db.profile.boss.castBgAlpha or 0.5
+                    end,
+                    function(r, g, b, a)
+                        db.profile.boss.castBgColor = { r = r, g = g, b = b }
+                        db.profile.boss.castBgAlpha = a
+                        ReloadAndUpdate()
+                    end, true, 20)
+                bgSw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                bgSw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Cast Background") end)
+                bgSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                rgn._lastInline = bgSw
+                -- Text-size cog: one slider drives BOTH the spell name and timer.
+                local _, textCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Cast Text",
+                    rows = {
+                        { type="slider", label="Text Size", min=6, max=20, step=1,
+                          get=function() return db.profile.boss.castSpellNameSize or 11 end,
+                          set=function(v)
+                              db.profile.boss.castSpellNameSize = v
+                              db.profile.boss.castDurationSize = v
+                              ReloadAndUpdate()
+                          end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) textCogShow(self) end)
+            end
+            return growthRow, eh + ch + gh
+        end
+
+        local function bossAfterSize(Ww, pp, yy)
+            local _, hh
+            local function BossCogBtn(rgn, showFn, iconPath)
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
                 cogBtn:SetScript("OnClick", function(self) showFn(self) end)
                 return cogBtn
             end
-            -- INDICATORS section (below DISPLAY)
-            _, hh = Ww:SectionHeader(pp, "INDICATORS", yy);  yy = yy - hh
+            -- BUFFS AND DEBUFFS section (below DISPLAY)
+            _, hh = Ww:SectionHeader(pp, "Buffs and Debuffs", yy);  yy = yy - hh
 
             -- Simple Debuff Display: forces Left anchor + debuff height =
             -- frame bar height so boss debuffs render as one large column.
+            -- Row 1 slot 2 is "Simple Text Size": the cooldown-text size slider,
+            -- gated by an inline Show-Cooldown-Text toggle, with an inline cog
+            -- holding the stack size and stack X/Y position controls.
+            local simpleTextOff = function() return not db.profile.boss.simpleDebuffShowCooldownText end
             local simpleRow
             simpleRow, hh = Ww:DualRow(pp, yy,
-                { type="toggle", text="Simple Debuff Display",
-                  tooltip = "Force debuffs to the Left of the frame and size them to match the frame height (excluding cast bar). Overrides the Debuffs Location and debuff size settings while enabled.",
-                  getValue=function() return db.profile.boss.simpleDebuffs ~= false end,
+                { type="dropdown", text="Simple Debuff Display",
+                  tooltip = "Force boss debuffs into a single large column matched to the frame height (excluding cast bar), aligned to the chosen side of the frame. Overrides the Debuffs Location and Debuff Size settings while active. None disables it and uses the normal Debuffs Location.",
+                  values = { none = "None", left = "Left", right = "Right" },
+                  order = { "none", "left", "right" },
+                  getValue=function() return ns.GetBossSimpleDebuffMode(db.profile.boss) end,
                   setValue=function(v)
                       db.profile.boss.simpleDebuffs = v
                       ReloadAndUpdate()
                       if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="toggle", text="Spell Target",
-                  tooltip = "Show the name of who the boss is casting on.",
-                  getValue=function() return db.profile.boss.showCastTarget == true end,
-                  setValue=function(v)
-                      db.profile.boss.showCastTarget = v
-                      ReloadAndUpdate()
-                  end });  yy = yy - hh
+                { type="slider", text="Simple Text Size", min=6, max=24, step=1,
+                  disabled=simpleTextOff, disabledTooltip="Show Cooldown Text",
+                  getValue=function() return db.profile.boss.simpleDebuffCooldownTextSize or 14 end,
+                  setValue=function(v) db.profile.boss.simpleDebuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
 
-            -- Cog on Simple Debuff Display (cooldown text for large debuff icons)
+            -- Inline cog on Simple Text Size: duration X/Y + stack size / X/Y.
             do
-                local leftRgn = simpleRow._leftRegion
-                local _, simpleDbCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Simple Debuff Text",
+                local rightRgn = simpleRow._rightRegion
+                local _, simpleStackCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Duration & Stack",
                     rows = {
-                        { type="toggle", label="Show Cooldown Text",
-                          get=function() return db.profile.boss.simpleDebuffShowCooldownText end,
-                          set=function(v) db.profile.boss.simpleDebuffShowCooldownText = v; ReloadAndUpdate() end },
-                        { type="slider", label="Text Size", min=6, max=24, step=1,
-                          get=function() return db.profile.boss.simpleDebuffCooldownTextSize or 14 end,
-                          set=function(v) db.profile.boss.simpleDebuffCooldownTextSize = v; ReloadAndUpdate() end },
+                        { type="slider", label="Duration X", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.simpleDebuffCooldownTextOffsetX or 0 end,
+                          set=function(v) db.profile.boss.simpleDebuffCooldownTextOffsetX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Duration Y", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.simpleDebuffCooldownTextOffsetY or 0 end,
+                          set=function(v) db.profile.boss.simpleDebuffCooldownTextOffsetY = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack Size", min=6, max=24, step=1,
+                          get=function() return db.profile.boss.debuffStackTextSize or 14 end,
+                          set=function(v) db.profile.boss.debuffStackTextSize = v; ReloadAndUpdate() end },
+                        { type="dropdown", label="Stack Position",
+                          values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
+                          order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                          get=function() return db.profile.boss.debuffStackTextPosition or "bottomright" end,
+                          set=function(v) db.profile.boss.debuffStackTextPosition = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack X", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.debuffStackTextOffsetX or 0 end,
+                          set=function(v) db.profile.boss.debuffStackTextOffsetX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack Y", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.debuffStackTextOffsetY or 0 end,
+                          set=function(v) db.profile.boss.debuffStackTextOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
-                BossCogBtn(leftRgn, simpleDbCogShow)
+                BossCogBtn(rightRgn, simpleStackCogShow)
             end
+
+            -- Inline "Show Cooldown Text" toggle on Simple Text Size (always enabled).
+            EllesmereUI.BuildInlineToggle({
+                region   = simpleRow._rightRegion,
+                getValue = function() return db.profile.boss.simpleDebuffShowCooldownText end,
+                setValue = function(v) db.profile.boss.simpleDebuffShowCooldownText = v; ReloadAndUpdate() end,
+                onToggle = function() EllesmereUI:RefreshPage() end,
+            })
 
             local bossAuraRow
             bossAuraRow, hh = Ww:DualRow(pp, yy,
@@ -8357,18 +10146,182 @@ initFrame:SetScript("OnEvent", function(self)
                           SwapAuraSlot(s, "buffAnchor", v)
                       end
                       ReloadAndUpdate()
+                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
+                      EllesmereUI:RefreshPage()
                   end },
                 { type="dropdown", text="Debuffs Location", values=buffAnchorValues, order=buffAnchorOrder,
-                  disabled = function() return db.profile.boss.simpleDebuffs ~= false end,
-                  disabledTooltip = "Simple Debuff Display",
+                  disabled = function() return ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" end,
+                  disabledTooltip = "Simple Debuff Display", requireState = "disabled",
                   getValue=function()
-                      if db.profile.boss.simpleDebuffs ~= false then return "left" end
+                      local mode = ns.GetBossSimpleDebuffMode(db.profile.boss)
+                      if mode ~= "none" then return mode end  -- show the simple side (Left/Right) while disabled
                       return db.profile.boss.debuffAnchor or "bottomleft"
                   end,
                   setValue=function(v)
                       SwapAuraSlot(db.profile.boss, "debuffAnchor", v)
                       ReloadAndUpdate()
+                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
+                      -- Refresh so dependent disabled states (Debuff Size, Boss
+                      -- Debuff Filter) update when location flips to/from None.
+                      EllesmereUI:RefreshPage()
                   end });  yy = yy - hh
+
+            -- Boss Buff Size | Debuff Size: icon size sliders, each with an inline
+            -- DIRECTIONS cog holding the cluster X/Y offset. Debuff Size is disabled
+            -- while Simple Debuff Display is active (simple mode frame-matches the
+            -- size). All setters refresh live frames + both previews.
+            local bossAuraSizeRow
+            bossAuraSizeRow, hh = Ww:DualRow(pp, yy,
+                { type="slider", text="Buff Size", min=10, max=70, step=1,
+                  disabled=function() return db.profile.boss.showBuffs == false end,
+                  disabledTooltip="Buffs Location", requireState="disabled",
+                  getValue=function() return db.profile.boss.buffSize or 22 end,
+                  setValue=function(v)
+                      db.profile.boss.buffSize = v; ReloadAndUpdate()
+                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
+                  end },
+                { type="slider", text="Debuff Size", min=10, max=70, step=1,
+                  -- Disabled while Simple Debuff Display frame-matches the size, or
+                  -- when no debuffs are shown at all (Simple None + Location None).
+                  disabled=function()
+                      local p = db.profile.boss
+                      return ns.GetBossSimpleDebuffMode(p) ~= "none" or (p.debuffAnchor or "bottomleft") == "none"
+                  end,
+                  disabledTooltip=function()
+                      if ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" then
+                          return EllesmereUI.DisabledTooltip("Simple Debuff Display", "disabled")
+                      end
+                      return EllesmereUI.DisabledTooltip("Debuffs Location")
+                  end,
+                  rawTooltip=true,
+                  getValue=function() return db.profile.boss.debuffSize or 22 end,
+                  setValue=function(v)
+                      db.profile.boss.debuffSize = v; ReloadAndUpdate()
+                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
+                  end });  yy = yy - hh
+            do  -- Directions cog on Buff Size (X/Y cluster offset)
+                local _, bSizeCog = EllesmereUI.BuildCogPopup({ title = "Buff Position", rows = {
+                    { type="slider", label="Offset X", min=-200, max=200, step=1,
+                      get=function() return db.profile.boss.buffOffsetX or 0 end,
+                      set=function(v) db.profile.boss.buffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                    { type="slider", label="Offset Y", min=-200, max=200, step=1,
+                      get=function() return db.profile.boss.buffOffsetY or 0 end,
+                      set=function(v) db.profile.boss.buffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+                BossCogBtn(bossAuraSizeRow._leftRegion, bSizeCog, EllesmereUI.DIRECTIONS_ICON)
+            end
+            do  -- Directions cog on Debuff Size (X/Y cluster offset)
+                local _, dSizeCog = EllesmereUI.BuildCogPopup({ title = "Debuff Position", rows = {
+                    { type="slider", label="Offset X", min=-200, max=200, step=1,
+                      get=function() return db.profile.boss.debuffOffsetX or 0 end,
+                      set=function(v) db.profile.boss.debuffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                    { type="slider", label="Offset Y", min=-200, max=200, step=1,
+                      get=function() return db.profile.boss.debuffOffsetY or 0 end,
+                      set=function(v) db.profile.boss.debuffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+                BossCogBtn(bossAuraSizeRow._rightRegion, dSizeCog, EllesmereUI.DIRECTIONS_ICON)
+            end
+
+            -- Per-unit DEBUFF filter for boss frames (NOT synced). Boss BUFFS are
+            -- never filtered -- they always show every HELPFUL aura. Multi-select
+            -- checkbox dropdown; checked options AND together into one Blizzard
+            -- aura-filter string at runtime (Own Only = PLAYER, Raid Frames = RAID,
+            -- Important = IMPORTANT). "Own Only" reuses the legacy onlyPlayerDebuffs
+            -- key so existing boss settings carry over.
+            do
+                local PP = EllesmereUI.PanelPP
+                local filterItems = {
+                    { key = "important",  label = "Important",   tooltip = "Shows only the spells Blizzard flags as Important" },
+                    { key = "ownOnly",    label = "Own Only",    tooltip = "Shows only the Debuffs you apply" },
+                    { key = "raidFrames", label = "Raid Frames", tooltip = "Shows only the Debuffs that appear on Raid Frames" },
+                }
+                local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", important = "debuffImportant", raidFrames = "debuffRaid" }
+                -- "Debuff Text Size" mirrors "Simple Text Size": a cooldown-text
+                -- size slider gated by an inline Show-Cooldown-Text toggle, with an
+                -- inline cog holding the (shared) stack size + stack X/Y controls.
+                local debuffTextOff = function() return not db.profile.boss.debuffShowCooldownText end
+                local filterRow
+                filterRow, hh = Ww:DualRow(pp, yy,
+                    { type="dropdown", text="Boss Debuff Filter",
+                      values={ __placeholder="..." }, order={ "__placeholder" },
+                      getValue=function() return "__placeholder" end, setValue=function() end },
+                    { type="slider", text="Debuff Text Size", min=6, max=24, step=1,
+                      disabled=debuffTextOff, disabledTooltip="Show Cooldown Text",
+                      getValue=function() return db.profile.boss.debuffCooldownTextSize or 10 end,
+                      setValue=function(v) db.profile.boss.debuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
+                do
+                    local rgn = filterRow._leftRegion
+                    if rgn._control then rgn._control:Hide() end
+                    local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                        rgn, 210, rgn:GetFrameLevel() + 2, filterItems,
+                        function(k) return db.profile.boss[DEBUFF_FILTER_KEYS[k]] or false end,
+                        function(k, v) db.profile.boss[DEBUFF_FILTER_KEYS[k]] = v; ReloadAndUpdate() end)
+                    PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+                    rgn._control = cbDD; rgn._lastInline = nil
+                    EllesmereUI.RegisterWidgetRefresh(cbRefresh)
+                    -- Disable the filter when no debuffs are shown at all (Simple
+                    -- Debuff Display None + Debuffs Location None): nothing to
+                    -- filter. A block frame intercepts mouse and shows the
+                    -- requirement tooltip while the dropdown is greyed.
+                    local filterBlock = CreateFrame("Frame", nil, cbDD)
+                    filterBlock:SetAllPoints()
+                    filterBlock:SetFrameLevel(cbDD:GetFrameLevel() + 10)
+                    filterBlock:EnableMouse(true)
+                    filterBlock:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(cbDD, EllesmereUI.DisabledTooltip("Debuffs Location"))
+                    end)
+                    filterBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    local function UpdateFilterDisabled()
+                        local p = db.profile.boss
+                        local off = ns.GetBossSimpleDebuffMode(p) == "none" and (p.debuffAnchor or "bottomleft") == "none"
+                        if off then
+                            cbDD:SetAlpha(0.3); filterBlock:Show()
+                        else
+                            cbDD:SetAlpha(1); filterBlock:Hide()
+                        end
+                    end
+                    UpdateFilterDisabled()
+                    EllesmereUI.RegisterWidgetRefresh(UpdateFilterDisabled)
+                end
+                -- Inline cog on Debuff Text Size: duration X/Y + stack size / X/Y
+                -- (shared boss debuff stack keys; applies in both display modes).
+                do
+                    local rightRgn = filterRow._rightRegion
+                    local _, debuffStackCogShow = EllesmereUI.BuildCogPopup({
+                        title = "Duration & Stack",
+                        rows = {
+                            { type="slider", label="Duration X", min=-100, max=100, step=1,
+                              get=function() return db.profile.boss.debuffCooldownTextOffsetX or 0 end,
+                              set=function(v) db.profile.boss.debuffCooldownTextOffsetX = v; ReloadAndUpdate() end },
+                            { type="slider", label="Duration Y", min=-100, max=100, step=1,
+                              get=function() return db.profile.boss.debuffCooldownTextOffsetY or 0 end,
+                              set=function(v) db.profile.boss.debuffCooldownTextOffsetY = v; ReloadAndUpdate() end },
+                            { type="slider", label="Stack Size", min=6, max=24, step=1,
+                              get=function() return db.profile.boss.debuffStackTextSize or 14 end,
+                              set=function(v) db.profile.boss.debuffStackTextSize = v; ReloadAndUpdate() end },
+                            { type="dropdown", label="Stack Position",
+                              values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
+                              order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                              get=function() return db.profile.boss.debuffStackTextPosition or "bottomright" end,
+                              set=function(v) db.profile.boss.debuffStackTextPosition = v; ReloadAndUpdate() end },
+                            { type="slider", label="Stack X", min=-100, max=100, step=1,
+                              get=function() return db.profile.boss.debuffStackTextOffsetX or 0 end,
+                              set=function(v) db.profile.boss.debuffStackTextOffsetX = v; ReloadAndUpdate() end },
+                            { type="slider", label="Stack Y", min=-100, max=100, step=1,
+                              get=function() return db.profile.boss.debuffStackTextOffsetY or 0 end,
+                              set=function(v) db.profile.boss.debuffStackTextOffsetY = v; ReloadAndUpdate() end },
+                        },
+                    })
+                    BossCogBtn(rightRgn, debuffStackCogShow)
+                end
+                -- Inline "Show Cooldown Text" toggle on Debuff Text Size.
+                EllesmereUI.BuildInlineToggle({
+                    region   = filterRow._rightRegion,
+                    getValue = function() return db.profile.boss.debuffShowCooldownText end,
+                    setValue = function(v) db.profile.boss.debuffShowCooldownText = v; ReloadAndUpdate() end,
+                    onToggle = function() EllesmereUI:RefreshPage() end,
+                })
+            end
 
             -- Cogwheel on Buffs Location
             do
@@ -8388,49 +10341,23 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Text Size", min=6, max=18, step=1,
                           get=function() return db.profile.boss.buffCooldownTextSize or 10 end,
                           set=function(v) db.profile.boss.buffCooldownTextSize = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack Size", min=6, max=24, step=1,
+                          get=function() return db.profile.boss.buffStackTextSize or 14 end,
+                          set=function(v) db.profile.boss.buffStackTextSize = v; ReloadAndUpdate() end },
+                        { type="dropdown", label="Stack Position",
+                          values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
+                          order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                          get=function() return db.profile.boss.buffStackTextPosition or "bottomright" end,
+                          set=function(v) db.profile.boss.buffStackTextPosition = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack X", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.buffStackTextOffsetX or 0 end,
+                          set=function(v) db.profile.boss.buffStackTextOffsetX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack Y", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.buffStackTextOffsetY or 0 end,
+                          set=function(v) db.profile.boss.buffStackTextOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
                 BossCogBtn(leftRgn, bBuffCogShowRaw)
-            end
-
-            -- Raid Marker
-            do
-                local function bossRmOff()
-                    return db.profile.boss.raidMarkerEnabled == false
-                end
-                local bossRmRow
-                bossRmRow, hh = Ww:DualRow(pp, yy,
-                    { type="toggle", text="Show Raid Marker",
-                      tooltip="Shows the raid target marker icon on boss frames.",
-                      getValue=function() return db.profile.boss.raidMarkerEnabled ~= false end,
-                      setValue=function(v)
-                        db.profile.boss.raidMarkerEnabled = v
-                        ReloadAndUpdate()
-                        EllesmereUI:RefreshPage()
-                      end },
-                    { type="slider", text="Raid Marker Size", min=12, max=48, step=1,
-                      disabled=bossRmOff, disabledTooltip="Raid Marker",
-                      getValue=function() return db.profile.boss.raidMarkerSize or 28 end,
-                      setValue=function(v) db.profile.boss.raidMarkerSize = v; ReloadAndUpdate() end });  yy = yy - hh
-
-                -- Inline color-swatch-style X/Y cog
-                do
-                    local _, bossRmCogShow = EllesmereUI.BuildCogPopup({
-                        title = "Raid Marker Position",
-                        rows = {
-                            { type="slider", label="X Offset", min=-50, max=50, step=1,
-                              get=function() return db.profile.boss.raidMarkerX or 0 end,
-                              set=function(v) db.profile.boss.raidMarkerX = v; ReloadAndUpdate() end },
-                            { type="slider", label="Y Offset", min=-50, max=50, step=1,
-                              get=function() return db.profile.boss.raidMarkerY or 0 end,
-                              set=function(v) db.profile.boss.raidMarkerY = v; ReloadAndUpdate() end },
-                            { type="dropdown", label="Alignment", values={ left="Left", center="Center", right="Right" }, order={ "left", "center", "right" },
-                              get=function() return db.profile.boss.raidMarkerAlign or "left" end,
-                              set=function(v) db.profile.boss.raidMarkerAlign = v; ReloadAndUpdate() end },
-                        },
-                    })
-                    BossCogBtn(bossRmRow._leftRegion, bossRmCogShow)
-                end
             end
 
             -- Cogwheel on Debuffs Location (hidden when Simple Debuff Display overrides placement)
@@ -8445,15 +10372,6 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Max Count", min=1, max=20, step=1,
                           get=function() return db.profile.boss.maxDebuffs or 10 end,
                           set=function(v) db.profile.boss.maxDebuffs = v; ReloadAndUpdate() end },
-                        { type="toggle", label="Show Own Only",
-                          get=function() return db.profile.boss.onlyPlayerDebuffs or false end,
-                          set=function(v) db.profile.boss.onlyPlayerDebuffs = v; ReloadAndUpdate() end },
-                        { type="toggle", label="Show Cooldown Text",
-                          get=function() return db.profile.boss.debuffShowCooldownText end,
-                          set=function(v) db.profile.boss.debuffShowCooldownText = v; ReloadAndUpdate() end },
-                        { type="slider", label="Text Size", min=6, max=18, step=1,
-                          get=function() return db.profile.boss.debuffCooldownTextSize or 10 end,
-                          set=function(v) db.profile.boss.debuffCooldownTextSize = v; ReloadAndUpdate() end },
                     },
                 })
                 local cogBtn = BossCogBtn(rightRgn, bDebuffCogShowRaw)
@@ -8463,11 +10381,11 @@ initFrame:SetScript("OnEvent", function(self)
                     cogBlock:SetFrameLevel(cogBtn:GetFrameLevel() + 10)
                     cogBlock:EnableMouse(true)
                     cogBlock:SetScript("OnEnter", function()
-                        EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Simple Debuff Display off"))
+                        EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Simple Debuff Display", "disabled"))
                     end)
                     cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     local function UpdateDebuffCogDisabled()
-                        local isSimple = db.profile.boss.simpleDebuffs ~= false
+                        local isSimple = ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none"
                         if isSimple then
                             cogBtn:SetAlpha(0.15)
                             cogBlock:Show()
@@ -8484,8 +10402,85 @@ initFrame:SetScript("OnEvent", function(self)
             return yy
         end
 
+        -- New "Indicators" section, rendered at the BOTTOM (below the Power Bar)
+        -- via opts.afterPowerRow. Holds the non-aura indicators moved out of the
+        -- Buffs and Debuffs section above.
+        local function bossIndicators(Ww, pp, yy)
+            local hh
+            local function ICogBtn(rgn, showFn)
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+                return cogBtn
+            end
+
+            _, hh = Ww:SectionHeader(pp, "Indicators", yy);  yy = yy - hh
+
+            -- Row 1: Out of Range Alpha | Spell Target
+            -- (Out of Range read live by the range ticker, so no reload needed.)
+            _, hh = Ww:DualRow(pp, yy,
+                { type="slider", text="Out of Range Alpha", min=10, max=100, step=1,
+                  tooltip="Fades boss frames when the boss is out of range of your spells. Set to 100% to disable the fade.",
+                  getValue=function() return math.floor(((db.profile.boss.oorAlpha or 0.4) * 100) + 0.5) end,
+                  setValue=function(v) db.profile.boss.oorAlpha = v / 100 end },
+                { type="toggle", text="Spell Target",
+                  tooltip = "Show the name of who the boss is casting on.",
+                  getValue=function() return db.profile.boss.showCastTarget == true end,
+                  setValue=function(v)
+                      db.profile.boss.showCastTarget = v
+                      ReloadAndUpdate()
+                  end });  yy = yy - hh
+
+            -- Row 2: Show Raid Marker | Raid Marker Size (+ position cog)
+            local function bossRmOff()
+                return db.profile.boss.raidMarkerEnabled == false
+            end
+            local bossRmRow
+            bossRmRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Show Raid Marker",
+                  tooltip="Shows the raid target marker icon on boss frames.",
+                  getValue=function() return db.profile.boss.raidMarkerEnabled ~= false end,
+                  setValue=function(v)
+                    db.profile.boss.raidMarkerEnabled = v
+                    ReloadAndUpdate()
+                    EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Raid Marker Size", min=12, max=48, step=1,
+                  disabled=bossRmOff, disabledTooltip="Raid Marker",
+                  getValue=function() return db.profile.boss.raidMarkerSize or 28 end,
+                  setValue=function(v) db.profile.boss.raidMarkerSize = v; ReloadAndUpdate() end });  yy = yy - hh
+            do
+                local _, bossRmCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Raid Marker Position",
+                    rows = {
+                        { type="slider", label="X Offset", min=-50, max=50, step=1,
+                          get=function() return db.profile.boss.raidMarkerX or 0 end,
+                          set=function(v) db.profile.boss.raidMarkerX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                          get=function() return db.profile.boss.raidMarkerY or 0 end,
+                          set=function(v) db.profile.boss.raidMarkerY = v; ReloadAndUpdate() end },
+                        { type="dropdown", label="Alignment", values={ left="Left", center="Center", right="Right" }, order={ "left", "center", "right" },
+                          get=function() return db.profile.boss.raidMarkerAlign or "left" end,
+                          set=function(v) db.profile.boss.raidMarkerAlign = v; ReloadAndUpdate() end },
+                    },
+                })
+                ICogBtn(bossRmRow._leftRegion, bossRmCogShow)
+            end
+
+            return yy
+        end
+
         local displayHeader, sizeRow, textHeader, textRow
-        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow, bossAfterSize)
+        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow, bossAfterSize, { hasPowerBar = true, afterPowerRow = bossIndicators })
 
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
@@ -8501,20 +10496,34 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Mini Frame Edits page  (dropdown selector + mini builders)
+    --  Mini Frames page  (dropdown selector + mini builders)
     ---------------------------------------------------------------------------
     local selectedMiniUnit = "targettarget"
     local miniUnitLabels = {
-        ["targettarget"] = "Focus Target / Target of Target",
+        ["targettarget"] = "Target of Target",
+        ["focustarget"]  = "Focus Target",
         ["pet"]          = "Pet",
-        ["boss"]         = "Boss",
     }
-    local miniUnitOrder = { "targettarget", "pet", "boss" }
+    local miniUnitOrder = { "targettarget", "focustarget", "pet" }
+
+    -- Allow Unlock Mode's "Element Options" to pre-select a mini unit before the
+    -- Mini Frames page builds (mirrors the Main Frames _setUnitFrameUnit /
+    -- _pendingUnitSelect mechanism). Field assignments -- no new locals.
+    EllesmereUI._setMiniUnit = function(unit) selectedMiniUnit = unit end
+    EllesmereUI._consumePendingMiniSelect = function()
+        local pending = EllesmereUI._pendingMiniSelect
+        if pending then
+            selectedMiniUnit = pending
+            EllesmereUI._pendingMiniSelect = nil
+        end
+    end
 
     local _miniHeaderBuilder
     local miniHeaderFixedH = 0
 
     local function BuildMiniPage(pageName, parent, yOffset)
+        -- Consume any pending mini selection from Element Options navigation
+        if EllesmereUI._consumePendingMiniSelect then EllesmereUI._consumePendingMiniSelect() end
         local W = EllesmereUI.Widgets
         local y = yOffset
         local _, h
@@ -8574,15 +10583,187 @@ initFrame:SetScript("OnEvent", function(self)
         --  Route to mini builders
         -------------------------------------------------------------------
         if selectedMiniUnit == "targettarget" then
-            y = -BuildFoTToTOptions(W, parent, y)
+            y = -BuildFoTToTOptions(W, parent, y, db.profile.targettarget, "targettarget")
+        elseif selectedMiniUnit == "focustarget" then
+            y = -BuildFoTToTOptions(W, parent, y, db.profile.focustarget, "focustarget")
         elseif selectedMiniUnit == "pet" then
             y = -BuildPetOptions(W, parent, y)
-        elseif selectedMiniUnit == "boss" then
-            y = -BuildBossOptions(W, parent, y)
         end
 
         -------------------------------------------------------------------
         --  CLICK NAVIGATION
+        -------------------------------------------------------------------
+        local glowFrame
+        local function PlaySettingGlow(targetFrame)
+            if not targetFrame then return end
+            if not glowFrame then
+                glowFrame = CreateFrame("Frame")
+                local c = EllesmereUI.ELLESMERE_GREEN
+                local function MkEdge()
+                    local t = glowFrame:CreateTexture(nil, "OVERLAY", nil, 7)
+                    t:SetColorTexture(c.r, c.g, c.b, 1)
+                    return t
+                end
+                glowFrame._top = MkEdge()
+                glowFrame._bot = MkEdge()
+                glowFrame._lft = MkEdge()
+                glowFrame._rgt = MkEdge()
+                glowFrame._top:SetHeight(2)
+                glowFrame._top:SetPoint("TOPLEFT"); glowFrame._top:SetPoint("TOPRIGHT")
+                glowFrame._bot:SetHeight(2)
+                glowFrame._bot:SetPoint("BOTTOMLEFT"); glowFrame._bot:SetPoint("BOTTOMRIGHT")
+                glowFrame._lft:SetWidth(2)
+                glowFrame._lft:SetPoint("TOPLEFT", glowFrame._top, "BOTTOMLEFT")
+                glowFrame._lft:SetPoint("BOTTOMLEFT", glowFrame._bot, "TOPLEFT")
+                glowFrame._rgt:SetWidth(2)
+                glowFrame._rgt:SetPoint("TOPRIGHT", glowFrame._top, "BOTTOMRIGHT")
+                glowFrame._rgt:SetPoint("BOTTOMRIGHT", glowFrame._bot, "TOPRIGHT")
+            end
+            glowFrame:SetParent(targetFrame)
+            glowFrame:SetAllPoints(targetFrame)
+            glowFrame:SetFrameLevel(targetFrame:GetFrameLevel() + 5)
+            glowFrame:SetAlpha(1)
+            glowFrame:Show()
+            local elapsed = 0
+            glowFrame:SetScript("OnUpdate", function(self, dt)
+                elapsed = elapsed + dt
+                if elapsed >= 0.75 then
+                    self:Hide(); self:SetScript("OnUpdate", nil); return
+                end
+                self:SetAlpha(1 - elapsed / 0.75)
+            end)
+        end
+
+        local function NavigateToSetting(key)
+            local targets = parent._ufClickTargets
+            if not targets then return end
+            local m = targets[key]
+            if not m or not m.section or not m.target then return end
+
+            local sf = EllesmereUI._scrollFrame
+            if not sf then return end
+            local _, _, _, _, headerY = m.section:GetPoint(1)
+            if not headerY then return end
+            local scrollPos = math.max(0, math.abs(headerY) - 40)
+            EllesmereUI.SmoothScrollTo(scrollPos)
+            local glowTarget = m.target
+            if m.slotSide and m.target then
+                local region = (m.slotSide == "left") and m.target._leftRegion or m.target._rightRegion
+                if region then glowTarget = region end
+            end
+            C_Timer.After(0.15, function() PlaySettingGlow(glowTarget) end)
+        end
+
+        -- Hit overlay factory
+        local function CreateHitOverlay(element, mappingKey, isText, frameLevelOverride, opts)
+            local anchor = isText and element:GetParent() or element
+            if not anchor.CreateTexture then anchor = anchor:GetParent() end
+            local btn = CreateFrame("Button", nil, anchor)
+            if isText then
+                local function ResizeToText()
+                    local ok, tw, th = pcall(function()
+                        local w = element:GetStringWidth() or 0
+                        local hh = element:GetStringHeight() or 0
+                        if w < 4 then w = 4 end
+                        if hh < 4 then hh = 4 end
+                        return w, hh
+                    end)
+                    if not ok then tw = 40; th = 12 end
+                    btn:SetSize(tw + 4, th + 4)
+                end
+                ResizeToText()
+                local justify = element:GetJustifyH()
+                if justify == "RIGHT" then btn:SetPoint("RIGHT", element, "RIGHT", 2, 0)
+                elseif justify == "CENTER" then btn:SetPoint("CENTER", element, "CENTER", 0, 0)
+                else btn:SetPoint("LEFT", element, "LEFT", -2, 0) end
+                btn:SetScript("OnShow", function() ResizeToText() end)
+                btn._resizeToText = ResizeToText
+            else
+                btn:SetAllPoints(opts and opts.hlAnchor or element)
+            end
+            btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
+            btn:RegisterForClicks("LeftButtonDown")
+            local c = EllesmereUI.ELLESMERE_GREEN
+            local PP = EllesmereUI.PP
+            -- Use a child container so the hover border doesn't conflict with
+            -- any existing PP border on the target frame.
+            local hlBase = (opts and opts.hlAnchor) or btn
+            local hlCont = CreateFrame("Frame", nil, hlBase)
+            hlCont:SetAllPoints()
+            hlCont:SetFrameLevel(hlBase:GetFrameLevel() + 1)
+            local brd = PP.CreateBorder(hlCont, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+            brd:Hide()
+            btn:SetScript("OnEnter", function() brd:Show() end)
+            btn:SetScript("OnLeave", function() brd:Hide() end)
+            btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
+            return btn
+        end
+
+        -- Create hit overlays on preview elements
+        if activePreview then
+            local pv = activePreview
+            local baseLevel = (pv._health and pv._health:GetFrameLevel() or 20) + 15
+            local textLevel = baseLevel + 10
+            if pv._health then CreateHitOverlay(pv._health, "healthBar", false, baseLevel, { hlAnchor = pv._border or pv._health }) end
+            if pv._portraitFrame and pv._portraitFrame:IsShown() then CreateHitOverlay(pv._portraitFrame, "portrait", false, baseLevel) end
+            if pv._castbar then
+                local castLevel = pv._castbar:GetFrameLevel() + 20
+                CreateHitOverlay(pv._castbar, "castBar", false, castLevel)
+            end
+            if pv._nameFS and pv._nameFS:IsShown() then CreateHitOverlay(pv._nameFS, "nameText", true, textLevel) end
+            if pv._hpFS and pv._hpFS:IsShown() then CreateHitOverlay(pv._hpFS, "healthText", true, textLevel) end
+        end
+
+        return abs(y)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Boss Frames page  (single-unit page; no unit dropdown -- boss only)
+    ---------------------------------------------------------------------------
+    -- Stored on ns (not new init-function locals) to stay clear of the Lua 5.1
+    -- 200-local cap in this chunk. The header builder mirrors the Mini page's,
+    -- minus the unit dropdown (boss is the only unit on this page). The click-
+    -- navigation block is the same machinery the Mini page uses.
+    ns._bossHeaderBuilder = nil
+    ns._BuildBossPage = function(pageName, parent, yOffset)
+        local W = EllesmereUI.Widgets
+        local y = yOffset
+
+        activePreview = nil
+
+        -------------------------------------------------------------------
+        --  CONTENT HEADER  (preview only, no dropdown)
+        -------------------------------------------------------------------
+        ns._bossHeaderBuilder = function(hdr, hdrW)
+            local fy = -20
+            local side = unitSide.boss or "right"
+            local preview = BuildUnitPreview(hdr, "boss", side)
+            activePreview = preview
+            local previewScale = preview._previewScale or 1
+            local initBuffTopPad = preview._buffTopPad or 0
+            preview._headerDropdownOY = math.abs(fy)
+            preview:ClearAllPoints()
+            PP.Point(preview, "TOP", hdr, "TOP", 0, (fy - initBuffTopPad) / previewScale)
+            preview._lastOY = (fy - initBuffTopPad) / previewScale
+            preview:Update()
+            local previewH = preview:GetHeight() * preview:GetScale()
+            local buffExtra = preview._buffExtra or 0
+            local detTopExtra = preview._detTopExtra or 0
+            fy = fy - previewH - buffExtra - detTopExtra - 20
+            preview._headerFixedH = 20 + 20
+            return math.abs(fy)
+        end
+        EllesmereUI:SetContentHeader(ns._bossHeaderBuilder)
+
+        parent._showRowDivider = true
+
+        -------------------------------------------------------------------
+        --  Boss section
+        -------------------------------------------------------------------
+        y = -BuildBossOptions(W, parent, y)
+
+        -------------------------------------------------------------------
+        --  CLICK NAVIGATION  (mirrors the Mini Frames page)
         -------------------------------------------------------------------
         local glowFrame
         local function PlaySettingGlow(targetFrame)
@@ -8834,7 +11015,7 @@ initFrame:SetScript("OnEvent", function(self)
                 borderSwatchBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
                 borderSwatchBlock:EnableMouse(true)
                 borderSwatchBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("Set Border above 0"))
+                    EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip("This option requires a Border Size above 0."))
                 end)
                 borderSwatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 local function UpdateBorderSwatchState()
@@ -8853,13 +11034,15 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIUnitFrames", {
         title       = "Unit Frames",
         description = "Configure unit frame appearance and behavior.",
-        pages       = { PAGE_DISPLAY, PAGE_MINI, PAGE_AURAS },
+        pages       = { PAGE_DISPLAY, PAGE_BOSS, PAGE_MINI, PAGE_AURAS },
         searchTerms = ufSearchTerms,
         buildPage   = function(pageName, parent, yOffset)
             -- Randomize preview creature IDs on every tab switch
             RandomizePreviewCreatures()
             if pageName == PAGE_DISPLAY then
                 return BuildFrameDisplayPage(pageName, parent, yOffset)
+            elseif pageName == PAGE_BOSS then
+                return ns._BuildBossPage(pageName, parent, yOffset)
             elseif pageName == PAGE_MINI then
                 return BuildMiniPage(pageName, parent, yOffset)
             elseif pageName == PAGE_AURAS then
@@ -8869,6 +11052,8 @@ initFrame:SetScript("OnEvent", function(self)
         getHeaderBuilder = function(pageName)
             if pageName == PAGE_DISPLAY then
                 return _displayHeaderBuilder
+            elseif pageName == PAGE_BOSS then
+                return ns._bossHeaderBuilder
             elseif pageName == PAGE_MINI then
                 return _miniHeaderBuilder
             end

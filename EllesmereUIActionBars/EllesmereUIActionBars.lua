@@ -208,7 +208,7 @@ local MEDIA_DIR = "Interface\\AddOns\\EllesmereUIActionBars\\Media\\"
 local FONT_PATH = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("actionBars"))
     or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
 local function GetEABOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("actionBars")) or "OUTLINE"
+    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("actionBars")) or "OUTLINE, SLUG"
 end
 local function GetEABUseShadow()
     return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("actionBars")
@@ -360,6 +360,7 @@ for _, info in ipairs(BAR_CONFIG) do
         borderClassColor = false,
         borderTexture = "solid",
         borderThickness = "thin",
+        borderBehind = false,
         buttonPadding = 2,
         buttonWidth = 0,
         buttonHeight = 0,
@@ -768,15 +769,24 @@ do
             if frameName ~= "MainActionBar" then
                 frame:SetParent(hiddenParent)
             else
-                -- Prevent Blizzard from re-showing MainActionBar (spec/zone change)
+                -- Keep MainActionBar invisible when Blizzard re-shows it on
+                -- spec / zone / vehicle / bonus-bar transitions WITHOUT touching
+                -- its protected shown state. Calling Hide() (or any *Base shown
+                -- setter) from this insecure hook taints MainActionBar, and
+                -- Blizzard's ValidateActionBarTransition then hits
+                -- ADDON_ACTION_BLOCKED on MainActionBar:SetShownBase the next time
+                -- it shows the bar in combat. (Repro: a quest bonus bar in Azshara
+                -- shows the frame out of combat -> the old Hide() tainted it ->
+                -- one-shotting a mob triggered a brief combat transition that then
+                -- blocked SetShownBase.) SetAlpha is unprotected, inherits to all
+                -- children, and works in combat, so the bar stays hidden taint-free.
                 hooksecurefunc(frame, "Show", function(self)
-                    if not InCombatLockdown() then self:Hide() end
+                    self:SetAlpha(0)
                 end)
                 -- Disable mouse on MainActionBar so it never eats clicks.
                 -- During combat, Blizzard can Show() this frame (mount/dismount
-                -- transitions) and our hook can't re-hide it. At alpha 0 and
-                -- frame level 50 it would invisibly intercept all clicks above
-                -- our EABButtons.
+                -- transitions). At alpha 0 and frame level 50 it would invisibly
+                -- intercept all clicks above our EABButtons.
                 frame:EnableMouse(false)
                 if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
@@ -1788,7 +1798,7 @@ local function SetupPagingFrame()
 
     -- Page number text
     local pageText = f:CreateFontString(nil, "OVERLAY")
-    pageText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+    pageText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE, SLUG")
     pageText:SetTextColor(1, 1, 1, 0.9)
     pageText:SetText("1")
     f._pageText = pageText
@@ -1894,7 +1904,7 @@ LayoutPagingFrame = function()
 
     f._upBtn:SetSize(arrowSize, arrowSize)
     f._downBtn:SetSize(arrowSize, arrowSize)
-    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, "OUTLINE")
+    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, "OUTLINE, SLUG")
 
     f._upBtn:ClearAllPoints()
     f._downBtn:ClearAllPoints()
@@ -1932,12 +1942,51 @@ LayoutPagingFrame = function()
 end
 ns.LayoutPagingFrame = LayoutPagingFrame
 
+-- Secure snippet appended to each button's _childupdate-eab-page handler (and
+-- reused as the _childupdate-eab-empower handler): after the action attr changes
+-- on a page swap, re-evaluate pressAndHoldAction/typerelease for empowered /
+-- hold-release spells. IsPressHoldReleaseSpell and GetActionInfo are available
+-- in the restricted environment even though they are gone from _G.
+-- Stored on ns (not a file local) to stay clear of Lua's 200-local chunk cap.
+ns._eabEmpowerSnippet = [[
+    local slot = self:GetAttribute('action')
+    if slot and IsPressHoldReleaseSpell then
+        local actionType, id, subType = GetActionInfo(slot)
+        local spellID = nil
+        if actionType == 'spell' then
+            spellID = id
+        elseif actionType == 'macro' and subType == 'spell' then
+            spellID = id
+        end
+        if spellID and IsPressHoldReleaseSpell(spellID) then
+            self:SetAttribute('pressAndHoldAction', true)
+            self:SetAttribute('typerelease', 'actionrelease')
+        else
+            self:SetAttribute('pressAndHoldAction', false)
+            if self:GetAttribute('typerelease') then
+                self:SetAttribute('typerelease', nil)
+            end
+        end
+    end
+]]
+
+-- Build the _childupdate-eab-page snippet for a button at the given 1-based bar
+-- index. On a page change: action = baseIndex + (page-1)*12, then re-check
+-- hold-release. ALL install sites (SetupBar, RebuildBarPaging) call this so the
+-- handler is byte-identical everywhere -- the page change rewrites the secure
+-- "action" attribute (our buttons are ID=0, so actionpage is never consulted).
+function ns._eabBuildPageChildSnippet(baseIndex)
+    return ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(baseIndex) .. ns._eabEmpowerSnippet
+end
+
 -------------------------------------------------------------------------------
 --  Secure Bar Frame Creation
---  Each bar gets a SecureHandlerStateTemplate frame. Bars 2-8 set a fixed
---  actionpage on the frame; MainBar sets actionpage via a _onstate-page
---  handler. Buttons derive their action via CalculateAction path 1
---  (ID + (page-1)*12) with native IDs.
+--  Each bar gets a SecureHandlerStateTemplate frame. Our buttons are created
+--  with SetID(0) + an explicit "action" attribute, so CalculateAction resolves
+--  the slot from that attribute (path 2), NOT from actionpage. Paging works by
+--  the bar's _onstate-page handler doing ChildUpdate("eab-page", page), and each
+--  button's _childupdate-eab-page snippet rewriting its "action" attribute. The
+--  frame "actionpage" attribute is kept only for insecure range-check reads.
 -------------------------------------------------------------------------------
 local function CreateBarFrame(info)
     local key = info.key
@@ -2096,15 +2145,16 @@ function ns.RebuildBarPaging(barKey)
                     self:ChildUpdate("eab-page", page)
                 ]])
                 frame._eabPagingInstalled = true
-                -- Install button handlers for ChildUpdate
+                -- Install button handlers for ChildUpdate. Must set the secure
+                -- "action" attr (our buttons are ID=0, so "actionpage" is never
+                -- consulted by CalculateAction). Same builder as SetupBar so a
+                -- bar that gets paging added live behaves identically to one
+                -- configured at login -- no /reload needed.
                 local btns = barButtons[barKey]
                 if btns then
-                    for _, btn in ipairs(btns) do
+                    for idx, btn in ipairs(btns) do
                         if not btn:GetAttribute("_childupdate-eab-page") then
-                            btn:SetAttributeNoHandler("_childupdate-eab-page", [[
-                                local page = tonumber(message) or 1
-                                self:SetAttribute("actionpage", page)
-                            ]])
+                            btn:SetAttributeNoHandler("_childupdate-eab-page", ns._eabBuildPageChildSnippet(idx))
                         end
                     end
                 end
@@ -2234,44 +2284,20 @@ local function SetupBar(info, skipProtected)
                 end
                 -- Install childupdate so the action attr recalculates on
                 -- page changes. Base index baked into the snippet.
-                -- Empowered spell snippet: runs after the action attr updates
-                -- so pressAndHoldAction/typerelease match the new action.
-                -- IsPressHoldReleaseSpell and GetActionInfo are available in
-                -- the restricted environment even though they're gone from _G.
-                local empowerSnippet = [[
-                    local slot = self:GetAttribute('action')
-                    if slot and IsPressHoldReleaseSpell then
-                        local actionType, id, subType = GetActionInfo(slot)
-                        local spellID = nil
-                        if actionType == 'spell' then
-                            spellID = id
-                        elseif actionType == 'macro' and subType == 'spell' then
-                            spellID = id
-                        end
-                        if spellID and IsPressHoldReleaseSpell(spellID) then
-                            self:SetAttribute('pressAndHoldAction', true)
-                            self:SetAttribute('typerelease', 'actionrelease')
-                        else
-                            self:SetAttribute('pressAndHoldAction', false)
-                            if self:GetAttribute('typerelease') then
-                                self:SetAttribute('typerelease', nil)
-                            end
-                        end
-                    end
-                ]]
+                -- Page child-update: rewrites the secure "action" attr on a page
+                -- change, then re-checks hold-release. Shared builder so SetupBar
+                -- and RebuildBarPaging install byte-identical handlers.
                 if key == "MainBar" and not btn:GetAttribute("_childupdate-eab-page") then
-                    btn:SetAttributeNoHandler("_childupdate-eab-page",
-                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. empowerSnippet)
+                    btn:SetAttributeNoHandler("_childupdate-eab-page", ns._eabBuildPageChildSnippet(i))
                 elseif frame._eabPagingInstalled
                        and not btn:GetAttribute("_childupdate-eab-page") then
-                    btn:SetAttributeNoHandler("_childupdate-eab-page",
-                        ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(i) .. empowerSnippet)
+                    btn:SetAttributeNoHandler("_childupdate-eab-page", ns._eabBuildPageChildSnippet(i))
                 end
                 -- Empower re-check on slot change (spec swap, drag, etc.)
                 -- The bar header's _onattributechanged dispatches ChildUpdate
                 -- when addon code sets "eab-empower-trigger" on slot change.
                 if not btn:GetAttribute("_childupdate-eab-empower") then
-                    btn:SetAttributeNoHandler("_childupdate-eab-empower", empowerSnippet)
+                    btn:SetAttributeNoHandler("_childupdate-eab-empower", ns._eabEmpowerSnippet)
                 end
                 buttons[i] = btn
                 buttonToBar[btn] = { barKey = key, index = i }
@@ -2307,6 +2333,24 @@ do
         if _dispatcherSetup then return end
         _dispatcherSetup = true
         local dispatcher = CreateFrame("Frame")
+        -- Desaturation curves: secret-safe duration -> 0/1 via EvaluateRemainingDuration,
+        -- so we never compare secret cooldown/charge numbers ourselves.
+        --   desatCurveAny  : 1 for any active cooldown (normal spells; GCD filtered via isOnGCD)
+        --   desatCurveReal : 1 only when the cooldown is longer than the GCD. Used for charge
+        --                    spells -- a banked charge shows only a GCD-length cooldown on the
+        --                    main cooldown so it stays colored; at 0 charges the longer recharge
+        --                    drives the main cooldown and it desaturates.
+        local desatCurveAny, desatCurveReal
+        if C_CurveUtil and C_CurveUtil.CreateCurve then
+            desatCurveAny = C_CurveUtil.CreateCurve()
+            desatCurveAny:SetType(Enum.LuaCurveType.Step)
+            desatCurveAny:AddPoint(0, 0)
+            desatCurveAny:AddPoint(0.001, 1)
+            desatCurveReal = C_CurveUtil.CreateCurve()
+            desatCurveReal:SetType(Enum.LuaCurveType.Step)
+            desatCurveReal:AddPoint(0, 0)
+            desatCurveReal:AddPoint(1.6, 1)
+        end
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_STATE")
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_USABLE")
@@ -2343,22 +2387,48 @@ do
                                 local action = btn:GetAttribute("action")
                                 if action and HasAction(action) then
                                     local cd = btn.cooldown
-                                    local cdInfo
+                                    local cdInfo, durObj
                                     if cd then
                                         cdInfo = C_ActionBar.GetActionCooldown(action)
                                         if cdInfo and cdInfo.isActive then
-                                            local dur = C_ActionBar.GetActionCooldownDuration(action)
-                                            if dur then cd:SetCooldownFromDurationObject(dur) end
+                                            durObj = C_ActionBar.GetActionCooldownDuration(action)
+                                            if durObj then cd:SetCooldownFromDurationObject(durObj) end
                                         else
                                             cd:Clear()
                                         end
                                     end
-                                    -- Desaturate icons on real cooldown (not GCD)
+                                    -- Charges fetched once here and reused by both the
+                                    -- desaturation and charge-cooldown updates below, so the
+                                    -- desaturation fix adds no redundant per-button API calls.
+                                    local chargeInfo = C_ActionBar.GetActionCharges(action)
+                                    -- Desaturate on a real cooldown, but NOT on the GCD (and NOT
+                                    -- while a charge spell still has a charge banked). isOnGCD is
+                                    -- reliable for plain spells but reads FALSE during the GCD for
+                                    -- charge spells AND items (on-use trinkets/consumables), so for
+                                    -- those we classify by the main-cooldown DURATION instead --
+                                    -- secret-safe via curves, and a GCD-length cooldown reads as 0:
+                                    --  * charge spells (maxCharges > 1) and items use the "real CD"
+                                    --    curve (a banked charge / a ready trinket only shows the GCD
+                                    --    on the main cooldown so it stays colored; the real recharge
+                                    --    or trinket cooldown is longer and desaturates).
+                                    --  * plain spells keep the original isOnGCD gate so they
+                                    --    desaturate for the whole cooldown, not just past the GCD.
                                     if EAB.db.profile.desaturateOnCooldown then
                                         local icon = btn.icon
                                         if icon then
-                                            local onRealCD = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
-                                            icon:SetDesaturated(onRealCD or false)
+                                            local val = 0
+                                            if cdInfo and cdInfo.isActive and durObj and durObj.EvaluateRemainingDuration then
+                                                local useRealCurve = chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1
+                                                if not useRealCurve and GetActionInfo(action) == "item" then
+                                                    useRealCurve = true
+                                                end
+                                                if useRealCurve then
+                                                    if desatCurveReal then val = durObj:EvaluateRemainingDuration(desatCurveReal, 0) end
+                                                elseif not cdInfo.isOnGCD then
+                                                    if desatCurveAny then val = durObj:EvaluateRemainingDuration(desatCurveAny, 0) end
+                                                end
+                                            end
+                                            icon:SetDesaturation(val or 0)
                                         end
                                     end
                                     -- Update count text (charges, item stacks, etc.)
@@ -2368,8 +2438,7 @@ do
                                         local display = C_ActionBar.GetActionDisplayCount(action)
                                         btn.Count:SetText(display or "")
                                     end
-                                    -- Update charge cooldown
-                                    local chargeInfo = C_ActionBar.GetActionCharges(action)
+                                    -- Update charge cooldown (chargeInfo fetched once above)
                                     if chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1 then
                                         local chargeCd = btn.chargeCooldown
                                         if chargeCd then
@@ -3549,15 +3618,23 @@ local function EnsureBorders(btn)
     if PP then
         PP.CreateBorder(btn, 0, 0, 0, 1, 1, "OVERLAY", 2)
         fd.borders = PP.GetBorders(btn)
-        -- Reparent the flyout arrow to the border frame so it renders above it
+        -- Reparent the flyout arrow INTO the border frame and lift it above the
+        -- border strips. The strips sit at OVERLAY sublevel 2 (the PP.CreateBorder
+        -- call above); sharing the frame isn't enough -- without a higher sublevel
+        -- the arrow still draws underneath them.
         if btn.Arrow then
             btn.Arrow:SetParent(fd.borders)
+            if btn.Arrow.SetDrawLayer then
+                btn.Arrow:SetDrawLayer("OVERLAY", 7)
+            elseif btn.Arrow.SetFrameLevel then
+                btn.Arrow:SetFrameLevel(fd.borders:GetFrameLevel() + 1)
+            end
         end
     end
     return fd.borders
 end
 
-local function ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
+local function ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey, behind)
     MakeButtonSquare(btn)
     local PP = EllesmereUI and EllesmereUI.PP
     local fd = EFD(btn)
@@ -3598,6 +3675,15 @@ local function ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey,
             end
         end
         EllesmereUI.ApplyBorderStyle(btn, sz, cr, cg, cb, ca, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
+        -- "Show Behind": textured border frame is a child of btn; equal level draws
+        -- in front of the icon, level-1 draws behind it. Solid borders unaffected.
+        if texKey ~= "solid" and EllesmereUI._bdBorderData then
+            local bdFrame = EllesmereUI._bdBorderData[btn]
+            if bdFrame then
+                local lvl = btn:GetFrameLevel()
+                bdFrame:SetFrameLevel(behind and math.max(0, lvl - 1) or lvl)
+            end
+        end
         if fd.borders and fd.shapeMask and fd.shapeMask:IsShown() then
             PP.HideBorder(btn)
             if EllesmereUI._bdBorderData then
@@ -3757,6 +3843,13 @@ local function ApplyShapeToButton(btn, shape, brdOn, brdR, brdG, brdB, brdA, brd
                 local sz = ResolveBorderThickness(s)
                 local thKey = s.borderThickness or "thin"
                 EllesmereUI.ApplyBorderStyle(btn, sz, c.r, c.g, c.b, c.a or 1, texKey, s.borderTextureOffset, s.borderTextureOffsetY, s.borderTextureShiftX, s.borderTextureShiftY, "actionbars", thKey)
+                if EllesmereUI._bdBorderData then
+                    local bdFrame = EllesmereUI._bdBorderData[btn]
+                    if bdFrame then
+                        local lvl = btn:GetFrameLevel()
+                        bdFrame:SetFrameLevel(s.borderBehind and math.max(0, lvl - 1) or lvl)
+                    end
+                end
             else
                 PP.ShowBorder(btn)
             end
@@ -4029,13 +4122,14 @@ function EAB:ApplyBordersForBar(barKey)
     local texShiftX = s.borderTextureShiftX
     local texShiftY = s.borderTextureShiftY
     local thicknessKey = s.borderThickness or "thin"
+    local behind = s.borderBehind
     local buttons = barButtons[barKey]
     if not buttons then return end
     for i = 1, #buttons do
         local btn = buttons[i]
         if btn then
             EFD(btn).barKey = barKey
-            ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, texShiftX, texShiftY, "actionbars", thicknessKey)
+            ApplyButtonBorders(btn, on, cr, cg, cb, ca, sz, zoom, textureKey, texOffset, texOffsetY, texShiftX, texShiftY, "actionbars", thicknessKey, behind)
         end
     end
 end
@@ -4222,8 +4316,7 @@ function EAB:ApplyFontsForBar(barKey)
                 if text == RANGE_INDICATOR or text == "\226\128\162" then text = "" end
                 hk:SetText(text)
                 hk:Show()
-                hk:SetFont(fontPath, kbSize, "OUTLINE")
-                hk:SetShadowOffset(0, 0)
+                EllesmereUI.ApplyIconTextFont(hk, fontPath, kbSize, "actionBars")
                 hk:SetTextColor(kbColor.r, kbColor.g, kbColor.b)
                 hk:ClearAllPoints()
                 hk:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -1 + kbOX, -3 + kbOY)
@@ -4235,8 +4328,7 @@ function EAB:ApplyFontsForBar(barKey)
         -- Count / charges text
         local ct = btn.Count
         if ct then
-            ct:SetFont(fontPath, ctSize, "OUTLINE")
-            ct:SetShadowOffset(0, 0)
+            EllesmereUI.ApplyIconTextFont(ct, fontPath, ctSize, "actionBars")
             ct:SetTextColor(ctColor.r, ctColor.g, ctColor.b)
             ct:ClearAllPoints()
             ct:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1 + ctOX, 4 + ctOY)
@@ -4249,8 +4341,8 @@ function EAB:ApplyFontsForBar(barKey)
                 nm:SetAlpha(0)
             else
                 nm:SetAlpha(1)
-                nm:SetFont(fontPath, macroSize, "OUTLINE")
-                nm:SetShadowOffset(0, 0)
+                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nm, false) end
+                nm:SetFont(fontPath, macroSize, "OUTLINE, SLUG")
                 nm:SetTextColor(macroColor.r, macroColor.g, macroColor.b)
                 nm:ClearAllPoints()
                 nm:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1 + macroOX, 4 + macroOY)
@@ -4295,8 +4387,7 @@ function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, 
     for ri = 1, cdFrame:GetNumRegions() do
         local region = select(ri, cdFrame:GetRegions())
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            region:SetFont(fontPath, cdSize, "OUTLINE")
-            region:SetShadowOffset(0, 0)
+            EllesmereUI.ApplyIconTextFont(region, fontPath, cdSize, "actionBars")
             region:SetTextColor(cr, cg, cb)
             region:ClearAllPoints()
             region:SetPoint("CENTER", cdFrame, "CENTER", cdOX, cdOY)
@@ -6709,6 +6800,17 @@ local function UpdateKeybinds()
         local prefix = BINDING_MAP[info.key]
         local btns = barButtons[info.key]
         if prefix and btns then
+            -- Custom modifier/form paging lives only in our private secure
+            -- state driver, which never moves Blizzard's GetActionBarPage().
+            -- Native engine commands (ACTIONBUTTONn / MULTIACTIONBARxBUTTONn)
+            -- resolve against Blizzard's page, so on a custom-paged bar the
+            -- keybind would fire the un-paged slot while the icon (our explicit
+            -- "action" attr) repages. Route those bars' keybinds through the
+            -- button (SetOverrideBindingClick) so the keypress reads our paged
+            -- "action" attr -- exactly what empower/flyout already do, and what
+            -- ElvUI/Bartender do for every button via LibActionButton.
+            local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[info.key]
+            local barHasCustomPaging = (bs and bs.paging and next(bs.paging) ~= nil) and true or false
             for i, btn in ipairs(btns) do
                 if btn then
                     local cmd = prefix .. i
@@ -6716,9 +6818,11 @@ local function UpdateKeybinds()
                     -- Empower spells need SetOverrideBindingClick so our
                     -- button's pressAndHoldAction/typerelease handle the
                     -- hold-and-release. Non-empower spells use native
-                    -- SetOverrideBinding for press-and-hold repeat casting.
+                    -- SetOverrideBinding for press-and-hold repeat casting --
+                    -- EXCEPT on custom-paged bars (see above), which must also
+                    -- route through the button so the keybind tracks the page.
                     local slot = btn:GetAttribute("action")
-                    local useClick = false
+                    local useClick = barHasCustomPaging
                     if slot and HasAction(slot) then
                         local actionType, id, subType = GetActionInfo(slot)
                         if actionType == "flyout" then
@@ -7453,7 +7557,7 @@ local function RegisterWithUnlockMode()
     end
 
 
-    EllesmereUI:RegisterUnlockElements(elements)
+    EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIActionBars")
 
     -- Reapply anchors now that elements are registered. RestoreBarPositions
     -- ran before registration (too early for ReapplyOwnAnchor to resolve
@@ -8753,8 +8857,8 @@ local function CreateDataBarFrame(barKey, updateFunc)
     bar:GetStatusBarTexture():SetDrawLayer("ARTWORK", 4)
 
     local text = bar:CreateFontString(nil, "OVERLAY")
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(text, GetEABUseShadow()) end
     text:SetFont(FONT_PATH, 9, GetEABOutline())
-    if GetEABUseShadow() then text:SetShadowOffset(1, -1) end
     text:SetPoint("CENTER")
     text:SetTextColor(1, 1, 1, 1)
 
@@ -9146,7 +9250,7 @@ local function RegisterDataBarsWithUnlockMode()
             })
         end
     end
-    EllesmereUI:RegisterUnlockElements(elements)
+    EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIActionBars")
 end
 
 function EAB_VTABLE.ExtraBars.CreateManagedDataBarFrames()
@@ -9418,9 +9522,14 @@ local function SetupBlizzardMovableFrame(barKey)
                 if relFrame ~= holder then
                     RepositionExtraContainer()
                 end
-                if UIParentBottomManagedFrameContainer then
-                    UIParentBottomManagedFrameContainer.showingFrames[ExtraAbilityContainer] = nil
-                end
+                -- Do NOT write to UIParentBottomManagedFrameContainer.showingFrames here.
+                -- Writing into that Blizzard-owned table from this insecure hook taints the
+                -- managed-frame-position system; a later in-combat layout pass (e.g. leaving
+                -- a queued/follower instance while in combat) then blocks the protected
+                -- ClearAllPoints on the managed containers (ADDON_ACTION_BLOCKED naming this
+                -- addon). ExtraAbilityContainer already carries ignoreFramePositionManager and
+                -- ignoreInLayout, so Blizzard excludes it from layout without us touching
+                -- showingFrames.
             end)
         end
 
@@ -10155,7 +10264,7 @@ local function RegisterExtraBarsWithUnlockMode()
             end -- else (not MicroBar/BagBar)
         end
     end
-    EllesmereUI:RegisterUnlockElements(elements)
+    EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIActionBars")
 end
 
 

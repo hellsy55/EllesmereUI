@@ -171,11 +171,8 @@ local function ApplyFontToNameText(nameText)
     if not nameText or not nameText.SetFont then return end
     local font = GetFont()
     local _, h = nameText:GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameText, GetNPUseShadow()) end
     nameText:SetFont(font, h or 9, GetNPOutline())
-    if GetNPUseShadow() then
-        nameText:SetShadowOffset(1, -1)
-        nameText:SetShadowColor(0, 0, 0, 1)
-    end
     if nameText.SetSnapToPixelGrid then
         nameText:SetSnapToPixelGrid(false)
     end
@@ -245,8 +242,7 @@ local function AcquireOverlay()
     overlay.name = overlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(overlay.name, 9, "")
     overlay.name:SetPoint("CENTER", overlay, "CENTER", 0, 0)
-    overlay.name:SetShadowOffset(1, -1)
-    overlay.name:SetShadowColor(0, 0, 0, 1)
+    -- 12.0.7: shadow is primed by SetFSFont above (FontObject-based); instance shadow removed.
     if overlay.name.SetSnapToPixelGrid then
         overlay.name:SetSnapToPixelGrid(false)
     end
@@ -257,8 +253,7 @@ local function AcquireOverlay()
     overlay.title = overlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(overlay.title, 9, "")
     overlay.title:SetPoint("TOP", overlay.name, "BOTTOM", 0, -1)
-    overlay.title:SetShadowOffset(1, -1)
-    overlay.title:SetShadowColor(0, 0, 0, 1)
+    -- 12.0.7: shadow is primed by SetFSFont above (FontObject-based); instance shadow removed.
     if overlay.title.SetSnapToPixelGrid then
         overlay.title:SetSnapToPixelGrid(false)
     end
@@ -290,11 +285,8 @@ local function ShowNPCOverlay(nameplate, unit)
     overlay.name:SetMaxLines(1)
     -- Apply our font
     local font = GetFont()
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(overlay.name, GetNPUseShadow()) end
     overlay.name:SetFont(font, NPC_OVERLAY_FONT_SIZE, GetNPOutline())
-    if GetNPUseShadow() then
-        overlay.name:SetShadowOffset(1, -1)
-        overlay.name:SetShadowColor(0, 0, 0, 1)
-    end
     if overlay.name.SetSnapToPixelGrid then
         overlay.name:SetSnapToPixelGrid(false)
     end
@@ -309,11 +301,8 @@ local function ShowNPCOverlay(nameplate, unit)
         local titleText = GetNPCTitle(unit)
         if titleText then
             local font = GetFont()
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(overlay.title, GetNPUseShadow()) end
             overlay.title:SetFont(font, NPC_TITLE_FONT_SIZE, GetNPOutline())
-            if GetNPUseShadow() then
-                overlay.title:SetShadowOffset(1, -1)
-                overlay.title:SetShadowColor(0, 0, 0, 1)
-            end
             overlay.title:SetText("<" .. titleText .. ">")
             overlay.title:SetTextColor(r, g, b, 0.7)
             overlay.title:Show()
@@ -641,28 +630,31 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.glowFrame:Hide()
 
     plate.hpText = plate.health:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.hpText, 10, "OUTLINE")
+    SetFSFont(plate.hpText, 10, "OUTLINE, SLUG")
     plate.hpText:SetPoint("RIGHT", plate.health, -2, 0)
 
     plate.highlight = plate.health:CreateTexture(nil, "OVERLAY", nil, 6)
     plate.highlight:SetAllPoints()
-    plate.highlight:SetColorTexture(1, 1, 1, 0.3)
+    local _hc = (FP() and FP().hoverColor) or ns.defaults.hoverColor
+    local _ha = (FP() and FP().hoverAlpha) or ns.defaults.hoverAlpha
+    plate.highlight:SetColorTexture(_hc.r, _hc.g, _hc.b, _ha)
     plate.highlight:Hide()
 
     plate.name = plate:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.name, 12, "OUTLINE")
+    SetFSFont(plate.name, 12, "OUTLINE, SLUG")
     plate.name:SetPoint("BOTTOM", plate.health, "TOP", 0, 4)
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)
 
+    local _aSt = ns.ResolveTargetArrowStyle(FP())
     plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
-    plate.leftArrow:SetSize(11, 16)
+    plate.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. _aSt.l .. ".png")
+    plate.leftArrow:SetSize(_aSt.w, 16)
     plate.leftArrow:SetPoint("RIGHT", plate.name, "LEFT", -2, 0)
     plate.leftArrow:Hide()
     plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
-    plate.rightArrow:SetSize(11, 16)
+    plate.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. _aSt.r .. ".png")
+    plate.rightArrow:SetSize(_aSt.w, 16)
     plate.rightArrow:SetPoint("LEFT", plate.name, "RIGHT", 2, 0)
     plate.rightArrow:Hide()
 
@@ -823,7 +815,18 @@ function FriendlyFrame:ApplyTarget()
     if not self.unit then return end
     local isTarget = UnitIsUnit(self.unit, "target")
     self.glow:SetShown(isTarget)
-    local showArrows = isTarget and FP() and FP().showTargetArrows
+    local fp = FP()
+    local showArrows = isTarget and fp and fp.showTargetArrows
+    if showArrows then
+        local st = ns.ResolveTargetArrowStyle(fp)
+        self.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.l .. ".png")
+        self.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.r .. ".png")
+        local acr, acg, acb = ns.GetTargetArrowColor(fp)
+        self.leftArrow:SetVertexColor(acr, acg, acb)
+        self.rightArrow:SetVertexColor(acr, acg, acb)
+        self.leftArrow:SetSize(st.w, 16)
+        self.rightArrow:SetSize(st.w, 16)
+    end
     self.leftArrow:SetShown(showArrows or false)
     self.rightArrow:SetShown(showArrows or false)
 end
@@ -1025,6 +1028,43 @@ function ns.RefreshFriendlyColors()
 end
 
 -------------------------------------------------------------------------------
+--  Friendly nameplate click-through
+--  Make friendly nameplates (players AND NPCs) non-clickable so their names
+--  never intercept mouse input or cause accidental friendly targeting. We do
+--  NOT resize the plate (which would distort visuals) -- instead we shrink the
+--  click hit-test rectangle to nothing via a large positive inset on every
+--  edge. An inset of 0 restores the natural (fully clickable) hit rect.
+--  The hit-test API is protected in combat, so we gate on InCombatLockdown and
+--  retry once on combat end. The retry listener is only registered while a
+--  change is actually pending, so this costs nothing when idle.
+-------------------------------------------------------------------------------
+local CLICK_THROUGH_INSET = 10000
+local clickThroughApplied = false
+local clickThroughRetry = CreateFrame("Frame")
+
+local function ApplyFriendlyClickThrough()
+    if not (C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets
+            and Enum and Enum.NamePlateType) then
+        return
+    end
+    local fp = FP()
+    local on = fp and fp.friendlyClickThrough == true
+    -- Never applied and feature is off: leave Blizzard's hit rect untouched.
+    if not on and not clickThroughApplied then return end
+    if InCombatLockdown() then
+        clickThroughRetry:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    clickThroughRetry:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    local inset = on and CLICK_THROUGH_INSET or 0
+    C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, inset, inset, inset, inset)
+    clickThroughApplied = on
+end
+ns.UpdateFriendlyClickThrough = ApplyFriendlyClickThrough
+
+clickThroughRetry:SetScript("OnEvent", function() ApplyFriendlyClickThrough() end)
+
+-------------------------------------------------------------------------------
 --  System enable / disable  (called from toggle setValue and on login)
 -------------------------------------------------------------------------------
 function ns.UpdateFriendlyNameplateSystem()
@@ -1160,6 +1200,9 @@ function ns.UpdateFriendlyNameplateSystem()
         -- Not in health-bar mode — restore fonts (covers disabled + name-only-off)
         RestoreFriendlyFontOverride()
     end
+
+    -- Apply friendly click-through (independent of player/NPC plate mode).
+    ApplyFriendlyClickThrough()
 end
 
 -------------------------------------------------------------------------------
