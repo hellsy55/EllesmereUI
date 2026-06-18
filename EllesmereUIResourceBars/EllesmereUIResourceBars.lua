@@ -723,6 +723,7 @@ local DEFAULTS = {
             thresholdEnabled = false,
             thresholdCount   = 3,
             thresholdPartialOnly = false,
+            thresholdReverse = false,  -- bar-type only: threshold color below the value (spenders)
             thresholdR = 0x0c/255, thresholdG = 0xd2/255, thresholdB = 0x9d/255, thresholdA = 1,
             tickValues  = "",   -- comma-separated absolute resource values for tick marks (bar-type only)
             thresholdSpecs = {},  -- per-spec threshold/hash entries: { specIDs={0}, hashValues="", thresholdCount=3, thresholdPartialOnly=false }
@@ -3209,6 +3210,10 @@ local function UpdateSecondaryResource()
     local _tsThreshCount = _tsEntry and _tsEntry.thresholdCount or sp.thresholdCount
     local _tsPartialOnly = _tsEntry and _tsEntry.thresholdPartialOnly
     if _tsPartialOnly == nil then _tsPartialOnly = sp.thresholdPartialOnly end
+    -- Bar-type only: reverse the threshold direction so the threshold color shows
+    -- below the value
+    local _tsReverse = _tsEntry and _tsEntry.thresholdReverse
+    if _tsReverse == nil then _tsReverse = sp.thresholdReverse end
     -- Per-entry threshold color (falls back to global sp.thresholdR/G/B/A)
     local _tsR = _tsEntry and _tsEntry.thresholdR or sp.thresholdR
     local _tsG = _tsEntry and _tsEntry.thresholdG or sp.thresholdG
@@ -3519,10 +3524,23 @@ local function UpdateSecondaryResource()
                     if _tsEntry and pType and UnitPowerPercent then
                         -- Use ColorCurve + UnitPowerPercent: WoW evaluates the secret
                         -- value against the curve on the C side, returns a Color object.
-                        local curve = GetBarThresholdCurve(
-                            r, g, b,
-                            _tsR or 1, _tsG or 0.2, _tsB or 0.2,
-                            _tsThreshCount or 30)
+                        -- Default: threshold color above the value, fill below it
+                        -- (builders -- warn when high). "Reverse Threshold Fill Color"
+                        -- (thresholdReverse) flips it to threshold color below
+						-- for spender resources like Hunter Focus where you
+                        -- want to warn when low.
+                        local curve
+                        if _tsReverse then
+                            curve = GetBarThresholdCurve(
+                                r, g, b,                                -- fill color (above)
+                                _tsR or 1, _tsG or 0.2, _tsB or 0.2,   -- threshold color (below)
+                                _tsThreshCount or 30)
+                        else
+                            curve = GetBarThresholdCurve(
+                                _tsR or 1, _tsG or 0.2, _tsB or 0.2,   -- threshold color (above)
+                                r, g, b,                                -- fill color (below)
+                                _tsThreshCount or 30)
+                        end
                         if curve then
                             local ok, colorResult = pcall(UnitPowerPercent, "player", pType, false, curve)
                             if ok and colorResult and colorResult.GetRGBA then
