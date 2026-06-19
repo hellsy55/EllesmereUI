@@ -7521,8 +7521,8 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "spacer" },
-                { type = "toggle", text = "Show Interrupt Source",
-                  tooltip = "Append the interrupting unit in brackets after \"Interrupted\" on the cast bar.",
+                { type = "toggle", text = "Interrupt Source In Text",
+                  tooltip = "Show the interrupting unit as \"Interrupted [Name]\" instead of using the cast target text slot.",
                   disabled = flashOff,
                   disabledTooltip = "Show Interrupted Flash Effect",
                   getValue = function()

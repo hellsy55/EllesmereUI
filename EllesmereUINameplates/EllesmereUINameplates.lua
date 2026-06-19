@@ -6440,7 +6440,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     else
         self.castName:SetText("Interrupted")
     end
-    if interrupterName then
+    if interrupterName and not showSource then
         self.castTarget:SetText(interrupterName)
         local cfg = p or defaults
         local useClassColor = defaults.castTargetClassColor
@@ -6464,9 +6464,9 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
         self.castTarget:SetText("")
     end
 
-    -- Show interrupter name in target slot, hide timer
+    -- Show interrupter name in target slot unless it was moved into the interrupt text.
     self.castTimer:Hide()
-    if interrupterName then
+    if interrupterName and not showSource then
         self.castTarget:Show()
     else
         self.castTarget:Hide()
