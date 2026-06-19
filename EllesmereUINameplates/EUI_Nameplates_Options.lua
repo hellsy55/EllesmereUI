@@ -1256,6 +1256,7 @@ initFrame:SetScript("OnEvent", function(self)
             else
                 PlaceHealthInBar(slotCenter, "CENTER", "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             end
+            if DBVal("hideEnemyNameWhileCasting") == true then nameFS:Hide() end
 
             -- Health bar color: always uses "enemies in combat" color
             local eic = (DB() and DB().enemyInCombat) or defaults.enemyInCombat
@@ -7520,7 +7521,14 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             _, h = W:DualRow(parent, y,
-                { type = "spacer" },
+                { type="toggle", text="Hide Enemy Name While Casting",
+                  tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
+                  getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
+                  setValue=function(v)
+                    DB().hideEnemyNameWhileCasting = v
+                    ns.RefreshAllSettings()
+                    UpdatePreview()
+                  end },
                 { type = "toggle", text = "Interrupt Source In Text",
                   tooltip = "Show the interrupting unit as \"Interrupted [Name]\" instead of using the cast target text slot.",
                   disabled = flashOff,
