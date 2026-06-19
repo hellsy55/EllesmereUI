@@ -180,6 +180,7 @@ local defaults = {
     castBarShieldEnabled = true,
     interruptedFlashEnabled = true,
     interruptedFlashColor = { r = 0.8, g = 0.0, b = 0.0 },
+    interruptedFlashShowSource = false,
     healthBarHeight = 17,
     friendlyNameOnly = true,
     friendlyNameOnlyYOffset = -20,
@@ -6415,7 +6416,6 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     self.cast:SetValue(1)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
-    self.castName:SetText("Interrupted")
 
     -- Show interrupter name (class-colored) in cast target position
     local interrupterName
@@ -6432,6 +6432,13 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
                 interrupterClass = UnitClassBase(unitToken)
             end
         end
+    end
+    local showSource = defaults.interruptedFlashShowSource
+    if p and p.interruptedFlashShowSource ~= nil then showSource = p.interruptedFlashShowSource end
+    if showSource and interrupterName then
+        self.castName:SetText("Interrupted [" .. interrupterName .. "]")
+    else
+        self.castName:SetText("Interrupted")
     end
     if interrupterName then
         self.castTarget:SetText(interrupterName)
