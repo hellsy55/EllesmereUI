@@ -2636,14 +2636,14 @@ local function StyleButton(button)
         icon._durText = dbDurFS
 
         -- Hover tooltip support. Gated by the Debuff Display "Hide Tooltips"
-        -- setting (default hidden): ApplyDebuffIcon toggles mouse MOTION to
-        -- match. Clicks always pass through (SetMouseClickEnabled false) so
-        -- click-casting and targeting on the secure unit button keep working.
-        -- When motion is on, the icon takes the hover, shows the aura's native
-        -- tooltip (instead of the unit tooltip) via the secret-safe instance-ID
-        -- API, and mirrors the button hover border so it does not blink off.
-        if icon.SetMouseClickEnabled then icon:SetMouseClickEnabled(false) end
-        if icon.SetMouseMotionEnabled then icon:SetMouseMotionEnabled(false) end
+        -- setting (default hidden): ApplyDebuffIcon toggles mouse interactivity to
+        -- match. Default is fully mouse-transparent (EnableMouse false), like the
+        -- defensive icons. Propagation is enabled so that when tooltips are shown, 
+		-- the icon can take the hover for its own tooltip yet still pass motion + 
+		-- clicks down to the button so casting keeps working.
+        icon:EnableMouse(false)
+        if icon.SetPropagateMouseMotion then icon:SetPropagateMouseMotion(true) end
+        if icon.SetPropagateMouseClicks then icon:SetPropagateMouseClicks(true) end
         icon:SetScript("OnEnter", function(self)
             local u, iid = self._tipUnit, self._tipIID
             if not u or not iid then return end
@@ -3677,9 +3677,13 @@ local function ApplyDebuffIcon(icon, auraData, unit, s)
     icon._tipUnit = unit
     icon._tipIID = auraData.auraInstanceID
     -- Tooltips show only when the setting is explicitly off; nil/true = hidden.
+    -- When shown, make the icon mouse-aware for its OnEnter tooltip; motion and
+    -- clicks still propagate to the parent button (set up in StyleButton) so
+    -- hover/click-casting keep working underneath. When hidden, fully disable
+    -- mouse so the icon is transparent and the button owns all hover/clicks.
     local wantTipMotion = (s.debuffHideTooltips == false)
-    if icon._tipMotion ~= wantTipMotion and icon.SetMouseMotionEnabled then
-        icon:SetMouseMotionEnabled(wantTipMotion)
+    if icon._tipMotion ~= wantTipMotion then
+        icon:EnableMouse(wantTipMotion)
         icon._tipMotion = wantTipMotion
     end
 
