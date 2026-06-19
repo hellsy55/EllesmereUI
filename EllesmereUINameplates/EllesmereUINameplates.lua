@@ -134,6 +134,7 @@ function ns._appendDisplayPresetKeys(t)
         "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
         "raidMarkerPos", "classificationSlot",
         "debuffCropIcons", "buffCropIcons", "ccCropIcons",
+        "showCastLockoutAsCrowdControl",
         "targetGlowEllesmereUI", "targetGlowBorderColor", "targetGlowHighlight", "targetBorderColor",
     }) do t[#t + 1] = k end
 end
@@ -180,6 +181,8 @@ local defaults = {
     castBarShieldEnabled = true,
     interruptedFlashEnabled = true,
     interruptedFlashColor = { r = 0.8, g = 0.0, b = 0.0 },
+    interruptedFlashShowSource = false,
+    showCastLockoutAsCrowdControl = false,
     healthBarHeight = 17,
     friendlyNameOnly = true,
     friendlyNameOnlyYOffset = -20,
@@ -277,6 +280,7 @@ local defaults = {
     rareEliteIconSize = 20,
     castBarHeight = 17,
     castOverlayEnabled = false,
+    hideEnemyNameWhileCasting = false,
     castNameSize = 10,
     castNameColor = { r = 1, g = 1, b = 1 },
     castNameOffsetX = 0,
@@ -686,6 +690,10 @@ end
 function ns.GetCastIconFullSize()
     if p and p.castIconFullSize ~= nil then return p.castIconFullSize end
     return defaults.castIconFullSize
+end
+local function GetHideEnemyNameWhileCasting()
+    if p and p.hideEnemyNameWhileCasting ~= nil then return p.hideEnemyNameWhileCasting end
+    return defaults.hideEnemyNameWhileCasting
 end
 
 -- Position + size the cast bar within `footprintW`, accounting for the
@@ -1542,6 +1550,43 @@ local function ClearAuraSlot(slot)
         else cd:SetCooldown(0, 0) end
         cd:Hide()
     end
+end
+
+ns.CAST_LOCKOUT_SLOT_ID = "__EUI_CAST_LOCKOUT__"
+ns.DEFAULT_CAST_LOCKOUT_DURATION = 5
+ns.CAST_LOCKOUT_ICON = "Interface\\Icons\\Ability_Kick"
+
+function ns.ShowCastLockoutAsCrowdControl()
+    if p and p.showCastLockoutAsCrowdControl ~= nil then return p.showCastLockoutAsCrowdControl end
+    return defaults.showCastLockoutAsCrowdControl
+end
+
+function ns.GetActiveCastLockout(plate)
+    local lockout = plate._castLockout
+    if not lockout then return nil end
+    if not ns.ShowCastLockoutAsCrowdControl() or lockout.expires <= GetTime() then
+        plate._castLockout = nil
+        return nil
+    end
+    return lockout
+end
+
+function ns.ArmCastLockoutCooldown(cd, lockout)
+    if cd then
+        if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+        if cd.SetAlpha then cd:SetAlpha(1) end
+        cd:SetCooldown(lockout.start, lockout.duration)
+        cd:Show()
+    end
+end
+
+function ns.ArmCastLockoutSlot(slot, lockout)
+    RawSetTex(slot.icon, lockout.icon)
+    slot.icon:Show()
+    ns.ArmCastLockoutCooldown(slot.cd, lockout)
+    slot:Show()
+    slot._durationObj = nil
+    slot._auraId = ns.CAST_LOCKOUT_SLOT_ID
 end
 
 -- Position target arrows OUTSIDE the outermost side auras (if arrows are shown).
@@ -4557,6 +4602,7 @@ function NameplateFrame:ClearUnit()
     self._kickIsEmpowered = nil
     self._kickGeoDirty = nil
     self._castTex = nil
+    self._castLockout = nil
     if ns._npDequeueAuraWork then ns._npDequeueAuraWork(self) end
     self.cast:Hide()
     self.castShieldFrame:Hide()
@@ -4633,6 +4679,8 @@ function NameplateFrame:UpdateHealthValues()
             end
             self.unit = actualUnit
             unit = actualUnit
+            self._castLockout = nil
+            self:UpdateAuras()
             self:UpdateName()
             self._castDirtyFull = true
             self:UpdateCast()
@@ -5022,6 +5070,10 @@ function NameplateFrame:UpdateNameWidth()
         PP.Width(self.name, math.max(barW, 20))
     end
 end
+function NameplateFrame:ApplyNameVisibility()
+    local hasNameSlot = FindSlotForElement("enemyName") ~= nil
+    self.name:SetShown(hasNameSlot and not (GetHideEnemyNameWhileCasting() and self.cast:IsShown()))
+end
 function NameplateFrame:RefreshNamePosition()
     local nameSlot = FindSlotForElement("enemyName")
     local nameYOff = GetNameYOffset()
@@ -5060,6 +5112,7 @@ function NameplateFrame:RefreshNamePosition()
         -- Name not assigned to any slot
         self.name:Hide()
     end
+    self:ApplyNameVisibility()
     self:UpdateAuras()
     self:UpdateClassification()
 end
@@ -5731,19 +5784,25 @@ function NameplateFrame:UpdateAuras(updateInfo)
     wipe(skipIDs); wipe(skipAuras)
     local ccSel = 0
     if ccSlotVal ~= "none" then
-    if C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local ccAuras = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|CROWD_CONTROL")
-        if ccAuras then
-            for _, aura in ipairs(ccAuras) do
-                if ccSel >= 2 then break end
-                if aura and aura.auraInstanceID and aura.icon then
-                    ccSel = ccSel + 1
-                    skipIDs[ccSel] = aura.auraInstanceID
-                    skipAuras[ccSel] = aura
+        local lockout = ns.GetActiveCastLockout(self)
+        if lockout then
+            ccSel = 1
+            skipIDs[1] = ns.CAST_LOCKOUT_SLOT_ID
+            skipAuras[1] = lockout
+        end
+        if C_UnitAuras and C_UnitAuras.GetUnitAuras then
+            local ccAuras = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|CROWD_CONTROL")
+            if ccAuras then
+                for _, aura in ipairs(ccAuras) do
+                    if ccSel >= 2 then break end
+                    if aura and aura.auraInstanceID and aura.icon then
+                        ccSel = ccSel + 1
+                        skipIDs[ccSel] = aura.auraInstanceID
+                        skipAuras[ccSel] = aura
+                    end
                 end
             end
         end
-    end
     end -- ccSlotVal ~= "none" (phase 1)
     -- PHASE 2 (P3): skip on identical membership, else rebuild from scratch
     if not needsFullRefresh
@@ -5761,13 +5820,15 @@ function NameplateFrame:UpdateAuras(updateInfo)
         for i = 1, #skipIDs do
             local slot = self.cc[i]
             local id = skipIDs[i]
-            if slot.cd and C_UnitAuras_GetAuraDuration then
+            if id == ns.CAST_LOCKOUT_SLOT_ID then
+                ns.ArmCastLockoutCooldown(slot.cd, skipAuras[i])
+            elseif slot.cd and C_UnitAuras_GetAuraDuration then
                 local durObj = C_UnitAuras_GetAuraDuration(unit, id)
                 if durObj and slot.cd.SetCooldownFromDurationObject then
                     NP_ArmAuraCooldown(slot.cd, durObj)
                 end
             end
-            if updated then
+            if updated and id ~= ns.CAST_LOCKOUT_SLOT_ID then
                 for j = 1, #updated do
                     if updated[j] == id then
                         RawSetTex(slot.icon, skipAuras[i].icon)
@@ -5789,23 +5850,27 @@ function NameplateFrame:UpdateAuras(updateInfo)
             local aura = skipAuras[i]
             local id = skipIDs[i]
             local slot = self.cc[i]
-            RawSetTex(slot.icon, aura.icon)
-            -- Texcoord (square or cropped) is applied in the size loop below.
-            slot.icon:Show()
-            local cd = slot.cd
-            if cd and C_UnitAuras_GetAuraDuration then
-                local durObj = C_UnitAuras_GetAuraDuration(unit, id)
-                if durObj and cd.SetCooldownFromDurationObject then
-                    if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
-                    NP_ArmAuraCooldown(cd, durObj)
-                    cd:Show()
+            if id == ns.CAST_LOCKOUT_SLOT_ID then
+                ns.ArmCastLockoutSlot(slot, aura)
+            else
+                RawSetTex(slot.icon, aura.icon)
+                -- Texcoord (square or cropped) is applied in the size loop below.
+                slot.icon:Show()
+                local cd = slot.cd
+                if cd and C_UnitAuras_GetAuraDuration then
+                    local durObj = C_UnitAuras_GetAuraDuration(unit, id)
+                    if durObj and cd.SetCooldownFromDurationObject then
+                        if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+                        NP_ArmAuraCooldown(cd, durObj)
+                        cd:Show()
+                    end
                 end
+                slot:Show()
+                slot._auraId = id
+                self._shownAuras[id] = slot
+                local m = groupMask[id] or 0
+                if m < 4 then groupMask[id] = m + 4 end
             end
-            slot:Show()
-            slot._auraId = id
-            self._shownAuras[id] = slot
-            local m = groupMask[id] or 0
-            if m < 4 then groupMask[id] = m + 4 end
         end
         self._prevCCCount = ccShown
         -- Reposition CC based on actual shown count
@@ -5900,6 +5965,7 @@ end
 function NameplateFrame:UpdateCast()
     if not self.unit then
         self.cast:Hide()
+        self:ApplyNameVisibility()
         return
     end
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
@@ -5913,6 +5979,7 @@ function NameplateFrame:UpdateCast()
         if not self._interrupted then
             self.cast:Hide()
         end
+        self:ApplyNameVisibility()
         self.castTimer:SetText("")
         if self.isCasting then
             if self._castFallback then
@@ -5951,6 +6018,9 @@ function NameplateFrame:UpdateCast()
 
     if isFullSetup then
         self.cast:Show()
+        self:ApplyNameVisibility()
+        local castW = self.cast:GetWidth()
+        if castW and castW > 0 then self.castName:SetWidth(castW * 0.42) end
         local _isv = issecretvalue
         local texClean = texture ~= nil and not (_isv and _isv(texture))
         if texClean then
@@ -6416,6 +6486,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     if p and p.interruptedFlashEnabled ~= nil then flashOn = p.interruptedFlashEnabled end
     if not flashOn then
         self.cast:Hide()
+        self:ApplyNameVisibility()
         return
     end
 
@@ -6425,7 +6496,6 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     self.cast:SetValue(1)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
-    self.castName:SetText("Interrupted")
 
     -- Show interrupter name (class-colored) in cast target position
     local interrupterName
@@ -6443,11 +6513,33 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
             end
         end
     end
-    if interrupterName then
+    local showSource = defaults.interruptedFlashShowSource
+    if p and p.interruptedFlashShowSource ~= nil then showSource = p.interruptedFlashShowSource end
+    local cfg = p or defaults
+    local useClassColor = defaults.castTargetClassColor
+    if cfg.castTargetClassColor ~= nil then useClassColor = cfg.castTargetClassColor end
+    local castW = self.cast:GetWidth()
+    if castW and castW > 0 then
+        self.castName:SetWidth((showSource and interrupterName) and math.max(castW - 8, 20) or castW * 0.42)
+    end
+    if showSource and interrupterName then
+        local sourceText = interrupterName
+        if useClassColor and interrupterClass and C_ClassColor then
+            local c = C_ClassColor.GetClassColor(interrupterClass)
+            if c then
+                local hex = (c.GenerateHexColor and c:GenerateHexColor()) or c.colorStr
+                if not hex and c.r and c.g and c.b then
+                    hex = string.format("ff%02x%02x%02x", math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
+                end
+                if hex then sourceText = "|c" .. hex .. interrupterName .. "|r" end
+            end
+        end
+        self.castName:SetText("Interrupted [" .. sourceText .. "]")
+    else
+        self.castName:SetText("Interrupted")
+    end
+    if interrupterName and not showSource then
         self.castTarget:SetText(interrupterName)
-        local cfg = p or defaults
-        local useClassColor = defaults.castTargetClassColor
-        if cfg.castTargetClassColor ~= nil then useClassColor = cfg.castTargetClassColor end
         if useClassColor then
             if interrupterClass and C_ClassColor then
                 local c = C_ClassColor.GetClassColor(interrupterClass)
@@ -6467,9 +6559,9 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
         self.castTarget:SetText("")
     end
 
-    -- Show interrupter name in target slot, hide timer
+    -- Show interrupter name in target slot unless it was moved into the interrupt text.
     self.castTimer:Hide()
-    if interrupterName then
+    if interrupterName and not showSource then
         self.castTarget:Show()
     else
         self.castTarget:Hide()
@@ -6478,6 +6570,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     self.castShieldFrame:SetAlpha(1)
     self.castBarOverlay:SetAlpha(0)
     self.cast:Show()
+    self:ApplyNameVisibility()
 
     if self._interruptTimer then
         self._interruptTimer:Cancel()
@@ -6489,7 +6582,25 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
             self._interrupted = nil
             self._interruptTimer = nil
             self.cast:Hide()
+            self:ApplyNameVisibility()
         end
+    end)
+end
+function NameplateFrame:ShowCastLockout()
+    if not ns.ShowCastLockoutAsCrowdControl() or not self.unit then return end
+    local now = GetTime()
+    local lockout = {
+        icon = ns.CAST_LOCKOUT_ICON,
+        start = now,
+        duration = ns.DEFAULT_CAST_LOCKOUT_DURATION,
+        expires = now + ns.DEFAULT_CAST_LOCKOUT_DURATION,
+    }
+    self._castLockout = lockout
+    self:UpdateAuras()
+    C_Timer.After(ns.DEFAULT_CAST_LOCKOUT_DURATION, function()
+        if self._castLockout ~= lockout or GetTime() < lockout.expires then return end
+        self._castLockout = nil
+        self:UpdateAuras()
     end)
 end
 function NameplateFrame:UNIT_HEALTH()
@@ -6689,6 +6800,7 @@ function NameplateFrame:UNIT_SPELLCAST_CHANNEL_STOP()
     if not self._interrupted then
         self.cast:Hide()
     end
+    self:ApplyNameVisibility()
     self.castTimer:SetText("")
     if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
         UpdateClassPowerOnPlate(self)
@@ -6698,6 +6810,10 @@ function NameplateFrame:UNIT_SPELLCAST_FAILED()
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_INTERRUPTED(_, _, _, interrupterGUID)
+    local protected = self._kickProtected
+    if interrupterGUID and ((issecretvalue and issecretvalue(protected)) or not protected) then
+        self:ShowCastLockout()
+    end
     self:ShowInterrupted(interrupterGUID)
 end
 -- Mid-cast interruptibility flips: re-read protection once, store it,

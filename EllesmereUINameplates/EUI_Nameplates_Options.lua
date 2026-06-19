@@ -1256,6 +1256,7 @@ initFrame:SetScript("OnEvent", function(self)
             else
                 PlaceHealthInBar(slotCenter, "CENTER", "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             end
+            if DBVal("hideEnemyNameWhileCasting") == true then nameFS:Hide() end
 
             -- Health bar color: always uses "enemies in combat" color
             local eic = (DB() and DB().enemyInCombat) or defaults.enemyInCombat
@@ -7518,6 +7519,39 @@ initFrame:SetScript("OnEvent", function(self)
                     swatch:EnableMouse(not flashOff())
                 end
             end
+
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Hide Enemy Name While Casting",
+                  tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
+                  getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
+                  setValue=function(v)
+                    DB().hideEnemyNameWhileCasting = v
+                    ns.RefreshAllSettings()
+                    UpdatePreview()
+                  end },
+                { type = "toggle", text = "Interrupt Source In Text",
+                  tooltip = "Show the interrupting unit as \"Interrupted [Name]\" instead of using the cast target text slot.",
+                  disabled = flashOff,
+                  disabledTooltip = "Show Interrupted Flash Effect",
+                  getValue = function()
+                      local db = DB()
+                      if db and db.interruptedFlashShowSource ~= nil then return db.interruptedFlashShowSource end
+                      return defaults.interruptedFlashShowSource
+                  end,
+                  setValue = function(v)
+                      DB().interruptedFlashShowSource = v
+                      RefreshAllPlates()
+                  end });  y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Show Cast Lockout as Crowd Control",
+                  tooltip = "Show successful interrupt lockouts in the crowd-control icon slot.",
+                  getValue = function() return DBVal("showCastLockoutAsCrowdControl") == true end,
+                  setValue = function(v)
+                      DB().showCastLockoutAsCrowdControl = v
+                      RefreshAllAuras()
+                  end },
+                { type = "label", text = "" });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
