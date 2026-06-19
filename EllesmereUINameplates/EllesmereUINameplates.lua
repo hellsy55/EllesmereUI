@@ -5942,6 +5942,8 @@ function NameplateFrame:UpdateCast()
 
     if isFullSetup then
         self.cast:Show()
+        local castW = self.cast:GetWidth()
+        if castW and castW > 0 then self.castName:SetWidth(castW * 0.42) end
         local _isv = issecretvalue
         local texClean = texture ~= nil and not (_isv and _isv(texture))
         if texClean then
@@ -6435,6 +6437,10 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     end
     local showSource = defaults.interruptedFlashShowSource
     if p and p.interruptedFlashShowSource ~= nil then showSource = p.interruptedFlashShowSource end
+    local castW = self.cast:GetWidth()
+    if castW and castW > 0 then
+        self.castName:SetWidth((showSource and interrupterName) and math.max(castW - 8, 20) or castW * 0.42)
+    end
     if showSource and interrupterName then
         self.castName:SetText("Interrupted [" .. interrupterName .. "]")
     else
