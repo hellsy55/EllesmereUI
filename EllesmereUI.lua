@@ -3086,6 +3086,22 @@ function EllesmereUI.GetFontOutlineFlag(addonKey)
     else return "" end
 end
 
+-- Per-module "Disable Slug Outline" toggle. When a module's box in that control
+-- is checked, its non-aura body text drops the SLUG token (a crisp but
+-- un-slugged outline). Stored centrally in EllesmereUIDB.disableSlugOutline;
+-- unchecked (slug kept) by default. moduleKey: "nameplates"/"unitFrames"/"raidFrames".
+function EllesmereUI.IsSlugDisabled(moduleKey)
+    local t = EllesmereUIDB and EllesmereUIDB.disableSlugOutline
+    return (t and t[moduleKey] == true) or false
+end
+
+-- Strip the SLUG token from a font outline flag:
+-- "OUTLINE, SLUG" -> "OUTLINE", "THICKOUTLINE, SLUG" -> "THICKOUTLINE", "" -> "".
+function EllesmereUI.StripSlugFlag(flag)
+    if not flag or flag == "" then return flag or "" end
+    return (flag:gsub("%s*,%s*SLUG", ""))
+end
+
 -- Returns true when the outline mode uses drop shadow instead of outline.
 -- Pass an addonKey to get per-module override; nil returns the global setting.
 function EllesmereUI.GetFontUseShadow(addonKey)
@@ -8815,7 +8831,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.1"
+EllesmereUI.VERSION = "8.2.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

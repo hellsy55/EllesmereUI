@@ -481,6 +481,10 @@ instanceFrame:SetScript("OnEvent", function(_, event)
                 wdb2.curSession = Enum.DamageMeterSessionType.Current
                 w.curSessionID = nil
             end
+            -- Default on M+ Start: switch this window to its configured meter type
+            if wdb2.mythicStartDMType and w.SetDMType then
+                w.SetDMType(wdb2.mythicStartDMType)
+            end
             w.Refresh()
         end
     elseif event == "CHALLENGE_MODE_COMPLETED" then
@@ -1638,6 +1642,7 @@ local function LayoutMenu(menu, items, onDismiss, isChild)
                 row:SetScript("OnEnter", function(self)
                     self._hl:SetColorTexture(1, 1, 1, hlAlpha)
                     if EG then self._lbl:SetTextColor(EG.r, EG.g, EG.b, 1) end
+                    if itemRef.tooltip and EUI.ShowWidgetTooltip then EUI.ShowWidgetTooltip(self, itemRef.tooltip) end
                     if itemRef.children then
                         if not _edmSub then _edmSub = MakeMenuPanel(1) end
                         LayoutMenu(_edmSub, itemRef.children, onDismiss, true)
@@ -1650,6 +1655,7 @@ local function LayoutMenu(menu, items, onDismiss, isChild)
                     elseif not isChild and _edmSub then _edmSub:Hide() end
                 end)
                 row:SetScript("OnLeave", function(self)
+                    if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
                     self._hl:SetColorTexture(1, 1, 1, active and hlAlpha or 0)
                     if active and EG then self._lbl:SetTextColor(EG.r, EG.g, EG.b, 1) else self._lbl:SetTextColor(1, 1, 1, 1) end
                     if isChild then return end
@@ -1686,6 +1692,7 @@ local function ShowEDMMenu(items, anchorBtn)
         _edmMenu:HookScript("OnHide", function()
             if _edmSub then _edmSub:Hide() end
             _edmMenuAnchor = nil
+            if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
         end)
     end
 
@@ -2007,6 +2014,25 @@ local function CreateDMWindow(winIdx)
     end
 
     W.settingsBtn = MakeHeaderBtn("dm_settings.png", -(btnPad + 2), "Settings", function()
+        -- "Default on M+ Start" submenu: the meter type this window switches to
+        -- when a Mythic+ key starts. "Off" (default) leaves the current type alone.
+        local function mStartEntry(label, dmType)
+            return { text = label, isActive = (wdb.mythicStartDMType == dmType),
+                     onClick = function() wdb.mythicStartDMType = dmType end }
+        end
+        local mStartChildren = {
+            { text = "Off", isActive = (not wdb.mythicStartDMType),
+              onClick = function() wdb.mythicStartDMType = false end },
+            "---",
+            mStartEntry("Damage Done", Enum.DamageMeterType.DamageDone),
+            mStartEntry("Healing", Enum.DamageMeterType.HealingDone),
+            mStartEntry("Damage Taken", Enum.DamageMeterType.DamageTaken),
+            mStartEntry("Avoidable Damage Taken", Enum.DamageMeterType.AvoidableDamageTaken),
+            mStartEntry("Enemy Damage Taken", Enum.DamageMeterType.EnemyDamageTaken),
+            mStartEntry("Interrupts", Enum.DamageMeterType.Interrupts),
+            mStartEntry("Dispels", Enum.DamageMeterType.Dispels),
+            mStartEntry("Deaths", Enum.DamageMeterType.Deaths),
+        }
         ShowEDMMenu({
             { text = "Hide in Dungeons", isActive = wdb.hideInDungeon, onClick = function()
                 wdb.hideInDungeon = not wdb.hideInDungeon
@@ -2046,9 +2072,14 @@ local function CreateDMWindow(winIdx)
                 wdb.hideTimer = not wdb.hideTimer
                 W.timerText:SetShown(not wdb.hideTimer)
             end },
-            { text = "Auto Swap Current/Overall", isActive = wdb.autoSwapMythic, onClick = function()
+            { text = "Auto Swap Current/Overall",
+              tooltip = "Auto switch your window to overall at the end of an M+ run, and current at the start",
+              isActive = wdb.autoSwapMythic, onClick = function()
                 wdb.autoSwapMythic = not wdb.autoSwapMythic
             end },
+            { text = "Default on M+ Start",
+              tooltip = "Set your window to this Meter Type on dungeon start",
+              children = mStartChildren },
             { text = "Settings", onClick = function()
                 if EUI.ShowModule then EUI:ShowModule("EllesmereUIDamageMeters") end
             end },
@@ -2087,11 +2118,19 @@ local function CreateDMWindow(winIdx)
         ShowEDMMenu(items, W.segmentBtn)
     end)
 
-    W.modeBtn = MakeHeaderBtn("dm_arrow.png", -(btnSize * 2 + btnPad * 3 + 2), "Switch Meter Type", function()
-        local function sel(dmType) return function()
-            W.curDMType = dmType; wdb.curDMType = dmType; W.CloseSource(); W.Refresh()
+    -- Switch this window to a meter type (data + icon + refresh). Shared by the
+    -- mode button and the "Default on M+ Start" key-start hook so both stay in sync.
+    function W.SetDMType(dmType)
+        W.curDMType = dmType; wdb.curDMType = dmType
+        if W.CloseSource then W.CloseSource() end
+        W.Refresh()
+        if W._modeIcon then
             W._modeIcon:SetTexture(DM_TYPE_ICONS[dmType] or DM_TYPE_ICONS[Enum.DamageMeterType.DamageDone])
-        end end
+        end
+    end
+
+    W.modeBtn = MakeHeaderBtn("dm_arrow.png", -(btnSize * 2 + btnPad * 3 + 2), "Switch Meter Type", function()
+        local function sel(dmType) return function() W.SetDMType(dmType) end end
         local function entry(label, dmType) return { text = label, onClick = sel(dmType), isActive = (dmType == W.curDMType) } end
         local cur = W.curDMType
         local dmActive = (cur == Enum.DamageMeterType.DamageDone or cur == Enum.DamageMeterType.DamageTaken or cur == Enum.DamageMeterType.AvoidableDamageTaken or cur == Enum.DamageMeterType.EnemyDamageTaken)

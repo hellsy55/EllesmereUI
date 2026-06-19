@@ -1578,28 +1578,8 @@ function EllesmereUI.ExportCurrentProfile(includeLayout)
     return EXPORT_PREFIX .. encoded
 end
 
--- Profile import strings that require the NaowhUI addon to be enabled.
--- Exact full-string match only (stored as set keys for O(1) lookup). Importing
--- one of these while NaowhUI is disabled is rejected with a requirement notice.
--- Populate with the protected export strings (each begins with "!EUI_").
-EllesmereUI.NAOWH_REQUIRED_STRINGS = {
-    -- ["temp"] = true,
-}
-
 function EllesmereUI.DecodeImportString(importStr)
     if not importStr or #importStr < 5 then return nil, "Invalid string" end
-    -- Check for NaowhUI installation to ensure profile import works correctly.
-    -- Checked before any decode work so the requirement notice takes priority
-    -- over format/version errors. Uses the standard check (GetAddOnEnableState > 0).
-    if EllesmereUI.NAOWH_REQUIRED_STRINGS[importStr] then
-        local enabled = true
-        if C_AddOns and C_AddOns.GetAddOnEnableState then
-            enabled = (C_AddOns.GetAddOnEnableState("NaowhUI", UnitName("player")) or 0) > 0
-        end
-        if not enabled then
-            return nil, "This profile requires NaowhUI Addon to be installed"
-        end
-    end
     -- Detect old CDM bar layout strings (format removed in 5.1.2)
     if importStr:sub(1, 9) == "!EUICDM_" then
         return nil, "This is an old CDM Bar Layout string. This format is no longer supported. Use the standard profile import instead."

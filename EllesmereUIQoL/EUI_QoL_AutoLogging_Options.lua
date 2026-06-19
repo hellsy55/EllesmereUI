@@ -41,6 +41,12 @@ local function KeysCfg()
     return EllesmereUIDB.keystonePopup
 end
 
+local function TeleCfg()
+    if not EllesmereUIDB then return {} end
+    EllesmereUIDB.teleportPrompt = EllesmereUIDB.teleportPrompt or {}
+    return EllesmereUIDB.teleportPrompt
+end
+
 local function BuildAutoLoggingPage(pageName, parent, yOffset)
     local W  = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
@@ -92,6 +98,58 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
               KeysCfg().scale = v / 100
               local popup = _G.EUIKeysPopup
               if popup then popup:SetScale(v / 100) end
+          end },
+        { type = "label", text = "" }
+    ); y = y - h
+
+    _, h = W:Spacer(parent, y, 20); y = y - h
+
+    ---------------------------------------------------------------------------
+    --  LFG REMINDER
+    ---------------------------------------------------------------------------
+    _, h = W:SectionHeader(parent, "LFG REMINDER", y); y = y - h
+
+    _, h = W:DualRow(parent, y,
+        { type    = "toggle",
+          text    = "Enable LFG Reminder",
+          tooltip = "When you join a Group Finder group for a dungeon that has a teleport, shows a small movable popup with the dungeon name and a one-click teleport button. It hides when you enter the dungeon, leave the group, or enter combat.",
+          getValue = function() return TeleCfg().enabled ~= false end,
+          setValue = function(v)
+              TeleCfg().enabled = v
+              EllesmereUI:RefreshPage()
+              if v then
+                  -- Enabling registers events and builds the popup at login.
+                  EllesmereUI:ShowConfirmPopup({
+                      title = "Reload Required",
+                      message = "Enabling the LFG Reminder requires a reload to take effect.",
+                      confirmText = "Reload",
+                      cancelText = "Later",
+                      onConfirm = function() ReloadUI() end,
+                  })
+              elseif _G._EUI_HideTeleportPrompt then
+                  -- Disabling is immediate: hide any shown popup now.
+                  _G._EUI_HideTeleportPrompt()
+              end
+          end },
+        { type    = "slider",
+          text    = "Window Scale",
+          min     = 50, max = 150, step = 5,
+          tooltip = "Scale of the LFG Reminder popup window.",
+          getValue = function() return math.floor((TeleCfg().scale or 1.05) * 100 + 0.5) end,
+          setValue = function(v)
+              TeleCfg().scale = v / 100
+              if _G._EUI_RefreshTeleportPrompt then _G._EUI_RefreshTeleportPrompt() end
+          end }
+    ); y = y - h
+
+    _, h = W:DualRow(parent, y,
+        { type    = "toggle",
+          text    = "Show 'Disable Feature' Text",
+          tooltip = "Shows the 'Disable Feature' text below the teleport button. When off, the text is hidden and the window is 20px shorter.",
+          getValue = function() return TeleCfg().showDisable ~= false end,
+          setValue = function(v)
+              TeleCfg().showDisable = v
+              if _G._EUI_RefreshTeleportPrompt then _G._EUI_RefreshTeleportPrompt() end
           end },
         { type = "label", text = "" }
     ); y = y - h

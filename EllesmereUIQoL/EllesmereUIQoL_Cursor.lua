@@ -33,6 +33,7 @@ local lastX, lastY
 
 local lastScale, lastHex, lastTex, lastAlpha
 local isVisible = true
+local mouselookActive = false  -- true while the hardware cursor is hidden (mouselook)
 
 -------------------------------------------------------------------------------
 --  Utility
@@ -238,7 +239,8 @@ local function ApplyTrail()
             local inInstance = not (p and p.instanceOnly) or InRealInstancedContent()
 
             -- Only spawn new dots when the cursor circle would be visible
-            if circleEnabled and inInstance then
+            local hiddenGate = not (p and p.onlyWhenHidden) or mouselookActive
+            if circleEnabled and inInstance and hiddenGate then
                 local cx, cy = GetCursorPosition()
                 trailTimer = trailTimer + elapsed
                 local dx = cx - trailLastCX
@@ -551,8 +553,22 @@ UpdateVisibility = function()
         -- "always" and "mouseover" both show (cursor is always at mouse)
         end
     end
+    -- "Only Show When Hidden": only show while steering the camera/character with
+    -- the mouse (cursor hidden). mouselookActive is maintained by the world mouse-
+    -- handler hooks (CameraOrSelectOrMove / TurnOrAction) further below.
+    if shouldShow and p.onlyWhenHidden and not mouselookActive then
+        shouldShow = false
+    end
     if shouldShow and not isVisible then
         isVisible = true
+        -- Snap to the current cursor BEFORE showing, otherwise the frame flashes
+        -- at its last (stale) position for one frame -- OnUpdate only repositions
+        -- on the following frame.
+        local s = UIParent:GetEffectiveScale()
+        local cx, cy = GetCursorPosition()
+        cx, cy = floor(cx / s + 0.5), floor(cy / s + 0.5)
+        lastX, lastY = cx, cy
+        f:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx, cy)
         f:Show()
     elseif not shouldShow and isVisible then
         isVisible = false
@@ -621,6 +637,71 @@ UpdateVisibility = function()
             end
         end
     end
+end
+
+-------------------------------------------------------------------------------
+--  "Only Show When Hidden"
+--  Show the cursor circle only while the player is steering the camera/character
+--  with the mouse (cursor hidden), and NOT on UI clicks. We post-hook WoW's world
+--  mouse handlers, which the game calls ONLY for presses on the 3D world (never
+--  for UI -- confirmed: dragging a UI frame fires neither):
+--    * Left on the world  -> CameraOrSelectOrMoveStart / ...Stop
+--    * Right (turn/move)  -> TurnOrActionStart / ...Stop
+--  The cursor position freezes while hidden, so "moving vs static" can't be read;
+--  instead a press must be HELD past HOLD_DELAY to count, which ignores quick
+--  clicks and leaves only sustained pans/turns. Event + one-shot-timer driven
+--  (no per-frame polling); the hooks no-op unless the option is enabled.
+-------------------------------------------------------------------------------
+local mlFeatureOn = false
+local mlLeftWorld, mlRight = false, false   -- a world left / right control is active
+local mlPending = false                     -- a delayed show is scheduled
+local MS_HOLD_DELAY = 0.15                  -- hold this long before it counts as a pan (not a click)
+
+local function ML_Show()
+    mlPending = false
+    if mlFeatureOn and (mlLeftWorld or mlRight) and not mouselookActive then
+        mouselookActive = true
+        UpdateVisibility()
+    end
+end
+
+local function ML_ControlStart()
+    if not mlFeatureOn or mouselookActive or mlPending then return end
+    mlPending = true
+    C_Timer.After(MS_HOLD_DELAY, ML_Show)
+end
+
+local function ML_ControlStop()
+    if mlFeatureOn and not (mlLeftWorld or mlRight) and mouselookActive then
+        mouselookActive = false
+        UpdateVisibility()
+    end
+end
+
+local mlHooked = false
+local function ML_InstallHooks()
+    if mlHooked then return end
+    mlHooked = true
+    if type(CameraOrSelectOrMoveStart) == "function" then
+        hooksecurefunc("CameraOrSelectOrMoveStart", function() mlLeftWorld = true;  ML_ControlStart() end)
+        hooksecurefunc("CameraOrSelectOrMoveStop",  function() mlLeftWorld = false; ML_ControlStop() end)
+    end
+    if type(TurnOrActionStart) == "function" then
+        hooksecurefunc("TurnOrActionStart", function() mlRight = true;  ML_ControlStart() end)
+        hooksecurefunc("TurnOrActionStop",  function() mlRight = false; ML_ControlStop() end)
+    end
+end
+
+local function ApplyOnlyWhenHidden()
+    local p = ECL.db and ECL.db.profile
+    mlFeatureOn = p and p.onlyWhenHidden or false
+    if mlFeatureOn then
+        ML_InstallHooks()  -- hooksecurefunc can't be undone; install once, gate by mlFeatureOn
+    else
+        mlLeftWorld, mlRight, mlPending = false, false, false
+        mouselookActive = false
+    end
+    UpdateVisibility()
 end
 
 local function CreateCastCircle()
@@ -1063,6 +1144,7 @@ function ECL:OnInitialize()
             cursor = {
                 enabled = true,
                 instanceOnly = false,
+                onlyWhenHidden = false,
                 useClassColor = true,
                 hex = "0CD29D",
                 texture = "ring_normal",
@@ -1143,6 +1225,7 @@ function ECL:OnInitialize()
     _G._ECL_RegisterUnlock = RegisterUnlockElements
     _G._ECL_RING_TEXTURES = RING_TEXTURES
     _G._ECL_ApplyTrail = ApplyTrail
+    _G._ECL_ApplyOnlyWhenHidden = ApplyOnlyWhenHidden
 end
 
 function ECL:OnEnable()
@@ -1167,6 +1250,7 @@ function ECL:OnEnable()
         ApplyGCDCircle()
         ApplyCastCircle()
         ApplyTrail()
+        ApplyOnlyWhenHidden()
         RegisterUnlockElements()
     end)
 

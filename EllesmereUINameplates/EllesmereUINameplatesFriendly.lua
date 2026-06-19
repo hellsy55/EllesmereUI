@@ -99,6 +99,24 @@ end
 -- Friendly NPC color: #00ff00
 local NPC_COLOR_R, NPC_COLOR_G, NPC_COLOR_B = 0, 1, 0
 
+-- Bar & name color for full-plate friendly NPCs. User-customizable via the
+-- inline swatch on "Show Friendly NPC Nameplates"; defaults to the green
+-- NPC_COLOR. Only used in full-plate mode -- name-only NPCs use the overlay's
+-- reaction color instead.
+local function GetFriendlyNPCColor()
+    local fp = FP()
+    local c = fp and fp.friendlyNPCColor
+    if c then return c.r, c.g, c.b end
+    return NPC_COLOR_R, NPC_COLOR_G, NPC_COLOR_B
+end
+
+-- User-configurable size for the full-plate friendly name text (players AND
+-- NPCs in health-bar mode -- not name-only). Defaults to 12.
+local function GetFriendlyNameTextSize()
+    local fp = FP()
+    return (fp and fp.friendlyNameTextSize) or 12
+end
+
 -------------------------------------------------------------------------------
 --  Friendly name-only font override
 --  When name-only mode is active we replace the system nameplate fonts with
@@ -121,6 +139,14 @@ local function SaveOriginalFonts()
     end
 end
 
+-- User-configurable size for friendly name-only player names. The names render
+-- through Blizzard's shared SystemFont_NamePlate object (per-instance SetFont is
+-- blocked on name-only plates), so this size is applied to the font object.
+local function GetFriendlyNameSize()
+    local fp = FP()
+    return (fp and fp.friendlyNameSize) or 15
+end
+
 local function ApplyFriendlyFontOverride()
     SaveOriginalFonts()
     -- Restore to known-good originals first so we read the correct height
@@ -135,13 +161,14 @@ local function ApplyFriendlyFontOverride()
         fontOverrideApplied = false
     end
     local font = GetFont()
+    local size = GetFriendlyNameSize()
     if SystemFont_NamePlate and SystemFont_NamePlate.SetFont then
         local _, _, flags = SystemFont_NamePlate:GetFont()
-        SystemFont_NamePlate:SetFont(font, 15, flags or GetNPOutline())
+        SystemFont_NamePlate:SetFont(font, size, flags or GetNPOutline())
     end
     if SystemFont_NamePlate_Outlined and SystemFont_NamePlate_Outlined.SetFont then
         local _, _, flags = SystemFont_NamePlate_Outlined:GetFont()
-        SystemFont_NamePlate_Outlined:SetFont(font, 15, flags or GetNPOutline())
+        SystemFont_NamePlate_Outlined:SetFont(font, size, flags or GetNPOutline())
     end
     fontOverrideApplied = true
 end
@@ -195,6 +222,15 @@ local function RestoreFontOnNameplate(nameplate)
     if nameText then
         styledNameTexts[nameText] = nil
         -- Blizzard will re-apply its default font on the next SetFontObject call
+    end
+end
+
+-- Exposed so the options panel can live-apply a new friendly name-only size.
+-- Re-running the override re-reads GetFriendlyNameSize and resizes the shared
+-- font object; the name FontStrings inherit it on the next render.
+function ns.RefreshFriendlyNameSize()
+    if IsNameOnlyMode() then
+        ApplyFriendlyFontOverride()
     end
 end
 
@@ -268,6 +304,13 @@ local NPC_OVERLAY_FONT_SIZE = 13
 local NPC_OVERLAY_Y_OFFSET = 5  -- positive = lower on screen (closer to character)
 local NPC_OVERLAY_WIDTH = 126   -- word-wrap width
 
+-- User-configurable size for the friendly NPC name-only overlay name text.
+-- Defaults to NPC_OVERLAY_FONT_SIZE.
+local function GetNPCOverlayNameSize()
+    local fp = FP()
+    return (fp and fp.friendlyNPCNameSize) or NPC_OVERLAY_FONT_SIZE
+end
+
 local function ShowNPCOverlay(nameplate, unit)
     if npcOverlays[nameplate] then return end
     local overlay = AcquireOverlay()
@@ -286,7 +329,7 @@ local function ShowNPCOverlay(nameplate, unit)
     -- Apply our font
     local font = GetFont()
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(overlay.name, GetNPUseShadow()) end
-    overlay.name:SetFont(font, NPC_OVERLAY_FONT_SIZE, GetNPOutline())
+    overlay.name:SetFont(font, GetNPCOverlayNameSize(), GetNPOutline())
     if overlay.name.SetSnapToPixelGrid then
         overlay.name:SetSnapToPixelGrid(false)
     end
@@ -522,55 +565,35 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.healthBG:SetAllPoints()
     plate.healthBG:SetColorTexture(0.12, 0.12, 0.12, 1.0)
 
-    local BORDER_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\border.png"
-    local BORDER_CORNER = 6
-    plate.borderFrame = CreateFrame("Frame", nil, plate.health)
-    plate.borderFrame:SetFrameLevel(plate.health:GetFrameLevel() + 5)
-    plate.borderFrame:SetAllPoints()
-
-    local function CreateBorderTex()
-        local PP = EllesmereUI and EllesmereUI.PP
-        local t = plate.borderFrame:CreateTexture(nil, "OVERLAY", nil, 7)
-        t:SetTexture(BORDER_TEX)
-        return t
+    -- Border: pixel-perfect PP.CreateBorder mirroring the enemy nameplate
+    -- border exactly. Reads the same enemy border settings (showBorder,
+    -- borderSize, borderColor) so friendly plates always match whatever
+    -- border the user has configured for enemy plates. Lives on a child
+    -- container at health level + 1 so it renders above the mouseover
+    -- highlight (OVERLAY sublevel 6) and the health fill.
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP and PP.CreateBorder then
+        local cr, cg, cb = ns.GetBorderColor()
+        local sz = (FP() and FP().borderSize) or ns.defaults.borderSize
+        PP.CreateBorder(plate.health, cr, cg, cb, 1, sz, "OVERLAY", 7)
+        if not ns.IsBorderEnabled() then PP.HideBorder(plate.health) end
     end
 
-    plate.borderTL = CreateBorderTex()
-    plate.borderTL:SetSize(BORDER_CORNER, BORDER_CORNER)
-    plate.borderTL:SetPoint("TOPLEFT", plate.borderFrame, "TOPLEFT", 0, 0)
-    plate.borderTL:SetTexCoord(0, 0.5, 0, 0.5)
-    plate.borderTR = CreateBorderTex()
-    plate.borderTR:SetSize(BORDER_CORNER, BORDER_CORNER)
-    plate.borderTR:SetPoint("TOPRIGHT", plate.borderFrame, "TOPRIGHT", 0, 0)
-    plate.borderTR:SetTexCoord(0.5, 1, 0, 0.5)
-    plate.borderBL = CreateBorderTex()
-    plate.borderBL:SetSize(BORDER_CORNER, BORDER_CORNER)
-    plate.borderBL:SetPoint("BOTTOMLEFT", plate.borderFrame, "BOTTOMLEFT", 0, 0)
-    plate.borderBL:SetTexCoord(0, 0.5, 0.5, 1)
-    plate.borderBR = CreateBorderTex()
-    plate.borderBR:SetSize(BORDER_CORNER, BORDER_CORNER)
-    plate.borderBR:SetPoint("BOTTOMRIGHT", plate.borderFrame, "BOTTOMRIGHT", 0, 0)
-    plate.borderBR:SetTexCoord(0.5, 1, 0.5, 1)
-    plate.borderTop = CreateBorderTex()
-    plate.borderTop:SetHeight(BORDER_CORNER)
-    plate.borderTop:SetPoint("TOPLEFT", plate.borderTL, "TOPRIGHT", 0, 0)
-    plate.borderTop:SetPoint("TOPRIGHT", plate.borderTR, "TOPLEFT", 0, 0)
-    plate.borderTop:SetTexCoord(0.5, 0.5, 0, 0.5)
-    plate.borderBottom = CreateBorderTex()
-    plate.borderBottom:SetHeight(BORDER_CORNER)
-    plate.borderBottom:SetPoint("BOTTOMLEFT", plate.borderBL, "BOTTOMRIGHT", 0, 0)
-    plate.borderBottom:SetPoint("BOTTOMRIGHT", plate.borderBR, "BOTTOMLEFT", 0, 0)
-    plate.borderBottom:SetTexCoord(0.5, 0.5, 0.5, 1)
-    plate.borderLeft = CreateBorderTex()
-    plate.borderLeft:SetWidth(BORDER_CORNER)
-    plate.borderLeft:SetPoint("TOPLEFT", plate.borderTL, "BOTTOMLEFT", 0, 0)
-    plate.borderLeft:SetPoint("BOTTOMLEFT", plate.borderBL, "TOPLEFT", 0, 0)
-    plate.borderLeft:SetTexCoord(0, 0.5, 0.5, 0.5)
-    plate.borderRight = CreateBorderTex()
-    plate.borderRight:SetWidth(BORDER_CORNER)
-    plate.borderRight:SetPoint("TOPRIGHT", plate.borderTR, "BOTTOMRIGHT", 0, 0)
-    plate.borderRight:SetPoint("BOTTOMRIGHT", plate.borderBR, "TOPRIGHT", 0, 0)
-    plate.borderRight:SetTexCoord(0.5, 1, 0.5, 0.5)
+    function plate:ApplyBorder()
+        if not PP then return end
+        if ns.IsBorderEnabled() then
+            local sz = (FP() and FP().borderSize) or ns.defaults.borderSize
+            PP.SetBorderSize(plate.health, sz)
+            PP.ShowBorder(plate.health)
+        else
+            PP.HideBorder(plate.health)
+        end
+    end
+    function plate:ApplyBorderColor()
+        if not PP then return end
+        local cr, cg, cb = ns.GetBorderColor()
+        PP.SetBorderColor(plate.health, cr, cg, cb, 1)
+    end
 
     local GLOW_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\background.png"
     local GLOW_MARGIN = 0.48
@@ -630,7 +653,7 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.glowFrame:Hide()
 
     plate.hpText = plate.health:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.hpText, 10, "OUTLINE, SLUG")
+    SetFSFont(plate.hpText, 10, (EllesmereUI and EllesmereUI.IsSlugDisabled("nameplates")) and "OUTLINE" or "OUTLINE, SLUG")
     plate.hpText:SetPoint("RIGHT", plate.health, -2, 0)
 
     plate.highlight = plate.health:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -641,7 +664,7 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.highlight:Hide()
 
     plate.name = plate:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.name, 12, "OUTLINE, SLUG")
+    SetFSFont(plate.name, GetFriendlyNameTextSize(), (EllesmereUI and EllesmereUI.IsSlugDisabled("nameplates")) and "OUTLINE" or "OUTLINE, SLUG")
     plate.name:SetPoint("BOTTOM", plate.health, "TOP", 0, 4)
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)
@@ -724,14 +747,19 @@ function FriendlyFrame:SetUnit(unit, nameplate)
         self.health:SetStatusBarColor(classColor.r, classColor.g, classColor.b)
         self.name:SetTextColor(1, 1, 1)
     else
-        self.health:SetStatusBarColor(NPC_COLOR_R, NPC_COLOR_G, NPC_COLOR_B)
-        self.name:SetTextColor(NPC_COLOR_R, NPC_COLOR_G, NPC_COLOR_B)
+        local nr, ng, nb = GetFriendlyNPCColor()
+        self.health:SetStatusBarColor(nr, ng, nb)
+        self.name:SetTextColor(nr, ng, nb)
     end
 
     self:UpdateHealth()
     self:UpdateName()
     self:UpdateRaidIcon()
     self:ApplyTarget()
+    -- Re-apply the enemy border settings every spawn: a pooled plate may have
+    -- been released while the user changed the border size/color/toggle.
+    if self.ApplyBorder then self:ApplyBorder() end
+    if self.ApplyBorderColor then self:ApplyBorderColor() end
     if ns.ApplyHealthBarTexture then ns.ApplyHealthBarTexture(self) end
 end
 
@@ -842,7 +870,6 @@ function FriendlyFrame:UNIT_NAME_UPDATE()  self:UpdateName() end
 -------------------------------------------------------------------------------
 local friendlyManager = CreateFrame("Frame")
 local friendlyManagerRegistered = false
-local friendlyMouseoverPlate = nil
 
 local RegisterFriendlyManager   -- forward declaration
 local UnregisterFriendlyManager -- forward declaration
@@ -891,9 +918,7 @@ ns.TryAddFriendlyPlate = TryAddFriendlyPlate
 function ns.RemoveFriendlyPlate(unit)
     local plate = friendlyPlates[unit]
     if not plate then return end
-    if friendlyMouseoverPlate == plate then
-        friendlyMouseoverPlate = nil
-    end
+    if ns._ClearMouseoverPlate then ns._ClearMouseoverPlate(plate) end
     if _cachedFriendlyTargetPlate == plate then _cachedFriendlyTargetPlate = nil end
     plate:ClearUnit()
     friendlyFrameCache:Release(plate)
@@ -906,9 +931,7 @@ end
 function ns.RemoveFriendlyPlateNoRestore(unit)
     local plate = friendlyPlates[unit]
     if not plate then return end
-    if friendlyMouseoverPlate == plate then
-        friendlyMouseoverPlate = nil
-    end
+    if ns._ClearMouseoverPlate then ns._ClearMouseoverPlate(plate) end
     if _cachedFriendlyTargetPlate == plate then _cachedFriendlyTargetPlate = nil end
     -- Clean up our plate without restoring Blizzard UF
     plate:UnregisterAllEvents()
@@ -935,7 +958,6 @@ end
 function RegisterFriendlyManager()
     if friendlyManagerRegistered then return end
     friendlyManager:RegisterEvent("PLAYER_TARGET_CHANGED")
-    friendlyManager:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
     friendlyManager:RegisterEvent("RAID_TARGET_UPDATE")
     friendlyManagerRegistered = true
 end
@@ -960,20 +982,6 @@ friendlyManager:SetScript("OnEvent", function(self, event)
         if oldTarget and oldTarget.unit then oldTarget:ApplyTarget() end
         if _cachedFriendlyTargetPlate and _cachedFriendlyTargetPlate ~= oldTarget then
             _cachedFriendlyTargetPlate:ApplyTarget()
-        end
-    elseif event == "UPDATE_MOUSEOVER_UNIT" then
-        if friendlyMouseoverPlate then
-            friendlyMouseoverPlate.highlight:Hide()
-            friendlyMouseoverPlate = nil
-        end
-        if UnitExists("mouseover") then
-            for _, plate in pairs(friendlyPlates) do
-                if plate.unit and UnitIsUnit(plate.unit, "mouseover") then
-                    plate.highlight:Show()
-                    friendlyMouseoverPlate = plate
-                    break
-                end
-            end
         end
     elseif event == "RAID_TARGET_UPDATE" then
         for _, plate in pairs(friendlyPlates) do plate:UpdateRaidIcon() end
@@ -1014,6 +1022,7 @@ function ns.RefreshFriendlyColors()
     local _fp = FP()
     local useClassColor = not _fp or _fp.classColorFriendly ~= false
     local bc = (_fp and _fp.friendlyBarColor) or ns.defaults.friendlyBarColor
+    local nr, ng, nb = GetFriendlyNPCColor()
     for unit, plate in pairs(friendlyPlates) do
         if UnitIsPlayer(unit) then
             if useClassColor then
@@ -1025,7 +1034,19 @@ function ns.RefreshFriendlyColors()
             else
                 plate.health:SetStatusBarColor(bc.r, bc.g, bc.b)
             end
+        else
+            plate.health:SetStatusBarColor(nr, ng, nb)
+            plate.name:SetTextColor(nr, ng, nb)
         end
+    end
+end
+
+-- Re-apply the full-plate friendly name text size to all live plates so the
+-- slider updates without a /reload. The name carries an explicit outline flag.
+function ns.RefreshFriendlyNameTextSize()
+    local size = GetFriendlyNameTextSize()
+    for _, plate in pairs(friendlyPlates) do
+        if plate.name then SetFSFont(plate.name, size, (EllesmereUI and EllesmereUI.IsSlugDisabled("nameplates")) and "OUTLINE" or "OUTLINE, SLUG") end
     end
 end
 

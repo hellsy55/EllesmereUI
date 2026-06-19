@@ -268,6 +268,105 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.2.2",
+        heroes = {
+            {
+                module = "QoL",
+                title = "LFG Teleport Reminder",
+                desc  = "When you join a Group Finder group for a dungeon that has a teleport, a movable popup appears with the dungeon name and a one-click teleport button. It hides itself when you enter the dungeon, leave the group, or drop into combat.",
+                nav   = { module = "EllesmereUIQoL", page = "Keys, Logs & Brez", section = "LFG REMINDER", highlight = "Enable LFG Reminder" },
+            },
+            {
+                module = "Nameplates",
+                title = "Friendly Plate Controls",
+                desc  = "New name-size sliders for friendly players and NPCs in both name-only and full-plate modes, plus a custom bar and name color for friendly NPCs.",
+                nav   = { module = "EllesmereUINameplates", page = "General", section = "OTHER NAMEPLATES", highlight = "Friendly Name Size" },
+            },
+            {
+                module = "Nameplates",
+                title = "Hitbox Upgrades",
+                desc  = "A new eyeball button overlays the clickable area on live enemy plates so you can size the hitbox visually, and increasing the vertical size now grows the hitbox evenly above and below the bar instead of only upward.",
+                nav   = { module = "EllesmereUINameplates", page = "General", section = "ENEMY NAMEPLATE SPACING", highlight = "Hitbox Size X" },
+            },
+            {
+                module = "Nameplates",
+                title = "Target Highlight & Textures",
+                desc  = "Target highlighting is now three independent toggles (EUI Glow, Border Color, and a new translucent Highlight wash) with a fully colorable border glow, plus four new Target and Focus overlay stripe textures and a per-texture opacity cog.",
+                nav   = { module = "EllesmereUINameplates", page = "Display", section = "TARGET & FOCUS EFFECTS", highlight = "Target Glow Style" },
+            },
+            {
+                module = "Unit & Raid Frames",
+                title = "Absorb & Heal Absorb Bars",
+                desc  = "New solid strip bars show shield-absorb and heal-absorb amounts, with selectable position, adjustable height, and custom color and transparency. Raid Frames' old absorb toggle is now a position dropdown to match.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "ABSORBS", highlight = "Absorb Bar",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Action Bars",
+                title = "Toggle Bar Visibility Keybind",
+                desc  = "Assign a key to show or hide an individual action bar on the fly. Bind one key to several bars and it toggles them all together as a synced group. Works out of combat.",
+                nav   = { module = "EllesmereUIActionBars", page = "Bar Display", section = "VISIBILITY", highlight = "Toggle Action Bar Visibility" },
+            },
+        },
+        features = {
+            {
+                module = "Cooldown Manager",
+                title = "Desaturate When Not Active",
+                desc  = "A new per-spell icon state that greys out the icon whenever the spell is not in its active state.",
+                -- No nav: lives in the per-spell cog, no options page to open (static card).
+            },
+            {
+                module = "Cursor",
+                title = "Only Show When Hidden",
+                desc  = "A new toggle that shows the cursor circle only while you hold the mouse to pan the camera or steer your character.",
+                nav   = { module = "EllesmereUIQoL", page = "Cursor", section = "CURSOR", highlight = "Only Show When Hidden" },
+            },
+            {
+                module = "Damage Meters",
+                title = "Default on M+ Start",
+                desc  = "A per-window setting that switches a meter window to a chosen type, such as Damage, Healing, or Interrupts, when a Mythic+ key starts.",
+                -- No nav: lives in the window's in-frame Settings menu (static card).
+            },
+            {
+                module = "General",
+                title = "Disable Slug Outline",
+                desc  = "A new per-module control that drops the SLUG outline from non-aura text in Unit Frames, Nameplates, and Raid Frames. Aura icon text keeps its outline.",
+                nav   = { module = "_EUIGlobal", page = "Fonts & Colors", section = "GLOBAL FONT", highlight = "Disable Slug Outline" },
+            },
+            {
+                module = "Raid Frames",
+                title = "Role Icon Upgrades",
+                desc  = "A new Modern Light role-icon style and five new role-position anchors: Top, Left, Center, Right, and Bottom.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "INDICATORS", highlight = "Role Icons" },
+            },
+            {
+                module = "Unit Frames",
+                title = "New Aura Filters",
+                desc  = "Buff and debuff filtering adds Crowd Control, Big Defensive, and External Defensive options.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "BUFFS AND DEBUFFS", highlight = "",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Unlock Mode",
+                title = "Unlock Mode Upgrades",
+                desc  = "The element you are moving now gets a clear white selection overlay so you always know which one the arrow keys will nudge, and the X and Y position boxes move in exact pixels that stay in lockstep with arrow-key nudges.",
+                -- No nav: in-world Unlock Mode UI, no options page to open (static card).
+            },
+        },
+        fixes = {
+            { module = "Nameplates", text = "Friendly plate borders now render pixel-perfect and follow the same show, size, and color settings as enemy plates." },
+            { module = "Nameplates", text = "Mousing off a friendly nameplate now clears its highlight reliably." },
+            { module = "Raid Frames", text = "Aura spacing sliders now allow -1 for tighter, overlapping layouts." },
+            { module = "Resource Bars", text = "The rune background no longer shows while a rune is recharging, and restores when it is ready." },
+        },
+    },
+    {
         version = "8.2.1",
         heroes = {
             {
@@ -2042,6 +2141,45 @@ initFrame:SetScript("OnEvent", function(self)
                     -- onChanged callback: a non-nil onChanged makes the CB
                     -- dropdown re-anchor the open menu to an absolute position
                     -- (meant for page rebuilds), which visibly shifts it here.
+                    FontReload()
+                end)
+            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            rgn._control = cbDD
+            rgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
+
+        -- Disable Slug Outline: per-module control that drops the SLUG token from
+        -- non-aura body text (Unit Frames / Nameplates non-aura text, Raid Frames
+        -- name & health). Aura icon text keeps its slug. Unchecked by default.
+        do
+            local dsoItems = {
+                { key = "unitFrames", label = "Unit Frames" },
+                { key = "nameplates", label = "Nameplates" },
+                { key = "raidFrames", label = "Raid Frames" },
+            }
+            local dsoRow
+            dsoRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Disable Slug Outline",
+                  tooltip="Drops the SLUG flag from non-aura text for the selected modules (Unit Frames and Nameplates non-aura text; Raid Frames name and health text). Aura icon text keeps its outline. Requires a UI reload.",
+                  values={ ["_placeholder"]="..." }, order={ "_placeholder" },
+                  getValue=function() return "_placeholder" end,
+                  setValue=function() end },
+                { type="label", text="" }
+            );  y = y - h
+            local rgn = dsoRow._leftRegion
+            if rgn._control then rgn._control:Hide() end
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rgn, 220, rgn:GetFrameLevel() + 2,
+                dsoItems,
+                function(k)
+                    local t = EllesmereUIDB and EllesmereUIDB.disableSlugOutline
+                    return t and t[k] == true
+                end,
+                function(k, v)
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    if not EllesmereUIDB.disableSlugOutline then EllesmereUIDB.disableSlugOutline = {} end
+                    EllesmereUIDB.disableSlugOutline[k] = v and true or false
                     FontReload()
                 end)
             PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)

@@ -184,6 +184,13 @@ local defaults = {
             powerBarOpacity = 100,
             showPlayerAbsorb = "none",
             absorbCleanAlpha = 30,
+            -- Absorb Bar / Heal Absorb Bar: separate strips (see Raid Frames)
+            absorbBarPosition     = "none",
+            absorbBarHeight       = 4,
+            absorbBarColor        = { r = 1, g = 1, b = 1 },
+            healAbsorbBarPosition = "none",
+            healAbsorbBarHeight   = 4,
+            healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
             showPlayerCastbar = false,
             showPlayerCastIcon = true,
             playerCastbarIconInWidth = true,
@@ -443,6 +450,13 @@ local defaults = {
             onlyPlayerDebuffs = false,
             showPlayerAbsorb = "none",
             absorbCleanAlpha = 30,
+            -- Absorb Bar / Heal Absorb Bar: separate strips (see Raid Frames)
+            absorbBarPosition     = "none",
+            absorbBarHeight       = 4,
+            absorbBarColor        = { r = 1, g = 1, b = 1 },
+            healAbsorbBarPosition = "none",
+            healAbsorbBarHeight   = 4,
+            healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
             showPlayerCastbar = false,
             showClassPowerBar = false,
             classPowerBarX = 0,
@@ -655,6 +669,13 @@ local defaults = {
             powerBarOpacity = 100,
             showPlayerAbsorb = "none",
             absorbCleanAlpha = 30,
+            -- Absorb Bar / Heal Absorb Bar: separate strips (see Raid Frames)
+            absorbBarPosition     = "none",
+            absorbBarHeight       = 4,
+            absorbBarColor        = { r = 1, g = 1, b = 1 },
+            healAbsorbBarPosition = "none",
+            healAbsorbBarHeight   = 4,
+            healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
             onlyPlayerDebuffs = true,
             debuffAnchor = "bottomleft",
             debuffGrowth = "auto",
@@ -883,6 +904,10 @@ end
 local function SetFSFont(fs, size, flags)
   if not (fs and fs.SetFont) then return end
   local f = flags or (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("unitFrames")) or ""
+  -- Per-module slug toggle: strip the SLUG token from non-aura body text only.
+  if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("unitFrames") then
+    f = EllesmereUI.StripSlugFlag(f)
+  end
   -- 12.0.7: drop shadows only render from a FontObject; prime before SetFont.
   if EllesmereUI and EllesmereUI.PrimeFontShadow then
     EllesmereUI.PrimeFontShadow(fs, f == "")
@@ -2584,6 +2609,45 @@ local function UpdateAbsorbBarReverseFill(frame, isReversed)
     end
 end
 
+-- Absorb / Heal Absorb strip-bar position resolvers + layout (mirrors Raid
+-- Frames). On ns so the options-panel preview can reuse the layout.
+ns.UF_GetAbsorbBarPos     = function(s) return (s and s.absorbBarPosition)     or "none" end
+ns.UF_GetHealAbsorbBarPos = function(s) return (s and s.healAbsorbBarPosition) or "none" end
+
+-- Anchor/orient a strip bar (Absorb Bar or Heal Absorb Bar). "above*" sit on top
+-- of the health bar; "top*" sit inside at its top, drawn just above the absorb
+-- texture; "belowAbsorb" (heal bar only) sits flush below the Absorb Bar's bottom
+-- edge, derived from the Absorb Bar's POSITION (not its live visibility, so it
+-- never shifts up). "*Right" fills from the right edge. `absorbLevel` is the
+-- absorb-overlay frame level (inside strips render at +1 above it).
+ns.UF_ApplyStripBarLayout = function(stripBar, hp, position, height, absorbLevel, absorbPos, absorbHeight)
+    if not stripBar or not hp then return end
+    stripBar:ClearAllPoints()
+    stripBar:SetHeight(PP.Scale(height or 4))
+    local insideLevel = (absorbLevel or (hp:GetFrameLevel() + 1)) + 1
+    if position == "belowAbsorb" then
+        absorbPos = absorbPos or "none"
+        local yOff = 0
+        if absorbPos == "topRight" or absorbPos == "topLeft" then
+            yOff = -PP.Scale(absorbHeight or 4)
+        end
+        stripBar:SetReverseFill(absorbPos ~= "aboveLeft" and absorbPos ~= "topLeft")
+        stripBar:SetPoint("TOPLEFT",  hp, "TOPLEFT",  0, yOff)
+        stripBar:SetPoint("TOPRIGHT", hp, "TOPRIGHT", 0, yOff)
+        stripBar:SetFrameLevel(insideLevel)
+    elseif position == "topRight" or position == "topLeft" then
+        stripBar:SetReverseFill(position == "topRight")
+        stripBar:SetPoint("TOPLEFT",  hp, "TOPLEFT",  0, 0)
+        stripBar:SetPoint("TOPRIGHT", hp, "TOPRIGHT", 0, 0)
+        stripBar:SetFrameLevel(insideLevel)
+    else
+        stripBar:SetReverseFill(position == "aboveRight")
+        stripBar:SetPoint("BOTTOMLEFT",  hp, "TOPLEFT",  0, 0)
+        stripBar:SetPoint("BOTTOMRIGHT", hp, "TOPRIGHT", 0, 0)
+        stripBar:SetFrameLevel(hp:GetFrameLevel() + 3)
+    end
+end
+
 local function CreateAbsorbBar(frame, unit, settings)
     if not frame.Health then return end
 
@@ -2714,10 +2778,36 @@ local function CreateAbsorbBar(frame, unit, settings)
     haBg:Hide()
     healAbsorbBar._bg = haBg
 
+    -- Absorb Bar + Heal Absorb Bar: separate strips (mirrors Raid Frames), each
+    -- showing the shield / heal-absorb amount at a configurable position.
+    -- Parented to the frame so "above" positions can sit outside the health bar.
+    -- Always created hidden; the Override drives them.
+    local absorbTopBar = CreateFrame("StatusBar", nil, frame)
+    absorbTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    absorbTopBar:SetStatusBarColor(1, 1, 1, 1)
+    absorbTopBar:SetReverseFill(true)
+    absorbTopBar:SetPoint("BOTTOMLEFT",  hpBar, "TOPLEFT",  0, 0)
+    absorbTopBar:SetPoint("BOTTOMRIGHT", hpBar, "TOPRIGHT", 0, 0)
+    absorbTopBar:SetHeight(4)
+    absorbTopBar:SetFrameLevel(hpBar:GetFrameLevel() + 3)
+    absorbTopBar:Hide()
+
+    local healAbsorbTopBar = CreateFrame("StatusBar", nil, frame)
+    healAbsorbTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    healAbsorbTopBar:SetStatusBarColor(200/255, 29/255, 29/255, 1)
+    healAbsorbTopBar:SetReverseFill(true)
+    healAbsorbTopBar:SetPoint("BOTTOMLEFT",  hpBar, "TOPLEFT",  0, 0)
+    healAbsorbTopBar:SetPoint("BOTTOMRIGHT", hpBar, "TOPRIGHT", 0, 0)
+    healAbsorbTopBar:SetHeight(4)
+    healAbsorbTopBar:SetFrameLevel(hpBar:GetFrameLevel() + 3)
+    healAbsorbTopBar:Hide()
+
     -- Attach extras to the main bar (backfill) so anything that references
     -- HealthPrediction.damageAbsorb can hide/show both segments together.
     backfillBar._forward      = forwardBar
     backfillBar._healAbsorb   = healAbsorbBar
+    backfillBar._topBar       = absorbTopBar
+    backfillBar._healTopBar   = healAbsorbTopBar
     backfillBar._hpBar        = hpBar
     backfillBar._hpCalculator = hpCalc
     backfillBar._curClip      = curClip
@@ -2779,12 +2869,20 @@ local function CreateAbsorbBar(frame, unit, settings)
             -- when the shield Absorb Style is "none".)
             local s = GetSettingsForUnit(updUnit)
             local ha = ab._healAbsorb
+            local topBar = ab._topBar
+            local healTopBar = ab._healTopBar
+            local barPos = ns.UF_GetAbsorbBarPos(s)
+            local barOn = topBar and barPos ~= "none"
+            local healBarPos = ns.UF_GetHealAbsorbBarPos(s)
+            local healBarOn = healTopBar and healBarPos ~= "none"
             local shieldOff = s and (not s.showPlayerAbsorb or s.showPlayerAbsorb == "none")
             local healOff = (((s and s.healAbsorbStyle) or "clean") == "none")
-            if shieldOff and healOff then
+            if shieldOff and healOff and not barOn and not healBarOn then
                 ab:Hide()
                 if fw then fw:Hide() end
                 if ha then ha:Hide() end
+                if topBar then topBar:Hide() end
+                if healTopBar then healTopBar:Hide() end
                 return
             end
 
@@ -2803,6 +2901,45 @@ local function CreateAbsorbBar(frame, unit, settings)
             local hpW, hpH = hp:GetWidth(), hp:GetHeight()
             ab:SetWidth(hpW); ab:SetHeight(hpH)
             if fw then fw:SetWidth(hpW); fw:SetHeight(hpH) end
+
+            -- Strip bars (mirrors Raid Frames): independent of the overlay styles.
+            if topBar then
+                if barOn then
+                    local bc = (s and s.absorbBarColor) or { r = 1, g = 1, b = 1 }
+                    local bh = (s and s.absorbBarHeight) or 4
+                    -- Re-layout only when position/height changes (no per-update SetPoint churn).
+                    if topBar._lpPos ~= barPos or topBar._lpH ~= bh then
+                        topBar._lpPos = barPos; topBar._lpH = bh
+                        ns.UF_ApplyStripBarLayout(topBar, hp, barPos, bh, ab:GetFrameLevel())
+                    end
+                    topBar:SetStatusBarColor(bc.r, bc.g, bc.b, bc.a or 1)
+                    topBar:SetMinMaxValues(0, maxHealth)
+                    topBar:SetValue(absorbAmt)
+                    topBar:Show()
+                else
+                    topBar:Hide()
+                end
+            end
+            if healTopBar then
+                if healBarOn then
+                    local hbc = (s and s.healAbsorbBarColor) or { r = 200/255, g = 29/255, b = 29/255 }
+                    local hbh = (s and s.healAbsorbBarHeight) or 4
+                    local abh = (s and s.absorbBarHeight) or 4
+                    -- Re-layout only when its or the Absorb Bar's position/height changes.
+                    if healTopBar._lpPos ~= healBarPos or healTopBar._lpH ~= hbh
+                       or healTopBar._lpAP ~= barPos or healTopBar._lpAH ~= abh then
+                        healTopBar._lpPos = healBarPos; healTopBar._lpH = hbh
+                        healTopBar._lpAP = barPos; healTopBar._lpAH = abh
+                        ns.UF_ApplyStripBarLayout(healTopBar, hp, healBarPos, hbh, ab:GetFrameLevel(), barPos, abh)
+                    end
+                    healTopBar:SetStatusBarColor(hbc.r, hbc.g, hbc.b, hbc.a or 1)
+                    healTopBar:SetMinMaxValues(0, maxHealth)
+                    healTopBar:SetValue((UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(updUnit)) or 0)
+                    healTopBar:Show()
+                else
+                    healTopBar:Hide()
+                end
+            end
 
             -- Re-anchor when the placement settings change. The key starts
             -- nil, so this also applies the saved placement on first update.
@@ -4288,16 +4425,32 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
     end
 end
 
--- Build a SIGNATURE string from the per-unit filter toggles (Own Only = PLAYER,
--- Raid Frames = RAID, Important = IMPORTANT). This is no longer the actual fetch
--- filter -- it's only used as part of each element's change-detection key so a
--- ForceUpdate fires when a toggle flips. The real fetch uses the broad base
--- filter + the per-aura OR FilterAura below. On ns (not a local) to stay clear
--- of the main-chunk 200-local cap.
-function ns.ComposeAuraFilter(base, ownOnly, raidFrames, important)
-    if ownOnly    then base = base .. "|PLAYER" end
-    if raidFrames then base = base .. "|RAID" end
-    if important  then base = base .. "|IMPORTANT" end
+-- Resolve the per-unit classification toggles for an aura element's base
+-- ("HELPFUL" buffs / "HARMFUL" debuffs) from its unit settings table. Returns
+-- five flags in order: ownOnly, raidFrames, crowdControl, bigDefensive,
+-- externalDefensive. Shared by ComposeAuraFilter (signature) and the runtime
+-- FilterAura so new classifications only need adding in one place. On ns (not a
+-- local) to stay clear of the main-chunk 200-local cap.
+function ns.ResolveAuraFlags(base, settings)
+    if base == "HELPFUL" then
+        return settings.onlyPlayerBuffs, settings.buffRaid,
+               settings.buffCrowdControl, settings.buffBigDefensive, settings.buffExternalDefensive
+    end
+    return settings.onlyPlayerDebuffs, settings.debuffRaid,
+           settings.debuffCrowdControl, settings.debuffBigDefensive, settings.debuffExternalDefensive
+end
+
+-- Build a SIGNATURE string from the per-unit filter toggles. This is no longer
+-- the actual fetch filter -- it's only used as part of each element's change-
+-- detection key so a ForceUpdate fires when a toggle flips. The real fetch uses
+-- the broad base filter + the per-aura OR FilterAura below.
+function ns.ComposeAuraFilter(base, settings)
+    local own, raid, cc, bigDef, extDef = ns.ResolveAuraFlags(base, settings)
+    if own    then base = base .. "|PLAYER" end
+    if raid   then base = base .. "|RAID" end
+    if cc     then base = base .. "|CROWD_CONTROL" end
+    if bigDef then base = base .. "|BIG_DEFENSIVE" end
+    if extDef then base = base .. "|EXTERNAL_DEFENSIVE" end
     return base
 end
 
@@ -4343,26 +4496,30 @@ function ns.EUIAuraFilter(element, unit, data, filter)
     -- flag for player + HARMFUL so a stale onlyPlayerDebuffs value has no effect.
     local usePlayer = f and f.player
     if usePlayer and unit == "player" and filter == "HARMFUL" then usePlayer = false end
-    if not f or not (usePlayer or f.raid or f.important) then return true end
+    if not f or not (usePlayer or f.raid or f.cc or f.bigDef or f.extDef) then return true end
     local iid = data.auraInstanceID
     if not iid then return true end
     if usePlayer and data.isPlayerAura then return true end
     local base = filter or "HELPFUL"
     if IsAuraFilteredOut then
-        if f.raid and not IsAuraFilteredOut(unit, iid, base .. "|RAID") then return true end
-        if f.important and not IsAuraFilteredOut(unit, iid, base .. "|IMPORTANT") then return true end
+        if f.raid   and not IsAuraFilteredOut(unit, iid, base .. "|RAID") then return true end
+        if f.cc     and not IsAuraFilteredOut(unit, iid, base .. "|CROWD_CONTROL") then return true end
+        if f.bigDef and not IsAuraFilteredOut(unit, iid, base .. "|BIG_DEFENSIVE") then return true end
+        if f.extDef and not IsAuraFilteredOut(unit, iid, base .. "|EXTERNAL_DEFENSIVE") then return true end
     end
     return false
 end
 
 -- Point an aura element at the broad base filter + our OR FilterAura, recording
--- the current classification toggles (and the lust-debuff override) for it to read.
-function ns.ApplyEUIAuraFilter(element, base, ownOnly, raidFrames, important, showLust)
+-- the current classification toggles (and the lust-debuff override) for it to
+-- read. Flags are resolved from the unit settings table by base (buff/debuff).
+function ns.ApplyEUIAuraFilter(element, base, settings)
     element.filter = base
     element.FilterAura = ns.EUIAuraFilter
     local f = element._euiAuraFlags
     if not f then f = {}; element._euiAuraFlags = f end
-    f.player, f.raid, f.important, f.showLust = ownOnly, raidFrames, important, showLust
+    f.player, f.raid, f.cc, f.bigDef, f.extDef = ns.ResolveAuraFlags(base, settings)
+    f.showLust = (base == "HARMFUL") and settings.showLustDebuff
 end
 
 local function CreateTargetAuras(frame, unit)
@@ -4489,7 +4646,7 @@ local function CreateTargetAuras(frame, unit)
     buffs.initialAnchor = bia
     buffs.growthX = bgx
     buffs.growthY = bgy
-    ns.ApplyEUIAuraFilter(buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+    ns.ApplyEUIAuraFilter(buffs, "HELPFUL", settings)
     buffs.PostCreateButton = SetupAuraIcon
     if not showBuffs then
         buffs:Hide()
@@ -4550,7 +4707,7 @@ local function CreateTargetAuras(frame, unit)
         debuffs.initialAnchor = dia
         debuffs.growthX = dgx
         debuffs.growthY = dgy
-        ns.ApplyEUIAuraFilter(debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
+        ns.ApplyEUIAuraFilter(debuffs, "HARMFUL", settings)
         debuffs.PostCreateButton = SetupAuraIcon
         if settings and settings.onlyPlayerDebuffs then
             debuffs.onlyShowPlayer = true
@@ -7196,11 +7353,11 @@ local function ReloadFrames()
                                 buffCbOff = -cbH
                             end
                             -- Only reanchor + ForceUpdate when layout actually changed
-                            local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                            local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings)
                             local buffKey = string.format("%s%s%d%d%d%s%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, buffCbOff, settings.buffGrowth or "auto", settings.maxBuffs or 4, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. "p" .. (settings.buffMaxPerRow or 0) .. buffFilter
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
-                                ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                                ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings)
                                 frame.Buffs.size = settings.buffSize or 22
                                 frame.Buffs:ClearAllPoints()
                                 frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + buffCbOff + (settings.buffOffsetY or 0))
@@ -7244,11 +7401,11 @@ local function ReloadFrames()
                                 if cbH <= 0 then cbH = 14 end
                                 debuffCbOff = -cbH
                             end
-                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
+                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings) .. (settings.showLustDebuff and "|LUST" or "")
                             local debuffKey = string.format("%s%s%d%d%d%s%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, debuffCbOff, settings.debuffGrowth or "auto", settings.maxDebuffs or 10, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0) .. "p" .. (settings.debuffMaxPerRow or 0) .. debuffFilter
                             if frame.Debuffs._lastDebuffKey ~= debuffKey then
                                 frame.Debuffs._lastDebuffKey = debuffKey
-                                ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
+                                ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings)
                                 frame.Debuffs.onlyShowPlayer = nil
                                 frame.Debuffs.size = settings.debuffSize or 22
                                 frame.Debuffs:ClearAllPoints()
@@ -7631,11 +7788,11 @@ local function ReloadFrames()
                                     liveCbOff = -cbH
                                 end
                             end
-                            local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                            local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings)
                             local buffKey = string.format("%s%s%d%d%s%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, settings.buffGrowth or "auto", settings.maxBuffs or 20, liveCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. "p" .. (settings.buffMaxPerRow or 0) .. buffFilter
                             if frame.Buffs._lastBuffKey ~= buffKey then
                                 frame.Buffs._lastBuffKey = buffKey
-                                ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                                ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings)
                                 frame.Buffs.size = settings.buffSize or 22
                                 frame.Buffs:ClearAllPoints()
                                 frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + liveCbOff + (settings.buffOffsetY or 0))
@@ -7681,11 +7838,11 @@ local function ReloadFrames()
                                     liveDbCbOff = -cbH
                                 end
                             end
-                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
+                            local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings) .. (settings.showLustDebuff and "|LUST" or "")
                             local debuffKey = string.format("%s%s%d%d%s%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, settings.debuffGrowth or "auto", settings.maxDebuffs or 20, liveDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0) .. "p" .. (settings.debuffMaxPerRow or 0) .. debuffFilter
                             if frame.Debuffs._lastDebuffKey ~= debuffKey then
                                 frame.Debuffs._lastDebuffKey = debuffKey
-                                ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
+                                ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings)
                                 frame.Debuffs.onlyShowPlayer = nil
                                 frame.Debuffs.size = settings.debuffSize or 22
                                 frame.Debuffs:ClearAllPoints()
@@ -7993,11 +8150,11 @@ local function ReloadFrames()
                                 focusDbCbOff = -cbH
                             end
                         end
-                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
+                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings) .. (settings.showLustDebuff and "|LUST" or "")
                         local debuffKey = string.format("%s%s%d%d%s%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, settings.debuffGrowth or "auto", settings.maxDebuffs or 10, focusDbCbOff, settings.debuffSize or 22, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0) .. "p" .. (settings.debuffMaxPerRow or 0) .. debuffFilter
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
-                            ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
+                            ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings)
                             frame.Debuffs.onlyShowPlayer = nil
                             frame.Debuffs.size = settings.debuffSize or 22
                             frame.Debuffs:ClearAllPoints()
@@ -8035,11 +8192,11 @@ local function ReloadFrames()
                                 focusBfCbOff = -cbH
                             end
                         end
-                        local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                        local buffFilter = ns.ComposeAuraFilter("HELPFUL", settings)
                         local buffKey = string.format("%s%s%d%d%s%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, settings.buffGrowth or "auto", settings.maxBuffs or 4, focusBfCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. "p" .. (settings.buffMaxPerRow or 0) .. buffFilter
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
-                            ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings.onlyPlayerBuffs, settings.buffRaid, settings.buffImportant)
+                            ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", settings)
                             frame.Buffs.size = settings.buffSize or 22
                             frame.Buffs:ClearAllPoints()
                             frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + focusBfCbOff + (settings.buffOffsetY or 0))
@@ -8345,11 +8502,11 @@ local function ReloadFrames()
                             liveDbCbOff = 0
                             simpleAnchorParent = frame.Health or frame
                         end
-                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant) .. (settings.showLustDebuff and "|LUST" or "")
+                        local debuffFilter = ns.ComposeAuraFilter("HARMFUL", settings) .. (settings.showLustDebuff and "|LUST" or "")
                         local debuffKey = string.format("%s%s%d%d%s%d%d%d%d%d%d", dia or "", dfp or "", dox or 0, doy or 0, effGrowth, settings.maxDebuffs or 10, liveDbCbOff, effectiveDebuffSize, settings.debuffOffsetX or 0, settings.debuffOffsetY or 0, settings.onlyPlayerDebuffs and 1 or 0) .. "p" .. (settings.debuffMaxPerRow or 0) .. debuffFilter
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
-                            ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings.onlyPlayerDebuffs, settings.debuffRaid, settings.debuffImportant, settings.showLustDebuff)
+                            ns.ApplyEUIAuraFilter(frame.Debuffs, "HARMFUL", settings)
                             frame.Debuffs.onlyShowPlayer = nil
                             frame.Debuffs.size = effectiveDebuffSize
                             frame.Debuffs:ClearAllPoints()
@@ -8401,7 +8558,7 @@ local function ReloadFrames()
                         local buffKey = string.format("%s%s%d%d%s%d%d%d%d%d", bia or "", bfp or "", box or 0, boy or 0, settings.buffGrowth or "auto", settings.maxBuffs or 4, bossBfCbOff, settings.buffSize or 22, settings.buffOffsetX or 0, settings.buffOffsetY or 0) .. "p" .. (settings.buffMaxPerRow or 0) .. buffFilter
                         if frame.Buffs._lastBuffKey ~= buffKey then
                             frame.Buffs._lastBuffKey = buffKey
-                            ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", false, false, false)
+                            ns.ApplyEUIAuraFilter(frame.Buffs, "HELPFUL", {})  -- boss buffs: no filtering
                             frame.Buffs.size = settings.buffSize or 22
                             frame.Buffs:ClearAllPoints()
                             frame.Buffs:SetPoint(bia, frame, bfp, box * 1 + (settings.buffOffsetX or 0), boy * 1 + bossBfCbOff + (settings.buffOffsetY or 0))
@@ -8527,6 +8684,7 @@ local function ReloadFrames()
                 if not fs or not fs.SetFont then return end
                 if isMiniFrame then
                     local f = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("unitFrames")) or ""
+                    if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("unitFrames") then f = EllesmereUI.StripSlugFlag(f) end
                     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, f == "") end
                     fs:SetFont(donorFontPath, sz or 12, f)
                 else

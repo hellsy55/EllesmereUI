@@ -34,7 +34,11 @@ initFrame:SetScript("OnEvent", function(self)
     local abs = math.abs
 
     local function GetUFOptOutline()
-        return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+        local f = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+        if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("unitFrames") then
+            f = EllesmereUI.StripSlugFlag(f)
+        end
+        return f
     end
     local function GetUFOptUseShadow()
         return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
@@ -1707,7 +1711,7 @@ initFrame:SetScript("OnEvent", function(self)
         --   absorbBar     = shield (damage) absorb, white/shield, drawn below
         --   healAbsorbBar = heal absorb, red, drawn one sublevel above; shown
         --                   only when the Heal Absorb Style eyeball is toggled on
-        local absorbBar, healAbsorbBar
+        local absorbBar, healAbsorbBar, absorbTopBar, healAbsorbTopBar
         if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
             local PREV_ABS_TEX = {
                 striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
@@ -1773,9 +1777,24 @@ initFrame:SetScript("OnEvent", function(self)
             haBgPv:SetColorTexture(0, 0, 0, ((settings.healAbsorbBgOpacity) or 15) / 100)
             haBgPv:SetAllPoints(healAbsorbBar:GetStatusBarTexture())
             healAbsorbBar._bg = haBgPv
+
+            -- Absorb Bar / Heal Absorb Bar preview strips (parented to the frame
+            -- so "above" positions sit outside the health bar). Driven below.
+            absorbTopBar = CreateFrame("StatusBar", nil, pf)
+            absorbTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+            absorbTopBar:SetMinMaxValues(0, 1)
+            absorbTopBar:SetValue(0.45)
+            absorbTopBar:Hide()
+            healAbsorbTopBar = CreateFrame("StatusBar", nil, pf)
+            healAbsorbTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+            healAbsorbTopBar:SetMinMaxValues(0, 1)
+            healAbsorbTopBar:SetValue(0.45)
+            healAbsorbTopBar:Hide()
         end
         pf._absorbBar = absorbBar
         pf._healAbsorbBar = healAbsorbBar
+        pf._absorbTopBar = absorbTopBar
+        pf._healAbsorbTopBar = healAbsorbTopBar
 
         -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
         local buffIcons = {}
@@ -2714,6 +2733,32 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
+            -- Absorb Bar / Heal Absorb Bar preview strips (independent of the
+            -- overlay styles; anchored to the preview health bar).
+            local _absStripHp = absorbBar and absorbBar:GetParent()
+            if absorbTopBar and _absStripHp then
+                local pos = s.absorbBarPosition or "none"
+                if pos ~= "none" then
+                    local bc = s.absorbBarColor or { r = 1, g = 1, b = 1 }
+                    ns.UF_ApplyStripBarLayout(absorbTopBar, _absStripHp, pos, s.absorbBarHeight or 4, _absStripHp:GetFrameLevel() + 1)
+                    absorbTopBar:SetStatusBarColor(bc.r, bc.g, bc.b, bc.a or 1)
+                    absorbTopBar:Show()
+                else
+                    absorbTopBar:Hide()
+                end
+            end
+            if healAbsorbTopBar and _absStripHp then
+                local pos = s.healAbsorbBarPosition or "none"
+                if pos ~= "none" then
+                    local hbc = s.healAbsorbBarColor or { r = 200/255, g = 29/255, b = 29/255 }
+                    ns.UF_ApplyStripBarLayout(healAbsorbTopBar, _absStripHp, pos, s.healAbsorbBarHeight or 4, _absStripHp:GetFrameLevel() + 1, s.absorbBarPosition or "none", s.absorbBarHeight or 4)
+                    healAbsorbTopBar:SetStatusBarColor(hbc.r, hbc.g, hbc.b, hbc.a or 1)
+                    healAbsorbTopBar:Show()
+                else
+                    healAbsorbTopBar:Hide()
+                end
+            end
+
             -- Buff icons -- reposition based on anchor/growth/size/offset settings
             local buffExtra = 0
             if #buffIcons > 0 then
@@ -3356,6 +3401,12 @@ initFrame:SetScript("OnEvent", function(self)
         healAbsorbColor      = { player=true, target=true, focus=true },
         healAbsorbEdgeMode   = { player=true, target=true, focus=true },
         healAbsorbBgOpacity  = { player=true, target=true, focus=true },
+        absorbBarPosition     = { player=true, target=true, focus=true },
+        absorbBarHeight       = { player=true, target=true, focus=true },
+        absorbBarColor        = { player=true, target=true, focus=true },
+        healAbsorbBarPosition = { player=true, target=true, focus=true },
+        healAbsorbBarHeight   = { player=true, target=true, focus=true },
+        healAbsorbBarColor    = { player=true, target=true, focus=true },
         showBuffs            = { player=true, target=true, focus=true },
         combatIndicatorStyle   = { player=true },
         combatIndicatorColor   = { player=true },
@@ -8366,17 +8417,19 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Per-unit aura filters (NOT synced). Labels track the selected section
         -- (Player/Target/Focus). Each is a multi-select checkbox dropdown; checked
-        -- options AND together into one Blizzard aura-filter string at runtime
-        -- (Own Only = PLAYER, Raid Frames = RAID, Important = IMPORTANT). "Own Only"
+        -- classifications OR together at runtime (Own Only = PLAYER, Raid Frames =
+        -- RAID, Crowd Control, Big Defensive, External Defensive). "Own Only"
         -- reuses the legacy onlyPlayerDebuffs key so existing settings carry over.
         do
             local filterItems = {
-                { key = "important",  label = "Important",   tooltip = "Shows only the spells Blizzard flags as Important" },
-                { key = "ownOnly",    label = "Own Only",    tooltip = "Shows only the Buffs/Debuffs you apply" },
-                { key = "raidFrames", label = "Raid Frames", tooltip = "Shows only the Buffs/Debuffs that appear on Raid Frames" },
+                { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Buffs/Debuffs that appear on Raid Frames" },
+                { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Buffs/Debuffs you apply" },
             }
-            local BUFF_FILTER_KEYS   = { ownOnly = "onlyPlayerBuffs",   important = "buffImportant",   raidFrames = "buffRaid" }
-            local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", important = "debuffImportant", raidFrames = "debuffRaid" }
+            local BUFF_FILTER_KEYS   = { ownOnly = "onlyPlayerBuffs",   raidFrames = "buffRaid",   crowdControl = "buffCrowdControl",   bigDefensive = "buffBigDefensive",   externalDefensive = "buffExternalDefensive" }
+            local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive" }
             -- "Own Only" is not offered for the PLAYER's debuffs (you rarely apply
             -- your own debuffs to yourself); any stale onlyPlayerDebuffs value is
             -- ignored at runtime (see ns.EUIAuraFilter).
@@ -8740,6 +8793,80 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             MakeCogBtn(rgn, cogShow)
+        end
+
+        -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ alpha swatch)
+        local absorbBarRow
+        absorbBarRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Absorb Bar",
+              values={ none="None", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left" },
+              order={ "none", "aboveRight", "aboveLeft", "topRight", "topLeft" },
+              getValue=function() return SValSupported("absorbBarPosition", "none") end,
+              setValue=function(v) SSetSupported("absorbBarPosition", v); EllesmereUI:RefreshPage() end },
+            { type="slider", text="Bar Height", min=1, max=20, step=1,
+              disabled=function() return SValSupported("absorbBarPosition", "none") == "none" end,
+              disabledTooltip="Absorb Bar",
+              getValue=function() return SValSupported("absorbBarHeight", 4) end,
+              setValue=function(v) SSetSupported("absorbBarHeight", v) end });  y = y - h
+        SApplySupport(absorbBarRow._leftRegion, "absorbBarPosition")
+        SApplySupport(absorbBarRow._rightRegion, "absorbBarHeight")
+        do
+            local rgn = absorbBarRow._rightRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, absorbBarRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGetSupported("absorbBarColor")
+                    if c then return c.r, c.g, c.b, c.a or 1 end
+                    return 1, 1, 1, 1
+                end,
+                function(r, g, b, a)
+                    UNIT_DB_MAP[selectedUnit]().absorbBarColor = { r=r, g=g, b=b, a=a }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, true, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateAbsorbBarSwatchVis()
+                swatch:SetAlpha(SValSupported("absorbBarPosition", "none") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateAbsorbBarSwatchVis)
+            UpdateAbsorbBarSwatchVis()
+        end
+
+        -- Row 4: Heal Absorb Bar (position dropdown) | Bar Height (+ alpha swatch)
+        local healAbsorbBarRow
+        healAbsorbBarRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Heal Absorb Bar",
+              values={ none="None", belowAbsorb="Below Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left" },
+              order={ "none", "belowAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft" },
+              getValue=function() return SValSupported("healAbsorbBarPosition", "none") end,
+              setValue=function(v) SSetSupported("healAbsorbBarPosition", v); EllesmereUI:RefreshPage() end },
+            { type="slider", text="Bar Height", min=1, max=20, step=1,
+              disabled=function() return SValSupported("healAbsorbBarPosition", "none") == "none" end,
+              disabledTooltip="Heal Absorb Bar",
+              getValue=function() return SValSupported("healAbsorbBarHeight", 4) end,
+              setValue=function(v) SSetSupported("healAbsorbBarHeight", v) end });  y = y - h
+        SApplySupport(healAbsorbBarRow._leftRegion, "healAbsorbBarPosition")
+        SApplySupport(healAbsorbBarRow._rightRegion, "healAbsorbBarHeight")
+        do
+            local rgn = healAbsorbBarRow._rightRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, healAbsorbBarRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGetSupported("healAbsorbBarColor")
+                    if c then return c.r, c.g, c.b, c.a or 1 end
+                    return 200/255, 29/255, 29/255, 1
+                end,
+                function(r, g, b, a)
+                    UNIT_DB_MAP[selectedUnit]().healAbsorbBarColor = { r=r, g=g, b=b, a=a }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, true, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateHealAbsorbBarSwatchVis()
+                swatch:SetAlpha(SValSupported("healAbsorbBarPosition", "none") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
+            UpdateHealAbsorbBarSwatchVis()
         end
 
         _, h = W:Spacer(parent, y, 20); y = y - h
@@ -10389,18 +10516,20 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Per-unit DEBUFF filter for boss frames (NOT synced). Boss BUFFS are
             -- never filtered -- they always show every HELPFUL aura. Multi-select
-            -- checkbox dropdown; checked options AND together into one Blizzard
-            -- aura-filter string at runtime (Own Only = PLAYER, Raid Frames = RAID,
-            -- Important = IMPORTANT). "Own Only" reuses the legacy onlyPlayerDebuffs
+            -- checkbox dropdown; checked classifications OR together at runtime
+            -- (Own Only = PLAYER, Raid Frames = RAID, Crowd Control, Big Defensive,
+            -- External Defensive). "Own Only" reuses the legacy onlyPlayerDebuffs
             -- key so existing boss settings carry over.
             do
                 local PP = EllesmereUI.PanelPP
                 local filterItems = {
-                    { key = "important",  label = "Important",   tooltip = "Shows only the spells Blizzard flags as Important" },
-                    { key = "ownOnly",    label = "Own Only",    tooltip = "Shows only the Debuffs you apply" },
-                    { key = "raidFrames", label = "Raid Frames", tooltip = "Shows only the Debuffs that appear on Raid Frames" },
+                    { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Debuffs that appear on Raid Frames" },
+                    { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                    { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                    { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                    { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Debuffs you apply" },
                 }
-                local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", important = "debuffImportant", raidFrames = "debuffRaid" }
+                local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive" }
                 -- "Debuff Text Size" mirrors "Simple Text Size": a cooldown-text
                 -- size slider gated by an inline Show-Cooldown-Text toggle, with an
                 -- inline cog holding the (shared) stack size + stack X/Y controls.

@@ -107,6 +107,20 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
+    -- Allow Unlock Mode's "Element Options" to pre-select a specific bar before
+    -- the Bar Display page builds (mirrors the unit-frame path): a direct setter
+    -- for when this module has already built, plus a pending value consumed at
+    -- page-build time. Both ignore keys that are not Bar Display dropdown bars
+    -- (Micro/Bag/XP/Rep live on their own tab) so the selector never goes blank.
+    EllesmereUI._setActionBarKey = function(key)
+        if barLabels[key] then _selectedBarKey = key end
+    end
+    EllesmereUI._consumePendingActionBarSelect = function()
+        local pending = EllesmereUI._pendingActionBarSelect
+        EllesmereUI._pendingActionBarSelect = nil
+        if pending and barLabels[pending] then _selectedBarKey = pending end
+    end
+
     ---------------------------------------------------------------------------
     --  Edit Overlay System
     --  Shows a non-draggable unlock-mode-style overlay on the actual bar
@@ -1379,6 +1393,31 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -----------------------------------------------------------------------
+        --  Bar 10 / Moonkin Form caution
+        -----------------------------------------------------------------------
+        -- Action page 10 (the slots Bar 10 displays) is the Druid Moonkin Form
+        -- bonus bar, so a Druid editing Bar 10 also edits their Moonkin Form
+        -- bar and vice versa. Surface that at the top of the page so it is not
+        -- a surprise. Shown for all classes; the text self-qualifies to Druids.
+        if SelectedKey() == "Bar10" then
+            local PP = EllesmereUI.PanelPP
+            local PAD = EllesmereUI.CONTENT_PAD
+            local warnW = parent:GetWidth() - PAD * 2
+            y = y - 5  -- 5px spacing above the caution
+            local warnHost = CreateFrame("Frame", nil, parent)
+            PP.Point(warnHost, "TOPLEFT", parent, "TOPLEFT", PAD, y)
+            local warnFS = EllesmereUI.MakeFont(warnHost, 14, nil, 1, 0.82, 0)
+            warnFS:SetWidth(warnW)
+            warnFS:SetWordWrap(true)
+            warnFS:SetJustifyH("CENTER")
+            warnFS:SetPoint("TOPLEFT", warnHost, "TOPLEFT", 0, 0)
+            warnFS:SetText(EllesmereUI.L("This Action Bar is also used as the Moonkin Form bar.\nChanging spells on a Druid for this bar will also change them on your Moonkin Form bar."))
+            local warnH = math.ceil(warnFS:GetStringHeight()) + 4
+            PP.Size(warnHost, warnW, warnH)
+            y = y - (warnH + 12)
+        end
+
+        -----------------------------------------------------------------------
         --  VISIBILITY
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_VISIBILITY, y);  y = y - h
@@ -1401,6 +1440,8 @@ initFrame:SetScript("OnEvent", function(self)
                   end,
                   setValue=function(v)
                       ApplyVisibilityKey(SB(), v)
+                      if EAB.ClearVisToggleOverride then EAB:ClearVisToggleOverride(SelectedKey()) end
+                      if EAB.RebuildVisToggleBindings then EAB:RebuildVisToggleBindings() end
                       EAB:RefreshRuntimeVisibility()
                       EAB:RefreshMouseover()
                       EAB:ApplyCombatVisibility()
@@ -1565,6 +1606,167 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 },
             })
+        end
+
+        -- Row 3: Toggle Action Bar keybind | Click Through  (hidden for vis-only bars)
+        if not visOnly then
+            local ctRow
+            ctRow, h = W:DualRow(parent, y,
+                { type="label", text="Toggle Action Bar Visibility" },
+                { type="toggle", text="Click Through",
+                  getValue=function()
+                      return SGet("clickThrough")
+                  end,
+                  setValue=function(v)
+                      SSet("clickThrough", v, function(k) EAB:ApplyClickThroughForBar(k) end)
+                  end });  y = y - h
+            -- Keybind button for "Toggle Action Bar" (left region). Pressing the
+            -- bound key flips this bar between shown and hidden at runtime without
+            -- writing the saved visibility. Enabled only when Visibility is Always
+            -- or Never; the toggle itself only works out of combat.
+            do
+                local rgn = ctRow._leftRegion
+                local kbBtn = CreateFrame("Button", nil, rgn)
+                PP.Size(kbBtn, 126, 29)
+                PP.Point(kbBtn, "RIGHT", rgn, "RIGHT", -20, 0)
+                kbBtn:SetFrameLevel(rgn:GetFrameLevel() + 4)
+                kbBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                local kbBg = EllesmereUI.SolidTex(kbBtn, "BACKGROUND", EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+                kbBg:SetAllPoints()
+                kbBtn._border = EllesmereUI.MakeBorder(kbBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, EllesmereUI.PanelPP)
+                local kbLbl = EllesmereUI.MakeFont(kbBtn, 12, nil, 1, 1, 1)
+                kbLbl:SetAlpha(EllesmereUI.DD_TXT_A)
+                kbLbl:SetPoint("CENTER")
+
+                local listening = false
+
+                local function FormatKey(key)
+                    if not key then return EllesmereUI.L("Not Bound") end
+                    local parts = {}
+                    for mod in key:gmatch("(%u+)%-") do
+                        parts[#parts + 1] = mod:sub(1, 1) .. mod:sub(2):lower()
+                    end
+                    parts[#parts + 1] = key:match("[^%-]+$") or key
+                    return table.concat(parts, " + ")
+                end
+
+                local function IsDisabled()
+                    local v = SB().barVisibility or "always"
+                    return v ~= "always" and v ~= "never"
+                end
+
+                local function RefreshLabel()
+                    if listening then return end
+                    kbLbl:SetText(FormatKey(SB().toggleVisKey))
+                end
+
+                local function RefreshState()
+                    local off = IsDisabled()
+                    kbBtn:SetAlpha(off and 0.3 or 1)
+                    kbBtn:EnableMouse(not off)
+                    if rgn._label then rgn._label:SetAlpha(off and 0.3 or 1) end
+                    if off and listening then
+                        listening = false
+                        kbBtn:EnableKeyboard(false)
+                    end
+                    RefreshLabel()
+                end
+
+                kbBtn:SetScript("OnClick", function(self, button)
+                    if IsDisabled() then return end
+                    if button == "RightButton" then
+                        if listening then listening = false; self:EnableKeyboard(false) end
+                        SB().toggleVisKey = nil
+                        EAB:RebuildVisToggleBindings()
+                        RefreshLabel()
+                        return
+                    end
+                    if listening then return end
+                    listening = true
+                    kbLbl:SetText(EllesmereUI.L("Press a key..."))
+                    self:EnableKeyboard(true)
+                end)
+
+                kbBtn:SetScript("OnKeyDown", function(self, key)
+                    if not listening then self:SetPropagateKeyboardInput(true); return end
+                    if key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
+                       or key == "LALT" or key == "RALT" then
+                        self:SetPropagateKeyboardInput(true); return
+                    end
+                    self:SetPropagateKeyboardInput(false)
+                    if key == "ESCAPE" then
+                        listening = false; self:EnableKeyboard(false); RefreshLabel(); return
+                    end
+                    local mods = ""
+                    if IsShiftKeyDown() then mods = mods .. "SHIFT-" end
+                    if IsControlKeyDown() then mods = mods .. "CTRL-" end
+                    if IsAltKeyDown() then mods = mods .. "ALT-" end
+                    SB().toggleVisKey = mods .. key
+                    EAB:RebuildVisToggleBindings()
+                    listening = false
+                    self:EnableKeyboard(false)
+                    RefreshLabel()
+                end)
+
+                kbBtn:SetScript("OnEnter", function(self)
+                    if IsDisabled() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Visibility set to Always or Never"))
+                        return
+                    end
+                    kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
+                    if kbBtn._border and kbBtn._border.SetColor then kbBtn._border:SetColor(1, 1, 1, 0.3) end
+                    EllesmereUI.ShowWidgetTooltip(self, "Toggling action bar visibility is only available out of combat\n\nLeft-click to set a keybind.\nRight-click to unbind.")
+                end)
+                kbBtn:SetScript("OnLeave", function()
+                    if listening then return end
+                    kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
+                    if kbBtn._border and kbBtn._border.SetColor then kbBtn._border:SetColor(1, 1, 1, EllesmereUI.DD_BRD_A) end
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+                kbBtn:SetScript("OnHide", function()
+                    if listening then listening = false; kbBtn:EnableKeyboard(false); RefreshLabel() end
+                end)
+
+                RefreshState()
+                EllesmereUI.RegisterWidgetRefresh(RefreshState)
+            end
+            -- Sync icon: Click Through (right)
+            do
+                local rgn = ctRow._rightRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Click Through to all Bars",
+                    onClick = function()
+                        local v = SB().clickThrough or false
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            EAB.db.profile.bars[key].clickThrough = v
+                            EAB:ApplyClickThroughForBar(key)
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = SB().clickThrough or false
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].clickThrough or false) ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local v = SB().clickThrough or false
+                            for _, key in ipairs(checkedKeys) do
+                                EAB.db.profile.bars[key].clickThrough = v
+                                EAB:ApplyClickThroughForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
         end
 
         -----------------------------------------------------------------------
@@ -2046,6 +2248,17 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
             end
+
+            -- Row 4: Reverse Icon Order | (empty)
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Reverse Icon Order",
+                  tooltip="Reverse the order of buttons on this bar.",
+                  getValue=function() return SVal("reverseIconOrder", false) end,
+                  setValue=function(v)
+                      SSet("reverseIconOrder", v, function(k) EAB:ApplyIconRowOverrides(k) end)
+                      SUpdatePreviewAndResize()
+                  end },
+                { type="label", text="" });  y = y - h
 
             -------------------------------------------------------------------
             --  ICON APPEARANCE
@@ -2737,40 +2950,23 @@ initFrame:SetScript("OnEvent", function(self)
             -------------------------------------------------------------------
             _, h = W:SectionHeader(parent, "ICON EFFECTS", y);  y = y - h
 
-            -- Row 1: Desaturate on Cooldown | Reverse Icon Order
-            _, h = W:DualRow(parent, y,
+            -- Row 1: Desaturate on Cooldown | Disable Tooltips
+            local dtRow
+            dtRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Desaturate on Cooldown",
                   tooltip="Desaturates (grays out) action button icons while the ability is on cooldown. GCD-only cooldowns are excluded.",
                   getValue=function() return EAB.db.profile.desaturateOnCooldown or false end,
                   setValue=function(v) EAB.db.profile.desaturateOnCooldown = v end },
-                { type="toggle", text="Reverse Icon Order",
-                  tooltip="Reverse the order of buttons on this bar.",
-                  getValue=function() return SVal("reverseIconOrder", false) end,
-                  setValue=function(v)
-                      SSet("reverseIconOrder", v, function(k) EAB:ApplyIconRowOverrides(k) end)
-                      SUpdatePreviewAndResize()
-                  end });  y = y - h
-
-            -- Row 2: Disable Tooltips | Click Through
-            local dtCtRow
-            dtCtRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Disable Tooltips",
                   getValue=function()
                       return SGet("disableTooltips") or false
                   end,
                   setValue=function(v)
                       SSet("disableTooltips", v)
-                  end },
-                { type="toggle", text="Click Through",
-                  getValue=function()
-                      return SGet("clickThrough")
-                  end,
-                  setValue=function(v)
-                      SSet("clickThrough", v, function(k) EAB:ApplyClickThroughForBar(k) end)
                   end });  y = y - h
-            -- Sync icon: Disable Tooltips (left)
+            -- Sync icon: Disable Tooltips (right)
             do
-                local rgn = dtCtRow._leftRegion
+                local rgn = dtRow._rightRegion
                 EllesmereUI.BuildSyncIcon({
                     region  = rgn,
                     tooltip = "Apply Disable Tooltips to all Bars",
@@ -2797,43 +2993,6 @@ initFrame:SetScript("OnEvent", function(self)
                             local v = SB().disableTooltips or false
                             for _, key in ipairs(checkedKeys) do
                                 EAB.db.profile.bars[key].disableTooltips = v
-                            end
-                            EllesmereUI:RefreshPage()
-                        end,
-                    },
-                })
-            end
-            -- Sync icon: Click Through (right)
-            do
-                local rgn = dtCtRow._rightRegion
-                EllesmereUI.BuildSyncIcon({
-                    region  = rgn,
-                    tooltip = "Apply Click Through to all Bars",
-                    onClick = function()
-                        local v = SB().clickThrough or false
-                        for _, key in ipairs(GROUP_BAR_ORDER) do
-                            EAB.db.profile.bars[key].clickThrough = v
-                            EAB:ApplyClickThroughForBar(key)
-                        end
-                        EllesmereUI:RefreshPage()
-                    end,
-                    isSynced = function()
-                        local v = SB().clickThrough or false
-                        for _, key in ipairs(GROUP_BAR_ORDER) do
-                            if (EAB.db.profile.bars[key].clickThrough or false) ~= v then return false end
-                        end
-                        return true
-                    end,
-                    flashTargets = function() return { rgn } end,
-                    multiApply = {
-                        elementKeys   = GROUP_BAR_ORDER,
-                        elementLabels = SHORT_LABELS,
-                        getCurrentKey = function() return SelectedKey() end,
-                        onApply       = function(checkedKeys)
-                            local v = SB().clickThrough or false
-                            for _, key in ipairs(checkedKeys) do
-                                EAB.db.profile.bars[key].clickThrough = v
-                                EAB:ApplyClickThroughForBar(key)
                             end
                             EllesmereUI:RefreshPage()
                         end,
@@ -3851,6 +4010,9 @@ initFrame:SetScript("OnEvent", function(self)
         local _, h
 
         activePreview = nil
+
+        -- Consume any pending bar selection from Element Options navigation.
+        if EllesmereUI._consumePendingActionBarSelect then EllesmereUI._consumePendingActionBarSelect() end
 
         -- Show edit overlay for the currently selected bar
         ShowEditOverlay(SelectedKey())

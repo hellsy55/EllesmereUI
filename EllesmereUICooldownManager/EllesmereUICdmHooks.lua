@@ -659,6 +659,12 @@ local function DecorateFrame(frame, barData)
                     end
                 end
 
+                -- Mark the per-session flag the moment any spell uses this setting,
+                -- so the SetDesaturated/SetDesaturation hooks can early-out with a
+                -- single check for everyone who never enables it. The swipe block
+                -- runs for every icon on login, so this also covers /reload.
+                if ss2 and ss2.desatNotActive then ns._cdmAnyDesatNotActive = true end
+
                 if ss2 and ss2.activeSwipeMode == "none" then
                     -- Hide Active State: force black swipe, track active flag.
                     -- CD model override is handled by the SetDesaturation hook
@@ -696,6 +702,11 @@ local function DecorateFrame(frame, barData)
                     -- Not active: black swipe.
                     if not _gcdSuppressed then
                         cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                    end
+                    -- Desaturate When Not Active (per-spell): symmetric mirror of
+                    -- the active branch's SetDesaturated(false) above.
+                    if ss2 and ss2.desatNotActive and fd.tex then
+                        fd.tex:SetDesaturated(true)
                     end
                     -- Transition: buff just ended, CD starting. Re-apply the
                     -- cooldown duration so the swipe shows immediately
@@ -934,6 +945,61 @@ local function DecorateFrame(frame, barData)
                     end
                 end
             end)
+        end
+
+        -- Desaturate When Not Active: additive hook on SetDesaturated AND
+        -- SetDesaturation (Blizzard re-saturates ready icons via either, on CD-end
+        -- and ticks). Re-applies our desaturation whenever the spell is NOT in its
+        -- active state, read LIVE from the swipe color (fd._wasActive is stale --
+        -- the swipe block doesn't re-run on some falloffs, e.g. DoT expiry). The
+        -- secret arg is never read; the _isProcessingOverride guard bounds
+        -- recursion and keeps it from fighting the swipe block's own SetDesaturated.
+        --
+        -- ZERO-COST WHEN UNUSED: the very first line is a single flag check, so
+        -- for anyone who never enables the setting every hook fire returns
+        -- immediately -- no frame/spell resolution runs. ns._cdmAnyDesatNotActive
+        -- is flipped on only when a spell actually uses the setting (swipe block /
+        -- options setValue).
+        if fd.tex and not fd._desatNotActiveHooked then
+            fd._desatNotActiveHooked = true
+            local function _maintainDesat()
+                if not ns._cdmAnyDesatNotActive then return end
+                if fd._isProcessingOverride then return end
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                local bk2 = fc2 and fc2.barKey
+                if not sid2 or not bk2 then return end
+                local sd2 = ns.GetBarSpellData(bk2)
+                local ss2 = sd2 and sd2.spellSettings and sd2.spellSettings[sid2]
+                -- Override fallback: sid2 may be a transformed/override variant
+                -- while settings live under the assigned base ID (matches cdState).
+                if not ss2 and sd2 and sd2.spellSettings and sd2.assignedSpells
+                   and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    for _, asid in ipairs(sd2.assignedSpells) do
+                        if asid and asid > 0 and asid ~= sid2
+                           and sd2.spellSettings[asid]
+                           and C_SpellBook.FindSpellOverrideByID(asid) == sid2 then
+                            ss2 = sd2.spellSettings[asid]
+                            break
+                        end
+                    end
+                end
+                if not (ss2 and ss2.desatNotActive) then return end
+                local isAct = false
+                local sc = frame.cooldownSwipeColor
+                if sc and type(sc) ~= "number" and sc.GetRGBA then
+                    local r = sc:GetRGBA()
+                    if type(r) == "number" and not issecretvalue(r) then isAct = (r ~= 0) end
+                end
+                if isAct then return end
+                fd._isProcessingOverride = true
+                fd.tex:SetDesaturated(true)
+                fd._isProcessingOverride = false
+            end
+            hooksecurefunc(fd.tex, "SetDesaturated", _maintainDesat)
+            if fd.tex.SetDesaturation then
+                hooksecurefunc(fd.tex, "SetDesaturation", _maintainDesat)
+            end
         end
     end
 

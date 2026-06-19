@@ -3356,7 +3356,8 @@ local function UpdateSecondaryResource()
                     end
 
                     if _runeReady[runeIdx] then
-                        -- Ready rune: full brightness, hide recharge overlay
+                        -- Ready rune: full brightness + restore background, hide recharge overlay
+                        rf._bg:SetAlpha(1)
                         if runeUseThresh then
                             if _tsPartialOnly and pos < _tsThreshCount then
                                 rf:SetActive(true, r, g, b, a)
@@ -3369,8 +3370,9 @@ local function UpdateSecondaryResource()
                         if rf._rechargeBar then rf._rechargeBar:Hide() end
                         if rf._cdText then rf._cdText:SetText("") end
                     else
-                        -- Cooling-down rune: hide normal fill, show recharge bar
+                        -- Cooling-down rune: hide normal fill + background, show recharge bar
                         rf:SetActive(false, r, g, b, a)
+                        rf._bg:SetAlpha(0)
 
                         -- Lazily create a StatusBar overlay for recharge progress
                         if not rf._rechargeBar then

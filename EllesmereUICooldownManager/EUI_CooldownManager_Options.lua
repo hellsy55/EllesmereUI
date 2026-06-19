@@ -4739,6 +4739,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.glowColorR = ss.glowColorR
                                                 os.glowColorG = ss.glowColorG
                                                 os.glowColorB = ss.glowColorB
+                                                os.desatNotActive = ss.desatNotActive
                                             end
                                         end
                                     end
@@ -4942,6 +4943,29 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end)
                         glowRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
+                    -- 3b. Non Active State (default = nil / none). Desaturates the
+                    -- icon when its active-state is NOT active -- the mirror of the
+                    -- runtime's active-branch SetDesaturated(false).
+                    local NONACTIVE_ITEMS = {
+                        { val = nil,  label = "None" },
+                        { val = true, label = "Desaturate When Not Active" },
+                    }
+                    local nonActiveRow = MakeSubnavRow("Non Active State", NONACTIVE_ITEMS,
+                        function() return ss.desatNotActive and true or nil end,
+                        function(v) EnsureSS(); ss.desatNotActive = v or nil; if v then ns._cdmAnyDesatNotActive = true end end,
+                        function() return ss.desatNotActive == nil end)
+                    if isCustomInjected and nonActiveRow then
+                        nonActiveRow:SetAlpha(0.35)
+                        nonActiveRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(nonActiveRow, customDisabledTip)
+                            end
+                        end)
+                        nonActiveRow:SetScript("OnLeave", function()
                             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                         end)
                     end

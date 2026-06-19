@@ -274,7 +274,7 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Only Show in Instances
+        -- Only Show in Instances ---- Only Show When Hidden
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Only Show in Instances",
               disabled=function() local p = DB(); return p and p.enabled == false end,
@@ -285,7 +285,16 @@ initFrame:SetScript("OnEvent", function(self)
                 p.instanceOnly = v
                 if _G._ECL_UpdateVisibility then _G._ECL_UpdateVisibility() end
               end },
-            { type="label", text="" }
+            { type="toggle", text="Only Show When Hidden",
+              tooltip="Only shows the cursor circle while the mouse is hidden -- that is, while you hold the left and/or right mouse button to pan the camera or move your character.",
+              disabled=function() local p = DB(); return p and p.enabled == false end,
+              disabledTooltip="Cursor Circle",
+              getValue=function() local p = DB(); return p and p.onlyWhenHidden or false end,
+              setValue=function(v)
+                local p = DB(); if not p then return end
+                p.onlyWhenHidden = v
+                if _G._ECL_ApplyOnlyWhenHidden then _G._ECL_ApplyOnlyWhenHidden() end
+              end }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h

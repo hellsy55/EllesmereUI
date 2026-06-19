@@ -59,7 +59,14 @@ local function GetFont()
     return (p and p.font) or defaults.font
 end
 local function GetNPOutline()
-    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE, SLUG"
+    local flag = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE, SLUG"
+    -- Per-module "Disable Slug Outline": drop the SLUG token from non-aura
+    -- body text so it renders a plain outline. Aura icon text bypasses this
+    -- helper with a hardcoded slug flag and is unaffected.
+    if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("nameplates") then
+        return EllesmereUI.StripSlugFlag(flag)
+    end
+    return flag
 end
 local function GetNPUseShadow()
     return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("nameplates")
@@ -127,6 +134,7 @@ function ns._appendDisplayPresetKeys(t)
         "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
         "raidMarkerPos", "classificationSlot",
         "debuffCropIcons", "buffCropIcons", "ccCropIcons",
+        "targetGlowEllesmereUI", "targetGlowBorderColor", "targetGlowHighlight", "targetBorderColor",
     }) do t[#t + 1] = k end
 end
 
@@ -139,12 +147,12 @@ local defaults = {
     focus = { r = 0.051, g = 0.820, b = 0.620 },
     focusColorEnabled = true,
     focusOverlayTexture = "striped-v2",
-    focusOverlayAlpha = 0.40,
+    focusOverlayAlpha = 1.0,
     focusOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
     target = { r = 0.459, g = 0.890, b = 0.580 },
     targetColorEnabled = false,
     targetOverlayTexture = "none",
-    targetOverlayAlpha = 0.40,
+    targetOverlayAlpha = 1.0,
     targetOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
     caster  = { r = 0.231, g = 0.510, b = 0.965 },
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
@@ -175,6 +183,7 @@ local defaults = {
     healthBarHeight = 17,
     friendlyNameOnly = true,
     friendlyNameOnlyYOffset = -20,
+    friendlyNameSize = 15,
     friendlyPlateYOffset = 0,
     friendlyHealthBarHeight = 17,
     friendlyHealthBarWidth = 150,
@@ -185,6 +194,9 @@ local defaults = {
     friendlyShowDefaultNames = false,
     classColorFriendly = true,
     friendlyBarColor = { r = 0.314, g = 0.800, b = 0.408 },
+    friendlyNPCColor = { r = 0, g = 1, b = 0 },
+    friendlyNPCNameSize = 13,
+    friendlyNameTextSize = 12,
     showEnemyPets = false,
     font = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF",
     textSlotTop = "enemyName",
@@ -254,6 +266,11 @@ local defaults = {
     ccTextSize = 12,
     ccTextColor = { r = 1, g = 1, b = 1 },
     targetGlowStyle = "ellesmereui",
+    -- Customizable target "Border Color" glow color (default white). The three
+    -- multi-toggle keys (targetGlowEllesmereUI / targetGlowBorderColor /
+    -- targetGlowHighlight) are intentionally NOT defaulted here: they stay nil
+    -- so the getters can live-convert from the legacy targetGlowStyle string.
+    targetBorderColor = { r = 1, g = 1, b = 1 },
     raidMarkerPos = "topright",
     raidMarkerSize = 24,
     classificationSlot = "topleft",
@@ -857,14 +874,15 @@ local function GetHealthBarWidth()
 end
 ns.GetHealthBarWidth = GetHealthBarWidth
 
--- Returns the Y offset to apply to plate content when hitbox Y scale != 100%.
--- SetNamePlateSize grows/shrinks the frame from its base anchor, so we shift
--- content to keep the visual bar in the same screen position.
+-- Y offset for plate content relative to the nameplate frame. Always 0: the
+-- Blizzard nameplate frame grows from its CENTER (not its base), so a taller
+-- SetNamePlateSize enlarges the clickable hitbox evenly above AND below the
+-- unit. Anchoring our content at the frame center therefore keeps the bar in
+-- place AND keeps the hitbox centered on it -- no compensation needed.
+-- (An earlier base-anchor assumption shifted content down by half the extra
+-- height, which made the hitbox extend only above the bar.)
 local function GetHitboxYShift()
-    local db = p or defaults
-    local sy = (db.hitboxScaleY or 100) / 100
-    if sy == 1 then return 0 end
-    return -((GetHealthBarHeight() * sy) - GetHealthBarHeight()) / 2
+    return 0
 end
 ns.GetHitboxYShift = GetHitboxYShift
 -- Slot-based size/offset getters. Key strings are memoized per posKey
@@ -965,8 +983,32 @@ local function GetTargetGlowStyle()
     return defaults.targetGlowStyle
 end
 ns.GetTargetGlowStyle = GetTargetGlowStyle
+-- Multi-toggle target glow model (EllesmereUI / Border Color / Highlight).
+-- Live conversion, NO migration: each toggle returns its own stored key when
+-- the user has set it, otherwise derives from the legacy targetGlowStyle
+-- string. targetGlowStyle stays in defaults ("ellesmereui") so the fallback
+-- source is always present. Legacy mapping: ellesmereui -> EllesmereUI;
+-- vibrant -> EllesmereUI + Border Color; none -> nothing. Defined on ns (not
+-- file-scope locals) to respect this file's near-cap local budget.
+function ns.GetTargetGlowEllesmereUI()
+    if p and p.targetGlowEllesmereUI ~= nil then return p.targetGlowEllesmereUI end
+    local style = (p and p.targetGlowStyle) or defaults.targetGlowStyle
+    return style == "ellesmereui" or style == "vibrant"
+end
+function ns.GetTargetGlowBorderColor()
+    if p and p.targetGlowBorderColor ~= nil then return p.targetGlowBorderColor end
+    local style = (p and p.targetGlowStyle) or defaults.targetGlowStyle
+    return style == "vibrant"
+end
+function ns.GetTargetGlowHighlight()
+    if p and p.targetGlowHighlight ~= nil then return p.targetGlowHighlight end
+    return false  -- no legacy equivalent
+end
+function ns.GetTargetBorderColor()
+    return (p and p.targetBorderColor) or defaults.targetBorderColor
+end
 local function GetShowTargetGlow()
-    return GetTargetGlowStyle() ~= "none"
+    return ns.GetTargetGlowEllesmereUI() or ns.GetTargetGlowBorderColor() or ns.GetTargetGlowHighlight()
 end
 ns.GetShowTargetGlow = GetShowTargetGlow
 local function GetShowClassPower()
@@ -1626,6 +1668,19 @@ local function EnsureGlow(plate)
     plate.glowFrame:Hide()
 end
 
+-- Highlight target style: a fixed translucent white wash across the target's
+-- health bar. Lazily created (only the target ever shows it) and kept SEPARATE
+-- from plate.highlight (the mouseover highlight) so the two never fight over
+-- show/hide state when a unit is both targeted and moused over.
+local function EnsureTargetHighlight(plate)
+    if plate.targetHighlight then return end
+    local t = plate.health:CreateTexture(nil, "OVERLAY", nil, 5)
+    t:SetAllPoints(plate.health)
+    t:SetColorTexture(1, 1, 1, 0.30)
+    t:Hide()
+    plate.targetHighlight = t
+end
+
 -- Target arrow styles: key -> { l=left texture, r=right texture, w=drawn width at
 -- height 16 (scale 1), label }. All source art is 66px tall; width preserves the
 -- original 36px art = 11px drawn, i.e. w = round(nativeWidth * 11/36): 36->11,
@@ -1699,24 +1754,35 @@ local function EnsureFocusOverlay(plate)
     local fillTex = plate.health:GetStatusBarTexture()
     plate.focusClipFill = CreateFrame("Frame", nil, plate.health)
     plate.focusClipFill:SetClipsChildren(true)
-    plate.focusClipFill:SetPoint("TOPLEFT", fillTex, "TOPLEFT", 0, -1)
-    plate.focusClipFill:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 1)
+    -- Vertical bounds come from the health bar itself (full nameplate height)
+    -- so the overlay can never pixel-snap 1px short on the top or bottom edge
+    -- as the plate floats at sub-pixel screen positions. Only the RIGHT edge
+    -- tracks the fill so the stripes window the filled portion.
+    plate.focusClipFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.focusClipFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.focusClipFill:SetPoint("RIGHT", fillTex, "RIGHT", 0, 0)
     plate.focusClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     plate.focusOverlayFill = plate.focusClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
+    -- Texture: full bar height, fixed width, anchored to the health LEFT so the
+    -- diagonal pattern stays continuous across the fill/background split (both
+    -- overlays share the same origin) and snaps with the clip's vertical edges.
     plate.focusOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
-    plate.focusOverlayFill:SetSize(200, 24)
+    plate.focusOverlayFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.focusOverlayFill:SetWidth(200)
     plate.focusOverlayFill:SetTexture(STRIPE_TEX)
     plate.focusOverlayFill:SetAlpha(overlayAlpha)
     plate.focusOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
     plate.focusClipFill:Hide()
     plate.focusClipBg = CreateFrame("Frame", nil, plate.health)
     plate.focusClipBg:SetClipsChildren(true)
-    plate.focusClipBg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, -1)
-    plate.focusClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 1)
+    plate.focusClipBg:SetPoint("TOPRIGHT", plate.health, "TOPRIGHT", 0, 0)
+    plate.focusClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 0)
+    plate.focusClipBg:SetPoint("LEFT", fillTex, "RIGHT", 0, 0)
     plate.focusClipBg:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     plate.focusOverlayBg = plate.focusClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
     plate.focusOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
-    plate.focusOverlayBg:SetSize(200, 24)
+    plate.focusOverlayBg:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.focusOverlayBg:SetWidth(200)
     plate.focusOverlayBg:SetTexture(STRIPE_TEX)
     plate.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
     plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -1731,24 +1797,35 @@ ns.EnsureTargetOverlay = function(plate)
     local fillTex = plate.health:GetStatusBarTexture()
     plate.targetClipFill = CreateFrame("Frame", nil, plate.health)
     plate.targetClipFill:SetClipsChildren(true)
-    plate.targetClipFill:SetPoint("TOPLEFT", fillTex, "TOPLEFT", 0, -1)
-    plate.targetClipFill:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 1)
+    -- Vertical bounds come from the health bar itself (full nameplate height)
+    -- so the overlay can never pixel-snap 1px short on the top or bottom edge
+    -- as the plate floats at sub-pixel screen positions. Only the RIGHT edge
+    -- tracks the fill so the stripes window the filled portion.
+    plate.targetClipFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.targetClipFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.targetClipFill:SetPoint("RIGHT", fillTex, "RIGHT", 0, 0)
     plate.targetClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     plate.targetOverlayFill = plate.targetClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
+    -- Texture: full bar height, fixed width, anchored to the health LEFT so the
+    -- diagonal pattern stays continuous across the fill/background split (both
+    -- overlays share the same origin) and snaps with the clip's vertical edges.
     plate.targetOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
-    plate.targetOverlayFill:SetSize(200, 24)
+    plate.targetOverlayFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.targetOverlayFill:SetWidth(200)
     plate.targetOverlayFill:SetTexture(STRIPE_TEX)
     plate.targetOverlayFill:SetAlpha(overlayAlpha)
     plate.targetOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
     plate.targetClipFill:Hide()
     plate.targetClipBg = CreateFrame("Frame", nil, plate.health)
     plate.targetClipBg:SetClipsChildren(true)
-    plate.targetClipBg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, -1)
-    plate.targetClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 1)
+    plate.targetClipBg:SetPoint("TOPRIGHT", plate.health, "TOPRIGHT", 0, 0)
+    plate.targetClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 0)
+    plate.targetClipBg:SetPoint("LEFT", fillTex, "RIGHT", 0, 0)
     plate.targetClipBg:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     plate.targetOverlayBg = plate.targetClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
     plate.targetOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
-    plate.targetOverlayBg:SetSize(200, 24)
+    plate.targetOverlayBg:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.targetOverlayBg:SetWidth(200)
     plate.targetOverlayBg:SetTexture(STRIPE_TEX)
     plate.targetOverlayBg:SetAlpha(overlayAlpha * 0.3)
     plate.targetOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -2325,6 +2402,12 @@ function ns.RefreshBorder()
     for _, plate in pairs(ns.plates) do
         if plate.ApplyBorder then plate:ApplyBorder() end
     end
+    -- Friendly plates mirror the enemy border settings 1:1.
+    if ns.friendlyPlates then
+        for _, plate in pairs(ns.friendlyPlates) do
+            if plate.ApplyBorder then plate:ApplyBorder() end
+        end
+    end
 end
 ns.RefreshBorderStyle = ns.RefreshBorder
 ns.RefreshSimpleBorderSize = ns.RefreshBorder
@@ -2332,6 +2415,12 @@ function ns.RefreshBorderColor()
     ns._npAppearanceGen = (ns._npAppearanceGen or 0) + 1
     for _, plate in pairs(ns.plates) do
         if plate.ApplyBorderColor then plate:ApplyBorderColor() end
+    end
+    -- Friendly plates mirror the enemy border settings 1:1.
+    if ns.friendlyPlates then
+        for _, plate in pairs(ns.friendlyPlates) do
+            if plate.ApplyBorderColor then plate:ApplyBorderColor() end
+        end
     end
 end
 function ns.RefreshCastBorder()
@@ -2390,18 +2479,70 @@ function ns.RefreshHitboxSize()
     local baseH = GetHealthBarHeight()
     local newH  = baseH * sy
     C_NamePlate.SetNamePlateSize(baseW * sx, newH)
-    -- The frame grows upward from its base, so the extra height is all on top.
-    -- Shift the hit area down by half the extra so it's centered on the bar.
+    -- The frame grows from its CENTER, so a taller size enlarges the clickable
+    -- hitbox evenly above and below the unit. -10000 insets let the hit rect
+    -- fill the full (centered) frame.
     if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets
        and Enum and Enum.NamePlateType then
         C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
         C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, -10000, -10000, -10000, -10000)
     end
-    -- Shift plate content to compensate for the upward frame growth
+    -- Anchor content at the frame center (GetHitboxYShift is 0): the frame grows
+    -- centered, so the bar stays put and the hitbox stays centered on it.
     local yShift = GetHitboxYShift()
     for _, plate in pairs(ns.plates) do
         plate:ClearAllPoints()
         plate:SetPoint("CENTER", plate.nameplate, "CENTER", 0, yShift)
+    end
+end
+
+-- Hitbox visualizer: a translucent overlay matching each enemy nameplate's
+-- clickable bounds (the frame sized by SetNamePlateSize above), so the Hitbox
+-- Size sliders can be dialled in visually. Toggled by the eyeball next to the
+-- sliders. Runtime-only (resets on reload); the overlay is created lazily the
+-- first time a plate actually needs it, so this costs nothing when off.
+-- Defined on ns (not a file-scope local) to stay under the Lua 5.1 200-local
+-- cap on this file's main chunk.
+function ns._ApplyHitboxOverlay(plate)
+    local np = plate and plate.nameplate
+    if not np then return end
+    if ns._hitboxOverlayShown then
+        local ov = plate.hitboxOverlay
+        if not ov then
+            ov = CreateFrame("Frame", nil, np)
+            local fill = ov:CreateTexture(nil, "BACKGROUND")
+            fill:SetAllPoints()
+            fill:SetColorTexture(0.047, 0.824, 0.624, 0.18)
+            local function Edge()
+                local t = ov:CreateTexture(nil, "BORDER")
+                t:SetColorTexture(0.047, 0.824, 0.624, 0.85)
+                return t
+            end
+            local top, bottom, left, right = Edge(), Edge(), Edge(), Edge()
+            top:SetPoint("TOPLEFT");    top:SetPoint("TOPRIGHT");    top:SetHeight(1)
+            bottom:SetPoint("BOTTOMLEFT"); bottom:SetPoint("BOTTOMRIGHT"); bottom:SetHeight(1)
+            left:SetPoint("TOPLEFT");   left:SetPoint("BOTTOMLEFT");  left:SetWidth(1)
+            right:SetPoint("TOPRIGHT"); right:SetPoint("BOTTOMRIGHT"); right:SetWidth(1)
+            plate.hitboxOverlay = ov
+        end
+        -- Re-parent + re-anchor each apply, since pooled plates get reused on a
+        -- fresh Blizzard nameplate (mirrors the _stackBounds handling).
+        ov:SetParent(np)
+        ov:SetFrameLevel(np:GetFrameLevel() + 10)
+        ov:ClearAllPoints()
+        ov:SetAllPoints(np)
+        ov:Show()
+    elseif plate.hitboxOverlay then
+        plate.hitboxOverlay:Hide()
+    end
+end
+
+-- Toggle the hitbox visualizer across every active enemy plate. Driven by the
+-- eyeball button beside the Hitbox Size sliders in options.
+function ns.SetHitboxOverlayShown(show)
+    ns._hitboxOverlayShown = show and true or false
+    for _, plate in pairs(ns.plates) do
+        ns._ApplyHitboxOverlay(plate)
     end
 end
 
@@ -4240,6 +4381,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()
+    if ns._hitboxOverlayShown or self.hitboxOverlay then ns._ApplyHitboxOverlay(self) end
     -- Apply static appearance only when stale (settings changed or fresh
     -- pool plate). Cache-hit re-spawns skip this entirely.
     if self._appearanceGen ~= ns._npAppearanceGen then
@@ -4422,6 +4564,7 @@ function NameplateFrame:ClearUnit()
     end
     self._interrupted = nil
     if self.glow then self.glow:Hide() end
+    if self.targetHighlight then self.targetHighlight:Hide() end
     self.highlight:Hide()
     self.raidFrame:Hide()
     self.classFrame:Hide()
@@ -4962,18 +5105,28 @@ function NameplateFrame:ApplyTarget()
     if not self.unit then return end
     local isTarget = UnitIsUnit(self.unit, "target")
     self._isTarget = isTarget  -- cached for hot-path hash line check
-    local style = GetTargetGlowStyle()
-    if isTarget and style ~= "none" then
+    -- EllesmereUI: background glow around the plate
+    if isTarget and ns.GetTargetGlowEllesmereUI() then
         EnsureGlow(self)
         self.glow:Show()
     elseif self.glow then
         self.glow:Hide()
     end
-    -- Vibrant: override health bar border to white on selected target
-    if isTarget and style == "vibrant" then
-        if PP then PP.SetBorderColor(self.health, 1, 1, 1, 1) end
+    -- Border Color: recolor the health bar border with the custom target color
+    if isTarget and ns.GetTargetGlowBorderColor() then
+        if PP then
+            local bc = ns.GetTargetBorderColor()
+            PP.SetBorderColor(self.health, bc.r, bc.g, bc.b, 1)
+        end
     else
         self:ApplyBorderColor()
+    end
+    -- Highlight: fixed translucent white wash across the health bar
+    if isTarget and ns.GetTargetGlowHighlight() then
+        EnsureTargetHighlight(self)
+        self.targetHighlight:Show()
+    elseif self.targetHighlight then
+        self.targetHighlight:Hide()
     end
     if p and p.showTargetArrows then
         if isTarget then
@@ -5014,7 +5167,8 @@ function NameplateFrame:ApplyMouseover()
     if not self.unit then return end
     if UnitExists("mouseover") and UnitIsUnit(self.unit, "mouseover") then
         self.highlight:Show()
-        currentMouseoverPlate = self
+        ns._currentMouseoverPlate = self
+        if ns._EnsureMouseoverTicker then ns._EnsureMouseoverTicker() end
     else
         self.highlight:Hide()
     end
@@ -6633,8 +6787,7 @@ manager:RegisterEvent("UI_SCALE_CHANGED")
 
 local pendingUnits = {}
 ns.pendingUnits = pendingUnits
-local currentMouseoverPlate = nil
-local mouseoverTicker = nil
+-- Mouseover-highlight state lives on ns (unified enemy+friendly monitor below).
 
 -- Per-unit event watchers for pending friendly units.
 -- Using per-unit frames avoids the global UNIT_FLAGS firehose.
@@ -6687,13 +6840,7 @@ CreateEnemyWatcher = function(unit)
         enemyWatchers[u] = nil
         local plate = ns.plates[u]
         if plate then
-            if currentMouseoverPlate == plate then
-                currentMouseoverPlate = nil
-                if mouseoverTicker then
-                    mouseoverTicker:Cancel()
-                    mouseoverTicker = nil
-                end
-            end
+            if ns._ClearMouseoverPlate then ns._ClearMouseoverPlate(plate) end
             plate:ClearUnit()
             frameCache:Release(plate)
             ns.plates[u] = nil
@@ -6773,31 +6920,52 @@ factionFrame:SetScript("OnEvent", function(_, event, unit)
         w:GetScript("OnEvent")(w, "UNIT_FACTION", unit)
     end
 end)
-local function UpdateMouseover()
-    if currentMouseoverPlate then
-        currentMouseoverPlate.highlight:Hide()
-        currentMouseoverPlate = nil
-    end
-    if UnitExists("mouseover") then
-        for _, plate in pairs(ns.plates) do
-            if plate.unit and UnitIsUnit(plate.unit, "mouseover") then
-                plate.highlight:Show()
-                currentMouseoverPlate = plate
-                break
-            end
+-- Unified mouseover monitor (enemy + friendly). UPDATE_MOUSEOVER_UNIT fires when
+-- a mouseover STARTS but never when it clears, so a single shared 0.1s ticker
+-- (alive only while a mouseover exists) watches for the mouse leaving. A held
+-- mouse button transiently drops the mouseover unit, so in that case we wait for
+-- GLOBAL_MOUSE_UP (handled on `manager`) and re-check.
+function ns._EnsureMouseoverTicker()
+    if ns._mouseoverTicker then return end
+    ns._mouseoverTicker = C_Timer.NewTicker(0.1, function()
+        if not UnitExists("mouseover") then
+            if ns._mouseoverTicker then ns._mouseoverTicker:Cancel(); ns._mouseoverTicker = nil end
+            ns._UpdateMouseover()
+            if IsMouseButtonDown() then manager:RegisterEvent("GLOBAL_MOUSE_UP") end
         end
-        if not mouseoverTicker then
-            mouseoverTicker = C_Timer.NewTicker(0.1, function()
-                if not UnitExists("mouseover") then
-                    if mouseoverTicker then
-                        mouseoverTicker:Cancel()
-                        mouseoverTicker = nil
-                    end
-                    UpdateMouseover()
-                end
-            end)
+    end)
+end
+
+-- Drop the highlight tracking if `plate` is the one currently highlighted.
+-- Called from both enemy and friendly plate removal.
+function ns._ClearMouseoverPlate(plate)
+    if ns._currentMouseoverPlate == plate then
+        ns._currentMouseoverPlate = nil
+        if ns._mouseoverTicker then ns._mouseoverTicker:Cancel(); ns._mouseoverTicker = nil end
+    end
+end
+
+function ns._UpdateMouseover()
+    local cur = ns._currentMouseoverPlate
+    if cur then
+        if cur.highlight then cur.highlight:Hide() end
+        ns._currentMouseoverPlate = nil
+    end
+    if not UnitExists("mouseover") then return end
+    local found
+    for _, plate in pairs(ns.plates) do
+        if plate.unit and UnitIsUnit(plate.unit, "mouseover") then found = plate; break end
+    end
+    if not found and ns.friendlyPlates then
+        for _, plate in pairs(ns.friendlyPlates) do
+            if plate.unit and UnitIsUnit(plate.unit, "mouseover") then found = plate; break end
         end
     end
+    if found and found.highlight then
+        found.highlight:Show()
+        ns._currentMouseoverPlate = found
+    end
+    ns._EnsureMouseoverTicker()
 end
 -- Refresh Y-offset on all visible friendly name-only plates
 function ns.RefreshFriendlyNameOnlyOffset()
@@ -6920,13 +7088,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
         end
         local plate = ns.plates[unit]
         if plate then
-            if currentMouseoverPlate == plate then
-                currentMouseoverPlate = nil
-                if mouseoverTicker then
-                    mouseoverTicker:Cancel()
-                    mouseoverTicker = nil
-                end
-            end
+            if ns._ClearMouseoverPlate then ns._ClearMouseoverPlate(plate) end
             -- Clear cached refs before release
             if ns._cachedTargetPlate == plate then ns._cachedTargetPlate = nil end
             if ns._cachedFocusPlate  == plate then ns._cachedFocusPlate  = nil end
@@ -6985,7 +7147,10 @@ manager:SetScript("OnEvent", function(self, event, unit)
             UpdateFocusPlate(ns._cachedFocusPlate)
         end
     elseif event == "UPDATE_MOUSEOVER_UNIT" then
-        UpdateMouseover()
+        ns._UpdateMouseover()
+    elseif event == "GLOBAL_MOUSE_UP" then
+        self:UnregisterEvent("GLOBAL_MOUSE_UP")
+        ns._UpdateMouseover()
     elseif event == "RAID_TARGET_UPDATE" then
         for _, plate in pairs(ns.plates) do
             plate:UpdateRaidIcon()

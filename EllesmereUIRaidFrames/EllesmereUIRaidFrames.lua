@@ -271,6 +271,12 @@ local ROLE_ICON_STYLES = {
         HEALER  = "GM-icon-role-healer",
         DAMAGER = "GM-icon-role-dps",
     },
+    blizzLight = {
+        _isTexture = true,
+        TANK    = ROLE_MEDIA .. "tank.png",
+        HEALER  = ROLE_MEDIA .. "healer.png",
+        DAMAGER = ROLE_MEDIA .. "dps.png",
+    },
 }
 
 local function ApplyRoleIcon(texture, role, style)
@@ -483,11 +489,15 @@ local defaults = {
         absorbBarEnabled = false,
         absorbBarHeight  = 4,
         absorbBarColor   = { r = 1, g = 1, b = 1 },
+        -- Heal Absorb Bar: separate strip showing the heal-absorb amount
+        healAbsorbBarPosition = "none",
+        healAbsorbBarHeight   = 4,
+        healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
 
         -- Indicators
-        roleIconStyle    = "modern",  -- "none", "modern", "modernCircle", "styled", "classicCircle", "classic"
+        roleIconStyle    = "modern",  -- none/modern/modernCircle/styled/classicCircle/classic/blizzDefault/blizzLight
         roleIconSize     = 13,
-        roleIconPosition = "bottomleft",  -- "topleft", "topright", "bottomleft", "bottomright"
+        roleIconPosition = "bottomleft",  -- topleft/top/topright/left/center/right/bottomleft/bottom/bottomright
         roleIconOffsetX  = 0,
         roleIconOffsetY  = 0,
         roleIconHideInCombat = false,
@@ -901,6 +911,13 @@ end
 -------------------------------------------------------------------------------
 --  Font helper (matches UF/CDM pattern)
 -------------------------------------------------------------------------------
+-- Weak set of FontStrings whose slug outline should be dropped when the
+-- "Disable Slug Outline" toggle is on for Raid Frames. Only Name + Health body
+-- text is registered here; status text, top-name-bar, group/title labels, and
+-- all aura icon text (which uses ApplyIconTextFont) are intentionally excluded.
+-- Hung on `ns` (not a new file-scope local) because this file is at the Lua 5.1
+-- 200-local cap. These FontStrings live on frames we create, so this is taint-safe.
+ns._noSlugFonts = ns._noSlugFonts or setmetatable({}, { __mode = "k" })
 local function GetOutline()
     return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
 end
@@ -911,6 +928,11 @@ local function ApplyFont(fs, size)
     if not (fs and fs.SetFont) then return end
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     local outline = GetOutline()
+    -- Drop the slug token for registered Name/Health FontStrings when the
+    -- per-module "Disable Slug Outline" toggle is on (aura text never registers).
+    if ns._noSlugFonts[fs] and EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("raidFrames") then
+        outline = EllesmereUI.StripSlugFlag(outline)
+    end
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outline == "" and GetUseShadow()) end
     fs:SetFont(fontPath, size, outline)
 end
@@ -1638,6 +1660,18 @@ local function CreateAbsorbBar(button, healthBar)
     topBar:SetFrameLevel(healthBar:GetFrameLevel() + 3)
     topBar:Hide()
 
+    -- Heal Absorb Bar: a second strip (mirrors the Absorb Bar) showing the
+    -- heal-absorb amount. Always created hidden; UpdateAbsorb drives it.
+    local healTopBar = CreateFrame("StatusBar", nil, button)
+    healTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    healTopBar:SetStatusBarColor(200/255, 29/255, 29/255, 1)
+    healTopBar:SetReverseFill(true)
+    healTopBar:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 0)
+    healTopBar:SetPoint("BOTTOMRIGHT", button, "TOPRIGHT", 0, 0)
+    healTopBar:SetHeight(4)
+    healTopBar:SetFrameLevel(healthBar:GetFrameLevel() + 3)
+    healTopBar:Hide()
+
     -- Forward-declared so ReanchorAbsorbToFill (defined just below) captures
     -- these as upvalues. The bars are created further down; until then the
     -- nil guards inside ReanchorAbsorbToFill simply skip them. Without this,
@@ -1806,6 +1840,7 @@ local function CreateAbsorbBar(button, healthBar)
     -- Store references in FFD (never on the Blizzard-owned button)
     backfillBar._forward      = forwardBar
     backfillBar._topBar       = topBar
+    backfillBar._healTopBar   = healTopBar
     backfillBar._healAbsorb   = healAbsorbBar
     backfillBar._healPred     = healPredBar
     backfillBar._reducedMax   = reducedBar
@@ -1819,6 +1854,63 @@ local function CreateAbsorbBar(button, healthBar)
     d.absorbBar = backfillBar
     d.ReanchorAbsorbToFill = ReanchorAbsorbToFill
     return backfillBar
+end
+
+-------------------------------------------------------------------------------
+--  Absorb Bar position (replaces the old on/off toggle)
+--  Positions: none / aboveRight / aboveLeft / topRight / topLeft.
+--  Legacy: the old boolean (absorbBarEnabled) maps to "aboveRight" when on and
+--  "none" when off. The new key (absorbBarPosition) takes precedence once the
+--  user picks one, so existing settings carry over with no migration.
+-------------------------------------------------------------------------------
+-- Absorb / Heal Absorb Bar position resolvers + strip layout. Defined on ns (no
+-- new file-scope locals -- this chunk is at Lua's 200-local cap).
+-- Legacy: the old boolean (absorbBarEnabled) maps to "aboveRight" when on and
+-- "none" when off; absorbBarPosition takes precedence once the user picks one.
+ns.GetAbsorbBarPosition = function(s)
+    local p = s and s.absorbBarPosition
+    if p then return p end
+    return (s and s.absorbBarEnabled) and "aboveRight" or "none"
+end
+ns.GetHealAbsorbBarPosition = function(s)
+    return (s and s.healAbsorbBarPosition) or "none"
+end
+
+-- Anchor/orient a strip bar (Absorb Bar or Heal Absorb Bar) for a position.
+-- "above*" sit on top of the frame (bottom edge on the button's top edge);
+-- "top*" sit inside at the top of the health bar, drawn just above the
+-- absorb-style texture. "belowAbsorb" (heal bar only) sits flush below the
+-- Absorb Bar's bottom edge, derived from the Absorb Bar's POSITION -- not its
+-- live visibility, so it never shifts up. "*Right" fills from the right edge.
+ns.ApplyStripBarLayout = function(stripBar, ab, button, position, height, absorbPos, absorbHeight)
+    if not stripBar then return end
+    local hp = ab._hpBar or button
+    stripBar:ClearAllPoints()
+    stripBar:SetHeight(PixelSnap(height or 4))
+    if position == "belowAbsorb" then
+        absorbPos = absorbPos or "none"
+        -- "above" absorb bottom = frame top edge (yOff 0); "top" (inside) absorb
+        -- bottom = one absorb-height below the top edge.
+        local yOff = 0
+        if absorbPos == "topRight" or absorbPos == "topLeft" then
+            yOff = -PixelSnap(absorbHeight or 4)
+        end
+        -- Match the Absorb Bar's fill direction so the pair lines up.
+        stripBar:SetReverseFill(absorbPos ~= "aboveLeft" and absorbPos ~= "topLeft")
+        stripBar:SetPoint("TOPLEFT", button, "TOPLEFT", 0, yOff)
+        stripBar:SetPoint("TOPRIGHT", button, "TOPRIGHT", 0, yOff)
+        stripBar:SetFrameLevel(ab:GetFrameLevel() + 1)
+    elseif position == "topRight" or position == "topLeft" then
+        stripBar:SetReverseFill(position == "topRight")
+        stripBar:SetPoint("TOPLEFT", hp, "TOPLEFT", 0, 0)
+        stripBar:SetPoint("TOPRIGHT", hp, "TOPRIGHT", 0, 0)
+        stripBar:SetFrameLevel(ab:GetFrameLevel() + 1)
+    else
+        stripBar:SetReverseFill(position == "aboveRight")
+        stripBar:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 0)
+        stripBar:SetPoint("BOTTOMRIGHT", button, "TOPRIGHT", 0, 0)
+        if ab._hpBar then stripBar:SetFrameLevel(ab._hpBar:GetFrameLevel() + 3) end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -1836,19 +1928,24 @@ local function UpdateAbsorb(button, unit)
 
     local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     local topBar = ab._topBar
-    local barOn = topBar and s.absorbBarEnabled
+    local barPos = ns.GetAbsorbBarPosition(s)
+    local barOn = topBar and barPos ~= "none"
+    local healTopBar = ab._healTopBar
+    local healBarPos = ns.GetHealAbsorbBarPosition(s)
+    local healBarOn = healTopBar and healBarPos ~= "none"
     local styleOn = s.absorbStyle and s.absorbStyle ~= "none"
     -- Heal absorb is INDEPENDENT of the shield absorb (matches Unit Frames):
     -- it renders whenever its own style is on, so keep going if it is enabled
     -- even when both the shield style and the Absorb Bar are off.
     local healOn = (s.healAbsorbStyle or "clean") ~= "none"
-    if not styleOn and not barOn and not healOn then
+    if not styleOn and not barOn and not healOn and not healBarOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
         if fw and fw._bfSpark then fw._bfSpark:Hide() end
         if ha then ha:Hide() end
         if topBar then topBar:Hide() end
+        if healTopBar then healTopBar:Hide() end
         return
     end
 
@@ -1872,13 +1969,42 @@ local function UpdateAbsorb(button, unit)
     if topBar then
         if barOn then
             local bc = s.absorbBarColor or { r = 1, g = 1, b = 1 }
-            topBar:SetHeight(PixelSnap(s.absorbBarHeight or 4))
-            topBar:SetStatusBarColor(bc.r, bc.g, bc.b, 1)
+            local bh = s.absorbBarHeight or 4
+            -- Re-layout only when position/height changes (no per-update SetPoint churn).
+            if topBar._lpPos ~= barPos or topBar._lpH ~= bh then
+                topBar._lpPos = barPos; topBar._lpH = bh
+                ns.ApplyStripBarLayout(topBar, ab, button, barPos, bh)
+            end
+            topBar:SetStatusBarColor(bc.r, bc.g, bc.b, bc.a or 1)
             topBar:SetMinMaxValues(0, maxHealth)
             topBar:SetValue(absorbAmt)
             topBar:Show()
         else
             topBar:Hide()
+        end
+    end
+
+    -- Heal Absorb Bar: solid strip showing the heal-absorb amount, independent of
+    -- the heal-absorb overlay style (mirrors the Absorb Bar). "Below Absorb Bar"
+    -- positions it relative to the Absorb Bar's slot.
+    if healTopBar then
+        if healBarOn then
+            local hbc = s.healAbsorbBarColor or { r = 200/255, g = 29/255, b = 29/255 }
+            local hbh = s.healAbsorbBarHeight or 4
+            local abh = s.absorbBarHeight or 4
+            -- Re-layout only when its or the Absorb Bar's position/height changes.
+            if healTopBar._lpPos ~= healBarPos or healTopBar._lpH ~= hbh
+               or healTopBar._lpAP ~= barPos or healTopBar._lpAH ~= abh then
+                healTopBar._lpPos = healBarPos; healTopBar._lpH = hbh
+                healTopBar._lpAP = barPos; healTopBar._lpAH = abh
+                ns.ApplyStripBarLayout(healTopBar, ab, button, healBarPos, hbh, barPos, abh)
+            end
+            healTopBar:SetStatusBarColor(hbc.r, hbc.g, hbc.b, hbc.a or 1)
+            healTopBar:SetMinMaxValues(0, maxHealth)
+            healTopBar:SetValue((UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(unit)) or 0)
+            healTopBar:Show()
+        else
+            healTopBar:Hide()
         end
     end
 
@@ -2275,6 +2401,7 @@ local function StyleButton(button)
 
     -- Name text
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
+    ns._noSlugFonts[nameFS] = true
     ApplyFont(nameFS, s.nameSize or 10)
     nameFS:SetJustifyH("CENTER")
     nameFS:SetWordWrap(false)
@@ -2282,6 +2409,7 @@ local function StyleButton(button)
 
     -- Health deficit text
     local healthFS = textCarrier:CreateFontString(nil, "OVERLAY")
+    ns._noSlugFonts[healthFS] = true
     ApplyFont(healthFS, s.healthTextSize or 9)
     healthFS:SetTextColor(1, 1, 1, 0.9)
     d.healthText = healthFS
@@ -2377,18 +2505,12 @@ local function StyleButton(button)
 
     local function AnchorRoleIcon()
         roleIcon:ClearAllPoints()
-        local pos = s.roleIconPosition or "bottomleft"
-        local ox = s.roleIconOffsetX or 0
-        local oy = s.roleIconOffsetY or 0
-        if pos == "topright" then
-            roleIcon:SetPoint("TOPRIGHT", health, "TOPRIGHT", ox, oy)
-        elseif pos == "bottomleft" then
-            roleIcon:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", ox, oy)
-        elseif pos == "bottomright" then
-            roleIcon:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", ox, oy)
-        else -- topleft
-            roleIcon:SetPoint("TOPLEFT", health, "TOPLEFT", ox, oy)
-        end
+        -- The position key (topleft/top/topright/left/center/right/bottomleft/
+        -- bottom/bottomright) uppercases directly to a valid anchor point, so all
+        -- 9 positions resolve like the Marker Position dropdown. The 4 corners
+        -- produce identical anchors to the previous explicit branches.
+        local pos = (s.roleIconPosition or "bottomleft"):upper()
+        roleIcon:SetPoint(pos, health, pos, s.roleIconOffsetX or 0, s.roleIconOffsetY or 0)
     end
     AnchorRoleIcon()
     d.AnchorRoleIcon = AnchorRoleIcon
@@ -5016,9 +5138,11 @@ FB.EnsureBuilt = function()
         carrier:SetAllPoints(health)
         carrier:SetFrameLevel(b:GetFrameLevel() + 12)
         local nameFS = carrier:CreateFontString(nil, "OVERLAY")
+        ns._noSlugFonts[nameFS] = true
         nameFS:SetWordWrap(false)
         b._nameText = nameFS
         local healthFS = carrier:CreateFontString(nil, "OVERLAY")
+        ns._noSlugFonts[healthFS] = true
         healthFS:SetWordWrap(false)
         b._healthText = healthFS
 
@@ -7992,7 +8116,8 @@ do
         },
         absorbs = {
             "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode",
-            "absorbBarEnabled", "absorbBarHeight", "absorbBarColor",
+            "absorbBarEnabled", "absorbBarPosition", "absorbBarHeight", "absorbBarColor",
+            "healAbsorbBarPosition", "healAbsorbBarHeight", "healAbsorbBarColor",
             "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
             "healAbsorbBgOpacity",
         },
@@ -10038,6 +10163,21 @@ local function CreatePreviewFrame(index)
         absorbBar._topBar = tb
     end
 
+    -- Heal Absorb Bar (preview): mirrors the Absorb Bar strip above.
+    do
+        local thb = CreateFrame("StatusBar", nil, f)
+        thb:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        thb:SetStatusBarColor(200/255, 29/255, 29/255, 1)
+        thb:SetReverseFill(true)
+        thb:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 0)
+        thb:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0, 0)
+        thb:SetHeight(4)
+        thb:SetFrameLevel(health:GetFrameLevel() + 3)
+        thb:SetMinMaxValues(0, 100)
+        thb:Hide()
+        absorbBar._healTopBar = thb
+    end
+
     -- Power bar (anchored to frame bottom for pixel alignment)
     local power
     if powerH > 0 then
@@ -10176,6 +10316,7 @@ local function CreatePreviewFrame(index)
 
     -- Name text (anchoring done by ApplyPreviewData on every refresh)
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
+    ns._noSlugFonts[nameFS] = true
     ApplyFont(nameFS, s.nameSize or 10)
     nameFS:SetJustifyH("CENTER")
     nameFS:SetWordWrap(false)
@@ -10183,6 +10324,7 @@ local function CreatePreviewFrame(index)
 
     -- Health text
     local healthFS = textCarrier:CreateFontString(nil, "OVERLAY")
+    ns._noSlugFonts[healthFS] = true
     ApplyFont(healthFS, s.healthTextSize or 9)
     healthFS:SetJustifyH("CENTER")
     healthFS:SetPoint("CENTER", health, "CENTER", 0, 0)
@@ -10624,7 +10766,8 @@ local function ApplyPreviewData(f, index)
         -- shield styles (indicators / test mode / absorbs eyeball).
         local topBar = f._absorbBar._topBar
         if topBar then
-            local barOn = s.absorbBarEnabled
+            local barPos = ns.GetAbsorbBarPosition(s)
+            local barOn = barPos ~= "none"
             if ns._indicatorsVisible then barOn = false
             elseif ns._testMode then
                 if ns._testAbsorbs == false then barOn = false end
@@ -10632,12 +10775,36 @@ local function ApplyPreviewData(f, index)
             end
             if barOn and absorbAmt > 0 then
                 local bc = s.absorbBarColor or { r = 1, g = 1, b = 1 }
-                topBar:SetHeight(PixelSnap(s.absorbBarHeight or 4))
-                topBar:SetStatusBarColor(bc.r, bc.g, bc.b, 1)
+                ns.ApplyStripBarLayout(topBar, f._absorbBar, f, barPos, s.absorbBarHeight or 4)
+                topBar:SetStatusBarColor(bc.r, bc.g, bc.b, bc.a or 1)
                 topBar:SetValue(absorbAmt)
                 topBar:Show()
             else
                 topBar:Hide()
+            end
+        end
+        -- Heal Absorb Bar preview (mirrors the Absorb Bar; gated on the heal
+        -- absorb preview toggles).
+        do
+            local healTopBarPv = f._absorbBar._healTopBar
+            if healTopBarPv then
+                local healBarPos = ns.GetHealAbsorbBarPosition(s)
+                local healBarOn = healBarPos ~= "none"
+                if ns._indicatorsVisible then healBarOn = false
+                elseif ns._testMode then
+                    if ns._testHealAbsorbs == false then healBarOn = false end
+                elseif not ns._absorbsPreviewVisible then healBarOn = false
+                end
+                local haAmtPv = ns.previewHealAbsorbValues[index] or 0
+                if healBarOn and haAmtPv > 0 then
+                    local hbc = s.healAbsorbBarColor or { r = 200/255, g = 29/255, b = 29/255 }
+                    ns.ApplyStripBarLayout(healTopBarPv, f._absorbBar, f, healBarPos, s.healAbsorbBarHeight or 4, ns.GetAbsorbBarPosition(s), s.absorbBarHeight or 4)
+                    healTopBarPv:SetStatusBarColor(hbc.r, hbc.g, hbc.b, hbc.a or 1)
+                    healTopBarPv:SetValue(haAmtPv)
+                    healTopBarPv:Show()
+                else
+                    healTopBarPv:Hide()
+                end
             end
         end
         if absStyle ~= "none" and absorbAmt > 0 then
@@ -11468,18 +11635,8 @@ local function ApplyPreviewData(f, index)
                 local riSz = PixelSnap(s.roleIconSize or 14)
                 f._roleIcon:SetSize(riSz, riSz)
                 f._roleIcon:ClearAllPoints()
-                local pos = s.roleIconPosition or "bottomleft"
-                local ox = s.roleIconOffsetX or 0
-                local oy = s.roleIconOffsetY or 0
-                if pos == "topright" then
-                    f._roleIcon:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", ox, oy)
-                elseif pos == "bottomleft" then
-                    f._roleIcon:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", ox, oy)
-                elseif pos == "bottomright" then
-                    f._roleIcon:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", ox, oy)
-                else
-                    f._roleIcon:SetPoint("TOPLEFT", f._health, "TOPLEFT", ox, oy)
-                end
+                local pos = (s.roleIconPosition or "bottomleft"):upper()
+                f._roleIcon:SetPoint(pos, f._health, pos, s.roleIconOffsetX or 0, s.roleIconOffsetY or 0)
                 f._roleIcon:Show()
             else
                 f._roleIcon:Hide()
@@ -12249,6 +12406,7 @@ ns._ShowSizePreview = function(tier)
 
             -- Name text
             local nameFS = health:CreateFontString(nil, "OVERLAY")
+            ns._noSlugFonts[nameFS] = true
             nameFS:SetJustifyH("CENTER")
             nameFS:SetWordWrap(false)
             f._nameText = nameFS
@@ -12322,8 +12480,14 @@ ns._ShowSizePreview = function(tier)
                 f._nameText:Hide()
             else
             local name = NAMES[((i - 1) % #NAMES) + 1]
-            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._nameText, GetOutline() == "" and GetUseShadow()) end
-            f._nameText:SetFont(fontPath, nameSize, GetOutline())
+            -- Size-preview name bypasses ApplyFont, so strip the slug inline here
+            -- (top-name-bar below is intentionally left with its slug).
+            local nameOutline = GetOutline()
+            if ns._noSlugFonts[f._nameText] and EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("raidFrames") then
+                nameOutline = EllesmereUI.StripSlugFlag(nameOutline)
+            end
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._nameText, nameOutline == "" and GetUseShadow()) end
+            f._nameText:SetFont(fontPath, nameSize, nameOutline)
             f._nameText:SetText(ns.CapName(name))
             f._nameText:SetWidth(bw * 0.75)
             -- Name color

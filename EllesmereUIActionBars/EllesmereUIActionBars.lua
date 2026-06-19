@@ -5370,9 +5370,9 @@ end
 --    PetBar:           Hide during pet battle.  Only show when the player has
 --                      a pet and is not in a vehicle/override/possess state.
 -------------------------------------------------------------------------------
-local function BuildVisibilityString(info, s)
+local function BuildVisibilityString(info, s, visOverride)
     local key = info.key
-    local vis = s.barVisibility or "always"
+    local vis = visOverride or s.barVisibility or "always"
 
     -- Build visibility-option hide clauses that can be expressed as macro
     -- conditionals. These run inside the secure state driver so they work
@@ -5703,6 +5703,14 @@ function EAB:RefreshRuntimeVisibility()
         if frame then
             local vis = s.barVisibility or "always"
             local isHidden = (vis == "never") or s.alwaysHidden
+            -- Runtime "Toggle Action Bar" override (keybind-driven, NOT persisted):
+            -- flips a bar between always-shown and hidden without touching the saved
+            -- barVisibility. Only ever set for bars whose saved mode is always/never.
+            local _visToggleOv = EAB._visOverride and EAB._visOverride[key]
+            if _visToggleOv then
+                vis = _visToggleOv
+                isHidden = (_visToggleOv == "never")
+            end
             if ShouldQuickKeybindSurfaceBar(s) and barFrames[key] and frame == barFrames[key] then
                 if not InCombatLockdown() then
                     RegisterAttributeDriver(frame, "state-visibility", "show")
@@ -5735,7 +5743,11 @@ function EAB:RefreshRuntimeVisibility()
             else
                 if not info.visibilityOnly and not InCombatLockdown() then
                     local newStr
-                    if EllesmereUI.CheckVisibilityOptionsNonMacro and EllesmereUI.CheckVisibilityOptionsNonMacro(s) then
+                    if _visToggleOv == "always" then
+                        -- Forced-show via the toggle keybind: ignore the saved mode
+                        -- (which may be "never") and any non-macro hide options.
+                        newStr = BuildVisibilityString(info, s, "always")
+                    elseif EllesmereUI.CheckVisibilityOptionsNonMacro and EllesmereUI.CheckVisibilityOptionsNonMacro(s) then
                         newStr = "hide"
                     else
                         newStr = BuildVisibilityString(info, s)
@@ -5773,6 +5785,101 @@ function EAB:RefreshRuntimeVisibility()
     end
 end
 
+
+-------------------------------------------------------------------------------
+--  "Toggle Action Bar" visibility keybind
+--  A per-bar keybind that flips a bar between always-shown and hidden at RUNTIME
+--  only -- the saved barVisibility is never written, so the toggle does not
+--  persist across sessions (a /reload restores the saved state). Only meaningful
+--  when the bar's saved visibility is "always" or "never", and only out of combat
+--  (changing a secure frame's state-visibility driver is combat-blocked).
+--  The keybind itself IS saved per-bar (s.toggleVisKey) and re-applied on login.
+--
+--  Bindings are keyed by the PRESSED KEY, not the bar, so a single key assigned
+--  to several bars toggles them all as a synced group: one press hides every
+--  bound bar that is currently shown, the next press shows them all.
+-------------------------------------------------------------------------------
+
+-- Toggle every bar bound to `key` as a group. If any participant is currently
+-- shown, hide them all; otherwise show them all. Only bars whose saved mode is
+-- "always"/"never" participate. Runtime-only -- never writes barVisibility.
+function EAB:ToggleVisKey(key)
+    if InCombatLockdown() or not key then return end
+    local participants, anyShown = {}, false
+    for _, info in ipairs(ALL_BARS) do
+        local s = self.db.profile.bars[info.key]
+        if s and s.toggleVisKey == key then
+            local saved = s.barVisibility or "always"
+            if saved == "always" or saved == "never" then
+                participants[#participants + 1] = info.key
+                local eff = (self._visOverride and self._visOverride[info.key]) or saved
+                if eff == "always" then anyShown = true end
+            end
+        end
+    end
+    if #participants == 0 then return end
+    local target = anyShown and "never" or "always"
+    self._visOverride = self._visOverride or {}
+    for _, bk in ipairs(participants) do
+        self._visOverride[bk] = target
+    end
+    self:RefreshRuntimeVisibility()
+end
+
+-- Drop a bar's runtime toggle override so its saved visibility takes effect
+-- again (called when the visibility dropdown changes in options).
+function EAB:ClearVisToggleOverride(barKey)
+    if self._visOverride then self._visOverride[barKey] = nil end
+end
+
+-- Rebuild override bindings from the saved per-bar keys: one pooled button per
+-- UNIQUE key (so a key shared by several bars drives all of them). A key is only
+-- bound if at least one bar using it has a saved always/never mode, so a shared
+-- key never dead-overrides the player's normal binding. Binding APIs are
+-- combat-protected, so defer to PLAYER_REGEN_ENABLED in combat.
+function EAB:RebuildVisToggleBindings()
+    if InCombatLockdown() then
+        if not self._visToggleCombatFrame then
+            local f = CreateFrame("Frame")
+            f:SetScript("OnEvent", function(self2)
+                self2:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                EAB:RebuildVisToggleBindings()
+            end)
+            self._visToggleCombatFrame = f
+        end
+        self._visToggleCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    -- Unique keys that have at least one participating (always/never) bar.
+    local keys, seen = {}, {}
+    for _, info in ipairs(ALL_BARS) do
+        local s = self.db.profile.bars[info.key]
+        local k = s and s.toggleVisKey
+        if k and k ~= "" and not seen[k] then
+            local saved = s.barVisibility or "always"
+            if saved == "always" or saved == "never" then
+                seen[k] = true
+                keys[#keys + 1] = k
+            end
+        end
+    end
+    -- Clear every pooled button's binding, then (re)assign one per unique key.
+    self._visToggleBtnPool = self._visToggleBtnPool or {}
+    for _, btn in ipairs(self._visToggleBtnPool) do
+        ClearOverrideBindings(btn)
+    end
+    for i, k in ipairs(keys) do
+        local btn = self._visToggleBtnPool[i]
+        if not btn then
+            btn = CreateFrame("Button", "EUIVisToggleKeyBtn" .. i, UIParent)
+            btn:Hide()
+            self._visToggleBtnPool[i] = btn
+        end
+        local thisKey = k
+        btn:SetScript("OnClick", function() EAB:ToggleVisKey(thisKey) end)
+        SetOverrideBindingClick(btn, true, k, btn:GetName())
+    end
+end
 
 function EAB:ApplySmartNumIcons(barKey)
     -- No-op: bar frame size is always determined by the user's numIcons
@@ -8110,6 +8217,9 @@ function EAB:FinishSetup()
     -- Set override keybindings immediately at load time, before combat
     -- state is restored. This ensures keybinds work on /reload in combat.
     UpdateKeybinds()
+
+    -- Re-apply saved "Toggle Action Bar" visibility keybinds.
+    EAB:RebuildVisToggleBindings()
 
     -- Initialize the showgrid monitor on ActionButton1 so that when
     -- Blizzard changes its showgrid attribute (e.g. during combat spell

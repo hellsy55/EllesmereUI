@@ -36,6 +36,16 @@ do
             end
         end
     end
+
+    -- Clean resolver: dungeon display name -> teleport spellID. Returns a plain
+    -- integer literal (never a secret value) or nil. Used by the LFG teleport
+    -- prompt to map an accepted dungeon's name to its teleport spell without
+    -- touching any secret LFG field. Strips a trailing parenthetical suffix.
+    EllesmereUI.ResolveTeleportSpellByName = function(displayName)
+        if type(displayName) ~= "string" then return nil end
+        local n = displayName:lower():gsub("%s*%b()%s*$", "")
+        return TELEPORT_BY_NAME[n]
+    end
 end
 local guildKeys = {}  -- [playerName] = { dungeon = mapID, keyLevel = N, rating = N }
 
