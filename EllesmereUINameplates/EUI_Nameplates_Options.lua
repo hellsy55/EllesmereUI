@@ -1256,6 +1256,7 @@ initFrame:SetScript("OnEvent", function(self)
             else
                 PlaceHealthInBar(slotCenter, "CENTER", "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             end
+            if DBVal("hideEnemyNameWhileCasting") == true then nameFS:Hide() end
 
             -- Health bar color: always uses "enemies in combat" color
             local eic = (DB() and DB().enemyInCombat) or defaults.enemyInCombat
@@ -4891,6 +4892,17 @@ initFrame:SetScript("OnEvent", function(self)
                 tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
             end)
         end
+
+        _, h = W:DualRow(parent, y,
+            { type="spacer" },
+            { type="toggle", text="Hide Enemy Name While Casting",
+              tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
+              getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
+              setValue=function(v)
+                DB().hideEnemyNameWhileCasting = v
+                ns.RefreshAllSettings()
+                UpdatePreview()
+              end });  y = y - h
 
         -- Row 4: Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
         local castBgRow

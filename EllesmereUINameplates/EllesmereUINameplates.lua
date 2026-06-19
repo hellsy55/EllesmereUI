@@ -277,6 +277,7 @@ local defaults = {
     rareEliteIconSize = 20,
     castBarHeight = 17,
     castOverlayEnabled = false,
+    hideEnemyNameWhileCasting = false,
     castNameSize = 10,
     castNameColor = { r = 1, g = 1, b = 1 },
     castNameOffsetX = 0,
@@ -686,6 +687,10 @@ end
 function ns.GetCastIconFullSize()
     if p and p.castIconFullSize ~= nil then return p.castIconFullSize end
     return defaults.castIconFullSize
+end
+local function GetHideEnemyNameWhileCasting()
+    if p and p.hideEnemyNameWhileCasting ~= nil then return p.hideEnemyNameWhileCasting end
+    return defaults.hideEnemyNameWhileCasting
 end
 
 -- Position + size the cast bar within `footprintW`, accounting for the
@@ -5012,6 +5017,10 @@ function NameplateFrame:UpdateNameWidth()
         PP.Width(self.name, math.max(barW, 20))
     end
 end
+function NameplateFrame:ApplyNameVisibility()
+    local hasNameSlot = FindSlotForElement("enemyName") ~= nil
+    self.name:SetShown(hasNameSlot and not (GetHideEnemyNameWhileCasting() and self.cast:IsShown()))
+end
 function NameplateFrame:RefreshNamePosition()
     local nameSlot = FindSlotForElement("enemyName")
     local nameYOff = GetNameYOffset()
@@ -5050,6 +5059,7 @@ function NameplateFrame:RefreshNamePosition()
         -- Name not assigned to any slot
         self.name:Hide()
     end
+    self:ApplyNameVisibility()
     self:UpdateAuras()
     self:UpdateClassification()
 end
@@ -5890,6 +5900,7 @@ end
 function NameplateFrame:UpdateCast()
     if not self.unit then
         self.cast:Hide()
+        self:ApplyNameVisibility()
         return
     end
     local name, _, texture, _, _, _, _, kickProtected, castSpellID = UnitCastingInfo(self.unit)
@@ -5903,6 +5914,7 @@ function NameplateFrame:UpdateCast()
         if not self._interrupted then
             self.cast:Hide()
         end
+        self:ApplyNameVisibility()
         self.castTimer:SetText("")
         if self.isCasting then
             if self._castFallback then
@@ -5941,6 +5953,7 @@ function NameplateFrame:UpdateCast()
 
     if isFullSetup then
         self.cast:Show()
+        self:ApplyNameVisibility()
         local _isv = issecretvalue
         local texClean = texture ~= nil and not (_isv and _isv(texture))
         if texClean then
@@ -6406,6 +6419,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     if p and p.interruptedFlashEnabled ~= nil then flashOn = p.interruptedFlashEnabled end
     if not flashOn then
         self.cast:Hide()
+        self:ApplyNameVisibility()
         return
     end
 
@@ -6468,6 +6482,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     self.castShieldFrame:SetAlpha(1)
     self.castBarOverlay:SetAlpha(0)
     self.cast:Show()
+    self:ApplyNameVisibility()
 
     if self._interruptTimer then
         self._interruptTimer:Cancel()
@@ -6479,6 +6494,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
             self._interrupted = nil
             self._interruptTimer = nil
             self.cast:Hide()
+            self:ApplyNameVisibility()
         end
     end)
 end
@@ -6679,6 +6695,7 @@ function NameplateFrame:UNIT_SPELLCAST_CHANNEL_STOP()
     if not self._interrupted then
         self.cast:Hide()
     end
+    self:ApplyNameVisibility()
     self.castTimer:SetText("")
     if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
         UpdateClassPowerOnPlate(self)
