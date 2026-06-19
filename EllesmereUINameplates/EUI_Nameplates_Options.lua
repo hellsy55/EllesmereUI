@@ -4893,17 +4893,6 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        _, h = W:DualRow(parent, y,
-            { type="spacer" },
-            { type="toggle", text="Hide Enemy Name While Casting",
-              tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
-              getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
-              setValue=function(v)
-                DB().hideEnemyNameWhileCasting = v
-                ns.RefreshAllSettings()
-                UpdatePreview()
-              end });  y = y - h
-
         -- Row 4: Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
         local castBgRow
         castBgRow, h = W:DualRow(parent, y,
@@ -7530,6 +7519,17 @@ initFrame:SetScript("OnEvent", function(self)
                     swatch:EnableMouse(not flashOff())
                 end
             end
+
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Hide Enemy Name While Casting",
+                  tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
+                  getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
+                  setValue=function(v)
+                    DB().hideEnemyNameWhileCasting = v
+                    ns.RefreshAllSettings()
+                    UpdatePreview()
+                  end },
+                { type = "spacer" });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
