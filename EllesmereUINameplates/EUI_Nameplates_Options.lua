@@ -7542,6 +7542,16 @@ initFrame:SetScript("OnEvent", function(self)
                       DB().interruptedFlashShowSource = v
                       RefreshAllPlates()
                   end });  y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Show Cast Lockout as Crowd Control",
+                  tooltip = "Show successful interrupt lockouts in the crowd-control icon slot.",
+                  getValue = function() return DBVal("showCastLockoutAsCrowdControl") == true end,
+                  setValue = function(v)
+                      DB().showCastLockoutAsCrowdControl = v
+                      RefreshAllAuras()
+                  end },
+                { type = "label", text = "" });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
