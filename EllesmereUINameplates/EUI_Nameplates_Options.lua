@@ -1385,11 +1385,26 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Aura text settings (unified)
-            local auraDurSz = DBVal("auraDurationTextSize") or defaults.auraDurationTextSize
-            local auraDurC = (DB() and DB().auraDurationTextColor) or defaults.auraDurationTextColor
-            local auraDurX = DBVal("auraDurationTextX") or defaults.auraDurationTextX
-            local auraDurY = DBVal("auraDurationTextY") or defaults.auraDurationTextY
+            local function AuraDurationVal(kind, suffix)
+                local db = DB()
+                local key = kind .. "DurationText" .. suffix
+                local oldKey = "auraDurationText" .. suffix
+                if db and db[key] ~= nil then return db[key] end
+                if db and db[oldKey] ~= nil then return db[oldKey] end
+                return defaults[oldKey]
+            end
+            local debuffDurSz = AuraDurationVal("debuff", "Size")
+            local debuffDurX = AuraDurationVal("debuff", "X")
+            local debuffDurY = AuraDurationVal("debuff", "Y")
+            local debuffDurC = AuraDurationVal("debuff", "Color")
+            local buffDurSz = AuraDurationVal("buff", "Size")
+            local buffDurX = AuraDurationVal("buff", "X")
+            local buffDurY = AuraDurationVal("buff", "Y")
+            local buffDurC = AuraDurationVal("buff", "Color")
+            local ccDurSz = AuraDurationVal("cc", "Size")
+            local ccDurX = AuraDurationVal("cc", "X")
+            local ccDurY = AuraDurationVal("cc", "Y")
+            local ccDurC = AuraDurationVal("cc", "Color")
             local auraStackSz = DBVal("auraStackTextSize") or defaults.auraStackTextSize
             local auraStackC = (DB() and DB().auraStackTextColor) or defaults.auraStackTextColor
             local auraStackX = DBVal("auraStackTextX") or defaults.auraStackTextX
@@ -1401,29 +1416,29 @@ initFrame:SetScript("OnEvent", function(self)
             local ccTPos     = DBVal("ccTimerPosition")     or atPos
 
             -- Helper: apply timer position to a duration text fontstring
-            local function ApplyTimerPos(durText, auraFrame, pos)
+            local function ApplyTimerPos(durText, auraFrame, pos, size, x, y, color)
                 if pos == "none" then
                     durText:Hide()
                     return
                 end
                 durText:Show()
-                durText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
-                durText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
+                durText:SetFont(fontPath, size, "OUTLINE, SLUG")
+                durText:SetTextColor(color.r, color.g, color.b, 1)
                 durText:ClearAllPoints()
                 if pos == "center" then
-                    durText:SetPoint("CENTER", auraFrame, "CENTER", auraDurX, auraDurY)
+                    durText:SetPoint("CENTER", auraFrame, "CENTER", x, y)
                     durText:SetJustifyH("CENTER")
                 elseif pos == "topright" then
-                    durText:SetPoint("TOPRIGHT", auraFrame, "TOPRIGHT", 3 + auraDurX, 4 + auraDurY)
+                    durText:SetPoint("TOPRIGHT", auraFrame, "TOPRIGHT", 3 + x, 4 + y)
                     durText:SetJustifyH("RIGHT")
                 elseif pos == "bottomleft" then
-                    durText:SetPoint("BOTTOMLEFT", auraFrame, "BOTTOMLEFT", -3 + auraDurX, -4 + auraDurY)
+                    durText:SetPoint("BOTTOMLEFT", auraFrame, "BOTTOMLEFT", -3 + x, -4 + y)
                     durText:SetJustifyH("LEFT")
                 elseif pos == "bottomright" then
-                    durText:SetPoint("BOTTOMRIGHT", auraFrame, "BOTTOMRIGHT", 3 + auraDurX, -4 + auraDurY)
+                    durText:SetPoint("BOTTOMRIGHT", auraFrame, "BOTTOMRIGHT", 3 + x, -4 + y)
                     durText:SetJustifyH("RIGHT")
                 else
-                    durText:SetPoint("TOPLEFT", auraFrame, "TOPLEFT", -3 + auraDurX, 4 + auraDurY)
+                    durText:SetPoint("TOPLEFT", auraFrame, "TOPLEFT", -3 + x, 4 + y)
                     durText:SetJustifyH("LEFT")
                 end
             end
@@ -1480,9 +1495,9 @@ initFrame:SetScript("OnEvent", function(self)
                     debuffs[i]:Show()
                     debuffs[i]:SetSize(Snap(debuffSz), Snap(debuffH))
                     ns.SetAuraIconCrop(debuffs[i].icon, debuffCrop, debuffSz, debuffH)
-                    debuffs[i].durationText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
-                    debuffs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
-                    ApplyTimerPos(debuffs[i].durationText, debuffs[i], debuffTPos)
+                    debuffs[i].durationText:SetFont(fontPath, debuffDurSz, "OUTLINE, SLUG")
+                    debuffs[i].durationText:SetTextColor(debuffDurC.r, debuffDurC.g, debuffDurC.b, 1)
+                    ApplyTimerPos(debuffs[i].durationText, debuffs[i], debuffTPos, debuffDurSz, debuffDurX, debuffDurY, debuffDurC)
                     ApplyStackPos(debuffs[i].stackText, debuffs[i])
                     PlaceInSlot(debuffs[i], debuffSlotVal, i, PV_CONST.DEBUFF_COUNT, debuffSz, debuffH, debuffSpacing, debuffXOff, debuffYOff)
                 end
@@ -1499,9 +1514,9 @@ initFrame:SetScript("OnEvent", function(self)
                     buffs[i]:Show()
                     buffs[i]:SetSize(Snap(buffSz), Snap(buffH))
                     ns.SetAuraIconCrop(buffs[i].icon, buffCrop, buffSz, buffH)
-                    buffs[i].durationText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
-                    buffs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
-                    ApplyTimerPos(buffs[i].durationText, buffs[i], buffTPos)
+                    buffs[i].durationText:SetFont(fontPath, buffDurSz, "OUTLINE, SLUG")
+                    buffs[i].durationText:SetTextColor(buffDurC.r, buffDurC.g, buffDurC.b, 1)
+                    ApplyTimerPos(buffs[i].durationText, buffs[i], buffTPos, buffDurSz, buffDurX, buffDurY, buffDurC)
                     PlaceInSlot(buffs[i], buffSlotVal, i, PV_CONST.BUFF_COUNT, buffSz, buffH, buffSpacing, buffXOff, buffYOff)
                     -- Dispel glow preview (always stop first to pick up color/style changes)
                     if showDispelGlowPreview and DBVal("dispelGlow") == true then
@@ -1523,9 +1538,9 @@ initFrame:SetScript("OnEvent", function(self)
                     ccs[i]:Show()
                     ccs[i]:SetSize(Snap(ccSz), Snap(ccH))
                     ns.SetAuraIconCrop(ccs[i].icon, ccCrop, ccSz, ccH)
-                    ccs[i].durationText:SetFont(fontPath, auraDurSz, "OUTLINE, SLUG")
-                    ccs[i].durationText:SetTextColor(auraDurC.r, auraDurC.g, auraDurC.b, 1)
-                    ApplyTimerPos(ccs[i].durationText, ccs[i], ccTPos)
+                    ccs[i].durationText:SetFont(fontPath, ccDurSz, "OUTLINE, SLUG")
+                    ccs[i].durationText:SetTextColor(ccDurC.r, ccDurC.g, ccDurC.b, 1)
+                    ApplyTimerPos(ccs[i].durationText, ccs[i], ccTPos, ccDurSz, ccDurX, ccDurY, ccDurC)
                     PlaceInSlot(ccs[i], ccSlotVal, i, PV_CONST.CC_COUNT, ccSz, ccH, ccSpacing, ccXOff, ccYOff)
                 end
             end
@@ -3385,12 +3400,21 @@ initFrame:SetScript("OnEvent", function(self)
         }
         local timerPosOrder = { "none", "topleft", "topright", "bottomleft", "bottomright", "center" }
 
+        local function AuraDurationVal(kind, suffix)
+            local db = DB()
+            local key = kind .. "DurationText" .. suffix
+            local oldKey = "auraDurationText" .. suffix
+            if db and db[key] ~= nil then return db[key] end
+            if db and db[oldKey] ~= nil then return db[oldKey] end
+            return defaults[oldKey]
+        end
+
         -- Shared helper: apply a timer position to live plates for one aura type
-        local function LiveApplyTimerPos(auraFrames, count, v)
-            local durC = (DB() and DB().auraDurationTextColor) or defaults.auraDurationTextColor
-            local durSz = DBVal("auraDurationTextSize") or defaults.auraDurationTextSize
-            local durX = DBVal("auraDurationTextX") or defaults.auraDurationTextX
-            local durY = DBVal("auraDurationTextY") or defaults.auraDurationTextY
+        local function LiveApplyTimerPos(auraFrames, count, v, kind)
+            local durC = AuraDurationVal(kind, "Color")
+            local durSz = AuraDurationVal(kind, "Size")
+            local durX = AuraDurationVal(kind, "X")
+            local durY = AuraDurationVal(kind, "Y")
             for _, plate in pairs(plates) do
                 for i = 1, count do
                     local af = auraFrames(plate, i)
@@ -5679,24 +5703,85 @@ initFrame:SetScript("OnEvent", function(self)
         local generalTextHeader
         generalTextHeader, h = W:SectionHeader(parent, "GENERAL TEXT", y);  y = y - h
 
-        -- Row 1: Aura Duration | Aura Stacks
+        -- Duration controls are per aura type. "None" is the show/hide switch.
         local auraDurPosRow
         local auraTimerStackRow
         do
-            local dualRow
-            dualRow, h = W:DualRow(parent, y,
-                { type="dropdown", text="Aura Duration", values=timerPosValues,
-                  getValue=function() return DBVal("debuffTimerPosition") or atFallback end,
+            local durationTypes = {
+                debuff = { text = "Debuff Duration", title = "Debuff Duration Settings", key = "debuffTimerPosition", count = 4, frames = function(p, i) return p.debuffs[i] end },
+                buff = { text = "Buff Duration", title = "Buff Duration Settings", key = "buffTimerPosition", count = 4, frames = function(p, i) return p.buffs[i] end },
+                cc = { text = "CC Duration", title = "CC Duration Settings", key = "ccTimerPosition", count = 2, frames = function(p, i) return p.cc[i] end },
+            }
+            local function DurationDropdown(kind)
+                local cfg = durationTypes[kind]
+                return { type="dropdown", text=cfg.text, values=timerPosValues,
+                  getValue=function() return DBVal(cfg.key) or atFallback end,
                   setValue=function(v)
-                    DB().debuffTimerPosition = v
-                    DB().buffTimerPosition = v
-                    DB().ccTimerPosition = v
-                    DB().auraTextPosition = v
-                    LiveApplyTimerPos(function(p, i) return p.debuffs[i] end, 4, v)
-                    LiveApplyTimerPos(function(p, i) return p.buffs[i] end, 4, v)
-                    LiveApplyTimerPos(function(p, i) return p.cc[i] end, 2, v)
+                    DB()[cfg.key] = v
+                    LiveApplyTimerPos(cfg.frames, cfg.count, v, kind)
                     UpdatePreview()
-                  end, order=timerPosOrder },
+                  end, order=timerPosOrder }
+            end
+            local function CurrentDurationPos(cfg)
+                return DBVal(cfg.key) or atFallback
+            end
+            local function RefreshDuration(kind)
+                local cfg = durationTypes[kind]
+                LiveApplyTimerPos(cfg.frames, cfg.count, CurrentDurationPos(cfg), kind)
+                UpdatePreview()
+            end
+            local function AttachDurationTools(region, kind)
+                local cfg = durationTypes[kind]
+                local colorGet = function()
+                    local c = AuraDurationVal(kind, "Color")
+                    return c.r, c.g, c.b
+                end
+                local colorSet = function(r, g, b)
+                    DB()[kind .. "DurationTextColor"] = { r = r, g = g, b = b }
+                    RefreshDuration(kind)
+                end
+                local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(region, region:GetFrameLevel() + 5, colorGet, colorSet, nil, 20)
+                PP.Point(swatch, "RIGHT", region._control, "LEFT", -12, 0)
+                region._lastInline = swatch
+                EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
+
+                local _, showCog = EllesmereUI.BuildCogPopup({
+                    title = cfg.title,
+                    rows = {
+                        { type="slider", label="Size", min=6, max=20, step=1,
+                          get=function() return AuraDurationVal(kind, "Size") end,
+                          set=function(v) DB()[kind .. "DurationTextSize"] = v; RefreshDuration(kind) end },
+                        { type="slider", label="X", min=-20, max=20, step=1,
+                          get=function() return AuraDurationVal(kind, "X") end,
+                          set=function(v) DB()[kind .. "DurationTextX"] = v; RefreshDuration(kind) end },
+                        { type="slider", label="Y", min=-20, max=20, step=1,
+                          get=function() return AuraDurationVal(kind, "Y") end,
+                          set=function(v) DB()[kind .. "DurationTextY"] = v; RefreshDuration(kind) end },
+                    },
+                })
+                local btn = CreateFrame("Button", nil, region)
+                btn:SetSize(26, 26)
+                btn:SetPoint("RIGHT", region._lastInline or region._control, "LEFT", -9, 0)
+                region._lastInline = btn
+                btn:SetFrameLevel(region:GetFrameLevel() + 5)
+                btn:SetAlpha(0.4)
+                local tex = btn:CreateTexture(nil, "OVERLAY")
+                tex:SetAllPoints()
+                tex:SetTexture(EllesmereUI.RESIZE_ICON)
+                btn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                btn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                btn:SetScript("OnClick", function(self) showCog(self) end)
+            end
+
+            local durationRow1
+            durationRow1, h = W:DualRow(parent, y, DurationDropdown("debuff"), DurationDropdown("buff")); y = y - h
+            auraDurPosRow = durationRow1
+            AttachDurationTools(durationRow1._leftRegion, "debuff")
+            AttachDurationTools(durationRow1._rightRegion, "buff")
+
+            local durationRow2
+            durationRow2, h = W:DualRow(parent, y,
+                DurationDropdown("cc"),
                 { type="dropdown", text="Aura Stacks", values=timerPosValues,
                   getValue=function() return DBVal("auraStackTextPosition") or asFallback end,
                   setValue=function(v)
@@ -5704,99 +5789,12 @@ initFrame:SetScript("OnEvent", function(self)
                     LiveApplyStackPos(function(p, i) return p.debuffs[i] end, 4, v)
                     LiveApplyStackPos(function(p, i) return p.buffs[i] end, 4, v)
                     UpdatePreview()
-                  end, order=timerPosOrder })
-            auraDurPosRow = dualRow
-            auraTimerStackRow = dualRow
-
-            -- LEFT: Aura Duration inline swatch + cog
-            local leftRgn = dualRow._leftRegion
-            local adColorGet = function()
-                local c = (DB() and DB().auraDurationTextColor) or defaults.auraDurationTextColor
-                return c.r, c.g, c.b
-            end
-            local adColorSet = function(r, g, b)
-                DB().auraDurationTextColor = { r = r, g = g, b = b }
-                for _, plate in pairs(plates) do
-                    for i = 1, 4 do
-                        if plate.debuffs[i] and plate.debuffs[i].cd and plate.debuffs[i].cd.text then
-                            plate.debuffs[i].cd.text:SetTextColor(r, g, b, 1)
-                        end
-                        if plate.buffs[i] and plate.buffs[i].cd and plate.buffs[i].cd.text then
-                            plate.buffs[i].cd.text:SetTextColor(r, g, b, 1)
-                        end
-                    end
-                    for i = 1, 2 do
-                        if plate.cc[i] and plate.cc[i].cd and plate.cc[i].cd.text then
-                            plate.cc[i].cd.text:SetTextColor(r, g, b, 1)
-                        end
-                    end
-                end
-                UpdatePreview()
-            end
-            local adSwatch, adUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, adColorGet, adColorSet, nil, 20)
-            PP.Point(adSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
-            leftRgn._lastInline = adSwatch
-            EllesmereUI.RegisterWidgetRefresh(function() adUpdateSwatch() end)
-
-            local _, auraDurCogShow = EllesmereUI.BuildCogPopup({
-                title = "Aura Duration Settings",
-                rows = {
-                    { type="slider", label="Size", min=6, max=20, step=1,
-                      get=function() return DBVal("auraDurationTextSize") or defaults.auraDurationTextSize end,
-                      set=function(v)
-                        DB().auraDurationTextSize = v
-                        for _, plate in pairs(plates) do
-                            for i = 1, 4 do
-                                if plate.debuffs[i] and plate.debuffs[i].cd and plate.debuffs[i].cd.text then
-                                    SetFSFont(plate.debuffs[i].cd.text, v, "OUTLINE, SLUG")
-                                end
-                                if plate.buffs[i] and plate.buffs[i].cd and plate.buffs[i].cd.text then
-                                    SetFSFont(plate.buffs[i].cd.text, v, "OUTLINE, SLUG")
-                                end
-                            end
-                            for i = 1, 2 do
-                                if plate.cc[i] and plate.cc[i].cd and plate.cc[i].cd.text then
-                                    SetFSFont(plate.cc[i].cd.text, v, "OUTLINE, SLUG")
-                                end
-                            end
-                        end
-                        UpdatePreview()
-                      end },
-                    { type="slider", label="X", min=-20, max=20, step=1,
-                      get=function() return DBVal("auraDurationTextX") or defaults.auraDurationTextX end,
-                      set=function(v)
-                        DB().auraDurationTextX = v
-                        LiveApplyTimerPos(function(p, i) return p.debuffs[i] end, 4, DBVal("debuffTimerPosition") or atFallback)
-                        LiveApplyTimerPos(function(p, i) return p.buffs[i] end, 4, DBVal("buffTimerPosition") or atFallback)
-                        LiveApplyTimerPos(function(p, i) return p.cc[i] end, 2, DBVal("ccTimerPosition") or atFallback)
-                        UpdatePreview()
-                      end },
-                    { type="slider", label="Y", min=-20, max=20, step=1,
-                      get=function() return DBVal("auraDurationTextY") or defaults.auraDurationTextY end,
-                      set=function(v)
-                        DB().auraDurationTextY = v
-                        LiveApplyTimerPos(function(p, i) return p.debuffs[i] end, 4, DBVal("debuffTimerPosition") or atFallback)
-                        LiveApplyTimerPos(function(p, i) return p.buffs[i] end, 4, DBVal("buffTimerPosition") or atFallback)
-                        LiveApplyTimerPos(function(p, i) return p.cc[i] end, 2, DBVal("ccTimerPosition") or atFallback)
-                        UpdatePreview()
-                      end },
-                },
-            })
-            local auraDurCogBtn = CreateFrame("Button", nil, leftRgn)
-            auraDurCogBtn:SetSize(26, 26)
-            auraDurCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
-            leftRgn._lastInline = auraDurCogBtn
-            auraDurCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            auraDurCogBtn:SetAlpha(0.4)
-            local auraDurCogTex = auraDurCogBtn:CreateTexture(nil, "OVERLAY")
-            auraDurCogTex:SetAllPoints()
-            auraDurCogTex:SetTexture(EllesmereUI.RESIZE_ICON)   auraDurCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            auraDurCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            auraDurCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            auraDurCogBtn:SetScript("OnClick", function(self) auraDurCogShow(self) end)
+                  end, order=timerPosOrder }); y = y - h
+            auraTimerStackRow = durationRow2
+            AttachDurationTools(durationRow2._leftRegion, "cc")
 
             -- RIGHT: Aura Stacks inline color swatch
-            local rightRgn = dualRow._rightRegion
+            local rightRgn = durationRow2._rightRegion
             local asColorGet = function()
                 local c = (DB() and DB().auraStackTextColor) or defaults.auraStackTextColor
                 return c.r, c.g, c.b
@@ -5871,9 +5869,8 @@ initFrame:SetScript("OnEvent", function(self)
             auraStackCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             auraStackCogBtn:SetScript("OnClick", function(self) auraStackCogShow(self) end)
         end
-        y = y - h
 
-        -- Row 2: Spell Name | Spell Target
+        -- Spell Name | Spell Target
         local spellNameRow
         spellNameRow, h = W:DualRow(parent, y,
             { type="slider", text="Spell Name", min=6, max=16, step=1,
@@ -6138,6 +6135,9 @@ initFrame:SetScript("OnEvent", function(self)
 
         local clickMappings = {
             auraDuration = { section = generalTextHeader,  target = auraDurPosRow,       slotSide = "left" },
+            debuffDuration = { section = generalTextHeader, target = auraDurPosRow,      slotSide = "left" },
+            buffDuration = { section = generalTextHeader,   target = auraDurPosRow,      slotSide = "right" },
+            ccDuration = { section = generalTextHeader,     target = auraTimerStackRow,  slotSide = "left" },
             auraStack    = { section = generalTextHeader,  target = auraTimerStackRow,   slotSide = "right" },
             castBar      = { section = healthBarHeader,  target = castBarHeightRow,    slotSide = "left" },
             castIcon     = { section = healthBarHeader,  target = showCastIconRow,     slotSide = "right" },
@@ -6327,7 +6327,7 @@ initFrame:SetScript("OnEvent", function(self)
                     if pv._ccs[i] then
                         CreateHitOverlay(pv._ccs[i], "ccIcon", false, iconLevel, iconHlOpts)
                         if pv._ccs[i].durationText then
-                            local ov = CreateHitOverlay(pv._ccs[i].durationText, "auraDuration", true, textOnIconLevel)
+                            local ov = CreateHitOverlay(pv._ccs[i].durationText, "ccDuration", true, textOnIconLevel)
                             textOverlays[#textOverlays + 1] = ov
                         end
                     end
@@ -6338,7 +6338,7 @@ initFrame:SetScript("OnEvent", function(self)
                     if pv._buffs[i] then
                         CreateHitOverlay(pv._buffs[i], "buffIcon", false, iconLevel, iconHlOpts)
                         if pv._buffs[i].durationText then
-                            local ov = CreateHitOverlay(pv._buffs[i].durationText, "auraDuration", true, textOnIconLevel)
+                            local ov = CreateHitOverlay(pv._buffs[i].durationText, "buffDuration", true, textOnIconLevel)
                             textOverlays[#textOverlays + 1] = ov
                         end
                     end
@@ -6349,7 +6349,7 @@ initFrame:SetScript("OnEvent", function(self)
                     if pv._debuffs[i] then
                         CreateHitOverlay(pv._debuffs[i], "debuffIcon", false, iconLevel, iconHlOpts)
                         if pv._debuffs[i].durationText then
-                            local ov = CreateHitOverlay(pv._debuffs[i].durationText, "auraDuration", true, textOnIconLevel)
+                            local ov = CreateHitOverlay(pv._debuffs[i].durationText, "debuffDuration", true, textOnIconLevel)
                             textOverlays[#textOverlays + 1] = ov
                         end
                         if pv._debuffs[i].stackText then
