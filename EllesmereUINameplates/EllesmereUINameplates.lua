@@ -4118,11 +4118,21 @@ function NameplateFrame:ApplyAppearance()
         self.castTimer:SetPoint("RIGHT", self.cast, "RIGHT", -3 + tmOX, tmOY)
     end
     self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
-    -- Aura duration/stack text settings (unified across debuffs, buffs, CCs)
-    local auraDurSize = (p and p.auraDurationTextSize) or defaults.auraDurationTextSize
-    local auraDurColor = (p and p.auraDurationTextColor) or defaults.auraDurationTextColor
-    local auraDurX = (p and p.auraDurationTextX) or defaults.auraDurationTextX
-    local auraDurY = (p and p.auraDurationTextY) or defaults.auraDurationTextY
+    local function GetAuraDurationCfg(kind)
+        local sizeKey = kind .. "DurationTextSize"
+        local xKey = kind .. "DurationTextX"
+        local yKey = kind .. "DurationTextY"
+        local colorKey = kind .. "DurationTextColor"
+        return {
+            size = (p and p[sizeKey]) or (p and p.auraDurationTextSize) or defaults.auraDurationTextSize,
+            x = (p and p[xKey]) or (p and p.auraDurationTextX) or defaults.auraDurationTextX,
+            y = (p and p[yKey]) or (p and p.auraDurationTextY) or defaults.auraDurationTextY,
+            color = (p and p[colorKey]) or (p and p.auraDurationTextColor) or defaults.auraDurationTextColor,
+        }
+    end
+    local debuffDur = GetAuraDurationCfg("debuff")
+    local buffDur = GetAuraDurationCfg("buff")
+    local ccDur = GetAuraDurationCfg("cc")
     local auraStackSize = (p and p.auraStackTextSize) or defaults.auraStackTextSize
     local auraStackColor = (p and p.auraStackTextColor) or defaults.auraStackTextColor
     local auraStackX = (p and p.auraStackTextX) or defaults.auraStackTextX
@@ -4131,7 +4141,7 @@ function NameplateFrame:ApplyAppearance()
     local debuffTPos = (p and p.debuffTimerPosition) or (p and p.auraTextPosition) or defaults.debuffTimerPosition
     local buffTPos   = (p and p.buffTimerPosition)   or (p and p.auraTextPosition) or defaults.buffTimerPosition
     local ccTPos     = (p and p.ccTimerPosition)     or (p and p.auraTextPosition) or defaults.ccTimerPosition
-    local function ApplyTimerPosition(durText, auraFrame, pos)
+    local function ApplyTimerPosition(durText, auraFrame, pos, cfg)
         local cd = auraFrame.cd
         if pos == "none" then
             if cd and cd.SetHideCountdownNumbers then
@@ -4142,23 +4152,23 @@ function NameplateFrame:ApplyAppearance()
         if cd and cd.SetHideCountdownNumbers then
             cd:SetHideCountdownNumbers(false)
         end
-        SetFSFont(durText, auraDurSize, "OUTLINE, SLUG")
-        durText:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
+        SetFSFont(durText, cfg.size, "OUTLINE, SLUG")
+        durText:SetTextColor(cfg.color.r, cfg.color.g, cfg.color.b, 1)
         durText:ClearAllPoints()
         if pos == "center" then
-            durText:SetPoint("CENTER", auraFrame, "CENTER", auraDurX, auraDurY)
+            durText:SetPoint("CENTER", auraFrame, "CENTER", cfg.x, cfg.y)
             durText:SetJustifyH("CENTER")
         elseif pos == "topright" then
-            PP.Point(durText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3 + auraDurX, 4 + auraDurY)
+            PP.Point(durText, "TOPRIGHT", auraFrame, "TOPRIGHT", 3 + cfg.x, 4 + cfg.y)
             durText:SetJustifyH("RIGHT")
         elseif pos == "bottomleft" then
-            PP.Point(durText, "BOTTOMLEFT", auraFrame, "BOTTOMLEFT", -3 + auraDurX, -4 + auraDurY)
+            PP.Point(durText, "BOTTOMLEFT", auraFrame, "BOTTOMLEFT", -3 + cfg.x, -4 + cfg.y)
             durText:SetJustifyH("LEFT")
         elseif pos == "bottomright" then
-            PP.Point(durText, "BOTTOMRIGHT", auraFrame, "BOTTOMRIGHT", 3 + auraDurX, -4 + auraDurY)
+            PP.Point(durText, "BOTTOMRIGHT", auraFrame, "BOTTOMRIGHT", 3 + cfg.x, -4 + cfg.y)
             durText:SetJustifyH("RIGHT")
         else
-            PP.Point(durText, "TOPLEFT", auraFrame, "TOPLEFT", -3 + auraDurX, 4 + auraDurY)
+            PP.Point(durText, "TOPLEFT", auraFrame, "TOPLEFT", -3 + cfg.x, 4 + cfg.y)
             durText:SetJustifyH("LEFT")
         end
     end
@@ -4188,9 +4198,9 @@ function NameplateFrame:ApplyAppearance()
     end
     for i = 1, #self.debuffs do
         if self.debuffs[i] and self.debuffs[i].cd and self.debuffs[i].cd.text then
-            SetFSFont(self.debuffs[i].cd.text, auraDurSize, "OUTLINE, SLUG")
-            self.debuffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-            ApplyTimerPosition(self.debuffs[i].cd.text, self.debuffs[i], debuffTPos)
+            SetFSFont(self.debuffs[i].cd.text, debuffDur.size, "OUTLINE, SLUG")
+            self.debuffs[i].cd.text:SetTextColor(debuffDur.color.r, debuffDur.color.g, debuffDur.color.b, 1)
+            ApplyTimerPosition(self.debuffs[i].cd.text, self.debuffs[i], debuffTPos, debuffDur)
         end
         if self.debuffs[i] and self.debuffs[i].count then
             SetFSFont(self.debuffs[i].count, auraStackSize, "OUTLINE, SLUG")
@@ -4214,9 +4224,9 @@ function NameplateFrame:ApplyAppearance()
     for i = 1, 4 do
         ns.ApplyAuraSlotCrop(self.buffs[i], buffCrop, buffSz)
         if self.buffs[i].cd and self.buffs[i].cd.text then
-            SetFSFont(self.buffs[i].cd.text, auraDurSize, "OUTLINE, SLUG")
-            self.buffs[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-            ApplyTimerPosition(self.buffs[i].cd.text, self.buffs[i], buffTPos)
+            SetFSFont(self.buffs[i].cd.text, buffDur.size, "OUTLINE, SLUG")
+            self.buffs[i].cd.text:SetTextColor(buffDur.color.r, buffDur.color.g, buffDur.color.b, 1)
+            ApplyTimerPosition(self.buffs[i].cd.text, self.buffs[i], buffTPos, buffDur)
         end
         if self.buffs[i].count then
             SetFSFont(self.buffs[i].count, auraStackSize, "OUTLINE, SLUG")
@@ -4228,9 +4238,9 @@ function NameplateFrame:ApplyAppearance()
     for i = 1, 2 do
         ns.ApplyAuraSlotCrop(self.cc[i], ccCrop, ccSz)
         if self.cc[i].cd and self.cc[i].cd.text then
-            SetFSFont(self.cc[i].cd.text, auraDurSize, "OUTLINE, SLUG")
-            self.cc[i].cd.text:SetTextColor(auraDurColor.r, auraDurColor.g, auraDurColor.b, 1)
-            ApplyTimerPosition(self.cc[i].cd.text, self.cc[i], ccTPos)
+            SetFSFont(self.cc[i].cd.text, ccDur.size, "OUTLINE, SLUG")
+            self.cc[i].cd.text:SetTextColor(ccDur.color.r, ccDur.color.g, ccDur.color.b, 1)
+            ApplyTimerPosition(self.cc[i].cd.text, self.cc[i], ccTPos, ccDur)
         end
     end
     PositionAuraSlot(self.cc, 2, ccSlot, self, ccSz, ccH, GetAuraSpacing("ccs"), GetAuraSlotOffsets("ccSlot"))
@@ -7280,6 +7290,20 @@ do
         "debuffTimerPosition", "buffTimerPosition", "ccTimerPosition",
         "auraDurationTextSize", "auraDurationTextColor",
     }
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "auraDurationTextX"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "auraDurationTextY"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "debuffDurationTextSize"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "debuffDurationTextX"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "debuffDurationTextY"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "debuffDurationTextColor"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "buffDurationTextSize"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "buffDurationTextX"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "buffDurationTextY"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "buffDurationTextColor"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextSize"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextX"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextY"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextColor"
     ns._appendDisplayPresetKeys(ns._displayPresetKeys)
 
     -- Also handle spec changes that happen before the UI is ever opened
