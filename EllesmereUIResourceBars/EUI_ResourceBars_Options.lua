@@ -1249,6 +1249,25 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     newEntry.thresholdPct = 30
                 end
+                -- Smart default for the power bar's "Threshold color below value":
+                -- spender resources (mana/energy/focus) start ON (warn when low),
+                -- builders (rage/runic/fury) start OFF (warn when high). Only when the
+                -- entry covers the current spec -- the one whose power type we can read.
+                if cfg.showPartialCog then
+                    local curIdx = GetSpecialization()
+                    local curSpecID = curIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(curIdx)
+                    if curSpecID then
+                        for _, sid in ipairs(ids) do
+                            if sid == curSpecID then
+                                local _, token = UnitPowerType("player")
+                                if token == "MANA" or token == "FOCUS" or token == "ENERGY" then
+                                    newEntry.thresholdPartialOnly = true
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
                 bd.thresholdSpecs[#bd.thresholdSpecs + 1] = newEntry
                 wipe(_tempSpecSel)
                 WrappedRefresh()
@@ -1515,7 +1534,7 @@ initFrame:SetScript("OnEvent", function(self)
                             title = "Threshold Coloring", bgAlpha = 1,
                             frameStrata = "FULLSCREEN_DIALOG", frameLevel = 500,
                             rows = {
-                                { type = "toggle", label = "Reverse Threshold Fill Color",
+                                { type = "toggle", label = "Threshold color below value",
                                   get = function()
                                       if not ef._entryIdx then return false end
                                       local bd2 = cfg.getBarData(); if not bd2 then return false end
@@ -2959,6 +2978,26 @@ initFrame:SetScript("OnEvent", function(self)
                         thresholdB = p2.thresholdB or 0x9d/255,
                         thresholdA = p2.thresholdA or 1,
                     }
+                    -- Smart default for "Threshold color below value": the only
+                    -- bar-type spender class resource is Hunter Focus -> start ON
+                    -- (warn when low); builders (Maelstrom/Insanity/Astral) start OFF.
+                    -- Only when the entry covers the current spec (resource readable).
+                    if isBar then
+                        local curIdx = GetSpecialization()
+                        local curSpecID = curIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(curIdx)
+                        if curSpecID then
+                            for _, sid in ipairs(ids) do
+                                if sid == curSpecID then
+                                    local gsr = _G._ERB_GetSecondaryResource
+                                    local info = gsr and gsr()
+                                    if info and info.power == "FOCUS_BAR" then
+                                        newEntry.thresholdReverse = true
+                                    end
+                                    break
+                                end
+                            end
+                        end
+                    end
                     p.secondary.thresholdSpecs[#p.secondary.thresholdSpecs + 1] = newEntry
                     wipe(_tempSpecSel)
                     if WrappedRefresh then WrappedRefresh() end
@@ -3270,6 +3309,39 @@ initFrame:SetScript("OnEvent", function(self)
                         cogBtn2:SetScript("OnClick", function(self) entryCogShow(self) end)
                         ef._cogBtn = cogBtn2
 
+                        -- Cog for bar-type specs."Reverse Threshold Fill Color" puts the
+						-- threshold color below the value
+                        local _, entryRevCogShow = EllesmereUI.BuildCogPopup({
+                            title = "Threshold Coloring", bgAlpha = 1, frameStrata = "FULLSCREEN_DIALOG", frameLevel = 500,
+                            rows = {
+                                { type = "toggle", label = "Threshold color below value",
+                                  get = function()
+                                      if not ef._entryIdx then return false end
+                                      local p2 = DB(); if not p2 then return false end
+                                      local ent = p2.secondary.thresholdSpecs and p2.secondary.thresholdSpecs[ef._entryIdx]
+                                      return ent and ent.thresholdReverse
+                                  end,
+                                  set = function(v)
+                                      if not ef._entryIdx then return end
+                                      local p2 = DB(); if not p2 then return end
+                                      local ent = p2.secondary.thresholdSpecs and p2.secondary.thresholdSpecs[ef._entryIdx]
+                                      if ent then ent.thresholdReverse = v; RefreshClass() end
+                                  end },
+                            },
+                        })
+                        local cogBtnBar = CreateFrame("Button", nil, ef)
+                        cogBtnBar:SetSize(20, 20)
+                        cogBtnBar:SetPoint("LEFT", entryToggle, "RIGHT", 6, 0)
+                        cogBtnBar:SetFrameLevel(ef:GetFrameLevel() + 5)
+                        cogBtnBar:SetAlpha(0.4)
+                        local cogTexBar = cogBtnBar:CreateTexture(nil, "OVERLAY")
+                        cogTexBar:SetAllPoints()
+                        cogTexBar:SetTexture(EllesmereUI.COGS_ICON)
+                        cogBtnBar:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                        cogBtnBar:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                        cogBtnBar:SetScript("OnClick", function(self) entryRevCogShow(self) end)
+                        ef._cogBtnBar = cogBtnBar
+
                         -- Disabled overlay for threshold row (excludes toggle so it stays clickable)
                         local threshDis = CreateFrame("Frame", nil, ef)
                         threshDis:SetPoint("TOPLEFT", threshLbl2, "TOPLEFT", -2, 4)
@@ -3316,6 +3388,12 @@ initFrame:SetScript("OnEvent", function(self)
                         ef._hashInput:Show(); ef._hashCogBtn:Show()
                         ef._threshLbl:SetPoint("TOPLEFT", ef, "TOPLEFT", 8, -61)
                     end
+
+                    -- Swap the cog: pip specs get "Only Color At/Above Threshold",
+                    -- bar specs get "Reverse Threshold Fill Color".
+                    ef._threshLbl:SetText(EllesmereUI.L("Threshold") .. (isBar and " %" or ""))
+                    if ef._cogBtn then ef._cogBtn:SetShown(not isBar) end
+                    if ef._cogBtnBar then ef._cogBtnBar:SetShown(isBar) end
 
                     -- spec label
                     ef._specLbl:SetText(EntryLabel(entry))
