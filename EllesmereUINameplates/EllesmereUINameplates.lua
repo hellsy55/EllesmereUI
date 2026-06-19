@@ -180,6 +180,7 @@ local defaults = {
     castBarShieldEnabled = true,
     interruptedFlashEnabled = true,
     interruptedFlashColor = { r = 0.8, g = 0.0, b = 0.0 },
+    interruptedFlashShowSource = false,
     healthBarHeight = 17,
     friendlyNameOnly = true,
     friendlyNameOnlyYOffset = -20,
@@ -5941,6 +5942,8 @@ function NameplateFrame:UpdateCast()
 
     if isFullSetup then
         self.cast:Show()
+        local castW = self.cast:GetWidth()
+        if castW and castW > 0 then self.castName:SetWidth(castW * 0.42) end
         local _isv = issecretvalue
         local texClean = texture ~= nil and not (_isv and _isv(texture))
         if texClean then
@@ -6415,7 +6418,6 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     self.cast:SetValue(1)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
-    self.castName:SetText("Interrupted")
 
     -- Show interrupter name (class-colored) in cast target position
     local interrupterName
@@ -6433,11 +6435,33 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
             end
         end
     end
-    if interrupterName then
+    local showSource = defaults.interruptedFlashShowSource
+    if p and p.interruptedFlashShowSource ~= nil then showSource = p.interruptedFlashShowSource end
+    local cfg = p or defaults
+    local useClassColor = defaults.castTargetClassColor
+    if cfg.castTargetClassColor ~= nil then useClassColor = cfg.castTargetClassColor end
+    local castW = self.cast:GetWidth()
+    if castW and castW > 0 then
+        self.castName:SetWidth((showSource and interrupterName) and math.max(castW - 8, 20) or castW * 0.42)
+    end
+    if showSource and interrupterName then
+        local sourceText = interrupterName
+        if useClassColor and interrupterClass and C_ClassColor then
+            local c = C_ClassColor.GetClassColor(interrupterClass)
+            if c then
+                local hex = (c.GenerateHexColor and c:GenerateHexColor()) or c.colorStr
+                if not hex and c.r and c.g and c.b then
+                    hex = string.format("ff%02x%02x%02x", math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
+                end
+                if hex then sourceText = "|c" .. hex .. interrupterName .. "|r" end
+            end
+        end
+        self.castName:SetText("Interrupted [" .. sourceText .. "]")
+    else
+        self.castName:SetText("Interrupted")
+    end
+    if interrupterName and not showSource then
         self.castTarget:SetText(interrupterName)
-        local cfg = p or defaults
-        local useClassColor = defaults.castTargetClassColor
-        if cfg.castTargetClassColor ~= nil then useClassColor = cfg.castTargetClassColor end
         if useClassColor then
             if interrupterClass and C_ClassColor then
                 local c = C_ClassColor.GetClassColor(interrupterClass)
@@ -6457,9 +6481,9 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
         self.castTarget:SetText("")
     end
 
-    -- Show interrupter name in target slot, hide timer
+    -- Show interrupter name in target slot unless it was moved into the interrupt text.
     self.castTimer:Hide()
-    if interrupterName then
+    if interrupterName and not showSource then
         self.castTarget:Show()
     else
         self.castTarget:Hide()

@@ -7518,6 +7518,22 @@ initFrame:SetScript("OnEvent", function(self)
                     swatch:EnableMouse(not flashOff())
                 end
             end
+
+            _, h = W:DualRow(parent, y,
+                { type = "spacer" },
+                { type = "toggle", text = "Interrupt Source In Text",
+                  tooltip = "Show the interrupting unit as \"Interrupted [Name]\" instead of using the cast target text slot.",
+                  disabled = flashOff,
+                  disabledTooltip = "Show Interrupted Flash Effect",
+                  getValue = function()
+                      local db = DB()
+                      if db and db.interruptedFlashShowSource ~= nil then return db.interruptedFlashShowSource end
+                      return defaults.interruptedFlashShowSource
+                  end,
+                  setValue = function(v)
+                      DB().interruptedFlashShowSource = v
+                      RefreshAllPlates()
+                  end });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
