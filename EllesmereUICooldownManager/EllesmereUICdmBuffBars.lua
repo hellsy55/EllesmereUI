@@ -223,6 +223,7 @@ local TBB_DEFAULT_BAR = {
     pandemicGlowLines = 8,
     pandemicGlowThickness = 2,
     pandemicGlowSpeed = 4,
+    smoothBars = true,
 }
 ns.TBB_DEFAULT_BAR = TBB_DEFAULT_BAR
 
@@ -1339,11 +1340,19 @@ local function UpdateLustBar(bar, cfg)
         if bar:IsShown() then bar:Hide() end
         return
     end
-    if not bar:IsShown() then bar:Show() end
+    local wasShown = bar:IsShown()
+    if not wasShown then bar:Show() end
     local sb = bar._bar
     if sb then
         sb:SetMinMaxValues(0, 40)
-        sb:SetValue(remaining)
+        local smooth = wasShown and cfg.smoothBars ~= false
+            and Enum and Enum.StatusBarInterpolation
+            and Enum.StatusBarInterpolation.ExponentialEaseOut
+        if smooth then
+            sb:SetValue(remaining, smooth)
+        else
+            sb:SetValue(remaining)
+        end
         if cfg.showSpark and bar._spark then bar._spark:Show() end
     end
     if cfg.showTimer and bar._timerText then
@@ -1416,7 +1425,8 @@ function ns.UpdateTrackedBuffBarTimers()
             local blizzBar = blzChild and blzChild.Bar
 
             if isActive then
-                if not bar:IsShown() then bar:Show() end
+                local wasShown = bar:IsShown()
+                if not wasShown then bar:Show() end
                 local sb = bar._bar
 
                 -- Stacks (gated)
@@ -1426,7 +1436,14 @@ function ns.UpdateTrackedBuffBarTimers()
                     -- Mirror Blizzard's bar onto ours. Secret values pass
                     -- through natively to widget setters -- no Lua comparison.
                     sb:SetMinMaxValues(blizzBar:GetMinMaxValues())
-                    sb:SetValue(blizzBar:GetValue())
+                    local smooth = wasShown and cfg.smoothBars ~= false
+                        and Enum and Enum.StatusBarInterpolation
+                        and Enum.StatusBarInterpolation.ExponentialEaseOut
+                    if smooth then
+                        sb:SetValue(blizzBar:GetValue(), smooth)
+                    else
+                        sb:SetValue(blizzBar:GetValue())
+                    end
                     if cfg.showSpark and bar._spark then bar._spark:Show() end
 
                     -- Auto fill color from Blizzard's bar texture

@@ -3674,6 +3674,17 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip = "Only show this bar while the tracked buff/cooldown is active. Turn off to keep an empty bar on screen at all times." }
         );  y = y - h
 
+        -- Smooth Bars
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Smooth Bars",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.smoothBars ~= false end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.smoothBars = v; RefreshTBB()
+              end },
+            { type = "label", text = "" }
+        );  y = y - h
+
         -----------------------------------------------------------------------
         --  EXTRAS
         -----------------------------------------------------------------------
