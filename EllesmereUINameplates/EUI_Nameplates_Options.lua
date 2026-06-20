@@ -3737,7 +3737,49 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() hvUpdateSwatch() end)
         end
 
-        -- Row 3: Bar Texture | Absorb Style
+        local hoverOverlayValues, hoverOverlayOrder = {}, {}
+        do
+            local STRIPE_ORDER = { "striped-v2", "striped-wide-v2", "stripes-medium", "stripes-small-close", "stripes-small-spread", "striped-tiny" }
+            local STRIPE_NAMES = {
+                ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes",
+                ["stripes-medium"] = "Medium Stripes", ["stripes-small-close"] = "Small Dense Stripes",
+                ["stripes-small-spread"] = "Small Spread Stripes", ["striped-tiny"] = "Tiny Stripes",
+            }
+            hoverOverlayValues.none = "None"
+            hoverOverlayOrder[#hoverOverlayOrder + 1] = "none"
+            hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
+            for _, k in ipairs(STRIPE_ORDER) do hoverOverlayValues[k] = STRIPE_NAMES[k]; hoverOverlayOrder[#hoverOverlayOrder + 1] = k end
+            hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
+            for _, k in ipairs(hbtOrder) do
+                hoverOverlayOrder[#hoverOverlayOrder + 1] = k
+                if k ~= "---" then hoverOverlayValues[k] = hbtValues[k] end
+            end
+            hoverOverlayValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key)
+                    if not key or key == "none" or key == "---" then return nil end
+                    if ns.OVERLAY_STRIPE_KEYS and ns.OVERLAY_STRIPE_KEYS[key] then
+                        return "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. key .. ".png"
+                    end
+                    return ns.healthBarTextures and ns.healthBarTextures[key]
+                end,
+            }
+        end
+
+        -- Row 3: Hover Texture | (empty)
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Hover Texture",
+              tooltip="Uses the Hover Effect color and opacity. Set to None for the flat hover highlight.",
+              values=hoverOverlayValues, order=hoverOverlayOrder,
+              getValue=function() return DBVal("hoverOverlayTexture") or defaults.hoverOverlayTexture end,
+              setValue=function(v)
+                DB().hoverOverlayTexture = v
+                ns.RefreshHoverEffect()
+                UpdatePreview()
+              end },
+            { type="label", text="" });  y = y - h
+
+        -- Row 4: Bar Texture | Absorb Style
         local absorbStyleValues = {
             ["striped"]="Striped", ["clean"]="Clean (Flat)", ["blizzard"]="Blizzard",
         }
