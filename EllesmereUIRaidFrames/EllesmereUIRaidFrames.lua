@@ -667,6 +667,7 @@ local defaults = {
         oorAlpha         = 0.4,
         showTooltip      = true,
         tooltipInCombat  = false,
+        freeRightClickCamera = false,  -- right-click + drag over a raid/party frame turns the camera (mouselook)
 
         -- Preview mode: "real", "overlay", "none"
         previewMode       = "overlay",
@@ -2224,12 +2225,93 @@ function ns.DebuffGridPoint(s, idx0, total)
 end
 
 -------------------------------------------------------------------------------
+--  Enable right-click camera movement over raid/party frames
+--  A global mouse watcher: when the right button is pressed over 
+--  one of our unit buttons and then dragged past a small threshold,
+--  it starts mouselook (camera turn). It never touches the secure
+--  buttons so it can't taint or interfere with click-casting.
+--  A right-click tap is left alone, so the menu still opens.
+-------------------------------------------------------------------------------
+do
+    local MOVE_THRESHOLD = 4
+    local watcher = CreateFrame("Frame")
+    local inLook = false
+    local lastX, lastY = 0, 0
+
+    local function stopLook()
+        if inLook then MouselookStop(); inLook = false end
+        watcher:SetScript("OnUpdate", nil)
+    end
+
+    -- True if the cursor is over one of our (visible) unit buttons. Uses a direct
+    -- IsMouseOver test against our registry.
+    local function overOwnFrame()
+        local reg = ns._euiUnitButtons
+        if not reg then return false end
+        for btn in pairs(reg) do
+            if btn:IsVisible() and btn:IsMouseOver() then return true end
+        end
+        return false
+    end
+
+    local function onUpdate()
+        if not IsMouseButtonDown(2) then stopLook(); return end
+        if inLook then return end
+        local x, y = GetCursorPosition()
+        if abs(x - lastX) > MOVE_THRESHOLD or abs(y - lastY) > MOVE_THRESHOLD then
+            pcall(MouselookStart)
+            inLook = true
+        end
+    end
+
+    watcher:SetScript("OnEvent", function(_, event, button)
+        if event == "GLOBAL_MOUSE_DOWN" then
+            if button ~= "RightButton" then return end
+            if not (db and db.profile and db.profile.freeRightClickCamera) then return end
+            if not overOwnFrame() then return end
+            inLook = false
+            lastX, lastY = GetCursorPosition()
+            watcher:SetScript("OnUpdate", onUpdate)
+        elseif event == "GLOBAL_MOUSE_UP" then
+            if button == "RightButton" then stopLook() end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            -- safety: never leave mouselook stuck after a combat-state change
+            if not IsMouseButtonDown(2) then stopLook() end
+        elseif event == "PLAYER_LOGIN" then
+            if ns.FRCM_Refresh then ns.FRCM_Refresh() end
+        end
+    end)
+    watcher:RegisterEvent("PLAYER_LOGIN")
+
+    -- Register the per-click global events only while the feature is on, so we
+    -- don't run a handler on every click when it's disabled. Call on toggle.
+    function ns.FRCM_Refresh()
+        if db and db.profile and db.profile.freeRightClickCamera then
+            watcher:RegisterEvent("GLOBAL_MOUSE_DOWN")
+            watcher:RegisterEvent("GLOBAL_MOUSE_UP")
+            watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+        else
+            watcher:UnregisterEvent("GLOBAL_MOUSE_DOWN")
+            watcher:UnregisterEvent("GLOBAL_MOUSE_UP")
+            watcher:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            stopLook()
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Style a single button (called once per button at creation time)
 -------------------------------------------------------------------------------
 local function StyleButton(button)
     local d = GetFFD(button)
     if d.styled then return end
     d.styled = true
+
+    -- Register our unit buttons so the free right-click camera watcher can tell
+    -- when the cursor is over an EUI raid/party frame (direct IsMouseOver test).
+    button._euiUnitButton = true
+    ns._euiUnitButtons = ns._euiUnitButtons or setmetatable({}, { __mode = "k" })
+    ns._euiUnitButtons[button] = true
 
     local s = db.profile
     local w = PixelSnap(s.frameWidth or 72)
