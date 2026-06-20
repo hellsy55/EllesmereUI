@@ -287,6 +287,7 @@ function ns.AddTrackedBuffBar()
     newBar.name = "Bar " .. (#tbb.bars + 1)
     newBar.popularKey = nil
     newBar.spellIDs = nil
+    newBar.baseSpellID = nil
     -- A new bar joins the group only if EVERY existing bar is already checked,
     -- otherwise it starts unchecked (independent). Vacuously true for the 1st bar.
     local allGrouped = true
@@ -903,6 +904,19 @@ local function MatchFrameToConfig(frame, cfg)
     if not gci then return false end
     local info = gci(cdID)
     if not info then return false end
+    -- Self-healing base capture for hero-talent override spells. When a bar was
+    -- saved for the OVERRIDE form (e.g. Death Charge) and is currently matched
+    -- while talented, the frame reports the override in info.overrideSpellID and
+    -- the BASE form (Death's Advance) in info.spellID. Record that base on the
+    -- config so the bar keeps matching once the talent is removed: cooldownInfo
+    -- only carries the override id WHILE talented, so without the stored base the
+    -- bar would go dark when untalented (cast becomes the base spell). This
+    -- backfills bars created before baseSpellID was captured at pick time.
+    if cfg.spellID and cfg.spellID > 0 and not cfg.baseSpellID
+       and info.overrideSpellID == cfg.spellID
+       and info.spellID and info.spellID > 0 and info.spellID ~= cfg.spellID then
+        cfg.baseSpellID = info.spellID
+    end
     -- Fast path: match via cooldownInfo struct fields.
     if cfg.spellIDs then
         for _, sid in ipairs(cfg.spellIDs) do
@@ -910,6 +924,11 @@ local function MatchFrameToConfig(frame, cfg)
         end
     elseif cfg.spellID and cfg.spellID > 0 then
         if MatchesSID(info, cfg.spellID) then return true end
+        -- Talent-override fallback: a bar saved for the override form also
+        -- tracks its base form, so it keeps showing after the talent is removed.
+        if cfg.baseSpellID and cfg.baseSpellID > 0 and MatchesSID(info, cfg.baseSpellID) then
+            return true
+        end
     else
         return false
     end
@@ -925,7 +944,8 @@ local function MatchFrameToConfig(frame, cfg)
                     if frameSID == sid then return true end
                 end
             elseif cfg.spellID and cfg.spellID > 0 then
-                return frameSID == cfg.spellID
+                if frameSID == cfg.spellID then return true end
+                if cfg.baseSpellID and frameSID == cfg.baseSpellID then return true end
             end
         end
     end

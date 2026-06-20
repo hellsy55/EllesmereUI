@@ -1880,6 +1880,9 @@ initFrame:SetScript("OnEvent", function(self)
             barCfg.popularKey     = nil
             barCfg.glowBased      = nil
             barCfg.customDuration = dur
+            -- Manually-entered id: no live frame to read the base from. Clear any
+            -- stale base; MatchFrameToConfig self-heals it if/when talented.
+            barCfg.baseSpellID    = nil
             barCfg.name           = C_Spell.GetSpellName(sid)
             Refresh()
             ns.BuildTrackedBuffBars()
@@ -2010,6 +2013,7 @@ initFrame:SetScript("OnEvent", function(self)
                 barCfg.glowBased      = entry.glowBased or nil
                 barCfg.customDuration = entry.customDuration
                 barCfg.spellID        = entry.spellIDs and entry.spellIDs[1] or 0
+                barCfg.baseSpellID    = nil
                 barCfg.name           = entry.name
                 Refresh()
                 ns.BuildTrackedBuffBars()
@@ -2104,6 +2108,18 @@ initFrame:SetScript("OnEvent", function(self)
                 barCfg.glowBased      = nil
                 barCfg.customDuration = nil
                 barCfg.name           = sp.name
+                -- Capture the BASE spell id for hero-talent override spells so
+                -- the bar keeps tracking after the talent is removed. When the
+                -- picked spell is an active override (e.g. Death Charge), the
+                -- live cooldownInfo reports the base (Death's Advance) in
+                -- info.spellID; store it only when it differs from the picked id.
+                barCfg.baseSpellID = nil
+                if sp.cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                    local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(sp.cdID)
+                    if info and info.spellID and info.spellID > 0 and info.spellID ~= sp.spellID then
+                        barCfg.baseSpellID = info.spellID
+                    end
+                end
                 Refresh()
                 ns.BuildTrackedBuffBars()
                 if onChanged then onChanged() end
