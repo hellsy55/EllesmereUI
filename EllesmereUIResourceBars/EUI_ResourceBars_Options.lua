@@ -3309,8 +3309,8 @@ initFrame:SetScript("OnEvent", function(self)
                         cogBtn2:SetScript("OnClick", function(self) entryCogShow(self) end)
                         ef._cogBtn = cogBtn2
 
-                        -- Cog for bar-type specs."Reverse Threshold Fill Color" puts the
-						-- threshold color below the value
+                        -- Cog for bar-type specs. "Reverse Threshold Fill Color"
+                        -- puts the threshold color below the value.
                         local _, entryRevCogShow = EllesmereUI.BuildCogPopup({
                             title = "Threshold Coloring", bgAlpha = 1, frameStrata = "FULLSCREEN_DIALOG", frameLevel = 500,
                             rows = {

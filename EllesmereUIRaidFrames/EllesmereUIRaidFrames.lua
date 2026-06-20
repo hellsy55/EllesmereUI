@@ -410,6 +410,7 @@ local defaults = {
         healthColorMode  = "class",  -- "class", "dark", "classic", "custom"
         customFillColor  = { r = 37/255, g = 193/255, b = 29/255 },
         customBgColor    = { r = 17/255, g = 17/255, b = 17/255 },
+        bgClassColored   = false,
         bgDarkness       = 50,
 
         -- Power bar (on when any powerShowFor* role is true)
@@ -625,7 +626,7 @@ local defaults = {
         debuffOffsetX    = 0,
         debuffOffsetY    = 0,
         debuffGrowDirection = "LEFT",
-		debuffPerRow     = 1,	-- icons per row (1 = single line, no wrap; >= 2 wraps)
+        debuffPerRow     = 5,   -- icons per row (1 = single line, no wrap; >= 2 wraps)
         debuffWrapDirection = "UP",
         debuffSpacing    = 1,
         debuffBorderSize = 1,
@@ -666,7 +667,9 @@ local defaults = {
         -- Range & misc
         oorAlpha         = 0.4,
         showTooltip      = true,
-        tooltipInCombat  = false,
+        -- "Show in Combat" moved to a global setting that governs all unit
+        -- tooltips: EllesmereUIDB.showUnitTooltipsInCombat (see the tooltip hook
+        -- near the top of this file). No longer a per-profile raid-frame key.
         freeRightClickCamera = false,  -- right-click + drag over a raid/party frame turns the camera (mouselook)
 
         -- Preview mode: "real", "overlay", "none"
@@ -710,6 +713,29 @@ ns._flatHeader       = nil  -- single header for merge-groups mode
 local eventFrame     = CreateFrame("Frame")
 local unitTrackers   = {}  -- [unitToken] = tracker frame
 local inCombat       = false
+
+-------------------------------------------------------------------------------
+--  Hide unit tooltips in combat (global). Extends the per-frame "Show in
+--  Combat" tooltip control to EVERY unit tooltip -- nameplates, target/focus,
+--  world mobs, and our own frames -- by suppressing them through the shared
+--  tooltip data pipeline. The setting is global (EllesmereUIDB.showUnitTooltips
+--  InCombat); unset/false = hide in combat (matches the original default).
+--  Costs ~0 out of combat: InCombatLockdown() early-outs before any other work.
+--  do/end keeps the helper out of file scope (this file is at the local cap).
+-------------------------------------------------------------------------------
+do
+    local function HideUnitTooltipInCombat(tooltip)
+        if tooltip ~= GameTooltip then return end
+        if tooltip.IsForbidden and tooltip:IsForbidden() then return end
+        if not InCombatLockdown() then return end
+        if EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat then return end
+        tooltip:Hide()
+    end
+    if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
+        and Enum and Enum.TooltipDataType then
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, HideUnitTooltipInCombat)
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Suppress Blizzard raid frames (zero CPU when our frames are active)
@@ -915,14 +941,8 @@ end
 -------------------------------------------------------------------------------
 --  Font helper (matches UF/CDM pattern)
 -------------------------------------------------------------------------------
--- Weak set of FontStrings whose slug outline should be dropped when the
--- "Disable Slug Outline" toggle is on for Raid Frames. Only Name + Health body
--- text is registered here; status text, top-name-bar, group/title labels, and
--- all aura icon text (which uses ApplyIconTextFont) are intentionally excluded.
--- Hung on `ns` (not a new file-scope local) because this file is at the Lua 5.1
--- 200-local cap. These FontStrings live on frames we create, so this is taint-safe.
-ns._noSlugFonts = ns._noSlugFonts or setmetatable({}, { __mode = "k" })
 local function GetOutline()
+    -- Slug-gated at the source (GetFontOutlineFlag) by the global "Never Show Slug" toggle.
     return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
 end
 local function GetUseShadow()
@@ -932,11 +952,6 @@ local function ApplyFont(fs, size)
     if not (fs and fs.SetFont) then return end
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     local outline = GetOutline()
-    -- Drop the slug token for registered Name/Health FontStrings when the
-    -- per-module "Disable Slug Outline" toggle is on (aura text never registers).
-    if ns._noSlugFonts[fs] and EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("raidFrames") then
-        outline = EllesmereUI.StripSlugFlag(outline)
-    end
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outline == "" and GetUseShadow()) end
     fs:SetFont(fontPath, size, outline)
 end
@@ -1269,6 +1284,25 @@ local function ResolveDisplayName(unit, applyCap)
     -- Cap only the in-frame name (applyCap), not the top name bar banner.
     if applyCap then display = ns.CapName(display) end
     return display
+end
+
+-- Background color: class color when bgClassColored, else the custom bg color.
+-- Returns r, g, b, a (alpha = bgDarkness). Mirrors the health-fill class option.
+function ns.GetBgColor(unit, s)
+    s = s or db.profile
+    local a = (s.bgDarkness or 50) / 100
+    if s.bgClassColored and unit and UnitExists(unit) then
+        local _, classToken = UnitClass(unit)
+        -- classToken can be a secret value (out-of-range/uninspectable units);
+        -- indexing GetClassColor's tables with a secret throws "table index is
+        -- secret". Guard it and fall back to the custom bg color when secret/nil.
+        if classToken and not issecretvalue(classToken) then
+            local cc = EllesmereUI.GetClassColor(classToken)
+            if cc then return cc.r, cc.g, cc.b, a end
+        end
+    end
+    local c = s.customBgColor
+    return c.r, c.g, c.b, a
 end
 
 local function GetNameColor(unit, s)
@@ -2309,7 +2343,8 @@ local function StyleButton(button)
 
     -- Register our unit buttons so the free right-click camera watcher can tell
     -- when the cursor is over an EUI raid/party frame (direct IsMouseOver test).
-    button._euiUnitButton = true
+    -- These are SecureGroupHeader/SecureUnitButton frames (Blizzard-owned), so
+    -- membership is tracked in an external weak table, never a key on the button.
     ns._euiUnitButtons = ns._euiUnitButtons or setmetatable({}, { __mode = "k" })
     ns._euiUnitButtons[button] = true
 
@@ -2561,7 +2596,6 @@ local function StyleButton(button)
 
     -- Name text
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
-    ns._noSlugFonts[nameFS] = true
     ApplyFont(nameFS, s.nameSize or 10)
     nameFS:SetJustifyH("CENTER")
     nameFS:SetWordWrap(false)
@@ -2569,7 +2603,6 @@ local function StyleButton(button)
 
     -- Health deficit text
     local healthFS = textCarrier:CreateFontString(nil, "OVERLAY")
-    ns._noSlugFonts[healthFS] = true
     ApplyFont(healthFS, s.healthTextSize or 9)
     healthFS:SetTextColor(1, 1, 1, 0.9)
     d.healthText = healthFS
@@ -2798,9 +2831,9 @@ local function StyleButton(button)
         -- Hover tooltip support. Gated by the Debuff Display "Hide Tooltips"
         -- setting (default hidden): ApplyDebuffIcon toggles mouse interactivity to
         -- match. Default is fully mouse-transparent (EnableMouse false), like the
-        -- defensive icons. Propagation is enabled so that when tooltips are shown, 
-		-- the icon can take the hover for its own tooltip yet still pass motion + 
-		-- clicks down to the button so casting keeps working.
+        -- defensive icons. Propagation is enabled so that when tooltips are
+        -- shown, the icon can take the hover for its own tooltip yet still pass
+        -- motion + clicks down to the button so casting keeps working.
         icon:EnableMouse(false)
         if icon.SetPropagateMouseMotion then icon:SetPropagateMouseMotion(true) end
         if icon.SetPropagateMouseClicks then icon:SetPropagateMouseClicks(true) end
@@ -3130,7 +3163,12 @@ local function StyleButton(button)
         -- in-combat sub-toggle) appear to do nothing on party frames.
         local s = fd._isParty and ns._scaledPartyProxy or (fd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
         if not s.showTooltip then return end
-        if inCombat and not s.tooltipInCombat then return end
+        -- "Show in Combat" is now a global setting that governs ALL unit
+        -- tooltips (see EllesmereUIDB.showUnitTooltipsInCombat). Gate the raid
+        -- frame's own OnEnter on it too, since this handler explicitly Show()s
+        -- the tooltip after SetUnit (so the global suppression hook alone, which
+        -- runs during SetUnit, would be undone here).
+        if inCombat and not (EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat) then return end
         local u = self:GetAttribute("unit")
         if u and UnitExists(u) then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
@@ -3628,7 +3666,7 @@ local SATED_DEBUFFS = {
 }
 
 -- Debuff filter check based on user setting
-local function IsDisplayDebuff(unit, auraData)
+local function IsDisplayDebuff(unit, auraData, s)
     local iid = auraData.auraInstanceID
     if not iid then return false end
     -- Permanently hidden debuffs -- never shown, no toggle. Inlined (no file-scope
@@ -3636,7 +3674,7 @@ local function IsDisplayDebuff(unit, auraData)
     -- secret. 1254550 = Arcane Empowerment, 308312 = Time Trial Practice.
     local hsid = auraData.spellId
     if hsid and not issecretvalue(hsid) and (hsid == 1254550 or hsid == 308312) then return false end
-    local s = db and db.profile
+    s = s or (db and db.profile)
     local mode = s and s.debuffFilter or "all"
     if mode == "none" then return false end
 
@@ -3849,7 +3887,7 @@ local function RenderDebuffs(d, s, unit)
 end
 
 -- Full scan: rebuild debuff cache from scratch
-local function FullScanDebuffs(d, unit)
+local function FullScanDebuffs(d, unit, s)
     if not d.debuffCache then d.debuffCache = {} end
     wipe(d.debuffCache)
     d.debuffInstanceMap = d.debuffInstanceMap or {}
@@ -3859,7 +3897,7 @@ local function FullScanDebuffs(d, unit)
         local auraData = C_UnitAuras.GetAuraDataByIndex(unit, i, "HARMFUL")
         if not auraData then break end
         i = i + 1
-        if IsDisplayDebuff(unit, auraData) then
+        if IsDisplayDebuff(unit, auraData, s) then
             local idx = #d.debuffCache + 1
             d.debuffCache[idx] = auraData
             d.debuffInstanceMap[auraData.auraInstanceID] = idx
@@ -3883,7 +3921,7 @@ local function UpdateDebuffs(button, unit, updateInfo)
         or (updateInfo.isFullUpdate)
 
     if needFullScan then
-        FullScanDebuffs(d, unit)
+        FullScanDebuffs(d, unit, s)
     else
         -- Incremental update
         local cache = d.debuffCache
@@ -3912,7 +3950,7 @@ local function UpdateDebuffs(button, unit, updateInfo)
                 local iid = auraData.auraInstanceID
                 if iid and C_UnitAuras_IsAuraFilteredOutByInstanceID
                     and not C_UnitAuras_IsAuraFilteredOutByInstanceID(unit, iid, "HARMFUL")
-                    and IsDisplayDebuff(unit, auraData) then
+                    and IsDisplayDebuff(unit, auraData, s) then
                     local idx = #cache + 1
                     cache[idx] = auraData
                     imap[auraData.auraInstanceID] = idx
@@ -4330,6 +4368,16 @@ local function RegisterPrivateAuraSlots(button, unit)
 
     -- Independent position/growth for private auras
     local pos = s.paPosition or "bottomleft"
+    -- "None": private auras disabled. Old anchors were already removed above; hide
+    -- the slot frames and skip registration so Blizzard's secure layer draws
+    -- nothing for this unit. The dispel container is independent and unaffected.
+    if pos == "none" then
+        if d.privateAuraFrames then
+            for _, f in ipairs(d.privateAuraFrames) do f:Hide() end
+        end
+        d.privateAuraUnit = unit
+        return
+    end
     local ox = s.paOffsetX or 0
     local oy = s.paOffsetY or 0
     local grow = s.paGrowDirection or "RIGHT"
@@ -5259,11 +5307,9 @@ FB.EnsureBuilt = function()
         carrier:SetAllPoints(health)
         carrier:SetFrameLevel(b:GetFrameLevel() + 12)
         local nameFS = carrier:CreateFontString(nil, "OVERLAY")
-        ns._noSlugFonts[nameFS] = true
         nameFS:SetWordWrap(false)
         b._nameText = nameFS
         local healthFS = carrier:CreateFontString(nil, "OVERLAY")
-        ns._noSlugFonts[healthFS] = true
         healthFS:SetWordWrap(false)
         b._healthText = healthFS
 
@@ -6974,8 +7020,7 @@ local function ReloadFrames()
 
         -- Background
         if d.bg then
-            local bgc = s.customBgColor
-            d.bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
+            d.bg:SetColorTexture(ns.GetBgColor(btn:GetAttribute("unit"), s))
         end
 
         -- Health bar height/anchor + Top Name Bar. The helper reserves the top
@@ -7353,6 +7398,39 @@ ns._ApplyTierOffset = function()
     if not bl then return end
     containerFrame:ClearAllPoints()
     containerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", PixelSnap(bl + ox), PixelSnap(bt + oy))
+end
+
+-- TEMP DEBUG (read-only, prints only): diagnose the vertical-group-growth
+-- stacking bug. Reproduce (25/30-man, group growth DOWN/UP), then run:
+--   /run EllesmereUI._RF_DumpLayout()
+-- It reports each visible group header's anchor + on-screen top-left and the
+-- first two units' on-screen positions, so we can tell whether the GROUPS
+-- overlap or the UNITS within a group stack, and at what coordinates. Remove
+-- once the root cause is found.
+function EllesmereUI._RF_DumpLayout()
+    local s = db.profile
+    local function r(v) if v then return floor(v + 0.5) else return "nil" end end
+    print("|cff66ccffEUI RF Layout Dump|r")
+    print(("  members=%s activeSize=%sx%s group=%s unit=%s tierOv=%s merge=%s"):format(
+        tostring(GetNumGroupMembers()), tostring(ns._activeSizeW), tostring(ns._activeSizeH),
+        tostring(s.groupGrowth), tostring(s.unitGrowth),
+        ns._activeTierOverride and "yes" or "no", s.mergeGroups and "yes" or "no"))
+    if containerFrame then
+        print(("  container LT=(%s,%s) size=%sx%s"):format(
+            r(containerFrame:GetLeft()), r(containerFrame:GetTop()),
+            r(containerFrame:GetWidth()), r(containerFrame:GetHeight())))
+    end
+    for g = 1, 8 do
+        local hdr = separatedHdrs[g]
+        if hdr and hdr:IsShown() then
+            local pt, _, _, hx, hy = hdr:GetPoint(1)
+            print(("  G%d pt=%s off=(%s,%s) hdrLT=(%s,%s)"):format(
+                g, tostring(pt), r(hx), r(hy), r(hdr:GetLeft()), r(hdr:GetTop())))
+            local b1, b2 = hdr[1], hdr[2]
+            if b1 then print(("     u1=%s LT=(%s,%s)"):format(tostring(b1:GetAttribute("unit")), r(b1:GetLeft()), r(b1:GetTop()))) end
+            if b2 then print(("     u2 LT=(%s,%s)"):format(r(b2:GetLeft()), r(b2:GetTop()))) end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -8232,7 +8310,7 @@ do
     local map = {
         healthBar = {
             "healthBarTexture", "healthBarOpacity", "healthColorMode",
-            "customFillColor", "customBgColor", "bgDarkness", "smoothBars",
+            "customFillColor", "customBgColor", "bgClassColored", "bgDarkness", "smoothBars",
             "healPrediction", "healPredOpacity", "healPredColor",
         },
         absorbs = {
@@ -8279,7 +8357,7 @@ do
             "topNameBarTextOffsetX", "topNameBarTextOffsetY", "topNameBarTextAlign",
         },
         rangeTooltip = {
-            "oorAlpha", "showTooltip", "tooltipInCombat",
+            "oorAlpha", "showTooltip",
         },
         defensives = {
             "showDefensives", "showExternals",
@@ -8909,8 +8987,7 @@ ns.ReloadPartyFrames = function()
 
         -- Background
         if d.bg then
-            local bgc = raw.customBgColor
-            d.bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (raw.bgDarkness or 50) / 100)
+            d.bg:SetColorTexture(ns.GetBgColor(btn:GetAttribute("unit"), raw))
         end
 
         -- Health bar height/anchor + Top Name Bar (reads party-resolved `raw`)
@@ -9675,7 +9752,10 @@ local function PvAuraTick()
     -- Private aura preview: cycling icons like defensives/debuffs.
     -- Party (single group of 5) gets 2 guaranteed + a 50% 3rd; raid keeps
     -- 1 guaranteed + a 50% 2nd per group.
+    -- "None" position disables private auras entirely, so the preview hides them
+    -- too (read from the same settings source the pa anchor renderer uses).
     local wantPA = ns._privateAurasPreviewVisible
+        and (PvSettings().paPosition or "center") ~= "none"
     if wantPA then
         local paBase = ns._partyPvActive and 2 or 1
         local paMax  = ns._partyPvActive and 3 or 2
@@ -10470,7 +10550,6 @@ local function CreatePreviewFrame(index)
 
     -- Name text (anchoring done by ApplyPreviewData on every refresh)
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
-    ns._noSlugFonts[nameFS] = true
     ApplyFont(nameFS, s.nameSize or 10)
     nameFS:SetJustifyH("CENTER")
     nameFS:SetWordWrap(false)
@@ -10478,7 +10557,6 @@ local function CreatePreviewFrame(index)
 
     -- Health text
     local healthFS = textCarrier:CreateFontString(nil, "OVERLAY")
-    ns._noSlugFonts[healthFS] = true
     ApplyFont(healthFS, s.healthTextSize or 9)
     healthFS:SetJustifyH("CENTER")
     healthFS:SetPoint("CENTER", health, "CENTER", 0, 0)
@@ -10901,8 +10979,14 @@ local function ApplyPreviewData(f, index)
             f._bg:ClearAllPoints()
             f._bg:SetPoint("TOPLEFT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
             f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
-            local bgc = s.customBgColor
-            f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
+            local bgA = (s.bgDarkness or 50) / 100
+            local cc = s.bgClassColored and classToken and EllesmereUI.GetClassColor(classToken)
+            if cc then
+                f._bg:SetColorTexture(cc.r, cc.g, cc.b, bgA)
+            else
+                local bgc = s.customBgColor
+                f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, bgA)
+            end
         end
     end
 
@@ -12561,7 +12645,6 @@ ns._ShowSizePreview = function(tier)
 
             -- Name text
             local nameFS = health:CreateFontString(nil, "OVERLAY")
-            ns._noSlugFonts[nameFS] = true
             nameFS:SetJustifyH("CENTER")
             nameFS:SetWordWrap(false)
             f._nameText = nameFS
@@ -12602,9 +12685,14 @@ ns._ShowSizePreview = function(tier)
         local cc = EllesmereUI.GetClassColor(ct)
         if cc then f._health:SetStatusBarColor(cc.r, cc.g, cc.b) end
 
-        -- Background
-        local bgc = s.customBgColor or { r = 17/255, g = 17/255, b = 17/255 }
-        f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
+        -- Background (class-colored when enabled, using this sample's class)
+        local bgA = (s.bgDarkness or 50) / 100
+        if s.bgClassColored and cc then
+            f._bg:SetColorTexture(cc.r, cc.g, cc.b, bgA)
+        else
+            local bgc = s.customBgColor or { r = 17/255, g = 17/255, b = 17/255 }
+            f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, bgA)
+        end
 
         -- Power bar with class-accurate color
         if f._power then
@@ -12635,12 +12723,9 @@ ns._ShowSizePreview = function(tier)
                 f._nameText:Hide()
             else
             local name = NAMES[((i - 1) % #NAMES) + 1]
-            -- Size-preview name bypasses ApplyFont, so strip the slug inline here
-            -- (top-name-bar below is intentionally left with its slug).
+            -- Size-preview name bypasses ApplyFont; GetOutline() is already
+            -- slug-gated at the source, so no inline strip is needed.
             local nameOutline = GetOutline()
-            if ns._noSlugFonts[f._nameText] and EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("raidFrames") then
-                nameOutline = EllesmereUI.StripSlugFlag(nameOutline)
-            end
             if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._nameText, nameOutline == "" and GetUseShadow()) end
             f._nameText:SetFont(fontPath, nameSize, nameOutline)
             f._nameText:SetText(ns.CapName(name))

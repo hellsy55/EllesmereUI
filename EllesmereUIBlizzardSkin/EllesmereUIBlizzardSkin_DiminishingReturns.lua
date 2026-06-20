@@ -1,7 +1,7 @@
 --------------------------------------------------------------------------------
 --  Secondary / Tertiary Stat Diminishing Returns
 --------------------------------------------------------------------------------
--- Powers the "Show Adjusted Stats" tooltip option on the themed character sheet.
+-- Powers the "Show Diminishing Returns" tooltip option on the themed character sheet.
 --
 -- Secondary stats (Crit, Haste, Mastery, Versatility) and tertiary stats
 -- (Leech, Avoidance, Speed) suffer escalating diminishing returns once their

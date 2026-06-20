@@ -653,7 +653,8 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.glowFrame:Hide()
 
     plate.hpText = plate.health:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.hpText, 10, (EllesmereUI and EllesmereUI.IsSlugDisabled("nameplates")) and "OUTLINE" or "OUTLINE, SLUG")
+    -- Forced crisp outline; SetFSFont applies the global "Never Show Slug" gate.
+    SetFSFont(plate.hpText, 10, "OUTLINE, SLUG")
     plate.hpText:SetPoint("RIGHT", plate.health, -2, 0)
 
     plate.highlight = plate.health:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -664,7 +665,7 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     plate.highlight:Hide()
 
     plate.name = plate:CreateFontString(nil, "OVERLAY")
-    SetFSFont(plate.name, GetFriendlyNameTextSize(), (EllesmereUI and EllesmereUI.IsSlugDisabled("nameplates")) and "OUTLINE" or "OUTLINE, SLUG")
+    SetFSFont(plate.name, GetFriendlyNameTextSize(), "OUTLINE, SLUG")
     plate.name:SetPoint("BOTTOM", plate.health, "TOP", 0, 4)
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)
@@ -1046,7 +1047,7 @@ end
 function ns.RefreshFriendlyNameTextSize()
     local size = GetFriendlyNameTextSize()
     for _, plate in pairs(friendlyPlates) do
-        if plate.name then SetFSFont(plate.name, size, (EllesmereUI and EllesmereUI.IsSlugDisabled("nameplates")) and "OUTLINE" or "OUTLINE, SLUG") end
+        if plate.name then SetFSFont(plate.name, size, "OUTLINE, SLUG") end
     end
 end
 

@@ -135,7 +135,7 @@ local function OutcomeColor(status)
     local sh = DB()
     if sh.barColorUseClass then
         local _, classFile = UnitClass("player")
-        local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+        local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile] and EUI.GetClassColor(classFile)
         if cc then return cc.r, cc.g, cc.b end
     end
     if sh.barColorUseAccent then return GetAccentRGB() end

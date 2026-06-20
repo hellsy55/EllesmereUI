@@ -762,19 +762,22 @@ local function ModPrefixForAttr(modsStr)
 end
 
 -- Set a secure "type" attribute, optionally gated to out-of-combat only.
--- menu/target (constracted to spell) route as a raw action type with no
--- conditional, when oocOnly is set we drive the type attribute by
--- combat: the real action out of combat, an inert "none" in combat.
+-- Unlike spell/macro (which carry their own [combat] conditional in the macro
+-- text), menu/target are raw action types with no conditional, so when oocOnly
+-- is set we drive the type attribute by combat state: the real action out of
+-- combat, an inert "none" in combat.
 --
--- nil because unit buttons set a default *type2 = "click" wildcard
+-- "none" (not nil) matters: unit buttons set a default type2 = "click" wildcard
 -- (the right-click menu via the secure proxy, see AttachSecureUnitMenu). The
 -- secure resolver falls back to that wildcard whenever the specific type<N> is
--- NIL -- so clearing the attribute in combat would let the wildcard menu open
--- anyway. A non-nil unrecognized type ("none") suppresses the wildcard
--- fallback and performs no action.
+-- nil, so clearing the attribute in combat would let the wildcard menu open
+-- anyway. A non-nil unrecognized type ("none") suppresses the wildcard fallback
+-- and performs no action.
 --
--- Bbinding application is deferred out of combat so these driver calls never run while in combat.
--- Unregister first so a stale driver can't survive a rebuild that changed the binding type.
+-- Binding application is deferred out of combat (see the InCombatLockdown guards
+-- in DoRegisterFrame / CC_ApplyBindings) so these driver calls never run in
+-- combat. Unregister first so a stale driver can't survive a rebuild that
+-- changed the binding type.
 local function SetGatedType(frame, attrName, value, oocOnly)
     UnregisterAttributeDriver(frame, attrName)
     if oocOnly then

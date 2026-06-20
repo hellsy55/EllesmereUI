@@ -2166,7 +2166,6 @@ L["Toggle All Indicators"] = "모든 표시기 켜기/끄기"
 L["Tooltip Options"] = "툴팁 옵션"
 L["When Healing"] = "힐러일 때 표시"
 L["When you are solo, center the player frame on the party frame instead of anchoring it at the top."] = "솔로일 때 플레이어 프레임을 파티 프레임 맨 위에 붙이지 않고 가운데에 배치합니다."
-L["When you are solo, center the player frame on the party frame instead of anchoring it at the top."] = "솔로일 때 플레이어 프레임을 파티 프레임 맨 위에 붙이지 않고 가운데에 배치합니다."
 L["Widens or narrows the boss frames relative to the raid frame size."] = "우두머리 프레임을 공격대 프레임 크기 기준으로 넓히거나 좁힙니다."
 L["Widens or narrows the extra frames relative to the raid frame size."] = "추가 프레임을 공격대 프레임 크기 기준으로 넓히거나 좁힙니다."
 -- add 레이드프레임 팝업 (RaidFrames Popup)

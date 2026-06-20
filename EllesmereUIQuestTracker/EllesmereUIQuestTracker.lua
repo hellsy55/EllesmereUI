@@ -23,6 +23,7 @@ local QT_DEFAULTS = {
     profile = {
         questTracker = {
             enabled              = true,
+            forceOnScreen        = false,
             visibility           = "always",
             visOnlyInstances     = false,
             visHideHousing       = false,
@@ -147,6 +148,7 @@ _G._EQT_RefreshAll = function()
     if EQT.UpdateVisibility then EQT.UpdateVisibility() end
     if EQT.RestyleAll then EQT.RestyleAll() end
     if EQT.ApplyBackground then EQT.ApplyBackground() end
+    if EQT.ApplyForceOnScreen then EQT.ApplyForceOnScreen() end
 end
 
 -------------------------------------------------------------------------------

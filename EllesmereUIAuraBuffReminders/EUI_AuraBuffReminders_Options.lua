@@ -903,7 +903,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Text Settings",
                 rows = {
-                    { type="slider", label="Text Size", min=6, max=24, step=1,
+                    { type="slider", label="Text Size", min=6, max=30, step=1,
                       get=function() local d = DDB(); return d and d.textSize or 11 end,
                       set=function(v) local d = DDB(); if not d then return end; d.textSize = v; RefreshAll(); UpdatePreviewHeader() end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,

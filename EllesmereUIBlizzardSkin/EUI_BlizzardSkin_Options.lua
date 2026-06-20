@@ -577,7 +577,7 @@ initFrame:SetScript("OnEvent", function(self)
         statRow4, h = W:DualRow(parent, y,
             StatCategoryToggle("Show PvP", "PvP",
                 "Toggle visibility of the PvP stat category (Honor Level, Honor, Conquest)."),
-            { type="toggle", text="Show Adjusted Stats",
+            { type="toggle", text="Show Diminishing Returns",
               tooltip="Add diminishing-returns detail (adjusted rating, wasted rating, and current penalty bracket) to the Secondary and Tertiary stat tooltips.",
               getValue=function() return EllesmereUIDB and EllesmereUIDB.showAdjustedStats or false end,
               setValue=function(v)

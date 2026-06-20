@@ -533,7 +533,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS["PALADIN"]
+                        local cc = EllesmereUI.GetClassColor("PALADIN")
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,
@@ -868,7 +868,7 @@ initFrame:SetScript("OnEvent", function(self)
             local classSwatch, updateClass = EllesmereUI.BuildColorSwatch(
                 rgn, btRow:GetFrameLevel() + 3,
                 function()
-                    local clr = EllesmereUI.CLASS_COLOR_MAP and EllesmereUI.CLASS_COLOR_MAP[EllesmereUI._playerClass]
+                    local clr = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                     if clr then return clr.r, clr.g, clr.b end
                     return 1, 1, 1
                 end,
@@ -932,7 +932,7 @@ initFrame:SetScript("OnEvent", function(self)
             local classSwatch, updateClass = EllesmereUI.BuildColorSwatch(
                 rgn, btRow:GetFrameLevel() + 3,
                 function()
-                    local clr = EllesmereUI.CLASS_COLOR_MAP and EllesmereUI.CLASS_COLOR_MAP[EllesmereUI._playerClass]
+                    local clr = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                     if clr then return clr.r, clr.g, clr.b end
                     return 1, 1, 1
                 end,
@@ -1325,7 +1325,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[select(2, UnitClass("player"))]
+                        local cc = EllesmereUI.GetClassColor(select(2, UnitClass("player")))
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,

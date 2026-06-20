@@ -192,7 +192,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, SECTION_MINIMAP, y);  y = y - h
 
         _, h = W:DualRow(parent, y,
-            { type="slider", text="Size", min=100, max=600, step=5,
+            { type="slider", text="Size", min=100, max=600, step=1,
               getValue=function() local m = MinimapDB(); return m and m.mapSize or 140 end,
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end

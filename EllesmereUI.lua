@@ -3081,18 +3081,19 @@ function EllesmereUI.GetFontOutlineFlag(addonKey)
     else
         mode = db.outlineMode or "none"
     end
-    if mode == "outline" then return "OUTLINE, SLUG"
-    elseif mode == "thick" then return "THICKOUTLINE, SLUG"
-    else return "" end
+    local flag
+    if mode == "outline" then flag = "OUTLINE, SLUG"
+    elseif mode == "thick" then flag = "THICKOUTLINE, SLUG"
+    else flag = "" end
+    return EllesmereUI.SlugFlag(flag)
 end
 
--- Per-module "Disable Slug Outline" toggle. When a module's box in that control
--- is checked, its non-aura body text drops the SLUG token (a crisp but
--- un-slugged outline). Stored centrally in EllesmereUIDB.disableSlugOutline;
--- unchecked (slug kept) by default. moduleKey: "nameplates"/"unitFrames"/"raidFrames".
-function EllesmereUI.IsSlugDisabled(moduleKey)
-    local t = EllesmereUIDB and EllesmereUIDB.disableSlugOutline
-    return (t and t[moduleKey] == true) or false
+-- Global "Never Show Slug" toggle. When ON, the SLUG token is stripped from
+-- every outline flag the UI produces -- body text and icon/aura text across all
+-- modules, plus the global Outline Mode itself. Stored centrally in
+-- EllesmereUIDB.neverShowSlug; OFF by default (slug outlines render as normal).
+function EllesmereUI.IsSlugDisabled()
+    return (EllesmereUIDB and EllesmereUIDB.neverShowSlug == true) or false
 end
 
 -- Strip the SLUG token from a font outline flag:
@@ -3100,6 +3101,14 @@ end
 function EllesmereUI.StripSlugFlag(flag)
     if not flag or flag == "" then return flag or "" end
     return (flag:gsub("%s*,%s*SLUG", ""))
+end
+
+-- Central gate: returns `flag` with SLUG removed when "Never Show Slug" is on,
+-- otherwise unchanged. Use this at every point a slug outline flag is produced
+-- (the outline helpers above and any hardcoded icon-text literal).
+function EllesmereUI.SlugFlag(flag)
+    if EllesmereUI.IsSlugDisabled() then return EllesmereUI.StripSlugFlag(flag) end
+    return flag
 end
 
 -- Returns true when the outline mode uses drop shadow instead of outline.
@@ -3181,9 +3190,11 @@ end
 function EllesmereUI.GetIconTextOutlineFlag(moduleKey)
     local t = EllesmereUIDB and EllesmereUIDB.outlineIconText
     if t and t[moduleKey] == false then
+        -- Follows the outline mode, which is already slug-gated at the source.
         return (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag(moduleKey)) or ""
     end
-    return "OUTLINE, SLUG"
+    -- Forced crisp outline; "Never Show Slug" still drops the slug token.
+    return EllesmereUI.SlugFlag("OUTLINE, SLUG")
 end
 
 -- Applies the icon-text outline flag AND the matching shadow in one call.
@@ -3365,6 +3376,10 @@ function EllesmereUI.ApplyColorsToOUF()
     if ok and EAB and EAB.ApplyBorders and not InCombatLockdown() then
         EAB:ApplyBorders()
         if EAB.ApplyShapes then EAB:ApplyShapes() end
+    end
+    -- 6. Refresh damage meters (bars/text class colors)
+    if EllesmereUI._DM_RefreshColors then
+        EllesmereUI._DM_RefreshColors()
     end
 end
 
@@ -8831,7 +8846,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.2"
+EllesmereUI.VERSION = "8.2.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -9011,6 +9026,7 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. If you ONLY use for sound alerts it should be okay but may still cause issues." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
             { addon = "Dominos",                  label = "Dominos",                    targets = { "EllesmereUIActionBars" } },
+            { addon = "ImprovedTalentLoadouts",   label = "Improved Talent Loadouts",   targets = { "EllesmereUIActionBars" } },
             { addon = "UnhaltedUnitFrames",       label = "Unhalted Unit Frames",       targets = { "EllesmereUIUnitFrames" } },
             { addon = "Platynator",               label = "Platynator",                 targets = { "EllesmereUINameplates" } },
             { addon = "Plater",                   label = "Plater Nameplates",          targets = { "EllesmereUINameplates" } },
@@ -9350,6 +9366,101 @@ SlashCmdList.EUIDEV = function()
     end
     local state = newVal == "1" and "ON" or "OFF"
     EllesmereUI.Print("|cff00ff00[EllesmereUI]|r Dev mode: all addon restriction CVars " .. state .. ".")
+    if EllesmereUI.UpdateDevModeIndicator then EllesmereUI.UpdateDevModeIndicator() end
+end
+
+-------------------------------------------------------------------------------
+--  Dev Mode badge: a small top-left indicator shown while /euidev is active
+--  (the addon-restriction-forced CVars are on, so the restricted / secret-value
+--  environment is being forced for testing). Toggled by /euidev and re-checked
+--  on login, since the CVars persist across sessions.
+-------------------------------------------------------------------------------
+do
+    local DEV_CVAR = "addonChallengeModeRestrictionsForced"
+
+    function EllesmereUI.IsDevModeActive()
+        return GetCVar(DEV_CVAR) == "1"
+    end
+
+    local badge
+
+    local function CreateDevBadge()
+        if badge then return badge end
+        local PP = EllesmereUI.PP
+        local accent = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+
+        local f = CreateFrame("Frame", "EllesmereUIDevModeBadge", UIParent)
+        f:SetFrameStrata("HIGH")
+        f:SetHeight(26)
+        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -16)
+        f:EnableMouse(false)
+        f:Hide()
+
+        -- Dark base + faint accent wash for an on-brand tint
+        local bg = f:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.02, 0.02, 0.03, 0.62)
+        local wash = f:CreateTexture(nil, "BORDER")
+        wash:SetAllPoints()
+        wash:SetColorTexture(accent.r, accent.g, accent.b, 0.06)
+
+        -- Accent 1px border (our own frame, safe)
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(f, accent.r, accent.g, accent.b, 0.9, 1, "OVERLAY", 7)
+        end
+
+        -- Pulsing accent "LED" dot (recording-indicator vibe)
+        local dot = f:CreateTexture(nil, "ARTWORK")
+        dot:SetTexture("Interface\\Buttons\\WHITE8x8")
+        dot:SetVertexColor(accent.r, accent.g, accent.b, 1)
+        dot:SetSize(7, 7)
+        dot:SetPoint("LEFT", f, "LEFT", 9, 0)
+        if dot.SetSnapToPixelGrid then dot:SetSnapToPixelGrid(false); dot:SetTexelSnappingBias(0) end
+        local ag = dot:CreateAnimationGroup()
+        ag:SetLooping("BOUNCE")
+        local pulse = ag:CreateAnimation("Alpha")
+        pulse:SetFromAlpha(1); pulse:SetToAlpha(0.1)
+        pulse:SetDuration(0.7); pulse:SetSmoothing("IN_OUT")
+        f._pulse = ag
+
+        -- Label
+        local label = f:CreateFontString(nil, "OVERLAY")
+        label:SetFont(EllesmereUI.EXPRESSWAY, 11,
+            (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE")
+        label:SetText("DEV MODE ACTIVE")
+        label:SetTextColor(accent.r, accent.g, accent.b, 1)
+        label:SetPoint("LEFT", dot, "RIGHT", 8, 0)
+
+        -- Size to content: dotPad(9) + dot(7) + gap(8) + text + rightPad(12)
+        f:SetWidth(9 + 7 + 8 + label:GetStringWidth() + 12)
+
+        badge = f
+        return f
+    end
+
+    function EllesmereUI.UpdateDevModeIndicator()
+        if not EllesmereUI.IsDevModeActive() then
+            if badge then
+                if badge._pulse then badge._pulse:Stop() end
+                badge:Hide()
+            end
+            return
+        end
+        local f = CreateDevBadge()
+        f:Show()
+        if f._pulse then f._pulse:Play() end
+    end
+
+    -- CVars persist across sessions: check on login (deferred so the theme accent
+    -- is fully resolved). PLAYER_LOGIN re-fires on /reload, so this covers both.
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        C_Timer.After(2, function()
+            if EllesmereUI.UpdateDevModeIndicator then EllesmereUI.UpdateDevModeIndicator() end
+        end)
+    end)
 end
 
 -- Open the panel with a specific addon's tab selected

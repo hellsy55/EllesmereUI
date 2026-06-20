@@ -125,8 +125,9 @@ local function GetOutlineFlag()
     if mode == "__global" then
         return (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("chat")) or ""
     end
-    if mode == "outline" then return "OUTLINE, SLUG" end
-    if mode == "thick" then return "THICKOUTLINE, SLUG" end
+    -- Chat-specific outline override; still slug-gated by "Never Show Slug".
+    if mode == "outline" then return (EUI.SlugFlag and EUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG" end
+    if mode == "thick" then return (EUI.SlugFlag and EUI.SlugFlag("THICKOUTLINE, SLUG")) or "THICKOUTLINE, SLUG" end
     return ""
 end
 
@@ -382,6 +383,28 @@ function ECHAT.ApplySidebarIcons()
     if ECHAT.ApplyIconFreeMove then ECHAT.ApplyIconFreeMove() end
 end
 
+-- Map of sidebar-icon visibility key -> its CFD button reference. The button is
+-- only created at login for icons that were enabled at that time, so enabling a
+-- previously-disabled icon has no frame to show until the sidebar is rebuilt on
+-- reload. The options panel uses this to fire a reload prompt only when adding a
+-- brand-new icon (scrollBtn is always created, so it never needs one).
+local SIDEBAR_ICON_REFS = {
+    showFriends  = "friendsBtn",
+    showCopy     = "copyBtn",
+    showPortals  = "portalBtn",
+    showVoice    = "voiceBtn",
+    showSettings = "settingsBtn",
+    showScroll   = "scrollBtn",
+}
+
+function ECHAT.SidebarIconExists(key)
+    local ref = SIDEBAR_ICON_REFS[key]
+    if not ref then return true end
+    local cf1 = _G.ChatFrame1
+    if not cf1 then return true end
+    return CFD(cf1)[ref] ~= nil
+end
+
 -- Chat frame position: owned by EUI unlock mode when a saved position exists.
 -- SetPoint hook enforces saved position, blocking Blizzard's Edit Mode.
 local _cfIgnoreSetPoint = false
@@ -583,14 +606,17 @@ local function ApplyIconOffset(btn, sb)
     if not btn or not sb or not btn:IsShown() then return end
     local key = btn._freeMoveKey
     if not key then return end
+    -- Break the chain for ALL icons: re-anchor directly to sidebar so moving
+    -- one does not drag the rest. The position is derived from the icon's
+    -- CAPTURED natural chain position (_freeMoveNat*) plus the saved offset, so
+    -- re-applying is idempotent. Reading the live center here instead would
+    -- compound the offset on every reload/refresh (the icon's current center
+    -- already includes the previous offset), which made icons fly around.
+    local natX, natY = btn._freeMoveNatX, btn._freeMoveNatY
+    if not natX then return end
     local ox, oy = GetIconOffset(key)
-    -- Break the chain for ALL icons: re-anchor directly to sidebar
-    -- using current center position so moving one doesn't drag the rest.
-    local bx, by = btn:GetCenter()
-    local sx, sy = sb:GetCenter()
-    if not bx or not sx then return end
     btn:ClearAllPoints()
-    btn:SetPoint("CENTER", sb, "CENTER", (bx - sx) + ox, (by - sy) + oy)
+    btn:SetPoint("CENTER", sb, "CENTER", natX + ox, natY + oy)
 end
 
 local function EnableIconFreeMove(btn)
@@ -682,14 +708,37 @@ function ECHAT.ApplyIconFreeMove()
         { ref = "scrollBtn",  key = "scroll" },
     }
 
+    -- Phase 1: enable drag hooks and capture each icon's natural (chain-layout)
+    -- center delta from the sidebar. We only (re)capture for icons still sitting
+    -- in the chain (anchor point ~= "CENTER"); once an icon has been re-anchored
+    -- to CENTER by a previous pass its live center already includes the saved
+    -- offset, so we keep the stored natural instead of re-reading it. This phase
+    -- only READS positions (no SetPoint), so processing order cannot let one
+    -- icon's offset contaminate the next icon's captured natural.
+    local sx, sy = sb:GetCenter()
     for _, info in ipairs(btns) do
         local btn = CFD(cf1)[info.ref]
         if btn then
             btn._freeMoveKey = info.key
             EnableIconFreeMove(btn)
-            if cfg.freeMoveIcons then
-                ApplyIconOffset(btn, sb)
+            if sx and btn:IsShown() then
+                local pt = btn:GetPoint(1)
+                if pt and pt ~= "CENTER" then
+                    local bx, by = btn:GetCenter()
+                    if bx then
+                        btn._freeMoveNatX = bx - sx
+                        btn._freeMoveNatY = by - sy
+                    end
+                end
             end
+        end
+    end
+
+    -- Phase 2: apply saved offsets from the stable captured naturals.
+    if cfg.freeMoveIcons then
+        for _, info in ipairs(btns) do
+            local btn = CFD(cf1)[info.ref]
+            if btn then ApplyIconOffset(btn, sb) end
         end
     end
 end
@@ -807,7 +856,7 @@ local function CreatePortalFlyout()
             labelFrame:SetFrameLevel(cd:GetFrameLevel() + 2)
             local label = labelFrame:CreateFontString(nil, "OVERLAY", nil)
             if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(label, true) end
-            label:SetFont(GetFont(), 8, "OUTLINE, SLUG")
+            label:SetFont(GetFont(), 8, (EUI.SlugFlag and EUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
             label:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
             label:SetTextColor(1, 1, 1, 0.9)
             label:SetText(short)

@@ -3529,7 +3529,7 @@ local function UpdateSecondaryResource()
                         -- Default: threshold color above the value, fill below it
                         -- (builders -- warn when high). "Reverse Threshold Fill Color"
                         -- (thresholdReverse) flips it to threshold color below
-						-- for spender resources like Hunter Focus where you
+                        -- for spender resources like Hunter Focus where you
                         -- want to warn when low.
                         local curve
                         if _tsReverse then

@@ -7,13 +7,8 @@
 local ADDON_NAME, ns = ...
 
 local function GetNPOptOutline()
-    local flag = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
-    -- Preview parity for "Disable Slug Outline": strip SLUG from non-aura
-    -- preview text. Aura preview text keeps its hardcoded slug flag.
-    if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("nameplates") then
-        return EllesmereUI.StripSlugFlag(flag)
-    end
-    return flag
+    -- Body-text preview flag, already slug-gated at the source (GetFontOutlineFlag).
+    return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
 end
 
 -------------------------------------------------------------------------------
@@ -737,14 +732,15 @@ initFrame:SetScript("OnEvent", function(self)
             textFrame:SetFrameLevel(d:GetFrameLevel() + 2)
 
             d.durationText = textFrame:CreateFontString(nil, "OVERLAY")
-            d.durationText:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
+            -- Preview aura text mirrors runtime: SlugFlag drops slug when the toggle is on.
+            d.durationText:SetFont(FONT_PATH, 11, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
             d.durationText:SetPoint("TOPLEFT", d, "TOPLEFT", -3, 4)
             d.durationText:SetJustifyH("LEFT")
             d.durationText:SetText(debuffData[i].text)
 
             -- Stack count text (bottom-right)
             d.stackText = textFrame:CreateFontString(nil, "OVERLAY")
-            d.stackText:SetFont(FONT_PATH, 11, "OUTLINE, SLUG")
+            d.stackText:SetFont(FONT_PATH, 11, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
             d.stackText:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", 1, 1)
             d.stackText:SetJustifyH("RIGHT")
             if debuffData[i].stacks > 0 then
@@ -778,7 +774,7 @@ initFrame:SetScript("OnEvent", function(self)
             bfTextFrame:SetAllPoints()
             bfTextFrame:SetFrameLevel(bf:GetFrameLevel() + 2)
             bf.durationText = bfTextFrame:CreateFontString(nil, "OVERLAY")
-            bf.durationText:SetFont(FONT_PATH, 12, "OUTLINE, SLUG")
+            bf.durationText:SetFont(FONT_PATH, 12, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
             bf.durationText:SetPoint("CENTER", bf, "CENTER", 0, 0)
             bf.durationText:SetText(buffData[i].text)
             buffs[i] = bf
@@ -806,7 +802,7 @@ initFrame:SetScript("OnEvent", function(self)
             cfTextFrame:SetAllPoints()
             cfTextFrame:SetFrameLevel(cf:GetFrameLevel() + 2)
             cf.durationText = cfTextFrame:CreateFontString(nil, "OVERLAY")
-            cf.durationText:SetFont(FONT_PATH, 12, "OUTLINE, SLUG")
+            cf.durationText:SetFont(FONT_PATH, 12, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
             cf.durationText:SetPoint("CENTER", cf, "CENTER", 0, 0)
             cf.durationText:SetText(ccData[i].text)
             ccs[i] = cf
@@ -820,10 +816,8 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         pf.Update = function(self)
             local fontPath   = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
+            -- Body-text outline, already slug-gated at the source (GetFontOutlineFlag).
             local npOutline  = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or "OUTLINE, SLUG"
-            if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("nameplates") then
-                npOutline = EllesmereUI.StripSlugFlag(npOutline)
-            end
             local barH       = Snap(DBVal("healthBarHeight"))
             local rawBarW    = BAR_W + DBVal("healthBarWidth")
             local barW       = IsDragging() and rawBarW or Snap(rawBarW)
@@ -1443,7 +1437,7 @@ initFrame:SetScript("OnEvent", function(self)
                     return
                 end
                 durText:Show()
-                durText:SetFont(fontPath, size, "OUTLINE, SLUG")
+                durText:SetFont(fontPath, size, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
                 durText:SetTextColor(color.r, color.g, color.b, 1)
                 durText:ClearAllPoints()
                 if pos == "center" then
@@ -1471,7 +1465,7 @@ initFrame:SetScript("OnEvent", function(self)
                     return
                 end
                 countText:Show()
-                countText:SetFont(fontPath, auraStackSz, "OUTLINE, SLUG")
+                countText:SetFont(fontPath, auraStackSz, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
                 countText:SetTextColor(auraStackC.r, auraStackC.g, auraStackC.b, 1)
                 countText:ClearAllPoints()
                 if auraStackPos == "center" then
@@ -1516,7 +1510,7 @@ initFrame:SetScript("OnEvent", function(self)
                     debuffs[i]:Show()
                     debuffs[i]:SetSize(Snap(debuffSz), Snap(debuffH))
                     ns.SetAuraIconCrop(debuffs[i].icon, debuffCrop, debuffSz, debuffH)
-                    debuffs[i].durationText:SetFont(fontPath, debuffDurSz, "OUTLINE, SLUG")
+                    debuffs[i].durationText:SetFont(fontPath, debuffDurSz, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
                     debuffs[i].durationText:SetTextColor(debuffDurC.r, debuffDurC.g, debuffDurC.b, 1)
                     ApplyTimerPos(debuffs[i].durationText, debuffs[i], debuffTPos, debuffDurSz, debuffDurX, debuffDurY, debuffDurC)
                     ApplyStackPos(debuffs[i].stackText, debuffs[i])
@@ -1535,7 +1529,7 @@ initFrame:SetScript("OnEvent", function(self)
                     buffs[i]:Show()
                     buffs[i]:SetSize(Snap(buffSz), Snap(buffH))
                     ns.SetAuraIconCrop(buffs[i].icon, buffCrop, buffSz, buffH)
-                    buffs[i].durationText:SetFont(fontPath, buffDurSz, "OUTLINE, SLUG")
+                    buffs[i].durationText:SetFont(fontPath, buffDurSz, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
                     buffs[i].durationText:SetTextColor(buffDurC.r, buffDurC.g, buffDurC.b, 1)
                     ApplyTimerPos(buffs[i].durationText, buffs[i], buffTPos, buffDurSz, buffDurX, buffDurY, buffDurC)
                     PlaceInSlot(buffs[i], buffSlotVal, i, PV_CONST.BUFF_COUNT, buffSz, buffH, buffSpacing, buffXOff, buffYOff)
@@ -1559,7 +1553,7 @@ initFrame:SetScript("OnEvent", function(self)
                     ccs[i]:Show()
                     ccs[i]:SetSize(Snap(ccSz), Snap(ccH))
                     ns.SetAuraIconCrop(ccs[i].icon, ccCrop, ccSz, ccH)
-                    ccs[i].durationText:SetFont(fontPath, ccDurSz, "OUTLINE, SLUG")
+                    ccs[i].durationText:SetFont(fontPath, ccDurSz, EllesmereUI.SlugFlag("OUTLINE, SLUG"))
                     ccs[i].durationText:SetTextColor(ccDurC.r, ccDurC.g, ccDurC.b, 1)
                     ApplyTimerPos(ccs[i].durationText, ccs[i], ccTPos, ccDurSz, ccDurX, ccDurY, ccDurC)
                     PlaceInSlot(ccs[i], ccSlotVal, i, PV_CONST.CC_COUNT, ccSz, ccH, ccSpacing, ccXOff, ccYOff)
@@ -3220,6 +3214,95 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetAlpha(questObjOff() and 0.15 or 0.4)
         end
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Enemy Name While Casting",
+              tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
+              getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
+              setValue=function(v)
+                DB().hideEnemyNameWhileCasting = v
+                ns.RefreshAllSettings()
+                UpdatePreview()
+              end },
+            { type = "toggle", text = "Experimental: Cast Lockout as CC Icon",
+              tooltip = "Show successful interrupt lockouts in the crowd-control icon slot.\n\nDue to addon restrictions, the duration shown is a generic 4 seconds for all classes, so it is not 100% accurate.",
+              getValue = function() return DBVal("showCastLockoutAsCrowdControl") == true end,
+              setValue = function(v)
+                  DB().showCastLockoutAsCrowdControl = v
+                  RefreshAllAuras()
+              end });  y = y - h
+
+        -- Focus Letter: draws a white "F" on the current focus nameplate.
+        local focusLetterOff = function()
+            return DBVal("focusLetterEnabled") ~= true
+        end
+        local focusLetterRow
+        focusLetterRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Focus Letter",
+              tooltip="Draws a white letter F on your current focus target's nameplate.",
+              getValue=function() return DBVal("focusLetterEnabled") == true end,
+              setValue=function(v)
+                DB().focusLetterEnabled = v
+                RefreshAllPlates()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" });  y = y - h
+
+        do
+            local leftRgn = focusLetterRow._leftRegion
+            local _, focusLetterCogShow = EllesmereUI.BuildCogPopup({
+                title = "Focus Letter",
+                rows = {
+                    { type="dropdown", label="Anchor",
+                      values=FOCUS_LETTER_ANCHORS,
+                      order=FOCUS_LETTER_ANCHOR_ORDER,
+                      get=GetFocusLetterAnchor,
+                      set=function(v)
+                        DB().focusLetterAnchor = v
+                        RefreshAllPlates()
+                      end },
+                    { type="slider", label="Size", min=6, max=40, step=1,
+                      get=function() return DBVal("focusLetterSize") or defaults.focusLetterSize end,
+                      set=function(v)
+                        DB().focusLetterSize = v
+                        RefreshAllPlates()
+                      end },
+                    { type="slider", label="X", min=-100, max=100, step=1,
+                      get=function() return DBVal("focusLetterX") or defaults.focusLetterX end,
+                      set=function(v)
+                        DB().focusLetterX = v
+                        RefreshAllPlates()
+                      end },
+                    { type="slider", label="Y", min=-100, max=100, step=1,
+                      get=function() return DBVal("focusLetterY") or defaults.focusLetterY end,
+                      set=function(v)
+                        DB().focusLetterY = v
+                        RefreshAllPlates()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, leftRgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            leftRgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            if cogTex.SetSnapToPixelGrid then cogTex:SetSnapToPixelGrid(false); cogTex:SetTexelSnappingBias(0) end
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(focusLetterOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            UpdateCogAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not focusLetterOff() then focusLetterCogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not focusLetterOff() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+        end
+
         return math.abs(y)
     end
 
@@ -4621,7 +4704,7 @@ initFrame:SetScript("OnEvent", function(self)
                     ySet = function(v) TextPosYSet(slotKey, v) end,
                     sizeGet = function() return DBVal(sizeKey) or defaults[sizeKey] end,
                     sizeSet = function(v) DB()[sizeKey] = v; TextOffsetRefresh() end,
-                    sizeMin = 6, sizeMax = 20,
+                    sizeMin = 6, sizeMax = 30,
                     sizeLabel = "Size",
                     sizeFirst = true,
                     toggleLabel = "Show % Decimal",
@@ -5258,9 +5341,6 @@ initFrame:SetScript("OnEvent", function(self)
         local isFocusTextureNone = function()
             return (DBVal("focusOverlayTexture") or defaults.focusOverlayTexture) == "none"
         end
-        local focusLetterOff = function()
-            return DBVal("focusLetterEnabled") ~= true
-        end
 
         local targetPrev, focusPrev
         local function RefreshFocusPreview()
@@ -5356,10 +5436,39 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Target Texture ---- Focus Texture
+        -- Both dropdowns list the special stripe overlays first, then the full bar
+        -- texture set (EUI textures + SharedMedia) shared with the main Bar Texture
+        -- dropdown. Stripe keys resolve to nameplate Media; bar keys resolve through
+        -- the health-bar texture lookup at render time (ns.ResolveOverlayTexPath).
+        local ovtValues, ovtOrder = {}, {}
+        do
+            local STRIPE_ORDER = { "striped-v2", "striped-wide-v2", "stripes-medium", "stripes-small-close", "stripes-small-spread", "striped-tiny" }
+            local STRIPE_NAMES = {
+                ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes",
+                ["stripes-medium"] = "Medium Stripes", ["stripes-small-close"] = "Small Dense Stripes",
+                ["stripes-small-spread"] = "Small Spread Stripes", ["striped-tiny"] = "Tiny Stripes",
+            }
+            for _, k in ipairs(STRIPE_ORDER) do ovtValues[k] = STRIPE_NAMES[k]; ovtOrder[#ovtOrder + 1] = k end
+            ovtOrder[#ovtOrder + 1] = "---"
+            for _, k in ipairs(hbtOrder) do
+                ovtOrder[#ovtOrder + 1] = k
+                if k ~= "---" then ovtValues[k] = hbtValues[k] end
+            end
+            ovtValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key)
+                    if not key or key == "none" or key == "---" then return nil end
+                    if ns.OVERLAY_STRIPE_KEYS and ns.OVERLAY_STRIPE_KEYS[key] then
+                        return "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. key .. ".png"
+                    end
+                    return ns.healthBarTextures and ns.healthBarTextures[key]
+                end,
+            }
+        end
         local textureDualRow
         textureDualRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Target Texture",
-              values={ ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes", ["stripes-medium"] = "Medium Stripes", ["stripes-small-close"] = "Small Dense Stripes", ["stripes-small-spread"] = "Small Spread Stripes", ["striped-tiny"] = "Tiny Stripes", none = "None" },
+              values=ovtValues,
               getValue=function() return DBVal("targetOverlayTexture") or defaults.targetOverlayTexture end,
               setValue=function(v)
                 DB().targetOverlayTexture = v
@@ -5367,9 +5476,9 @@ initFrame:SetScript("OnEvent", function(self)
                 if targetPrev and targetPrev.UpdateOverlay then targetPrev.UpdateOverlay() end
                 EllesmereUI:RefreshPage()
               end,
-              order={ "striped-v2", "striped-wide-v2", "stripes-medium", "stripes-small-close", "stripes-small-spread", "striped-tiny", "none" } },
+              order=ovtOrder },
             { type="dropdown", text="Focus Texture",
-              values={ ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes", ["stripes-medium"] = "Medium Stripes", ["stripes-small-close"] = "Small Dense Stripes", ["stripes-small-spread"] = "Small Spread Stripes", ["striped-tiny"] = "Tiny Stripes", none = "None" },
+              values=ovtValues,
               getValue=function() return DBVal("focusOverlayTexture") or defaults.focusOverlayTexture end,
               setValue=function(v)
                 DB().focusOverlayTexture = v
@@ -5377,7 +5486,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
                 EllesmereUI:RefreshPage()
               end,
-              order={ "striped-v2", "striped-wide-v2", "stripes-medium", "stripes-small-close", "stripes-small-spread", "striped-tiny", "none" } });  y = y - h
+              order=ovtOrder });  y = y - h
 
         -- Inline Target Texture color swatch
         do
@@ -5500,72 +5609,6 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             cogBtn:SetScript("OnEnter", function(self)
                 if not isFocusTextureNone() then self:SetAlpha(0.75) end
-            end)
-            cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
-        end
-
-        -- Focus Letter
-        local focusLetterRow
-        focusLetterRow, h = W:DualRow(parent, y,
-            { type="label", text="" },
-            { type="toggle", text="Focus Letter",
-              getValue=function() return DBVal("focusLetterEnabled") == true end,
-              setValue=function(v)
-                DB().focusLetterEnabled = v
-                RefreshFocusPreview()
-                EllesmereUI:RefreshPage()
-              end });  y = y - h
-
-        do
-            local rightRgn = focusLetterRow._rightRegion
-            local _, focusLetterCogShow = EllesmereUI.BuildCogPopup({
-                title = "Focus Letter",
-                rows = {
-                    { type="dropdown", label="Anchor",
-                      values=FOCUS_LETTER_ANCHORS,
-                      order=FOCUS_LETTER_ANCHOR_ORDER,
-                      get=GetFocusLetterAnchor,
-                      set=function(v)
-                        DB().focusLetterAnchor = v
-                        RefreshFocusPreview()
-                      end },
-                    { type="slider", label="Size", min=6, max=40, step=1,
-                      get=function() return DBVal("focusLetterSize") or defaults.focusLetterSize end,
-                      set=function(v)
-                        DB().focusLetterSize = v
-                        RefreshFocusPreview()
-                      end },
-                    { type="slider", label="X", min=-100, max=100, step=1,
-                      get=function() return DBVal("focusLetterX") or defaults.focusLetterX end,
-                      set=function(v)
-                        DB().focusLetterX = v
-                        RefreshFocusPreview()
-                      end },
-                    { type="slider", label="Y", min=-100, max=100, step=1,
-                      get=function() return DBVal("focusLetterY") or defaults.focusLetterY end,
-                      set=function(v)
-                        DB().focusLetterY = v
-                        RefreshFocusPreview()
-                      end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, rightRgn)
-            cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
-            cogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints()
-            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            local function UpdateCogAlpha()
-                cogBtn:SetAlpha(focusLetterOff() and 0.15 or 0.4)
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
-            UpdateCogAlpha()
-            cogBtn:SetScript("OnClick", function(self)
-                if not focusLetterOff() then focusLetterCogShow(self) end
-            end)
-            cogBtn:SetScript("OnEnter", function(self)
-                if not focusLetterOff() then self:SetAlpha(0.75) end
             end)
             cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
         end
@@ -6227,7 +6270,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local clickMappings = {
-            auraDuration = { section = generalTextHeader,  target = auraDurPosRow,       slotSide = "left" },
             debuffDuration = { section = generalTextHeader, target = auraDurPosRow,      slotSide = "left" },
             buffDuration = { section = generalTextHeader,   target = auraDurPosRow,      slotSide = "right" },
             ccDuration = { section = generalTextHeader,     target = auraTimerStackRow,  slotSide = "left" },
@@ -6846,11 +6888,11 @@ initFrame:SetScript("OnEvent", function(self)
                     local oAlpha = DBVal(_overlayAlphaKey) or defaults[_overlayAlphaKey]
                     local oc = (DB() and DB()[_overlayColorKey]) or defaults[_overlayColorKey]
                     overlayFillClip, overlayFillTex = MakeOverlayClip(fillRef, "TOPLEFT", fillRef, "BOTTOMRIGHT", 2)
-                    overlayFillTex:SetTexture(MEDIA .. tex .. ".png")
+                    overlayFillTex:SetTexture(ns.ResolveOverlayTexPath and ns.ResolveOverlayTexPath(tex) or (MEDIA .. tex .. ".png"))
                     overlayFillTex:SetAlpha(oAlpha)
                     overlayFillTex:SetVertexColor(oc.r, oc.g, oc.b)
                     overlayBgClip, overlayBgTex = MakeOverlayClip(fillRef, "TOPRIGHT", health, "BOTTOMRIGHT", 1)
-                    overlayBgTex:SetTexture(MEDIA .. tex .. ".png")
+                    overlayBgTex:SetTexture(ns.ResolveOverlayTexPath and ns.ResolveOverlayTexPath(tex) or (MEDIA .. tex .. ".png"))
                     overlayBgTex:SetAlpha(oAlpha * 0.3)
                     overlayBgTex:SetVertexColor(oc.r, oc.g, oc.b)
                 end
@@ -6901,14 +6943,14 @@ initFrame:SetScript("OnEvent", function(self)
                     if not overlayFillClip then
                         overlayFillClip, overlayFillTex = MakeOverlayClip(fillRef, "TOPLEFT", fillRef, "BOTTOMRIGHT", 2)
                     end
-                    overlayFillTex:SetTexture(MEDIA .. tex .. ".png")
+                    overlayFillTex:SetTexture(ns.ResolveOverlayTexPath and ns.ResolveOverlayTexPath(tex) or (MEDIA .. tex .. ".png"))
                     overlayFillTex:SetAlpha(oAlpha)
                     overlayFillTex:SetVertexColor(oc.r, oc.g, oc.b)
                     overlayFillClip:Show()
                     if not overlayBgClip then
                         overlayBgClip, overlayBgTex = MakeOverlayClip(fillRef, "TOPRIGHT", health, "BOTTOMRIGHT", 1)
                     end
-                    overlayBgTex:SetTexture(MEDIA .. tex .. ".png")
+                    overlayBgTex:SetTexture(ns.ResolveOverlayTexPath and ns.ResolveOverlayTexPath(tex) or (MEDIA .. tex .. ".png"))
                     overlayBgTex:SetAlpha(oAlpha * 0.3)
                     overlayBgTex:SetVertexColor(oc.r, oc.g, oc.b)
                     overlayBgClip:Show()
@@ -7638,39 +7680,6 @@ initFrame:SetScript("OnEvent", function(self)
                     swatch:EnableMouse(not flashOff())
                 end
             end
-
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Hide Enemy Name While Casting",
-                  tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
-                  getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
-                  setValue=function(v)
-                    DB().hideEnemyNameWhileCasting = v
-                    ns.RefreshAllSettings()
-                    UpdatePreview()
-                  end },
-                { type = "toggle", text = "Interrupt Source In Text",
-                  tooltip = "Show the interrupting unit as \"Interrupted [Name]\" instead of using the cast target text slot.",
-                  disabled = flashOff,
-                  disabledTooltip = "Show Interrupted Flash Effect",
-                  getValue = function()
-                      local db = DB()
-                      if db and db.interruptedFlashShowSource ~= nil then return db.interruptedFlashShowSource end
-                      return defaults.interruptedFlashShowSource
-                  end,
-                  setValue = function(v)
-                      DB().interruptedFlashShowSource = v
-                      RefreshAllPlates()
-                  end });  y = y - h
-
-            _, h = W:DualRow(parent, y,
-                { type = "toggle", text = "Show Cast Lockout as Crowd Control",
-                  tooltip = "Show successful interrupt lockouts in the crowd-control icon slot.",
-                  getValue = function() return DBVal("showCastLockoutAsCrowdControl") == true end,
-                  setValue = function(v)
-                      DB().showCastLockoutAsCrowdControl = v
-                      RefreshAllAuras()
-                  end },
-                { type = "label", text = "" });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h

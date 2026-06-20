@@ -64,7 +64,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or STANDARD_TEXT_FONT
             local infoFrame = CreateFrame("Frame", nil, parent)
-            infoFrame:SetSize(parent:GetWidth() or 400, 30)
+            infoFrame:SetSize(parent:GetWidth() or 400, 20)
             infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 20)
             infoFrame._isSpacer = true
             local infoLabel = infoFrame:CreateFontString(nil, "OVERLAY")
@@ -73,7 +73,37 @@ initFrame:SetScript("OnEvent", function(self)
             infoLabel:SetPoint("CENTER")
             infoLabel:SetJustifyH("CENTER")
             infoLabel:SetText(EllesmereUI.L("Reposition this element within Blizzard Edit Mode"))
-            y = y - 40
+
+            -- Accent toggle beneath the label. "Force Quest Tracker on Screen"
+            -- keeps the tracker clamped to the screen; clicking again ("Allow
+            -- Quest Tracker to be Moved Offscreen") releases it so it can be
+            -- dragged off-screen. The choice is saved in the quest tracker DB
+            -- (forceOnScreen) and re-applied at load by EQT.ApplyForceOnScreen(),
+            -- so it persists through reload/logout. Edit Mode is opened so the
+            -- user can reposition the frame after toggling.
+            local EG = EllesmereUI.ELLESMERE_GREEN
+            local fosBtn = CreateFrame("Button", nil, parent)
+            local fosFS = fosBtn:CreateFontString(nil, "OVERLAY")
+            fosFS:SetFont(fontPath, 15, "")
+            fosFS:SetTextColor(EG.r, EG.g, EG.b, 0.75)
+            fosFS:SetPoint("CENTER")
+            local function UpdateForceOnScreenLabel()
+                local on = Cfg("forceOnScreen") == true
+                fosFS:SetText(EllesmereUI.L(on and "Allow Quest Tracker to be Moved Offscreen" or "Force Quest Tracker on Screen"))
+                fosBtn:SetSize(fosFS:GetStringWidth() + 12, 18)
+            end
+            UpdateForceOnScreenLabel()
+            fosBtn:SetPoint("TOP", infoLabel, "BOTTOM", 0, -10)
+            fosBtn:SetScript("OnEnter", function() fosFS:SetTextColor(EG.r, EG.g, EG.b, 1) end)
+            fosBtn:SetScript("OnLeave", function() fosFS:SetTextColor(EG.r, EG.g, EG.b, 0.75) end)
+            fosBtn:SetScript("OnClick", function()
+                if InCombatLockdown() then return end
+                Set("forceOnScreen", not (Cfg("forceOnScreen") == true))
+                if EQT.ApplyForceOnScreen then EQT.ApplyForceOnScreen() end
+                UpdateForceOnScreenLabel()
+                if EditModeManagerFrame then ShowUIPanel(EditModeManagerFrame) end
+            end)
+            y = y - 68
         end
 
         -- -- DISPLAY ---------------------------------------------------------

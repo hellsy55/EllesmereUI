@@ -1856,7 +1856,7 @@ local function SetupPagingFrame()
 
     -- Page number text
     local pageText = f:CreateFontString(nil, "OVERLAY")
-    pageText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE, SLUG")
+    pageText:SetFont(STANDARD_TEXT_FONT, 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     pageText:SetTextColor(1, 1, 1, 0.9)
     pageText:SetText("1")
     f._pageText = pageText
@@ -1975,7 +1975,7 @@ LayoutPagingFrame = function()
 
     f._upBtn:SetSize(arrowSize, arrowSize)
     f._downBtn:SetSize(arrowSize, arrowSize)
-    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, "OUTLINE, SLUG")
+    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
 
     f._upBtn:ClearAllPoints()
     f._downBtn:ClearAllPoints()
@@ -4433,7 +4433,7 @@ function EAB:ApplyFontsForBar(barKey)
             else
                 nm:SetAlpha(1)
                 if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nm, false) end
-                nm:SetFont(fontPath, macroSize, "OUTLINE, SLUG")
+                nm:SetFont(fontPath, macroSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
                 nm:SetTextColor(macroColor.r, macroColor.g, macroColor.b)
                 nm:ClearAllPoints()
                 nm:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1 + macroOX, 4 + macroOY)
@@ -6025,7 +6025,25 @@ function EAB:UpdateHousingVisibility()
                     -- need the full check since they have no state driver.
                     local isSecure = not info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable and barFrames[key]
                     local shouldHide = isSecure and ShouldHideNonMacro(s) or (not isSecure and EllesmereUI.CheckVisibilityOptions(s))
-                    if shouldHide then
+                    -- Runtime "Toggle Action Bar" keybind override wins over the saved
+                    -- mode and the non-macro hide checks, exactly as RefreshRuntimeVisibility
+                    -- does. Without these two branches any event routed through here
+                    -- (target change, group/mount/housing) re-applies the saved visibility
+                    -- and re-shows a bar the player toggled off with its keybind. Secure
+                    -- managed bars only (the override is never set for other frame types).
+                    local _visToggleOv = isSecure and self._visOverride and self._visOverride[key]
+                    if _visToggleOv == "never" then
+                        if frame._eabLastVisStr ~= "hide" then
+                            frame._eabLastVisStr = "hide"
+                            RegisterAttributeDriver(frame, "state-visibility", "hide")
+                        end
+                    elseif _visToggleOv == "always" then
+                        local ovStr = BuildVisibilityString(info, s, "always")
+                        if frame._eabLastVisStr ~= ovStr then
+                            frame._eabLastVisStr = ovStr
+                            RegisterAttributeDriver(frame, "state-visibility", ovStr)
+                        end
+                    elseif shouldHide then
                         if isSecure then
                             if frame._eabLastVisStr ~= "hide" then
 
@@ -8672,7 +8690,7 @@ function EAB:FinishSetup()
         local softOnly = (hasSoftInteract or hasSoftEnemy or hasSoftFriend) and not hasHardTarget
         for _, info in ipairs(ALL_BARS) do
             local s = self.db.profile.bars[info.key]
-            if s and s.visHideNoTarget then
+            if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
                 local frame = barFrames[info.key]
                 if frame then
                     if softOnly then
@@ -8714,7 +8732,7 @@ function EAB:FinishSetup()
         regenFrame:SetScript("OnEvent", function()
             for _, info in ipairs(ALL_BARS) do
                 local s = self.db.profile.bars[info.key]
-                if s and s.visHideNoTarget then
+                if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
                     local frame = barFrames[info.key]
                     if frame then
                         local newStr = BuildVisibilityString(info, s)

@@ -543,7 +543,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Macro name text (bottom-center, mirrors real button Name position)
             local macroFS = bf:CreateFontString(nil, "OVERLAY")
             if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(macroFS, false) end
-            macroFS:SetFont(DEFAULT_FONT, 12, "OUTLINE, SLUG")
+            macroFS:SetFont(DEFAULT_FONT, 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
             macroFS:SetTextColor(1, 1, 1)
             macroFS:SetPoint("BOTTOMLEFT", bf, "BOTTOMLEFT", 1, 4)
             macroFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
@@ -1029,7 +1029,7 @@ initFrame:SetScript("OnEvent", function(self)
                             macroFS:SetText(mcText)
                         end
                         if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(macroFS, false) end
-                        macroFS:SetFont(fontPath, scaledMCSize, "OUTLINE, SLUG")
+                        macroFS:SetFont(fontPath, scaledMCSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
                         macroFS:SetTextColor(mcColor.r, mcColor.g, mcColor.b)
                         local mcOX = (settings.macroOffsetX or 0) * totalScale
                         local mcOY = (settings.macroOffsetY or 0) * totalScale
@@ -3322,7 +3322,7 @@ initFrame:SetScript("OnEvent", function(self)
                       SSet("hideKeybind", v, function(k) EAB:ApplyFontsForBar(k) end)
                       SUpdatePreview()
                   end },
-                { type="slider", text="Keybind Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Keybind Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("keybindFontSize", 12) end,
                   setValue=function(v)
                       SSet("keybindFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3480,7 +3480,7 @@ initFrame:SetScript("OnEvent", function(self)
                       SSet("hideMacroText", v, function(k) EAB:ApplyFontsForBar(k) end)
                       SUpdatePreview()
                   end },
-                { type="slider", text="Macro Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Macro Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("macroFontSize", 12) end,
                   setValue=function(v)
                       SSet("macroFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3628,13 +3628,13 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Row 3: Charges Text Size slider + inline swatch (left) | Cooldown Text Size slider + inline swatch (right)
             chargesRow, h = W:DualRow(parent, y,
-                { type="slider", text="Charges Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Charges Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("countFontSize", 12) end,
                   setValue=function(v)
                       SSet("countFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
                       SUpdatePreview()
                   end },
-                { type="slider", text="Cooldown Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Cooldown Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("cooldownFontSize", 12) end,
                   setValue=function(v)
                       SSet("cooldownFontSize", v, function(k) EAB:ApplyCooldownFontsForBar(k) end)

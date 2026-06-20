@@ -59,14 +59,9 @@ local function GetFont()
     return (p and p.font) or defaults.font
 end
 local function GetNPOutline()
-    local flag = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE, SLUG"
-    -- Per-module "Disable Slug Outline": drop the SLUG token from non-aura
-    -- body text so it renders a plain outline. Aura icon text bypasses this
-    -- helper with a hardcoded slug flag and is unaffected.
-    if EllesmereUI and EllesmereUI.IsSlugDisabled and EllesmereUI.IsSlugDisabled("nameplates") then
-        return EllesmereUI.StripSlugFlag(flag)
-    end
-    return flag
+    -- Already slug-gated at the source (GetFontOutlineFlag); SetFSFont also
+    -- gates the explicit-flag path, so aura literals are covered too.
+    return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates")) or "OUTLINE, SLUG"
 end
 local function GetNPUseShadow()
     return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("nameplates")
@@ -74,6 +69,9 @@ end
 local function SetFSFont(fs, size, flags)
   if not (fs and fs.SetFont) then return end
   local f = flags or GetNPOutline()
+  -- "Never Show Slug": gate the explicit-flag path here so hardcoded aura
+  -- "OUTLINE, SLUG" literals drop the slug too (body text is already gated).
+  if EllesmereUI and EllesmereUI.SlugFlag then f = EllesmereUI.SlugFlag(f) end
   -- 12.0.7: drop shadows only render from a FontObject; prime before SetFont.
   if EllesmereUI and EllesmereUI.PrimeFontShadow then
     EllesmereUI.PrimeFontShadow(fs, f == "")
@@ -186,7 +184,6 @@ local defaults = {
     castBarShieldEnabled = true,
     interruptedFlashEnabled = true,
     interruptedFlashColor = { r = 0.8, g = 0.0, b = 0.0 },
-    interruptedFlashShowSource = false,
     showCastLockoutAsCrowdControl = false,
     healthBarHeight = 17,
     friendlyNameOnly = true,
@@ -767,11 +764,21 @@ end
 -- they never land under the icon. Returns 0 for the legacy default (left,
 -- normal) and for in-width-tucked icons, so existing layouts are unchanged.
 -- All inputs are clean profile numbers, safe to add.
-function ns.GetCastIconReserve()
+-- The optional `plate` only matters for the full-size icon: that icon is a child
+-- of the cast bar and only renders during a cast, so its (large) reserve is
+-- gated on the plate's cast bar being shown. A settings-only query (no plate)
+-- assumes the space is reserved.
+function ns.GetCastIconReserve(plate)
     if not GetShowCastIcon() then return 0, nil end
     local onRight = ns.GetCastIconOnRight()
     local side = onRight and "right" or "left"
     if ns.GetCastIconFullSize() then
+        -- Only reserve the full-size icon's footprint while it is actually
+        -- visible (cast bar up), so side elements sit flush against the bar
+        -- when nothing is casting instead of being shoved out by a phantom gap.
+        if plate and plate.cast and not plate.cast:IsShown() then
+            return 0, side
+        end
         return GetHealthBarHeight() + GetCastBarHeight(), side
     end
     if onRight and not ns.GetCastIconInWidth() then
@@ -1558,7 +1565,7 @@ local function ClearAuraSlot(slot)
 end
 
 ns.CAST_LOCKOUT_SLOT_ID = "__EUI_CAST_LOCKOUT__"
-ns.DEFAULT_CAST_LOCKOUT_DURATION = 5
+ns.DEFAULT_CAST_LOCKOUT_DURATION = 4
 ns.CAST_LOCKOUT_ICON = "Interface\\Icons\\Ability_Kick"
 
 function ns.ShowCastLockoutAsCrowdControl()
@@ -1629,9 +1636,11 @@ PositionArrowsOutsideAuras = function(plate)
     -- Track the furthest pixel extent on each side (accounts for per-slot X offsets)
     local leftExtent, rightExtent = 0, 0
     -- Cast spell icon: reserve on its side so the arrow + the (pushed) side-slot
-    -- core icons all clear it. Settings-driven (not icon:IsShown) so the arrow
-    -- holds steady across cast start/stop. Clean profile numbers, never secrets.
-    local iconRes, iconSide = ns.GetCastIconReserve()
+    -- core icons all clear it. Normal-size icons reserve at all times (the small
+    -- gap holds steady across cast start/stop); the full-size icon only renders
+    -- during a cast, so passing the plate gates its (large) reserve on the cast
+    -- bar being shown. Clean profile numbers, never secrets.
+    local iconRes, iconSide = ns.GetCastIconReserve(plate)
     local leftPush = (iconRes > 0 and iconSide == "left") and iconRes or 0
     local rightPush = (iconRes > 0 and iconSide == "right") and iconRes or 0
     if leftPush > 0 then leftExtent = math.max(leftExtent, leftPush) end
@@ -1794,6 +1803,44 @@ local function EnsureArrows(plate)
     PP.Size(plate.rightArrow, aw, ah)
     PP.Point(plate.rightArrow, "LEFT", plate.health, "RIGHT", 8, 0)
     plate.rightArrow:Hide()
+end
+
+-- Target/Focus overlay textures: the special stripe overlays live in the
+-- nameplates Media folder (resolved by name); everything else is a regular bar
+-- texture resolved through the shared health-bar texture lookup (EUI textures +
+-- SharedMedia), so the overlay dropdowns can offer the full bar texture set.
+ns.OVERLAY_STRIPE_KEYS = {
+    ["striped-v2"] = true, ["striped-wide-v2"] = true, ["stripes-medium"] = true,
+    ["stripes-small-close"] = true, ["stripes-small-spread"] = true, ["striped-tiny"] = true,
+}
+function ns.ResolveOverlayTexPath(key)
+    if not key or key == "none" then return nil end
+    if ns.OVERLAY_STRIPE_KEYS[key] then
+        return "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. key .. ".png"
+    end
+    if EllesmereUI.ResolveTexturePath then
+        return EllesmereUI.ResolveTexturePath(ns.healthBarTextures, key, "Interface\\Buttons\\WHITE8x8")
+    end
+    return nil
+end
+
+-- Stripe overlays keep their fixed 200px, left-anchored pattern (continuous
+-- diagonal across the fill/background split). Bar textures instead fill the full
+-- bar width so they render like a normal bar fill; the clip frames still window
+-- the filled vs empty portions.
+local function ApplyOverlayGeometry(fillT, bgT, health, isStripe)
+    fillT:ClearAllPoints(); bgT:ClearAllPoints()
+    fillT:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+    fillT:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
+    bgT:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+    bgT:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
+    if isStripe then
+        fillT:SetWidth(200)
+        bgT:SetWidth(200)
+    else
+        fillT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
+        bgT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
+    end
 end
 
 local function EnsureFocusOverlay(plate)
@@ -2318,6 +2365,19 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         end
     end)
     plate.cast._timerPlate = plate
+    -- Full-size cast icon: its side-slot reserve is only valid while the cast bar
+    -- is shown, so re-anchor the reserving side elements on every cast show/hide.
+    -- One chokepoint catches all show/hide paths (start, stop, channel stop,
+    -- interrupt flash + its timer). RefreshCastIconSideReserve early-outs unless
+    -- the full-size icon is enabled, so these scripts are ~free in the common case.
+    local function OnCastVisibilityChanged(self)
+        local owner = self._timerPlate
+        if owner and owner.RefreshCastIconSideReserve then
+            owner:RefreshCastIconSideReserve()
+        end
+    end
+    plate.cast:HookScript("OnShow", OnCastVisibilityChanged)
+    plate.cast:HookScript("OnHide", OnCastVisibilityChanged)
     plate.debuffs = {}
     local maxDbf = (p and p.maxDebuffs) or defaults.maxDebuffs
     for i = 1, maxDbf do
@@ -4747,8 +4807,9 @@ function NameplateFrame:UpdateHealthValues()
             end
             self.unit = actualUnit
             unit = actualUnit
-            self._castLockout = nil
-            self:UpdateAuras()
+            -- Only refresh auras for the lockout when one was actually active
+            -- (zero cost when the Cast Lockout feature is off / no lockout).
+            if self._castLockout then self._castLockout = nil; self:UpdateAuras() end
             self:UpdateName()
             self._castDirtyFull = true
             self:UpdateCast()
@@ -4943,7 +5004,7 @@ function NameplateFrame:UpdateHealthColor()
         -- live dropdown changes rebuild it via the name compare)
         if ns._focusOverlayTexName ~= focusTex then
             ns._focusOverlayTexName = focusTex
-            ns._focusOverlayTexPath = "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. focusTex .. ".png"
+            ns._focusOverlayTexPath = ns.ResolveOverlayTexPath(focusTex)
         end
         local texPath = ns._focusOverlayTexPath
         local overlayAlpha = db2.focusOverlayAlpha or defaults.focusOverlayAlpha
@@ -4955,6 +5016,7 @@ function NameplateFrame:UpdateHealthColor()
             self._ovFocShown = true
             self._ovFocTex, self._ovFocAlpha = texPath, overlayAlpha
             self._ovFocR, self._ovFocG, self._ovFocB = oc.r, oc.g, oc.b
+            ApplyOverlayGeometry(self.focusOverlayFill, self.focusOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[focusTex] == true)
             self.focusOverlayFill:SetTexture(texPath)
             self.focusOverlayFill:SetAlpha(overlayAlpha)
             self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
@@ -4969,13 +5031,19 @@ function NameplateFrame:UpdateHealthColor()
         self.focusClipFill:Hide()
         self.focusClipBg:Hide()
     end
-    ns.ApplyFocusLetter(self, unit, db2)
+    -- Focus letter: zero-cost when off. Gate the call so a disabled plate pays
+    -- only two field reads here (no function call, no UnitIsUnit, no allocation).
+    -- The _focusLetterShown term lets a letter that is currently up hide itself on
+    -- the refresh that turns the feature off, after which this gate stays cold.
+    if db2.focusLetterEnabled or self._focusLetterShown then
+        ns.ApplyFocusLetter(self, unit, db2)
+    end
     -- Target overlay: identical to focus overlay but for current target
     local targetTex = db2.targetOverlayTexture or defaults.targetOverlayTexture
     if targetTex ~= "none" and UnitIsUnit(unit, "target") then
         if ns._targetOverlayTexName ~= targetTex then
             ns._targetOverlayTexName = targetTex
-            ns._targetOverlayTexPath = "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. targetTex .. ".png"
+            ns._targetOverlayTexPath = ns.ResolveOverlayTexPath(targetTex)
         end
         local texPath = ns._targetOverlayTexPath
         local overlayAlpha = db2.targetOverlayAlpha or defaults.targetOverlayAlpha
@@ -4987,6 +5055,7 @@ function NameplateFrame:UpdateHealthColor()
             self._ovTgtShown = true
             self._ovTgtTex, self._ovTgtAlpha = texPath, overlayAlpha
             self._ovTgtR, self._ovTgtG, self._ovTgtB = oc.r, oc.g, oc.b
+            ApplyOverlayGeometry(self.targetOverlayFill, self.targetOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[targetTex] == true)
             self.targetOverlayFill:SetTexture(texPath)
             self.targetOverlayFill:SetAlpha(overlayAlpha)
             self.targetOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
@@ -5086,13 +5155,13 @@ function NameplateFrame:UpdateClassification()
             cxOff, debuffY + cpPush + cyOff)
     elseif slot == "left" then
         local sideOff = GetSideAuraXOffset()
-        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconRes, iconSide = ns.GetCastIconReserve(self)
         local iconPush = (iconSide == "left") and iconRes or 0
         PP.Point(self.classFrame, "RIGHT", self.health, "LEFT",
             -sideOff - iconPush + cxOff, cyOff)
     elseif slot == "right" then
         local sideOff = GetSideAuraXOffset()
-        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconRes, iconSide = ns.GetCastIconReserve(self)
         local iconPush = (iconSide == "right") and iconRes or 0
         PP.Point(self.classFrame, "LEFT", self.health, "RIGHT",
             sideOff + iconPush + cxOff, cyOff)
@@ -5140,8 +5209,24 @@ function NameplateFrame:UpdateNameWidth()
     end
 end
 function NameplateFrame:ApplyNameVisibility()
+    -- Zero cost when off: the name's shown state is owned by RefreshNamePosition;
+    -- only override it (hide while the cast bar is up) when the feature is on.
+    if not GetHideEnemyNameWhileCasting() then return end
     local hasNameSlot = FindSlotForElement("enemyName") ~= nil
-    self.name:SetShown(hasNameSlot and not (GetHideEnemyNameWhileCasting() and self.cast:IsShown()))
+    self.name:SetShown(hasNameSlot and not self.cast:IsShown())
+end
+-- The full-size cast icon (a child of the cast bar) only occupies its side-slot
+-- space while a cast is up, so its reserve is gated on the cast bar being shown
+-- (see GetCastIconReserve). Whenever the cast bar shows or hides, re-anchor the
+-- side elements that reserve that space -- the target arrow, classification
+-- icon, and raid marker -- so they track the icon instead of sitting shoved out
+-- by a phantom gap. Zero cost unless the full-size icon is actually enabled;
+-- each re-anchor helper no-ops on plates that don't show that element.
+function NameplateFrame:RefreshCastIconSideReserve()
+    if not (GetShowCastIcon() and ns.GetCastIconFullSize()) then return end
+    self:UpdateClassification()
+    self:UpdateRaidIcon()
+    PositionArrowsOutsideAuras(self)
 end
 function NameplateFrame:RefreshNamePosition()
     local nameSlot = FindSlotForElement("enemyName")
@@ -5212,13 +5297,13 @@ function NameplateFrame:UpdateRaidIcon()
             rxOff, debuffY + cpPush + ryOff)
     elseif pos == "left" then
         local sideOff = GetSideAuraXOffset()
-        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconRes, iconSide = ns.GetCastIconReserve(self)
         local iconPush = (iconSide == "left") and iconRes or 0
         PP.Point(self.raidFrame, "RIGHT", self.health, "LEFT",
             -sideOff - iconPush + rxOff, ryOff)
     elseif pos == "right" then
         local sideOff = GetSideAuraXOffset()
-        local iconRes, iconSide = ns.GetCastIconReserve()
+        local iconRes, iconSide = ns.GetCastIconReserve(self)
         local iconPush = (iconSide == "right") and iconRes or 0
         PP.Point(self.raidFrame, "LEFT", self.health, "RIGHT",
             sideOff + iconPush + rxOff, ryOff)
@@ -5853,7 +5938,9 @@ function NameplateFrame:UpdateAuras(updateInfo)
     wipe(skipIDs); wipe(skipAuras)
     local ccSel = 0
     if ccSlotVal ~= "none" then
-        local lockout = ns.GetActiveCastLockout(self)
+        -- Short-circuit on the plain field so there's no call when no lockout is
+        -- pending (i.e. always, when the feature is off).
+        local lockout = self._castLockout and ns.GetActiveCastLockout(self)
         if lockout then
             ccSel = 1
             skipIDs[1] = ns.CAST_LOCKOUT_SLOT_ID
@@ -6566,7 +6653,10 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
 
-    -- Show interrupter name (class-colored) in cast target position
+    -- Resolve the interrupter's name + class from the GUID, exactly as PR #398
+    -- does. Class-color is applied via an embedded hex code when the class
+    -- resolves; if it doesn't (e.g. a secret GUID), the `if interrupterClass`
+    -- check simply skips coloring and the name shows uncolored.
     local interrupterName
     local interrupterClass
     if interrupterGUID then
@@ -6582,16 +6672,17 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
             end
         end
     end
-    local showSource = defaults.interruptedFlashShowSource
-    if p and p.interruptedFlashShowSource ~= nil then showSource = p.interruptedFlashShowSource end
     local cfg = p or defaults
     local useClassColor = defaults.castTargetClassColor
     if cfg.castTargetClassColor ~= nil then useClassColor = cfg.castTargetClassColor end
+
+    -- Show the interrupter inline as "Interrupted (Name)" in the single cast-name
+    -- FontString; the cast-target / timer slots are cleared during the flash.
     local castW = self.cast:GetWidth()
     if castW and castW > 0 then
-        self.castName:SetWidth((showSource and interrupterName) and math.max(castW - 8, 20) or castW * 0.42)
+        self.castName:SetWidth(interrupterName and math.max(castW - 8, 20) or castW * 0.42)
     end
-    if showSource and interrupterName then
+    if interrupterName then
         local sourceText = interrupterName
         if useClassColor and interrupterClass and C_ClassColor then
             local c = C_ClassColor.GetClassColor(interrupterClass)
@@ -6603,38 +6694,13 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
                 if hex then sourceText = "|c" .. hex .. interrupterName .. "|r" end
             end
         end
-        self.castName:SetText("Interrupted [" .. sourceText .. "]")
+        self.castName:SetText("Interrupted (" .. sourceText .. ")")
     else
         self.castName:SetText("Interrupted")
     end
-    if interrupterName and not showSource then
-        self.castTarget:SetText(interrupterName)
-        if useClassColor then
-            if interrupterClass and C_ClassColor then
-                local c = C_ClassColor.GetClassColor(interrupterClass)
-                if c then
-                    self.castTarget:SetTextColor(c:GetRGB())
-                else
-                    self.castTarget:SetTextColor(1, 1, 1, 1)
-                end
-            else
-                self.castTarget:SetTextColor(1, 1, 1, 1)
-            end
-        else
-            local ctc = (cfg and cfg.castTargetColor) or defaults.castTargetColor
-            self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
-        end
-    else
-        self.castTarget:SetText("")
-    end
-
-    -- Show interrupter name in target slot unless it was moved into the interrupt text.
+    self.castTarget:SetText("")
+    self.castTarget:Hide()
     self.castTimer:Hide()
-    if interrupterName and not showSource then
-        self.castTarget:Show()
-    else
-        self.castTarget:Hide()
-    end
     self.castShieldFrame:Hide()
     self.castShieldFrame:SetAlpha(1)
     self.castBarOverlay:SetAlpha(0)

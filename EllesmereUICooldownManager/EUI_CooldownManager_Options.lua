@@ -4611,9 +4611,16 @@ initFrame:SetScript("OnEvent", function(self)
                         { val = "custom",  label = "CD Swipe Color" },
                         { val = "class",   label = "CD Swipe Class Colored" },
                         { val = "none",    label = "Hide Active State" },
+                        -- Independent toggle+swatch (NOT part of the swipe single-select
+                        -- above): recolors the icon's border during active state.
+                        { activeBorder = true, label = "Border Color" },
                     }
                     local CD_STATE_ITEMS = {
                         { val = nil,               label = "None" },
+                        -- Charge-spell toggle (independent boolean, NOT part of the
+                        -- single-select cdStateEffect below). Handled as a toggle in the
+                        -- item loop (item.charge names the ss key).
+                        { charge = "chargeHideSwipe", label = "Hide Swipe (Charges)" },
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -4702,9 +4709,21 @@ initFrame:SetScript("OnEvent", function(self)
                                 sLbl:SetJustifyH("LEFT")
                                 sLbl:SetText(item.label)
 
-                                -- Highlight selected item
-                                local isSelected = (curVal == item.val)
-                                    or (curVal == nil and item.val == nil)
+                                -- Highlight selected item. Charge entries are
+                                -- independent toggles (item.charge names the ss
+                                -- boolean key); all other items are single-select
+                                -- on item.val.
+                                local isChargeToggle = item.charge ~= nil
+                                local isActiveBorder = item.activeBorder == true
+                                local isSelected
+                                if isChargeToggle then
+                                    isSelected = (ss[item.charge] == true)
+                                elseif isActiveBorder then
+                                    isSelected = (ss.activeBorderEnabled == true)
+                                else
+                                    isSelected = (curVal == item.val)
+                                        or (curVal == nil and item.val == nil)
+                                end
                                 if isSelected then
                                     local acR, acG, acB = EllesmereUI.GetAccentColor()
                                     sLbl:SetTextColor(acR, acG, acB, 1)
@@ -4724,6 +4743,72 @@ initFrame:SetScript("OnEvent", function(self)
                                     sHl:SetAlpha(0)
                                 end)
                                 si:SetScript("OnClick", function()
+                                    -- Charge toggles flip an independent boolean and
+                                    -- keep the flyout open (so both can be set in one
+                                    -- pass). They never touch the single-select
+                                    -- cdStateEffect.
+                                    if isChargeToggle then
+                                        EnsureSS()
+                                        ss[item.charge] = (not (ss[item.charge] == true)) or nil
+                                        isSelected = (ss[item.charge] == true)
+                                        if isSelected then
+                                            local acR, acG, acB = EllesmereUI.GetAccentColor()
+                                            sLbl:SetTextColor(acR, acG, acB, 1)
+                                            ns._cdmAnyChargeStyle = true
+                                        else
+                                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                                        end
+                                        if sd._syncIconSettings and sd.assignedSpells then
+                                            for _, otherSid in ipairs(sd.assignedSpells) do
+                                                if otherSid and otherSid > 0 and otherSid ~= spellID then
+                                                    if not sd.spellSettings[otherSid] then
+                                                        sd.spellSettings[otherSid] = {}
+                                                    end
+                                                    sd.spellSettings[otherSid][item.charge] = ss[item.charge]
+                                                end
+                                            end
+                                        end
+                                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                        if ns.QueueReanchor then ns.QueueReanchor() end
+                                        return
+                                    end
+                                    -- Border Color: independent toggle (keeps flyout
+                                    -- open). The inline swatch picks the color; the row
+                                    -- toggles it on/off. Recolors the icon border during
+                                    -- active state only.
+                                    if isActiveBorder then
+                                        EnsureSS()
+                                        ss.activeBorderEnabled = (not (ss.activeBorderEnabled == true)) or nil
+                                        isSelected = (ss.activeBorderEnabled == true)
+                                        if isSelected then
+                                            if not ss.activeBorderR then
+                                                ss.activeBorderR = 1; ss.activeBorderG = 0.776
+                                                ss.activeBorderB = 0.376; ss.activeBorderA = 1
+                                            end
+                                            local acR, acG, acB = EllesmereUI.GetAccentColor()
+                                            sLbl:SetTextColor(acR, acG, acB, 1)
+                                        else
+                                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                                        end
+                                        if sd._syncIconSettings and sd.assignedSpells then
+                                            for _, otherSid in ipairs(sd.assignedSpells) do
+                                                if otherSid and otherSid > 0 and otherSid ~= spellID then
+                                                    if not sd.spellSettings[otherSid] then
+                                                        sd.spellSettings[otherSid] = {}
+                                                    end
+                                                    local os = sd.spellSettings[otherSid]
+                                                    os.activeBorderEnabled = ss.activeBorderEnabled
+                                                    os.activeBorderR = ss.activeBorderR
+                                                    os.activeBorderG = ss.activeBorderG
+                                                    os.activeBorderB = ss.activeBorderB
+                                                    os.activeBorderA = ss.activeBorderA
+                                                end
+                                            end
+                                        end
+                                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                        if ns.QueueReanchor then ns.QueueReanchor() end
+                                        return
+                                    end
                                     setVal(item.val)
                                     -- Sync to all bar buttons if enabled
                                     if sd._syncIconSettings and sd.assignedSpells then
@@ -4745,12 +4830,18 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.activeSwipeG = ss.activeSwipeG
                                                 os.activeSwipeB = ss.activeSwipeB
                                                 os.activeSwipeA = ss.activeSwipeA
+                                                os.activeBorderEnabled = ss.activeBorderEnabled
+                                                os.activeBorderR = ss.activeBorderR
+                                                os.activeBorderG = ss.activeBorderG
+                                                os.activeBorderB = ss.activeBorderB
+                                                os.activeBorderA = ss.activeBorderA
                                                 os.activeGlow = ss.activeGlow
                                                 os.activeGlowClassColor = ss.activeGlowClassColor
                                                 os.activeGlowR = ss.activeGlowR
                                                 os.activeGlowG = ss.activeGlowG
                                                 os.activeGlowB = ss.activeGlowB
                                                 os.cdStateEffect = ss.cdStateEffect
+                                                os.chargeHideSwipe = ss.chargeHideSwipe
                                                 os.glowColor = ss.glowColor
                                                 os.glowColorR = ss.glowColorR
                                                 os.glowColorG = ss.glowColorG
@@ -4861,6 +4952,7 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end,
                         function()
+                            if ss.activeBorderEnabled then return false end
                             if ss.activeSwipeMode == "none" or ss.activeSwipeClassColor then return false end
                             -- Check if custom color differs from default #FFC660
                             local dr, dg, db = 1, 0.776, 0.376
@@ -4940,6 +5032,67 @@ initFrame:SetScript("OnEvent", function(self)
                                         end,
                                     }, swatchBtn)
                                 end)
+                            elseif item.activeBorder then
+                                -- Border Color swatch (mirrors CD Swipe Color). The
+                                -- swatch picks the color and enables the override; the
+                                -- row itself toggles it on/off (handled in the item loop).
+                                local swatchBtn = CreateFrame("Button", nil, si)
+                                swatchBtn:SetSize(14, 14)
+                                swatchBtn:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                swatchBtn:SetFrameLevel(si:GetFrameLevel() + 3)
+                                local swatchTex = swatchBtn:CreateTexture(nil, "ARTWORK")
+                                swatchTex:SetAllPoints()
+                                swatchTex:SetColorTexture(
+                                    ss.activeBorderR or 1,
+                                    ss.activeBorderG or 0.776,
+                                    ss.activeBorderB or 0.376, 1)
+                                swatchBtn:SetScript("OnClick", function()
+                                    EnsureSS()
+                                    ss.activeBorderEnabled = true
+                                    if not ss.activeBorderR then
+                                        ss.activeBorderR = 1; ss.activeBorderG = 0.776
+                                        ss.activeBorderB = 0.376; ss.activeBorderA = 1
+                                    end
+                                    sub:Hide()
+                                    menu:Hide()
+                                    if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                    if ns.QueueReanchor then ns.QueueReanchor() end
+                                    local snapR, snapG, snapB = ss.activeBorderR, ss.activeBorderG, ss.activeBorderB
+                                    local snapA = ss.activeBorderA or 1
+                                    local function OnPickerChanged()
+                                        local popup = EllesmereUI._colorPickerPopup
+                                        if not popup then return end
+                                        local r, g, b = popup:GetColorRGB()
+                                        local a = popup:GetColorAlpha()
+                                        ss.activeBorderR = r; ss.activeBorderG = g; ss.activeBorderB = b
+                                        ss.activeBorderA = a
+                                        swatchTex:SetColorTexture(r, g, b, a)
+                                        if sd._syncIconSettings and sd.assignedSpells and sd.spellSettings then
+                                            for _, otherSid in ipairs(sd.assignedSpells) do
+                                                if otherSid and otherSid > 0 and otherSid ~= spellID then
+                                                    if not sd.spellSettings[otherSid] then sd.spellSettings[otherSid] = {} end
+                                                    local os2 = sd.spellSettings[otherSid]
+                                                    os2.activeBorderEnabled = true
+                                                    os2.activeBorderR = r; os2.activeBorderG = g; os2.activeBorderB = b
+                                                    os2.activeBorderA = a
+                                                end
+                                            end
+                                        end
+                                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                        if ns.QueueReanchor then ns.QueueReanchor() end
+                                    end
+                                    EllesmereUI:ShowColorPicker({
+                                        r = snapR, g = snapG, b = snapB,
+                                        hasOpacity = true,
+                                        opacity = snapA,
+                                        opacityFunc = OnPickerChanged,
+                                        swatchFunc = OnPickerChanged,
+                                        cancelFunc = function()
+                                            ss.activeBorderR = snapR; ss.activeBorderG = snapG; ss.activeBorderB = snapB
+                                            ss.activeBorderA = snapA
+                                        end,
+                                    }, swatchBtn)
+                                end)
                             end
                         end)
                     if isCustomInjected and activeRow then
@@ -5001,7 +5154,7 @@ initFrame:SetScript("OnEvent", function(self)
                             EnsureSS(); ss.cdStateEffect = v
                             if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                         end,
-                        function() return ss.cdStateEffect == nil end,
+                        function() return ss.cdStateEffect == nil and not ss.chargeHideSwipe end,
                         function(si, item)
                             local isGlow = (item.val == "pixelGlowReady" or item.val == "buttonGlowReady")
                             if isGlow and ss.procGlow and ss.procGlow > 0 then
@@ -5175,12 +5328,18 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.activeSwipeG = ss.activeSwipeG
                                     os.activeSwipeB = ss.activeSwipeB
                                     os.activeSwipeA = ss.activeSwipeA
+                                    os.activeBorderEnabled = ss.activeBorderEnabled
+                                    os.activeBorderR = ss.activeBorderR
+                                    os.activeBorderG = ss.activeBorderG
+                                    os.activeBorderB = ss.activeBorderB
+                                    os.activeBorderA = ss.activeBorderA
                                     os.activeGlow = ss.activeGlow
                                     os.activeGlowClassColor = ss.activeGlowClassColor
                                     os.activeGlowR = ss.activeGlowR
                                     os.activeGlowG = ss.activeGlowG
                                     os.activeGlowB = ss.activeGlowB
                                     os.cdStateEffect = ss.cdStateEffect
+                                    os.chargeHideSwipe = ss.chargeHideSwipe
                                     os.glowColor = ss.glowColor
                                     os.glowColorR = ss.glowColorR
                                     os.glowColorG = ss.glowColorG
@@ -9965,14 +10124,14 @@ initFrame:SetScript("OnEvent", function(self)
         local durationRow
         durationRow, h = W:DualRow(parent, y,
             { type="slider", text="Duration Size",
-              min=6, max=24, step=1, trackWidth=120,
+              min=6, max=30, step=1, trackWidth=120,
               getValue=function() return BD().cooldownFontSize or 12 end,
               setValue=function(v)
                   BD().cooldownFontSize = v
                   ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
               end },
             { type="slider", text="Charge/Stack Size",
-              min=6, max=24, step=1, trackWidth=120,
+              min=6, max=30, step=1, trackWidth=120,
               getValue=function() return BD().stackCountSize or 11 end,
               setValue=function(v)
                   BD().stackCountSize = v

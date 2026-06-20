@@ -1302,7 +1302,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
                     b.fill:ClearAllPoints(); b.fill:SetAllPoints(b.row)
                 end
                 ApplyBarTexture(b.fill, texPath, texKey); b.fill:SetMinMaxValues(0, maxAmt); b.fill:SetValue(p.total)
-                local cc = p.class and RAID_CLASS_COLORS[p.class]
+                local cc = p.class and RAID_CLASS_COLORS[p.class] and EUI.GetClassColor(p.class)
                 if cc then b.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
                 else b.fill:SetStatusBarColor(0x33/255, 0x33/255, 0x33/255) end
                 b.label:SetTextColor(1, 1, 1); b.amount:SetTextColor(1, 1, 1)
@@ -2930,7 +2930,7 @@ local function CreateDMWindow(winIdx)
             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
             if showClassColor then
-                local cc = classFile and RAID_CLASS_COLORS[classFile]
+                local cc = classFile and RAID_CLASS_COLORS[classFile] and EUI.GetClassColor(classFile)
                 if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
                 elseif W.curDMType == Enum.DamageMeterType.EnemyDamageTaken then bar.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
                 else bar.fill:SetStatusBarColor(0.5, 0.5, 0.5) end
@@ -3081,7 +3081,7 @@ local function CreateDMWindow(winIdx)
                         if showClassColor then
                             if classFile ~= bar._cachedColorClass then
                                 bar._cachedColorClass = classFile
-                                local cc = classFile and RAID_CLASS_COLORS[classFile]
+                                local cc = classFile and RAID_CLASS_COLORS[classFile] and EUI.GetClassColor(classFile)
                                 if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
                                 elseif W.curDMType == Enum.DamageMeterType.EnemyDamageTaken then bar.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
                                 else bar.fill:SetStatusBarColor(0.5, 0.5, 0.5) end
@@ -3094,7 +3094,7 @@ local function CreateDMWindow(winIdx)
 
                         -- Left text color (pos + label)
                         if c.leftTextUseClassColor then
-                            local cc = classFile and RAID_CLASS_COLORS[classFile]
+                            local cc = classFile and RAID_CLASS_COLORS[classFile] and EUI.GetClassColor(classFile)
                             local lr, lg, lb = cc and cc.r or 1, cc and cc.g or 1, cc and cc.b or 1
                             bar.label:SetTextColor(lr, lg, lb)
                             bar.pos:SetTextColor(lr, lg, lb)
@@ -3106,7 +3106,7 @@ local function CreateDMWindow(winIdx)
                         end
                         -- Right text color (amount)
                         if c.rightTextUseClassColor then
-                            local cc = classFile and RAID_CLASS_COLORS[classFile]
+                            local cc = classFile and RAID_CLASS_COLORS[classFile] and EUI.GetClassColor(classFile)
                             local rr, rg, rb = cc and cc.r or 1, cc and cc.g or 1, cc and cc.b or 1
                             bar.amount:SetTextColor(rr, rg, rb)
                         elseif fullRebuild then
@@ -3372,7 +3372,7 @@ local function CreateDMWindow(winIdx)
                     bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                     bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
                     ApplyBarTexture(bar.fill, texPath, texKey); bar.fill:SetMinMaxValues(0, maxAmt); bar.fill:SetValue(p.total)
-                    local cc = p.class and RAID_CLASS_COLORS[p.class]
+                    local cc = p.class and RAID_CLASS_COLORS[p.class] and EUI.GetClassColor(p.class)
                     if cc then bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
                     else local ar2, ag2, ab2 = GetAccentRGB(); bar.fill:SetStatusBarColor(ar2, ag2, ab2) end
                     SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
@@ -3434,7 +3434,7 @@ local function CreateDMWindow(winIdx)
                 bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
                 ApplyBarTexture(bar.fill, texPath, texKey); bar.fill:SetMinMaxValues(0, maxAmt); bar.fill:SetValue(entry.amount)
                 if W.sourceClass and RAID_CLASS_COLORS[W.sourceClass] then
-                    local cc = RAID_CLASS_COLORS[W.sourceClass]; bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
+                    local cc = EUI.GetClassColor(W.sourceClass); bar.fill:SetStatusBarColor(cc.r, cc.g, cc.b)
                 else local ar2, ag2, ab2 = GetAccentRGB(); bar.fill:SetStatusBarColor(ar2, ag2, ab2) end
                 SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
                 local spellName
@@ -3882,6 +3882,24 @@ end
 ns.RefreshMeter = function()
     for _, w in ipairs(_windows) do w.Refresh() end
 end
+
+-- Bust the per-class color caches and repaint. Called when global custom class
+-- colors change so bars/text recolor live without a /reload (bars cache color
+-- keyed only on classFile, which does not change when the palette is edited).
+ns.RefreshColors = function()
+    for _, w in ipairs(_windows) do
+        w._stickyClassCache = nil
+        w._barCacheKey = nil
+        if w.rowPool then
+            for _, bar in ipairs(w.rowPool) do bar._cachedColorClass = nil end
+        end
+        if w.stickyPlayer then w.stickyPlayer._cachedColorClass = nil end
+        w.Refresh()
+    end
+end
+-- Exposed on the shared table so the parent addon's ApplyColorsToOUF can repaint
+-- damage meters when global custom class colors change.
+EllesmereUI._DM_RefreshColors = ns.RefreshColors
 
 ns.ApplyBorder = function()
     for _, w in ipairs(_windows) do

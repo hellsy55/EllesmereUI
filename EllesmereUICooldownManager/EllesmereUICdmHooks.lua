@@ -196,6 +196,12 @@ local function ResolveSpellSettings(frame, sid2, sd2)
     local settings = sd2 and sd2.spellSettings
     if not settings or not sid2 then return nil end
 
+    -- Fast path: direct hit on the primary id (the common, non-override case).
+    -- Returns before building the identity set / addId closure below, so the hot
+    -- SetSwipeColor path stays allocation-free for spells without an override.
+    local direct = settings[sid2]
+    if direct then return direct end
+
     local fc2 = _ecmeFC[frame]
 
     -- Build the frame's identity-id set (deduped).
@@ -509,6 +515,95 @@ local function HideBlizzardDecorations(frame)
 end
 
 -------------------------------------------------------------------------------
+--  Charge cooldown style
+--  BASELINE: every charge spell draws the cooldown edge (spark), mirroring the
+--  action bars edge -- it follows the icon shape's square/circular path at the
+--  shape's scale and is masked by the existing CDM shape system. Always on for
+--  charge spells, no setting.
+--  PER-SPELL: the "Hide Swipe (Charges)" toggle additionally hides the radial
+--  swipe so a charge spell shows the edge only. Resolved only when in use
+--  (ns._cdmAnyChargeStyle) so the swipe lookup costs ~0 for everyone else.
+-------------------------------------------------------------------------------
+local CDM_EDGE_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\edge.png"
+
+-- Resolve the per-spell settings table for a CDM frame. Thin wrapper: looks up
+-- the frame's spell/bar identity, then defers to ResolveSpellSettings -- the same
+-- Hero-talent-aware resolver the SetSwipeColor / cdState / desat hooks use -- so
+-- the charge "Hide Swipe" path resolves override spells identically.
+function ns._ResolveCdmSS(frame)
+    local fc2 = _ecmeFC[frame]
+    local sid2 = fc2 and fc2.spellID
+    local bk2 = fc2 and fc2.barKey
+    if not sid2 or not bk2 then return nil end
+    return ResolveSpellSettings(frame, sid2, ns.GetBarSpellData and ns.GetBarSpellData(bk2))
+end
+
+-- Draw the cooldown edge on a charge frame (baseline). The shape system already
+-- owns the mask + circular-edge flag for custom shapes; we add the texture, gold
+-- color, per-shape scale (square default), and the draw flag.
+local function ApplyCdmEdge(cd, bk2)
+    if not cd then return end
+    local bd = barDataByKey and barDataByKey[bk2]
+    local shape = (bd and bd.iconShape) or "none"
+    -- SetEdgeScale is a frame-relative multiplier, so the edge tracks icon size
+    -- automatically. Plain (non-shaped) icons use the action bars' baseline edge
+    -- size; custom shapes use the per-shape scale (same values action bars use).
+    local scale
+    if shape == "none" or shape == "cropped" then
+        scale = 2.1
+    else
+        scale = (ns.CDM_SHAPE_EDGE_SCALES and ns.CDM_SHAPE_EDGE_SCALES[shape]) or 0.75
+    end
+    if cd.SetEdgeTexture then cd:SetEdgeTexture(CDM_EDGE_TEXTURE) end
+    if cd.SetEdgeColor then cd:SetEdgeColor(0.973, 0.839, 0.604, 1) end
+    if cd.SetEdgeScale then cd:SetEdgeScale(scale) end
+    if cd.SetDrawEdge then cd:SetDrawEdge(true) end
+end
+
+-- Live active-state read from Blizzard's swipe color (mirrors the SetSwipeColor
+-- hook; fd._wasActive is stale on falloffs). Returns true while the spell is in
+-- its active (buff-up) state. Secret-safe: a secret red channel reads as not
+-- active. Used so charge "Hide Swipe" never hides the active-state colored swipe.
+local function CdmFrameIsActive(frame)
+    local swipeColor = frame and frame.cooldownSwipeColor
+    if swipeColor and type(swipeColor) ~= "number" and swipeColor.GetRGBA then
+        local r = swipeColor:GetRGBA()
+        if r and type(r) == "number" and not issecretvalue(r) then
+            return r ~= 0
+        end
+    end
+    return false
+end
+
+-- Apply charge cooldown style. Returns true for charge spells (caller then skips
+-- its own swipe forcing). BASELINE edge is drawn for every charge spell; the
+-- swipe is hidden only when the per-spell Hide Swipe toggle is set (resolved
+-- only while ns._cdmAnyChargeStyle is on). Caller MUST guard with
+-- fd._isProcessingOverride so the SetDrawSwipe sibling hook does not recurse.
+-- Secret-safe: HasVisualDataSource_Charges is a clean bool, the ss flag is ours.
+local function ApplyCdmChargeStyle(frame, cd)
+    if type(frame.HasVisualDataSource_Charges) ~= "function"
+       or not frame:HasVisualDataSource_Charges() then
+        return false
+    end
+    local fc2 = _ecmeFC[frame]
+    ApplyCdmEdge(cd, fc2 and fc2.barKey)
+    local hide = false
+    if ns._cdmAnyChargeStyle then
+        local ss2 = ns._ResolveCdmSS(frame)
+        if ss2 and ss2.chargeHideSwipe then
+            -- Hide only the recharge swipe. The active-state overlay IS the
+            -- (colored) swipe, so keep it drawn while the active state is
+            -- showing (active AND not "hide active state").
+            local showActive = ss2.activeSwipeMode ~= "none" and CdmFrameIsActive(frame)
+            hide = not showActive
+        end
+    end
+    if cd.SetDrawSwipe then cd:SetDrawSwipe(not hide) end
+    return true
+end
+
+-------------------------------------------------------------------------------
 --  DecorateFrame
 --  Add our visual overlays to a CDM frame (one-time per frame).
 -------------------------------------------------------------------------------
@@ -713,6 +808,10 @@ local function DecorateFrame(frame, barData)
                 -- single check for everyone who never enables it. The swipe block
                 -- runs for every icon on login, so this also covers /reload.
                 if ss2 and ss2.desatNotActive then ns._cdmAnyDesatNotActive = true end
+                -- Same one-shot gate for the per-spell charge Hide Swipe so the
+                -- SetDrawSwipe hook can early-out for everyone who never enables
+                -- it. Covers /reload (runs for every icon).
+                if ss2 and ss2.chargeHideSwipe then ns._cdmAnyChargeStyle = true end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
                     -- Hide Active State: force black swipe, track active flag.
@@ -776,6 +875,16 @@ local function DecorateFrame(frame, barData)
                     end
                 end
 
+                -- Charge "Hide Swipe" only suppresses the recharge swipe; the
+                -- active-state colored swipe IS the active overlay, so keep it
+                -- drawn while the active state is showing. Runs inside the
+                -- override guard, so the SetDrawSwipe hook does not re-enter.
+                if ns._cdmAnyChargeStyle and ss2 and ss2.chargeHideSwipe and cd.SetDrawSwipe
+                   and type(frame.HasVisualDataSource_Charges) == "function"
+                   and frame:HasVisualDataSource_Charges() then
+                    cd:SetDrawSwipe(ss2.activeSwipeMode ~= "none" and isActive)
+                end
+
                 -- Active glow (per-spell)
                 local hasGlow2 = ss2 and ss2.activeGlow and ss2.activeGlow > 0
                 if isActive and hasGlow2 then
@@ -802,13 +911,99 @@ local function DecorateFrame(frame, barData)
                     fd._activeGlowOn = false
                 end
 
+                -- Active border color (per-spell). Recolor the icon border while the
+                -- spell is active; restore the bar's default border color on falloff.
+                -- SetBorderStyleColor handles both solid (PP) and textured borders and
+                -- no-ops on a hidden border (border size 0). Re-applied each tick while
+                -- active so a live color edit shows and other resets can't win.
+                if isActive and ss2 and ss2.activeBorderEnabled then
+                    if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
+                        EllesmereUI.SetBorderStyleColor(fd.borderFrame,
+                            ss2.activeBorderR or 1, ss2.activeBorderG or 0.776,
+                            ss2.activeBorderB or 0.376, ss2.activeBorderA or 1)
+                    end
+                    fd._activeBorderOn = true
+                elseif fd._activeBorderOn then
+                    if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
+                        EllesmereUI.SetBorderStyleColor(fd.borderFrame,
+                            (bd2 and bd2.borderR) or 0, (bd2 and bd2.borderG) or 0,
+                            (bd2 and bd2.borderB) or 0, (bd2 and bd2.borderA) or 1)
+                    end
+                    fd._activeBorderOn = false
+                end
+
                 fd._isProcessingOverride = false
             end)
             hooksecurefunc(cd, "SetDrawSwipe", function(_, show)
                 if fd._isProcessingOverride then return end
+                -- Charge spells get the baseline edge (+ per-spell Hide Swipe).
+                -- ApplyCdmChargeStyle returns true and fully owns the swipe + edge
+                -- only for charge spells, so non-charge frames fall through to the
+                -- default force-true below.
+                fd._isProcessingOverride = true
+                local handled = ApplyCdmChargeStyle(frame, cd)
+                fd._isProcessingOverride = false
+                if handled then return end
                 if show then return end
                 fd._isProcessingOverride = true
                 cd:SetDrawSwipe(true)
+                fd._isProcessingOverride = false
+            end)
+            -- Charge-spell recharge swipe restore.
+            -- The swipe is rendered from the widget's armed duration, NOT from
+            -- the SetDrawSwipe flag (the flag only gates an existing swipe). When
+            -- one charge of a multi-charge spell refills while another is still
+            -- recharging, Blizzard's CooldownViewer calls Cooldown:Clear(), which
+            -- wipes the armed duration. Our SetDrawSwipe(true) brute-force then
+            -- has no geometry to draw, so the still-valid recharge swipe vanishes.
+            -- Re-arm from the charge recharge duration so the swipe stays visible.
+            -- Charge spells only; non-charge / buff / custom frames early-out.
+            hooksecurefunc(cd, "Clear", function()
+                if fd._isProcessingOverride then return end
+                -- HasVisualDataSource_Charges is a clean bool and exists only on
+                -- Blizzard CooldownViewer item frames, so this also excludes our
+                -- own custom (trinket/racial/item) frames and aura buff frames.
+                local hasCharges = type(frame.HasVisualDataSource_Charges) == "function"
+                    and frame:HasVisualDataSource_Charges()
+                if not hasCharges then return end
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                if not sid2 or not C_Spell or not C_Spell.GetSpellCooldown
+                    or not C_Spell.GetSpellChargeDuration then
+                    return
+                end
+                -- Resolve the override ID for transformed spells (mirror of the
+                -- onDesatChange / cdState paths) BEFORE querying cooldown state,
+                -- so charge-based replacements report against the live spell.
+                local effID = sid2
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                    if ovr and ovr > 0 and ovr ~= sid2 then effID = ovr end
+                end
+                -- isActive / isOnGCD are clean bools from C_Spell.GetSpellCooldown
+                -- (read bare elsewhere in this file). Only re-arm while the spell
+                -- is genuinely still recharging AND not merely on GCD: a GCD-tail
+                -- race can transiently report isActive with a degenerate charge
+                -- duration, and arming a 0,0 cooldown would strobe the swipe. When
+                -- all charges are back (isActive false) leave it cleared so the
+                -- swipe correctly disappears.
+                local cdInfo = C_Spell.GetSpellCooldown(effID)
+                if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
+                -- Re-derive the charge recharge duration. The duration object is
+                -- opaque and fed straight to the widget, never inspected, so it is
+                -- secret-safe.
+                local durObj = C_Spell.GetSpellChargeDuration(effID)
+                if not durObj and effID ~= sid2 then
+                    durObj = C_Spell.GetSpellChargeDuration(sid2)
+                end
+                if not durObj then return end
+                fd._isProcessingOverride = true
+                if cd.SetUseAuraDisplayTime then
+                    cd:SetUseAuraDisplayTime(false)
+                end
+                cd:SetCooldownFromDurationObject(durObj)
+                -- Baseline charge edge (+ per-spell Hide Swipe) on the re-arm.
+                ApplyCdmChargeStyle(frame, cd)
                 fd._isProcessingOverride = false
             end)
         end
@@ -880,11 +1075,18 @@ local function DecorateFrame(frame, barData)
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
         fd.cooldown:SetReverse(isBuff)
 
-        -- NOTE: Do NOT hook SetCooldown or Clear on the Cooldown widget.
-        -- Hooking these runs our code inside Blizzard's secure cooldown update
-        -- chain, which propagates taint to frame properties like isActive and
-        -- allowAvailableAlert. Active state animations are handled during
-        -- reanchor instead.
+        -- NOTE: Clear IS hooked above (in the _swipeColorHooked block) ONLY to
+        -- restore the recharge swipe on charge spells. SetCooldown is still
+        -- deliberately NOT hooked. A hooksecurefunc post-hook does not taint the
+        -- secure caller; taint would only stick if the hook BODY wrote a Blizzard
+        -- frame field (e.g. isActive, allowAvailableAlert) or called
+        -- Show/Hide/SetAlpha on a Blizzard frame. The Clear hook does neither: it
+        -- reads only clean getters (HasVisualDataSource_Charges,
+        -- GetSpellCooldown().isActive) and calls pure cooldown-widget setters
+        -- (SetUseAuraDisplayTime / SetCooldownFromDurationObject / SetDrawSwipe),
+        -- the same setters already used safely by the SetSwipeColor and
+        -- SetDesaturated hooks. All hook state lives on the external fd table,
+        -- never on the Blizzard frame.
 
         -- Cooldown State Effect: separate additive hook on SetDesaturated.
         -- Blizzard calls SetDesaturated on every CD tick AND on CD end,

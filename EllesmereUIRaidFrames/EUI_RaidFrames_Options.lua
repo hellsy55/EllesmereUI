@@ -945,9 +945,30 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateSwatchVis)
             UpdateSwatchVis()
         end
-        -- Inline swatch for custom bg color
+        -- Inline swatches for background: Custom + Class pair. Clicking either
+        -- toggles bgClassColored; the inactive one dims (mirrors the fill picker).
         do
             local rgn = row._rightRegion
+            -- Class-colored background swatch (player class color; not editable).
+            local bgClassSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, row:GetFrameLevel() + 3,
+                function()
+                    local _, ct = UnitClass("player")
+                    local cc = ct and EllesmereUI.GetClassColor(ct)
+                    if cc then return cc.r, cc.g, cc.b, 1 end
+                    return 1, 1, 1, 1
+                end,
+                function() end, false, 20)
+            bgClassSwatch:SetScript("OnClick", function()
+                SSet("bgClassColored", true)
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end)
+            bgClassSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgClassSwatch, "Class Colored Background") end)
+            bgClassSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            bgClassSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = bgClassSwatch
+
+            -- Custom background color swatch.
             local bgSwatch = EllesmereUI.BuildColorSwatch(
                 rgn, row:GetFrameLevel() + 3,
                 function()
@@ -959,18 +980,37 @@ initFrame:SetScript("OnEvent", function(self)
                     SWrite("customBgColor", { r=r, g=g, b=b })
                     ReloadAndUpdate()
                 end, false, 20)
+            bgSwatch._eabOrigClick = bgSwatch:GetScript("OnClick")
+            bgSwatch:SetScript("OnClick", function(self)
+                if SVal("bgClassColored", false) then
+                    SSet("bgClassColored", false)
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    return
+                end
+                if self._eabOrigClick then self._eabOrigClick(self) end
+            end)
+            bgSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSwatch, "Custom Background Color") end)
+            bgSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgSwatch
-            -- Blocking overlay: dim + non-clickable + tooltip in Dark Mode (no background).
-            local bgBlock = CreateFrame("Frame", nil, bgSwatch)
-            bgBlock:SetAllPoints()
-            bgBlock:SetFrameLevel(bgSwatch:GetFrameLevel() + 10)
+            -- Blocking overlay over BOTH swatches: dim + non-clickable + tooltip in
+            -- Dark Mode (no background exists there).
+            local bgBlock = CreateFrame("Frame", nil, rgn)
+            bgBlock:SetPoint("TOPLEFT", bgSwatch, "TOPLEFT", 0, 0)
+            bgBlock:SetPoint("BOTTOMRIGHT", bgClassSwatch, "BOTTOMRIGHT", 0, 0)
+            bgBlock:SetFrameLevel(bgClassSwatch:GetFrameLevel() + 10)
             bgBlock:EnableMouse(true)
             bgBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSwatch, "Not available in Dark Mode") end)
             bgBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateBgSwatchVis()
-                local dark = SVal("healthColorMode", "class") == "dark"
-                if dark then bgSwatch:SetAlpha(0.3); bgBlock:Show() else bgSwatch:SetAlpha(1); bgBlock:Hide() end
+                if SVal("healthColorMode", "class") == "dark" then
+                    bgSwatch:SetAlpha(0.3); bgClassSwatch:SetAlpha(0.3); bgBlock:Show()
+                else
+                    bgBlock:Hide()
+                    local classOn = SVal("bgClassColored", false)
+                    bgSwatch:SetAlpha(classOn and 0.3 or 1)
+                    bgClassSwatch:SetAlpha(classOn and 1 or 0.3)
+                end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateBgSwatchVis)
             UpdateBgSwatchVis()
@@ -1567,7 +1607,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 function(r, g, b, a)
                     SWrite("powerBorderColor", { r=r, g=g, b=b })
-                    db.profile.powerBorderAlpha = a
+                    SWrite("powerBorderAlpha", a)
                     ReloadAndUpdate()
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
@@ -2046,7 +2086,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Role Icons",
               getValue=function() return SVal("roleIconPosition", "bottomleft") end,
               setValue=function(v) SSet("roleIconPosition", v) end },
-            { type="slider", text="Role Icon Size", min=8, max=24, step=1,
+            { type="slider", text="Role Icon Size", min=8, max=30, step=1,
               disabled=function() return SVal("roleIconStyle", "modern") == "none" end,
               disabledTooltip="Role Icons",
               getValue=function() return SVal("roleIconSize", 14) end,
@@ -2159,7 +2199,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Status Text", values=statusTextPositionValues, order=statusTextPositionOrder,
               getValue=function() return SVal("statusTextPosition", "center") end,
               setValue=function(v) SSet("statusTextPosition", v) end },
-            { type="slider", text="Text Size", min=6, max=24, step=1,
+            { type="slider", text="Text Size", min=6, max=30, step=1,
               getValue=function() return SVal("statusTextSize", 14) end,
               setValue=function(v) SSet("statusTextSize", v) end });  y = y - h
         -- Cog for status text offset X/Y
@@ -2238,7 +2278,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   EllesmereUI:RefreshPage()
               end },
-            { type="slider", text="Leader Icon Size", min=8, max=24, step=1,
+            { type="slider", text="Leader Icon Size", min=8, max=30, step=1,
               disabled=function() return not SVal("showLeaderIcon", false) end,
               disabledTooltip="Leader Icon",
               getValue=function() return SVal("leaderIconSize", 14) end,
@@ -2279,7 +2319,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="toggle", text="Show Group Numbers",
                   getValue=function() return SVal("showGroupNumbers", false) end,
                   setValue=function(v) SSet("showGroupNumbers", v) end },
-                { type="slider", text="Number Size", min=6, max=24, step=1,
+                { type="slider", text="Number Size", min=6, max=30, step=1,
                   getValue=function() return SVal("groupNumberSize", 10) end,
                   setValue=function(v) SSet("groupNumberSize", v) end });  y = y - h
             -- Inline color swatch (alpha enabled) on the Number Size region
@@ -2444,7 +2484,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if v == "none" then
                       SSet("showDispelIcons", false)
                   else
-                      db.profile.showDispelIcons = true
+                      SSet("showDispelIcons", true)
                       SSet("dispelIconPosition", v)
                   end
                   EllesmereUI:RefreshPage()
@@ -2510,11 +2550,11 @@ initFrame:SetScript("OnEvent", function(self)
             [2] = "Left",
         }
         local dispelOverlayPosOrder = { 0, 1, 2 }
-        local posRow, h = W:DualRow(parent, y,
+        _, h = W:DualRow(parent, y,
             { type="dropdown", text="Private Dispel Overlay Position", values=dispelOverlayPosValues, order=dispelOverlayPosOrder,
               getValue=function() return SVal("dispelOverlayPosition", 0) end,
               setValue=function(v) SSet("dispelOverlayPosition", v); ReloadAndUpdate() end },
-            { type="empty" }
+            { type="label", text="" }
         ); y = y - h
 
         if onSection then onSection("dispels", _secY, y) end; _secY = y
@@ -2543,7 +2583,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=TNBOff,
               getValue=function() return SVal("topNameBarBgOpacity", 80) end,
               setValue=function(v) SSet("topNameBarBgOpacity", v) end },
-            { type="slider", text="Text Size", min=6, max=24, step=1,
+            { type="slider", text="Text Size", min=6, max=30, step=1,
               disabled=TNBOff,
               getValue=function() return SVal("topNameBarTextSize", 11) end,
               setValue=function(v) SSet("topNameBarTextSize", v) end });  y = y - h
@@ -3318,12 +3358,21 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSet("showTooltip", v) end });  y = y - h
         do
             local rgn = row._rightRegion
+            -- "Show in Combat" is a GLOBAL setting (EllesmereUIDB) that hides or
+            -- shows ALL unit tooltips during combat -- nameplates, target/focus,
+            -- world mobs, and our frames -- not just the raid frames. It is
+            -- therefore independent of the raid-frame-only "Show Tooltip" master,
+            -- so the cog stays interactive regardless of that toggle. Unset =
+            -- false = hide in combat (the original per-frame default).
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Tooltip Options",
+                title = "Unit Tooltips",
                 rows = {
                     { type="toggle", label="Show in Combat",
-                      get=function() return SVal("tooltipInCombat", false) end,
-                      set=function(v) SSet("tooltipInCombat", v) end },
+                      get=function() return EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.showUnitTooltipsInCombat = v
+                      end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
@@ -3331,21 +3380,12 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.15)
+            cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
             cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self)
-                self:SetAlpha(SVal("showTooltip", true) and 0.4 or 0.15)
-            end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-            local function UpdateTooltipCog()
-                local off = not SVal("showTooltip", true)
-                cogBtn:SetAlpha(off and 0.15 or 0.4)
-                cogBtn:EnableMouse(not off)
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateTooltipCog)
-            UpdateTooltipCog()
         end
 
         -- Hide Blizzard Party Panel. Shares the exact same global setting and
@@ -4921,6 +4961,7 @@ initFrame:SetScript("OnEvent", function(self)
         end  -- close do (eyeball)
 
         local paPosValues = {
+            none        = "None",
             topleft     = "Top Left",
             top         = "Top",
             topright    = "Top Right",
@@ -4931,7 +4972,7 @@ initFrame:SetScript("OnEvent", function(self)
             bottom      = "Bottom",
             bottomright = "Bottom Right",
         }
-        local paPosOrder = { "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
+        local paPosOrder = { "none", "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
         local paGrowValues = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
         local paGrowOrder = { "RIGHT", "LEFT", "UP", "DOWN" }
 
@@ -4952,6 +4993,9 @@ initFrame:SetScript("OnEvent", function(self)
                   SSet("paPosition", v)
                   SSet("paGrowDirection", GetDefaultPaGrow(v))
                   EllesmereUI:RefreshPage()
+                  -- Clear/re-seed the preview private-aura icons so "None" hides
+                  -- them on the preview immediately (matches the live frames).
+                  if ns.RestartPvAuraTicker then ns.RestartPvAuraTicker() end
               end },
             { type="dropdown", text="Growth Direction", values=paGrowValues, order=paGrowOrder,
               getValue=function() return SVal("paGrowDirection", "RIGHT") end,

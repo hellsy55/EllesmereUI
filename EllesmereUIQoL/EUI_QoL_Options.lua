@@ -396,7 +396,7 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "FPS Counter Settings",
                 rows = {
                     { type="slider", label="Text Size",
-                      min=8, max=24, step=1,
+                      min=8, max=30, step=1,
                       get=function()
                         return (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
                       end,
