@@ -158,6 +158,7 @@ local defaults = {
     targetOverlayTexture = "none",
     targetOverlayAlpha = 1.0,
     targetOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
+    hoverOverlayTexture = "none",
     caster  = { r = 0.231, g = 0.510, b = 0.965 },
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
     boss = { r = 0.518, g = 0.243, b = 0.984 },
@@ -1947,6 +1948,42 @@ function ns.ApplyFocusLetter(plate, unit, db)
     end
 end
 
+ns.EnsureHoverOverlay = function(plate)
+    if plate.hoverClipFill then return end
+    local overlayAlpha = (p and p.hoverAlpha) or defaults.hoverAlpha
+    local overlayColor = (p and p.hoverColor) or defaults.hoverColor
+    local STRIPE_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\striped-v2.png"
+    local fillTex = plate.health:GetStatusBarTexture()
+    plate.hoverClipFill = CreateFrame("Frame", nil, plate.health)
+    plate.hoverClipFill:SetClipsChildren(true)
+    plate.hoverClipFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.hoverClipFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.hoverClipFill:SetPoint("RIGHT", fillTex, "RIGHT", 0, 0)
+    plate.hoverClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    plate.hoverOverlayFill = plate.hoverClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
+    plate.hoverOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.hoverOverlayFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.hoverOverlayFill:SetWidth(200)
+    plate.hoverOverlayFill:SetTexture(STRIPE_TEX)
+    plate.hoverOverlayFill:SetAlpha(overlayAlpha)
+    plate.hoverOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    plate.hoverClipFill:Hide()
+    plate.hoverClipBg = CreateFrame("Frame", nil, plate.health)
+    plate.hoverClipBg:SetClipsChildren(true)
+    plate.hoverClipBg:SetPoint("TOPRIGHT", plate.health, "TOPRIGHT", 0, 0)
+    plate.hoverClipBg:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", 0, 0)
+    plate.hoverClipBg:SetPoint("LEFT", fillTex, "RIGHT", 0, 0)
+    plate.hoverClipBg:SetFrameLevel(plate.health:GetFrameLevel() + 1)
+    plate.hoverOverlayBg = plate.hoverClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
+    plate.hoverOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
+    plate.hoverOverlayBg:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
+    plate.hoverOverlayBg:SetWidth(200)
+    plate.hoverOverlayBg:SetTexture(STRIPE_TEX)
+    plate.hoverOverlayBg:SetAlpha(overlayAlpha * 0.3)
+    plate.hoverOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    plate.hoverClipBg:Hide()
+end
+
 ns.EnsureTargetOverlay = function(plate)
     if plate.targetClipFill then return end
     local overlayAlpha = (p and p.targetOverlayAlpha) or defaults.targetOverlayAlpha
@@ -2737,6 +2774,55 @@ function ns.RefreshAllSettings()
     if ns.ApplyClassPowerSetting then ns.ApplyClassPowerSetting() end
 end
 
+function ns.HideHoverEffect(plate)
+    if not plate then return end
+    if plate.highlight then plate.highlight:Hide() end
+    if plate.hoverClipFill then plate.hoverClipFill:Hide() end
+    if plate.hoverClipBg then plate.hoverClipBg:Hide() end
+    plate._ovHoverShown = nil
+end
+
+function ns.ShowHoverEffect(plate)
+    if not plate or not plate.health then return end
+    local db2 = p or defaults
+    local hoverTex = db2.hoverOverlayTexture or defaults.hoverOverlayTexture
+    local hc = db2.hoverColor or defaults.hoverColor
+    local ha = db2.hoverAlpha or defaults.hoverAlpha
+    if hoverTex ~= "none" then
+        if ns._hoverOverlayTexName ~= hoverTex then
+            ns._hoverOverlayTexName = hoverTex
+            ns._hoverOverlayTexPath = ns.ResolveOverlayTexPath(hoverTex)
+        end
+        local texPath = ns._hoverOverlayTexPath
+        ns.EnsureHoverOverlay(plate)
+        if not plate._ovHoverShown or plate._ovHoverTex ~= texPath
+            or plate._ovHoverAlpha ~= ha
+            or plate._ovHoverR ~= hc.r or plate._ovHoverG ~= hc.g or plate._ovHoverB ~= hc.b then
+            plate._ovHoverShown = true
+            plate._ovHoverTex, plate._ovHoverAlpha = texPath, ha
+            plate._ovHoverR, plate._ovHoverG, plate._ovHoverB = hc.r, hc.g, hc.b
+            ApplyOverlayGeometry(plate.hoverOverlayFill, plate.hoverOverlayBg, plate.health, ns.OVERLAY_STRIPE_KEYS[hoverTex] == true)
+            plate.hoverOverlayFill:SetTexture(texPath)
+            plate.hoverOverlayFill:SetAlpha(ha)
+            plate.hoverOverlayFill:SetVertexColor(hc.r, hc.g, hc.b)
+            plate.hoverOverlayBg:SetTexture(texPath)
+            plate.hoverOverlayBg:SetAlpha(ha * 0.3)
+            plate.hoverOverlayBg:SetVertexColor(hc.r, hc.g, hc.b)
+        end
+        if plate.highlight then plate.highlight:Hide() end
+        plate.hoverClipFill:Show()
+        plate.hoverClipBg:Show()
+        return
+    end
+    if plate.hoverClipFill then plate.hoverClipFill:Hide() end
+    if plate.hoverClipBg then plate.hoverClipBg:Hide() end
+    plate._ovHoverShown = nil
+    if plate.highlight then
+        plate.highlight:SetColorTexture(hc.r, hc.g, hc.b, ha)
+        plate.highlight:Show()
+    end
+end
+
 -- Recolor the mouseover highlight on every live plate (enemy + friendly).
 function ns.RefreshHoverEffect()
     local c = (p and p.hoverColor) or defaults.hoverColor
@@ -2745,10 +2831,20 @@ function ns.RefreshHoverEffect()
         if plate.highlight then
             plate.highlight:SetColorTexture(c.r, c.g, c.b, a)
         end
+        if plate == ns._currentMouseoverPlate then
+            ns.ShowHoverEffect(plate)
+        else
+            ns.HideHoverEffect(plate)
+        end
     end
     for _, plate in pairs(ns.friendlyPlates or {}) do
         if plate.highlight then
             plate.highlight:SetColorTexture(c.r, c.g, c.b, a)
+        end
+        if plate == ns._currentMouseoverPlate then
+            ns.ShowHoverEffect(plate)
+        else
+            ns.HideHoverEffect(plate)
         end
     end
 end
@@ -4748,7 +4844,7 @@ function NameplateFrame:ClearUnit()
     self._interrupted = nil
     if self.glow then self.glow:Hide() end
     if self.targetHighlight then self.targetHighlight:Hide() end
-    self.highlight:Hide()
+    ns.HideHoverEffect(self)
     self.raidFrame:Hide()
     self.classFrame:Hide()
     if self.classText then self.classText:Hide() end
@@ -5383,11 +5479,11 @@ end
 function NameplateFrame:ApplyMouseover()
     if not self.unit then return end
     if UnitExists("mouseover") and UnitIsUnit(self.unit, "mouseover") then
-        self.highlight:Show()
+        ns.ShowHoverEffect(self)
         ns._currentMouseoverPlate = self
         if ns._EnsureMouseoverTicker then ns._EnsureMouseoverTicker() end
     else
-        self.highlight:Hide()
+        ns.HideHoverEffect(self)
     end
 end
 -- Per-category rebuild support: id -> group-membership bitmask
@@ -7209,7 +7305,7 @@ end
 function ns._UpdateMouseover()
     local cur = ns._currentMouseoverPlate
     if cur then
-        if cur.highlight then cur.highlight:Hide() end
+        ns.HideHoverEffect(cur)
         ns._currentMouseoverPlate = nil
     end
     if not UnitExists("mouseover") then return end
@@ -7222,8 +7318,8 @@ function ns._UpdateMouseover()
             if plate.unit and UnitIsUnit(plate.unit, "mouseover") then found = plate; break end
         end
     end
-    if found and found.highlight then
-        found.highlight:Show()
+    if found then
+        ns.ShowHoverEffect(found)
         ns._currentMouseoverPlate = found
     end
     ns._EnsureMouseoverTicker()

@@ -772,7 +772,7 @@ function FriendlyFrame:ClearUnit()
     self.unit = nil
     self.nameplate = nil
     self.glow:Hide()
-    self.highlight:Hide()
+    if ns.HideHoverEffect then ns.HideHoverEffect(self) else self.highlight:Hide() end
     self.raidFrame:Hide()
     self.leftArrow:Hide()
     self.rightArrow:Hide()
@@ -942,7 +942,7 @@ function ns.RemoveFriendlyPlateNoRestore(unit)
     plate.unit = nil
     plate.nameplate = nil
     plate.glow:Hide()
-    plate.highlight:Hide()
+    if ns.HideHoverEffect then ns.HideHoverEffect(plate) else plate.highlight:Hide() end
     plate.raidFrame:Hide()
     plate.leftArrow:Hide()
     plate.rightArrow:Hide()
