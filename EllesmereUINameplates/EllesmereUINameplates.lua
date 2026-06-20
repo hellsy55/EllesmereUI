@@ -150,6 +150,11 @@ local defaults = {
     focusOverlayTexture = "striped-v2",
     focusOverlayAlpha = 1.0,
     focusOverlayColor = { r = 1.0, g = 1.0, b = 1.0 },
+    focusLetterEnabled = false,
+    focusLetterAnchor = "CENTER",
+    focusLetterX = 0,
+    focusLetterY = 0,
+    focusLetterSize = 18,
     target = { r = 0.459, g = 0.890, b = 0.580 },
     targetColorEnabled = false,
     targetOverlayTexture = "none",
@@ -1832,6 +1837,67 @@ local function EnsureFocusOverlay(plate)
     plate.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
     plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
     plate.focusClipBg:Hide()
+end
+
+ns.FOCUS_LETTER_ANCHORS = {
+    CENTER = true,
+    LEFT = true,
+    RIGHT = true,
+    TOP = true,
+    BOTTOM = true,
+    TOPLEFT = true,
+    TOPRIGHT = true,
+    BOTTOMLEFT = true,
+    BOTTOMRIGHT = true,
+}
+
+function ns.GetFocusLetterAnchor(db)
+    local anchor = (db and db.focusLetterAnchor) or defaults.focusLetterAnchor
+    return ns.FOCUS_LETTER_ANCHORS[anchor] and anchor or defaults.focusLetterAnchor
+end
+
+function ns.EnsureFocusLetter(plate)
+    if plate.focusLetter then return end
+    plate.focusLetter = plate.healthTextFrame:CreateFontString(nil, "OVERLAY")
+    plate.focusLetter:SetJustifyH("CENTER")
+    plate.focusLetter:SetJustifyV("MIDDLE")
+    plate.focusLetter:Hide()
+end
+
+function ns.ApplyFocusLetter(plate, unit, db)
+    if db.focusLetterEnabled == true and UnitIsUnit(unit, "focus") then
+        ns.EnsureFocusLetter(plate)
+        local size = db.focusLetterSize or defaults.focusLetterSize
+        local anchor = ns.GetFocusLetterAnchor(db)
+        local x = db.focusLetterX or defaults.focusLetterX
+        local y = db.focusLetterY or defaults.focusLetterY
+        local font = GetFont()
+        local outline = GetNPOutline()
+        if not plate._focusLetterShown
+            or plate._focusLetterSize ~= size
+            or plate._focusLetterAnchor ~= anchor
+            or plate._focusLetterX ~= x
+            or plate._focusLetterY ~= y
+            or plate._focusLetterFont ~= font
+            or plate._focusLetterOutline ~= outline then
+            plate._focusLetterShown = true
+            plate._focusLetterSize = size
+            plate._focusLetterAnchor = anchor
+            plate._focusLetterX = x
+            plate._focusLetterY = y
+            plate._focusLetterFont = font
+            plate._focusLetterOutline = outline
+            SetFSFont(plate.focusLetter, size, outline)
+            plate.focusLetter:SetText("F")
+            plate.focusLetter:ClearAllPoints()
+            plate.focusLetter:SetPoint(anchor, plate.health, anchor, x, y)
+            plate.focusLetter:SetTextColor(1, 1, 1, 1)
+        end
+        plate.focusLetter:Show()
+    elseif plate.focusLetter then
+        plate._focusLetterShown = nil
+        plate.focusLetter:Hide()
+    end
 end
 
 ns.EnsureTargetOverlay = function(plate)
@@ -4598,6 +4664,7 @@ function NameplateFrame:ClearUnit()
     self._buffsBuiltAttackable = nil
     self._lastHCr, self._lastHCg, self._lastHCb = nil, nil, nil
     self._ovFocShown, self._ovTgtShown = nil, nil
+    self._focusLetterShown = nil
     self._kickIsChannel = nil
     self._kickIsEmpowered = nil
     self._kickGeoDirty = nil
@@ -4625,6 +4692,7 @@ function NameplateFrame:ClearUnit()
     self.raidFrame:Hide()
     self.classFrame:Hide()
     if self.classText then self.classText:Hide() end
+    if self.focusLetter then self.focusLetter:Hide() end
     if self.leftArrow then self.leftArrow:Hide() end
     if self.rightArrow then self.rightArrow:Hide() end
     HideClassPowerOnPlate(self)
@@ -4901,6 +4969,7 @@ function NameplateFrame:UpdateHealthColor()
         self.focusClipFill:Hide()
         self.focusClipBg:Hide()
     end
+    ns.ApplyFocusLetter(self, unit, db2)
     -- Target overlay: identical to focus overlay but for current target
     local targetTex = db2.targetOverlayTexture or defaults.targetOverlayTexture
     if targetTex ~= "none" and UnitIsUnit(unit, "target") then
@@ -7177,6 +7246,9 @@ manager:SetScript("OnEvent", function(self, event, unit)
         -- fires when a nameplate is recycled for the same target unit).
         if UnitIsUnit(unit, "target") then
             ns._cachedTargetPlate = plate
+        end
+        if UnitIsUnit(unit, "focus") then
+            ns._cachedFocusPlate = plate
         end
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         questMobCache[unit] = nil
