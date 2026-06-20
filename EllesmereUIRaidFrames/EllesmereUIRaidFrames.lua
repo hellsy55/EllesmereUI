@@ -12985,10 +12985,26 @@ local function RefreshPartyPreview()
         ns._partyOC:Show()
     end
 
-    -- Real mode: anchor frames to the actual party container position
+    -- Real mode: anchor frames to the actual party container, mirroring the
+    -- real layout's basePoint logic (_PositionPartySlots). Slot 0 sits at the
+    -- container corner the growth direction moves AWAY from, so Flip Frame
+    -- Growth keeps the stack bounded by the container instead of growing past
+    -- it. A plain TOPLEFT anchor misaligned the flipped preview by a full
+    -- stack height/width versus the edit-mode location.
     if mode == "real" and ns._partyContainerFrame then
         local pos = s.partyUnlockPos
         if pos then
+            local stepX, stepY = 0, 0
+            local basePoint = "TOPLEFT"
+            if unitGrowth == "RIGHT" then
+                stepX = w + spacing
+            elseif unitGrowth == "LEFT" then
+                stepX = -(w + spacing); basePoint = "TOPRIGHT"
+            elseif unitGrowth == "UP" then
+                stepY = h + spacing; basePoint = "BOTTOMLEFT"
+            else -- DOWN
+                stepY = -(h + spacing)
+            end
             local idx = 0  -- running position; skips the hidden player frame
             for i = 1, 5 do
                 local f = ns._partyPvFrames[i]
@@ -12997,15 +13013,8 @@ local function RefreshPartyPreview()
                         f:Hide()
                     else
                         f:ClearAllPoints()
-                        local ox, oy = 0, 0
-                        if isVert then
-                            oy = idx * (h + spacing)
-                            if unitGrowth == "UP" then oy = -oy end
-                        else
-                            ox = idx * (w + spacing)
-                            if unitGrowth == "LEFT" then ox = -ox end
-                        end
-                        f:SetPoint("TOPLEFT", ns._partyContainerFrame, "TOPLEFT", ox, -oy)
+                        f:SetPoint(basePoint, ns._partyContainerFrame, basePoint,
+                            PixelSnap(stepX * idx), PixelSnap(stepY * idx))
                         idx = idx + 1
                     end
                 end
