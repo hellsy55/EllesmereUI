@@ -1882,22 +1882,52 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
                     if sp then savedEdge = sp end
                 end
                 -- Phase 2 follow: shift the absolute saved growth edge by how far
-                -- the anchor target's center has moved SINCE this bar was saved
-                -- (savedEdge.tgtx/.tgty, captured by savePos in the same UIParent
-                -- space as tCX/tCY). Both terms are UIParent space, added straight
-                -- to the UIParent-space center -- no ratio. Gated on
-                -- _anchorFollowReady (false until the post-settle flip, so the
-                -- whole login is a pure absolute pin) and on a saved baseline
-                -- existing (only bars re-saved since this shipped). CDM growth bars
-                -- only; StanceBar, ERB-shift bars, and unlock mode keep the pure
-                -- absolute pin (delta 0).
+                -- the anchor target has moved/resized SINCE this bar was saved.
+                -- When the anchor side aligns with this bar's own growth direction
+                -- (e.g. anchored to the target's RIGHT side while itself growing
+                -- RIGHT), the saved growth edge IS the near edge facing the target,
+                -- so the saved target edge can be recovered as
+                -- (savedNearEdge - ai.offsetX/Y) and diffed against the target's
+                -- CURRENT edge. This tracks the target both moving AND resizing --
+                -- e.g. a different character's main CDM bar having a different
+                -- icon count/width, which a center-delta can't detect (the center
+                -- doesn't move when a CENTER-anchored bar only changes width).
+                -- Misaligned anchors (or no ai.offsetX/Y yet) fall back to the
+                -- original center-delta, which is correct for non-resizing targets
+                -- (unit frames, ERB bars). Gated on _anchorFollowReady (false until
+                -- the post-settle flip, so the whole login is a pure absolute pin)
+                -- and on a saved baseline existing (only bars re-saved since this
+                -- shipped). CDM growth bars only; StanceBar, ERB-shift bars, and
+                -- unlock mode keep the pure absolute pin (delta 0).
+                local uw, uh = UIParent:GetSize()
                 local dTX, dTY = 0, 0
                 if isCDM and childKey ~= "StanceBar" and not shiftActive
                    and not isUnlocked and EllesmereUI._anchorFollowReady and savedEdge then
-                    if savedEdge.tgtx then dTX = tCX - savedEdge.tgtx end
-                    if savedEdge.tgty then dTY = tCY - savedEdge.tgty end
+                    if ai and ai.offsetX ~= nil then
+                        local childEdgeX = (uw / 2 + savedEdge.x) * ratio
+                        if side == "RIGHT" and growDir == "RIGHT" then
+                            dTX = tR - (childEdgeX - ai.offsetX)
+                        elseif side == "LEFT" and growDir == "LEFT" then
+                            dTX = tL - (childEdgeX - ai.offsetX)
+                        elseif savedEdge.tgtx then
+                            dTX = tCX - savedEdge.tgtx
+                        end
+                    elseif savedEdge.tgtx then
+                        dTX = tCX - savedEdge.tgtx
+                    end
+                    if ai and ai.offsetY ~= nil then
+                        local childEdgeY = (uh / 2 + savedEdge.y) * ratio
+                        if side == "TOP" and growDir == "UP" then
+                            dTY = tT - (childEdgeY - ai.offsetY)
+                        elseif side == "BOTTOM" and growDir == "DOWN" then
+                            dTY = tB - (childEdgeY - ai.offsetY)
+                        elseif savedEdge.tgty then
+                            dTY = tCY - savedEdge.tgty
+                        end
+                    elseif savedEdge.tgty then
+                        dTY = tCY - savedEdge.tgty
+                    end
                 end
-                local uw, uh = UIParent:GetSize()
                 if growDir == "RIGHT" then
                     if savedEdge and savedEdge.point == "LEFT" and savedEdge.x then
                         cx = (uw / 2 + savedEdge.x) * ratio + cW / 2 + dTX
