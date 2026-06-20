@@ -84,6 +84,26 @@ initFrame:SetScript("OnEvent", function(self)
         return c.r, c.g, c.b
     end
 
+    local FOCUS_LETTER_ANCHORS = {
+        CENTER = "Center",
+        LEFT = "Left",
+        RIGHT = "Right",
+        TOP = "Top",
+        BOTTOM = "Bottom",
+        TOPLEFT = "Top Left",
+        TOPRIGHT = "Top Right",
+        BOTTOMLEFT = "Bottom Left",
+        BOTTOMRIGHT = "Bottom Right",
+    }
+    local FOCUS_LETTER_ANCHOR_ORDER = {
+        "CENTER", "LEFT", "RIGHT", "TOP", "BOTTOM",
+        "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT",
+    }
+    local function GetFocusLetterAnchor()
+        local anchor = DBVal("focusLetterAnchor") or defaults.focusLetterAnchor
+        return FOCUS_LETTER_ANCHORS[anchor] and anchor or defaults.focusLetterAnchor
+    end
+
     ---------------------------------------------------------------------------
     --  Refresh helpers  (same logic as the AceConfig version)
     ---------------------------------------------------------------------------
@@ -5238,8 +5258,15 @@ initFrame:SetScript("OnEvent", function(self)
         local isFocusTextureNone = function()
             return (DBVal("focusOverlayTexture") or defaults.focusOverlayTexture) == "none"
         end
+        local focusLetterOff = function()
+            return DBVal("focusLetterEnabled") ~= true
+        end
 
         local targetPrev, focusPrev
+        local function RefreshFocusPreview()
+            RefreshAllPlates()
+            if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
+        end
 
         local targetColorRow
         targetColorRow, h = W:DualRow(parent, y,
@@ -5451,8 +5478,7 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return math.floor(((DBVal("focusOverlayAlpha") or defaults.focusOverlayAlpha) * 100) + 0.5) end,
                       set=function(v)
                         DB().focusOverlayAlpha = v / 100
-                        RefreshAllPlates()
-                        if focusPrev and focusPrev.UpdateOverlay then focusPrev.UpdateOverlay() end
+                        RefreshFocusPreview()
                       end },
                 },
             })
@@ -5474,6 +5500,72 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             cogBtn:SetScript("OnEnter", function(self)
                 if not isFocusTextureNone() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+        end
+
+        -- Focus Letter
+        local focusLetterRow
+        focusLetterRow, h = W:DualRow(parent, y,
+            { type="label", text="" },
+            { type="toggle", text="Focus Letter",
+              getValue=function() return DBVal("focusLetterEnabled") == true end,
+              setValue=function(v)
+                DB().focusLetterEnabled = v
+                RefreshFocusPreview()
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
+
+        do
+            local rightRgn = focusLetterRow._rightRegion
+            local _, focusLetterCogShow = EllesmereUI.BuildCogPopup({
+                title = "Focus Letter",
+                rows = {
+                    { type="dropdown", label="Anchor",
+                      values=FOCUS_LETTER_ANCHORS,
+                      order=FOCUS_LETTER_ANCHOR_ORDER,
+                      get=GetFocusLetterAnchor,
+                      set=function(v)
+                        DB().focusLetterAnchor = v
+                        RefreshFocusPreview()
+                      end },
+                    { type="slider", label="Size", min=6, max=40, step=1,
+                      get=function() return DBVal("focusLetterSize") or defaults.focusLetterSize end,
+                      set=function(v)
+                        DB().focusLetterSize = v
+                        RefreshFocusPreview()
+                      end },
+                    { type="slider", label="X", min=-100, max=100, step=1,
+                      get=function() return DBVal("focusLetterX") or defaults.focusLetterX end,
+                      set=function(v)
+                        DB().focusLetterX = v
+                        RefreshFocusPreview()
+                      end },
+                    { type="slider", label="Y", min=-100, max=100, step=1,
+                      get=function() return DBVal("focusLetterY") or defaults.focusLetterY end,
+                      set=function(v)
+                        DB().focusLetterY = v
+                        RefreshFocusPreview()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rightRgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
+            cogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(focusLetterOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            UpdateCogAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not focusLetterOff() then focusLetterCogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not focusLetterOff() then self:SetAlpha(0.75) end
             end)
             cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
         end
@@ -6764,6 +6856,32 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
+            local focusLetterFS
+            local function RefreshFocusLetter()
+                if colorKey ~= "focus" then return end
+                if DBVal("focusLetterEnabled") ~= true then
+                    if focusLetterFS then focusLetterFS:Hide() end
+                    return
+                end
+                if not focusLetterFS then
+                    focusLetterFS = textFrame:CreateFontString(nil, "OVERLAY")
+                    focusLetterFS:SetJustifyH("CENTER")
+                    focusLetterFS:SetJustifyV("MIDDLE")
+                end
+                local size = DBVal("focusLetterSize") or defaults.focusLetterSize
+                local anchor = GetFocusLetterAnchor()
+                local x = DBVal("focusLetterX") or defaults.focusLetterX
+                local y = DBVal("focusLetterY") or defaults.focusLetterY
+                local curFont = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
+                SetPVFont(focusLetterFS, curFont, size, GetNPOptOutline())
+                focusLetterFS:SetText("F")
+                focusLetterFS:ClearAllPoints()
+                focusLetterFS:SetPoint(anchor, health, anchor, x, y)
+                focusLetterFS:SetTextColor(1, 1, 1, 1)
+                focusLetterFS:Show()
+            end
+            RefreshFocusLetter()
+
             -- Live update hook: re-color when swatch changes
             container.UpdateColor = function()
                 local cc = (DB() and DB()[colorKey]) or defaults[colorKey]
@@ -6795,6 +6913,7 @@ initFrame:SetScript("OnEvent", function(self)
                     overlayBgTex:SetVertexColor(oc.r, oc.g, oc.b)
                     overlayBgClip:Show()
                 end
+                RefreshFocusLetter()
             end
             container.Randomize = function()
                 healthPct = math.floor(60 + math.random() * 15)
