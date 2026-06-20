@@ -3221,12 +3221,10 @@ function EABR:OnEnable()
     end
 
     ---------------------------------------------------------------------------
-    --  Range polling (0.5s throttle). Runs in combat too: UnitInRange is not
-    --  protected, and the group-buff reminders gate on member range, so a
-    --  member walking in or out of range mid-fight must retrigger evaluation.
+    --  Range updates. UNIT_IN_RANGE_UPDATE mirrors the raid frames' range
+    --  path, so range changes retrigger group-buff evaluation without polling.
     ---------------------------------------------------------------------------
     local _lastRangeSet = {}   -- [unitToken] = true/false (last known in-range state)
-    local _rangeAccum   = 0    -- seconds since last poll
 
     -- Pre-build unit token strings to avoid per-poll allocations
     local _raidTokens = {}
@@ -3235,44 +3233,85 @@ function EABR:OnEnable()
     for i = 1, 4 do _partyTokens[i] = "party" .. i end
 
     local rangeFrame = CreateFrame("Frame")
-    local _rangeChanged = false
+    local _rangeTrackers = {}
     local function _checkUnit(u)
         if not UnitExists(u) then
             if _lastRangeSet[u] ~= nil then
                 _lastRangeSet[u] = nil
-                _rangeChanged = true
+                return true
             end
-            return
+            return false
         end
         local state = _unitInRange(u)
         if _lastRangeSet[u] ~= state then
             _lastRangeSet[u] = state
-            _rangeChanged = true
+            return true
+        end
+        return false
+    end
+
+    local function _checkAllRangeUnits()
+        local changed = false
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do
+                if _checkUnit(_raidTokens[i]) then changed = true end
+            end
+        elseif IsInGroup() then
+            for i = 1, GetNumSubgroupMembers() do
+                if _checkUnit(_partyTokens[i]) then changed = true end
+            end
+        end
+        return changed
+    end
+
+    local function _onRangeEvent(_, event, unit)
+        if event == "UNIT_PHASE" then
+            if _checkAllRangeUnits() then RequestRefresh() end
+        elseif unit and _checkUnit(unit) then
+            RequestRefresh()
         end
     end
 
-    rangeFrame:SetScript("OnUpdate", function(_, elapsed)
-        -- Only poll while in a group. The poll just reads UnitInRange and
-        -- requests our own (insecure) refresh, so combat is safe.
-        if not IsInGroup() then
-            _rangeAccum = 0
-            return
+    local function _clearRangeTrackers()
+        for _, tracker in pairs(_rangeTrackers) do
+            tracker:UnregisterAllEvents()
         end
-        _rangeAccum = _rangeAccum + elapsed
-        if _rangeAccum < 0.5 then
-            return
-        end
-        _rangeAccum = 0
+    end
 
-        _rangeChanged = false
+    local function _trackRangeUnit(unit)
+        if UnitIsUnit(unit, "player") then return end
+        local tracker = _rangeTrackers[unit]
+        if not tracker then
+            tracker = CreateFrame("Frame")
+            tracker:SetScript("OnEvent", _onRangeEvent)
+            _rangeTrackers[unit] = tracker
+        end
+        tracker:RegisterUnitEvent("UNIT_IN_RANGE_UPDATE", unit)
+        tracker:RegisterUnitEvent("UNIT_CONNECTION", unit)
+    end
+
+    local function _rebuildRangeTracking()
+        _clearRangeTrackers()
+        wipe(_lastRangeSet)
         if IsInRaid() then
-            for i = 1, GetNumGroupMembers() do _checkUnit(_raidTokens[i]) end
-        else
-            for i = 1, GetNumSubgroupMembers() do _checkUnit(_partyTokens[i]) end
+            for i = 1, GetNumGroupMembers() do _trackRangeUnit(_raidTokens[i]) end
+        elseif IsInGroup() then
+            for i = 1, GetNumSubgroupMembers() do _trackRangeUnit(_partyTokens[i]) end
         end
+        if _checkAllRangeUnits() then RequestRefresh() end
+    end
 
-        if _rangeChanged then RequestRefresh() end
+    rangeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    rangeFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    rangeFrame:RegisterEvent("UNIT_PHASE")
+    rangeFrame:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_PHASE" then
+            _onRangeEvent(nil, event)
+        else
+            _rebuildRangeTracking()
+        end
     end)
+    _rebuildRangeTracking()
 end
 
 -------------------------------------------------------------------------------
