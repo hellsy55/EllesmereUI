@@ -68,6 +68,20 @@ local function IsFriendlyNPCEnabled()
     return fp and (fp.showFriendlyNPCs == true)
 end
 
+-- Per-unit gate for friendly NPC nameplates. On top of our own toggle, respect
+-- Blizzard's "NPC Names" filter via UnitShouldDisplayName(unit): it returns true
+-- for the "desired" NPCs the game names (vendors, guards, quest givers, plus the
+-- current target/mouseover) and false for flavor NPCs the filter hides. Without
+-- this gate our overlay / custom plate would draw a name on NPCs the game
+-- intentionally leaves nameless. nil-guarded for safety.
+local function IsFriendlyNPCShownForUnit(unit)
+    if not IsFriendlyNPCEnabled() then return false end
+    if unit and UnitShouldDisplayName and not UnitShouldDisplayName(unit) then
+        return false
+    end
+    return true
+end
+
 local function ShowNPCTitles()
     local fp = FP()
     return fp and (fp.showNPCTitles ~= false)
@@ -89,8 +103,12 @@ local function GetNPCTitle(unit)
     local line = data.lines[2 + cbMode]
     if not line then return nil end
     local text = line.leftText
-    if not text or text == "" then return nil end
+    -- The secret guard MUST come before any comparison: line.leftText is a secret
+    -- string under nameplate taint, and "text == ''" throws on a secret value.
+    -- A truthiness check (not text) is secret-safe, so the nil-guard stays first.
+    if not text then return nil end
     if issecretvalue and issecretvalue(text) then return nil end
+    if text == "" then return nil end
     -- Filter out level strings (e.g. "Level 70 Humanoid")
     if text:lower():match(LEVEL_PATTERN) then return nil end
     return text
@@ -232,6 +250,24 @@ function ns.RefreshFriendlyNameSize()
     if IsNameOnlyMode() then
         ApplyFriendlyFontOverride()
     end
+end
+
+-- Re-assert the name-only font size after Blizzard touches nameplate fonts.
+-- The size lives on the shared SystemFont_NamePlate object, which Blizzard resets
+-- to its default during per-plate setup (new plates / camera revealing plates) and
+-- on UpdateNamePlateOptions (CVar / display / options changes). Without re-applying,
+-- newly shown or re-shown name-only plates revert to the default size. Deferred to
+-- the next frame (after Blizzard's setup finishes) and debounced to batch bursts.
+-- Touches font objects only -- no CVar writes -- so it can never feed back into
+-- UpdateNamePlateOptions.
+local _nameSizeReapplyPending = false
+local function ScheduleNameSizeReapply()
+    if _nameSizeReapplyPending or not IsNameOnlyMode() then return end
+    _nameSizeReapplyPending = true
+    C_Timer.After(0, function()
+        _nameSizeReapplyPending = false
+        if IsNameOnlyMode() then ApplyFriendlyFontOverride() end
+    end)
 end
 
 -- Exposed so the options panel can trigger a refresh after font changes
@@ -466,10 +502,15 @@ local nameOnlyNPCSuppressed = {}  -- nameplate → true
 local function SuppressNPCNameplate(nameplate, unit)
     if nameOnlyNPCSuppressed[nameplate] then return end
     nameOnlyNPCSuppressed[nameplate] = true
-    -- Fully suppress the Blizzard UF
+    -- Always hide Blizzard's default plate (its health bar) for friendly NPCs so
+    -- nothing leaks through...
     SuppressBlizzardUF(unit, nameplate)
-    -- Show our custom name overlay
-    ShowNPCOverlay(nameplate, unit)
+    -- ...but only draw our name overlay for NPCs Blizzard would actually name
+    -- (respects the "NPC Names" filter via IsFriendlyNPCShownForUnit). Filtered
+    -- flavor NPCs stay suppressed with no overlay = fully hidden, matching Blizz.
+    if IsFriendlyNPCShownForUnit(unit) then
+        ShowNPCOverlay(nameplate, unit)
+    end
 end
 
 local function RestoreNPCNameplate(nameplate, unit)
@@ -493,8 +534,16 @@ hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, unit)
     if UnitCanAttack("player", unit) then return end
     if UnitIsUnit(unit, "player") then return end
 
+    -- Re-assert the name-only font size for this newly added / camera-revealed
+    -- plate -- Blizzard's per-plate setup resets the shared font object to default.
+    -- No-op outside name-only mode.
+    ScheduleNameSizeReapply()
+
     -- Health-bar mode: full UF suppression for players (and NPCs if enabled)
     if IsFriendlyEnabled() then
+        -- Suppress Blizzard's default plate for players and ALL enabled friendly
+        -- NPCs. The custom plate itself is gated per-NPC in TryAddFriendlyPlate, so
+        -- filtered NPCs end up suppressed with no plate = hidden.
         if not UnitIsPlayer(unit) and not IsFriendlyNPCEnabled() then return end
         local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
         if nameplate then
@@ -504,7 +553,7 @@ hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, unit)
     end
 
     -- Name-only mode: suppress Blizzard UF and show our own name overlay for NPCs
-    if IsNameOnlyMode() and IsFriendlyNPCEnabled() and not UnitIsPlayer(unit) then
+    if IsNameOnlyMode() and not UnitIsPlayer(unit) and IsFriendlyNPCEnabled() then
         local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
         if nameplate then
             SuppressNPCNameplate(nameplate, unit)
@@ -900,8 +949,9 @@ local function TryAddFriendlyPlate(unit)
     end
     if UnitCanAttack("player", unit) then return end
     if UnitIsUnit(unit, "player") then return end
-    -- Skip non-player units unless friendly NPC plates are enabled
-    if not UnitIsPlayer(unit) and not IsFriendlyNPCEnabled() then return end
+    -- Skip non-player units unless friendly NPC plates are enabled (and the unit
+    -- isn't filtered out by Blizzard's "NPC Names" setting).
+    if not UnitIsPlayer(unit) and not IsFriendlyNPCShownForUnit(unit) then return end
     local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
     if not nameplate then return end
     if friendlyPlates[unit] then return end
@@ -1198,15 +1248,16 @@ function ns.UpdateFriendlyNameplateSystem()
             local cc = (_fp and _fp.classColorFriendly ~= false) and 1 or 0
             pcall(SetCVar, "nameplateUseClassColorForFriendlyPlayerUnitNames", cc)
         end
-        -- Sweep NPC plates: suppress health bars and color names green
-        local npcEnabled = IsFriendlyNPCEnabled()
+        -- Sweep NPC plates: suppress health bars and color names green. Gated
+        -- per-unit so Blizzard's "NPC Names" filter is respected -- widgets-only
+        -- NPCs are left to Blizzard instead of getting our overlay.
         local function SweepNPCPlates()
             local allPlates = C_NamePlate.GetNamePlates()
             if allPlates then
                 for _, nameplate in ipairs(allPlates) do
                     local u = nameplate.namePlateUnitToken
                     if u and not UnitCanAttack("player", u) and not UnitIsUnit(u, "player") and not UnitIsPlayer(u) then
-                        if npcEnabled then
+                        if IsFriendlyNPCEnabled() then
                             SuppressNPCNameplate(nameplate, u)
                         else
                             RestoreNPCNameplate(nameplate, u)
@@ -1249,6 +1300,16 @@ if C_AddOns.IsAddOnLoaded("totalRP3") or C_AddOns.DoesAddOnExist("totalRP3") the
     end)
 end
 
+-- Blizzard re-applies the default nameplate font whenever UpdateNamePlateOptions
+-- fires (CVar / display / nameplate-options changes), wiping our name-only size.
+-- Re-assert it for everyone (the TRP3 branch above only runs when TRP3 is loaded).
+-- Font objects only -- safe, debounced, no CVar feedback.
+if NamePlateDriverFrame and NamePlateDriverFrame.UpdateNamePlateOptions then
+    hooksecurefunc(NamePlateDriverFrame, "UpdateNamePlateOptions", function()
+        ScheduleNameSizeReapply()
+    end)
+end
+
 -------------------------------------------------------------------------------
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
@@ -1280,7 +1341,8 @@ initFrame:SetScript("OnEvent", function(self, event)
                     end
                 end
             end
-            -- Name-only NPC sweep: suppress health bars and color names
+            -- Name-only NPC sweep: suppress health bars and color names. Per-unit
+            -- gate respects Blizzard's "NPC Names" filter (skip widgets-only NPCs).
             if IsNameOnlyMode() and IsFriendlyNPCEnabled() then
                 local allPlates = C_NamePlate.GetNamePlates()
                 if allPlates then

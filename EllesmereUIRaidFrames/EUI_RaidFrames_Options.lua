@@ -519,6 +519,7 @@ initFrame:SetScript("OnEvent", function(self)
         ["largeOutlinedStripesR"] = "Large Outlined Stripes R", -- heal-absorb only: large-habsorb-right.png
         ["largeStripes"]          = "Large Stripes",            -- large-absorb-left.png
         ["largeStripesR"]         = "Large Stripes R",          -- large-absorb-right.png
+        ["maxHealthStripes"]      = "Max Health Stripes",       -- reduced max-health overlay
     }
     -- Shield absorb dropdown shows every style including Blizzard (Modern).
     local absorbStyleOrder = { "none", "striped", "stripedReversed", "clean", "blizzard", "blizzardModern", "largeStripes", "largeStripesR" }
@@ -1391,6 +1392,78 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI.RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
                 UpdateHealAbsorbBarSwatchVis()
+            end
+        end
+
+        -- Row 5: Max Health Texture (+ color swatch + backing cog) | Max Health Opacity.
+        -- Styles mirror Heal Absorb plus the dedicated "Max Health Stripes" texture
+        -- as the first option. No placement -- the overlay is always right-anchored.
+        do
+            local maxHealthRow
+            maxHealthRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Max Health Style", values=absorbStyleValues,
+                  order={ "none", "maxHealthStripes", "striped", "stripedReversed", "clean", "blizzard", "healBlizzModern", "largeOutlinedStripes", "largeOutlinedStripesR", "largeStripes", "largeStripesR" },
+                  getValue=function() return SVal("maxHealthStyle", "maxHealthStripes") end,
+                  setValue=function(v) SSet("maxHealthStyle", v); EllesmereUI:RefreshPage() end },
+                { type="slider", text="Max Health Opacity", min=5, max=100, step=1,
+                  disabled=function() return SVal("maxHealthStyle", "maxHealthStripes") == "none" end,
+                  disabledTooltip="Max Health Style",
+                  getValue=function() return SVal("maxHealthOpacity", 100) end,
+                  setValue=function(v) SSet("maxHealthOpacity", v) end });  y = y - h
+            -- Inline color swatch: tints the max health texture
+            do
+                local rgn = maxHealthRow._leftRegion
+                local swatch = EllesmereUI.BuildColorSwatch(
+                    rgn, maxHealthRow:GetFrameLevel() + 3,
+                    function()
+                        local c = SGet("maxHealthColor")
+                        if c then return c.r, c.g, c.b, 1 end
+                        return 0.7, 0.1, 0.1, 1
+                    end,
+                    function(r, g, b)
+                        SWrite("maxHealthColor", { r=r, g=g, b=b })
+                        ReloadAndUpdate()
+                    end, false, 20)
+                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                -- Blocking overlay: disabled for "none" and the pre-colored styles.
+                local swatchBlock = CreateFrame("Frame", nil, swatch)
+                swatchBlock:SetAllPoints()
+                swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                swatchBlock:EnableMouse(true)
+                swatchBlock:Hide()
+                local function UpdateMaxHealthSwatchVis()
+                    local st = SVal("maxHealthStyle", "maxHealthStripes")
+                    local off = (st == "none" or st == "healBlizzModern" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR")
+                    swatch:SetAlpha(off and 0.3 or 1)
+                    if off then swatchBlock:Show() else swatchBlock:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateMaxHealthSwatchVis)
+                UpdateMaxHealthSwatchVis()
+            end
+            -- Inline cog: backing opacity only (no placement -- always right side)
+            do
+                local rgn = maxHealthRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Max Health Rendering",
+                    rows = {
+                        { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+                          get=function() return SVal("maxHealthBgOpacity", 100) end,
+                          set=function(v) SSet("maxHealthBgOpacity", v) end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
             end
         end
 

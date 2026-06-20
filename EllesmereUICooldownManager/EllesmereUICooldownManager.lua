@@ -5399,10 +5399,20 @@ RegisterCDMUnlockElements = function()
                     -- stays off (pure absolute pin). require-re-save: existing bars
                     -- pick this up only when next dragged + Save & Exit.
                     local tgtx, tgty
+                    local tgtL, tgtR, tgtT, tgtB
                     if grow and grow ~= "CENTER" and EllesmereUI.GetAnchorTargetCenterUI then
                         tgtx, tgty = EllesmereUI.GetAnchorTargetCenterUI("CDM_" .. key)
+                        -- Corner-follow baseline: the target's edges at save time,
+                        -- captured ONLY when anchored to another CDM bar. Lets
+                        -- ApplyAnchorPosition hold a perpendicular (corner) bar
+                        -- against the target edge when the target's width/height
+                        -- changes. nil otherwise -> corner follow stays off.
+                        if EllesmereUI.GetAnchorTargetEdgesUI then
+                            tgtL, tgtR, tgtT, tgtB = EllesmereUI.GetAnchorTargetEdgesUI("CDM_" .. key)
+                        end
                     end
-                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY, tgtx = tgtx, tgty = tgty }
+                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY,
+                        tgtx = tgtx, tgty = tgty, tgtL = tgtL, tgtR = tgtR, tgtT = tgtT, tgtB = tgtB }
                     -- Skip rebuild when called from anchor propagation or while
                     -- unlock mode is active (unlock mode owns positioning then).
                     if not EllesmereUI._propagatingSave and not EllesmereUI._unlockActive then

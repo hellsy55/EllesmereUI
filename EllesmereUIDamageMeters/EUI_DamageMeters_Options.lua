@@ -733,7 +733,9 @@ initFrame:SetScript("OnEvent", function(self)
               min = 0, max = 1, step = 0.01,
               getValue = function() return Cfg("barBgAlpha") or 0 end,
               setValue = function(v) Set("barBgAlpha", v); if ns.ApplyBarBg then ns.ApplyBarBg() end end })
-        -- Inline color swatch on Background (right region)
+        -- Inline custom + class color swatches on Background (right region).
+        -- Custom paints a fixed track color; class tints each bar's track with
+        -- that player's class color. Mirrors the Left/Right Text Size swatches.
         do
             local rgn = bdRow._rightRegion
             local ctrl = rgn._control
@@ -743,12 +745,60 @@ initFrame:SetScript("OnEvent", function(self)
                     return (Cfg("barBgR") or 0), (Cfg("barBgG") or 0), (Cfg("barBgB") or 0)
                 end,
                 function(r, g, b)
+                    Set("barBgUseClassColor", false)
                     Set("barBgR", r); Set("barBgG", g); Set("barBgB", b)
                     if ns.ApplyBarBg then ns.ApplyBarBg() end
+                    EllesmereUI:RefreshPage()
                 end,
                 false, 20)
             PP.Point(barBgSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            EllesmereUI.RegisterWidgetRefresh(function() barBgSwatchRefresh() end)
+            local origClick = barBgSwatch:GetScript("OnClick")
+            barBgSwatch:SetScript("OnClick", function(self, ...)
+                if Cfg("barBgUseClassColor") then
+                    Set("barBgUseClassColor", false)
+                    if ns.ApplyBarBg then ns.ApplyBarBg() end
+                    EllesmereUI:RefreshPage()
+                    return
+                end
+                if origClick then origClick(self, ...) end
+            end)
+            barBgSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(barBgSwatch, "Custom Color")
+            end)
+            barBgSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local barBgClassSwatch, barBgClassRefresh = EllesmereUI.BuildColorSwatch(
+                rgn, bdRow:GetFrameLevel() + 3,
+                function()
+                    local clr = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                    if clr then return clr.r, clr.g, clr.b end
+                    return 1, 1, 1
+                end,
+                function()
+                    Set("barBgUseClassColor", true)
+                    if ns.ApplyBarBg then ns.ApplyBarBg() end
+                    EllesmereUI:RefreshPage()
+                end,
+                false, 20)
+            PP.Point(barBgClassSwatch, "RIGHT", barBgSwatch, "LEFT", -8, 0)
+            barBgClassSwatch:SetScript("OnClick", function()
+                Set("barBgUseClassColor", true)
+                if ns.ApplyBarBg then ns.ApplyBarBg() end
+                EllesmereUI:RefreshPage()
+            end)
+            barBgClassSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(barBgClassSwatch, "Class Color")
+            end)
+            barBgClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function refreshBarBg()
+                barBgSwatchRefresh(); barBgClassRefresh()
+                local useClass = Cfg("barBgUseClassColor")
+                barBgSwatch:SetAlpha(useClass and 0.3 or 1)
+                barBgClassSwatch:SetAlpha(useClass and 1 or 0.3)
+            end
+            EllesmereUI.RegisterWidgetRefresh(refreshBarBg)
+            refreshBarBg()
         end
         do
             local rgn = bdRow._leftRegion

@@ -1019,13 +1019,12 @@ initFrame:SetScript("OnEvent", function(self)
         local health = CreateFrame("Frame", nil, pf)
         PP.Size(health, frameW, healthH)
         local healthBgColor = health:CreateTexture(nil, "BACKGROUND")
-        if isDarkTheme then
-            -- Only cover the empty (missing-health) portion so the fill's alpha shows through
-            healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", math.floor(frameW * (_previewHealthPct or 0.70) + 0.5), 0)
-            healthBgColor:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
-        else
-            healthBgColor:SetAllPoints()
-        end
+        -- Cover only the empty (missing-health) portion in both light and dark
+        -- mode so a reduced fill opacity shows the backdrop through the fill, not
+        -- the bg color. The live-update pass below re-anchors this accounting for
+        -- reverse fill; matches the live frame edge-anchored bg.
+        healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", math.floor(frameW * (_previewHealthPct or 0.70) + 0.5), 0)
+        healthBgColor:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
         healthBgColor:SetColorTexture(bgR, bgG, bgB, 1)
         healthBgColor:SetAlpha(bgA)
         local pvPowerAboveOff = (initPpPos == "above") and powerH or 0
@@ -2159,8 +2158,11 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
                 healthFill:SetColorTexture(uHR, uHG, uHB, 1)
-                if isDark then
-                    healthBgColor:ClearAllPoints()
+                -- Background covers only the empty (missing-health) portion in
+                -- both light and dark mode, so a reduced fill opacity reveals the
+                -- backdrop, not the bg color. Mirrors the live frame edge-anchor.
+                healthBgColor:ClearAllPoints()
+                do
                     local hpW = math.floor(fw * (_previewHealthPct or 0.70) + 0.5)
                     if s.healthReverseFill then
                         healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
@@ -2169,9 +2171,6 @@ initFrame:SetScript("OnEvent", function(self)
                         healthBgColor:SetPoint("TOPLEFT", health, "TOPLEFT", hpW, 0)
                         healthBgColor:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
                     end
-                else
-                    healthBgColor:ClearAllPoints()
-                    healthBgColor:SetAllPoints(health)
                 end
                 healthBgColor:SetColorTexture(uBgR, uBgG, uBgB, 1)
                 -- Update bar texture on fill textures

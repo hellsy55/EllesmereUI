@@ -205,6 +205,7 @@ local DM_DEFAULTS = {
             rightTextColor  = { r = 1, g = 1, b = 1 },
             bgR = 0, bgG = 0, bgB = 0, bgAlpha = 0.75,
             barBgR = 0, barBgG = 0, barBgB = 0, barBgAlpha = 0,
+            barBgUseClassColor = false,
             standaloneTimer       = false,
             standaloneTimerSize   = 26,
             standaloneTimerUseAccent = false,
@@ -1790,7 +1791,20 @@ local function CreateDMWindow(winIdx)
         bar._bg:SetAllPoints(bar.row)
         function bar.ApplyBg()
             local c = DB()
-            bar._bg:SetColorTexture(c.barBgR or 0, c.barBgG or 0, c.barBgB or 0, c.barBgAlpha or 0)
+            local a = c.barBgAlpha or 0
+            -- Class-colored track when enabled: tint the per-bar background with
+            -- this bar's player class color (x the bg alpha), else the custom bg
+            -- color. classFile can be a secret value, so guard before indexing
+            -- (RAID_CLASS_COLORS[secret] throws); EUI.GetClassColor honors global
+            -- custom class color overrides. Mirrors the fill/text class coloring.
+            if c.barBgUseClassColor then
+                local cf = bar._class
+                if cf and (not issecretvalue or not issecretvalue(cf)) and RAID_CLASS_COLORS[cf] then
+                    local cc = EUI.GetClassColor(cf)
+                    if cc then bar._bg:SetColorTexture(cc.r, cc.g, cc.b, a); return end
+                end
+            end
+            bar._bg:SetColorTexture(c.barBgR or 0, c.barBgG or 0, c.barBgB or 0, a)
         end
         bar.ApplyBg()
         local tf = CreateFrame("Frame", nil, bar.fill)
@@ -2938,6 +2952,10 @@ local function CreateDMWindow(winIdx)
                 if c.barColorUseAccent ~= false then local ar2, ag2, ab2 = GetAccentRGB(); bar.fill:SetStatusBarColor(ar2, ag2, ab2)
                 else local bc = c.barColor; bar.fill:SetStatusBarColor(bc and bc.r or 0.35, bc and bc.g or 0.55, bc and bc.b or 0.8) end
             end
+            -- Repaint the class-colored background for the new class (no-op cost
+            -- when off). bar._class is set here so ApplyBg reads the current class.
+            bar._class = classFile
+            if c.barBgUseClassColor then bar.ApplyBg() end
         end
         -- Per-tick: value + text only
         if isDeaths then
@@ -3066,6 +3084,11 @@ local function CreateDMWindow(winIdx)
                             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
                             bar._cachedColorClass = nil
+                            -- Repaint the class-colored background for the new class
+                            -- (no-op cost when the feature is off). bar._class is set
+                            -- here so ApplyBg reads the current class.
+                            bar._class = classFile
+                            if c.barBgUseClassColor then bar.ApplyBg() end
                         end
 
                         -- Fill value

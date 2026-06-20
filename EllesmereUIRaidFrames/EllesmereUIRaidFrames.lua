@@ -486,6 +486,13 @@ local defaults = {
         healAbsorbEdgeMode = "overlay",
         -- Black backing behind the heal-absorb texture (all styles); 0 = off.
         healAbsorbBgOpacity = 25,
+        -- Reduced max-health overlay (always right-anchored). Styled like Heal
+        -- Absorb but with a dedicated "Max Health Stripes" texture and no
+        -- placement option.
+        maxHealthStyle      = "maxHealthStripes",
+        maxHealthColor      = { r = 0.7, g = 0.1, b = 0.1 },
+        maxHealthOpacity    = 100,
+        maxHealthBgOpacity  = 100,
         -- Absorb Bar: solid bar above the frame, fills from the right edge
         absorbBarEnabled = false,
         absorbBarHeight  = 4,
@@ -1179,8 +1186,11 @@ function ns._ApplyHealthBg(d, health, s, unit)
     if s.healthColorMode == "dark" then
         bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
     else
-        local bgc = s.customBgColor
-        bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
+        -- Class-colored when bgClassColored is on, else the custom bg color
+        -- (GetBgColor handles the secret-value guard + alpha = bgDarkness). Must
+        -- match the layout-pass and preview paths so the per-unit UNIT_HEALTH
+        -- refresh no longer clobbers the class-colored background back to custom.
+        bg:SetColorTexture(ns.GetBgColor(unit, s))
     end
 end
 
@@ -1573,6 +1583,35 @@ ns.ApplyHealAbsorbStyle = function(haBar, style, settings)
         fill:SetHorizTile(tiled)
         fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
+    end
+end
+
+-- Reduced max-health overlay style. A 1:1 set of the heal-absorb textures plus
+-- the dedicated "Max Health Stripes" texture; the bar is always right-anchored
+-- (caller sets ReverseFill). Color swatch tints the texture, the slider drives
+-- texture opacity (the backing opacity is applied by the caller, like heal
+-- absorb). Pre-colored styles (Default Blizz Frames / Large Outlined) force white.
+ns.ApplyMaxHealthStyle = function(bar, style, settings)
+    if not bar then return end
+    style = style or "maxHealthStripes"
+    local tex, tiled
+    if style == "maxHealthStripes" then
+        tex = "Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\striped-maxhp.png"
+        tiled = true
+    else
+        tex = ABSORB_STYLE_TEX[style] or "Interface\\Buttons\\WHITE8X8"
+        tiled = (style == "striped" or style == "stripedReversed" or style == "largeStripes" or style == "largeStripesR" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR")
+    end
+    local alpha = settings and (settings.maxHealthOpacity or 100) / 100 or 1
+    local mc = settings and settings.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
+    if style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then mc = { r = 1, g = 1, b = 1 } end
+    bar:SetStatusBarTexture(tex)
+    bar:SetStatusBarColor(mc.r, mc.g, mc.b, alpha)
+    local fill = bar:GetStatusBarTexture()
+    if fill then
+        fill:SetDrawLayer("ARTWORK", 3)
+        fill:SetHorizTile(tiled)
+        fill:SetVertTile(tiled)
     end
 end
 
@@ -2167,15 +2206,26 @@ local function UpdateAbsorb(button, unit)
         end
     end
 
-    -- Reduced max health: striped overlay on right side
+    -- Reduced max health: styled overlay anchored to the right side. Texture /
+    -- color / opacity / backing mirror Heal Absorb; re-styled only on change.
     local rmh = ab._reducedMax
     if rmh then
+        local rmhStyle = s.maxHealthStyle or "maxHealthStripes"
         local lossPct = GetUnitTotalModifiedMaxHealthPercent and GetUnitTotalModifiedMaxHealthPercent(unit) or 0
-        if lossPct > 0 then
+        if rmhStyle ~= "none" and lossPct > 0 then
+            local mc = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
+            local rmhKey = rmhStyle .. (s.maxHealthOpacity or 100) .. mc.r .. mc.g .. mc.b
+            if rmh._lastRmhKey ~= rmhKey then
+                rmh._lastRmhKey = rmhKey
+                ns.ApplyMaxHealthStyle(rmh, rmhStyle, s)
+            end
             rmh:SetValue(lossPct)
-            -- Anchor background to the fill texture
+            -- Backing: track the fill rect, opacity from settings (every update).
             local rmhBg = ab._reducedMaxBg
-            if rmhBg then rmhBg:SetAllPoints(rmh:GetStatusBarTexture()) end
+            if rmhBg then
+                rmhBg:SetColorTexture(0, 0, 0, (s.maxHealthBgOpacity or 100) / 100)
+                rmhBg:SetAllPoints(rmh:GetStatusBarTexture())
+            end
             rmh:Show()
         else
             rmh:Hide()
@@ -8319,6 +8369,7 @@ do
             "healAbsorbBarPosition", "healAbsorbBarHeight", "healAbsorbBarColor",
             "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
             "healAbsorbBgOpacity",
+            "maxHealthStyle", "maxHealthOpacity", "maxHealthColor", "maxHealthBgOpacity",
         },
         powerBar = {
             "showPowerBar", "powerHeight", "powerBgDarkness", "powerBgColor",
@@ -10373,6 +10424,7 @@ local function CreatePreviewFrame(index)
         rmhBg:SetAllPoints(rmhFill)
         rmhBg:SetColorTexture(0, 0, 0, 1)
         f._reducedMaxHealthBar = rmh
+        f._reducedMaxHealthBg = rmhBg
     end
 
     -- Store absorb references on preview frame
@@ -11281,8 +11333,19 @@ local function ApplyPreviewData(f, index)
     -- Reduced max health preview
     if f._reducedMaxHealthBar then
         local rmhAmt = ns.previewReducedMaxHealth and ns.previewReducedMaxHealth[index] or 0
-        if ns._testReducedMaxHealth and rmhAmt > 0 then
+        local rmhStyle = s.maxHealthStyle or "maxHealthStripes"
+        -- Show in the Full Preview (Reduced Max Health test toggle) AND in the
+        -- Absorbs-section preview (the shield-effects eye), mirroring Heal Absorb.
+        local rmhShow = ns._testReducedMaxHealth
+            or (not ns._testMode and not ns._indicatorsVisible and ns._absorbsPreviewVisible)
+        if rmhShow and rmhAmt > 0 and rmhStyle ~= "none" then
+            ns.ApplyMaxHealthStyle(f._reducedMaxHealthBar, rmhStyle, s)
             f._reducedMaxHealthBar:SetValue(rmhAmt)
+            local rmhBg = f._reducedMaxHealthBg
+            if rmhBg then
+                rmhBg:SetColorTexture(0, 0, 0, (s.maxHealthBgOpacity or 100) / 100)
+                rmhBg:SetAllPoints(f._reducedMaxHealthBar:GetStatusBarTexture())
+            end
             f._reducedMaxHealthBar:Show()
         else
             f._reducedMaxHealthBar:Hide()
@@ -12473,11 +12536,6 @@ ns._ShowSizePreview = function(tier)
     local perGroup    = 5
     local numGroups   = math.ceil(frameCount / perGroup)
 
-    local texPath = ResolveHealthTexture()
-    local powerH = IsPowerBarEnabled(s) and PixelSnap(s.powerHeight or 4) or 0
-    local healthH = PixelSnap(bh - powerH)
-    local topBarH = (s.topNameBarEnabled and PixelSnap(s.topNameBarHeight or 20)) or 0
-
     -- Group bounding box (same logic as LayoutGroups)
     local groupW, groupH
     if unitGrowth == "RIGHT" or unitGrowth == "LEFT" then
@@ -12549,49 +12607,7 @@ ns._ShowSizePreview = function(tier)
         container:SetPoint("CENTER", UIParent, "CENTER", tierOX, tierOY)
     end
 
-    -- Build role/class assignments: 2 tanks, scaled healers, rest DPS
-    local TANK_CLS   = ns._PV_TANK_CLASSES or { "WARRIOR", "PALADIN", "DEATHKNIGHT" }
-    local HEALER_CLS = ns._PV_HEALER_CLASSES or { "PRIEST", "PALADIN", "SHAMAN", "MONK", "DRUID", "EVOKER" }
-    local DPS_CLS    = ns._PV_DPS_CLASSES or ns._PV_CLASS_TOKENS
-    local NAMES      = ns._PV_NAMES or { "Player" }
-    local CLASS_PWR  = ns._PV_CLASS_POWER or {}
-
-    local nTanks = 2
-    local nHealers = math.max(2, math.floor(frameCount / 5))
-    local nDPS = frameCount - nTanks - nHealers
-
-    local spRoles = {}
-    local spClasses = {}
-    local ti, hi, di = 1, 1, 1
-    for i = 1, frameCount do
-        if i <= nTanks then
-            spRoles[i] = "TANK"
-            spClasses[i] = TANK_CLS[ti]; ti = (ti % #TANK_CLS) + 1
-        elseif i <= nTanks + nHealers then
-            spRoles[i] = "HEALER"
-            spClasses[i] = HEALER_CLS[hi]; hi = (hi % #HEALER_CLS) + 1
-        else
-            spRoles[i] = "DAMAGER"
-            spClasses[i] = DPS_CLS[di]; di = (di % #DPS_CLS) + 1
-        end
-    end
-
-    -- Power color lookup by token
-    local PWR_COLORS = PowerBarColor or {}
-    local function GetPowerColorByToken(pToken)
-        if EllesmereUI.GetPowerColor then
-            local info = EllesmereUI.GetPowerColor(pToken)
-            if info then return info.r, info.g, info.b end
-        end
-        local pEnum = Enum and Enum.PowerType and Enum.PowerType[pToken]
-        if pEnum and PWR_COLORS[pEnum] then
-            local c = PWR_COLORS[pEnum]
-            return c.r, c.g, c.b
-        end
-        return 0, 0.5, 1
-    end
-
-    -- Font for names
+    -- Font for the unit-number label
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
     local nameSize = s.nameSize or 10
 
@@ -12603,14 +12619,6 @@ ns._ShowSizePreview = function(tier)
         if gx < minX then minX = gx end
         if gy > maxY then maxY = gy end
     end
-
-    -- Role icon settings
-    local riStyle = s.roleIconStyle or "modern"
-    local riSize = PixelSnap(s.roleIconSize or 14)
-    local riPos = s.roleIconPosition or "bottomleft"
-    local showRoleTank = s.showRoleForTank
-    local showRoleHealer = s.showRoleForHealer
-    local showRoleDPS = s.showRoleForDPS
 
     for i = 1, frameCount do
         local f = ns._sizePreviewFrames[i]
@@ -12674,114 +12682,45 @@ ns._ShowSizePreview = function(tier)
 
         f:SetParent(container)
         f:SetSize(bw, bh)
-        -- Health top anchor + Top Name Bar (per-power block below re-sets height)
-        LayoutTopNameBar(s, bh, powerH, f._health, f._topNameBar, f._topNameBarBg, f._topNameBarText)
-        f._health:SetStatusBarTexture(texPath)
-        f._health:GetStatusBarTexture():SetHorizTile(false)
+        -- GENERIC SIZING PLACEHOLDER (NOT a style preview):
+        -- The custom raid-size previews (10/15/25/30) deliberately do NOT mimic the
+        -- user's real raid-frame style. They render as plain blocks that only show
+        -- each frame's footprint at the chosen width/height/spacing, so the size
+        -- preview can never be mistaken for a live style preview when it does not
+        -- match the user's customized frames. No class colors, textures, power bars,
+        -- names, role icons or custom border -- just a flat fill, a thin neutral
+        -- outline and the unit number.
+        f._health:ClearAllPoints()
+        f._health:SetAllPoints(f)
+        f._health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        if f._health:GetStatusBarTexture() then f._health:GetStatusBarTexture():SetHorizTile(false) end
+        f._health:SetStatusBarColor(0.24, 0.26, 0.30, 1)
         f._health:SetValue(100)
+        f._bg:SetColorTexture(0.09, 0.09, 0.11, 1)
+        if f._power then f._power:Hide() end
+        if f._topNameBar then f._topNameBar:Hide() end
+        if f._roleIcon then f._roleIcon:Hide() end
 
-        -- Class color
-        local ct = spClasses[i]
-        local cc = EllesmereUI.GetClassColor(ct)
-        if cc then f._health:SetStatusBarColor(cc.r, cc.g, cc.b) end
-
-        -- Background (class-colored when enabled, using this sample's class)
-        local bgA = (s.bgDarkness or 50) / 100
-        if s.bgClassColored and cc then
-            f._bg:SetColorTexture(cc.r, cc.g, cc.b, bgA)
-        else
-            local bgc = s.customBgColor or { r = 17/255, g = 17/255, b = 17/255 }
-            f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, bgA)
+        -- Thin neutral outline so each block and the spacing between them reads clearly.
+        if f._border and PP then
+            f._border:SetFrameLevel(f:GetFrameLevel() + 2)
+            EllesmereUI.ApplyBorderStyle(f._border, 1, 0.7, 0.7, 0.75, 0.8,
+                "solid", nil, nil, nil, nil, "unitframes", 1)
         end
 
-        -- Power bar with class-accurate color
-        if f._power then
-            local role = spRoles[i]
-            local showForRole = (role == "HEALER" and s.powerShowForHealer)
-                or (role == "TANK" and s.powerShowForTank)
-                or (role == "DAMAGER" and s.powerShowForDPS)
-            if powerH > 0 and showForRole then
-                f._power:SetHeight(powerH)
-                f._power:SetStatusBarTexture(texPath)
-                f._power:GetStatusBarTexture():SetHorizTile(false)
-                local pwToken = CLASS_PWR[ct] or "MANA"
-                local pr, pg, pb = GetPowerColorByToken(pwToken)
-                f._power:SetStatusBarColor(pr, pg, pb)
-                f._power:Show()
-                -- Adjust health height for power bar (and Top Name Bar)
-                f._health:SetHeight(healthH - topBarH)
-            else
-                f._power:Hide()
-                -- Expand health to full frame height (still reserving the top bar)
-                f._health:SetHeight(bh - topBarH)
-            end
-        end
-
-        -- Name text
+        -- Centered unit number.
         if f._nameText then
-            if s.namePosition == "none" or s.topNameBarEnabled then
-                f._nameText:Hide()
-            else
-            local name = NAMES[((i - 1) % #NAMES) + 1]
-            -- Size-preview name bypasses ApplyFont; GetOutline() is already
-            -- slug-gated at the source, so no inline strip is needed.
             local nameOutline = GetOutline()
-            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._nameText, nameOutline == "" and GetUseShadow()) end
-            f._nameText:SetFont(fontPath, nameSize, nameOutline)
-            f._nameText:SetText(ns.CapName(name))
-            f._nameText:SetWidth(bw * 0.75)
-            -- Name color
-            if cc then
-                f._nameText:SetTextColor(cc.r, cc.g, cc.b)
-            else
-                f._nameText:SetTextColor(1, 1, 1)
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then
+                EllesmereUI.PrimeFontShadow(f._nameText, nameOutline == "" and GetUseShadow())
             end
+            f._nameText:SetFont(fontPath, math.max(11, nameSize), nameOutline)
+            f._nameText:SetText(tostring(i))
+            f._nameText:SetTextColor(0.9, 0.9, 0.9)
+            f._nameText:SetWidth(bw)
             f._nameText:ClearAllPoints()
             f._nameText:SetPoint("CENTER", f._health, "CENTER", 0, 0)
             f._nameText:Show()
-            end -- namePosition ~= "none"
-        end
-
-        -- Top Name Bar text (size/anchor/align/visibility set by LayoutTopNameBar)
-        if f._topNameBarText and s.topNameBarEnabled then
-            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(f._topNameBarText, GetOutline() == "" and GetUseShadow()) end
-            f._topNameBarText:SetFont(fontPath, s.topNameBarTextSize or 11, GetOutline())
-            f._topNameBarText:SetText(NAMES[((i - 1) % #NAMES) + 1])
-            if (s.topNameBarTextColorMode or "class") == "custom" then
-                local c = s.topNameBarTextColor or { r = 1, g = 1, b = 1 }
-                f._topNameBarText:SetTextColor(c.r, c.g, c.b)
-            elseif cc then
-                f._topNameBarText:SetTextColor(cc.r, cc.g, cc.b)
-            else
-                f._topNameBarText:SetTextColor(1, 1, 1)
-            end
-        end
-
-        -- Role icon
-        if f._roleIcon then
-            local role = spRoles[i]
-            local showForRole = (role == "TANK" and showRoleTank)
-                or (role == "HEALER" and showRoleHealer)
-                or (role == "DAMAGER" and showRoleDPS)
-            if riStyle ~= "none" and showForRole and ApplyRoleIcon(f._roleIcon, role, riStyle) then
-                f._roleIcon:SetSize(riSize, riSize)
-                f._roleIcon:ClearAllPoints()
-                f._roleIcon:SetPoint(riPos:upper(), f._health, riPos:upper(), 0, 0)
-                f._roleIcon:Show()
-            else
-                f._roleIcon:Hide()
-            end
-        end
-
-        -- Border (style/size/texture/offsets via ApplyBorderStyle)
-        if f._border and PP then
-            local bs = s.borderSize or 1
-            local bc = s.borderColor or { r = 0, g = 0, b = 0 }
-            local pl = f:GetFrameLevel()
-            f._border:SetFrameLevel(s.borderBehind and math.max(0, pl - 1) or (pl + 2))
-            EllesmereUI.ApplyBorderStyle(f._border, bs, bc.r, bc.g, bc.b, s.borderAlpha or 1,
-                s.borderTexture or "solid", s.borderTextureOffset, s.borderTextureOffsetY,
-                s.borderTextureShiftX, s.borderTextureShiftY, "unitframes", bs)
         end
 
         -- Position: group index + unit index within group

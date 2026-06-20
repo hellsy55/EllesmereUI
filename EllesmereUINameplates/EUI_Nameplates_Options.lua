@@ -3154,7 +3154,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if ns.RefreshQuestObjective then ns.RefreshQuestObjective() end
                 EllesmereUI:RefreshPage()
               end,
-              tooltip="On quest mobs in the open world, replaces the quest icon with the objective progress (a kill quest shows 0/6, a percentage quest shows 50%). Falls back to the icon when no progress is available. Never shown in instances." });  y = y - h
+              tooltip="On quest mobs in the open world, replaces the quest icon with the objective progress (ex: kill quests show 0/6, percentage objectives show 50%)." });  y = y - h
         -- "(Percent)" suffix on Focus Cast Height
         do
             local leftFrame = questObjRow._leftRegion
@@ -3245,7 +3245,19 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshAllPlates()
                 EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" });  y = y - h
+            -- Line of Sight Opacity: a pure CVar passthrough (like the Lag
+            -- Tolerance slider). Nothing is stored in our DB -- getValue reflects
+            -- the live nameplateOccludedAlphaMult CVar and setValue only writes it
+            -- when the user moves the slider. Combat-guarded write, mirroring
+            -- SetCVarSafe in the global options.
+            { type="slider", text="Line of Sight Opacity",
+              tooltip="Nameplates opacity for units that are out of line of sight. 0 = fully transparent, 1 = fully opaque.",
+              min=0, max=1, step=0.01,
+              getValue=function() return tonumber(GetCVar("nameplateOccludedAlphaMult")) or 0 end,
+              setValue=function(v)
+                if InCombatLockdown() then return end
+                SetCVar("nameplateOccludedAlphaMult", v)
+              end });  y = y - h
 
         do
             local leftRgn = focusLetterRow._leftRegion
@@ -3751,8 +3763,12 @@ initFrame:SetScript("OnEvent", function(self)
             for _, k in ipairs(STRIPE_ORDER) do hoverOverlayValues[k] = STRIPE_NAMES[k]; hoverOverlayOrder[#hoverOverlayOrder + 1] = k end
             hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
             for _, k in ipairs(hbtOrder) do
-                hoverOverlayOrder[#hoverOverlayOrder + 1] = k
-                if k ~= "---" then hoverOverlayValues[k] = hbtValues[k] end
+                -- "none" is already prepended above; skip the copy from hbtOrder
+                -- (which starts with "none") so the dropdown shows it only once.
+                if k ~= "none" then
+                    hoverOverlayOrder[#hoverOverlayOrder + 1] = k
+                    if k ~= "---" then hoverOverlayValues[k] = hbtValues[k] end
+                end
             end
             hoverOverlayValues._menuOpts = {
                 itemHeight = 28,

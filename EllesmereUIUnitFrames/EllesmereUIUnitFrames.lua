@@ -1163,6 +1163,12 @@ local function ApplyDarkTheme(health)
                 self:SetStatusBarColor(cFill.r, cFill.g, cFill.b)
             end
             if self.bg then
+                -- Keep bg covering only the empty (missing-health) portion as
+                -- health changes, so a reduced fill opacity never reveals the bg
+                -- behind the filled section. Matches the dark-mode path.
+                self.bg:ClearAllPoints()
+                self.bg:SetPoint("TOPLEFT", self:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+                self.bg:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 0)
                 local bgClassR, bgClassG, bgClassB
                 if bgClassColored then
                     local u = unit or self.unit or uKey
@@ -1190,10 +1196,13 @@ local function ApplyDarkTheme(health)
             end
         end
         if health.bg then
-            -- Restore bg to cover the full bar area
+            -- Anchor bg to only cover the empty (missing-health) portion so the
+            -- bar opacity fill shows the world behind it, not the bg color. The
+            -- anchor is relational, so the left edge tracks the fill as health
+            -- changes; PostUpdateColor re-applies it to survive texture swaps.
             health.bg:ClearAllPoints()
-            PP.Point(health.bg, "TOPLEFT", health, "TOPLEFT", 0, 0)
-            PP.Point(health.bg, "BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+            health.bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+            health.bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
             local bgClassColored = unitSettings and unitSettings.bgClassColored
             local bgClassR, bgClassG, bgClassB
             if bgClassColored then

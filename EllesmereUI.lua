@@ -5511,12 +5511,12 @@ local function CreateMainFrame()
     EllesmereUI._sidebar = sidebar
 
     -- Nav buttons -- start below the logo area with proper spacing
-    local NAV_TOP     = -128   -- distance from sidebar top to first nav item
-    local NAV_ROW_H   = 50    -- height per nav row (Unlock / Global Settings)
-    local NAV_ICON_W  = 52    -- exact pixel width
-    local NAV_ICON_H  = 37    -- exact pixel height
+    local NAV_TOP     = -114   -- distance from sidebar top to first nav item
+    local NAV_ROW_H   = 40    -- height per nav row (Unlock / Global / Patch Notes / Profiles)
+    local NAV_ICON_W  = 46    -- exact pixel width
+    local NAV_ICON_H  = 31    -- exact pixel height
     local NAV_LEFT    = 20    -- left padding for icon
-    local NAV_TXT_GAP = 14    -- gap between icon and label
+    local NAV_TXT_GAP = 10    -- gap between icon and label
 
     -- Helper: create a 1px horizontal glow line on a sidebar button (TOP or BOTTOM edge)
     local function MakeNavEdgeLine(btn, edge)
@@ -5600,7 +5600,7 @@ local function CreateMainFrame()
         btn._iconOn  = ICONS_PATH .. "sidebar\\unlockmode-ig-on.png"
         btn._iconOff = ICONS_PATH .. "sidebar\\unlockmode-ig.png"
 
-        local label = MakeFont(btn, 15, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
         label:SetText("Unlock Mode")
         btn._label = label
@@ -5667,7 +5667,7 @@ local function CreateMainFrame()
         btn._iconOn  = ICONS_PATH .. "sidebar\\settings-ig-on-2.png"
         btn._iconOff = ICONS_PATH .. "sidebar\\settings-ig-2.png"
 
-        local label = MakeFont(btn, 15, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
         label:SetText("Global Settings")
         btn._label = label
@@ -5713,13 +5713,156 @@ local function CreateMainFrame()
         sidebarButtons[GLOBAL_KEY] = btn
     end
 
-    -- Addon offset: first addon starts two rows below (Unlock Mode + Global Settings)
-    local ORIG_ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 2
+    -------------------------------------------------------------------
+    --  Patch Notes button  (own page -- selects the _EUIPatchNotes module)
+    -------------------------------------------------------------------
+    do
+        local btn = CreateFrame("Button", nil, sidebar)
+        btn:SetSize(SIDEBAR_W, NAV_ROW_H)
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, NAV_TOP - NAV_ROW_H * 2)
+        btn:SetFrameLevel(sidebar:GetFrameLevel() + 1)
+
+        DecorateSidebarButton(btn)
+
+        -- Glow layer (behind icon): tinted version of the -on texture
+        local iconGlow = btn:CreateTexture(nil, "ARTWORK", nil, 0)
+        iconGlow:SetTexture(ICONS_PATH .. "sidebar\\notes-on.png")
+        iconGlow:SetSize(NAV_ICON_W, NAV_ICON_H)
+        iconGlow:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        iconGlow:SetDesaturated(true)
+        iconGlow:SetVertexColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
+        iconGlow:Hide()
+        btn._iconGlow = iconGlow
+        RegAccent({ type="vertex", obj=iconGlow })
+
+        -- Icon layer (on top of glow): always the white off texture
+        local icon = btn:CreateTexture(nil, "ARTWORK", nil, 1)
+        icon:SetTexture(ICONS_PATH .. "sidebar\\notes-off.png")
+        icon:SetSize(NAV_ICON_W, NAV_ICON_H)
+        icon:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        btn._icon    = icon
+        btn._iconOn  = ICONS_PATH .. "sidebar\\notes-on.png"
+        btn._iconOff = ICONS_PATH .. "sidebar\\notes-off.png"
+
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
+        label:SetText("Patch Notes")
+        btn._label = label
+
+        label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+        icon:SetDesaturated(false)
+        icon:SetAlpha(NAV_ENABLED_ICON_A)
+
+        btn._folder = "_EUIPatchNotes"
+        btn._loaded = true
+
+        local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
+        hlTex:SetAllPoints()
+        btn:SetScript("OnEnter", function(self)
+            hlTex:SetAlpha(0.06)
+            if activeModule ~= self._folder then
+                self._hoverGlow:Show()
+                self._hoverIndicator:Show()
+                self._label:SetTextColor(NAV_HOVER_ENABLED_TEXT.r, NAV_HOVER_ENABLED_TEXT.g, NAV_HOVER_ENABLED_TEXT.b, NAV_HOVER_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            hlTex:SetAlpha(0)
+            self._hoverGlow:Hide()
+            self._hoverIndicator:Hide()
+            if activeModule ~= self._folder then
+                self._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnClick", function(self)
+            if modules[self._folder] then
+                EllesmereUI:SelectModule(self._folder)
+            end
+        end)
+
+        sidebarButtons["_EUIPatchNotes"] = btn
+        EllesmereUI._patchNotesSidebarBtn = btn
+    end
+
+    -------------------------------------------------------------------
+    --  Profiles & Presets button  (own page -- selects the _EUIProfiles module)
+    -------------------------------------------------------------------
+    do
+        local btn = CreateFrame("Button", nil, sidebar)
+        btn:SetSize(SIDEBAR_W, NAV_ROW_H)
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, NAV_TOP - NAV_ROW_H * 3)
+        btn:SetFrameLevel(sidebar:GetFrameLevel() + 1)
+
+        DecorateSidebarButton(btn)
+
+        -- Glow layer (behind icon): tinted version of the -on texture
+        local iconGlow = btn:CreateTexture(nil, "ARTWORK", nil, 0)
+        iconGlow:SetTexture(ICONS_PATH .. "sidebar\\profiles-on.png")
+        iconGlow:SetSize(NAV_ICON_W, NAV_ICON_H)
+        iconGlow:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        iconGlow:SetDesaturated(true)
+        iconGlow:SetVertexColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
+        iconGlow:Hide()
+        btn._iconGlow = iconGlow
+        RegAccent({ type="vertex", obj=iconGlow })
+
+        -- Icon layer (on top of glow): always the white off texture
+        local icon = btn:CreateTexture(nil, "ARTWORK", nil, 1)
+        icon:SetTexture(ICONS_PATH .. "sidebar\\profiles-off.png")
+        icon:SetSize(NAV_ICON_W, NAV_ICON_H)
+        icon:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        btn._icon    = icon
+        btn._iconOn  = ICONS_PATH .. "sidebar\\profiles-on.png"
+        btn._iconOff = ICONS_PATH .. "sidebar\\profiles-off.png"
+
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
+        label:SetText("Profiles & Presets")
+        btn._label = label
+
+        label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+        icon:SetDesaturated(false)
+        icon:SetAlpha(NAV_ENABLED_ICON_A)
+
+        btn._folder = "_EUIProfiles"
+        btn._loaded = true
+
+        local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
+        hlTex:SetAllPoints()
+        btn:SetScript("OnEnter", function(self)
+            hlTex:SetAlpha(0.06)
+            if activeModule ~= self._folder then
+                self._hoverGlow:Show()
+                self._hoverIndicator:Show()
+                self._label:SetTextColor(NAV_HOVER_ENABLED_TEXT.r, NAV_HOVER_ENABLED_TEXT.g, NAV_HOVER_ENABLED_TEXT.b, NAV_HOVER_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            hlTex:SetAlpha(0)
+            self._hoverGlow:Hide()
+            self._hoverIndicator:Hide()
+            if activeModule ~= self._folder then
+                self._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnClick", function(self)
+            if modules[self._folder] then
+                EllesmereUI:SelectModule(self._folder)
+            end
+        end)
+
+        sidebarButtons["_EUIProfiles"] = btn
+        EllesmereUI._profilesSidebarBtn = btn
+    end
+
+    -- Addon offset: first addon starts four rows below
+    -- (Unlock Mode + Global Settings + Patch Notes + Profiles & Presets)
+    local ORIG_ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 4
 
     -----------------------------------------------------------------------
     --  Sidebar search bar (filters addon list by display name or page name)
     -----------------------------------------------------------------------
-    local SB_TOP_PAD     = 18   -- gap between Global Settings and the search bar
+    local SB_TOP_PAD     = 13   -- gap between Profiles & Presets and the search bar
     local SB_H           = 28
     local SB_BOT_PAD     = 6
     local SB_SIDE_INSET  = 20
@@ -5798,10 +5941,12 @@ local function CreateMainFrame()
     --  class art, so addon buttons live inside a ScrollFrame with smooth
     --  mouse-wheel scrolling and a thin thumb on the right edge.
     -----------------------------------------------------------------------
-    local ADDON_VISIBLE_ROWS    = 10.5
+    local ADDON_VISIBLE_ROWS    = 12   -- nav rows shrank to 40px; bump count so the addon viewport still fills to the bottom
     -- +30 = 20px viewport bonus plus 10px offsetting the SB_TOP_PAD bump above,
     -- so growing the search-bar padding doesn't silently shrink the viewport.
-    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30
+    -- Reserve a strip below the viewport for the scroll-to-bottom arrow button.
+    local ADDON_ARROW_RESERVE   = 24
+    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30 - ADDON_ARROW_RESERVE
     local ADDON_SCROLL_STEP     = 60   -- match the main content scroll
     local ADDON_SMOOTH_SPEED    = 12   -- match the main content scroll
 
@@ -5838,8 +5983,47 @@ local function CreateMainFrame()
     addonThumb:SetWidth(3)
     addonThumb:SetHeight(40)
 
+    -- Scroll-to-bottom arrow, centered just below the viewport. Dims when the
+    -- list is at the bottom (or doesn't scroll at all); click animates the list
+    -- to the bottom. OnClick is wired further below, once the smooth-scroll
+    -- state locals exist. Alpha tiers are stored on the frame (it's ours).
+    local arrowBtn = CreateFrame("Button", nil, sidebar)
+    arrowBtn:SetSize(22, 19)
+    arrowBtn:SetPoint("TOP", addonScrollFrame, "BOTTOM", 0, -5)
+    arrowBtn:SetFrameLevel(sidebar:GetFrameLevel() + 5)
+    arrowBtn:SetHitRectInsets(-12, -12, -6, -8)
+    arrowBtn._aEnabled, arrowBtn._aDisabled, arrowBtn._aHover = 0.7, 0.2, 1.0
+    arrowBtn._atBottom = false
+    do
+        local t = arrowBtn:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(ICONS_PATH .. "eui-arrow-down3.png")
+        t:SetAllPoints()
+    end
+    arrowBtn:SetAlpha(arrowBtn._aEnabled)
+    arrowBtn:SetScript("OnEnter", function(self)
+        if not self._atBottom then self:SetAlpha(self._aHover) end
+    end)
+    arrowBtn:SetScript("OnLeave", function(self)
+        self:SetAlpha(self._atBottom and self._aDisabled or self._aEnabled)
+    end)
+    EllesmereUI._addonScrollArrow = arrowBtn
+
     local function UpdateAddonThumb()
         local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        -- Scroll-to-bottom arrow state: disabled (dimmed) when there's nothing
+        -- below, enabled otherwise. Runs before the no-scroll early return.
+        do
+            local cur = tonumber(addonScrollFrame:GetVerticalScroll()) or 0
+            local atBottom = (maxScroll <= 0.5) or (cur >= maxScroll - 0.5)
+            arrowBtn._atBottom = atBottom
+            if atBottom then
+                arrowBtn:SetAlpha(arrowBtn._aDisabled)
+            elseif arrowBtn:IsMouseOver() then
+                arrowBtn:SetAlpha(arrowBtn._aHover)
+            else
+                arrowBtn:SetAlpha(arrowBtn._aEnabled)
+            end
+        end
         if maxScroll <= 0 then
             addonTrack:Hide()
             return
@@ -5911,6 +6095,20 @@ local function CreateMainFrame()
     end)
     addonScrollFrame:SetScript("OnScrollRangeChanged", UpdateAddonThumb)
     addonScrollFrame:HookScript("OnSizeChanged", UpdateAddonThumb)
+
+    -- Scroll-to-bottom arrow click: smooth-animate to the bottom (no-op when
+    -- already there). Reuses the same smooth-scroll state as the mouse wheel.
+    arrowBtn:SetScript("OnClick", function()
+        local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        if maxScroll <= 0 then return end
+        local scale = addonScrollFrame:GetEffectiveScale()
+        maxScroll = math.floor(maxScroll * scale) / scale
+        addonScrollTarget = maxScroll
+        if not addonIsSmoothing then
+            addonIsSmoothing = true
+            addonSmoothFrame:Show()
+        end
+    end)
 
     -- Click / drag on the scrollbar track. Clicking anywhere on the track
     -- jumps the scroll to that position; holding the button drags.
@@ -7089,11 +7287,28 @@ local function CreateMainFrame()
     footerFrame._resetBtn = resetBtn
 
     -- Reload UI  (next to Reset, 40px gap, same white/muted style)
-    MakeFooterBtn(footerFrame, FOOTER_BTN_W, FOOTER_BTN_H,
+    local reloadBtn = MakeFooterBtn(footerFrame, FOOTER_BTN_W, FOOTER_BTN_H,
         "BOTTOMLEFT", resetBtn, "BOTTOMRIGHT", FOOTER_BTN_GAP, 0,
         RS_TEXT_R, RS_TEXT_G, RS_TEXT_B, RS_TEXT_A, RS_TEXT_HR, RS_TEXT_HG, RS_TEXT_HB, RS_TEXT_HA,
         RS_BRD_R, RS_BRD_G, RS_BRD_B, RS_BRD_A, RS_BRD_HR, RS_BRD_HG, RS_BRD_HB, RS_BRD_HA,
         "Reload UI", function() ReloadUI() end)
+    footerFrame._reloadBtn = reloadBtn
+
+    -- Show/hide the Reset button per module. Modules without an onReset (Patch
+    -- Notes, Profiles) have nothing to reset, so Reset is hidden and Reload UI
+    -- slides left into its slot to avoid a gap. Called from SelectModule.
+    EllesmereUI._UpdateResetButtonVisible = function(hasReset)
+        local rb, rl = footerFrame._resetBtn, footerFrame._reloadBtn
+        if not rb or not rl then return end
+        rl:ClearAllPoints()
+        if hasReset then
+            rb:Show()
+            rl:SetPoint("BOTTOMLEFT", rb, "BOTTOMRIGHT", FOOTER_BTN_GAP, 0)
+        else
+            rb:Hide()
+            rl:SetPoint("BOTTOMLEFT", footerFrame, "BOTTOMLEFT", FOOTER_PAD, FOOTER_Y)
+        end
+    end
 
     -- Social icons  (to the left of Done button)
     do
@@ -8444,6 +8659,9 @@ function EllesmereUI:SelectModule(folderName)
         rb._label:SetWordWrap(false)
         rb._label:SetMaxLines(1)
     end
+    if EllesmereUI._UpdateResetButtonVisible then
+        EllesmereUI._UpdateResetButtonVisible(config.onReset ~= nil)
+    end
     headerFrame._desc:SetText(EllesmereUI.L(config.description or ""))
     BuildTabs(config.pages, config.disabledPages, config.disabledPageTooltips)
     local savedPage = _lastPagePerModule[folderName]
@@ -8846,7 +9064,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.3"
+EllesmereUI.VERSION = "8.2.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

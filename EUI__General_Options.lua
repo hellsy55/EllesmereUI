@@ -22,6 +22,12 @@ local PAGE_COLORS      = "Fonts & Colors"
 local PAGE_PROFILES    = "Profiles"
 local PAGE_WHATSNEW    = "Patch Notes"
 
+-- Profiles and Patch Notes are their own sidebar pages (single-page modules),
+-- not tabs under Global Settings. These keys match the sidebar buttons created
+-- in EllesmereUI.lua.
+local PROFILES_KEY     = "_EUIProfiles"
+local PATCHNOTES_KEY   = "_EUIPatchNotes"
+
 -- Standalone single-module builds rename the host addon to contain "Standalone".
 -- The What's New tab is suite-only, so it is never added to the page list there.
 local IS_STANDALONE = type(ADDON_NAME) == "string" and ADDON_NAME:find("Standalone") ~= nil
@@ -267,6 +273,57 @@ end
 --  EllesmereUI:NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "8.2.4",
+        heroes = {
+            {
+                module = "Nameplates",
+                title = "Nameplate Hover Textures",
+                desc  = "Mousing over a nameplate can now show a striped or textured highlight overlay instead of a flat color, with several stripe styles to choose from.",
+                nav   = { module = "EllesmereUINameplates", page = "Display", section = "STYLE", highlight = "Hover Texture" },
+            },
+            {
+                module = "Raid Frames",
+                title = "Customizable Reduced Max Health",
+                desc  = "The reduced max-health overlay on raid frames was a single fixed texture with no options; it now has full style, color, and opacity controls.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "ABSORBS", highlight = "Max Health Style" },
+            },
+        },
+        features = {
+            {
+                module = "Damage Meters",
+                title = "Class-Colored Bar Backgrounds",
+                desc  = "A new class-color swatch tints each meter bar's background track with that player's class color, alongside the existing custom color.",
+                nav   = { module = "EllesmereUIDamageMeters", page = "Damage Meters", section = "BARS", highlight = "Background" },
+            },
+            {
+                module = "Nameplates",
+                title = "Line of Sight Opacity",
+                desc  = "A new slider controls how faded a nameplate becomes when its unit is out of your line of sight.",
+                nav   = { module = "EllesmereUINameplates", page = "General", section = "EXTRAS", highlight = "Line of Sight Opacity" },
+            },
+            {
+                module = "General",
+                title = "Profiles and Patch Notes Pages",
+                desc  = "Profiles & Presets and Patch Notes are now their own entries in the options sidebar instead of tabs inside Global Settings.",
+                -- No nav: these are top-level sidebar pages, not a single setting.
+            },
+            {
+                module = "Raid Frames",
+                title = "Dispel Overlay Preview",
+                desc  = "Preview the raid-frame dispel overlay styling right in the options with a new eye button.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "DISPELS", highlight = "Dispel Overlay" },
+            },
+        },
+        fixes = {
+            { module = "Cooldown Manager", text = "Tracking bars for hero-talent override spells now keep showing after the talent is removed, such as a Death Charge bar that keeps tracking once you untalent and cast Death's Advance." },
+            { module = "Nameplates", text = "Fixed a Lua error that could occur when mousing over friendly NPC nameplates that have titles such as innkeepers or flight masters." },
+            { module = "Raid Frames", text = "Health bar backgrounds set to class color no longer revert to the custom color as a unit's health changes." },
+            { module = "Unit Frames", text = "Health bar backgrounds no longer show through the filled portion when you lower the fill opacity, matching how raid frames already behaved." },
+            { module = "Cooldown Manager", text = "Bars anchored to another cooldown bar now stay flush against it when you switch to a character or profile whose bar is a different width." },
+            { module = "General", text = "The options sidebar addon list now shows a scroll-to-bottom arrow so it is clear the list can scroll." },
+        },
+    },
     {
         version = "8.2.3",
         heroes = {
@@ -5896,11 +5953,9 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
-    -- Patch Notes is suite-only; never add it to the page list in standalone builds.
-    local globalPages = { PAGE_GENERAL, PAGE_PROFILES, PAGE_COLORS }
-    if not IS_STANDALONE then
-        globalPages[#globalPages + 1] = PAGE_WHATSNEW
-    end
+    -- Profiles and Patch Notes are now their own sidebar pages (registered below),
+    -- so Global Settings only owns General + Fonts & Colors.
+    local globalPages = { PAGE_GENERAL, PAGE_COLORS }
 
     EllesmereUI:RegisterModule(GLOBAL_KEY, {
         title       = "Global Settings",
@@ -5997,15 +6052,49 @@ initFrame:SetScript("OnEvent", function(self)
         end,
     })
 
+    -- Profiles & Presets: its own single-page sidebar module. Reuses the
+    -- existing profiles page builder; the profiles-root lifecycle is handled by
+    -- the shared CleanupProfilesRoot hooks below (now keyed to PROFILES_KEY).
+    EllesmereUI:RegisterModule(PROFILES_KEY, {
+        title       = "Profiles & Presets",
+        description = "Import, export, and switch EllesmereUI profiles and presets.",
+        pages       = { PAGE_PROFILES },
+        buildPage   = function(pageName, parent, yOffset)
+            return BuildProfilesPage(pageName, parent, yOffset)
+        end,
+        onPageCacheRestore = function()
+            if not EllesmereUI._profilesRoot then
+                C_Timer.After(0, function()
+                    if EllesmereUI:GetActiveModule() == PROFILES_KEY then
+                        BuildProfilesPage(PAGE_PROFILES, nil, -6)
+                    end
+                end)
+            end
+        end,
+    })
+
+    -- Patch Notes: its own single-page sidebar module. Suite-only, mirroring the
+    -- old suite-only tab (never registered in standalone builds).
+    if not IS_STANDALONE then
+        EllesmereUI:RegisterModule(PATCHNOTES_KEY, {
+            title       = "Patch Notes",
+            description = "What's new in EllesmereUI.",
+            pages       = { PAGE_WHATSNEW },
+            buildPage   = function(pageName, parent, yOffset)
+                return EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
+            end,
+        })
+    end
+
     -- Clean up profiles root when panel closes
     EllesmereUI:RegisterOnHide(function()
         CleanupProfilesRoot()
     end)
 
-    -- Clean up profiles root when switching to another module
+    -- Clean up profiles root when switching to any module other than Profiles
     if EllesmereUI.SelectModule then
         hooksecurefunc(EllesmereUI, "SelectModule", function(_, folderName)
-            if folderName ~= GLOBAL_KEY then
+            if folderName ~= PROFILES_KEY then
                 CleanupProfilesRoot()
             end
         end)
