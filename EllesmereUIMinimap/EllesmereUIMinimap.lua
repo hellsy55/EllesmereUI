@@ -2252,8 +2252,11 @@ local function ShowCalendarTooltip(anchor, lockoutEntries)
 
     local bottom = tt:GetBottom()
     if bottom and bottom < 0 then
-        tt:ClearAllPoints()
-        tt:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, -bottom)
+        local top = tt:GetTop()
+        if top then
+            tt:ClearAllPoints()
+            tt:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, -bottom)
+        end
     end
 end
 
@@ -2285,14 +2288,24 @@ local function GetCalendarLockoutEntries()
             GetSavedInstanceInfo(i)
         if name and (locked or extended) and (isRaid or LOCKOUT_DIFFICULTIES[difficulty]) then
             local diffLabel = difficultyName
-            if (not diffLabel or diffLabel == "") and GetDifficultyInfo and difficulty then
-                diffLabel = GetDifficultyInfo(difficulty)
+            local _, _, isHeroic, _, displayHeroic, displayMythic
+            if GetDifficultyInfo and difficulty then
+                diffLabel, _, isHeroic, _, displayHeroic, displayMythic = GetDifficultyInfo(difficulty)
             end
             diffLabel = diffLabel or ""
 
-            local _, _, isHeroic, _, displayHeroic, displayMythic = GetDifficultyInfo and GetDifficultyInfo(difficulty) or nil
             local isLFR = LFR_DIFFICULTIES[difficulty]
-            local sortKey = name .. "\t" .. (displayMythic and "4" or (isHeroic or displayHeroic) and "3" or isLFR and "1" or "2")
+            local sortTier
+            if displayMythic then
+                sortTier = "4"
+            elseif isHeroic or displayHeroic then
+                sortTier = "3"
+            elseif isLFR then
+                sortTier = "1"
+            else
+                sortTier = "2"
+            end
+            local sortKey = name .. "\t" .. sortTier
 
             local leftText = name
             local rightText = diffLabel
@@ -2304,6 +2317,8 @@ local function GetCalendarLockoutEntries()
     end
 
     table.sort(entries, function(a, b) return a.sortKey < b.sortKey end)
+
+    if #entries == 0 then return end
 
     local result = {}
     for ei = 1, #entries do
@@ -2368,8 +2383,10 @@ local function BuildCustomIndicators(minimap)
     _customIndicators.calendar:SetScript("OnEnter", function(self)
         if calBaseEnter then calBaseEnter(self) end
         if GetFFD(self).freeMoveJustDragged then return end
-        if EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then return end
-        local lockoutEntries = GetCalendarLockoutEntries()
+        local lockoutEntries
+        if not (EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance()) then
+            lockoutEntries = GetCalendarLockoutEntries()
+        end
         if lockoutEntries then
             ShowCalendarTooltip(self, lockoutEntries)
         elseif EllesmereUI.ShowWidgetTooltip then
