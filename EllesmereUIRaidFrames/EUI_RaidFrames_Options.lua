@@ -3359,6 +3359,14 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue = function(r, g, b) SWrite("statusColorDead", { r=r, g=g, b=b }); ReloadAndUpdate() end },
               } });  y = y - h
 
+        -- Right-click + drag over a raid/party frame turns the camera (mouselook).
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Right Mouse Camera Unlock",
+              tooltip="Allows free camera movement while holding and dragging right mouse button over raid frames. Right-click tap still opens the unit menu.",
+              getValue=function() return SVal("freeRightClickCamera", false) end,
+              setValue=function(v) SSet("freeRightClickCamera", v); if ns.FRCM_Refresh then ns.FRCM_Refresh() end end },
+            { type="label", text="" });  y = y - h
+
         if onSection then onSection("rangeTooltip", _secY, y) end
         return y
     end
