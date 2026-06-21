@@ -2391,7 +2391,19 @@ local function BuildBars()
                 if not runeFrames[i] then
                     runeFrames[i] = CreatePip(secondaryFrame, 20, pipH, i,
                         0, 0, 0, 0, 0)
-                    local cdText = runeFrames[i]:CreateFontString(nil, "OVERLAY")
+                    -- Countdown number on its own overlay frame ABOVE the bar
+                    -- border so the recharge number renders on top of the border
+                    -- instead of beneath it. Rune pips are built with per-pip
+                    -- border size 0 (see args above), so the VISIBLE border is
+                    -- the outer secondaryFrame._barBorder at secondaryFrame
+                    -- level +5 -- the number must clear that, not just the pip.
+                    -- Stays below the count/value text overlay (level 25). The
+                    -- recharge fill stays framed by the border (matches the
+                    -- ready-rune fill).
+                    local cdOverlay = CreateFrame("Frame", nil, runeFrames[i])
+                    cdOverlay:SetAllPoints(runeFrames[i])
+                    cdOverlay:SetFrameLevel(secondaryFrame:GetFrameLevel() + 10)
+                    local cdText = cdOverlay:CreateFontString(nil, "OVERLAY")
                     runeFrames[i]._cdText = cdText
                 end
                 -- Re-apply font size, color, and offsets every rebuild so textSize,

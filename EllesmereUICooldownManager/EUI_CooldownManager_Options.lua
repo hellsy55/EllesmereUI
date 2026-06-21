@@ -2465,9 +2465,31 @@ initFrame:SetScript("OnEvent", function(self)
 
             local TBB_PREVIEW_MAX_H = 200
 
+            -- Vertical headroom: timer/name/stacks text positioned ABOVE/BELOW the
+            -- bar (top/bottom) anchors OUTSIDE the bar's bounds, while left/right/
+            -- center stay inside it. The clip wrapper is sized to the content, so
+            -- without headroom the outside (vertical) text gets chopped. Grow only
+            -- the scroll child + wrapper (NOT pvContent, which the border/highlight
+            -- wrap via SetAllPoints) and push the content down by the top headroom.
+            local function TBPad(side)
+                if not bd then return 0 end
+                local tp = bd.timerPosition or (bd.showTimer and "right" or "none")
+                local sp = bd.stacksPosition or "center"
+                local np = bd.verticalOrientation and "none"
+                    or (bd.namePosition or ((bd.showName ~= false) and "left" or "none"))
+                local p = 0
+                if tp == side then p = math.max(p, bd.timerSize or 11) end
+                if sp == side then p = math.max(p, bd.stacksSize or 11) end
+                if np == side then p = math.max(p, bd.nameSize or 11) end
+                return p > 0 and (p + 8) or 0
+            end
+            local tbTopPad = TBPad("top")
+            local tbBotPad = TBPad("bottom")
+            local CONTENT_H = PREVIEW_H + tbTopPad + tbBotPad
+
             -- Wrapper: clips children, capped height
             local pvWrapper = CreateFrame("Frame", nil, hdr)
-            local visH = math.min(PREVIEW_H, TBB_PREVIEW_MAX_H)
+            local visH = math.min(CONTENT_H, TBB_PREVIEW_MAX_H)
             pvWrapper:SetSize(maxAvailW, visH)
             PP.Point(pvWrapper, "TOP", hdr, "TOP", 0, fy)
             pvWrapper:SetClipsChildren(true)
@@ -2479,12 +2501,12 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Actual preview content frame (scroll child)
             local pvFrame = CreateFrame("Frame", nil, pvSF)
-            pvFrame:SetSize(maxAvailW, PREVIEW_H)
+            pvFrame:SetSize(maxAvailW, CONTENT_H)
             pvSF:SetScrollChild(pvFrame)
 
             -- Scrollbar track + thumb (same pattern as action bar preview)
             local pvTrack, pvThumb
-            if PREVIEW_H > TBB_PREVIEW_MAX_H then
+            if CONTENT_H > TBB_PREVIEW_MAX_H then
                 pvTrack = CreateFrame("Frame", nil, pvWrapper)
                 pvTrack:SetWidth(4)
                 pvTrack:SetPoint("TOPRIGHT", pvWrapper, "TOPRIGHT", -2, -2)
@@ -2604,11 +2626,13 @@ initFrame:SetScript("OnEvent", function(self)
             _tbbPvFrame._wrapper = pvWrapper
 
             if bd then
-                -- Content wrapper: sized to bar+icon, centered in pvFrame.
-                -- Bar, icon, border, and highlight all parent to this.
+                -- Content wrapper: sized to bar+icon (NOT the text headroom, so the
+                -- border/highlight that SetAllPoints it still wrap only the bar).
+                -- Pushed down by the top text headroom so above-bar text lands in
+                -- the scroll child's extra room instead of being clipped.
                 local pvContent = CreateFrame("Frame", nil, pvFrame)
                 pvContent:SetSize(PREVIEW_W, PREVIEW_H)
-                pvContent:SetPoint("TOP", pvFrame, "TOP", 0, 0)
+                pvContent:SetPoint("TOP", pvFrame, "TOP", 0, -tbTopPad)
 
                 local barW = rawW
                 local barH = rawH
@@ -2837,8 +2861,8 @@ initFrame:SetScript("OnEvent", function(self)
                 hint:SetText(EllesmereUI.L("Use the dropdown above to add a new bar"))
             end
 
-            -- Preview visual height = bar height, capped at scroll container max
-            local pvVisH = math.min(PREVIEW_H, TBB_PREVIEW_MAX_H)
+            -- Preview visual height = bar + text headroom, capped at scroll max
+            local pvVisH = math.min(CONTENT_H, TBB_PREVIEW_MAX_H)
 
             fy = fy - pvVisH - 15
             _tbbHeaderFixedH = 20 + DD_H + 15 + 15

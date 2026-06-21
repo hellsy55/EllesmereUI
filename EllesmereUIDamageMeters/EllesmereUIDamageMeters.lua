@@ -1838,7 +1838,10 @@ local function CreateDMWindow(winIdx)
         end
         bar.ApplyBg()
         local tf = CreateFrame("Frame", nil, bar.fill)
-        tf:SetAllPoints(bar.fill); tf:SetFrameLevel(bar.fill:GetFrameLevel() + 2)
+        -- Keep text ABOVE the per-bar border (bar.row +3, lazy-created in
+        -- ApplyBorder). Keyed off bar.row like the border so the two can't tie
+        -- and let the border (created later, when enabled) cover the text.
+        tf:SetAllPoints(bar.fill); tf:SetFrameLevel(bar.row:GetFrameLevel() + 4)
         bar.pos = tf:CreateFontString(nil, "OVERLAY"); bar.pos:SetPoint("LEFT", tf, "LEFT", 3, 0); SetDMFont(bar.pos, 11)
         bar.label = tf:CreateFontString(nil, "OVERLAY"); bar.label:SetPoint("LEFT", bar.pos, "RIGHT", 2, 0); bar.label:SetPoint("RIGHT", tf, "RIGHT", -70, 0); bar.label:SetJustifyH("LEFT"); SetDMFont(bar.label, 11)
         bar.label:SetWordWrap(false)
