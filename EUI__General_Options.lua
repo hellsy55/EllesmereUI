@@ -274,7 +274,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.2.5",
+        version = "8.2.6",
         heroes = {
             {
                 module = "Cooldown Manager",
@@ -328,6 +328,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Cooldown Manager", text = "Custom glow type and color now apply to abilities that proc into a second ability, such as a Demon Hunter's Eradicate becoming Reap or a Death Knight's Festering Strike becoming Festering Scythe, instead of falling back to the default glow." },
             { module = "Cooldown Manager", text = "Tracking bar fills now animate smoothly instead of jumping between values." },
             { module = "Resource Bars", text = "Vengeance Demon Hunter Soul Fragment pips show the threshold color again once the configured fragment count is reached." },
+            { module = "Unit Frames", text = "Health bar backgrounds no longer turn transparent when Reverse Fill is enabled and the unit takes damage." },
         },
     },
     {

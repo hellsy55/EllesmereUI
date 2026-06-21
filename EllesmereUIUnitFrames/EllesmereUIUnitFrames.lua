@@ -1087,6 +1087,26 @@ end
 local DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B = 0x11/255, 0x11/255, 0x11/255  -- #111111
 local DARK_BG_R, DARK_BG_G, DARK_BG_B = 0x4f/255, 0x4f/255, 0x4f/255  -- #4f4f4f
 
+-- Anchor the health bg to cover ONLY the empty (missing-health) portion so a
+-- reduced fill opacity never reveals the bg behind the filled section. The empty
+-- side flips with reverse fill: a normal bar empties on the RIGHT, a reverse-fill
+-- bar empties on the LEFT. Anchoring to the wrong side collapses the bg to zero
+-- width whenever the bar is not full -- the reverse-fill "transparent background"
+-- bug. The anchor is relational, so the edge tracks the fill as health changes.
+local function AnchorHealthBg(health)
+    local bg = health and health.bg
+    local tex = health and health.GetStatusBarTexture and health:GetStatusBarTexture()
+    if not bg or not tex then return end
+    bg:ClearAllPoints()
+    if health.GetReverseFill and health:GetReverseFill() then
+        bg:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+        bg:SetPoint("BOTTOMRIGHT", tex, "BOTTOMLEFT", 0, 0)
+    else
+        bg:SetPoint("TOPLEFT", tex, "TOPRIGHT", 0, 0)
+        bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+    end
+end
+
 local function ApplyDarkTheme(health)
     if not health then return end
     local isDark = db and db.profile and db.profile.darkTheme
@@ -1101,9 +1121,7 @@ local function ApplyDarkTheme(health)
         if health.bg then
             -- Anchor bg to only cover the empty (missing-health) portion so the
             -- bar opacity fill shows the world behind it, not the bg color.
-            health.bg:ClearAllPoints()
-            health.bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-            health.bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+            AnchorHealthBg(health)
             health.bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
             health.bg:SetAlpha(1)
         end
@@ -1115,9 +1133,7 @@ local function ApplyDarkTheme(health)
         health.PostUpdateColor = function(self)
             self:SetStatusBarColor(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B)
             if self.bg then
-                self.bg:ClearAllPoints()
-                self.bg:SetPoint("TOPLEFT", self:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-                self.bg:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 0)
+                AnchorHealthBg(self)
             end
         end
     else
@@ -1174,9 +1190,7 @@ local function ApplyDarkTheme(health)
                 -- Keep bg covering only the empty (missing-health) portion as
                 -- health changes, so a reduced fill opacity never reveals the bg
                 -- behind the filled section. Matches the dark-mode path.
-                self.bg:ClearAllPoints()
-                self.bg:SetPoint("TOPLEFT", self:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-                self.bg:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", 0, 0)
+                AnchorHealthBg(self)
                 local bgClassR, bgClassG, bgClassB
                 if bgClassColored then
                     local u = unit or self.unit or uKey
@@ -1208,9 +1222,7 @@ local function ApplyDarkTheme(health)
             -- bar opacity fill shows the world behind it, not the bg color. The
             -- anchor is relational, so the left edge tracks the fill as health
             -- changes; PostUpdateColor re-applies it to survive texture swaps.
-            health.bg:ClearAllPoints()
-            health.bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-            health.bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+            AnchorHealthBg(health)
             local bgClassColored = unitSettings and unitSettings.bgClassColored
             local bgClassR, bgClassG, bgClassB
             if bgClassColored then
@@ -2483,8 +2495,8 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
 
     ApplyHealthBarTexture(health, UnitToSettingsKey(unit))
     ApplyHealthBarAlpha(health, UnitToSettingsKey(unit))
-    ApplyDarkTheme(health)
     health:SetReverseFill(settings.healthReverseFill and true or false)
+    ApplyDarkTheme(health)
 
     -- Smooth bar interpolation (opt-in; defaults off)
     if settings.smoothBars then
@@ -5561,8 +5573,8 @@ local function StyleSimpleFrame(frame, unit)
     ApplyHealthBarTexture(health, unitKey)
     settings.healthBarTexture = origTex
     ApplyHealthBarAlpha(health, unitKey)
-    ApplyDarkTheme(health)
     health:SetReverseFill(settings.healthReverseFill and true or false)
+    ApplyDarkTheme(health)
 
     frame.Health = health
 
@@ -5796,8 +5808,8 @@ local function StylePetFrame(frame, unit)
     ApplyHealthBarTexture(health, unitKey)
     settings.healthBarTexture = origTex
     ApplyHealthBarAlpha(health, unitKey)
-    ApplyDarkTheme(health)
     health:SetReverseFill(settings.healthReverseFill and true or false)
+    ApplyDarkTheme(health)
 
     frame.Health = health
 
@@ -8850,8 +8862,8 @@ local function ReloadFrames()
                 local cbTexKey = (isMiniFrame and donorSettings.healthBarTexture) or settings.healthBarTexture or db.profile.healthBarTexture or "none"
                 ns.ApplyCastBarTexture(frame.Castbar, cbTexKey)
             end
-            ApplyDarkTheme(frame.Health)
             frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
+            ApplyDarkTheme(frame.Health)
             UpdateAbsorbBarReverseFill(frame, settings.healthReverseFill and true or false)
             -- Smooth bar interpolation (live toggle without /reload)
             if settings.smoothBars then
