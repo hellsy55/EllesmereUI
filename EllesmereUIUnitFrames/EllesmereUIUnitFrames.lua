@@ -262,7 +262,7 @@ local defaults = {
             leaderIndicatorX = 0,
             leaderIndicatorY = 0,
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
             powerReverseFill = false,
         },
         target = {
@@ -419,7 +419,7 @@ local defaults = {
             leaderIndicatorX = 0,
             leaderIndicatorY = 0,
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
             powerReverseFill = false,
         },
         playerTarget = {
@@ -470,7 +470,7 @@ local defaults = {
             playerCastbarWidth = 181,
             playerCastbarHeight = 14,
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
             powerReverseFill = false,
         },
         targettarget = {
@@ -502,7 +502,7 @@ local defaults = {
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
         },
         -- Focus Target: independent clone of Target of Target defaults.
         -- MUST stay byte-identical to the targettarget block above so existing
@@ -537,7 +537,7 @@ local defaults = {
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
         },
         pet = {
             frameWidth = 101,
@@ -568,7 +568,7 @@ local defaults = {
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
         },
         focus = {
             frameWidth = 160,
@@ -722,7 +722,7 @@ local defaults = {
             raidMarkerX = 0,
             raidMarkerY = 0,
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
             powerReverseFill = false,
         },
         boss = {
@@ -825,7 +825,7 @@ local defaults = {
             raidMarkerY = 0,
             bossStackDirection = "down",
             healthReverseFill = false,
-            smoothBars = true,
+            smoothBars = false,
         },
         enabledFrames = {
             player = true,
@@ -2486,8 +2486,8 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
     ApplyDarkTheme(health)
     health:SetReverseFill(settings.healthReverseFill and true or false)
 
-    -- Smooth bar interpolation (same API as Raid Frames)
-    if settings.smoothBars ~= false then
+    -- Smooth bar interpolation (opt-in; defaults off)
+    if settings.smoothBars then
         health.smoothing = Enum and Enum.StatusBarInterpolation
             and Enum.StatusBarInterpolation.ExponentialEaseOut
     end
@@ -8854,7 +8854,7 @@ local function ReloadFrames()
             frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
             UpdateAbsorbBarReverseFill(frame, settings.healthReverseFill and true or false)
             -- Smooth bar interpolation (live toggle without /reload)
-            if settings.smoothBars ~= false then
+            if settings.smoothBars then
                 frame.Health.smoothing = Enum and Enum.StatusBarInterpolation
                     and Enum.StatusBarInterpolation.ExponentialEaseOut
             else

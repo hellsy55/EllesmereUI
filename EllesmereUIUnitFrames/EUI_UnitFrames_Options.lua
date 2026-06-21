@@ -5101,7 +5101,7 @@ initFrame:SetScript("OnEvent", function(self)
         local sharedOpacityRow
         sharedOpacityRow, h = W:DualRow(parent, y,
             { type="toggle", text="Smooth Health Bars",
-              getValue=function() return SVal("smoothBars", true) end,
+              getValue=function() return SVal("smoothBars", false) end,
               setValue=function(v) SSet("smoothBars", v) end },
             { type="slider", text="Bar Opacity", min=10, max=100, step=1,
               disabled=function() return db.profile.darkTheme end,
@@ -9977,7 +9977,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Smooth Health Bars + Reverse Fill
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Smooth Health Bars",
-              getValue=function() return MVal("smoothBars", true) end,
+              getValue=function() return MVal("smoothBars", false) end,
               setValue=function(v) MSet("smoothBars", v) end },
             { type="toggle", text="Reverse Fill",
               getValue=function() return settingsTable.healthReverseFill end,

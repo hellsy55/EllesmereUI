@@ -223,7 +223,6 @@ local TBB_DEFAULT_BAR = {
     pandemicGlowLines = 8,
     pandemicGlowThickness = 2,
     pandemicGlowSpeed = 4,
-    smoothBars = true,
 }
 ns.TBB_DEFAULT_BAR = TBB_DEFAULT_BAR
 
@@ -442,10 +441,21 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     bg:SetColorTexture(0, 0, 0, 0.4)
     wrapFrame._bg = bg
 
-    -- Spark
-    local spark = bar:CreateTexture(nil, "OVERLAY", nil, 2)
+    -- Spark on a dedicated overlay frame one level above the (gradient) fill so
+    -- it always draws OVER the fill, still clipped to the bar so it never spills
+    -- past the ends. SnapToPixelGrid off so it tracks the smoothly-interpolated
+    -- fill edge at sub-pixel precision instead of jumping a pixel as the edge
+    -- crosses a grid line.
+    local sparkOverlay = CreateFrame("Frame", nil, bar)
+    sparkOverlay:SetAllPoints(bar)
+    sparkOverlay:SetClipsChildren(true)
+    sparkOverlay:SetFrameLevel(bar:GetFrameLevel() + 2)
+    wrapFrame._sparkOverlay = sparkOverlay
+    local spark = sparkOverlay:CreateTexture(nil, "OVERLAY", nil, 7)
     spark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
     spark:SetBlendMode("ADD")
+    spark:SetSnapToPixelGrid(false)
+    spark:SetTexelSnappingBias(0)
     spark:Hide()
     wrapFrame._spark = spark
 
@@ -769,7 +779,8 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         if isVert then
             bar._spark:SetPoint("CENTER", sparkAnchor, "TOP", 0, 0)
         else
-            bar._spark:SetPoint("CENTER", sparkAnchor, "RIGHT", 0, 0)
+            -- 1px left so the spark sits over the fill edge, not past it.
+            bar._spark:SetPoint("CENTER", sparkAnchor, "RIGHT", -1, 0)
         end
         bar._spark:Show()
     else
@@ -1345,8 +1356,11 @@ local function UpdateLustBar(bar, cfg)
     local sb = bar._bar
     if sb then
         sb:SetMinMaxValues(0, 40)
-        local smooth = wasShown and cfg.smoothBars ~= false
-            and Enum and Enum.StatusBarInterpolation
+        -- Smooth fill is baseline for tracking bars: they move in one direction
+        -- at a known rate (no sudden jumps to read instantly, unlike a health
+        -- bar), so interpolation only removes judder. wasShown snaps a fresh
+        -- appearance instead of animating from a stale value.
+        local smooth = wasShown and Enum and Enum.StatusBarInterpolation
             and Enum.StatusBarInterpolation.ExponentialEaseOut
         if smooth then
             sb:SetValue(remaining, smooth)
@@ -1436,8 +1450,8 @@ function ns.UpdateTrackedBuffBarTimers()
                     -- Mirror Blizzard's bar onto ours. Secret values pass
                     -- through natively to widget setters -- no Lua comparison.
                     sb:SetMinMaxValues(blizzBar:GetMinMaxValues())
-                    local smooth = wasShown and cfg.smoothBars ~= false
-                        and Enum and Enum.StatusBarInterpolation
+                    -- Smooth fill is baseline (see UpdateLustBar note).
+                    local smooth = wasShown and Enum and Enum.StatusBarInterpolation
                         and Enum.StatusBarInterpolation.ExponentialEaseOut
                     if smooth then
                         sb:SetValue(blizzBar:GetValue(), smooth)
@@ -1627,7 +1641,8 @@ function ns.UpdateTrackedBuffBarTimers()
             end
             if anchor then
                 bar._spark:SetPoint("CENTER", anchor,
-                    bar._lastVertical and "TOP" or "RIGHT", 0, 0)
+                    bar._lastVertical and "TOP" or "RIGHT",
+                    bar._lastVertical and 0 or -1, 0)
             end
         end
     end
