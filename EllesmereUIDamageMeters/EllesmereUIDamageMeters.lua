@@ -849,6 +849,31 @@ local function FormatTimer(seconds)
     return format("%d:%02d", math.floor(seconds / 60), math.floor(seconds % 60))
 end
 
+local function GetBreakdownDuration(session, sessionID)
+    if sessionID then
+        if C_DamageMeter and C_DamageMeter.GetAvailableCombatSessions then
+            local sess = C_DamageMeter.GetAvailableCombatSessions()
+            if sess then
+                for _, s in ipairs(sess) do
+                    if s.sessionID == sessionID and type(s.durationSeconds) == "number" and not (issecretvalue and issecretvalue(s.durationSeconds)) then
+                        return s.durationSeconds
+                    end
+                end
+            end
+        end
+    elseif session == Enum.DamageMeterSessionType.Current then
+        return GetCurrentViewDuration()
+    elseif C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
+        local d = C_DamageMeter.GetSessionDurationSeconds(session)
+        if type(d) == "number" and not (issecretvalue and issecretvalue(d)) then return d end
+    end
+end
+
+local function AmountPerSecond(total, duration)
+    if type(total) ~= "number" or not duration or duration <= 0 then return nil end
+    return total / duration
+end
+
 -------------------------------------------------------------------------------
 --  Class icon sprite system
 -------------------------------------------------------------------------------
@@ -936,9 +961,9 @@ end
 
 -------------------------------------------------------------------------------
 --  Enemy Damage Taken: aggregate combatSpellDetails into per-player totals
---  Returns sorted array of { name, class, specIcon, total } or nil on failure.
+--  Returns sorted array of { name, class, specIcon, total, amountPerSecond } or nil on failure.
 -------------------------------------------------------------------------------
-local function AggregateEnemyPlayers(srcData)
+local function AggregateEnemyPlayers(srcData, duration)
     if not srcData or not srcData.combatSpells or #srcData.combatSpells == 0 then return nil end
     local byName = {}
     local list = {}
@@ -960,6 +985,9 @@ local function AggregateEnemyPlayers(srcData)
         end
     end
     if #list == 0 then return nil end
+    for _, p in ipairs(list) do
+        p.amountPerSecond = AmountPerSecond(p.total, duration)
+    end
     table.sort(list, function(a, b) return a.total > b.total end)
     return list
 end
@@ -1028,11 +1056,12 @@ local function BuildAllPlayerTargets(session, sessionID)
     end
 
     -- Convert each player's enemy map to a sorted array
+    local duration = GetBreakdownDuration(session, sessionID)
     local map = {}
     for pName, enemies in pairs(byPlayer) do
         local list = {}
         for eKey, total in pairs(enemies) do
-            list[#list + 1] = { name = enemyNames[eKey], total = total }
+            list[#list + 1] = { name = enemyNames[eKey], total = total, amountPerSecond = AmountPerSecond(total, duration) }
         end
         table.sort(list, function(a, b) return a.total > b.total end)
         map[pName] = list
@@ -1271,7 +1300,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         elseif C_DamageMeter.GetCombatSessionSourceFromType then
             srcData = C_DamageMeter.GetCombatSessionSourceFromType(curSession, curDMType, guid, cid)
         end
-        local players = AggregateEnemyPlayers(srcData)
+        local players = AggregateEnemyPlayers(srcData, GetBreakdownDuration(curSession, curSessionID))
         if not players then return false end
 
         ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", "Damage Taken")
@@ -1279,6 +1308,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         local maxAmt = players[1].total
         local ttMax = TT_MAX()
         local count = math.min(ttMax, #players)
+        local numFmt = DB().numberFormat or 2
         for i = 1, math.max(ttMax, #_ttBars) do
             local b = EnsureTTBar(i)
             if i <= count then
@@ -1307,7 +1337,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
                 else b.fill:SetStatusBarColor(0x33/255, 0x33/255, 0x33/255) end
                 b.label:SetTextColor(1, 1, 1); b.amount:SetTextColor(1, 1, 1)
                 b.label:SetText(StripRealm(p.name))
-                b.amount:SetText(AbbrevNumber(p.total))
+                b.amount:SetText(FormatBarValue(p.total, p.amountPerSecond, numFmt))
                 b.row:Show()
             else b.row:Hide() end
         end
@@ -1432,7 +1462,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
                     tb.fill:SetStatusBarColor(0xDD/255, 0x31/255, 0x31/255)
                     tb.label:SetTextColor(1, 1, 1); tb.amount:SetTextColor(1, 1, 1)
                     tb.label:SetText(t.name)
-                    tb.amount:SetText(AbbrevNumber(t.total))
+                    tb.amount:SetText(FormatBarValue(t.total, t.amountPerSecond, DB().numberFormat or 2))
                     tb.row:Show()
                     ttTargetCount = ttTargetCount + 1
                 else tb.row:Hide() end
@@ -3347,12 +3377,12 @@ local function CreateDMWindow(winIdx)
                 local ok, sd = pcall(C_DamageMeter.GetCombatSessionSourceFromType, W.curSession, W.curDMType, guid, cid)
                 if ok then srcData = sd end
             end
-            local players = AggregateEnemyPlayers(srcData)
+            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
+            local players = AggregateEnemyPlayers(srcData, GetBreakdownDuration(W.curSession, W.curSessionID))
             if not players then
                 if W.spellPool then for i = 1, BAR_POOL_SIZE do W.spellPool[i].row:Hide() end end
                 return
             end
-            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
             local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local texPath, texKey = GetBarTexturePath()
@@ -3378,7 +3408,7 @@ local function CreateDMWindow(winIdx)
                     SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
                     bar.label:SetTextColor(1, 1, 1); bar.amount:SetTextColor(1, 1, 1)
                     bar.label:SetText(StripRealm(p.name))
-                    bar.amount:SetText(AbbrevNumber(p.total)); bar._spellID = nil
+                    bar.amount:SetText(FormatBarValue(p.total, p.amountPerSecond, c.numberFormat or 2)); bar._spellID = nil
                 else bar.row:Hide(); bar._spellID = nil end
             end
             local srcTotalH = pCount * stride
@@ -3495,7 +3525,7 @@ local function CreateDMWindow(winIdx)
                     SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
                     bar.label:SetTextColor(1, 1, 1); bar.amount:SetTextColor(1, 1, 1)
                     bar.label:SetText(t.name)
-                    bar.amount:SetText(AbbrevNumber(t.total)); bar._spellID = nil
+                    bar.amount:SetText(FormatBarValue(t.total, t.amountPerSecond, c.numberFormat or 2)); bar._spellID = nil
                     targetsRendered = targetsRendered + 1
                 end
             end
