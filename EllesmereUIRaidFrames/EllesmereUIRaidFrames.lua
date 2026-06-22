@@ -30,6 +30,7 @@ ns.NICK_ADDON = ADDON_NAME:find("Standalone") and ADDON_NAME or "EllesmereUI"
 --  Kept on `ns` (not file-scope locals) to avoid the Lua 5.1 local cap in this
 --  large file, and shared with EUI_RaidFrames_BuffManager.lua.
 -------------------------------------------------------------------------------
+ns.LVL_DISPEL_OVERLAY = 7  -- Blizzard private-aura dispel gradient: below the border (+8) and name/health text (+12) so it renders BEHIND them (like the regular dispel overlay), but above the health bar so it stays visible. Per-slot private-aura icons stay above at LVL_AURA.
 ns.LVL_AURA   = 13   -- base level for every aura icon/bar (children at +1..+5); sits ONE above the name/health text (+12) so auras draw over text
 ns.LVL_RAISE  = 20   -- main border while hovered/targeted (PP container at +1)
 ns.LVL_MARKER = 22   -- raid marker icon (always on top)
@@ -209,8 +210,10 @@ local RAID_CLASS_COLORS     = RAID_CLASS_COLORS
 local C_UnitAuras_AddPrivateAuraAnchor    = C_UnitAuras and C_UnitAuras.AddPrivateAuraAnchor
 local C_UnitAuras_RemovePrivateAuraAnchor = C_UnitAuras and C_UnitAuras.RemovePrivateAuraAnchor
 
--- Strata bump for private aura container frames (workaround for 12.0.5
--- bug where container icons render behind the parent frame)
+-- Strata bump for the per-slot private aura ICON frames (workaround for 12.0.5
+-- bug where private aura icons render behind the parent frame). The dispel
+-- OVERLAY container does NOT use this -- it stays on the button's own strata at
+-- a below-text frame level so it renders behind the text (see RegisterDispelContainer).
 local PA_STRATA_FIX = {
     BACKGROUND = "LOW", LOW = "MEDIUM", MEDIUM = "HIGH", HIGH = "DIALOG",
 }
@@ -372,6 +375,7 @@ local defaults = {
         mergeGroups      = false,
         visibleGroups    = { true, true, true, true, true, true, false, false },
         hideEmptyGroups  = true,     -- collapse subgroups with no members (raid only, real frames)
+        excludeHiddenGroupsFromSize = true, -- hidden Show Groups don't count toward the raid-size breakpoint
 
         -- Visibility
         showWhenSolo     = false,
@@ -518,12 +522,13 @@ local defaults = {
         raidMarkerOffsetY  = 0,
         showReadyCheck   = true,
         showSummonPending = true,
-        readyCheckSize   = 18,
+        readyCheckSize   = 20,
         readyCheckPosition = "center",  -- "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom"
         readyCheckOffsetX  = 0,
         readyCheckOffsetY  = 0,
         threatBorderSize = 2,    -- aggro warning border thickness; 0 = off
         showLeaderIcon   = false,
+        showLeaderIconInCombat = true,  -- "Show In Combat" cog; off = hide in combat
         leaderIconPosition = "top",
         leaderIconSize   = 14,
         leaderIconOffsetX  = 0,
@@ -1121,6 +1126,40 @@ ns._GetRaidSizeFrameDimensions = function(groupSize)
     return baseW, baseH
 end
 
+-- Effective raid head count for size-breakpoint determination. By default (and
+-- when "Exclude Hidden Groups from Size" is on) members sitting in subgroups
+-- hidden via Show Groups are not counted while in a raid. This lets a user hide
+-- groups 7/8 (or any groups) and have the raid-size breakpoint reflect only the
+-- members they actually see, instead of the full roster bumping them into a
+-- smaller-frame tier. Explicitly turned off: returns GetNumGroupMembers()
+-- verbatim (counts the full roster).
+ns._GetEffectiveRaidSize = function()
+    local n = GetNumGroupMembers() or 0
+    if n == 0 then return n end
+    local s = db.profile
+    if s.excludeHiddenGroupsFromSize == false then return n end
+    -- Subgroups only exist in a raid; party/solo has nothing to exclude.
+    if not IsInRaid() then return n end
+    local vg = s.visibleGroups
+    if not vg then return n end
+    -- Skip the roster walk entirely when no group is actually hidden.
+    local anyHidden = false
+    for g = 1, 8 do
+        if vg[g] == false then anyHidden = true; break end
+    end
+    if not anyHidden then return n end
+    local count = 0
+    for ri = 1, n do
+        local _, _, sub = GetRaidRosterInfo(ri)
+        if sub and vg[sub] ~= false then count = count + 1 end
+    end
+    -- Degenerate guard: if every populated group is hidden the filter excludes
+    -- everyone. Fall back to the raw count so we never size for a 0-man raid
+    -- (nothing is shown in that case anyway).
+    if count == 0 then return n end
+    return count
+end
+
 -- Track current active tier so we know when to re-layout
 ns._currentSizeTier = 20
 
@@ -1251,14 +1290,22 @@ function ns.CapName(display)
     return display
 end
 
+-- Fraction of the frame width the NAME text may fill before it auto-truncates.
+-- 1.0 = the full frame width (names truncate only at 100%). Every name-width
+-- SetWidth routes through this single knob; health text keeps its own inline
+-- budget. On ns (not a file-scope local) to stay clear of the 200-local cap.
+ns.RF_NAME_WIDTH_FRACTION = 1.0
+
 -- Resolve the display name for a unit. Nickname sources are consulted in order:
 -- Northern Sky Raid Tools (NSAPI) first, then Timeline Reminders (TimelineReminders),
--- falling back to the short character name. For NSRT we pass our addon key "EUI"
--- (NSRT added a dedicated per-addon setting + EUI_NICKNAME_TOGGLE callback for us):
--- NSAPI:GetName self-gates on NSRT's Global Nicknames AND its EUI checkbox, so the
--- user controls nicknames entirely through NSRT (no EUI-side toggle). GetName returns
--- the short name when no nickname is set, which falls through to the next source.
--- pcall keeps a misbehaving external API from ever breaking name rendering.
+-- then the Liquid addon (LiquidAPI), falling back to the short character name. For
+-- NSRT we pass our addon key "EUI" (NSRT added a dedicated per-addon setting +
+-- EUI_NICKNAME_TOGGLE callback for us): NSAPI:GetName self-gates on NSRT's Global
+-- Nicknames AND its EUI checkbox, so the user controls nicknames entirely through
+-- NSRT (no EUI-side toggle). GetName returns the short name when no nickname is set,
+-- which falls through to the next source. Each source is gated entirely by its own
+-- addon (no EUI-side toggle), and pcall keeps a misbehaving external API from ever
+-- breaking name rendering.
 local function ResolveDisplayName(unit, applyCap)
     local name = UnitName(unit) or ""
     local display
@@ -1288,6 +1335,19 @@ local function ResolveDisplayName(unit, applyCap)
                     end
                 end
             end
+        end
+    end
+    -- Liquid addon nicknames (consulted when NSRT and TR did not produce one).
+    -- LiquidAPI.GetNicknameForEllesmereUI takes the raw UnitName string and returns
+    -- a nickname string, or nil for: no nickname set, nicknames disabled in the
+    -- Liquid addon, a secret name, or an empty name. It does all of that gating
+    -- itself, so we just pcall-wrap it (dot call, single arg -- not a method) and
+    -- re-check the result is a clean, non-empty string as defense in depth.
+    if not display and LiquidAPI and LiquidAPI.GetNicknameForEllesmereUI then
+        local ok, dn = pcall(LiquidAPI.GetNicknameForEllesmereUI, name)
+        if ok and type(dn) == "string"
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+            display = dn
         end
     end
     if not display then
@@ -2556,10 +2616,13 @@ local function StyleButton(button)
     -- dispellable debuffs). Only way to show dispel info for re-privated
     -- auras in 12.0.5+. Uses alpha gating: our custom overlay wins for
     -- normal debuffs, container catches private ones we can't see.
+    -- Frame level sits BELOW the name/health text (LVL_DISPEL_OVERLAY = +7,
+    -- text = +12) so the gradient renders behind text. RegisterDispelContainer
+    -- re-applies this level and forces Blizzard to re-read it (no strata bump).
     if C_UnitAuras_AddPrivateAuraAnchor then
         local dcWrapper = CreateFrame("Frame", nil, button)
         dcWrapper:SetAllPoints(health)
-        dcWrapper:SetFrameLevel(button:GetFrameLevel() + ns.LVL_AURA)
+        dcWrapper:SetFrameLevel(button:GetFrameLevel() + ns.LVL_DISPEL_OVERLAY)
         dcWrapper:EnableMouse(false)
         if dcWrapper.SetMouseClickEnabled then dcWrapper:SetMouseClickEnabled(false) end
         -- Set all required attributes BEFORE AddPrivateAuraAnchor
@@ -2827,7 +2890,7 @@ local function StyleButton(button)
 
     -- Ready check icon (shared with the incoming-summon indicator)
     local readyCheck = health:CreateTexture(nil, "OVERLAY", nil, 3)
-    readyCheck:SetSize(PixelSnap(s.readyCheckSize or 18), PixelSnap(s.readyCheckSize or 18))
+    readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:Hide()
     d.readyCheck = readyCheck
 
@@ -3084,7 +3147,7 @@ local function StyleButton(button)
         nameFS:Show()
         local ox = s.nameOffsetX or 0
         local oy = s.nameOffsetY or 0
-        nameFS:SetWidth((s.frameWidth or 72) * 0.75)
+        nameFS:SetWidth((s.frameWidth or 72) * ns.RF_NAME_WIDTH_FRACTION)
         nameFS:SetHeight(0)
         if pos == "topleft" then
             nameFS:SetPoint("TOPLEFT", health, "TOPLEFT", 2 + ox, -2 + oy)
@@ -3436,6 +3499,34 @@ ns._UpdateRoleIcon = function(d, s, unit)
 end
 
 -------------------------------------------------------------------------------
+--  Leader/assistant icon show/hide decision. Shared by UpdateButton and the
+--  lightweight ns._UpdateLeaderIcons combat-transition updater so both stay in
+--  lockstep. Honors the per-row "Show In Combat" cog (default on): when off,
+--  the icon is suppressed for the duration of combat and restored on
+--  PLAYER_REGEN_ENABLED. (Lives on ns, not a file local, to respect the chunk
+--  local cap.)
+-------------------------------------------------------------------------------
+ns._UpdateLeaderIcon = function(d, s, unit)
+    local leaderIcon = d.leaderIcon
+    if not leaderIcon then return end
+    if not s.showLeaderIcon then leaderIcon:Hide(); return end
+    if s.showLeaderIconInCombat == false and inCombat then leaderIcon:Hide(); return end
+    local isLeader = UnitIsGroupLeader(unit)
+    local isAssist = UnitIsGroupAssistant(unit)
+    if isLeader and not issecretvalue(isLeader) then
+        leaderIcon:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+        leaderIcon:SetTexCoord(0, 1, 0, 1)
+        leaderIcon:Show()
+    elseif isAssist and not issecretvalue(isAssist) then
+        leaderIcon:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
+        leaderIcon:SetTexCoord(0, 1, 0, 1)
+        leaderIcon:Show()
+    else
+        leaderIcon:Hide()
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Update all visual elements for a single button
 -------------------------------------------------------------------------------
 local function UpdateButton(button)
@@ -3644,26 +3735,8 @@ local function UpdateButton(button)
     -- Role icon
     ns._UpdateRoleIcon(d, s, unit)
 
-    -- Leader/assistant icon
-    if d.leaderIcon then
-        if s.showLeaderIcon then
-            local isLeader = UnitIsGroupLeader(unit)
-            local isAssist = UnitIsGroupAssistant(unit)
-            if isLeader and not issecretvalue(isLeader) then
-                d.leaderIcon:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
-                d.leaderIcon:SetTexCoord(0, 1, 0, 1)
-                d.leaderIcon:Show()
-            elseif isAssist and not issecretvalue(isAssist) then
-                d.leaderIcon:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
-                d.leaderIcon:SetTexCoord(0, 1, 0, 1)
-                d.leaderIcon:Show()
-            else
-                d.leaderIcon:Hide()
-            end
-        else
-            d.leaderIcon:Hide()
-        end
-    end
+    -- Leader/assistant icon (honors the "Show In Combat" cog)
+    ns._UpdateLeaderIcon(d, s, unit)
 
     -- Raid marker
     if d.raidMarker then
@@ -4360,9 +4433,11 @@ local function RegisterDispelContainer(button, unit)
     wrapper:SetAttribute("aura-organization-type", s and s.dispelOverlayPosition or 0)   -- 0=Top, 1=Bottom, 2=Left
     wrapper:SetAttribute("update-settings", true)
 
-    -- Apply strata fix (12.0.5 container rendering workaround)
-    local parentStrata = button:GetFrameStrata()
-    wrapper:SetFrameStrata(PA_STRATA_FIX[parentStrata] or "DIALOG")
+    -- Pin to the button's OWN strata + a below-text frame level (NO strata bump)
+    -- so the overlay renders BEHIND the name/health text. Re-applied here (not
+    -- only at creation) so it survives any button-level change before register.
+    wrapper:SetFrameStrata(button:GetFrameStrata())
+    wrapper:SetFrameLevel(button:GetFrameLevel() + ns.LVL_DISPEL_OVERLAY)
 
     local ok, anchorID = pcall(function()
         return C_UnitAuras_AddPrivateAuraAnchor({
@@ -4376,6 +4451,13 @@ local function RegisterDispelContainer(button, unit)
     end)
     if ok and anchorID then
         d.dispelContainerAnchorID = anchorID
+        -- AddPrivateAuraAnchor caches the parent's frame level on first register
+        -- and ignores later changes; toggling to 0 and back forces Blizzard to
+        -- re-read it on the next paint so our below-text level actually applies
+        -- (without this the overlay can render behind the whole frame).
+        local lvl = wrapper:GetFrameLevel()
+        wrapper:SetFrameLevel(0)
+        wrapper:SetFrameLevel(lvl)
     end
     d.dispelContainerUnit = unit
 end
@@ -4815,7 +4897,7 @@ local function UpdateReadyCheck(button, unit)
     local tex = d.readyCheck
     if not tex then return end
 
-    local sz = PixelSnap(db.profile.readyCheckSize or 18)
+    local sz = PixelSnap(db.profile.readyCheckSize or 20)
     tex:SetSize(sz, sz)
 
     -- Ready check (priority)
@@ -4998,6 +5080,21 @@ ns._UpdateRoleIcons = function()
     for unit, btn in pairs(unitToButton) do updateRole(unit, btn) end
     for unit, btn in pairs(ns._partyUnitToButton) do updateRole(unit, btn) end
     for unit, btn in pairs(ns._xfUnitToButton) do updateRole(unit, btn) end
+end
+
+-- Lightweight: only refresh leader/assistant icons on each button. Driven by
+-- combat transitions so the "Show In Combat" cog can suppress/restore the icon
+-- without a full per-button repaint. Texture Show/Hide is combat-legal.
+ns._UpdateLeaderIcons = function()
+    local function updateLeader(unit, btn)
+        local d = GetFFD(btn)
+        if not d.leaderIcon then return end
+        local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
+        ns._UpdateLeaderIcon(d, s, unit)
+    end
+    for unit, btn in pairs(unitToButton) do updateLeader(unit, btn) end
+    for unit, btn in pairs(ns._partyUnitToButton) do updateLeader(unit, btn) end
+    for unit, btn in pairs(ns._xfUnitToButton) do updateLeader(unit, btn) end
 end
 
 -- Lightweight: health-only update for UNIT_HEALTH / UNIT_MAXHEALTH.
@@ -5565,7 +5662,7 @@ FB.ApplyStyle = function(owner)
 
         ApplyFont(b._nameText, s.nameSize or 10)
         ApplyFont(b._healthText, s.healthTextSize or 9)
-        b._nameText:SetWidth(w * 0.75)
+        b._nameText:SetWidth(w * ns.RF_NAME_WIDTH_FRACTION)
         b._nameText:SetHeight(0)
         b._healthText:SetWidth(w * 0.75)
         b._healthText:SetHeight(0)
@@ -6022,7 +6119,7 @@ XF.Layout = function()
             if d.AnchorNameText then d.AnchorNameText() end
             -- AnchorNameText derives width from the BASE frame width; the
             -- offset width is authoritative here.
-            d.nameText:SetWidth(w * 0.75)
+            d.nameText:SetWidth(w * ns.RF_NAME_WIDTH_FRACTION)
         end
         if d.healthText then
             ApplyFont(d.healthText, xs.healthTextSize or 9)
@@ -6050,7 +6147,7 @@ XF.Layout = function()
             if d.AnchorRaidMarker then d.AnchorRaidMarker() end
         end
         if d.readyCheck then
-            local rcSz = PixelSnap(xs.readyCheckSize or 18)
+            local rcSz = PixelSnap(xs.readyCheckSize or 20)
             d.readyCheck:SetSize(rcSz, rcSz)
             if d.AnchorReadyCheck then d.AnchorReadyCheck() end
         end
@@ -7059,7 +7156,7 @@ local function ReloadFrames()
     -- Rebuild dispel-color curves so custom-color edits take effect immediately.
     if ns._RebuildDispelCurves then ns._RebuildDispelCurves() end
     -- Recalculate active tier from current group size + overrides
-    local numMembers = GetNumGroupMembers()
+    local numMembers = ns._GetEffectiveRaidSize()
     local prevW, prevH = ns._activeSizeW, ns._activeSizeH
     if numMembers > 0 then
         ns._activeSizeW, ns._activeSizeH = ns._GetRaidSizeFrameDimensions(numMembers)
@@ -7186,7 +7283,7 @@ local function ReloadFrames()
 
         -- Ready check / summon size + position
         if d.readyCheck then
-            local rcSz = PixelSnap(s.readyCheckSize or 18)
+            local rcSz = PixelSnap(s.readyCheckSize or 20)
             d.readyCheck:SetSize(rcSz, rcSz)
             if d.AnchorReadyCheck then d.AnchorReadyCheck() end
         end
@@ -7282,7 +7379,7 @@ ns._ResizeButtons = function(w, h)
             if d.health then
                 d.health:SetHeight(((d.power and d.power:IsShown()) and xhealthH or xbh) - topBarH)
             end
-            if d.nameText then d.nameText:SetWidth(xbw * 0.75) end
+            if d.nameText then d.nameText:SetWidth(xbw * ns.RF_NAME_WIDTH_FRACTION) end
         end
     end
     ns._activeSizeW = w
@@ -7315,7 +7412,7 @@ ns._ResizePartyButtons = function(w, h)
                 local hh = ((d.power and d.power:IsShown()) and healthH or bh) - topBarH
                 d.health:SetHeight(hh)
             end
-            if d.nameText then d.nameText:SetWidth(bw * 0.75) end
+            if d.nameText then d.nameText:SetWidth(bw * ns.RF_NAME_WIDTH_FRACTION) end
             -- Live-rescale indicators/auras. No-op for hidden buttons / no unit
             -- (e.g. options menu while not grouped), so cheap there.
             if autoResize then
@@ -7466,7 +7563,7 @@ ns._ApplyTierOffset = function()
     local pos = db.profile.unlockPos
     if not pos then return end
     local ox, oy = 0, 0
-    local numMembers = GetNumGroupMembers()
+    local numMembers = ns._GetEffectiveRaidSize()
     if numMembers > 0 then
         local s = db.profile
         local overrides = s.raidSizeOverrides
@@ -7937,12 +8034,14 @@ local function OnEvent(self, event, arg1, ...)
             if ns._HideSizePreview then ns._HideSizePreview() end
         end
         if ns.EnsureRealFramesRestored then ns.EnsureRealFramesRestored() end
-        -- Combat starting: hide role icons on frames using the "Hide In Combat" cog.
+        -- Combat starting: hide role/leader icons on frames using the in-combat cogs.
         if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
+        if ns._UpdateLeaderIcons then ns._UpdateLeaderIcons() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
-        -- Combat ended: restore any role icons suppressed by "Hide In Combat".
+        -- Combat ended: restore any role/leader icons suppressed during combat.
         if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
+        if ns._UpdateLeaderIcons then ns._UpdateLeaderIcons() end
         -- Complete any container reparent that was blocked during combat (e.g.
         -- the options panel was closed mid-combat while a preview was active).
         -- Without this, a combat auto-close can leave the real frames orphaned
@@ -7995,7 +8094,7 @@ local function OnEvent(self, event, arg1, ...)
         if inCombat then
             ns._rosterDirtyInCombat = true
             -- Check if size tier changed during combat (deferred to REGEN)
-            local numMembers = GetNumGroupMembers()
+            local numMembers = ns._GetEffectiveRaidSize()
             if numMembers > 0 then
                 local newW, newH = ns._GetRaidSizeFrameDimensions(numMembers)
                 if newW ~= ns._activeSizeW or newH ~= ns._activeSizeH then
@@ -8078,7 +8177,7 @@ local function OnEvent(self, event, arg1, ...)
             -- button (no aura rescan) so leader/role/marker/health for
             -- UNCHANGED-token units stay correct -- e.g. a new leader after the
             -- old one left, which keeps its token so the hook won't fire.
-            local numMembers = GetNumGroupMembers()
+            local numMembers = ns._GetEffectiveRaidSize()
             local newW, newH = ns._GetRaidSizeFrameDimensions(numMembers > 0 and numMembers or 1)
             local tierChanged = (newW ~= ns._activeSizeW or newH ~= ns._activeSizeH)
             local wasVis = framesVisible
@@ -8438,7 +8537,7 @@ do
             "showReadyCheck", "showSummonPending",
             "readyCheckSize", "readyCheckPosition", "readyCheckOffsetX", "readyCheckOffsetY",
             "statusTextPosition", "statusTextOffsetX", "statusTextOffsetY", "statusTextSize", "statusTextColor",
-            "showLeaderIcon", "leaderIconPosition", "leaderIconSize", "leaderIconOffsetX", "leaderIconOffsetY",
+            "showLeaderIcon", "showLeaderIconInCombat", "leaderIconPosition", "leaderIconSize", "leaderIconOffsetX", "leaderIconOffsetY",
             "borderSize", "borderColor", "borderAlpha", "borderTexture",
             "borderBehind", "borderTextureOffset", "borderTextureOffsetY",
             "borderTextureShiftX", "borderTextureShiftY",
@@ -9118,7 +9217,7 @@ ns.ReloadPartyFrames = function()
             ApplyFont(d.nameText, pp.nameSize or 10)
             if d.AnchorNameText then d.AnchorNameText() end
             -- Override width constraint for party button dimensions
-            d.nameText:SetWidth(bw * 0.75)
+            d.nameText:SetWidth(bw * ns.RF_NAME_WIDTH_FRACTION)
         end
 
         -- Health text
@@ -9162,7 +9261,7 @@ ns.ReloadPartyFrames = function()
 
         -- Ready check / summon
         if d.readyCheck then
-            local rcSz = PixelSnap(pp.readyCheckSize or 18)
+            local rcSz = PixelSnap(pp.readyCheckSize or 20)
             d.readyCheck:SetSize(rcSz, rcSz)
             if d.AnchorReadyCheck then d.AnchorReadyCheck() end
         end
@@ -10648,7 +10747,7 @@ local function CreatePreviewFrame(index)
 
     -- Ready check icon (position/size re-applied in the preview indicator pass)
     local readyCheck = health:CreateTexture(nil, "OVERLAY", nil, 3)
-    readyCheck:SetSize(PixelSnap(s.readyCheckSize or 18), PixelSnap(s.readyCheckSize or 18))
+    readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:SetPoint("CENTER", health, "CENTER", 0, 0)
     readyCheck:Hide()
 
@@ -11732,7 +11831,7 @@ local function ApplyPreviewData(f, index)
             (isSummon and s.showSummonPending)
         )
         if showRC then
-            local rcSz = PixelSnap(s.readyCheckSize or 18)
+            local rcSz = PixelSnap(s.readyCheckSize or 20)
             f._readyCheck:SetSize(rcSz, rcSz)
             -- Anchor based on ready-check position setting
             f._readyCheck:ClearAllPoints()
@@ -11790,7 +11889,7 @@ local function ApplyPreviewData(f, index)
         f._nameText:Show()
         local ox = s.nameOffsetX or 0
         local oy = s.nameOffsetY or 0
-        f._nameText:SetWidth((s.frameWidth or 72) * 0.75)
+        f._nameText:SetWidth((s.frameWidth or 72) * ns.RF_NAME_WIDTH_FRACTION)
         f._nameText:SetHeight(0)
         if pos == "topleft" then
             f._nameText:SetPoint("TOPLEFT", f._health, "TOPLEFT", 2 + ox, -2 + oy)

@@ -623,6 +623,7 @@ local DEFAULTS = {
     profile = {
         health = {
             enabled     = false,
+            smoothBars  = false,
             width       = 214,
             height      = 16,
             borderSize  = 0,
@@ -658,6 +659,7 @@ local DEFAULTS = {
         },
         primary = {
             enabled     = true,
+            smoothBars  = false,
             width       = 214,
             height      = 14,
             borderSize  = 1,
@@ -700,6 +702,7 @@ local DEFAULTS = {
         },
         secondary = {
             enabled     = true,
+            smoothBars  = false,
             pipWidth    = 214,
             pipHeight   = 20,
             pipSpacing  = 1,
@@ -732,6 +735,8 @@ local DEFAULTS = {
             protIgnorePainBar = true,      -- Prot Warrior: show Ignore Pain bar (total absorbs vs the IP cap = 30% max health; aura stacks are secret). New-user default; existing profiles pinned off via migration "resourcebars_protwar_ignorepain_existing_off_v1".
             protIgnorePainHashLine = true, -- Prot Ignore Pain: draw the moving duration hash line (resets on cast)
             runesSimple = false,  -- DK: treat runes as flat pips (no recharge animation/timer)
+            runesCustomRecharge = false,  -- DK: use a custom color for recharging runes instead of a dimmed version of the rune color
+            runesRechargeR = 0.5, runesRechargeG = 0.5, runesRechargeB = 0.5, runesRechargeA = 1,
             chargedR = 0.44, chargedG = 0.77, chargedB = 1.00, chargedA = 1,
             enhanceFiveBar = true,  -- Enhance Shaman: show 5 pips with overflow coloring
             enhanceOverflowR = 1, enhanceOverflowG = 0.6, enhanceOverflowB = 0.2,
@@ -1047,7 +1052,16 @@ local function CreateStatusBar(parent, name, w, h, borderSize, borderR, borderG,
 
     -- Forward StatusBar methods to the inner bar so callers don't change
     bar.SetMinMaxValues = function(_, ...) sb:SetMinMaxValues(...) end
-    bar.SetValue = function(_, ...) sb:SetValue(...) end
+    bar.SetValue = function(_, ...)
+        -- Native StatusBar interpolation (opt-in "Smooth Bars"). _smoothing is
+        -- set only on health/power/class-resource bars whose toggle is on; nil
+        -- everywhere else, so this is a plain SetValue with zero added cost.
+        if bar._smoothing then
+            sb:SetValue((...), bar._smoothing)
+        else
+            sb:SetValue(...)
+        end
+    end
     bar.GetValue = function(_) return sb:GetValue() end
     bar.SetStatusBarTexture = function(_, ...) sb:SetStatusBarTexture(...) end
     bar.GetStatusBarTexture = function(_) return sb:GetStatusBarTexture() end
@@ -2308,6 +2322,8 @@ local function BuildBars()
                     0, 0, 0, 0, 0)
                 secondaryBar:SetMinMaxValues(0, maxPts)
                 secondaryBar:SetValue(0)
+                -- Apply the Smooth Bars setting to the freshly created bar.
+                if ERB.ApplySmoothing then ERB:ApplySmoothing() end
             else
                 -- For existing bars, only update min/max if needed (don't reset value to 0)
                 local actualMax = maxPts
@@ -3414,8 +3430,11 @@ local function UpdateSecondaryResource()
                             frac = max(0, min(1, elapsed / rDur))
                         end
                         rf._rechargeBar:SetValue(frac)
-                        -- 75% brightness while recharging (subtle dim), matching threshold color when active
-                        if runeUseThresh then
+                        -- Recharge color: custom color when enabled, otherwise 75%
+                        -- brightness (subtle dim), matching threshold color when active
+                        if sp.runesCustomRecharge then
+                            rf._rechargeBar:SetStatusBarColor(sp.runesRechargeR or 0.5, sp.runesRechargeG or 0.5, sp.runesRechargeB or 0.5, sp.runesRechargeA or 1)
+                        elseif runeUseThresh then
                             rf._rechargeBar:SetStatusBarColor(tr * 0.75, tg * 0.75, tb * 0.75, a)
                         else
                             rf._rechargeBar:SetStatusBarColor(r * 0.75, g * 0.75, b * 0.75, a)
@@ -5462,6 +5481,20 @@ end
 -------------------------------------------------------------------------------
 --  Master Apply
 -------------------------------------------------------------------------------
+-- Native StatusBar fill smoothing (opt-in per bar; default off). Mirrors the
+-- Unit Frames approach: store the interpolation mode on the bar and let the
+-- CreateStatusBar SetValue wrapper pass it to Blizzard's C-side interpolation.
+-- nil = no interpolation = zero added cost (a plain SetValue). Only the three
+-- main bars are touched; cast bar / pips never get _smoothing.
+function ERB:ApplySmoothing()
+    local interp = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut
+    local p = ERB.db and ERB.db.profile
+    if not (interp and p) then return end
+    if healthBar    then healthBar._smoothing    = (p.health    and p.health.smoothBars)    and interp or nil end
+    if primaryBar   then primaryBar._smoothing   = (p.primary   and p.primary.smoothBars)   and interp or nil end
+    if secondaryBar then secondaryBar._smoothing = (p.secondary and p.secondary.smoothBars) and interp or nil end
+end
+
 function ERB:ApplyAll()
     local _, classFile = UnitClass("player")
     cachedClass = classFile
@@ -5488,6 +5521,7 @@ function ERB:ApplyAll()
     UpdatePrimaryBar()
     UpdateSecondaryResource()
     UpdateVisibility()
+    self:ApplySmoothing()
 
     -- Vehicle proxy: hide resource bars during full vehicle UI ([vehicleui] condition)
     -- Secure frame creation + RegisterStateDriver both need to happen outside combat
@@ -5727,6 +5761,7 @@ function ERB:OnInitialize()
 
     _G._ERB_AceDB = self.db
     _G._ERB_Apply = function() ERB:ApplyAll() end
+    _G._ERB_ApplySmoothing = function() ERB:ApplySmoothing() end
     -- Unlock mode / EUI options panel: temporarily render the power bar at its
     -- true stored height (no expand) so movers and getSize see the real size.
     -- RUNTIME-ONLY suppression via EllesmereUI._erbExpandSuppressed -- it NEVER

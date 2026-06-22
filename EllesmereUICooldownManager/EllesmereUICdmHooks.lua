@@ -618,6 +618,129 @@ local function ApplyCdmChargeStyle(frame, cd)
     return true
 end
 
+-- Max Stacks Glow (per-spell): glow a charge spell when it is at max charges.
+-- 1:1 with Active State Glow but on its own overlay (so the two never fight) and
+-- driven by charge state instead of the active swipe. ss2.maxStacksGlow is the
+-- glow STYLE; the color is the unified ss.glowColor (same as every other glow).
+-- atMax is a CLEAN bool the caller derives from C_Spell.GetSpellCharges().isActive
+-- (recharge-active flag, false only at max) -- never the secret currentCharges.
+local function ApplyMaxStacksGlow(frame, fd, ss2, atMax)
+    if not fd then return end
+    local has = ss2 and ss2.maxStacksGlow and ss2.maxStacksGlow > 0
+    if has and atMax then
+        if not fd._maxStacksGlowOn then
+            -- Lazy-create the overlay only when the glow is first needed, so an
+            -- unused feature adds no frame. Its own overlay means it never fights
+            -- the active glow (StartNativeGlow stops glows on the passed overlay only).
+            local mo = fd.maxStacksGlowOverlay
+            if not mo and frame then
+                mo = CreateFrame("Frame", nil, frame)
+                mo:SetAllPoints(frame)
+                mo:SetAlpha(0)
+                mo:EnableMouse(false)
+                fd.maxStacksGlowOverlay = mo
+            end
+            if mo then
+                if frame then mo:SetFrameLevel(frame:GetFrameLevel() + 16) end
+                local gr, gg, gb = ns.ResolveGlowColor(ss2)
+                gr = gr or 1; gg = gg or 0.85; gb = gb or 0
+                ns.StartNativeGlow(mo, ss2.maxStacksGlow, gr, gg, gb)
+                fd._maxStacksGlowOn = true
+            end
+        end
+    elseif fd._maxStacksGlowOn then
+        if fd.maxStacksGlowOverlay then ns.StopNativeGlow(fd.maxStacksGlowOverlay) end
+        fd._maxStacksGlowOn = false
+    end
+end
+
+-- Max Stacks Glow is driven by SPELL_UPDATE_CHARGES, NOT the cooldown-widget hooks:
+-- those fire when a charge is SPENT (swipe set) but not when the last charge REFILLS
+-- to max (verified live). SPELL_UPDATE_CHARGES fires on BOTH charge transitions and
+-- nothing else, so it is far cheaper than SPELL_UPDATE_COOLDOWN (which fires on every
+-- GCD); isActive only ever flips together with a charge-count change, so this one
+-- event catches both edges. The watch set holds only icons that have the glow enabled,
+-- so each event iterates a tiny set, and the frame is created only once the feature is
+-- turned on (0 cost otherwise).
+ns._maxStacksWatch = ns._maxStacksWatch or setmetatable({}, { __mode = "k" })
+
+-- Re-derive at-max from CLEAN charge state and (un)glow. Self-unwatches when the
+-- per-icon setting is off or the frame lost its spell, so the set drains itself.
+local function EvalMaxStacksFrame(frame, fd)
+    if not fd then return end
+    local fcw = _ecmeFC[frame]
+    local sidw = fcw and fcw.spellID
+    local bkw = fcw and fcw.barKey
+    if not sidw or not bkw then
+        ApplyMaxStacksGlow(frame, fd, nil, false)
+        ns._maxStacksWatch[frame] = nil
+        return
+    end
+    local ssw = ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw))
+    if not (ssw and ssw.maxStacksGlow and ssw.maxStacksGlow > 0) then
+        ApplyMaxStacksGlow(frame, fd, ssw, false)
+        ns._maxStacksWatch[frame] = nil
+        return
+    end
+    local liveSid = sidw
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        liveSid = C_SpellBook.FindSpellOverrideByID(sidw) or sidw
+    end
+    -- atMax derives PURELY from charge data (maxCharges + the recharge isActive
+    -- flag), NEVER from HasVisualDataSource_Charges: that returns false whenever the
+    -- icon is drawing a GCD swipe instead of the recharge, which would wrongly drop
+    -- the glow every time a charge tops off during the global cooldown. maxCharges>1
+    -- is itself the charge-spell test (nil / 1 for non-charge spells -> atMax false).
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    local atMax = ci ~= nil and (ci.maxCharges or 0) > 1 and not ci.isActive
+    ApplyMaxStacksGlow(frame, fd, ssw, atMax)
+end
+
+local function WatchMaxStacksFrame(frame, fd)
+    ns._maxStacksWatch[frame] = fd
+    if not ns._maxStacksEventFrame then
+        local ef = CreateFrame("Frame")
+        ef:RegisterEvent("SPELL_UPDATE_CHARGES")
+        ef:SetScript("OnEvent", function()
+            for f, d in pairs(ns._maxStacksWatch) do
+                EvalMaxStacksFrame(f, d)
+            end
+        end)
+        ns._maxStacksEventFrame = ef
+    end
+end
+
+-- Called from RefreshCDMIconAppearance (login + settings changes) so an at-max
+-- charge spell -- which never fires the swipe hook, having no swipe -- still gets
+-- watched. Early-outs on non-charge icons (one cheap capability check, no settings
+-- lookup), so the only icons that cost anything are charge spells. Once watched,
+-- the single SPELL_UPDATE_CHARGES frame keeps them current. Also self-cleans an
+-- icon whose setting was just turned off.
+function ns.WatchMaxStacksIfEnabled(frame)
+    if not frame then return end
+    local fd = hookFrameData[frame]
+    if not fd then return end
+    local fcw = _ecmeFC[frame]
+    local sidw = fcw and fcw.spellID
+    local bkw = fcw and fcw.barKey
+    if not (sidw and bkw) then return end
+    -- Charge-spell test via static charge data (stable). HasVisualDataSource_Charges
+    -- flips false during a GCD swipe and would wrongly skip the spell here too.
+    local liveSid = sidw
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then liveSid = C_SpellBook.FindSpellOverrideByID(sidw) or sidw end
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    local isCharge = ci ~= nil and (ci.maxCharges or 0) > 1
+    local ssw = isCharge and ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw)) or nil
+    if ssw and ssw.maxStacksGlow and ssw.maxStacksGlow > 0 then
+        ns._cdmAnyMaxStacksGlow = true
+        WatchMaxStacksFrame(frame, fd)
+        EvalMaxStacksFrame(frame, fd)
+    elseif ns._maxStacksWatch[frame] then
+        ns._maxStacksWatch[frame] = nil
+        ApplyMaxStacksGlow(frame, fd, nil, false)
+    end
+end
+
 -------------------------------------------------------------------------------
 --  DecorateFrame
 --  Add our visual overlays to a CDM frame (one-time per frame).
@@ -827,6 +950,7 @@ local function DecorateFrame(frame, barData)
                 -- SetDrawSwipe hook can early-out for everyone who never enables
                 -- it. Covers /reload (runs for every icon).
                 if ss2 and ss2.chargeHideSwipe then ns._cdmAnyChargeStyle = true end
+                if ss2 and ss2.maxStacksGlow and ss2.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
                     -- Hide Active State: force black swipe, track active flag.
@@ -926,6 +1050,20 @@ local function DecorateFrame(frame, barData)
                     fd._activeGlowOn = false
                 end
 
+                -- Max Stacks Glow (per-spell): glow a multi-charge spell at max charges.
+                -- "At max" = no recharge running, read from GetSpellCharges().isActive
+                -- The secret currentCharges is never read. Consuming a charge fires this
+                -- swipe hook; refilling to max fires Cooldown:Clear (handled below).
+                if ns._cdmAnyMaxStacksGlow and ss2 and ss2.maxStacksGlow and ss2.maxStacksGlow > 0 then
+                    -- Register for charge/cooldown events (the only thing that catches
+                    -- refill-to-max) and eval now so a charge SPEND updates immediately.
+                    WatchMaxStacksFrame(frame, fd)
+                    EvalMaxStacksFrame(frame, fd)
+                elseif fd._maxStacksGlowOn then
+                    ApplyMaxStacksGlow(frame, fd, nil, false)  -- setting cleared -> off
+                    ns._maxStacksWatch[frame] = nil
+                end
+
                 -- Active border color (per-spell). Recolor the icon border while the
                 -- spell is active; restore the bar's default border color on falloff.
                 -- SetBorderStyleColor handles both solid (PP) and textured borders and
@@ -1002,6 +1140,17 @@ local function DecorateFrame(frame, barData)
                 -- duration, and arming a 0,0 cooldown would strobe the swipe. When
                 -- all charges are back (isActive false) leave it cleared so the
                 -- swipe correctly disappears.
+                -- Max Stacks Glow: Clear fires on every charge refill (incl. reaching
+                -- max). Re-eval from GetSpellCharges().isActive (clean; false only at
+                -- max) so the glow turns on the moment the last charge returns.
+                if ns._cdmAnyMaxStacksGlow then
+                    local bkm = fc2 and fc2.barKey
+                    local ssm = bkm and ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bkm)) or nil
+                    if ssm and ssm.maxStacksGlow and ssm.maxStacksGlow > 0 then
+                        WatchMaxStacksFrame(frame, fd)
+                        EvalMaxStacksFrame(frame, fd)
+                    end
+                end
                 local cdInfo = C_Spell.GetSpellCooldown(effID)
                 if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
                 -- Re-derive the charge recharge duration. The duration object is
@@ -1079,6 +1228,19 @@ local function DecorateFrame(frame, barData)
                 -- way the suppressGCD check above does.
                 local cdInfo2 = sid2 and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(sid2)
                 local onRealCD = cdInfo2 and cdInfo2.isActive and not cdInfo2.isOnGCD
+                -- Charge spells report cooldown isActive while a recharge is in
+                -- progress even when a castable charge remains, which would wrongly
+                -- desaturate a still-usable icon. currentCharges is a SECRET value
+                -- in this tainted hook (can't be compared), so use Blizzard's clean
+                -- isOnActualCooldown flag instead -- false means at least one charge
+                -- is usable, so stay saturated until the spell is genuinely out.
+                if onRealCD and type(frame.HasVisualDataSource_Charges) == "function"
+                   and frame:HasVisualDataSource_Charges() then
+                    local actualCD = frame.isOnActualCooldown
+                    if (not issecretvalue or not issecretvalue(actualCD)) and actualCD == false then
+                        onRealCD = false
+                    end
+                end
                 fd.tex:SetDesaturated(onRealCD or false)
                 fd._isProcessingOverride = false
             end
@@ -2040,8 +2202,19 @@ local function CollectAndReanchor()
                                     -- override (ss.alwaysShow "on"/"off") beats the bar
                                     -- toggle. Lookup only when per-icon settings exist
                                     -- on the bar (zero added cost otherwise).
-                                    local showInactive = bd and bd.showInactiveBuffIcons and true or false
-                                    if bd then
+                                    -- "Keep Buffs in Same Place" (bd.hidePlaceholderIcon)
+                                    -- reuses the Always-Show placeholder path: treat it as
+                                    -- Always-Show internally (the two are mutually exclusive
+                                    -- in the options). The placeholders it injects are then
+                                    -- rendered invisible by the alpha-0 opacity passes.
+                                    local showInactive = bd and (bd.showInactiveBuffIcons or bd.hidePlaceholderIcon) and true or false
+                                    -- Per-icon Always-Show override (on/off) applies only in
+                                    -- Always-Show mode. "Keep Buffs in Same Place" reserves
+                                    -- EVERY tracked buff's slot, so a per-icon "off" must not
+                                    -- punch a gap -- skip the override entirely in that mode.
+                                    -- (For non-users hidePlaceholderIcon is false, so this is
+                                    -- byte-identical to the original `if bd then`.)
+                                    if bd and not bd.hidePlaceholderIcon then
                                         local sdAS = ns.GetBarSpellData(targetBar)
                                         if sdAS and sdAS.spellSettings then
                                             -- Shared resolver: matches the stored key
@@ -2199,7 +2372,20 @@ local function CollectAndReanchor()
                         local barHidden = container and container._visHidden
                         local fcH = _ecmeFC[frame]
                         if not (fcH and fcH._cdStateHidden) then
-                            frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                            -- Hide Icon: an Always-Show placeholder still reserves its
+                            -- layout slot (it stays shown + decorated + positioned) but
+                            -- renders fully invisible -- icon, border and background --
+                            -- via frame alpha 0. The same check is mirrored in the two
+                            -- other per-icon opacity passes (_CDMApplyVisibility and
+                            -- ApplyBarOpacity) so none of them paint over it.
+                            -- The off-by-default bar flag is tested FIRST so anyone not
+                            -- using this feature short-circuits straight to the original
+                            -- branch below (identical code, no added work).
+                            if barData.hidePlaceholderIcon and frame._isPlaceholderFrame then
+                                frame:SetAlpha(0)
+                            else
+                                frame:SetAlpha(barHidden and 0 or (barData.barOpacity or 1))
+                            end
                         end
                     end
                     -- Ensure stack/charge text stays above our border overlay.

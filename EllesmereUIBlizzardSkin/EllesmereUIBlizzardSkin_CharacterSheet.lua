@@ -3790,17 +3790,25 @@ local function SkinCharacterSheet()
             local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
             enchantLabel:SetFont(fontPath, enchantSize, "")
             enchantLabel:SetTextColor(1, 1, 1, 0.8)
-            enchantLabel:SetJustifyH("CENTER")
 
-            -- Position based on column (below itemlevel)
+            -- Position based on column (below itemlevel). Justify toward the
+            -- icon so a width-capped enchant name hugs its slot: left-column
+            -- text left-aligned, right-column text right-aligned (weapon slots
+            -- follow their anchor side).
             if tContains(leftColumnSlots, slotName) then
                 enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
+                enchantLabel:SetJustifyH("LEFT")
             elseif tContains(rightColumnSlots, slotName) then
                 enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
+                enchantLabel:SetJustifyH("RIGHT")
             elseif slotName == "CharacterMainHandSlot" then
                 enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
+                enchantLabel:SetJustifyH("RIGHT")
             elseif slotName == "CharacterSecondaryHandSlot" then
                 enchantLabel:SetPoint("LEFT", slot, "RIGHT", 5, -5)
+                enchantLabel:SetJustifyH("LEFT")
+            else
+                enchantLabel:SetJustifyH("CENTER")
             end
 
             local hoverFrame = CreateFrame("Frame", nil, textOverlayFrame)
@@ -4306,6 +4314,22 @@ local function SkinCharacterSheet()
             upgradeTrackText, upgradeTrackColor = EUI_GetUpgradeTrack(itemLink)
         end
 
+        -- Resolve the item-level display color once (custom override > upgrade
+        -- track hue > item rarity > white). Shared by the item-level label and,
+        -- when Show Enchant Names is on, the enchant name text -- so the enchant
+        -- name reads in the same color as that item's level.
+        local ilvlColor
+        if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
+            ilvlColor = EllesmereUIDB.charSheetItemLevelColor
+        elseif upgradeTrackText ~= "" and upgradeTrackColor then
+            ilvlColor = upgradeTrackColor
+        elseif (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and itemQuality then
+            local r, g, b = GetItemQualityColor(itemQuality)
+            ilvlColor = { r = r, g = g, b = b }
+        else
+            ilvlColor = { r = 1, g = 1, b = 1 }
+        end
+
         -- Update itemlevel label with optional rarity color
         if GetFFD(slot).itemLevelLabel then
             -- Check if itemlevel is enabled (default: true)
@@ -4314,26 +4338,7 @@ local function SkinCharacterSheet()
             if showItemLevel then
                 GetFFD(slot).itemLevelLabel:SetText(tostring(itemLevel) or "")
                 GetFFD(slot).itemLevelLabel:SetShown(isCharTab)
-
-                -- Color resolution order:
-                --   1. User custom color (if enabled)
-                --   2. Upgrade track color (shares the Hero/Myth/Champion hue
-                --      so both labels read as a single unit)
-                --   3. Item rarity color
-                --   4. White fallback
-                local displayColor
-                if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
-                    displayColor = EllesmereUIDB.charSheetItemLevelColor
-                elseif upgradeTrackText ~= "" and upgradeTrackColor then
-                    displayColor = upgradeTrackColor
-                elseif (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and itemQuality then
-                    local r, g, b = GetItemQualityColor(itemQuality)
-                    displayColor = { r = r, g = g, b = b }
-                else
-                    displayColor = { r = 1, g = 1, b = 1 }
-                end
-
-                GetFFD(slot).itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
+                GetFFD(slot).itemLevelLabel:SetTextColor(ilvlColor.r, ilvlColor.g, ilvlColor.b, 0.9)
             else
                 GetFFD(slot).itemLevelLabel:Hide()
             end
@@ -4371,8 +4376,51 @@ local function SkinCharacterSheet()
                 tooltipText = tooltipText:gsub("^.-%s*%-%s*", "")
             end
 
-            if showEnchants and iconOnly and iconOnly ~= "" then
-                GetFFD(slot).enchantLabel:SetText(iconOnly)
+            -- "Show Enchant Names": render the readable enchant name as text
+            -- (colored to match the item level) instead of its icon. The
+            -- missing-enchant warning always keeps its red icon (no name to
+            -- show). Falls back to the icon for any item without a real enchant.
+            local showNames = EllesmereUIDB and EllesmereUIDB.charSheetEnchantNames
+            local useName = showNames and hasEnchant and tooltipText and tooltipText ~= ""
+            local labelText = useName and tooltipText or iconOnly
+
+            if showEnchants and labelText and labelText ~= "" then
+                GetFFD(slot).enchantLabel:SetText(labelText)
+                local enchFontSize = (EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize) or 9
+                if useName then
+                    -- Enchant names always render OUTLINE, SLUG for legibility over
+                    -- the model (hardcoded; matches the char-sheet outline standard).
+                    GetFFD(slot).enchantLabel:SetFont(fontPath, enchFontSize, "OUTLINE, SLUG")
+                    -- Item-level color, blended 50% toward white so the name reads
+                    -- softer than the ilvl number.
+                    GetFFD(slot).enchantLabel:SetTextColor(
+                        ilvlColor.r + (1 - ilvlColor.r) * 0.5,
+                        ilvlColor.g + (1 - ilvlColor.g) * 0.5,
+                        ilvlColor.b + (1 - ilvlColor.b) * 0.5, 0.9)
+                    -- Cap the name at 45% of the gap between the two equipment
+                    -- columns (right edge of the left icons -> left edge of the
+                    -- right icons) so a long enchant never bleeds across the
+                    -- model or into the far column. Overflow truncates with an
+                    -- ellipsis; the full name is still on the hover tooltip.
+                    -- textOverlayFrame (the label's parent) shares the slots'
+                    -- effective scale, so the edge delta is already in the
+                    -- label's own width units.
+                    local maxW
+                    local leftRef, rightRef = _G.CharacterHeadSlot, _G.CharacterHandsSlot
+                    if leftRef and rightRef then
+                        local lr, rl = leftRef:GetRight(), rightRef:GetLeft()
+                        if lr and rl and rl > lr then maxW = (rl - lr) * 0.45 end
+                    end
+                    GetFFD(slot).enchantLabel:SetWordWrap(false)
+                    GetFFD(slot).enchantLabel:SetWidth(maxW or 0)
+                else
+                    -- Icon mode: no outline (matches the label's creation default),
+                    -- default white tint so a prior name-mode color never bleeds
+                    -- onto the atlas icons, and clear the width cap.
+                    GetFFD(slot).enchantLabel:SetFont(fontPath, enchFontSize, "")
+                    GetFFD(slot).enchantLabel:SetTextColor(1, 1, 1, 0.8)
+                    GetFFD(slot).enchantLabel:SetWidth(0)
+                end
                 GetFFD(slot).enchantLabel:SetShown(isCharTab)
 
                 if GetFFD(slot).enchantHoverFrame then
@@ -4438,6 +4486,15 @@ local function SkinCharacterSheet()
                 UpdateSlotInfo(slotName)
             end
         end
+    end
+
+    -- Public: force a full slot-label rebuild even when no item changed. Options
+    -- toggles that only change how labels render (e.g. Show Enchant Names) leave
+    -- the equipped items untouched, so the per-slot item-link cache above would
+    -- otherwise short-circuit every slot and the change wouldn't apply live.
+    function EllesmereUI._refreshCharSheetSlotLabels()
+        wipe(itemCache)
+        RefreshAllSlotLabels()
     end
 
     if not GetFFD(frame).itemLevelMonitor then

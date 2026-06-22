@@ -266,36 +266,36 @@ local EXPRESSWAY = MEDIA_PATH .. "fonts\\Expressway.ttf"
 -- too. nil on Western Latin locales -> callers keep the bundled Expressway.
 local LOCALE_FONT_FALLBACK = _G.EllesmereUI and _G.EllesmereUI._localeFont or nil
 -------------------------------------------------------------------------------
---  Addon Roster  --  per-addon icon on/off from EllesmereUI/media
+--  Addon Roster  --  per-addon display name + search alias from EllesmereUI/media
 -------------------------------------------------------------------------------
 local ICONS_PATH    = MEDIA_PATH .. "icons\\"
 
 local ADDON_ROSTER = {
-    { folder = "EllesmereUIActionBars",        display = "Action Bars",        search_name = "EllesmereUI Action Bars",        icon_on = ICONS_PATH .. "sidebar\\actionbars-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\actionbars-ig.png"      },
-    { folder = "EllesmereUINameplates",        display = "Nameplates",         search_name = "EllesmereUI Nameplates",         icon_on = ICONS_PATH .. "sidebar\\nameplates-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\nameplates-ig.png"      },
-    { folder = "EllesmereUIUnitFrames",        display = "Unit Frames",        search_name = "EllesmereUI Unit Frames",        icon_on = ICONS_PATH .. "sidebar\\unitframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\unitframes-ig.png"      },
-    { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png"      },
-    { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
-    { folder = "EllesmereUIResourceBars",      display = "Resource & Cast Bars", search_name = "EllesmereUI Resource Bars Cast Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
-    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png" },
+    { folder = "EllesmereUIActionBars",        display = "Action Bars",          search_name = "EllesmereUI Action Bars"             },
+    { folder = "EllesmereUINameplates",        display = "Nameplates",           search_name = "EllesmereUI Nameplates"              },
+    { folder = "EllesmereUIUnitFrames",        display = "Unit Frames",          search_name = "EllesmereUI Unit Frames"             },
+    { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",          search_name = "EllesmereUI Raid Frames"             },
+    { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",     search_name = "EllesmereUI Cooldown Manager"        },
+    { folder = "EllesmereUIResourceBars",      display = "Resource & Cast Bars", search_name = "EllesmereUI Resource Bars Cast Bars" },
+    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders",   search_name = "EllesmereUI AuraBuff Reminders"      },
     -- Basics is intentionally NOT in the roster: its code has been split into
     -- the per-module addons below. The Basics folder still exists as a shim
     -- addon purely so the v6.6 split-migration can read its enable state.
-    { folder = "EllesmereUIQoL",               display = "Quality of Life",    search_name = "EllesmereUI Quality of Life",    icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
-    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",  search_name = "EllesmereUI Blizz UI Enhanced",  icon_on = ICONS_PATH .. "sidebar\\blizzard-ig-on.png",        icon_off = ICONS_PATH .. "sidebar\\blizzard-ig.png"      },
-    { folder = "EllesmereUIFriends",           display = "Friends List",       search_name = "EllesmereUI Friends List",       icon_on = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",         icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png"       },
-    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",      search_name = "EllesmereUI Mythic+ Timer",      icon_on = ICONS_PATH .. "sidebar\\mplus-ig-on.png",           icon_off = ICONS_PATH .. "sidebar\\mplus-ig.png"         },
-    { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
-    { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
-    { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
+    { folder = "EllesmereUIQoL",               display = "Quality of Life",      search_name = "EllesmereUI Quality of Life"         },
+    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",    search_name = "EllesmereUI Blizz UI Enhanced"       },
+    { folder = "EllesmereUIFriends",           display = "Friends List",         search_name = "EllesmereUI Friends List"            },
+    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",        search_name = "EllesmereUI Mythic+ Timer"           },
+    { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",        search_name = "EllesmereUI Quest Tracker"           },
+    { folder = "EllesmereUIMinimap",           display = "Minimap",              search_name = "EllesmereUI Minimap"                 },
+    { folder = "EllesmereUIChat",              display = "Chat",                 search_name = "EllesmereUI Chat"                    },
+    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",        search_name = "EllesmereUI Damage Meters"           },
+    { folder = "EllesmereUIBags",              display = "Bags",                 search_name = "EllesmereUI Bags"                    },
+    { folder = "EllesmereUIPartyMode",         display = "Party Mode",           search_name = "EllesmereUI Party Mode",             alwaysLoaded = true },
 }
 
 -------------------------------------------------------------------------------
 --  Addon Groups  --  ordered categories that drive the sidebar layout.
---  Each group has its own parent header (icon + label, no power toggle); the
+--  Each group has its own text-only parent header (label, no power toggle); the
 --  listed members render as child rows beneath it (label + power only, no
 --  left icon). Member order is authoritative -- coming-soon entries are
 --  placed at the end of their group.
@@ -307,8 +307,6 @@ EllesmereUI.ADDON_GROUPS = {
     {
         key     = "core",
         label   = "Core Addons",
-        icon_on  = ICONS_PATH .. "sidebar\\actionbars-ig-on.png",
-        icon_off = ICONS_PATH .. "sidebar\\actionbars-ig.png",
         members = {
             "EllesmereUIActionBars",
             "EllesmereUINameplates",
@@ -321,8 +319,6 @@ EllesmereUI.ADDON_GROUPS = {
     {
         key     = "qol",
         label   = "QoL Addons",
-        icon_on  = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",
-        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",
         members = {
             "EllesmereUIQoL",
             "EllesmereUIAuraBuffReminders",
@@ -332,8 +328,6 @@ EllesmereUI.ADDON_GROUPS = {
     {
         key     = "reskin",
         label   = "UI Reskin Addons",
-        icon_on  = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",
-        icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png",
         members = {
             "EllesmereUIBlizzardSkin",
             "EllesmereUIDamageMeters",
@@ -378,8 +372,6 @@ if IS_STANDALONE then
         table.insert(EllesmereUI.ADDON_GROUPS, 1, {
             key     = "standalone",
             label   = "Standalone",
-            icon_on  = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",
-            icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",
             members = { selfFolder },
         })
     end
@@ -2492,9 +2484,15 @@ do
     function EllesmereUI.GetBorderDefaultSize(addonKey, textureKey)
         if textureKey == "shadow" then textureKey = "glow" end  -- Shadow shares Glow's defaults
         local addon = _borderDefaults[addonKey]
-        if not addon then return nil end
-        local tex = addon[textureKey]
-        return tex and tex.defaultSize or nil
+        local tex = addon and addon[textureKey]
+        if tex and tex.defaultSize then return tex.defaultSize end
+        -- Any SharedMedia border ("sm:<name>") defaults to size 1 unless a
+        -- specific defaultSize was registered above. This is the shared engine
+        -- function, so it applies to every consumer. It is only called from a
+        -- dropdown setValue (style change), never on load/apply, so stored
+        -- sizes are never touched until the user actively picks a SharedMedia style.
+        if type(textureKey) == "string" and textureKey:sub(1, 3) == "sm:" then return 1 end
+        return nil
     end
 
     -- Built-in border textures (always available, no SharedMedia required)
@@ -5602,7 +5600,7 @@ local function CreateMainFrame()
 
         local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
-        label:SetText("Unlock Mode")
+        label:SetText(EllesmereUI.L("Unlock Mode"))
         btn._label = label
 
         -- Always "loaded" appearance
@@ -5669,7 +5667,7 @@ local function CreateMainFrame()
 
         local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
-        label:SetText("Global Settings")
+        label:SetText(EllesmereUI.L("Global Settings"))
         btn._label = label
 
         -- No download icon for global settings
@@ -5746,7 +5744,7 @@ local function CreateMainFrame()
 
         local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
-        label:SetText("Patch Notes")
+        label:SetText(EllesmereUI.L("Patch Notes"))
         btn._label = label
 
         label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
@@ -5817,7 +5815,7 @@ local function CreateMainFrame()
 
         local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
-        label:SetText("Profiles & Presets")
+        label:SetText(EllesmereUI.L("Profiles & Presets"))
         btn._label = label
 
         label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
@@ -6181,7 +6179,7 @@ local function CreateMainFrame()
         local EG = ELLESMERE_GREEN
         local label = MakeFont(row, 15, nil, EG.r, EG.g, EG.b, 1)
         label:SetPoint("LEFT", row, "LEFT", NAV_LEFT, 0)
-        label:SetText(group.label)
+        label:SetText(EllesmereUI.L(group.label))
         RegAccent({ type="callback", fn = function(r, g, b)
             label:SetTextColor(r, g, b, 1)
         end })
@@ -7228,7 +7226,7 @@ local function CreateMainFrame()
         local bg = SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, .92)
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, textR, textG, textB)
-        lbl:SetAlpha(textA); lbl:SetPoint("CENTER"); lbl:SetText(label)
+        lbl:SetAlpha(textA); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L(label))
         btn._label = lbl
         do
             local FADE_DUR = 0.1
@@ -7449,7 +7447,7 @@ local function CreateMainFrame()
         local bg = SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, .92)
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b)
-        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText("Done")
+        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L("Done"))
         -- Hover animation reads from ELLESMERE_GREEN live
         local FADE_DUR = 0.1
         local progress, target = 0, 0
@@ -9064,7 +9062,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.6"
+EllesmereUI.VERSION = "8.2.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -192,6 +192,7 @@ local DM_DEFAULTS = {
             showClassColor  = true,
             showPinnedSelf  = false,
             showHoverTooltip = true,
+            showSpellTooltips = true,  -- game spell tooltip on breakdown-row hover
             breakdownAnchorPoint = "row", -- "row" (Above Row) | "center" (Center of Screen)
             breakdownBarTexture = "match",
             barColorUseAccent = true,
@@ -794,15 +795,21 @@ end
 --  Number formatting
 -------------------------------------------------------------------------------
 local _abbreviateCfg
+-- East Asian clients group large numbers by ten-thousands (wan) and
+-- hundred-millions (yi) rather than K/M/B. Simplified and Traditional Chinese
+-- share the math and the thousands glyph; only the wan/yi glyphs differ.
+local CJK = ({
+    zhCN = { thousand = "千", wan = "万", yi = "亿" },
+    zhTW = { thousand = "千", wan = "萬", yi = "億" },
+})[GetLocale()]
 do
     local opts
-    local locale = GetLocale()
-    if locale == "zhCN" then
+    if CJK then
         opts = {
-            { breakpoint = 100000000, abbreviation = "亿", significandDivisor = 1000000,  fractionDivisor = 100, abbreviationIsGlobal = false }, 
-            { breakpoint = 10000,     abbreviation = "万", significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false }, 
-            { breakpoint = 1000,      abbreviation = "千", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false }, 
-            { breakpoint = 1,         abbreviation = "",   significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false }, 
+            { breakpoint = 100000000, abbreviation = CJK.yi,       significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 10000,     abbreviation = CJK.wan,      significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1000,      abbreviation = CJK.thousand, significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
+            { breakpoint = 1,         abbreviation = "",           significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
         }
     else
         opts = {
@@ -822,24 +829,19 @@ local function AbbrevNumber(n)
     if AbbreviateNumbers then
         return AbbreviateNumbers(n, _abbreviateCfg) or "0"
     end
-    
     local num = tonumber(n)
     if not num then return "?" end
-    
-    local locale = GetLocale()
-    if locale == "zhCN" then
-        if num >= 1e8 then return format("%.2f亿", num / 1e8)
-        elseif num >= 1e4 then return format("%.2f万", num / 1e4)
-        elseif num >= 1e3 then return format("%.1f千", num / 1e3)
-        else return format("%.0f", num) end
-    else
-        if num >= 1e9 then return format("%.1fB", num / 1e9)
-        elseif num >= 1e6 then return format("%.1fM", num / 1e6)
-        elseif num >= 1e3 then return format("%.1fK", num / 1e3)
+    if CJK then
+        if num >= 1e8 then return format("%.2f%s", num / 1e8, CJK.yi)
+        elseif num >= 1e4 then return format("%.2f%s", num / 1e4, CJK.wan)
+        elseif num >= 1e3 then return format("%.1f%s", num / 1e3, CJK.thousand)
         else return format("%.0f", num) end
     end
+    if num >= 1e9 then return format("%.1fB", num / 1e9)
+    elseif num >= 1e6 then return format("%.1fM", num / 1e6)
+    elseif num >= 1e3 then return format("%.1fK", num / 1e3)
+    else return format("%.0f", num) end
 end
-
 
 local function FormatBarValue(amt, perSec, numFmt)
     -- Per-second can drop below 1 on long overall windows (total / huge time),
@@ -1962,6 +1964,34 @@ local function CreateDMWindow(winIdx)
         return bar
     end
 
+    -- Spell tooltip on breakdown-row hover. Shows the REAL game spell tooltip
+    -- (full native info: cooldown, range, cast time, description, etc.) -- the
+    -- only way to get that is the shared GameTooltip. This is a deliberate
+    -- exception to the usual EllesmereUI-tooltip rule: that rule exists to avoid
+    -- taint in SECURE / chat-frame contexts, and these breakdown rows are our
+    -- own non-secure, addon-created frames, so the standard SetOwner +
+    -- SetSpellByID + Show sequence is safe here.
+    --
+    -- Anchored to the LEFT of the bar via ANCHOR_NONE + manual SetPoint.
+    -- Guards: bar._spellID is a clean numeric spellID on spell rows (nil on
+    -- player/target rows); secret-value + valid-spell checks keep it safe in
+    -- any context (and ShowWidgetTooltip's combat suppression no longer applies,
+    -- so the guards do the work).
+    local function ShowSpellRowTooltip(anchor, spellID)
+        if not spellID or type(spellID) ~= "number" then return end
+        local cfg = DB()
+        if cfg and cfg.showSpellTooltips == false then return end
+        if issecretvalue and issecretvalue(spellID) then return end
+        -- Only show for a real, resolvable spell.
+        local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
+        if not name or (issecretvalue and issecretvalue(name)) then return end
+        GameTooltip:SetOwner(anchor, "ANCHOR_NONE")
+        GameTooltip:ClearAllPoints()
+        GameTooltip:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -6, 0)
+        GameTooltip:SetSpellByID(spellID)
+        GameTooltip:Show()
+    end
+
     local function MakeSpellRow(parent)
         local bar = {}
         bar.row = CreateFrame("Button", nil, parent); bar.row:SetHeight(18); bar.row:EnableMouse(true); bar.row:RegisterForClicks("AnyUp")
@@ -1972,6 +2002,8 @@ local function CreateDMWindow(winIdx)
         bar.label:SetWordWrap(false)
         bar.amount = tf:CreateFontString(nil, "OVERLAY"); bar.amount:SetPoint("RIGHT", tf, "RIGHT", -3, 0); bar.amount:SetJustifyH("RIGHT"); SetDMFont(bar.amount, 11)
         bar.row:SetScript("OnClick", function() W.CloseSource() end)
+        bar.row:SetScript("OnEnter", function(self) ShowSpellRowTooltip(self, bar._spellID) end)
+        bar.row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         bar._spellID = nil; bar.row:Hide()
         return bar
     end

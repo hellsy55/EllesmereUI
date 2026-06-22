@@ -123,7 +123,7 @@ function ns._appendDisplayPresetKeys(t)
         "textSlotLeftSize", "textSlotLeftXOffset", "textSlotLeftYOffset",
         "textSlotCenterSize", "textSlotCenterXOffset", "textSlotCenterYOffset",
         "textSlotTopColor", "textSlotRightColor", "textSlotLeftColor", "textSlotCenterColor",
-        "tankHasAggroEnabled", "tankHasAggro", "classicTankAggro",
+        "tankHasAggroEnabled", "tankHasAggro", "classicTankAggro", "tankHasAggroOverrideMobType",
         "dpsHasAggro", "dpsNearAggro", "offTankAggroEnabled", "offTankAggro",
         "dpsNoAggroEnabled", "dpsNoAggro",
         "targetArrowDouble", "targetArrowStyle", "targetArrowColor", "targetArrowClassColor",
@@ -166,6 +166,9 @@ local defaults = {
     darkenEnemiesOOC = true,
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
+    -- When on, the tank has-aggro color overrides the Mini-Boss and Caster
+    -- colors (promotes it above priority step 7); off = it stays low priority.
+    tankHasAggroOverrideMobType = false,
     classicTankAggro = false,
     tankLosingAggro = { r = 0.81, g = 0.72, b = 0.19 },
     tankNoAggro = { r = 1.00, g = 0.22, b = 0.17 },
@@ -277,6 +280,10 @@ local defaults = {
     -- targetGlowHighlight) are intentionally NOT defaulted here: they stay nil
     -- so the getters can live-convert from the legacy targetGlowStyle string.
     targetBorderColor = { r = 1, g = 1, b = 1 },
+    -- Target Highlight wash color/opacity (defaults match the formerly
+    -- hardcoded white at 30%, so existing users are unaffected).
+    targetHighlightColor = { r = 1, g = 1, b = 1 },
+    targetHighlightAlpha = 0.20,
     raidMarkerPos = "topright",
     raidMarkerSize = 24,
     classificationSlot = "topleft",
@@ -304,6 +311,17 @@ local defaults = {
     showBorder = true,
     borderSize = 1,
     borderColor = { r = 0.067, g = 0.067, b = 0.067 },
+    -- Custom border (opt-in) -- reuses the shared EllesmereUI border engine
+    -- (same system as Unit Frames, full SharedMedia support). When
+    -- customBorderEnabled is false (the default) NONE of these keys are read
+    -- and the simple border above is rendered exactly as before, so existing
+    -- users see zero change.
+    customBorderEnabled = false,
+    customBorderTexture = "solid",
+    customBorderSize = 1,
+    customBorderColor = { r = 0.067, g = 0.067, b = 0.067 },
+    customBorderAlpha = 1,
+    customBorderBehind = false,
     pandemicGlow = false,
     pandemicGlowStyle = 1,
     pandemicGlowColor = { r = 1.0, g = 0.800, b = 0.329 },
@@ -368,6 +386,99 @@ local BAR_W = 150
 ns.defaults = defaults
 ns.BAR_W = BAR_W
 local CAST_H = 17
+
+-- Custom nameplate border (opt-in) -----------------------------------------
+-- Register per-style/size offset defaults with the shared border engine,
+-- mirroring the Unit Frames registration. Wrapped in do/end so no file-scope
+-- locals leak (this file runs near Lua 5.1's main-chunk local cap).
+do
+    if EllesmereUI and EllesmereUI.RegisterBorderDefaults then
+        local function AllSizes(ox, oy, sx, sy)
+            local t = {}
+            for k = 0, 4 do t[k] = { offsetX = ox, offsetY = oy, shiftX = sx, shiftY = sy } end
+            return t
+        end
+        EllesmereUI.RegisterBorderDefaults("nameplates", {
+            ["glow"]  = { defaultSize = 1, sizes = AllSizes(0, 0, 0, 0) },
+            ["blizz"] = {
+                defaultSize = 4,
+                sizes = {
+                    [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                    [1] = { offsetX = 2, offsetY = 1, shiftX = 0, shiftY = 0 },
+                    [2] = { offsetX = 3, offsetY = 1, shiftX = 1, shiftY = 0 },
+                    [3] = { offsetX = 4, offsetY = 2, shiftX = 2, shiftY = 0 },
+                    [4] = { offsetX = 5, offsetY = 3, shiftX = 2, shiftY = 0 },
+                },
+            },
+            ["dialog"] = {
+                defaultSize = 2,
+                sizes = {
+                    [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                    [1] = { offsetX = 2, offsetY = 2, shiftX = 0, shiftY = 0 },
+                    [2] = { offsetX = 2, offsetY = 2, shiftX = 0, shiftY = 0 },
+                    [3] = { offsetX = 4, offsetY = 4, shiftX = 0, shiftY = 0 },
+                    [4] = { offsetX = 8, offsetY = 8, shiftX = 0, shiftY = 0 },
+                },
+            },
+            ["sm:Blizzard Achievement Wood"] = { defaultSize = 1, sizes = AllSizes(1, 1, 0, 0) },
+        })
+    end
+end
+
+-- Custom border apply helpers. They read the enemy profile `p` (friendly
+-- plates intentionally mirror the enemy border settings 1:1) and route through
+-- the shared EllesmereUI border engine. The custom border lives on a dedicated
+-- child frame we own (plate._customBorder), so it never collides with the
+-- simple PP.CreateBorder that decorates plate.health directly. Defined as ns
+-- fields (not new file-scope locals) to respect the local cap.
+function ns.IsCustomBorderEnabled()
+    local v = p and p.customBorderEnabled
+    if v == nil then return defaults.customBorderEnabled end
+    return v
+end
+function ns.ApplyCustomBorderStyle(plate)
+    if not plate or not plate.health then return end
+    if not (EllesmereUI and EllesmereUI.ApplyBorderStyle) then return end
+    local tex    = (p and p.customBorderTexture) or defaults.customBorderTexture
+    local sz     = (p and p.customBorderSize) or defaults.customBorderSize
+    local col    = (p and p.customBorderColor) or defaults.customBorderColor
+    local a      = (p and p.customBorderAlpha) or defaults.customBorderAlpha or 1
+    local behind = p and p.customBorderBehind
+    if behind == nil then behind = defaults.customBorderBehind end
+    local bf = plate._customBorder
+    if not bf then
+        bf = CreateFrame("Frame", nil, plate.health)
+        bf:SetAllPoints(plate.health)
+        plate._customBorder = bf
+    end
+    -- Nameplate health bars flatten render layers, which voids inter-frame
+    -- ordering -- a textured backdrop border drawn on the BORDER draw layer
+    -- would be clipped by the ARTWORK health fill. Lift the border onto an
+    -- explicit MEDIUM strata (the same flatten escape the plate uses for its
+    -- text and aura layers) so it renders above the fill. Strata is set before
+    -- ApplyBorderStyle so the backdrop child it may create inherits it; setting
+    -- it again on reuse re-propagates to that child.
+    bf:SetFrameStrata("MEDIUM")
+    bf:SetFrameLevel(behind and math.max(1, plate.health:GetFrameLevel() - 1) or (plate.health:GetFrameLevel() + 1))
+    EllesmereUI.ApplyBorderStyle(bf, sz, col.r, col.g, col.b, a, tex,
+        p and p.customBorderOffset, p and p.customBorderOffsetY,
+        p and p.customBorderShiftX, p and p.customBorderShiftY,
+        "nameplates", sz)
+end
+function ns.ApplyCustomBorderColor(plate)
+    if not plate or not plate._customBorder then return end
+    if not (EllesmereUI and EllesmereUI.SetBorderStyleColor) then return end
+    local col = (p and p.customBorderColor) or defaults.customBorderColor
+    local a   = (p and p.customBorderAlpha) or defaults.customBorderAlpha or 1
+    EllesmereUI.SetBorderStyleColor(plate._customBorder, col.r, col.g, col.b, a)
+end
+function ns.HideCustomBorder(plate)
+    local bf = plate and plate._customBorder
+    if bf and EllesmereUI and EllesmereUI.ApplyBorderStyle then
+        EllesmereUI.ApplyBorderStyle(bf, 0)
+        bf:Hide()
+    end
+end
 
 -- Health bar texture overlay tables (stored on ns to avoid local count pressure)
 do
@@ -1027,6 +1138,14 @@ function ns.GetTargetGlowHighlight()
 end
 function ns.GetTargetBorderColor()
     return (p and p.targetBorderColor) or defaults.targetBorderColor
+end
+function ns.GetTargetHighlightColor()
+    return (p and p.targetHighlightColor) or defaults.targetHighlightColor
+end
+function ns.GetTargetHighlightAlpha()
+    local a = p and p.targetHighlightAlpha
+    if a == nil then return defaults.targetHighlightAlpha end
+    return a
 end
 local function GetShowTargetGlow()
     return ns.GetTargetGlowEllesmereUI() or ns.GetTargetGlowBorderColor() or ns.GetTargetGlowHighlight()
@@ -1736,7 +1855,8 @@ local function EnsureTargetHighlight(plate)
     if plate.targetHighlight then return end
     local t = plate.health:CreateTexture(nil, "OVERLAY", nil, 5)
     t:SetAllPoints(plate.health)
-    t:SetColorTexture(1, 1, 1, 0.30)
+    local c = ns.GetTargetHighlightColor()
+    t:SetColorTexture(c.r, c.g, c.b, ns.GetTargetHighlightAlpha())
     t:Hide()
     plate.targetHighlight = t
 end
@@ -2114,18 +2234,30 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
 
     function plate:ApplyBorder()
         if not PP then return end
-        if IsBorderEnabled() then
-            local sz = (p and p.borderSize) or defaults.borderSize
-            PP.SetBorderSize(plate.health, sz)
-            PP.ShowBorder(plate.health)
-        else
+        if ns.IsCustomBorderEnabled() then
+            -- Custom border replaces the simple one: hide the PP strips on the
+            -- health bar and render the custom border on its own child frame.
             PP.HideBorder(plate.health)
+            ns.ApplyCustomBorderStyle(plate)
+        else
+            ns.HideCustomBorder(plate)
+            if IsBorderEnabled() then
+                local sz = (p and p.borderSize) or defaults.borderSize
+                PP.SetBorderSize(plate.health, sz)
+                PP.ShowBorder(plate.health)
+            else
+                PP.HideBorder(plate.health)
+            end
         end
     end
     function plate:ApplyBorderColor()
         if not PP then return end
-        local cr, cg, cb = GetBorderColor()
-        PP.SetBorderColor(plate.health, cr, cg, cb, 1)
+        if ns.IsCustomBorderEnabled() then
+            ns.ApplyCustomBorderColor(plate)
+        else
+            local cr, cg, cb = GetBorderColor()
+            PP.SetBorderColor(plate.health, cr, cg, cb, 1)
+        end
     end
     -- Target glow, target arrows, and focus overlay are lazy-created on
     -- demand (EnsureGlow / EnsureArrows / EnsureFocusOverlay) since only
@@ -3971,9 +4103,27 @@ local function GetReactionColor(unit)
             return c.r, c.g, c.b
         end
     end
-    -- 7. Boss / Mini-boss
+    -- 6b. Tank has aggro -- "Override Mini-Boss and Caster colors" option.
+    -- Promotes the has-aggro color above the mini-boss/caster steps (but still
+    -- below target/focus/enemy-class). Sits between the absolute-priority
+    -- Classic Tank Aggro path (handled above) and the default low-priority path
+    -- (step 9). Off by default, so the default behavior is unchanged.
+    if isThreatUnit and _isTankRole and threatStatus >= 3 then
+        local hae = defaults.tankHasAggroEnabled
+        if db.tankHasAggroEnabled ~= nil then hae = db.tankHasAggroEnabled end
+        local ovr = defaults.tankHasAggroOverrideMobType
+        if db.tankHasAggroOverrideMobType ~= nil then ovr = db.tankHasAggroOverrideMobType end
+        if hae and ovr then
+            local c = _C("tankHasAggro")
+            return c.r, c.g, c.b
+        end
+    end
+    -- 7. Mini-boss. Boss is intentionally LOWER priority than the low-priority
+    -- threat colors below, so it is deferred to step 10b (see _isBossUnit);
+    -- mini-boss stays here, above threat.
     local inCombat = UnitAffectingCombat(unit)
     local classification = UnitClassification(unit)
+    local _isBossUnit = false  -- deferred: boss color is applied at step 10b
     if classification == "elite" or classification == "worldboss" or classification == "rareelite" then
         -- Effective level (handles level scaling / Chromie time), not raw level.
         local level = UnitEffectiveLevel(unit)
@@ -3990,8 +4140,12 @@ local function GetReactionColor(unit)
             if level ~= -1 and UnitIsLieutenant and UnitIsLieutenant(unit) then
                 isBoss = false
             end
-            local c = _C(isBoss and "boss" or "miniboss")
-            return MaybeDarken(c.r, c.g, c.b, inCombat)
+            if isBoss then
+                _isBossUnit = true
+            else
+                local c = _C("miniboss")
+                return MaybeDarken(c.r, c.g, c.b, inCombat)
+            end
         end
     end
     -- 8. Caster
@@ -4017,6 +4171,12 @@ local function GetReactionColor(unit)
             local c = _C("dpsNoAggro")
             return c.r, c.g, c.b
         end
+    end
+    -- 10b. Boss (intentionally below the low-priority threat colors above, so a
+    -- tank-has-aggro / dps-no-aggro color takes precedence over the boss color).
+    if _isBossUnit then
+        local c = _C("boss")
+        return MaybeDarken(c.r, c.g, c.b, inCombat)
     end
     -- 11. Fallback: enemy in combat / out of combat
     local eic = _C("enemyInCombat")
@@ -5429,14 +5589,27 @@ function NameplateFrame:ApplyTarget()
     if isTarget and ns.GetTargetGlowBorderColor() then
         if PP then
             local bc = ns.GetTargetBorderColor()
-            PP.SetBorderColor(self.health, bc.r, bc.g, bc.b, 1)
+            if ns.IsCustomBorderEnabled() then
+                -- Custom border replaces the simple one; recolor it with the
+                -- target color. Lazy-create it first if a plate is targeted
+                -- before its first ApplyBorder ran.
+                if not self._customBorder then ns.ApplyCustomBorderStyle(self) end
+                if self._customBorder and EllesmereUI.SetBorderStyleColor then
+                    EllesmereUI.SetBorderStyleColor(self._customBorder, bc.r, bc.g, bc.b, 1)
+                end
+            else
+                PP.SetBorderColor(self.health, bc.r, bc.g, bc.b, 1)
+            end
         end
     else
         self:ApplyBorderColor()
     end
-    -- Highlight: fixed translucent white wash across the health bar
+    -- Highlight: translucent wash across the health bar (color + opacity are
+    -- configurable; re-applied on show so live edits and pooled textures update)
     if isTarget and ns.GetTargetGlowHighlight() then
         EnsureTargetHighlight(self)
+        local c = ns.GetTargetHighlightColor()
+        self.targetHighlight:SetColorTexture(c.r, c.g, c.b, ns.GetTargetHighlightAlpha())
         self.targetHighlight:Show()
     elseif self.targetHighlight then
         self.targetHighlight:Hide()
@@ -6273,19 +6446,25 @@ function NameplateFrame:UpdateCast()
         self:ApplyNameVisibility()
         local castW = self.cast:GetWidth()
         if castW and castW > 0 then self.castName:SetWidth(castW * 0.42) end
-        local _isv = issecretvalue
-        local texClean = texture ~= nil and not (_isv and _isv(texture))
-        if texClean then
-            self._castTex = texture
+        -- Icon and name must describe the SAME cast. Both are taken from this
+        -- UnitCastingInfo/UnitChannelInfo snapshot: the icon comes straight from
+        -- the live texture (which may be a secret value -- SetTexture accepts
+        -- secrets natively), so it is never rejected and never replaced by a
+        -- cached or leftover icon from a previous cast or a recycled unit.
+        if type(texture) ~= "nil" then
             self.castIcon:SetTexture(texture)
-        elseif self._castTex then
-            self.castIcon:SetTexture(self._castTex)
-        elseif castSpellID then
-            local info = C_Spell.GetSpellInfo(castSpellID)
-            if info and info.iconID then
-                self._castTex = info.iconID
+        elseif type(castSpellID) ~= "nil" then
+            -- Texture genuinely absent (rare): fall back to THIS cast's spell
+            -- icon. pcall guards an invalid/0/unknown spellID; iconID is fed
+            -- straight to SetTexture and never branched on.
+            local okInfo, info = pcall(C_Spell.GetSpellInfo, castSpellID)
+            if okInfo and type(info) == "table" then
                 self.castIcon:SetTexture(info.iconID)
+            else
+                self.castIcon:SetTexture(nil)
             end
+        else
+            self.castIcon:SetTexture(nil)
         end
         self.castName:SetText(type(name) ~= "nil" and name or "")
 

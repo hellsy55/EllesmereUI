@@ -1391,6 +1391,17 @@ local function CastIconInWidth(unit, s)
     return s.showCastIcon ~= false and s.castbarIconInWidth ~= false
 end
 
+-- Whether the cast spell icon sits on the RIGHT of the bar instead of the
+-- default left. Independent of "part of the bar"; defaults off (left).
+local function CastIconOnRight(unit, s)
+    s = s or GetSettingsForUnit(unit)
+    if not s then return false end
+    if unit == "player" then
+        return s.playerCastbarIconRight == true
+    end
+    return s.castbarIconRight == true
+end
+
 -- Anchor the cast spell icon and inset the fill based on whether the icon is
 -- part of the bar width. inWidth=true -> icon at the bar's left edge, fill
 -- inset by the icon width (castbarBg becomes the full footprint, so unlock
@@ -1406,7 +1417,7 @@ end
 -- iconH is the configured cast bar height (castbarHeight / playerCastbarHeight),
 -- used only for the square WIDTH and the matching fill inset so those are
 -- deterministic too; it falls back to bg:GetHeight() when omitted.
-local function LayoutCastbarIcon(castbar, inWidth, iconH)
+local function LayoutCastbarIcon(castbar, inWidth, iconH, onRight)
     if not castbar then return end
     local bg = castbar:GetParent()
     if not bg then return end
@@ -1415,17 +1426,35 @@ local function LayoutCastbarIcon(castbar, inWidth, iconH)
     if iconFrame then
         iconFrame:ClearAllPoints()
         if inWidth then
-            PP.Point(iconFrame, "TOPLEFT", bg, "TOPLEFT", 0, 0)
-            PP.Point(iconFrame, "BOTTOMLEFT", bg, "BOTTOMLEFT", 0, 0)
+            -- Icon inside the footprint, flush with the chosen edge.
+            if onRight then
+                PP.Point(iconFrame, "TOPRIGHT", bg, "TOPRIGHT", 0, 0)
+                PP.Point(iconFrame, "BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
+            else
+                PP.Point(iconFrame, "TOPLEFT", bg, "TOPLEFT", 0, 0)
+                PP.Point(iconFrame, "BOTTOMLEFT", bg, "BOTTOMLEFT", 0, 0)
+            end
         else
-            PP.Point(iconFrame, "TOPRIGHT", bg, "TOPLEFT", 0, 0)
-            PP.Point(iconFrame, "BOTTOMRIGHT", bg, "BOTTOMLEFT", 0, 0)
+            -- Icon hangs outside the bar, off the chosen edge.
+            if onRight then
+                PP.Point(iconFrame, "TOPLEFT", bg, "TOPRIGHT", 0, 0)
+                PP.Point(iconFrame, "BOTTOMLEFT", bg, "BOTTOMRIGHT", 0, 0)
+            else
+                PP.Point(iconFrame, "TOPRIGHT", bg, "TOPLEFT", 0, 0)
+                PP.Point(iconFrame, "BOTTOMRIGHT", bg, "BOTTOMLEFT", 0, 0)
+            end
         end
         iconFrame:SetWidth(side)
     end
     castbar:ClearAllPoints()
-    PP.Point(castbar, "TOPLEFT", bg, "TOPLEFT", inWidth and side or 0, 0)
-    PP.Point(castbar, "BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
+    if inWidth and onRight then
+        -- Bar occupies the left of the footprint; icon takes the right edge.
+        PP.Point(castbar, "TOPLEFT", bg, "TOPLEFT", 0, 0)
+        PP.Point(castbar, "BOTTOMRIGHT", bg, "BOTTOMRIGHT", -side, 0)
+    else
+        PP.Point(castbar, "TOPLEFT", bg, "TOPLEFT", inWidth and side or 0, 0)
+        PP.Point(castbar, "BOTTOMRIGHT", bg, "BOTTOMRIGHT", 0, 0)
+    end
 end
 
 -- Returns the donor settings table for mini frames (focus ? target ? player)
@@ -1630,10 +1659,14 @@ local function ContentToTag(content)
     elseif content == "curhpshort" then return "[curhpshort]"
     elseif content == "perhp" then return "[perhp]%"
     elseif content == "perhpnosign" then return "[perhpnosign]"
-    elseif content == "perpp" then return "[perpp]%"
-    elseif content == "curpp" then return "[curpp]"
-    elseif content == "curhp_curpp" then return "[curhpshort] | [curpp]"
-    elseif content == "perhp_perpp" then return "[perhp]% | [perpp]%"
+    -- Power content uses the secret-safe eui- power tags (identical to the power
+    -- bar text). The stock [curpp]/[perpp] tags read raw UnitPower, which is a
+    -- secret value for enemies and bugs out the fontstring on target change; the
+    -- eui- tags resolve power type from the cache and stay display-safe.
+    elseif content == "perpp" then return "[eui-perpp]%"
+    elseif content == "curpp" then return "[eui-curpp]"
+    elseif content == "curhp_curpp" then return "[curhpshort] | [eui-curpp]"
+    elseif content == "perhp_perpp" then return "[perhp]% | [eui-perpp]%"
     elseif content == "absorb" then return "[eui-absorb]"
     elseif content == "absorbshort" then return "[eui-absorbshort]"
     elseif content == "group" then return "[group]"
@@ -2032,6 +2065,27 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if frame.UpdateTags then frame:UpdateTags() end
     end
 
+    -- Power-color override for power-content text. Mirrors the power bar text
+    -- logic: the unit's own power type, white fallback when the token can't
+    -- resolve. ApplyBTBPowerColors re-applies all three slots; it runs at layout
+    -- time AND continuously from the power element's PostUpdateColor, so the color
+    -- survives tag updates and power-type changes (identical to the power bar text).
+    -- The per-slot early-out (no power-color flag) keeps it ~free when unused.
+    local function ApplyBTBPowerColor(fs, contentKey, usePowerColor)
+        if not fs or not usePowerColor then return end
+        if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
+            local _, pToken = UnitPowerType(unit)
+            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+            if info then fs:SetTextColor(info.r, info.g, info.b)
+            else fs:SetTextColor(1, 1, 1) end
+        end
+    end
+    local function ApplyBTBPowerColors(s)
+        ApplyBTBPowerColor(leftFS, s.btbLeftContent or "none", s.btbLeftPowerColor)
+        ApplyBTBPowerColor(rightFS, s.btbRightContent or "none", s.btbRightPowerColor)
+        ApplyBTBPowerColor(centerFS, s.btbCenterContent or "none", s.btbCenterPowerColor)
+    end
+
     local function ApplyBTBTextPositions(s)
         local lc = s.btbLeftContent or "none"
         local rc = s.btbRightContent or "none"
@@ -2067,22 +2121,10 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         ApplyClassColor(leftFS, unit, s.btbLeftClassColor, s.btbLeftColorR, s.btbLeftColorG, s.btbLeftColorB)
         ApplyClassColor(rightFS, unit, s.btbRightClassColor, s.btbRightColorR, s.btbRightColorG, s.btbRightColorB)
         ApplyClassColor(centerFS, unit, s.btbCenterClassColor, s.btbCenterColorR, s.btbCenterColorG, s.btbCenterColorB)
-        -- Power color overrides (applied after class color, takes priority for power-related text)
-        local function ApplyBTBPowerColor(fs, contentKey, usePowerColor)
-            if not fs or not usePowerColor then return end
-            if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-                -- EUI's global power color override (matches the power bar fill),
-                -- NOT Blizzard's PowerBarColor table.
-                local _, pToken = UnitPowerType(unit)
-                local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-                if info then
-                    fs:SetTextColor(info.r, info.g, info.b)
-                end
-            end
-        end
-        ApplyBTBPowerColor(leftFS, lc, s.btbLeftPowerColor)
-        ApplyBTBPowerColor(rightFS, rc, s.btbRightPowerColor)
-        ApplyBTBPowerColor(centerFS, cc, s.btbCenterPowerColor)
+        -- Power color: applied after class color; also re-applied continuously
+        -- from the power element's PostUpdateColor (btb._applyBTBPowerColors) so it
+        -- survives tag updates / power-type changes, identical to the power bar text.
+        ApplyBTBPowerColors(s)
     end
 
     ApplyBTBTextTags(
@@ -2094,6 +2136,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
 
     btb._applyBTBTextTags = ApplyBTBTextTags
     btb._applyBTBTextPositions = ApplyBTBTextPositions
+    btb._applyBTBPowerColors = ApplyBTBPowerColors
 
     -- Class icon overlay ? on a high-level frame so it renders above the border
     local classIconHolder = CreateFrame("Frame", nil, frame)
@@ -3258,6 +3301,18 @@ local function CreatePowerBar(frame, unit, settings)
             -- the bar on its built-in default color instead of the user's.
             self:SetStatusBarColor(bR, bG, bB)
         end
+        -- Keep the power-percent text color in sync with THIS unit (fires on
+        -- target/focus change + UNIT_DISPLAYPOWER, so the text follows the unit
+        -- instead of the color resolved at creation). Gated on the feature being
+        -- active (power-colored AND text shown) -> short-circuits to no cost
+        -- for every other frame.
+        if s2.powerPercentTextPowerColor and (s2.powerPercentText or "none") ~= "none" and self._applyPowerTextColor then
+            self._applyPowerTextColor(s2)
+        end
+        -- Same continuous re-application for the Bottom Text Bar's power-colored
+        -- text (per-slot early-out keeps it ~free when no slot uses power color).
+        local btb = frame.BottomTextBar
+        if btb and btb._applyBTBPowerColors then btb._applyBTBPowerColors(s2) end
     end
 
     -- Custom power bar background color
@@ -3279,11 +3334,50 @@ local function CreatePowerBar(frame, unit, settings)
     power._ppFS = ppFS
     power._ppTextOvr = ppTextOvr
 
+    -- Power-percent text color for the CURRENT unit (applied per-unit so
+    -- target/focus follow the unit, not the player). Power-color mode resolves
+    -- the unit's own power type; some enemies return a secret token that can't
+    -- map to a color, so those fall back to white (matching the reference
+    -- approach). No-power units are NOT special-cased -- they keep showing 0%.
+    local function ApplyPowerTextColor(s)
+        if s.powerPercentTextPowerColor then
+            local _, pToken = UnitPowerType(unit)
+            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+            if info then ppFS:SetTextColor(info.r, info.g, info.b)
+            else ppFS:SetTextColor(1, 1, 1) end
+        elseif s.powerTextColor then
+            local tc = s.powerTextColor
+            ppFS:SetTextColor(tc.r, tc.g, tc.b, tc.a or 1)
+        else
+            ppFS:SetTextColor(1, 1, 1)
+        end
+    end
+    power._applyPowerTextColor = ApplyPowerTextColor
+
     local function ApplyPowerPercentText(s)
         local pos = s.powerPercentText or "none"
         local sz  = s.powerPercentSize or 9
         local ox  = s.powerPercentX or 0
         local oy  = s.powerPercentY or 0
+
+        -- Height-0 hotfix (purely additive; only triggers when Power Bar Height is 0).
+        -- Normally the text overlay is SetAllPoints(power); at height 0 the bar
+        -- collapses to nothing, so the overlay -- and the power text with it -- would
+        -- collapse too. Re-anchor the overlay to the bar's footprint with a real text
+        -- height so the text still renders while the bar stays hidden. The _euiHeight0
+        -- flag means frames that never hit height 0 are completely untouched, and a
+        -- live change back to a positive height restores the exact original behavior.
+        if (s.powerHeight or 6) <= 0 then
+            ppTextOvr:ClearAllPoints()
+            ppTextOvr:SetPoint("LEFT", power, "LEFT", 0, 0)
+            ppTextOvr:SetPoint("RIGHT", power, "RIGHT", 0, 0)
+            ppTextOvr:SetHeight(sz + 6)
+            ppTextOvr._euiHeight0 = true
+        elseif ppTextOvr._euiHeight0 then
+            ppTextOvr:ClearAllPoints()
+            ppTextOvr:SetAllPoints(power)
+            ppTextOvr._euiHeight0 = nil
+        end
 
         SetFSFont(ppFS, sz)
         ppFS:ClearAllPoints()
@@ -3325,20 +3419,8 @@ local function CreatePowerBar(frame, unit, settings)
         frame:Tag(ppFS, tag); ppFS._curTag = tag
         if frame.UpdateTags then frame:UpdateTags() end
 
-        -- Text color: power-colored > custom color > white
-        if s.powerPercentTextPowerColor then
-            -- Use EUI's global power color override (matches the options swatch
-            -- and the power bar fill), NOT Blizzard's PowerBarColor table.
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then ppFS:SetTextColor(info.r, info.g, info.b)
-            else ppFS:SetTextColor(1, 1, 1) end
-        elseif s.powerTextColor then
-            local tc = s.powerTextColor
-            ppFS:SetTextColor(tc.r, tc.g, tc.b, tc.a or 1)
-        else
-            ppFS:SetTextColor(1, 1, 1)
-        end
+        -- Text color: power-colored (per-unit) > custom color > white
+        ApplyPowerTextColor(s)
         ppFS:Show()
     end
 
@@ -4264,7 +4346,7 @@ local function CreateCastBar(frame, unit, settings)
 
     -- Initial icon/fill layout (re-applied on every reload by the per-unit
     -- update paths and whenever the cast-bar height changes).
-    LayoutCastbarIcon(castbar, CastIconInWidth(unit, settings), cbHeight)
+    LayoutCastbarIcon(castbar, CastIconInWidth(unit, settings), cbHeight, CastIconOnRight(unit, settings))
 
     return castbar
 end
@@ -7422,7 +7504,7 @@ local function ReloadFrames()
                                     local cbg = settings.castBgColor
                                     castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
                                 end
-                                LayoutCastbarIcon(frame.Castbar, CastIconInWidth("player", settings))
+                                LayoutCastbarIcon(frame.Castbar, CastIconInWidth("player", settings), nil, CastIconOnRight("player", settings))
                                 -- Resize cast icon to match castbar height
                                 if frame.Castbar._iconFrame then
                                     PP.Size(frame.Castbar._iconFrame, cbH, cbH)
@@ -7890,7 +7972,7 @@ local function ReloadFrames()
                                     local cbg = settings.castBgColor
                                     castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
                                 end
-                                LayoutCastbarIcon(frame.Castbar, CastIconInWidth("target", settings))
+                                LayoutCastbarIcon(frame.Castbar, CastIconInWidth("target", settings), nil, CastIconOnRight("target", settings))
                                 if frame.Castbar._iconFrame then
                                     PP.Size(frame.Castbar._iconFrame, cbH2, cbH2)
                                     if not frame.Castbar:IsShown() then
@@ -8249,7 +8331,7 @@ local function ReloadFrames()
                                 local cbg = settings.castBgColor
                                 castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
                             end
-                            LayoutCastbarIcon(frame.Castbar, CastIconInWidth("focus", settings))
+                            LayoutCastbarIcon(frame.Castbar, CastIconInWidth("focus", settings), nil, CastIconOnRight("focus", settings))
                             if frame.Castbar._iconFrame then
                                 PP.Size(frame.Castbar._iconFrame, cbH3, cbH3)
                                 if not frame.Castbar:IsShown() then
@@ -8564,7 +8646,7 @@ local function ReloadFrames()
                                 frame:EnableElement("Castbar")
                             end
                             PP.Size(castbarBg, totalWidth, settings.castbarHeight or 14)
-                            LayoutCastbarIcon(frame.Castbar, CastIconInWidth("boss1", settings))
+                            LayoutCastbarIcon(frame.Castbar, CastIconInWidth("boss1", settings), nil, CastIconOnRight("boss1", settings))
                             if frame.Castbar._iconFrame then
                                 local cbH = settings.castbarHeight or 14
                                 PP.Size(frame.Castbar._iconFrame, cbH, cbH)
@@ -8917,6 +8999,17 @@ local function ReloadFrames()
                         local cf = s2.customPowerFillColor
                         if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) else self:SetStatusBarColor(0, 0, 1) end
                     end
+                    -- Keep the power-percent text color in sync with this unit
+                    -- (per-unit power color; set up in CreatePowerBar). Gated on
+                    -- the feature being active (power-colored AND text shown) ->
+                    -- short-circuits to no cost for every other frame.
+                    if s2.powerPercentTextPowerColor and (s2.powerPercentText or "none") ~= "none" and self._applyPowerTextColor then
+                        self._applyPowerTextColor(s2)
+                    end
+                    -- Same continuous re-application for the Bottom Text Bar's
+                    -- power-colored text (per-slot early-out keeps it ~free).
+                    local btb = frame.BottomTextBar
+                    if btb and btb._applyBTBPowerColors then btb._applyBTBPowerColors(s2) end
                 end
                 local customBg = settings.customPowerBgColor
                 if customBg and frame.Power.bg then
@@ -9179,6 +9272,16 @@ function InitializeFrames()
         end
         frame:HookScript("OnEnter", UnitFrame_OnEnter)
         frame:HookScript("OnLeave", UnitFrame_OnLeave)
+        -- Expose to click-casting via the standard global table. The EUI unit
+        -- frames replace the Blizzard ones, which the click-cast engine registers
+        -- by name -- but those are hidden, so the engine never reaches the visible
+        -- frames. Registering ours here lets click-casting (EUI's engine when "All
+        -- Unit Frames" is on, or Clique otherwise) apply the same bindings + the
+        -- unbound-click suppression it uses on raid/party. The engine captures and
+        -- restores each frame's native click attrs, so these keep their own
+        -- defaults (no forced left-click target) when click-cast is off.
+        if type(ClickCastFrames) ~= "table" then ClickCastFrames = {} end
+        ClickCastFrames[frame] = true
     end
 
     -- Always spawn all frames; hide disabled ones for zero performance impact
@@ -10241,6 +10344,12 @@ function InitializeFrames()
                 if btb.LeftText then ApplyClassColor(btb.LeftText, unitKey, s.btbLeftClassColor, s.btbLeftColorR, s.btbLeftColorG, s.btbLeftColorB) end
                 if btb.RightText then ApplyClassColor(btb.RightText, unitKey, s.btbRightClassColor, s.btbRightColorR, s.btbRightColorG, s.btbRightColorB) end
                 if btb.CenterText then ApplyClassColor(btb.CenterText, unitKey, s.btbCenterClassColor, s.btbCenterColorR, s.btbCenterColorG, s.btbCenterColorB) end
+                -- Power color must win for power-colored slots: the ApplyClassColor
+                -- calls above drop any non-class slot to its custom/white color, which
+                -- clobbers the power color PostUpdateColor set. Re-apply power color
+                -- after (class -> power, same order as ApplyBTBTextPositions). The
+                -- per-slot early-out keeps it free for slots not using power color.
+                if btb._applyBTBPowerColors then btb._applyBTBPowerColors(s) end
             end
         end
         if not frame or not frame.Portrait then return end

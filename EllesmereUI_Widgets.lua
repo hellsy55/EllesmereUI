@@ -4565,12 +4565,27 @@ local function BuildCogPopup(opts)
             end
         end
 
+        -- True while any dropdown menu opened from inside this popup is shown and
+        -- moused over. Exposed on the popup so external close-logic (e.g. a parent
+        -- menu that drives this popup as a flyout with its own _clickOutside
+        -- disabled) can stay open when the user clicks a dropdown option whose list
+        -- extends below the popup's own rect.
+        pf._anyDropdownHovered = function()
+            for _, rw in ipairs(rowWidgets) do
+                if (rw.type == 'dropdown' or rw.type == 'reorder') and rw.btn and rw.btn._ddMenu
+                   and rw.btn._ddMenu:IsShown() and rw.btn._ddMenu:IsMouseOver() then
+                    return true
+                end
+            end
+            return false
+        end
+
         -- Click-outside-to-close handler (also closes when scrolled out of view)
         local wasDown = false
         pf._clickOutside = function(self)
             local down = IsMouseButtonDown("LeftButton")
             if down and not wasDown then
-                local ddOpen = false; for _, rw in ipairs(rowWidgets) do if (rw.type == 'dropdown' or rw.type == 'reorder') and rw.btn and rw.btn._ddMenu and rw.btn._ddMenu:IsShown() and rw.btn._ddMenu:IsMouseOver() then ddOpen = true; break end end; if not self:IsMouseOver() and not (popupOwner and popupOwner:IsMouseOver()) and not ddOpen then
+                if not self:IsMouseOver() and not (popupOwner and popupOwner:IsMouseOver()) and not pf._anyDropdownHovered() then
                     self:Hide()
                 end
             end

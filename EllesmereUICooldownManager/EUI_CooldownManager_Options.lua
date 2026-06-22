@@ -5288,6 +5288,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.activeGlowR = ss.activeGlowR
                                                 os.activeGlowG = ss.activeGlowG
                                                 os.activeGlowB = ss.activeGlowB
+                                                os.maxStacksGlow = ss.maxStacksGlow
                                                 os.cdStateEffect = ss.cdStateEffect
                                                 os.chargeHideSwipe = ss.chargeHideSwipe
                                                 os.glowColor = ss.glowColor
@@ -5564,6 +5565,30 @@ initFrame:SetScript("OnEvent", function(self)
                             })
                         end)
 
+                        -- Border: per-icon override of the bar's border SIZE +
+                        -- COLOR (never style). Mirrors the Charge/Stack Text cog
+                        -- exactly; the render side reads (ssb and ssb.border*) or
+                        -- the bar value in ApplyShapeToCDMIcon.
+                        MakeCogRow("Border", function()
+                            local b = cdmBd
+                            return valChanged(ss.borderSize, (b and b.borderSize) or 1)
+                                or colChanged(ss.borderR, ss.borderG, ss.borderB,
+                                    (b and b.borderR) or 0, (b and b.borderG) or 0, (b and b.borderB) or 0)
+                        end, function(row)
+                            return EllesmereUI.BuildCogPopup({
+                                title = "Border", noOwnerDim = true,
+                                frameStrata = "FULLSCREEN_DIALOG", frameLevel = 350,
+                                rows = {
+                                    { type="slider", label="Size", min=0, max=8, step=1,
+                                      get=function() return ss.borderSize or (cdmBd and cdmBd.borderSize) or 1 end,
+                                      set=function(v) EnsureSS(); ss.borderSize = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
+                                    { type="colorpicker", label="Color",
+                                      get=function() return ss.borderR or (cdmBd and cdmBd.borderR) or 0, ss.borderG or (cdmBd and cdmBd.borderG) or 0, ss.borderB or (cdmBd and cdmBd.borderB) or 0 end,
+                                      set=function(r, g, b) EnsureSS(); ss.borderR = r; ss.borderG = g; ss.borderB = b; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
+                                },
+                            })
+                        end)
+
                         -- Always Show Buffs + Desaturate Inactive apply only to
                         -- Blizzard-tracked buffs (inactive placeholders); they are
                         -- omitted entirely for injected custom/preset buffs.
@@ -5836,6 +5861,25 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
+                    -- 3a. Max Stacks Glow (default = nil / none). 1:1 with Active
+                    -- State Glow; glows the icon while a charge spell is at max
+                    -- charges. Shares the unified Glow Effect Color below.
+                    local maxStacksGlowRow = MakeSubnavRow("Max Stacks Glow", ACTIVE_GLOW_ITEMS,
+                        function() return ss.maxStacksGlow end,
+                        function(v) EnsureSS(); ss.maxStacksGlow = v; if v and v > 0 then ns._cdmAnyMaxStacksGlow = true end end,
+                        function() return ss.maxStacksGlow == nil end)
+                    if isCustomInjected and maxStacksGlowRow then
+                        maxStacksGlowRow:SetAlpha(0.35)
+                        maxStacksGlowRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(maxStacksGlowRow, customDisabledTip)
+                            end
+                        end)
+                        maxStacksGlowRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
                     -- 3b. Non Active State (default = nil / none). Desaturates the
                     -- icon when its active-state is NOT active -- the mirror of the
                     -- runtime's active-branch SetDesaturated(false).
@@ -6055,6 +6099,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.activeGlowR = ss.activeGlowR
                                     os.activeGlowG = ss.activeGlowG
                                     os.activeGlowB = ss.activeGlowB
+                                    os.maxStacksGlow = ss.maxStacksGlow
                                     os.cdStateEffect = ss.cdStateEffect
                                     os.chargeHideSwipe = ss.chargeHideSwipe
                                     os.glowColor = ss.glowColor
@@ -6084,7 +6129,14 @@ initFrame:SetScript("OnEvent", function(self)
             menu._openSub = nil  -- track open subnav for close checks
             menu:SetScript("OnUpdate", function(m)
                 local overMenu = m:IsMouseOver() or anchorFrame:IsMouseOver()
-                local overSub = m._openSub and m._openSub:IsShown() and m._openSub:IsMouseOver()
+                -- A cog flyout (Duration / Charge-Stack) drives itself through this
+                -- menu, so also treat "mouse over the flyout's open dropdown menu"
+                -- as over-the-sub. Without this, picking a Position option whose
+                -- list extends below the flyout reads as an outside click and closes
+                -- the whole menu.
+                local sub = m._openSub
+                local overSub = sub and sub:IsShown()
+                    and (sub:IsMouseOver() or (sub._anyDropdownHovered and sub._anyDropdownHovered()))
                 -- Keep the menu open while the shared color picker is up: it's a
                 -- separate popup, so interacting with it must not dismiss the
                 -- menu (and its cog/subnav flyout).
@@ -9567,6 +9619,25 @@ initFrame:SetScript("OnEvent", function(self)
             -- Hide Buffs When Inactive toggle removed: always forced ON.
         end
 
+        -- Keep Buffs in Same Place (native buff bars): reserves every tracked buff's
+        -- slot so active buffs never reposition; inactive slots are invisible. Reuses
+        -- the Always-Show placeholder path internally (placeholders injected, then
+        -- rendered alpha 0). Mutually exclusive with Always Show Buffs -- disabled
+        -- while that is on.
+        if isBuffBar then
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Keep Buffs in Same Place",
+                  disabled=function() return BD().showInactiveBuffIcons == true end,
+                  disabledTooltip="Disabled while Always Show Buffs is enabled", rawTooltip=true,
+                  getValue=function() return BD().hidePlaceholderIcon == true end,
+                  setValue=function(v)
+                      BD().hidePlaceholderIcon = v
+                      ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="label", text="" }); y = y - h
+        end
+
         end -- not isFocusKick (Bar Layout section)
 
         -------------------------------------------------------------------
@@ -9956,6 +10027,12 @@ initFrame:SetScript("OnEvent", function(self)
             local row1Left
             if isBuffBar then
                 row1Left = { type="toggle", text="Always Show Buffs",
+                    -- Mutually exclusive with "Keep Buffs in Same Place" (Bar Layout).
+                    -- Disabled while that is the active choice. The extra
+                    -- "and showInactiveBuffIcons ~= true" keeps a legacy both-on profile
+                    -- unlockable: this toggle stays enabled so it can be turned off.
+                    disabled=function() local b=BD(); return b.hidePlaceholderIcon == true and b.showInactiveBuffIcons ~= true end,
+                    disabledTooltip="Disabled while Keep Buffs in Same Place is enabled", rawTooltip=true,
                     getValue=function() return BD().showInactiveBuffIcons == true end,
                     setValue=function(v)
                         BD().showInactiveBuffIcons = v

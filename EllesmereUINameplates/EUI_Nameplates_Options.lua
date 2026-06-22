@@ -450,6 +450,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         local borderFrame = CreatePreviewBorderSet(healthWrapper, BORDER_TEX)
         local simpleBorderFrame = CreatePreviewBorderSet(healthWrapper, BORDER_TEX_SIMPLE)
+        -- Custom border preview: a dedicated child frame the shared border
+        -- engine draws onto when Custom Border is enabled. Stored on the
+        -- wrapper (a frame we own) so it adds no new builder local.
+        healthWrapper._customBorder = CreateFrame("Frame", nil, healthWrapper)
+        healthWrapper._customBorder:SetAllPoints(healthWrapper)
+        healthWrapper._customBorder:Hide()
 
         -- Solid 1px edge lines on all 4 sides of healthWrapper.
         -- The image border's outermost solid pixel can vanish at non-native
@@ -499,18 +505,21 @@ initFrame:SetScript("OnEvent", function(self)
             gf:Hide()
         end
 
-        -- Target "Highlight" style preview: fixed translucent white wash over the
-        -- health bar. The texture + glow getter refs are stashed on previewGlow
-        -- (already an Update() upvalue) so they add no new upvalues to the
-        -- near-cap preview Update closure.
+        -- Target "Highlight" style preview: translucent wash over the health bar
+        -- (color + opacity configurable via the Target Highlight cog). The
+        -- texture + glow getter refs are stashed on previewGlow (already an
+        -- Update() upvalue) so they add no new upvalues to the near-cap preview
+        -- Update closure.
         previewGlow.highlight = health:CreateTexture(nil, "OVERLAY", nil, 5)
         previewGlow.highlight:SetAllPoints(health)
-        previewGlow.highlight:SetColorTexture(1, 1, 1, 0.30)
+        do local hc = ns.GetTargetHighlightColor(); previewGlow.highlight:SetColorTexture(hc.r, hc.g, hc.b, ns.GetTargetHighlightAlpha()) end
         previewGlow.highlight:Hide()
-        previewGlow.getEUI       = ns.GetTargetGlowEllesmereUI
-        previewGlow.getBorderOn  = ns.GetTargetGlowBorderColor
-        previewGlow.getHighlight = ns.GetTargetGlowHighlight
-        previewGlow.getBorderCol = ns.GetTargetBorderColor
+        previewGlow.getEUI            = ns.GetTargetGlowEllesmereUI
+        previewGlow.getBorderOn       = ns.GetTargetGlowBorderColor
+        previewGlow.getHighlight      = ns.GetTargetGlowHighlight
+        previewGlow.getBorderCol      = ns.GetTargetBorderColor
+        previewGlow.getHighlightCol   = ns.GetTargetHighlightColor
+        previewGlow.getHighlightAlpha = ns.GetTargetHighlightAlpha
 
         -- Text overlay frame: renders above health bar fill and borders (same as real addon)
         local healthTextFrame = CreateFrame("Frame", nil, health)
@@ -894,15 +903,41 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             -- Border style toggle
-            local bOn = DBVal("showBorder")
-            if bOn == nil then bOn = defaults.showBorder end
-            if bOn then
-                borderFrame:Hide(); simpleBorderFrame:Show()
-                for _, e in ipairs(_solidEdges) do e:Show() end
-                simpleBorderFrame:ApplySize(DBVal("borderSize") or defaults.borderSize)
-            else
+            local customOn = DBVal("customBorderEnabled")
+            if customOn == nil then customOn = defaults.customBorderEnabled end
+            local pcb = healthWrapper._customBorder
+            if customOn then
+                -- Custom border (shared engine) replaces the simple preview border.
                 borderFrame:Hide(); simpleBorderFrame:Hide()
                 for _, e in ipairs(_solidEdges) do e:Hide() end
+                if pcb and EllesmereUI.ApplyBorderStyle then
+                    local ctex   = DBVal("customBorderTexture") or defaults.customBorderTexture
+                    local csz    = DBVal("customBorderSize") or defaults.customBorderSize
+                    local ccol   = (DB() and DB().customBorderColor) or defaults.customBorderColor
+                    local ca     = DBVal("customBorderAlpha") or defaults.customBorderAlpha or 1
+                    local cbehind = DBVal("customBorderBehind")
+                    if cbehind == nil then cbehind = defaults.customBorderBehind end
+                    pcb:SetFrameLevel(cbehind and math.max(0, healthWrapper:GetFrameLevel() - 1) or (healthWrapper:GetFrameLevel() + 2))
+                    EllesmereUI.ApplyBorderStyle(pcb, csz, ccol.r, ccol.g, ccol.b, ca, ctex,
+                        DBVal("customBorderOffset"), DBVal("customBorderOffsetY"),
+                        DBVal("customBorderShiftX"), DBVal("customBorderShiftY"),
+                        "nameplates", csz)
+                end
+            else
+                if pcb and EllesmereUI.ApplyBorderStyle then
+                    EllesmereUI.ApplyBorderStyle(pcb, 0)
+                    pcb:Hide()
+                end
+                local bOn = DBVal("showBorder")
+                if bOn == nil then bOn = defaults.showBorder end
+                if bOn then
+                    borderFrame:Hide(); simpleBorderFrame:Show()
+                    for _, e in ipairs(_solidEdges) do e:Show() end
+                    simpleBorderFrame:ApplySize(DBVal("borderSize") or defaults.borderSize)
+                else
+                    borderFrame:Hide(); simpleBorderFrame:Hide()
+                    for _, e in ipairs(_solidEdges) do e:Hide() end
+                end
             end
 
             -- Refresh all 1px AddBorder edges (cast icon, aura icons)
@@ -1896,9 +1931,15 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, tex in ipairs(simpleBorderFrame._texs) do tex:SetVertexColor(bc.r, bc.g, bc.b) end
                 for _, e in ipairs(_solidEdges) do e:SetColorTexture(bc.r, bc.g, bc.b, 1); UnsnapTex(e) end
             end
-            -- Highlight: fixed translucent white wash across the preview health bar
+            -- Highlight: translucent wash across the preview health bar (color +
+            -- opacity configurable via the Target Highlight cog)
             if previewGlow.highlight then
-                previewGlow.highlight:SetShown(showTargetGlowPreview and glowHighlight)
+                local showHL = showTargetGlowPreview and glowHighlight
+                if showHL then
+                    local hc = previewGlow.getHighlightCol()
+                    previewGlow.highlight:SetColorTexture(hc.r, hc.g, hc.b, previewGlow.getHighlightAlpha())
+                end
+                previewGlow.highlight:SetShown(showHL)
             end
 
             -- Absorb preview: update and toggle
@@ -3625,28 +3666,51 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 1: Show Border | Border Size
+        -- Row 1: Border (None / Basic / Custom) | Border Size
+        -- The dropdown is a pure VIEW over the existing showBorder +
+        -- customBorderEnabled keys (no migration): None = border off,
+        -- Basic = standard border, Custom = the custom border engine. Selecting
+        -- Custom reveals the Custom Border row below (the page rebuild reflows
+        -- the rows beneath it down); None/Basic collapse it away.
         local borderStyleRow
         borderStyleRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Border",
+            { type="dropdown", text="Border",
+              values={ none = "None", basic = "Basic", custom = "Custom" },
+              order={ "none", "basic", "custom" },
               getValue=function()
-                local v = DBVal("showBorder")
-                if v == nil then return defaults.showBorder end
-                return v
+                if DBVal("customBorderEnabled") then return "custom" end
+                local sb = DBVal("showBorder")
+                if sb == nil then sb = defaults.showBorder end
+                return sb and "basic" or "none"
               end,
               setValue=function(v)
-                DB().showBorder = v
+                if v == "custom" then
+                  DB().customBorderEnabled = true
+                elseif v == "basic" then
+                  DB().customBorderEnabled = false
+                  DB().showBorder = true
+                else
+                  DB().customBorderEnabled = false
+                  DB().showBorder = false
+                end
                 ns.RefreshBorder()
+                ns.RefreshBorderColor()
                 UpdatePreview()
-                EllesmereUI:RefreshPage()
+                -- Force rebuild so the Custom Border row shows/hides and the
+                -- rows below reflow.
+                EllesmereUI:RefreshPage(true)
               end },
             { type="slider", text="Border Size", min=1, max=4, step=1,
+              -- Only the Basic border uses this size (None has no border;
+              -- Custom uses its own Custom Border Size below).
               disabled=function()
+                if DBVal("customBorderEnabled") then return true end
                 local v = DBVal("showBorder")
                 if v == nil then return not defaults.showBorder end
                 return not v
               end,
-              disabledTooltip="Show Border", requireState="enabled",
+              disabledTooltip="This option is only used by the Basic border.",
+              rawTooltip=true,
               getValue=function() return DBVal("borderSize") or defaults.borderSize end,
               setValue=function(v)
                 DB().borderSize = v
@@ -3654,10 +3718,14 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
               end })
         y = y - h
-        -- Inline color swatch next to Show Border toggle (left region)
+        -- Inline color swatch next to the Border dropdown (left region) -- the
+        -- standard (Basic) border color. Dimmed unless the mode is Basic.
         do
             local leftRgn = borderStyleRow._leftRegion
             local function isBorderOff()
+                -- Off for None and Custom (the standard border, and therefore
+                -- its color, is inert then) -- only Basic uses it.
+                if DBVal("customBorderEnabled") then return true end
                 local v = DBVal("showBorder")
                 if v == nil then return not defaults.showBorder end
                 return not v
@@ -3685,7 +3753,151 @@ initFrame:SetScript("OnEvent", function(self)
             swatch:EnableMouse(not off)
         end
 
-        -- Row 2: Background (+ inline color swatch) | Hover Effect (+ inline color swatch)
+        -- Custom Border row -- only built when the Border dropdown above is set
+        -- to "Custom". Selecting Custom triggers a page rebuild (in that
+        -- dropdown's setValue), which reveals this row and reflows the rows
+        -- below it down; choosing None/Basic collapses it away. Uses the shared
+        -- EllesmereUI border engine (identical to Unit Frames, full SharedMedia
+        -- support). The if-body scopes its locals so they don't grow this
+        -- builder's local count.
+        if DBVal("customBorderEnabled") then
+            -- Custom Border Style dropdown (+ offset cog) | Custom Border Size (+ color swatch)
+            local cbTexValues, cbTexOrder = EllesmereUI.GetBorderTextureDropdown()
+            local customBorderRow
+            customBorderRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Custom Border Style",
+                  values=cbTexValues, order=cbTexOrder,
+                  getValue=function() return DBVal("customBorderTexture") or defaults.customBorderTexture end,
+                  setValue=function(v)
+                    DB().customBorderTexture = v
+                    DB().customBorderOffset  = nil
+                    DB().customBorderOffsetY = nil
+                    DB().customBorderShiftX  = nil
+                    DB().customBorderShiftY  = nil
+                    local _bcol, _bbehind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                    DB().customBorderColor  = _bcol
+                    DB().customBorderAlpha  = 1
+                    DB().customBorderBehind = _bbehind
+                    local defSz = EllesmereUI.GetBorderDefaultSize("nameplates", v)
+                    if defSz then DB().customBorderSize = defSz end
+                    ns.RefreshBorder()
+                    UpdatePreview()
+                    EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Custom Border Size", min=0, max=4, step=1,
+                  getValue=function() return DBVal("customBorderSize") or defaults.customBorderSize end,
+                  setValue=function(v)
+                    DB().customBorderSize = v
+                    ns.RefreshBorder()
+                    UpdatePreview()
+                  end })
+            y = y - h
+
+            -- Inline "Border Offset" cog on the Custom Border Style region
+            do
+                local leftRgn = customBorderRow._leftRegion
+                local _, cbCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Border Offset",
+                    rows = {
+                        { type="slider", label="Offset X", min=-10, max=10, step=1,
+                          get=function()
+                            local v = DB() and DB().customBorderOffset
+                            if v then return v end
+                            local tex = DBVal("customBorderTexture") or defaults.customBorderTexture
+                            local sz  = DBVal("customBorderSize") or defaults.customBorderSize
+                            local dox = EllesmereUI.GetBorderDefaults("nameplates", tex, sz)
+                            return dox
+                          end,
+                          set=function(v) DB().customBorderOffset = v; ns.RefreshBorder(); UpdatePreview() end },
+                        { type="slider", label="Offset Y", min=-10, max=10, step=1,
+                          get=function()
+                            local v = DB() and DB().customBorderOffsetY
+                            if v then return v end
+                            local tex = DBVal("customBorderTexture") or defaults.customBorderTexture
+                            local sz  = DBVal("customBorderSize") or defaults.customBorderSize
+                            local _, doy = EllesmereUI.GetBorderDefaults("nameplates", tex, sz)
+                            return doy
+                          end,
+                          set=function(v) DB().customBorderOffsetY = v; ns.RefreshBorder(); UpdatePreview() end },
+                        { type="slider", label="Shift X", min=-10, max=10, step=1,
+                          get=function()
+                            local v = DB() and DB().customBorderShiftX
+                            if v then return v end
+                            local tex = DBVal("customBorderTexture") or defaults.customBorderTexture
+                            local sz  = DBVal("customBorderSize") or defaults.customBorderSize
+                            local _, _, dsx = EllesmereUI.GetBorderDefaults("nameplates", tex, sz)
+                            return dsx
+                          end,
+                          set=function(v) DB().customBorderShiftX = (v == 0 and nil or v); ns.RefreshBorder(); UpdatePreview() end },
+                        { type="slider", label="Shift Y", min=-10, max=10, step=1,
+                          get=function()
+                            local v = DB() and DB().customBorderShiftY
+                            if v then return v end
+                            local tex = DBVal("customBorderTexture") or defaults.customBorderTexture
+                            local sz  = DBVal("customBorderSize") or defaults.customBorderSize
+                            local _, _, _, dsy = EllesmereUI.GetBorderDefaults("nameplates", tex, sz)
+                            return dsy
+                          end,
+                          set=function(v) DB().customBorderShiftY = (v == 0 and nil or v); ns.RefreshBorder(); UpdatePreview() end },
+                        { type="toggle", label="Show Behind",
+                          get=function()
+                            local v = DBVal("customBorderBehind")
+                            if v == nil then return defaults.customBorderBehind end
+                            return v
+                          end,
+                          set=function(v) DB().customBorderBehind = v; ns.RefreshBorder(); UpdatePreview() end },
+                    },
+                })
+                local cbCogBtn = CreateFrame("Button", nil, leftRgn)
+                cbCogBtn:SetSize(26, 26)
+                cbCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                leftRgn._lastInline = cbCogBtn
+                cbCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+                local cbCogTex = cbCogBtn:CreateTexture(nil, "OVERLAY")
+                cbCogTex:SetAllPoints(); cbCogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON or EllesmereUI.COGS_ICON)
+                -- Offsets only apply to textured styles, so dim + disable the
+                -- cog for the "solid" style. (The whole row only exists when
+                -- Custom is selected, so no enable gate is needed.)
+                local function cbCogOff() return (DBVal("customBorderTexture") or defaults.customBorderTexture) == "solid" end
+                cbCogBtn:SetScript("OnEnter", function(s) if not cbCogOff() then s:SetAlpha(0.7) end end)
+                cbCogBtn:SetScript("OnLeave", function(s) if not cbCogOff() then s:SetAlpha(0.4) end end)
+                cbCogBtn:SetScript("OnClick", function(s) if not cbCogOff() then cbCogShow(s) end end)
+                local function cbCogState()
+                    local off = cbCogOff()
+                    cbCogBtn:SetAlpha(off and 0.15 or 0.4)
+                    cbCogBtn:EnableMouse(not off)
+                end
+                EllesmereUI.RegisterWidgetRefresh(cbCogState)
+                cbCogState()
+            end
+
+            -- Inline color swatch (with alpha) on the Custom Border Size region
+            do
+                local rightRgn = customBorderRow._rightRegion
+                local cbColGet = function()
+                    local c = (DB() and DB().customBorderColor) or defaults.customBorderColor
+                    return c.r, c.g, c.b, (DBVal("customBorderAlpha") or defaults.customBorderAlpha or 1)
+                end
+                local cbColSet = function(r, g, b, a)
+                    DB().customBorderColor = { r = r, g = g, b = b }
+                    if a ~= nil then DB().customBorderAlpha = a end
+                    ns.RefreshBorderColor()
+                    UpdatePreview()
+                end
+                local cbSwatch, cbUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, cbColGet, cbColSet, true, 20)
+                PP.Point(cbSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+                rightRgn._lastInline = cbSwatch
+                EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
+            end
+        end
+
+        -- Row 2: Background (+ inline color swatch) | Absorb Style (+ settings
+        -- cog and preview eye). Absorb Style sits here so the section fills
+        -- sequentially with no blank slot left in the middle.
+        local absorbStyleValues = {
+            ["striped"]="Striped", ["clean"]="Clean (Flat)", ["blizzard"]="Blizzard",
+        }
+        local absorbStyleOrder = { "blizzard", "striped", "clean" }
         local bgHoverRow
         bgHoverRow, h = W:DualRow(parent, y,
             { type="slider", text="Background", min=0, max=100, step=1,
@@ -3700,14 +3912,11 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 UpdatePreview()
               end },
-            { type="slider", text="Hover Effect", min=0, max=100, step=1,
-              tooltip="Controls the highlight shown over a nameplate when you mouse over it. Set to 0 to disable.",
-              getValue=function()
-                return math.floor(((DBVal("hoverAlpha") or defaults.hoverAlpha) * 100) + 0.5)
-              end,
+            { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+              getValue=function() return DBVal("absorbStyle") or "blizzard" end,
               setValue=function(v)
-                DB().hoverAlpha = v / 100
-                ns.RefreshHoverEffect()
+                DB().absorbStyle = v
+                ns.ApplyAbsorbStyleAll()
                 UpdatePreview()
               end })
         y = y - h
@@ -3731,93 +3940,10 @@ initFrame:SetScript("OnEvent", function(self)
             leftRgn._lastInline = cbSwatch
             EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
         end
-        -- Inline color swatch on Hover Effect (right region)
-        do
-            local rightRgn = bgHoverRow._rightRegion
-            local hvColorGet = function()
-                local c = (DB() and DB().hoverColor) or defaults.hoverColor
-                return c.r, c.g, c.b
-            end
-            local hvColorSet = function(r, g, b)
-                DB().hoverColor = { r = r, g = g, b = b }
-                ns.RefreshHoverEffect()
-                UpdatePreview()
-            end
-            local hvSwatch, hvUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, hvColorGet, hvColorSet, nil, 20)
-            PP.Point(hvSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
-            rightRgn._lastInline = hvSwatch
-            EllesmereUI.RegisterWidgetRefresh(function() hvUpdateSwatch() end)
-        end
 
-        local hoverOverlayValues, hoverOverlayOrder = {}, {}
+        -- Inline "Absorb Settings" cog on the Absorb Style region (right of Row 2)
         do
-            local STRIPE_ORDER = { "striped-v2", "striped-wide-v2", "stripes-medium", "stripes-small-close", "stripes-small-spread", "striped-tiny" }
-            local STRIPE_NAMES = {
-                ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes",
-                ["stripes-medium"] = "Medium Stripes", ["stripes-small-close"] = "Small Dense Stripes",
-                ["stripes-small-spread"] = "Small Spread Stripes", ["striped-tiny"] = "Tiny Stripes",
-            }
-            hoverOverlayValues.none = "None"
-            hoverOverlayOrder[#hoverOverlayOrder + 1] = "none"
-            hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
-            for _, k in ipairs(STRIPE_ORDER) do hoverOverlayValues[k] = STRIPE_NAMES[k]; hoverOverlayOrder[#hoverOverlayOrder + 1] = k end
-            hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
-            for _, k in ipairs(hbtOrder) do
-                -- "none" is already prepended above; skip the copy from hbtOrder
-                -- (which starts with "none") so the dropdown shows it only once.
-                if k ~= "none" then
-                    hoverOverlayOrder[#hoverOverlayOrder + 1] = k
-                    if k ~= "---" then hoverOverlayValues[k] = hbtValues[k] end
-                end
-            end
-            hoverOverlayValues._menuOpts = {
-                itemHeight = 28,
-                background = function(key)
-                    if not key or key == "none" or key == "---" then return nil end
-                    if ns.OVERLAY_STRIPE_KEYS and ns.OVERLAY_STRIPE_KEYS[key] then
-                        return "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. key .. ".png"
-                    end
-                    return ns.healthBarTextures and ns.healthBarTextures[key]
-                end,
-            }
-        end
-
-        -- Row 3: Hover Texture | (empty)
-        _, h = W:DualRow(parent, y,
-            { type="dropdown", text="Hover Texture",
-              tooltip="Uses the Hover Effect color and opacity. Set to None for the flat hover highlight.",
-              values=hoverOverlayValues, order=hoverOverlayOrder,
-              getValue=function() return DBVal("hoverOverlayTexture") or defaults.hoverOverlayTexture end,
-              setValue=function(v)
-                DB().hoverOverlayTexture = v
-                ns.RefreshHoverEffect()
-                UpdatePreview()
-              end },
-            { type="label", text="" });  y = y - h
-
-        -- Row 4: Bar Texture | Absorb Style
-        local absorbStyleValues = {
-            ["striped"]="Striped", ["clean"]="Clean (Flat)", ["blizzard"]="Blizzard",
-        }
-        local absorbStyleOrder = { "blizzard", "striped", "clean" }
-        local absorbStyleRow
-        absorbStyleRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
-              getValue=function() return DBVal("healthBarTexture") or "none" end,
-              setValue=function(v)
-                DB().healthBarTexture = v
-                RefreshAllTextures()
-                UpdatePreview()
-              end },
-            { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
-              getValue=function() return DBVal("absorbStyle") or "blizzard" end,
-              setValue=function(v)
-                DB().absorbStyle = v
-                ns.ApplyAbsorbStyleAll()
-                UpdatePreview()
-              end });  y = y - h
-        do
-            local rgn = absorbStyleRow._rightRegion
+            local rgn = bgHoverRow._rightRegion
             local _, absorbCogShow = EllesmereUI.BuildCogPopup({
                 title = "Absorb Settings",
                 rows = {
@@ -3847,7 +3973,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
             local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
-            local rgn = absorbStyleRow._rightRegion
+            local rgn = bgHoverRow._rightRegion
             local eyeBtn = CreateFrame("Button", nil, rgn)
             eyeBtn:SetSize(26, 26)
             eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
@@ -3872,6 +3998,19 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
             eyeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
         end
+
+        -- Row 3: Bar Texture | (empty -- Absorb Style moved up to Row 2; the
+        -- Hover Texture dropdown was moved to the bottom of the TARGET, FOCUS &
+        -- HOVER EFFECTS section).
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
+              getValue=function() return DBVal("healthBarTexture") or "none" end,
+              setValue=function(v)
+                DB().healthBarTexture = v
+                RefreshAllTextures()
+                UpdatePreview()
+              end },
+            { type="label", text="" });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -5141,10 +5280,10 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
-        --  TARGET & FOCUS EFFECTS
+        --  TARGET, FOCUS & HOVER EFFECTS
         -----------------------------------------------------------------------
         local tfxHeader
-        tfxHeader, h = W:SectionHeader(parent, "TARGET & FOCUS EFFECTS", y);  y = y - h
+        tfxHeader, h = W:SectionHeader(parent, "TARGET, FOCUS & HOVER EFFECTS", y);  y = y - h
 
         local targetGlowRow
         -- Build the arrow-style dropdown options from the shared style table.
@@ -5200,6 +5339,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- are independent; the data model live-converts from the legacy
         -- targetGlowStyle string (see ns.GetTargetGlow* in the core file).
         local refreshTargetBorderSwatch  -- fwd decl; assigned when the swatch builds
+        local refreshTargetHighlightCog  -- fwd decl; assigned when the cog builds
         do
             local leftRgn = targetGlowRow._leftRegion
             if leftRgn._control then leftRgn._control:Hide() end
@@ -5224,6 +5364,7 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, plate in pairs(plates) do plate:ApplyTarget() end
                     UpdatePreview()
                     if refreshTargetBorderSwatch then refreshTargetBorderSwatch() end
+                    if refreshTargetHighlightCog then refreshTargetHighlightCog() end
                 end)
             PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
@@ -5241,6 +5382,10 @@ initFrame:SetScript("OnEvent", function(self)
                 end, nil, 20)
             PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = swatch
+            -- Tooltip so the swatch's purpose is clear (shown when interactive,
+            -- i.e. while the Border Color toggle is on).
+            swatch:SetScript("OnEnter", function() if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(swatch, "Border Color") end end)
+            swatch:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
             refreshTargetBorderSwatch = function()
                 local off = not ns.GetTargetGlowBorderColor()
                 swatch:SetAlpha(off and 0.15 or 1)
@@ -5249,6 +5394,48 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(refreshTargetBorderSwatch)
             refreshTargetBorderSwatch()
+
+            -- Inline cog: Target Highlight color + opacity. Gated on the
+            -- Highlight toggle (the highlight only renders when it is enabled).
+            do
+                local _, highlightCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Target Highlight",
+                    rows = {
+                        { type="colorpicker", label="Color", hasAlpha=false,
+                          get=function() local c = ns.GetTargetHighlightColor(); return c.r, c.g, c.b end,
+                          set=function(r, g, b)
+                            DB().targetHighlightColor = { r = r, g = g, b = b }
+                            for _, plate in pairs(plates) do plate:ApplyTarget() end
+                            UpdatePreview()
+                          end },
+                        { type="slider", label="Opacity", min=0, max=100, step=1,
+                          get=function() return math.floor((ns.GetTargetHighlightAlpha() * 100) + 0.5) end,
+                          set=function(v)
+                            DB().targetHighlightAlpha = v / 100
+                            for _, plate in pairs(plates) do plate:ApplyTarget() end
+                            UpdatePreview()
+                          end },
+                    },
+                })
+                local highlightCogBtn = CreateFrame("Button", nil, leftRgn)
+                highlightCogBtn:SetSize(26, 26)
+                highlightCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                leftRgn._lastInline = highlightCogBtn
+                highlightCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+                local highlightCogTex = highlightCogBtn:CreateTexture(nil, "OVERLAY")
+                highlightCogTex:SetAllPoints(); highlightCogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function highlightCogOff() return not ns.GetTargetGlowHighlight() end
+                highlightCogBtn:SetScript("OnEnter", function(s) if not highlightCogOff() then s:SetAlpha(0.7) end end)
+                highlightCogBtn:SetScript("OnLeave", function(s) if not highlightCogOff() then s:SetAlpha(0.4) end end)
+                highlightCogBtn:SetScript("OnClick", function(s) if not highlightCogOff() then highlightCogShow(s) end end)
+                refreshTargetHighlightCog = function()
+                    local off = highlightCogOff()
+                    highlightCogBtn:SetAlpha(off and 0.15 or 0.4)
+                    highlightCogBtn:EnableMouse(not off)
+                end
+                EllesmereUI.RegisterWidgetRefresh(refreshTargetHighlightCog)
+                refreshTargetHighlightCog()
+            end
         end
 
         -- Inline Custom + Class color swatches on Target Arrows (next to the dropdown;
@@ -5724,6 +5911,80 @@ initFrame:SetScript("OnEvent", function(self)
         end
         focusPrev.SetDisabled(isFocusColorDisabled())
         focusPrev.UpdateColor()
+
+        -- Hover Texture (+ Hover Effect opacity slider + color swatch beside it):
+        -- the mouseover highlight overlay and its opacity/color. Lives at the
+        -- bottom of this section.
+        local hoverOverlayValues, hoverOverlayOrder = {}, {}
+        do
+            local STRIPE_ORDER = { "striped-v2", "striped-wide-v2", "stripes-medium", "stripes-small-close", "stripes-small-spread", "striped-tiny" }
+            local STRIPE_NAMES = {
+                ["striped-v2"] = "Stripes", ["striped-wide-v2"] = "Wide Stripes",
+                ["stripes-medium"] = "Medium Stripes", ["stripes-small-close"] = "Small Dense Stripes",
+                ["stripes-small-spread"] = "Small Spread Stripes", ["striped-tiny"] = "Tiny Stripes",
+            }
+            hoverOverlayValues.none = "None"
+            hoverOverlayOrder[#hoverOverlayOrder + 1] = "none"
+            hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
+            for _, k in ipairs(STRIPE_ORDER) do hoverOverlayValues[k] = STRIPE_NAMES[k]; hoverOverlayOrder[#hoverOverlayOrder + 1] = k end
+            hoverOverlayOrder[#hoverOverlayOrder + 1] = "---"
+            for _, k in ipairs(hbtOrder) do
+                -- "none" is already prepended above; skip the copy from hbtOrder
+                -- (which starts with "none") so the dropdown shows it only once.
+                if k ~= "none" then
+                    hoverOverlayOrder[#hoverOverlayOrder + 1] = k
+                    if k ~= "---" then hoverOverlayValues[k] = hbtValues[k] end
+                end
+            end
+            hoverOverlayValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key)
+                    if not key or key == "none" or key == "---" then return nil end
+                    if ns.OVERLAY_STRIPE_KEYS and ns.OVERLAY_STRIPE_KEYS[key] then
+                        return "Interface\\AddOns\\EllesmereUINameplates\\Media\\" .. key .. ".png"
+                    end
+                    return ns.healthBarTextures and ns.healthBarTextures[key]
+                end,
+            }
+        end
+        do
+            local hoverRow
+            hoverRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Hover Texture",
+                  tooltip="Uses the Hover Effect color and opacity. Set to None for the flat hover highlight.",
+                  values=hoverOverlayValues, order=hoverOverlayOrder,
+                  getValue=function() return DBVal("hoverOverlayTexture") or defaults.hoverOverlayTexture end,
+                  setValue=function(v)
+                    DB().hoverOverlayTexture = v
+                    ns.RefreshHoverEffect()
+                    UpdatePreview()
+                  end },
+                { type="slider", text="Hover Effect", min=0, max=100, step=1,
+                  tooltip="Controls the highlight shown over a nameplate when you mouse over it. Set to 0 to disable.",
+                  getValue=function()
+                    return math.floor(((DBVal("hoverAlpha") or defaults.hoverAlpha) * 100) + 0.5)
+                  end,
+                  setValue=function(v)
+                    DB().hoverAlpha = v / 100
+                    ns.RefreshHoverEffect()
+                    UpdatePreview()
+                  end });  y = y - h
+            -- Inline color swatch on Hover Effect (right region)
+            local rightRgn = hoverRow._rightRegion
+            local hvColorGet = function()
+                local c = (DB() and DB().hoverColor) or defaults.hoverColor
+                return c.r, c.g, c.b
+            end
+            local hvColorSet = function(r, g, b)
+                DB().hoverColor = { r = r, g = g, b = b }
+                ns.RefreshHoverEffect()
+                UpdatePreview()
+            end
+            local hvSwatch, hvUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, hvColorGet, hvColorSet, nil, 20)
+            PP.Point(hvSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            rightRgn._lastInline = hvSwatch
+            EllesmereUI.RegisterWidgetRefresh(function() hvUpdateSwatch() end)
+        end
 
         -----------------------------------------------------------------------
         --  CLASS RESOURCE
@@ -7919,6 +8180,41 @@ initFrame:SetScript("OnEvent", function(self)
             local off = isTankHasAggroDisabled()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
+
+            -- Inline cog: "Override Mini-Boss and Caster colors". Promotes the
+            -- tank has-aggro color above the mini-boss/caster priority steps.
+            -- Dimmed + non-interactive while the Has Aggro toggle is off.
+            local _, hasAggroCogShow = EllesmereUI.BuildCogPopup({
+                title = "Has Aggro",
+                rows = {
+                    { type="toggle", label="Override Mini-Boss and Caster colors",
+                      get=function()
+                        local db = DB()
+                        if db and db.tankHasAggroOverrideMobType ~= nil then return db.tankHasAggroOverrideMobType end
+                        return defaults.tankHasAggroOverrideMobType
+                      end,
+                      set=function(v) DB().tankHasAggroOverrideMobType = v; RefreshAllPlates() end },
+                },
+            })
+            local hasAggroCogBtn = CreateFrame("Button", nil, leftRgn)
+            hasAggroCogBtn:SetSize(26, 26)
+            hasAggroCogBtn:SetPoint("RIGHT", swatch, "LEFT", -8, 0)
+            hasAggroCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            local hasAggroCogTex = hasAggroCogBtn:CreateTexture(nil, "OVERLAY")
+            hasAggroCogTex:SetAllPoints(); hasAggroCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            hasAggroCogBtn:SetScript("OnEnter", function(s) if not isTankHasAggroDisabled() then s:SetAlpha(0.7) end end)
+            hasAggroCogBtn:SetScript("OnLeave", function(s) if not isTankHasAggroDisabled() then s:SetAlpha(0.4) end end)
+            hasAggroCogBtn:SetScript("OnClick", function(s) if not isTankHasAggroDisabled() then hasAggroCogShow(s) end end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local cogOff = isTankHasAggroDisabled()
+                hasAggroCogBtn:SetAlpha(cogOff and 0.15 or 0.4)
+                hasAggroCogBtn:EnableMouse(not cogOff)
+            end)
+            do
+                local cogOff = isTankHasAggroDisabled()
+                hasAggroCogBtn:SetAlpha(cogOff and 0.15 or 0.4)
+                hasAggroCogBtn:EnableMouse(not cogOff)
+            end
         end
 
         -- Inline "Off-Tank" color swatch next to right toggle

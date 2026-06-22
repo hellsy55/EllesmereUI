@@ -434,6 +434,9 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.showEnchants = v
                   if EllesmereUI._refreshEnchantsVisibility then EllesmereUI._refreshEnchantsVisibility() end
+                  -- Refresh so the inline Enchant Settings cog updates its
+                  -- disabled state in lockstep with this toggle.
+                  EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Show Gems",
               tooltip="Toggle visibility of gem icons inside equipment slots.",
@@ -445,6 +448,51 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
         AttachDisabledOverlay(enchGemRow)
+
+        -- Inline cog on the Enchants toggle: "Show Enchant Names". Disabled
+        -- (grayed, non-interactive) while Enchants are hidden, since the name
+        -- only replaces the enchant icon when enchants are shown.
+        do
+            local rgn = enchGemRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Enchant Settings",
+                rows = {
+                    { type="toggle", label="Show Enchant Names",
+                      tooltip="Show each enchant's name as text (colored to match that item's item level) instead of its icon. The name normally appears only when hovering the icon.",
+                      get=function() return EllesmereUIDB and EllesmereUIDB.charSheetEnchantNames or false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantNames = v
+                          if EllesmereUI._refreshCharSheetSlotLabels then EllesmereUI._refreshCharSheetSlotLabels() end
+                      end },
+                    { type="slider", label="Text Size", min=6, max=20, step=1,
+                      disabled=function() return not (EllesmereUIDB and EllesmereUIDB.charSheetEnchantNames) end,
+                      disabledTooltip="Show Enchant Names",
+                      get=function() return (EllesmereUIDB and EllesmereUIDB.charSheetEnchantSize) or 9 end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.charSheetEnchantSize = v
+                          if EllesmereUI._refreshCharSheetSlotLabels then EllesmereUI._refreshCharSheetSlotLabels() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY"); cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            local function enchantsOn() return EllesmereUIDB and EllesmereUIDB.showEnchants ~= false end
+            cogBtn:SetScript("OnEnter", function(s) if enchantsOn() then s:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(enchantsOn() and 0.4 or 0.15) end)
+            cogBtn:SetScript("OnClick", function(s) if enchantsOn() then cogShow(s) end end)
+            local function cogState()
+                local on = enchantsOn()
+                cogBtn:SetAlpha(on and 0.4 or 0.15)
+                cogBtn:EnableMouse(on)
+            end
+            EllesmereUI.RegisterWidgetRefresh(cogState); cogState()
+        end
 
         local pvpRow
         pvpRow, h = W:DualRow(parent, y,

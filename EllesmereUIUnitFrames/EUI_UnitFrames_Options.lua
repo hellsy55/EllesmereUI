@@ -1329,11 +1329,13 @@ initFrame:SetScript("OnEvent", function(self)
             -- fills the freed space, keeping the right edge fixed -- exactly like
             -- the real cast bar. Off = icon hangs outside the left, bar full width.
             local pvCastIconW = initCH
-            local pvCastIconInWidth
+            local pvCastIconInWidth, pvCastIconOnRight
             if unitKey == "player" then
                 pvCastIconInWidth = settings.showPlayerCastIcon ~= false and settings.playerCastbarIconInWidth ~= false
+                pvCastIconOnRight = settings.playerCastbarIconRight == true
             else
                 pvCastIconInWidth = settings.showCastIcon ~= false and settings.castbarIconInWidth ~= false
+                pvCastIconOnRight = settings.castbarIconRight == true
             end
             local pvBarW = pvCastIconInWidth and math.max(1, totalW - pvCastIconW) or totalW
             castbar = CreateFrame("Frame", nil, pf)
@@ -1349,7 +1351,10 @@ initFrame:SetScript("OnEvent", function(self)
             -- stays centered where the full bar was (right edge unchanged).
             castbar._cbAnchor = cbAnchor
             castbar._cbOffset = cbOffset
-            PP.Point(castbar, "TOP", cbAnchor, "BOTTOM", cbOffset + (pvCastIconInWidth and (pvCastIconW / 2) or 0), 0)
+            -- Icon-in-width shifts the narrowed bar toward the icon-free side so
+            -- the footprint stays put: right by half the icon (icon on left) or
+            -- left by half (icon on right).
+            PP.Point(castbar, "TOP", cbAnchor, "BOTTOM", cbOffset + (pvCastIconInWidth and (pvCastIconOnRight and -(pvCastIconW / 2) or (pvCastIconW / 2)) or 0), 0)
             if castbarH > 0 then
                 totalH = totalH + castbarH
             end
@@ -1434,14 +1439,19 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Cast spell icon -- always on the LEFT side of the castbar (matches real addon)
+            -- Cast spell icon -- left side of the castbar by default (matches real addon),
+            -- or the right side when "Show Icon on Right" is enabled.
             -- Uses plain frame + edge textures instead of BackdropTemplate for pixel-perfect rendering
             local iconSize = initCH
             castIconFrame = CreateFrame("Frame", nil, pf)
             PP.Size(castIconFrame, iconSize, iconSize)
-            -- Icon hangs off the bar's left edge; when "part of the bar" is on the
-            -- bar is narrower + shifted right (above), so the icon sits inside.
-            PP.Point(castIconFrame, "TOPRIGHT", castbar, "TOPLEFT", 0, 0)
+            -- Icon hangs off the bar's chosen edge; when "part of the bar" is on the
+            -- bar is narrower + shifted away (above), so the icon sits inside.
+            if pvCastIconOnRight then
+                PP.Point(castIconFrame, "TOPLEFT", castbar, "TOPRIGHT", 0, 0)
+            else
+                PP.Point(castIconFrame, "TOPRIGHT", castbar, "TOPLEFT", 0, 0)
+            end
             -- Black background
             local iconBg = castIconFrame:CreateTexture(nil, "BACKGROUND")
             iconBg:SetAllPoints()
@@ -2415,11 +2425,13 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Cast icon "part of the bar": shrink the bar from the left +
                     -- shift it right so the icon sits inside the width (right edge
                     -- fixed); otherwise full width with the icon hanging outside.
-                    local ciInWidth
+                    local ciInWidth, ciOnRight
                     if unitKey == "player" then
                         ciInWidth = s.showPlayerCastIcon ~= false and s.playerCastbarIconInWidth ~= false
+                        ciOnRight = s.playerCastbarIconRight == true
                     else
                         ciInWidth = s.showCastIcon ~= false and s.castbarIconInWidth ~= false
+                        ciOnRight = s.castbarIconRight == true
                     end
                     local ciIconW = ch
                     local ciBarW = ciInWidth and math.max(1, tw - ciIconW) or tw
@@ -2465,7 +2477,11 @@ initFrame:SetScript("OnEvent", function(self)
                     if castIconFrame then
                         castIconFrame:SetSize(ch, ch)
                         castIconFrame:ClearAllPoints()
-                        PP.Point(castIconFrame, "TOPRIGHT", castbar, "TOPLEFT", 0, 0)
+                        if ciOnRight then
+                            PP.Point(castIconFrame, "TOPLEFT", castbar, "TOPRIGHT", 0, 0)
+                        else
+                            PP.Point(castIconFrame, "TOPRIGHT", castbar, "TOPLEFT", 0, 0)
+                        end
                         -- Check showCastIcon / showPlayerCastIcon
                         local showIcon
                         if unitKey == "player" then
@@ -2533,10 +2549,11 @@ initFrame:SetScript("OnEvent", function(self)
                     local pvBtbVisible = (btbFrame and s.bottomTextBar and btbPos == "bottom")
                     local cbAnchorFrame = pvBtbVisible and btbFrame or ((pvPpIsAtt and power and power:IsShown()) and power or health)
                     local cbAnchorOff = pvBtbVisible and 0 or cbOff
-                    -- Icon-in-width: shift the (narrowed) bar right by half the icon
-                    -- width so its right edge stays flush under the frame and the
-                    -- icon sits inside the footprint's left edge (matches the real frame).
-                    PP.Point(castbar, "TOP", cbAnchorFrame, "BOTTOM", cbAnchorOff + (ciInWidth and (ciIconW / 2) or 0), 0)
+                    -- Icon-in-width: shift the (narrowed) bar by half the icon width
+                    -- toward the icon-free side so the footprint stays flush under
+                    -- the frame and the icon sits inside its edge (matches the real
+                    -- frame). Left icon -> shift right; right icon -> shift left.
+                    PP.Point(castbar, "TOP", cbAnchorFrame, "BOTTOM", cbAnchorOff + (ciInWidth and (ciOnRight and -(ciIconW / 2) or (ciIconW / 2)) or 0), 0)
                 else
                     castbar:Hide()
                     if castIconFrame then castIconFrame:Hide() end
@@ -5720,7 +5737,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 2: Power Text (format) + Text Position
+        -- Row 2: Power Text (format) + Fill Opacity
         local sharedPowerRow2
         sharedPowerRow2, h = W:DualRow(parent, y,
             { type="dropdown", text="Power Text", values=ppFmtValues, order=ppFmtOrder,
@@ -5736,9 +5753,12 @@ initFrame:SetScript("OnEvent", function(self)
                   ReloadAndUpdate(); UpdatePreview()
                   EllesmereUI:RefreshPage()
               end },
-            { type="dropdown", text="Text Position", values=ppTextValues, order=ppTextOrder,
-              getValue=function() return SVal("powerPercentText", "none") end,
-              setValue=function(v) SSet("powerPercentText", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+            { type="slider", text="Fill Opacity", min=10, max=100, step=1,
+              getValue=function() return SVal("powerBarOpacity", 100) end,
+              setValue=function(v)
+                  SSet("powerBarOpacity", v)
+                  UpdatePreview()
+              end });  y = y - h
         -- Cogwheel on Power Text for Show % toggle
         do
             local fmtRgn = sharedPowerRow2._leftRegion
@@ -5772,41 +5792,7 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateFmtCogState()
             RegisterWidgetRefresh(UpdateFmtCogState)
         end
-        -- Cogwheel on Text Position for size + x/y offsets
-        do
-            local ppRgn = sharedPowerRow2._rightRegion
-            local _, ppCogShowRaw = EllesmereUI.BuildCogPopup({
-                title = "Text Position",
-                rows = {
-                    { type="slider", label="Size", min=6, max=30, step=1,
-                      get=function() return SVal("powerPercentSize", 9) end,
-                      set=function(v) SSet("powerPercentSize", v); UpdatePreview() end },
-                    { type="slider", label="X Offset", min=-50, max=50, step=1,
-                      get=function() return SVal("powerPercentX", 0) end,
-                      set=function(v) SSet("powerPercentX", v); UpdatePreview() end },
-                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
-                      get=function() return SVal("powerPercentY", 0) end,
-                      set=function(v) SSet("powerPercentY", v); UpdatePreview() end },
-                },
-            })
-            local ppCogShow = ppCogShowRaw
-            local ppCogBtn = MakeCogBtn(ppRgn, ppCogShow, nil, EllesmereUI.RESIZE_ICON)
-            local function UpdatePPCogState()
-                local isNone = SVal("powerPercentText", "none") == "none"
-                ppCogBtn:SetAlpha(isNone and 0.15 or 0.4)
-                ppCogBtn:SetEnabled(not isNone)
-            end
-            ppCogBtn:SetScript("OnEnter", function(self)
-                if SVal("powerPercentText", "none") == "none" then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a text position other than none."))
-                else self:SetAlpha(0.7) end
-            end)
-            ppCogBtn:SetScript("OnLeave", function(self) UpdatePPCogState(); EllesmereUI.HideWidgetTooltip() end)
-            ppCogBtn:SetScript("OnClick", function(self) ppCogShow(self) end)
-            UpdatePPCogState()
-            RegisterWidgetRefresh(UpdatePPCogState)
-        end
-        -- Sync icons: Power Text Format (left) and Text Position (right)
+        -- Sync icon: Power Text Format (left of row 2)
         do
             local rgn = sharedPowerRow2._leftRegion
             EllesmereUI.BuildSyncIcon({
@@ -5837,20 +5823,23 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+        -- Fill Opacity sync (right of row 2)
         do
             local rgn = sharedPowerRow2._rightRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Power Text Position to all Frames",
+                tooltip = "Apply Bar Opacity to all Frames",
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerPercentText or "none"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerPercentText = v end
+                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if key ~= selectedUnit then UNIT_DB_MAP[key]().powerBarOpacity = v end
+                    end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerPercentText or "none"
+                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().powerPercentText or "none") ~= v then return false end
+                        if (UNIT_DB_MAP[key]().powerBarOpacity or 100) ~= v then return false end
                     end
                     return true
                 end,
@@ -5860,8 +5849,8 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().powerPercentText or "none"
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerPercentText = v end
+                        local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerBarOpacity = v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
@@ -6066,15 +6055,12 @@ initFrame:SetScript("OnEvent", function(self)
             MakeCogBtn(rgn, gradCogShow)
         end
 
-        -- Row 4: Bar Opacity + Text Color
+        -- Row 4: Text Position + Text Color
         local sharedPowerRow4
         sharedPowerRow4, h = W:DualRow(parent, y,
-            { type="slider", text="Fill Opacity", min=10, max=100, step=1,
-              getValue=function() return SVal("powerBarOpacity", 100) end,
-              setValue=function(v)
-                  SSet("powerBarOpacity", v)
-                  UpdatePreview()
-              end },
+            { type="dropdown", text="Text Position", values=ppTextValues, order=ppTextOrder,
+              getValue=function() return SVal("powerPercentText", "none") end,
+              setValue=function(v) SSet("powerPercentText", v); ReloadAndUpdate(); UpdatePreview() end },
             { type="multiSwatch", text="Text Color",
               swatches = {
                 { tooltip = "Custom Text Color",
@@ -6119,23 +6105,55 @@ initFrame:SetScript("OnEvent", function(self)
                       return SVal("powerPercentTextPowerColor", false) and 1 or 0.3
                   end },
               } });  y = y - h
-        -- Sync icon: Bar Opacity (left of row 4)
+        -- Cogwheel on Text Position for size + x/y offsets (left of row 4)
+        do
+            local ppRgn = sharedPowerRow4._leftRegion
+            local _, ppCogShowRaw = EllesmereUI.BuildCogPopup({
+                title = "Text Position",
+                rows = {
+                    { type="slider", label="Size", min=6, max=30, step=1,
+                      get=function() return SVal("powerPercentSize", 9) end,
+                      set=function(v) SSet("powerPercentSize", v); UpdatePreview() end },
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return SVal("powerPercentX", 0) end,
+                      set=function(v) SSet("powerPercentX", v); UpdatePreview() end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return SVal("powerPercentY", 0) end,
+                      set=function(v) SSet("powerPercentY", v); UpdatePreview() end },
+                },
+            })
+            local ppCogShow = ppCogShowRaw
+            local ppCogBtn = MakeCogBtn(ppRgn, ppCogShow, nil, EllesmereUI.RESIZE_ICON)
+            local function UpdatePPCogState()
+                local isNone = SVal("powerPercentText", "none") == "none"
+                ppCogBtn:SetAlpha(isNone and 0.15 or 0.4)
+                ppCogBtn:SetEnabled(not isNone)
+            end
+            ppCogBtn:SetScript("OnEnter", function(self)
+                if SVal("powerPercentText", "none") == "none" then
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a text position other than none."))
+                else self:SetAlpha(0.7) end
+            end)
+            ppCogBtn:SetScript("OnLeave", function(self) UpdatePPCogState(); EllesmereUI.HideWidgetTooltip() end)
+            ppCogBtn:SetScript("OnClick", function(self) ppCogShow(self) end)
+            UpdatePPCogState()
+            RegisterWidgetRefresh(UpdatePPCogState)
+        end
+        -- Text Position sync (left of row 4)
         do
             local rgn = sharedPowerRow4._leftRegion
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
-                tooltip = "Apply Bar Opacity to all Frames",
+                tooltip = "Apply Power Text Position to all Frames",
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if key ~= selectedUnit then UNIT_DB_MAP[key]().powerBarOpacity = v end
-                    end
+                    local v = UNIT_DB_MAP[selectedUnit]().powerPercentText or "none"
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerPercentText = v end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
+                    local v = UNIT_DB_MAP[selectedUnit]().powerPercentText or "none"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().powerBarOpacity or 100) ~= v then return false end
+                        if (UNIT_DB_MAP[key]().powerPercentText or "none") ~= v then return false end
                     end
                     return true
                 end,
@@ -6145,8 +6163,8 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().powerBarOpacity or 100
-                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerBarOpacity = v end
+                        local v = UNIT_DB_MAP[selectedUnit]().powerPercentText or "none"
+                        for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerPercentText = v end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
                     end,
                 },
@@ -6780,6 +6798,22 @@ initFrame:SetScript("OnEvent", function(self)
                               UNIT_DB_MAP.player().playerCastbarIconInWidth = v
                           else
                               UNIT_DB_MAP[selectedUnit]().castbarIconInWidth = v
+                          end
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
+                    { type = "toggle", label = "Show Icon on Right",
+                      tooltip = "Place the cast icon on the right side of the bar instead of the left.",
+                      get = function()
+                          if selectedUnit == "player" then
+                              return UNIT_DB_MAP.player().playerCastbarIconRight == true
+                          end
+                          return UNIT_DB_MAP[selectedUnit]().castbarIconRight == true
+                      end,
+                      set = function(v)
+                          if selectedUnit == "player" then
+                              UNIT_DB_MAP.player().playerCastbarIconRight = v
+                          else
+                              UNIT_DB_MAP[selectedUnit]().castbarIconRight = v
                           end
                           ReloadAndUpdate(); UpdatePreview()
                       end },
@@ -7458,14 +7492,36 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             blSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(blSwatch, "Custom Colored") end)
             blSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            -- Power Color swatch: shows the player's current power color; click to
+            -- select power-colored mode. Same per-unit power resolution as the power
+            -- bar text (white fallback when the power token can't resolve).
+            local blPowerSwatch, blUpdatePowerSwatch = EllesmereUI.BuildColorSwatch(
+                btbLRgn, btbLRgn:GetFrameLevel() + 5,
+                function()
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    if info then return info.r, info.g, info.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(blPowerSwatch, "RIGHT", blSwatch, "LEFT", -8, 0)
+            btbLRgn._lastInline = blPowerSwatch
+            blPowerSwatch:SetScript("OnClick", function()
+                if blOff() then return end
+                SSet("btbLeftPowerColor", true); SSet("btbLeftClassColor", false)
+                UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            blPowerSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(blPowerSwatch, "Power Colored") end)
+            blPowerSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateBlSwatches()
                 local off = blOff()
                 local isClass = SVal("btbLeftClassColor", false)
                 local isPower = SVal("btbLeftPowerColor", false)
                 blSwatch:SetAlpha((isClass or isPower or off) and 0.3 or 1)
                 blClassSwatch:SetAlpha((isClass and not off) and 1 or 0.3)
+                blPowerSwatch:SetAlpha((isPower and not off) and 1 or 0.3)
             end
-            RegisterWidgetRefresh(function() blUpdateSwatch(); blUpdateClassSwatch(); UpdateBlSwatches() end)
+            RegisterWidgetRefresh(function() blUpdateSwatch(); blUpdateClassSwatch(); blUpdatePowerSwatch(); UpdateBlSwatches() end)
             UpdateBlSwatches()
         end
         -- Cogwheel on BTB Left Text
@@ -7474,9 +7530,6 @@ initFrame:SetScript("OnEvent", function(self)
             local _, btbLeftCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "BTB Left Text Settings",
                 rows = {
-                    { type="toggle", label="Power Color",
-                      get=function() return SVal("btbLeftPowerColor", false) end,
-                      set=function(v) SSet("btbLeftPowerColor", v); if v then SSet("btbLeftClassColor", false) end; UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=30, step=1,
                       get=function() return SVal("btbLeftSize", 11) end,
                       set=function(v) SSet("btbLeftSize", v); UpdatePreview() end },
@@ -7553,14 +7606,36 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             brSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(brSwatch, "Custom Colored") end)
             brSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            -- Power Color swatch: shows the player's current power color; click to
+            -- select power-colored mode. Same per-unit power resolution as the power
+            -- bar text (white fallback when the power token can't resolve).
+            local brPowerSwatch, brUpdatePowerSwatch = EllesmereUI.BuildColorSwatch(
+                btbRRgn, btbRRgn:GetFrameLevel() + 5,
+                function()
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    if info then return info.r, info.g, info.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(brPowerSwatch, "RIGHT", brSwatch, "LEFT", -8, 0)
+            btbRRgn._lastInline = brPowerSwatch
+            brPowerSwatch:SetScript("OnClick", function()
+                if brOff() then return end
+                SSet("btbRightPowerColor", true); SSet("btbRightClassColor", false)
+                UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            brPowerSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(brPowerSwatch, "Power Colored") end)
+            brPowerSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateBrSwatches()
                 local off = brOff()
                 local isClass = SVal("btbRightClassColor", false)
                 local isPower = SVal("btbRightPowerColor", false)
                 brSwatch:SetAlpha((isClass or isPower or off) and 0.3 or 1)
                 brClassSwatch:SetAlpha((isClass and not off) and 1 or 0.3)
+                brPowerSwatch:SetAlpha((isPower and not off) and 1 or 0.3)
             end
-            RegisterWidgetRefresh(function() brUpdateSwatch(); brUpdateClassSwatch(); UpdateBrSwatches() end)
+            RegisterWidgetRefresh(function() brUpdateSwatch(); brUpdateClassSwatch(); brUpdatePowerSwatch(); UpdateBrSwatches() end)
             UpdateBrSwatches()
         end
         -- Cogwheel on BTB Right Text
@@ -7569,9 +7644,6 @@ initFrame:SetScript("OnEvent", function(self)
             local _, btbRightCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "BTB Right Text Settings",
                 rows = {
-                    { type="toggle", label="Power Color",
-                      get=function() return SVal("btbRightPowerColor", false) end,
-                      set=function(v) SSet("btbRightPowerColor", v); if v then SSet("btbRightClassColor", false) end; UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=30, step=1,
                       get=function() return SVal("btbRightSize", 11) end,
                       set=function(v) SSet("btbRightSize", v); UpdatePreview() end },
@@ -7730,14 +7802,36 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             bcSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bcSwatch, "Custom Colored") end)
             bcSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            -- Power Color swatch: shows the player's current power color; click to
+            -- select power-colored mode. Same per-unit power resolution as the power
+            -- bar text (white fallback when the power token can't resolve).
+            local bcPowerSwatch, bcUpdatePowerSwatch = EllesmereUI.BuildColorSwatch(
+                btbCRgn, btbCRgn:GetFrameLevel() + 5,
+                function()
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    if info then return info.r, info.g, info.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(bcPowerSwatch, "RIGHT", bcSwatch, "LEFT", -8, 0)
+            btbCRgn._lastInline = bcPowerSwatch
+            bcPowerSwatch:SetScript("OnClick", function()
+                if bcOff() then return end
+                SSet("btbCenterPowerColor", true); SSet("btbCenterClassColor", false)
+                UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            bcPowerSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bcPowerSwatch, "Power Colored") end)
+            bcPowerSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateBcSwatches()
                 local off = bcOff()
                 local isClass = SVal("btbCenterClassColor", false)
                 local isPower = SVal("btbCenterPowerColor", false)
                 bcSwatch:SetAlpha((isClass or isPower or off) and 0.3 or 1)
                 bcClassSwatch:SetAlpha((isClass and not off) and 1 or 0.3)
+                bcPowerSwatch:SetAlpha((isPower and not off) and 1 or 0.3)
             end
-            RegisterWidgetRefresh(function() bcUpdateSwatch(); bcUpdateClassSwatch(); UpdateBcSwatches() end)
+            RegisterWidgetRefresh(function() bcUpdateSwatch(); bcUpdateClassSwatch(); bcUpdatePowerSwatch(); UpdateBcSwatches() end)
             UpdateBcSwatches()
         end
         -- Cogwheel on BTB Center Text
@@ -7746,9 +7840,6 @@ initFrame:SetScript("OnEvent", function(self)
             local _, btbCenterCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "BTB Center Text Settings",
                 rows = {
-                    { type="toggle", label="Power Color",
-                      get=function() return SVal("btbCenterPowerColor", false) end,
-                      set=function(v) SSet("btbCenterPowerColor", v); if v then SSet("btbCenterClassColor", false) end; UpdatePreview(); EllesmereUI:RefreshPage() end },
                     { type="slider", label="Size", min=8, max=30, step=1,
                       get=function() return SVal("btbCenterSize", 11) end,
                       set=function(v) SSet("btbCenterSize", v); UpdatePreview() end },
@@ -9777,6 +9868,7 @@ initFrame:SetScript("OnEvent", function(self)
             if pv._nameFS and pv._nameFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._nameFS, "nameText", true, textLevel) end
             if pv._hpFS and pv._hpFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._hpFS, "healthText", true, textLevel) end
             if pv._centerFS and pv._centerFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._centerFS, "centerText", true, textLevel) end
+            if pv._ppFS and pv._ppFS:IsShown() then textOverlays[#textOverlays+1] = CreateHitOverlay(pv._ppFS, "powerBarText", true, textLevel) end
             -- Create an overlay for EVERY buff/debuff frame, not just the ones
             -- shown right now. Each overlay is a child of its icon frame with
             -- SetAllPoints, so it hides/shows and re-anchors with the icon. The
@@ -9836,7 +9928,7 @@ initFrame:SetScript("OnEvent", function(self)
         opts = opts or {}
 
         -- Local cog button helper (MakeCogBtn is scoped to BuildSharedSettings)
-        local function MCogBtn(rgn, showFn)
+        local function MCogBtn(rgn, showFn, iconPath)
             local btn = CreateFrame("Button", nil, rgn)
             btn:SetSize(26, 26)
             btn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
@@ -9845,7 +9937,7 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetAlpha(0.4)
             local tex = btn:CreateTexture(nil, "OVERLAY")
             tex:SetAllPoints()
-            tex:SetTexture(EllesmereUI.COGS_ICON)
+            tex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
             btn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
             btn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             btn:SetScript("OnClick", function(self) showFn(self) end)
@@ -10309,6 +10401,147 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = bgSw
                 RegisterWidgetRefresh(function() bgSwUp() end)
             end
+
+            -- Row 3: Power Text (format) + Text Position -- ported from Main Frames.
+            -- Reads/writes the same per-unit keys; MSet -> ReloadAndUpdate live-updates
+            -- the real boss frames AND the preview (runtime already supports boss).
+            local pwrTextRow
+            pwrTextRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Power Text",
+                  values = { ["none"]="None", ["smart"]="Smart Text", ["curpp"]="Power Value", ["perpp"]="Power %", ["both"]="Value | %" },
+                  order  = { "none", "smart", "curpp", "perpp", "both" },
+                  getValue=function() return MVal("powerTextFormat", "perpp") end,
+                  setValue=function(v)
+                      settingsTable.powerTextFormat = v
+                      if v ~= "none" and MVal("powerPercentText", "none") == "none" then
+                          settingsTable.powerPercentText = "center"
+                      end
+                      if v == "none" then settingsTable.powerPercentText = "none" end
+                      ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                  end },
+                { type="dropdown", text="Text Position",
+                  values = { ["none"]="None", ["left"]="Left", ["right"]="Right", ["center"]="Center" },
+                  order  = { "none", "---", "left", "right", "center" },
+                  getValue=function() return MVal("powerPercentText", "none") end,
+                  setValue=function(v) MSet("powerPercentText", v); EllesmereUI:RefreshPage() end });  y = y - h
+            -- Expose the power-text row so the preview's power-text click overlay
+            -- can scroll here (mirrors parent._powerHeightRow / _powerHeaderFrame).
+            parent._powerTextRow = pwrTextRow
+            -- Inline Text Color swatches on Power Text (left): Custom + Power Colored,
+            -- mutually exclusive (mirrors Main Frames' Text Color multiSwatch). Custom
+            -- click: first clears power-colored (selecting custom), second opens the
+            -- picker. Power-colored click: selects power-colored + clears custom.
+            do
+                local rgn = pwrTextRow._leftRegion
+                local customSw, customSwUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function()
+                        local c = MGet("powerTextColor")
+                        if c then return c.r, c.g, c.b end
+                        return 1, 1, 1
+                    end,
+                    function(r, g, b)
+                        settingsTable.powerTextColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate()
+                    end, false, 20)
+                PP.Point(customSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = customSw
+                local customOrigClick = customSw:GetScript("OnClick")
+                customSw:SetScript("OnClick", function(self, ...)
+                    if MVal("powerPercentTextPowerColor", false) then
+                        settingsTable.powerPercentTextPowerColor = false
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage(); return
+                    end
+                    if customOrigClick then customOrigClick(self, ...) end
+                end)
+                customSw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(customSw, "Custom Text Color") end)
+                customSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local powerSw, powerSwUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function()
+                        local _, pToken = UnitPowerType("player")
+                        local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                        if info then return info.r, info.g, info.b end
+                        return 1, 1, 1
+                    end,
+                    function() end, false, 20)
+                PP.Point(powerSw, "RIGHT", customSw, "LEFT", -8, 0)
+                rgn._lastInline = powerSw
+                powerSw:SetScript("OnClick", function()
+                    settingsTable.powerPercentTextPowerColor = true
+                    settingsTable.powerTextColor = nil
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end)
+                powerSw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(powerSw, "Power Colored Text") end)
+                powerSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function UpdSwatches()
+                    local isPower = MVal("powerPercentTextPowerColor", false)
+                    customSw:SetAlpha(isPower and 0.3 or 1)
+                    powerSw:SetAlpha(isPower and 1 or 0.3)
+                end
+                RegisterWidgetRefresh(function() customSwUp(); powerSwUp(); UpdSwatches() end)
+                UpdSwatches()
+            end
+            -- Show % cog on Power Text (left)
+            do
+                local rgn = pwrTextRow._leftRegion
+                local _, showCog = EllesmereUI.BuildCogPopup({
+                    title = "Power Text",
+                    rows = {
+                        { type="toggle", label="Show %",
+                          get=function() return MVal("powerShowPercent", true) ~= false end,
+                          set=function(v) MSet("powerShowPercent", v) end },
+                    },
+                })
+                local cogBtn = MCogBtn(rgn, showCog)
+                local function Upd()
+                    local fmt = MVal("powerTextFormat", "perpp")
+                    local off = (fmt == "none" or fmt == "curpp")
+                    cogBtn:SetAlpha(off and 0.15 or 0.4)
+                    cogBtn:SetEnabled(not off)
+                end
+                cogBtn:SetScript("OnEnter", function(self)
+                    local fmt = MVal("powerTextFormat", "perpp")
+                    if fmt == "none" or fmt == "curpp" then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option is only available for formats that display a percentage."))
+                    else self:SetAlpha(0.7) end
+                end)
+                cogBtn:SetScript("OnLeave", function(self) Upd(); EllesmereUI.HideWidgetTooltip() end)
+                cogBtn:SetScript("OnClick", function(self) showCog(self) end)
+                Upd()
+                RegisterWidgetRefresh(Upd)
+            end
+            -- Size + X/Y offsets cog on Text Position (right)
+            do
+                local rgn = pwrTextRow._rightRegion
+                local _, szCog = EllesmereUI.BuildCogPopup({
+                    title = "Text Position",
+                    rows = {
+                        { type="slider", label="Size", min=6, max=30, step=1,
+                          get=function() return MVal("powerPercentSize", 9) end,
+                          set=function(v) MSet("powerPercentSize", v) end },
+                        { type="slider", label="X Offset", min=-50, max=50, step=1,
+                          get=function() return MVal("powerPercentX", 0) end,
+                          set=function(v) MSet("powerPercentX", v) end },
+                        { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                          get=function() return MVal("powerPercentY", 0) end,
+                          set=function(v) MSet("powerPercentY", v) end },
+                    },
+                })
+                local cogBtn = MCogBtn(rgn, szCog, EllesmereUI.RESIZE_ICON)
+                local function Upd()
+                    local off = MVal("powerPercentText", "none") == "none"
+                    cogBtn:SetAlpha(off and 0.15 or 0.4)
+                    cogBtn:SetEnabled(not off)
+                end
+                cogBtn:SetScript("OnEnter", function(self)
+                    if MVal("powerPercentText", "none") == "none" then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("This option requires a text position other than none."))
+                    else self:SetAlpha(0.7) end
+                end)
+                cogBtn:SetScript("OnLeave", function(self) Upd(); EllesmereUI.HideWidgetTooltip() end)
+                cogBtn:SetScript("OnClick", function(self) szCog(self) end)
+                Upd()
+                RegisterWidgetRefresh(Upd)
+            end
         end
 
         -- Extra section rendered at the very bottom, below the Power Bar (boss "Indicators").
@@ -10523,6 +10756,10 @@ initFrame:SetScript("OnEvent", function(self)
                           tooltip = "This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
                           get = function() return db.profile.boss.castbarIconInWidth ~= false end,
                           set = function(v) db.profile.boss.castbarIconInWidth = v; ReloadAndUpdate() end },
+                        { type = "toggle", label = "Show Icon on Right",
+                          tooltip = "Place the cast icon on the right side of the bar instead of the left.",
+                          get = function() return db.profile.boss.castbarIconRight == true end,
+                          set = function(v) db.profile.boss.castbarIconRight = v; ReloadAndUpdate() end },
                     },
                 })
                 local cogBtn = CreateFrame("Button", nil, rgn)
@@ -10657,6 +10894,12 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, simplePosCogShow = EllesmereUI.BuildCogPopup({
                     title = "Simple Debuff Position",
                     rows = {
+                        -- Max debuffs shown in simple mode. Shares the boss maxDebuffs
+                        -- key with Debuffs Location (the two modes are mutually
+                        -- exclusive); the runtime caps frame.Debuffs.num to it.
+                        { type="slider", label="Max Count", min=1, max=20, step=1,
+                          get=function() return db.profile.boss.maxDebuffs or 10 end,
+                          set=function(v) db.profile.boss.maxDebuffs = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                         { type="slider", label="Offset X", min=-200, max=200, step=1,
                           get=function() local x = ns.GetBossSimpleDebuffOffset(db.profile.boss); return x end,
                           set=function(v) db.profile.boss.simpleDebuffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -10748,6 +10991,12 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, simpleBuffPosCogShow = EllesmereUI.BuildCogPopup({
                     title = "Simple Buff Position",
                     rows = {
+                        -- Max buffs shown in simple mode. Shares the boss maxBuffs key
+                        -- with Buffs Location (the two modes are mutually exclusive);
+                        -- the runtime caps frame.Buffs.num to it.
+                        { type="slider", label="Max Count", min=1, max=20, step=1,
+                          get=function() return db.profile.boss.maxBuffs or 4 end,
+                          set=function(v) db.profile.boss.maxBuffs = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                         { type="slider", label="Offset X", min=-200, max=200, step=1,
                           get=function() local x = ns.GetBossSimpleBuffOffset(db.profile.boss); return x end,
                           set=function(v) db.profile.boss.simpleBuffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -11249,6 +11498,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Power bar -> Power Bar Height (pwrRow1 left, POWER BAR section).
             healthBar  = { section = textHeader or displayHeader,  target = sizeRow,  slotSide = "left" },
             powerBar   = { section = parent._powerHeaderFrame or displayHeader,  target = parent._powerHeightRow,  slotSide = "left" },
+            powerBarText = { section = parent._powerHeaderFrame or displayHeader,  target = parent._powerTextRow,  slotSide = "left" },
             portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
@@ -11666,6 +11916,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- its own bar (replacing the old ambiguous whole-frame overlay).
             if pv._health then CreateHitOverlay(pv._health, "healthBar", false, baseLevel) end
             if pv._power then CreateHitOverlay(pv._power, "powerBar", false, baseLevel) end
+            if pv._ppFS and pv._ppFS:IsShown() then CreateHitOverlay(pv._ppFS, "powerBarText", true, textLevel) end
             if pv._portraitFrame and pv._portraitFrame:IsShown() then CreateHitOverlay(pv._portraitFrame, "portrait", false, baseLevel) end
             if pv._castbar then
                 local castLevel = pv._castbar:GetFrameLevel() + 20

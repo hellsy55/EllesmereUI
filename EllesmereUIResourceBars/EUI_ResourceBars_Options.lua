@@ -1983,7 +1983,10 @@ initFrame:SetScript("OnEvent", function(self)
                   RebuildPower()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            { type = "dropdown", text = "Smooth Bars",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end }
         );  y = y - h
         -- Inline reposition cog on "Shift Elements if No Power": Extra Y Offset
         do
@@ -2001,6 +2004,35 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
+        end
+
+        -- Replace the dummy "Smooth Bars" right dropdown with a checkbox dropdown.
+        -- Each item enables native StatusBar interpolation on its bar; off = a
+        -- plain SetValue with zero added cost. Defaults all off.
+        do
+            local rightRgn = shiftPowRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local smoothItems = {
+                { key = "secondary", label = "Class Resource Bar" },
+                { key = "primary",   label = "Power Bar" },
+                { key = "health",    label = "Health Bar" },
+            }
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                smoothItems,
+                function(k)
+                    local p = DB(); if not p then return false end
+                    return (p[k] and p[k].smoothBars) or false
+                end,
+                function(k, v)
+                    local p = DB(); if not p then return end
+                    if p[k] then p[k].smoothBars = v end
+                    if _G._ERB_ApplySmoothing then _G._ERB_ApplySmoothing() end
+                end)
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
         _, h = W:Spacer(parent, y, 16);  y = y - h
@@ -3533,13 +3565,25 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - cursorH
         end
 
-        -- Row: Simple Runes (DK only)
+        -- Row: Custom Recharge Color | Simple Runes (DK only)
         do
             local _, playerClass = UnitClass("player")
             if playerClass == "DEATHKNIGHT" then
                 local simpleRuneRow
                 simpleRuneRow, h = W:DualRow(parent, y,
+                    { type = "toggle", text = "Custom Recharge Color",
+                      tooltip = "Choose the color of recharging runes instead of a dimmed version of the rune color.",
+                      disabled = function() local p = DB(); return p and not p.secondary.enabled end,
+                      disabledTooltip = "Class Resource",
+                      getValue = function() local p = DB(); return p and p.secondary.runesCustomRecharge end,
+                      setValue = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.runesCustomRecharge = v
+                          RebuildClass()
+                          EllesmereUI:RefreshPage()
+                      end },
                     { type = "toggle", text = "Simple Runes",
+                      tooltip = "Show rune count in center and remove recharge text/animation",
                       disabled = function() local p = DB(); return p and not p.secondary.enabled end,
                       disabledTooltip = "Class Resource",
                       getValue = function() local p = DB(); return p and p.secondary.runesSimple end,
@@ -3547,8 +3591,44 @@ initFrame:SetScript("OnEvent", function(self)
                           local p = DB(); if not p then return end
                           p.secondary.runesSimple = v
                           RebuildClass()
-                      end },
-                    { type = "label", text = "" }); y = y - h
+                      end }); y = y - h
+                -- Inline color swatch for custom recharge color (left region)
+                do
+                    local rgn = simpleRuneRow._leftRegion
+                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                        rgn, simpleRuneRow:GetFrameLevel() + 3,
+                        function()
+                            local p = DB(); if not p then return 0.5, 0.5, 0.5, 1 end
+                            local s = p.secondary
+                            return s.runesRechargeR or 0.5, s.runesRechargeG or 0.5, s.runesRechargeB or 0.5, s.runesRechargeA or 1
+                        end,
+                        function(r, g, b, a)
+                            local p = DB(); if not p then return end
+                            p.secondary.runesRechargeR = r
+                            p.secondary.runesRechargeG = g
+                            p.secondary.runesRechargeB = b
+                            p.secondary.runesRechargeA = a
+                            SmoothRefresh()
+                        end, true, 20)
+                    swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = swatch
+                    -- Disabled overlay when class resource off or custom recharge off
+                    local swatchBlock = CreateFrame("Frame", nil, swatch)
+                    swatchBlock:SetAllPoints()
+                    swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                    swatchBlock:EnableMouse(true)
+                    swatchBlock:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Custom Recharge Color"))
+                    end)
+                    swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    local function UpdateRechargeSwatch()
+                        local p = DB()
+                        local off = not p or not p.secondary.enabled or not p.secondary.runesCustomRecharge
+                        if off then swatch:SetAlpha(0.3); swatchBlock:Show() else swatch:SetAlpha(1); swatchBlock:Hide() end
+                    end
+                    EllesmereUI.RegisterWidgetRefresh(function() if updateSwatch then updateSwatch() end; UpdateRechargeSwatch() end)
+                    UpdateRechargeSwatch()
+                end
             end
             if playerClass == "HUNTER" then
                 _, h = W:DualRow(parent, y,
@@ -3681,7 +3761,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             specBtn:SetScript("OnEnter", function(self)
                 self:SetAlpha(0.7)
-                EllesmereUI.ShowWidgetTooltip(self, "Enable/Disable per Spec")
+                EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Enable/Disable per Spec"))
             end)
             specBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4); EllesmereUI.HideWidgetTooltip() end)
             specBtn:SetScript("OnClick", function()
@@ -3705,9 +3785,9 @@ initFrame:SetScript("OnEvent", function(self)
                     db              = dummyDB,
                     dbKey           = "_erbPower",
                     presetKey       = "_specs",
-                    title           = "Power Bar",
-                    subtitle        = "Enable for these specs:",
-                    buttonText      = "Apply",
+                    title           = EllesmereUI.L("Power Bar"),
+                    subtitle        = EllesmereUI.L("Enable for these specs:"),
+                    buttonText      = EllesmereUI.L("Apply"),
                     preCheckedSpecs = preChecked,
                     onConfirm       = function(assignments)
                         p.primary.disabledSpecs = {}
@@ -4413,7 +4493,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             specBtn:SetScript("OnEnter", function(self)
                 self:SetAlpha(0.7)
-                EllesmereUI.ShowWidgetTooltip(self, "Enable/Disable per Spec")
+                EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Enable/Disable per Spec"))
             end)
             specBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4); EllesmereUI.HideWidgetTooltip() end)
             specBtn:SetScript("OnClick", function()
@@ -4437,9 +4517,9 @@ initFrame:SetScript("OnEvent", function(self)
                     db              = dummyDB,
                     dbKey           = "_erbHealth",
                     presetKey       = "_specs",
-                    title           = "Health Bar",
-                    subtitle        = "Enable for these specs:",
-                    buttonText      = "Apply",
+                    title           = EllesmereUI.L("Health Bar"),
+                    subtitle        = EllesmereUI.L("Enable for these specs:"),
+                    buttonText      = EllesmereUI.L("Apply"),
                     preCheckedSpecs = preChecked,
                     onConfirm       = function(assignments)
                         p.health.disabledSpecs = {}

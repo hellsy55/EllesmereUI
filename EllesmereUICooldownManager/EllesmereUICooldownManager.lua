@@ -493,6 +493,7 @@ local DEFAULTS = {
                     -- the inline cog. Off by default for new installs; the
                     -- migration turns it on for users who had the old global on.
                     showInactiveBuffIcons = false, desaturateInactiveBuffs = true,
+                    hidePlaceholderIcon = false,
                     iconSize = 32, numRows = 1, spacing = 2,
                     borderSize = 1, borderR = 0, borderG = 0, borderB = 0, borderA = 1,
                     borderClassColor = false, borderTexture = "solid",
@@ -614,6 +615,34 @@ function ns.GetBarSpellDataForSpec(barKey, specKey)
     local bs = prof.barSpells[barKey]
     if not bs then return nil end
     return bs
+end
+
+-- Max Stacks Glow gate: set ns._cdmAnyMaxStacksGlow once if any saved spell (any
+-- spec) has the glow enabled. RefreshCDMIconAppearance then skips its per-icon
+-- watch check entirely for anyone who never uses the feature -- 0 cost when off.
+-- Monotonic + scanned-once: a runtime enable is handled by the option's setValue,
+-- so this only needs to discover already-saved settings at/after login.
+function ns.RescanMaxStacksGlowFlag()
+    if ns._cdmAnyMaxStacksGlow or ns._maxStacksFlagScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._maxStacksFlagScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                local ssAll = bs and bs.spellSettings
+                if ssAll then
+                    for _, ss in pairs(ssAll) do
+                        if ss and ss.maxStacksGlow and ss.maxStacksGlow > 0 then
+                            ns._cdmAnyMaxStacksGlow = true
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -3201,7 +3230,7 @@ ns.ApplyCDMTooltipState = ApplyCDMTooltipState
 -------------------------------------------------------------------------------
 --  Apply custom shape to a CDM icon
 -------------------------------------------------------------------------------
-ApplyShapeToCDMIcon = function(icon, shape, barData)
+ApplyShapeToCDMIcon = function(icon, shape, barData, ssb)
     if not icon then return end
     local fd = _getFD(icon)
     local tex = fd and fd.tex or icon._tex
@@ -3216,6 +3245,17 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     if barData.borderClassColor then
         local cc = _playerClass and RAID_CLASS_COLORS[_playerClass]
         if cc then brdR, brdG, brdB = cc.r, cc.g, cc.b end
+    end
+    -- Per-icon Border override (buff-family bars): size + color only, never
+    -- style. ssb is the resolved per-icon settings passed in from
+    -- RefreshCDMIconAppearance; nil for cd/utility bars and uncustomized icons,
+    -- so this is a no-op unless a buff icon has a per-icon border set. Feeds both
+    -- the square (ApplyBorderStyle) and shaped (shapeBorder) paths below.
+    if ssb then
+        if ssb.borderSize ~= nil then borderSz = ssb.borderSize end
+        if ssb.borderR ~= nil then brdR = ssb.borderR end
+        if ssb.borderG ~= nil then brdG = ssb.borderG end
+        if ssb.borderB ~= nil then brdB = ssb.borderB end
     end
 
     local ifc = FC(icon)
@@ -3426,6 +3466,13 @@ local function RefreshCDMIconAppearance(barKey)
         -- keys off the live/canonical id, which may differ from fc.spellID.
         local ssb
         local isBuffFamilyBar = (barData.barType == "buffs" or barKey == "buffs")
+        -- Login / refresh coverage for Max Stacks Glow: a charge spell sitting at
+        -- max never fires the swipe hook, so register it here too. Gated on the
+        -- feature flag (set once by RescanMaxStacksGlowFlag / the option) so anyone
+        -- who never enables it pays nothing here -- the call is skipped entirely.
+        if ns._cdmAnyMaxStacksGlow and not isBuffFamilyBar and ns.WatchMaxStacksIfEnabled then
+            ns.WatchMaxStacksIfEnabled(icon)
+        end
         if isBuffFamilyBar then
             local fcb = _ecmeFC[icon]
             -- Resolve by the DISPLAYED spell first (GetCanonicalSpellIDForFrame --
@@ -3604,9 +3651,11 @@ local function RefreshCDMIconAppearance(barKey)
             kbText:SetTextColor(barData.keybindR or 1, barData.keybindG or 1, barData.keybindB or 1, barData.keybindA or 0.9)
         end
 
-        -- Apply custom shape (overrides border/zoom set above)
+        -- Apply custom shape (overrides border/zoom set above). Pass the resolved
+        -- per-icon settings so the buff-family Border override (size + color)
+        -- applies on the authoritative border render, square or shaped.
         local shape = barData.iconShape or "none"
-        ApplyShapeToCDMIcon(icon, shape, barData)
+        ApplyShapeToCDMIcon(icon, shape, barData, ssb)
 
         -- Reset glow so glow type change takes effect on next tick.
         -- Do NOT reset isActive -- that causes a 1-frame flash where the
@@ -4545,7 +4594,13 @@ _CDMApplyVisibility = function()
                                 end
                             end
                             local icfc = _ecmeFC[ic]
-                            if not (icfc and icfc._cdStateHidden) then
+                            -- Off-by-default flag tested first: non-users short-circuit
+                            -- straight to the original branch (identical code, no added work).
+                            if barData.hidePlaceholderIcon and ic._isPlaceholderFrame then
+                                -- Hide Icon: an Always-Show placeholder keeps its reserved
+                                -- layout slot but stays fully invisible (icon, border, bg).
+                                ic:SetAlpha(0)
+                            elseif not (icfc and icfc._cdStateHidden) then
                                 ic:SetAlpha(visAlpha)
                             end
                         end
@@ -4628,7 +4683,13 @@ local function ApplyBarOpacity(barKey)
             local ic = icons[i]
             if ic then
                 local icfc = _ecmeFC[ic]
-                if not (icfc and icfc._cdStateHidden) then
+                -- Off-by-default flag tested first: non-users short-circuit straight
+                -- to the original branch (identical code, no added work).
+                if barData.hidePlaceholderIcon and ic._isPlaceholderFrame then
+                    -- Hide Icon: an Always-Show placeholder keeps its reserved
+                    -- layout slot but stays fully invisible (icon, border, bg).
+                    ic:SetAlpha(0)
+                elseif not (icfc and icfc._cdStateHidden) then
                     ic:SetAlpha(a)
                 end
             end
@@ -4836,6 +4897,7 @@ BuildAllCDMBars = function()
     -- Ensure ghost bars exist before iterating bars
     EnsureGhostBars()
     EnsureFocusKickBar()
+    ns.RescanMaxStacksGlowFlag()  -- set the Max Stacks Glow gate (once) before refresh
 
     local p = ECME.db.profile
 

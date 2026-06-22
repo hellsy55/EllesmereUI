@@ -1943,6 +1943,16 @@ local function SkinEditBox(cf)
         end
     end
     ApplyEditBoxHeaderFont(eb)
+
+    -- Edit box HOOKS (not the plain setters above) taint a temp whisper
+    -- window's execution context. When that conversation's secure code later
+    -- touches its secret tellTarget (e.g. a BN_WHISPER presence ID) it poisons
+    -- the shared ChatHistory access tables, after which EVERY chat message
+    -- errors in HistoryKeeper for the rest of the session. Only the permanent
+    -- docked frames (1-10) are safe to hook; temp windows (11+) get visual
+    -- skinning only. (This matches the function header's stated intent and the
+    -- 1-10 header-font gate in ECHAT.ApplyFonts.)
+    if idx <= 10 then
     eb:HookScript("OnEditFocusGained", function(self) ApplyEditBoxHeaderFont(self) end)
 
     eb:SetAltArrowKeyMode(false)
@@ -1995,6 +2005,7 @@ local function SkinEditBox(cf)
                 CFD(self).histIdx = 0
             end)
         end
+    end
 end
 
 local function SkinChatFrame(cf)
@@ -2826,7 +2837,11 @@ initFrame:SetScript("OnEvent", function(self)
         end
         idleEventFrame:SetScript("OnEvent", OnActiveMessage)
 
-        for i = 1, 20 do
+        -- Permanent docked frames only (1-10). Hooking a temp whisper edit box
+        -- (11+) taints its execution context and poisons HistoryKeeper on
+        -- BN_WHISPER. Temp windows do not exist at login, but a /reload with a
+        -- conversation window open could expose them here, so gate it.
+        for i = 1, 10 do
             local eb = _G["ChatFrame" .. i .. "EditBox"]
             if eb then
                 eb:HookScript("OnEditFocusGained", OnActiveMessage)

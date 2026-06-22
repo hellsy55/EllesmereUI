@@ -2269,11 +2269,11 @@ initFrame:SetScript("OnEvent", function(self)
         local readyCheckPositionOrder = { "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
         local rcRow
         rcRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Ready Check", values=readyCheckPositionValues, order=readyCheckPositionOrder,
+            { type="dropdown", text="Ready Check & Summon", values=readyCheckPositionValues, order=readyCheckPositionOrder,
               getValue=function() return SVal("readyCheckPosition", "center") end,
               setValue=function(v) SSet("readyCheckPosition", v) end },
             { type="slider", text="Icon Size", min=8, max=40, step=1,
-              getValue=function() return SVal("readyCheckSize", 18) end,
+              getValue=function() return SVal("readyCheckSize", 20) end,
               setValue=function(v) SSet("readyCheckSize", v) end });  y = y - h
         -- Cog for ready check / summon toggles + offset X/Y
         do
@@ -2415,8 +2415,12 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = row._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Leader Icon Offset",
+                title = "Leader Icon",
                 rows = {
+                    { type="toggle", label="Show In Combat",
+                      tooltip="Show the leader/assistant icon while you are in combat. Disable to hide it during combat.",
+                      get=function() return SVal("showLeaderIconInCombat", true) end,
+                      set=function(v) SSet("showLeaderIconInCombat", v); if ns._UpdateLeaderIcons then ns._UpdateLeaderIcons() end end },
                     { type="slider", label="Offset X", min=-50, max=50, step=1,
                       get=function() return SVal("leaderIconOffsetX", 0) end,
                       set=function(v) SSet("leaderIconOffsetX", v) end },
@@ -4209,6 +4213,10 @@ initFrame:SetScript("OnEvent", function(self)
                       tooltip="Collapse subgroups that have no members so the remaining groups close ranks. For example, if only groups 1, 2, 3 and 6 have players, they show with no gaps instead of leaving empty space where groups 4 and 5 would be. Real raid frames only.",
                       get=function() return SVal("hideEmptyGroups", true) end,
                       set=function(v) SSet("hideEmptyGroups", v) end },
+                    { type="toggle", label="Exclude Hidden from Size",
+                      tooltip="When using custom raid sizes, don't count members in hidden groups toward the raid-size breakpoint. For example, if you hide groups 7 and 8, a full 40-man raid is sized as if it were 24-man instead of jumping to the 30-man frame size. Has no effect unless you have custom raid sizes set up.",
+                      get=function() return SVal("excludeHiddenGroupsFromSize", true) end,
+                      set=function(v) SSet("excludeHiddenGroupsFromSize", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
