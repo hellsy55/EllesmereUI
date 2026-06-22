@@ -464,10 +464,13 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     wrapFrame._gradTex  = nil
 
     -- Text overlay: parented to wrapFrame (not bar) so bar's SetClipsChildren
-    -- doesn't chop text when font size exceeds bar height.
+    -- doesn't chop text when font size exceeds bar height. Level sits ABOVE the
+    -- border (set to bar +5 in ApplySettings) and the pandemic glow (wrapFrame
+    -- +6) so the timer/name/stacks text renders on top of the border instead of
+    -- beneath it. Keyed off bar (like the border) so the two track together.
     local textOverlay = CreateFrame("Frame", nil, wrapFrame)
     textOverlay:SetAllPoints(bar)
-    textOverlay:SetFrameLevel(bar:GetFrameLevel() + 3)
+    textOverlay:SetFrameLevel(bar:GetFrameLevel() + 6)
     wrapFrame._textOverlay = textOverlay
 
     -- Timer text

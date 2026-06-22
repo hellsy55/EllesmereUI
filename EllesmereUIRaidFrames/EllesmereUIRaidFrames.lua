@@ -35,20 +35,19 @@ ns.LVL_RAISE  = 20   -- main border while hovered/targeted (PP container at +1)
 ns.LVL_MARKER = 22   -- raid marker icon (always on top)
 
 -------------------------------------------------------------------------------
---  Chat-strata host: lowers a frame onto the chat frame's strata, one level
---  above it, so its contents render on the SAME layer as chat (just above chat
---  on that layer) instead of the marker carrier's always-on-top layer. Used by
---  the leader/assistant icon host. Re-applied on reload so it tracks the chat
---  frame's current strata/level (and recovers if a container SetFrameStrata
---  cascade reset it). Mirrors the chat sidebar's own strata match.
+--  Leader-icon host strata: keeps the leader/assistant icon host on the
+--  button's own strata, in the above-border/below-aura band (ns.LVL_AURA - 1,
+--  same as the name/health text) so the crown clears the GENERAL border while
+--  auras still draw over it. The hover/target border raise (+ns.LVL_RAISE)
+--  intentionally covers it. Re-applied on reload so it recovers if a container
+--  SetFrameStrata cascade reset it. (Previously this lowered the host onto the
+--  chat strata, which left the icon drawing BENEATH the border entirely.)
 -------------------------------------------------------------------------------
-function ns.ApplyChatStrata(frame)
-    local cf = DEFAULT_CHAT_FRAME
-    if cf and cf.GetFrameStrata then
-        frame:SetFrameStrata(cf:GetFrameStrata())
-        frame:SetFrameLevel((cf:GetFrameLevel() or 0) + 1)
-    else
-        frame:SetFrameStrata("LOW")
+function ns.ApplyLeaderStrata(frame)
+    local parent = frame:GetParent()
+    if parent then
+        frame:SetFrameStrata(parent:GetFrameStrata())
+        frame:SetFrameLevel(parent:GetFrameLevel() + (ns.LVL_AURA - 1))
     end
 end
 
@@ -2740,10 +2739,13 @@ local function StyleButton(button)
     AnchorStatusText()
     d.AnchorStatusText = AnchorStatusText
 
-    -- Role icon (carrier frame above power bar + its border so icon renders on top)
+    -- Role icon. Carrier sits just BELOW the aura band (ns.LVL_AURA) and above
+    -- the base/threat/dispel borders (same band as the name/health text), so the
+    -- icon clears the general border while auras still draw over it. The
+    -- hover/target border raise (+ns.LVL_RAISE) intentionally covers it.
     local roleCarrier = CreateFrame("Frame", nil, button)
     roleCarrier:SetAllPoints(health)
-    roleCarrier:SetFrameLevel(button:GetFrameLevel() + 5)
+    roleCarrier:SetFrameLevel(button:GetFrameLevel() + (ns.LVL_AURA - 1))
     local roleIcon = roleCarrier:CreateTexture(nil, "OVERLAY")
     local riSz = PixelSnap(s.roleIconSize or 14)
     roleIcon:SetSize(riSz, riSz)
@@ -2777,7 +2779,7 @@ local function StyleButton(button)
     -- bar as before. Strata/level are re-asserted on reload (chat-relative).
     d.leaderHost = CreateFrame("Frame", nil, button)
     d.leaderHost:SetAllPoints(health)
-    ns.ApplyChatStrata(d.leaderHost)
+    ns.ApplyLeaderStrata(d.leaderHost)
 
     local leaderIcon = d.leaderHost:CreateTexture(nil, "OVERLAY")
     local liSz = PixelSnap(s.leaderIconSize or 14)
@@ -6670,9 +6672,16 @@ local function CreateHeaders()
     -- via relative anchoring (no SetPoint is ever issued on the secure headers).
     -- Shown only when showGroupNumbers is on (see ns._UpdateGroupNumbers).
     if not ns._groupNumberLabels then
+        -- Overlay host kept at a high frame level so the labels draw ABOVE the
+        -- raid buttons. The buttons are descendants of containerFrame, so labels
+        -- parented straight to the container render BENEATH the bars; a high
+        -- frame level within the same (LOW) strata lifts them on top.
+        ns._groupNumberOverlay = CreateFrame("Frame", nil, containerFrame)
+        ns._groupNumberOverlay:SetAllPoints(containerFrame)
+        ns._groupNumberOverlay:SetFrameLevel(9000)
         ns._groupNumberLabels = {}
         for gi = 1, 8 do
-            local lbl = containerFrame:CreateFontString(nil, "OVERLAY")
+            local lbl = ns._groupNumberOverlay:CreateFontString(nil, "OVERLAY")
             lbl:Hide()
             ns._groupNumberLabels[gi] = lbl
         end
@@ -7164,8 +7173,8 @@ local function ReloadFrames()
             d.leaderIcon:ClearAllPoints()
             local liPos = (s.leaderIconPosition or "top"):upper()
             d.leaderIcon:SetPoint(liPos, d.health, liPos, s.leaderIconOffsetX or 0, s.leaderIconOffsetY or 0)
-            -- Keep the leader-icon host on the chat frame's current strata/level
-            if d.leaderHost then ns.ApplyChatStrata(d.leaderHost) end
+            -- Re-assert the host's strata/level above the border
+            if d.leaderHost then ns.ApplyLeaderStrata(d.leaderHost) end
         end
 
         -- Raid marker size + position
@@ -9140,8 +9149,8 @@ ns.ReloadPartyFrames = function()
             d.leaderIcon:ClearAllPoints()
             local liPos = (raw.leaderIconPosition or "top"):upper()
             d.leaderIcon:SetPoint(liPos, d.health, liPos, pp.leaderIconOffsetX or 0, pp.leaderIconOffsetY or 0)
-            -- Keep the leader-icon host on the chat frame's current strata/level
-            if d.leaderHost then ns.ApplyChatStrata(d.leaderHost) end
+            -- Re-assert the host's strata/level above the border
+            if d.leaderHost then ns.ApplyLeaderStrata(d.leaderHost) end
         end
 
         -- Raid marker
@@ -10670,16 +10679,20 @@ local function CreatePreviewFrame(index)
     statusFS:SetTextColor(pvStc.r, pvStc.g, pvStc.b)
     statusFS:Hide()
 
-    -- Role icon (carrier frame above power bar + its border)
+    -- Role icon. Carrier sits just BELOW the aura band and above the base border
+    -- (mirrors the real frames): clears the general border while auras draw over
+    -- it; the hover/target border raise intentionally covers it.
     local roleCarrier = CreateFrame("Frame", nil, f)
     roleCarrier:SetAllPoints(health)
-    roleCarrier:SetFrameLevel(f:GetFrameLevel() + 5)
+    roleCarrier:SetFrameLevel(f:GetFrameLevel() + (ns.LVL_AURA - 1))
     local roleIcon = roleCarrier:CreateTexture(nil, "OVERLAY")
     local riSz = PixelSnap(s.roleIconSize or 14)
     roleIcon:SetSize(riSz, riSz)
 
-    -- Leader icon (on marker carrier, above the border)
-    local leaderIcon = markerCarrier:CreateTexture(nil, "OVERLAY")
+    -- Leader icon: on the text carrier band (above the general border, below the
+    -- aura layer) to mirror the real frames -- the hover/target raise covers it,
+    -- the general border does not.
+    local leaderIcon = textCarrier:CreateTexture(nil, "OVERLAY")
     local liSz = PixelSnap(s.leaderIconSize or 14)
     leaderIcon:SetSize(liSz, liSz)
     local liPos = (s.leaderIconPosition or "top"):upper()
@@ -12277,7 +12290,17 @@ local function RefreshPreview()
     -- Reparent after all frames are created (first load creates them in the loop above)
     local reparentTo = isOverlay and overlayContainer or (previewContainer or containerFrame)
     for _, f in ipairs(previewFrames) do f:SetParent(reparentTo) end
-    for _, lbl in ipairs(previewGroupLabels) do lbl:SetParent(reparentTo) end
+    -- Group-number labels go on a high-level overlay child of the same container
+    -- so they draw ABOVE the preview bars (which are descendants of reparentTo);
+    -- parenting them straight to reparentTo leaves them beneath the bars.
+    if not ns._previewGroupNumberOverlay then
+        ns._previewGroupNumberOverlay = CreateFrame("Frame", nil, reparentTo)
+    end
+    ns._previewGroupNumberOverlay:SetParent(reparentTo)
+    ns._previewGroupNumberOverlay:SetAllPoints(reparentTo)
+    ns._previewGroupNumberOverlay:SetFrameLevel(9000)
+    ns._previewGroupNumberOverlay:Show()
+    for _, lbl in ipairs(previewGroupLabels) do lbl:SetParent(ns._previewGroupNumberOverlay) end
 
     -- Container size (4 groups)
     local totalW, totalH
