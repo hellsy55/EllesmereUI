@@ -11,8 +11,5 @@ EllesmereUIUnitFrames/Libs/
 CLAUDE.md
 CLAUDE_PATTERNS.md
 
-# Agent workspace files
-.agentdocs/
-
 # Developer scripts
 *.ps1
