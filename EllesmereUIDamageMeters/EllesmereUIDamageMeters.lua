@@ -795,12 +795,23 @@ end
 -------------------------------------------------------------------------------
 local _abbreviateCfg
 do
-    local opts = {
-        { breakpoint = 1000000000, abbreviation = "B", significandDivisor = 10000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 1000000,    abbreviation = "M", significandDivisor = 10000,    fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 1000,       abbreviation = "K", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
-        { breakpoint = 1,          abbreviation = "",  significandDivisor = 1,         fractionDivisor = 1,   abbreviationIsGlobal = false },
-    }
+    local opts
+    local locale = GetLocale()
+    if locale == "zhCN" then
+        opts = {
+            { breakpoint = 100000000, abbreviation = "亿", significandDivisor = 1000000,  fractionDivisor = 100, abbreviationIsGlobal = false }, 
+            { breakpoint = 10000,     abbreviation = "万", significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false }, 
+            { breakpoint = 1000,      abbreviation = "千", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false }, 
+            { breakpoint = 1,         abbreviation = "",   significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false }, 
+        }
+    else
+        opts = {
+            { breakpoint = 1000000000, abbreviation = "B", significandDivisor = 10000000, fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1000000,    abbreviation = "M", significandDivisor = 10000,    fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1000,       abbreviation = "K", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
+            { breakpoint = 1,          abbreviation = "",  significandDivisor = 1,         fractionDivisor = 1,   abbreviationIsGlobal = false },
+        }
+    end
     if CreateAbbreviateConfig then
         _abbreviateCfg = { config = CreateAbbreviateConfig(opts) }
     end
@@ -811,13 +822,24 @@ local function AbbrevNumber(n)
     if AbbreviateNumbers then
         return AbbreviateNumbers(n, _abbreviateCfg) or "0"
     end
+    
     local num = tonumber(n)
     if not num then return "?" end
-    if num >= 1e9 then return format("%.1fB", num / 1e9)
-    elseif num >= 1e6 then return format("%.1fM", num / 1e6)
-    elseif num >= 1e3 then return format("%.1fK", num / 1e3)
-    else return format("%.0f", num) end
+    
+    local locale = GetLocale()
+    if locale == "zhCN" then
+        if num >= 1e8 then return format("%.2f亿", num / 1e8)
+        elseif num >= 1e4 then return format("%.2f万", num / 1e4)
+        elseif num >= 1e3 then return format("%.1f千", num / 1e3)
+        else return format("%.0f", num) end
+    else
+        if num >= 1e9 then return format("%.1fB", num / 1e9)
+        elseif num >= 1e6 then return format("%.1fM", num / 1e6)
+        elseif num >= 1e3 then return format("%.1fK", num / 1e3)
+        else return format("%.0f", num) end
+    end
 end
+
 
 local function FormatBarValue(amt, perSec, numFmt)
     -- Per-second can drop below 1 on long overall windows (total / huge time),
