@@ -5068,6 +5068,7 @@ initFrame:SetScript("OnEvent", function(self)
                         -- single-select cdStateEffect below). Handled as a toggle in the
                         -- item loop (item.charge names the ss key).
                         { charge = "chargeHideSwipe", label = "Hide Swipe (Charges)" },
+                        { charge = "hideRechargeEdge", label = "Hide Recharge Edge" },
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -5291,6 +5292,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.maxStacksGlow = ss.maxStacksGlow
                                                 os.cdStateEffect = ss.cdStateEffect
                                                 os.chargeHideSwipe = ss.chargeHideSwipe
+                                                os.hideRechargeEdge = ss.hideRechargeEdge
                                                 os.glowColor = ss.glowColor
                                                 os.glowColorR = ss.glowColorR
                                                 os.glowColorG = ss.glowColorG
@@ -5910,7 +5912,7 @@ initFrame:SetScript("OnEvent", function(self)
                             EnsureSS(); ss.cdStateEffect = v
                             if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                         end,
-                        function() return ss.cdStateEffect == nil and not ss.chargeHideSwipe end,
+                        function() return ss.cdStateEffect == nil and not ss.chargeHideSwipe and not ss.hideRechargeEdge end,
                         function(si, item)
                             local isGlow = (item.val == "pixelGlowReady" or item.val == "buttonGlowReady")
                             if isGlow and ss.procGlow and ss.procGlow > 0 then
@@ -6102,6 +6104,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.maxStacksGlow = ss.maxStacksGlow
                                     os.cdStateEffect = ss.cdStateEffect
                                     os.chargeHideSwipe = ss.chargeHideSwipe
+                                    os.hideRechargeEdge = ss.hideRechargeEdge
                                     os.glowColor = ss.glowColor
                                     os.glowColorR = ss.glowColorR
                                     os.glowColorG = ss.glowColorG
@@ -7260,6 +7263,44 @@ initFrame:SetScript("OnEvent", function(self)
             if #itemsDisplayed > 0 and #itemsExtra > 0 then MakeDivider() end
 
             for _, sp in ipairs(itemsExtra) do MakeItem(sp, false) end
+        end
+
+        -- "Missing Spells?" footer: a centered, accent-colored prompt at the end
+        -- of the real CDM spell sections. Clicking it opens Blizzard's CDM and
+        -- closes EUI options -- the exact action of the link under the buff bar
+        -- preview. Shown for bars that list Blizzard CDM spells (CD/utility and
+        -- buff bars); skipped for custom-buff bars (Custom Spell ID only, no CDM
+        -- list) so it never lands under the custom-spell-id / presets section.
+        if not isCustomBuff then
+            MakeDivider()
+            local FOOTER_H = 38
+            local mbItem = CreateFrame("Button", nil, inner)
+            mbItem:SetHeight(FOOTER_H)
+            mbItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            mbItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            mbItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+
+            local mbFS = mbItem:CreateFontString(nil, "OVERLAY")
+            mbFS:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            mbFS:SetAllPoints()
+            mbFS:SetJustifyH("CENTER")
+            mbFS:SetJustifyV("MIDDLE")
+            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            mbFS:SetTextColor(ar, ag, ab, 1)
+            mbFS:SetText(EllesmereUI.L("Missing Spells?") .. "\n" .. EllesmereUI.L("Add in Blizzard CDM"))
+
+            mbItem:SetScript("OnEnter", function() mbFS:SetTextColor(1, 1, 1, 1) end)
+            mbItem:SetScript("OnLeave", function()
+                local r, g, b = EllesmereUI.GetAccentColor()
+                mbFS:SetTextColor(r, g, b, 1)
+            end)
+            mbItem:SetScript("OnClick", function()
+                menu:Hide()
+                if ns.OpenBlizzardCDMTab then ns.OpenBlizzardCDMTab(true) end
+            end)
+
+            allItems[#allItems + 1] = mbItem
+            mH = mH + FOOTER_H
         end
 
         local totalH = mH + 4

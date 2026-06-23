@@ -126,7 +126,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
-        _, h = W:SectionHeader(parent, "GROUP FINDER QUEUE", y);  y = y - h
+        _, h = W:SectionHeader(parent, "BLIZZARD WINDOW RESKINS", y);  y = y - h
 
         local _eqolLoaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EnhanceQoL")
         local queueRow
@@ -187,10 +187,6 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        _, h = W:Spacer(parent, y, 20);  y = y - h
-
-        _, h = W:SectionHeader(parent, "GAME PAUSE MENU", y);  y = y - h
-
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Reskin Pause Menu",
               tooltip="Reskins the ESC / Game Menu with the EUI dark style, matching fonts, and accent-colored title.",
@@ -214,14 +210,7 @@ initFrame:SetScript("OnEvent", function(self)
                       })
                   end
               end },
-            { type="label", text="" }
-        );  y = y - h
-
-        _, h = W:Spacer(parent, y, 20); y = y - h
-        _, h = W:SectionHeader(parent, "THE GREAT VAULT", y);  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Great Vault Skin",
+            { type="toggle", text="Reskin Great Vault",
               tooltip="Reskins the Great Vault window with custom tile backgrounds, progress colors, and completion states.",
               getValue=function()
                   if not EllesmereUIDB then return false end
@@ -242,9 +231,33 @@ initFrame:SetScript("OnEvent", function(self)
                           onConfirm   = function() ReloadUI() end,
                       })
                   end
+              end }
+        );  y = y - h
+
+        -- TEMP: Reskin LFG Menu toggle is commented out until the backend is
+        -- wired up. DO NOT DELETE -- re-enable by removing the --[[ / --]] markers.
+        --[[
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Reskin LFG Menu",
+              tooltip="Reskins the Group Finder / LFG window with the EUI dark style.",
+              getValue=function()
+                  if not EllesmereUIDB then return false end
+                  -- Seed the default ONCE on first read: enabled only if both
+                  -- Reskin Blizzard Elements (customTooltips) and Reskin Queue
+                  -- Popup are enabled at that moment; stored thereafter so it
+                  -- stays fixed regardless of later changes to those toggles.
+                  if EllesmereUIDB.reskinLFGMenu == nil then
+                      EllesmereUIDB.reskinLFGMenu = (EllesmereUIDB.customTooltips ~= false) and (EllesmereUIDB.reskinQueuePopup ~= false)
+                  end
+                  return EllesmereUIDB.reskinLFGMenu
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.reskinLFGMenu = v
               end },
             { type="label", text="" }
         );  y = y - h
+        --]]
 
         return math.abs(y)
     end

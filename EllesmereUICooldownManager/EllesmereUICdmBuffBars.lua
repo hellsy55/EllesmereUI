@@ -1891,6 +1891,19 @@ function ns.RegisterTBBUnlockElements()
                     -- bar is enabled the anchor is nil and all are hidden.
                     return idx ~= ns.TBBGroupAnchorIndex()
                 end,
+                -- Grouped non-anchor members are positioned by the relative
+                -- SetPoint chain in BuildTrackedBuffBars. Report them as
+                -- addon-owned so the generic anchor system never repositions
+                -- them -- otherwise a cascade/override SetPoint severs the chain
+                -- (e.g. in combat via a stale per-member anchor link). The group
+                -- ANCHOR returns false, so it stays fully element-anchorable.
+                isAnchored = function()
+                    local t = ns.GetTrackedBuffBars()
+                    local b = t and t.bars
+                    local c = b and b[idx]
+                    if not c or not ns.TBBBarGrouped(c) then return false end
+                    return idx ~= ns.TBBGroupAnchorIndex()
+                end,
                 getFrame = function() return tbbFrames[idx] end,
                 getSize  = function()
                     -- Return total frame size (including icon) so width-

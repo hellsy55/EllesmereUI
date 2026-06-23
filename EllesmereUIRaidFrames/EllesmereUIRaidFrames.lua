@@ -565,6 +565,7 @@ local defaults = {
         dispelIconPosition = "right",
         dispelIconOffsetX  = 0,
         dispelIconOffsetY  = 0,
+        dispelIconSize     = 16,
         -- Per-dispel-type colors (defaults mirror DISPEL_COLORS). "Bleed" is the
         -- no-dispelName/physical type (stored under the "" key in DISPEL_COLORS).
         dispelColorMagic   = { r = 0.349, g = 0.475, b = 1.0 },
@@ -2675,6 +2676,8 @@ local function StyleButton(button)
 
     local function AnchorDispelIcon()
         dispelIcon:ClearAllPoints()
+        local sz = s.dispelIconSize or 16
+        dispelIcon:SetSize(sz, sz)
         local pos = s.dispelIconPosition or "center"
         local ox = s.dispelIconOffsetX or 0
         local oy = s.dispelIconOffsetY or 0
@@ -8546,7 +8549,7 @@ do
         },
         dispels = {
             "dispelBorderSize", "dispelOverlay", "dispelOverlayOpacity", "dispelShowAll",
-            "showDispelIcons", "dispelIconPosition", "dispelIconOffsetX", "dispelIconOffsetY",
+            "showDispelIcons", "dispelIconPosition", "dispelIconOffsetX", "dispelIconOffsetY", "dispelIconSize",
             "dispelColorMagic", "dispelColorCurse", "dispelColorDisease",
             "dispelColorPoison", "dispelColorBleed",
         },
@@ -11681,6 +11684,8 @@ local function ApplyPreviewData(f, index)
             local atlas = DISPEL_ICON_ATLAS[dispelType]
             if atlas then f._dispelIconTex:SetAtlas(atlas) end
             f._dispelIcon:ClearAllPoints()
+            local diSz = s.dispelIconSize or 16
+            f._dispelIcon:SetSize(diSz, diSz)
             local diPos = s.dispelIconPosition or "center"
             local diOX = s.dispelIconOffsetX or 0
             local diOY = s.dispelIconOffsetY or 0

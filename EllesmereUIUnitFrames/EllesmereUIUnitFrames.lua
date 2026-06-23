@@ -310,6 +310,7 @@ local defaults = {
             castbarKickTickEnabled = true,
             castbarInterruptMidCastEnabled = false,
             castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
+            castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
             castbarClassColored = false,
             healthDisplay = "both",
             showBuffs = true,
@@ -615,6 +616,7 @@ local defaults = {
             castbarKickTickEnabled = true,
             castbarInterruptMidCastEnabled = false,
             castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
+            castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
             castbarClassColored = false,
             healthDisplay = "perhp",
             leftTextContent = "name",
@@ -2074,9 +2076,11 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
     local function ApplyBTBPowerColor(fs, contentKey, usePowerColor)
         if not fs or not usePowerColor then return end
         if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then fs:SetTextColor(info.r, info.g, info.b)
+            -- Secret-safe per-unit power color: player resolves via the clean
+            -- string token (identical to before); non-player units recover it
+            -- from the clean integer power type instead of falling back to white.
+            local r, g, b = EllesmereUI.ResolveUnitPowerColor(unit)
+            if r then fs:SetTextColor(r, g, b)
             else fs:SetTextColor(1, 1, 1) end
         end
     end
@@ -3279,9 +3283,11 @@ local function CreatePowerBar(frame, unit, settings)
             local cf = s2.customPowerFillColor
             if cf then bR, bG, bB = cf.r, cf.g, cf.b else bR, bG, bB = 0, 0, 1 end
         else
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then bR, bG, bB = info.r, info.g, info.b end
+            -- Secret-safe: player via the clean token, non-player via the clean
+            -- integer power type, so the custom power color applies on EVERY unit
+            -- (the bar no longer depends on oUF's colors.power sync). Unmapped
+            -- power types return nil and keep oUF's resolved color.
+            bR, bG, bB = EllesmereUI.ResolveUnitPowerColor(unit)
         end
         if s2.powerGradientEnabled and bR then
             local gc = s2.powerGradientColor
@@ -3341,9 +3347,11 @@ local function CreatePowerBar(frame, unit, settings)
     -- approach). No-power units are NOT special-cased -- they keep showing 0%.
     local function ApplyPowerTextColor(s)
         if s.powerPercentTextPowerColor then
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then ppFS:SetTextColor(info.r, info.g, info.b)
+            -- Secret-safe per-unit power color (see EllesmereUI.ResolveUnitPowerColor):
+            -- player keeps the exact token color; non-player units recover it from
+            -- the clean integer power type instead of falling back to white.
+            local r, g, b = EllesmereUI.ResolveUnitPowerColor(unit)
+            if r then ppFS:SetTextColor(r, g, b)
             else ppFS:SetTextColor(1, 1, 1) end
         elseif s.powerTextColor then
             local tc = s.powerTextColor
@@ -3814,6 +3822,12 @@ local function ApplyUnitFrameCastColor(castbar)
     end
     castbar.castTintLayer:SetVertexColor(cc.r, cc.g, cc.b)
     if castbar._shieldedTint then
+        -- Uninterruptible overlay colour (customizable; defaults to the
+        -- previously-hardcoded grey). The overlay's alpha is toggled from the
+        -- secret "not interruptible" flag, so the colour is always set and only
+        -- becomes visible on uninterruptible casts.
+        local uc = (settings and settings.castbarUninterruptibleColor) or { r = 0.5, g = 0.5, b = 0.5 }
+        castbar._shieldedTint:SetVertexColor(uc.r, uc.g, uc.b)
         local uninterruptible = GetCastbarUninterruptible(castbar)
         if castbar._shieldedTint.SetAlphaFromBoolean then
             castbar._shieldedTint:SetAlphaFromBoolean(uninterruptible, 1, 0)
@@ -8984,9 +8998,10 @@ local function ReloadFrames()
                         local cf = s2.customPowerFillColor
                         if cf then bR, bG, bB = cf.r, cf.g, cf.b else bR, bG, bB = 0, 0, 1 end
                     else
-                        local _, pToken = UnitPowerType(unit)
-                        local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-                        if info then bR, bG, bB = info.r, info.g, info.b end
+                        -- Secret-safe per-unit power color (player via token,
+                        -- non-player via the clean integer type), so custom power
+                        -- colors apply on EVERY unit independent of oUF's sync.
+                        bR, bG, bB = EllesmereUI.ResolveUnitPowerColor(unit)
                     end
                     if s2.powerGradientEnabled and bR then
                         local gc = s2.powerGradientColor
@@ -8998,6 +9013,12 @@ local function ReloadFrames()
                     elseif not useP then
                         local cf = s2.customPowerFillColor
                         if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) else self:SetStatusBarColor(0, 0, 1) end
+                    elseif bR then
+                        -- Power-color mode (no gradient): explicitly paint the bar
+                        -- so it does not depend on oUF's colors.power being synced
+                        -- (block 1 does this; this settings-refresh copy did not,
+                        -- which is why non-player bars showed oUF's default color).
+                        self:SetStatusBarColor(bR, bG, bB)
                     end
                     -- Keep the power-percent text color in sync with this unit
                     -- (per-unit power color; set up in CreatePowerBar). Gated on

@@ -982,8 +982,16 @@ local function ProcessSpecChange(newSpecKey)
     -- _hookFrameData, clears all FC caches on viewer pool frames, then
     -- runs a direct synchronous CollectAndReanchor. After this returns,
     -- cdmBarIcons is populated with the new spec's icons.
+    -- Hold placeholder injection across this synchronous talent_reconcile pass:
+    -- on a spec switch it runs BEFORE the per-spec profile swap, so barDataByKey
+    -- still carries the OLD spec's Always-Show / Keep-in-Place flags. Injecting
+    -- here would flash placeholders the new spec never asked for. The reanchor
+    -- that follows (profile_import for per-spec, or the next buff event) re-injects
+    -- correctly from the now-active profile.
     if ns.FullCDMRebuild then
+        ns._cdmSpecRebuildStale = true
         ns.FullCDMRebuild("talent_reconcile")
+        ns._cdmSpecRebuildStale = false
     end
 
     -- Signal the profile system that CDM's spec rebuild is complete.

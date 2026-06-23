@@ -2437,6 +2437,7 @@ do
         dispatcher:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
         dispatcher:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
         dispatcher:RegisterEvent("PLAYER_TARGET_CHANGED")
+        dispatcher:RegisterEvent("CVAR_UPDATE")  -- "Show numbers for cooldowns" toggled -> re-apply charge recharge numbers
         -- Direct API calls bypass the mixin's OnEvent dispatch, which
         -- triggers UpdateButtonArt (noop + hook), icon bg hook, and other
         -- per-button overhead. With 60 populated buttons, the mixin path
@@ -2517,6 +2518,21 @@ do
                                     if chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1 then
                                         local chargeCd = btn.chargeCooldown
                                         if chargeCd then
+                                            -- Extend the WoW "Show numbers for cooldowns" setting to
+                                            -- recharging charge spells. Blizzard hides the countdown
+                                            -- number on the charge (recharge) cooldown unconditionally,
+                                            -- so a number normally only shows at 0 charges (the main
+                                            -- cooldown). Mirror the "Show numbers for cooldowns" CVar
+                                            -- here: un-hide the recharge timer only when the setting is
+                                            -- on, hide it when off. Cached per-frame so we only call on a
+                                            -- state change; CVAR_UPDATE re-applies it live on toggle.
+                                            if chargeCd.SetHideCountdownNumbers then
+                                                local hideNums = not GetCVarBool("countdownForCooldowns")
+                                                if EFD(chargeCd).rechargeNumbersHidden ~= hideNums then
+                                                    EFD(chargeCd).rechargeNumbersHidden = hideNums
+                                                    chargeCd:SetHideCountdownNumbers(hideNums)
+                                                end
+                                            end
                                             if chargeInfo.isActive then
                                                 local chargeDur = C_ActionBar.GetActionChargeDuration(action)
                                                 if chargeDur then chargeCd:SetCooldownFromDurationObject(chargeDur) end
@@ -2527,6 +2543,20 @@ do
                                     elseif btn.chargeCooldown then
                                         btn.chargeCooldown:Clear()
                                     end
+                                end
+                            end
+                        elseif event == "CVAR_UPDATE" then
+                            -- "Show numbers for cooldowns" toggled: re-apply the recharge-number
+                            -- visibility to every charge cooldown immediately (the main cooldown
+                            -- numbers update natively; this keeps the recharge timer consistent).
+                            -- Cached per chargeCd, so unrelated CVAR_UPDATEs are near-free.
+                            local hideNums = not GetCVarBool("countdownForCooldowns")
+                            for _, btn in ipairs(btns) do
+                                local chargeCd = btn.chargeCooldown
+                                if chargeCd and chargeCd.SetHideCountdownNumbers
+                                   and EFD(chargeCd).rechargeNumbersHidden ~= hideNums then
+                                    EFD(chargeCd).rechargeNumbersHidden = hideNums
+                                    chargeCd:SetHideCountdownNumbers(hideNums)
                                 end
                             end
                         elseif event == "ACTIONBAR_UPDATE_USABLE" then

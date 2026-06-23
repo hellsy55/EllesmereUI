@@ -6548,6 +6548,7 @@ initFrame:SetScript("OnEvent", function(self)
                 AddCastColorSwatch("Interrupt Ready Mid-Cast", "castbarInterruptMidCastColor", { r = 0.318, g = 0.820, b = 0.357 },
                     function() return not SValSupported("castbarInterruptMidCastEnabled", false) end)
                 AddCastColorSwatch("Interrupt on CD", "castbarInterruptReadyColor", { r = 0.92, g = 0.35, b = 0.20 })
+                AddCastColorSwatch("Uninterruptible Cast", "castbarUninterruptibleColor", { r = 0.5, g = 0.5, b = 0.5 })
                 AddCastColorSwatch("Interruptible Cast", "castbarFillColor", { r = 0.863, g = 0.820, b = 0.639 })
             else
                 AddCastColorSwatch("Fill Color", "castbarFillColor", { r = 1, g = 0.7, b = 0 })
@@ -6565,11 +6566,13 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
                     local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local unintC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarUninterruptibleColor
                     local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
                     for _, key in ipairs(keys) do
                         SetCastbarEnabled(key, v)
                         if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
                         if readyC then UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b } end
+                        if unintC then UNIT_DB_MAP[key]().castbarUninterruptibleColor = { r = unintC.r, g = unintC.g, b = unintC.b } end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
@@ -6577,6 +6580,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
                     local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local unintC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarUninterruptibleColor
                     local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
                     for _, key in ipairs(keys) do
                         if GetCastbarEnabled(key) ~= v then return false end
@@ -6589,6 +6593,10 @@ initFrame:SetScript("OnEvent", function(self)
                             if readyC and kr then
                                 if kr.r ~= readyC.r or kr.g ~= readyC.g or kr.b ~= readyC.b then return false end
                             elseif readyC ~= kr then return false end
+                            local ku = UNIT_DB_MAP[key]().castbarUninterruptibleColor
+                            if unintC and ku then
+                                if ku.r ~= unintC.r or ku.g ~= unintC.g or ku.b ~= unintC.b then return false end
+                            elseif unintC ~= ku then return false end
                         end
                     end
                     return true
@@ -6602,11 +6610,15 @@ initFrame:SetScript("OnEvent", function(self)
                         local v = GetCastbarEnabled(selectedUnit)
                         local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
                         local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                        local unintC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarUninterruptibleColor
                         for _, key in ipairs(checkedKeys) do
                             SetCastbarEnabled(key, v)
                             if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
                             if readyC and (key == "target" or key == "focus") then
                                 UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b }
+                            end
+                            if unintC and (key == "target" or key == "focus") then
+                                UNIT_DB_MAP[key]().castbarUninterruptibleColor = { r = unintC.r, g = unintC.g, b = unintC.b }
                             end
                         end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()

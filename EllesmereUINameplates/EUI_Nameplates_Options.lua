@@ -363,13 +363,22 @@ initFrame:SetScript("OnEvent", function(self)
         previewAbsorb:Hide()
         local function ApplyPreviewAbsorbStyle()
             local style = DBVal("absorbStyle") or "blizzard"
-            local tex = ns.NP_ABSORB_STYLE_TEX[style] or ns.NP_ABSORB_STYLE_TEX.blizzard
-            local alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
-            if style == "clean" then
+            local tex = ns.NP_ABSORB_STYLE_TEX[style] or ns.ResolveOverlayTexPath(style) or ns.NP_ABSORB_STYLE_TEX.blizzard
+            local alpha = DBVal("absorbAlpha")
+            if alpha then
+                alpha = alpha / 100
+            elseif style == "clean" then
                 alpha = (DBVal("absorbCleanAlpha") or 30) / 100
+            else
+                alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
+            end
+            local r, g, b = 1, 1, 1
+            if style ~= "blizzard" then
+                local c = (DB() and DB().absorbColor) or defaults.absorbColor or { r = 1, g = 1, b = 1 }
+                r, g, b = c.r, c.g, c.b
             end
             previewAbsorb:SetStatusBarTexture(tex)
-            previewAbsorb:SetStatusBarColor(1, 1, 1, alpha)
+            previewAbsorb:SetStatusBarColor(r, g, b, alpha)
             local fill = previewAbsorb:GetStatusBarTexture()
             if fill then fill:SetDrawLayer("ARTWORK", 1); fill:AddMaskTexture(absorbMask) end
         end
@@ -378,12 +387,14 @@ initFrame:SetScript("OnEvent", function(self)
                 local barW = health:GetWidth()
                 local barH = health:GetHeight()
                 local hpPct = (previewHpPct or 75) / 100
-                local missingW = barW * (1 - hpPct)
-                local absorbW = missingW * 0.95
-                if absorbW < 2 then absorbW = 2 end
-                previewAbsorb:SetSize(absorbW, barH)
+                -- Match the live absorbForward bar: a FULL bar-width StatusBar
+                -- windowed by its fill value, so the texture renders at bar scale
+                -- (not squished into the absorb width). The visible absorb still
+                -- occupies the same ~missing-health region; only the texture scale
+                -- changes. The mask clips the overrun past the health bar's edge.
+                previewAbsorb:SetSize(barW, barH)
                 previewAbsorb:SetMinMaxValues(0, 1)
-                previewAbsorb:SetValue(1)
+                previewAbsorb:SetValue((1 - hpPct) * 0.95)
                 ApplyPreviewAbsorbStyle()
                 previewAbsorb:Show()
             else
@@ -1099,6 +1110,12 @@ initFrame:SetScript("OnEvent", function(self)
             cast:ClearAllPoints()
             cast:SetSize(math.max(1, barW - pIconW), castH)
             cast:SetPoint("TOPLEFT", health, "BOTTOMLEFT", pShiftX, 0)
+            do
+                local cTexKey = DBVal("castBarTexture") or "none"
+                local cTexPath = EllesmereUI.ResolveTexturePath(ns.healthBarTextures, cTexKey, "Interface\\Buttons\\WHITE8x8")
+                cast:SetStatusBarTexture(cTexPath)
+                UnsnapTex(cast:GetStatusBarTexture())
+            end
             cast:SetStatusBarColor(cbColor.r, cbColor.g, cbColor.b, 1)
             -- Cast icon: size + anchor per side / full-size. SetSize (not
             -- SetScale) keeps AddBorder pixel-perfect. Frame level was lifted at
@@ -3663,6 +3680,7 @@ initFrame:SetScript("OnEvent", function(self)
             ns.RefreshAllSettings()
             for _, plate in pairs(ns.friendlyPlates or {}) do
                 if ns.ApplyHealthBarTexture then ns.ApplyHealthBarTexture(plate) end
+                if ns.ApplyCastBarTexture then ns.ApplyCastBarTexture(plate) end
             end
         end
 
@@ -3894,10 +3912,25 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 2: Background (+ inline color swatch) | Absorb Style (+ settings
         -- cog and preview eye). Absorb Style sits here so the section fills
         -- sequentially with no blank slot left in the middle.
+        -- Blizzard + the stripe overlay set (shared with the Focus Texture
+        -- dropdown) + Clean. Stripe keys resolve through ns.ResolveOverlayTexPath.
         local absorbStyleValues = {
-            ["striped"]="Striped", ["clean"]="Clean (Flat)", ["blizzard"]="Blizzard",
+            ["blizzard"]="Blizzard",
+            ["striped"]="Striped",
+            ["striped-v2"]="Stripes",
+            ["striped-wide-v2"]="Wide Stripes",
+            ["stripes-medium"]="Medium Stripes",
+            ["stripes-small-close"]="Small Dense Stripes",
+            ["stripes-small-spread"]="Small Spread Stripes",
+            ["striped-tiny"]="Tiny Stripes",
+            ["clean"]="Clean (Flat)",
         }
-        local absorbStyleOrder = { "blizzard", "striped", "clean" }
+        local absorbStyleOrder = {
+            "blizzard", "striped",
+            "striped-v2", "striped-wide-v2", "stripes-medium",
+            "stripes-small-close", "stripes-small-spread", "striped-tiny",
+            "clean",
+        }
         local bgHoverRow
         bgHoverRow, h = W:DualRow(parent, y,
             { type="slider", text="Background", min=0, max=100, step=1,
@@ -3916,8 +3949,13 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return DBVal("absorbStyle") or "blizzard" end,
               setValue=function(v)
                 DB().absorbStyle = v
+                -- Selecting a style sets the opacity to that style's default
+                -- (Blizzard/Stripes 80%, Clean 30%); the slider tweaks from there.
+                DB().absorbAlpha = math.floor(((ns.NP_ABSORB_STYLE_ALPHA[v] or 0.8) * 100) + 0.5)
                 ns.ApplyAbsorbStyleAll()
                 UpdatePreview()
+                -- Refresh so the color swatch enables/disables (Blizzard = off).
+                EllesmereUI:RefreshPage()
               end })
         y = y - h
         -- Inline color swatch on Background (left region)
@@ -3941,16 +3979,53 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
         end
 
+        -- Inline absorb color swatch on the Absorb Style region (right of Row 2).
+        -- White by default; tints every style except Blizzard (disabled there,
+        -- since the Blizzard texture keeps its own coloring). Mirrors the Focus
+        -- Texture swatch's disabled pattern.
+        do
+            local rgn = bgHoverRow._rightRegion
+            local acColorGet = function()
+                local c = (DB() and DB().absorbColor) or defaults.absorbColor or { r = 1, g = 1, b = 1 }
+                return c.r, c.g, c.b
+            end
+            local acColorSet = function(r, g, b)
+                DB().absorbColor = { r = r, g = g, b = b }
+                ns.ApplyAbsorbStyleAll()
+                UpdatePreview()
+            end
+            local acSwatch, acUpdateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, acColorGet, acColorSet, nil, 20)
+            PP.Point(acSwatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = acSwatch
+            local function absorbColorOff() return (DBVal("absorbStyle") or "blizzard") == "blizzard" end
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = absorbColorOff()
+                acSwatch:SetAlpha(off and 0.15 or 1)
+                acSwatch:EnableMouse(not off)
+                acUpdateSwatch()
+            end)
+            local off0 = absorbColorOff()
+            acSwatch:SetAlpha(off0 and 0.15 or 1)
+            acSwatch:EnableMouse(not off0)
+        end
+
         -- Inline "Absorb Settings" cog on the Absorb Style region (right of Row 2)
         do
             local rgn = bgHoverRow._rightRegion
             local _, absorbCogShow = EllesmereUI.BuildCogPopup({
                 title = "Absorb Settings",
                 rows = {
-                    { type = "slider", label = "Clean Opacity", min = 5, max = 100, step = 1,
-                      get = function() return DBVal("absorbCleanAlpha") or 30 end,
+                    { type = "slider", label = "Opacity", min = 5, max = 100, step = 1,
+                      get = function()
+                        local v = DBVal("absorbAlpha")
+                        if v then return v end
+                        -- Untouched profiles: show the active style's default.
+                        local style = DBVal("absorbStyle") or "blizzard"
+                        if style == "clean" then return DBVal("absorbCleanAlpha") or 30 end
+                        return math.floor(((ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8) * 100) + 0.5)
+                      end,
                       set = function(v)
-                        DB().absorbCleanAlpha = v
+                        DB().absorbAlpha = v
                         ns.ApplyAbsorbStyleAll()
                         UpdatePreview()
                       end },
@@ -3999,9 +4074,10 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
         end
 
-        -- Row 3: Bar Texture | (empty -- Absorb Style moved up to Row 2; the
-        -- Hover Texture dropdown was moved to the bottom of the TARGET, FOCUS &
-        -- HOVER EFFECTS section).
+        -- Row 3: Bar Texture | Cast Bar Texture
+        -- Both dropdowns share the same texture set (EUI built-ins + SharedMedia)
+        -- and resolve identically; Bar Texture drives the health bar, Cast Bar
+        -- Texture drives the cast bar.
         _, h = W:DualRow(parent, y,
             { type="dropdown", text="Bar Texture", values=hbtValues, order=hbtOrder,
               getValue=function() return DBVal("healthBarTexture") or "none" end,
@@ -4010,7 +4086,13 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshAllTextures()
                 UpdatePreview()
               end },
-            { type="label", text="" });  y = y - h
+            { type="dropdown", text="Cast Bar Texture", values=hbtValues, order=hbtOrder,
+              getValue=function() return DBVal("castBarTexture") or "none" end,
+              setValue=function(v)
+                DB().castBarTexture = v
+                RefreshAllTextures()
+                UpdatePreview()
+              end });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -5020,7 +5102,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if ns.ApplyNamePlateClickArea then ns.ApplyNamePlateClickArea() end
                 UpdatePreview()
               end },
-            { type="slider", text="Health Bar Height", min=6, max=30, step=1,
+            { type="slider", text="Health Bar Height", min=6, max=50, step=1,
               getValue=function() return DBVal("healthBarHeight") end,
               setValue=function(v)
                 DB().healthBarHeight = v
@@ -5033,7 +5115,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local castBarHeightRow
         castBarHeightRow, h = W:DualRow(parent, y,
-            { type="slider", text="Cast Bar Height", min=10, max=30, step=1,
+            { type="slider", text="Cast Bar Height", min=10, max=40, step=1,
               getValue=function() return DBVal("castBarHeight") or defaults.castBarHeight end,
               setValue=function(v)
                 DB().castBarHeight = v

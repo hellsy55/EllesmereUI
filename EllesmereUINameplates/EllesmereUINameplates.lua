@@ -140,6 +140,7 @@ end
 local defaults = {
     absorbStyle = "blizzard",
     absorbCleanAlpha = 30,
+    absorbColor = { r = 1, g = 1, b = 1 },
     hostile = { r = 0.39, g = 0.11, b = 0.09 },
     neutral = { r = 0.81, g = 0.72, b = 0.19 },
     tapped  = { r = 0.50, g = 0.50, b = 0.50 },
@@ -381,6 +382,7 @@ local defaults = {
     textSlotCenterColor = { r = 1, g = 1, b = 1 },
     -- Bar texture overlay
     healthBarTexture = "none",
+    castBarTexture = "none",
 }
 local BAR_W = 150
 ns.defaults = defaults
@@ -541,18 +543,53 @@ local function ApplyHealthBarTexture(plate)
 end
 ns.ApplyHealthBarTexture = ApplyHealthBarTexture
 
+-- Cast bar texture -- mirrors ApplyHealthBarTexture exactly, using the same
+-- texture set (EUI built-ins + SharedMedia, appended into ns.healthBarTextures
+-- at options-build time). Attached to ns (no new file-scope local).
+function ns.ApplyCastBarTexture(plate)
+    local cast = plate.cast
+    if not cast then return end
+    local texKey = (p and p.castBarTexture) or defaults.castBarTexture or "none"
+    local path   = EllesmereUI.ResolveTexturePath(ns.healthBarTextures, texKey, "Interface\\Buttons\\WHITE8x8")
+    cast:SetStatusBarTexture(path)
+    -- The uninterruptible overlay is a flat WHITE8x8 drawn over the fill (tinted
+    -- grey, shown via SetAlphaFromBoolean), so it would hide the fill texture on
+    -- uninterruptible casts. Give it the same texture so the pattern shows
+    -- through in the uninterruptible colour. The per-cast SetVertexColor (grey)
+    -- is re-applied on every cast start, so changing the texture here is safe.
+    if plate.castBarOverlay then
+        plate.castBarOverlay:SetTexture(path)
+    end
+end
+
 function ns.ApplyAbsorbStyle(plate)
     local style = (p and p.absorbStyle) or defaults.absorbStyle
-    local tex   = ns.NP_ABSORB_STYLE_TEX[style] or ns.NP_ABSORB_STYLE_TEX.blizzard
-    local alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
-    if style == "clean" then
+    -- blizzard/striped/clean live in NP_ABSORB_STYLE_TEX; the stripe keys
+    -- (shared with the Focus Texture dropdown) resolve via ResolveOverlayTexPath.
+    local tex   = ns.NP_ABSORB_STYLE_TEX[style] or ns.ResolveOverlayTexPath(style) or ns.NP_ABSORB_STYLE_TEX.blizzard
+    -- Opacity applies to every style. absorbAlpha (0-100) is the single source
+    -- of truth once the user touches the slider or picks a style; until then we
+    -- fall back to the original per-style defaults so existing profiles are
+    -- unchanged.
+    local alpha = p and p.absorbAlpha
+    if alpha then
+        alpha = alpha / 100
+    elseif style == "clean" then
         alpha = ((p and p.absorbCleanAlpha) or defaults.absorbCleanAlpha or 30) / 100
+    else
+        alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
+    end
+    -- Tint applies to every style EXCEPT Blizzard, which keeps its own coloring.
+    local r, g, b = 1, 1, 1
+    if style ~= "blizzard" then
+        local c = (p and p.absorbColor) or defaults.absorbColor
+        if c then r, g, b = c.r, c.g, c.b end
     end
     local mask = plate._absorbMask
     for _, bar in ipairs({ plate.absorb, plate.absorbForward, plate.absorbOverflow }) do
         if bar then
             bar:SetStatusBarTexture(tex)
-            bar:SetStatusBarColor(1, 1, 1, alpha)
+            bar:SetStatusBarColor(r, g, b, alpha)
             local fill = bar:GetStatusBarTexture()
             if fill then
                 fill:SetDrawLayer("ARTWORK", 1)
@@ -4678,6 +4715,7 @@ function NameplateFrame:ApplyAppearance()
         self.absorbOverflow:SetHeight(GetHealthBarHeight())
     end
     ApplyHealthBarTexture(self)
+    ns.ApplyCastBarTexture(self)
     ns.ApplyAbsorbStyle(self)
     self:ApplyBorder()
     self:ApplyBorderColor()
@@ -7014,6 +7052,21 @@ function NameplateFrame:ShowCastLockout()
     end)
 end
 function NameplateFrame:UNIT_HEALTH()
+    -- If the mob dies while the "Interrupted" flash is held up, Blizzard's
+    -- nameplate death animation scales the still-shown cast bar and it looks
+    -- squished/warped. Tear the flash down the instant death is detected.
+    -- Gated on _interrupted first, so UnitIsDeadOrGhost is only ever called
+    -- during the brief flash window -- ~free on normal health ticks. (Same
+    -- safe death check already used by the health-text path.)
+    if self._interrupted and self.unit and UnitIsDeadOrGhost(self.unit) then
+        self._interrupted = nil
+        if self._interruptTimer then
+            self._interruptTimer:Cancel()
+            self._interruptTimer = nil
+        end
+        self.cast:Hide()
+        self:ApplyNameVisibility()
+    end
     self:UpdateHealthValues()
 end
 function NameplateFrame:UNIT_ABSORB_AMOUNT_CHANGED()

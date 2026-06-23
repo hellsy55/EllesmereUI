@@ -510,6 +510,52 @@ local function GetSecondaryResource()
 end
 
 -------------------------------------------------------------------------------
+--  "Class Resource Color" fill resolver. Maps the current spec's secondary
+--  resource to a color: discrete class resources -> Class Resource Colors;
+--  power-type bar secondaries -> Power Colors. Returns nil for resources with
+--  no dedicated color (DK runes, Ironfur, Ignore Pain, Stagger) so callers fall
+--  back to the class color. Attached to ERB (no new file-scope local -- this
+--  file is at the Lua 200-local cap) plus a global alias for the options preview.
+-------------------------------------------------------------------------------
+do
+    local RKEY = {
+        [PT.COMBO]       = "ComboPoints",
+        [PT.RUNES]       = "Runes",
+        [PT.HOLY_POWER]  = "HolyPower",
+        [PT.CHI]         = "Chi",
+        [PT.SOUL_SHARDS] = "SoulShards",
+        [PT.ARCANE]      = "ArcaneCharges",
+        [PT.ESSENCE]     = "Essence",
+        ["ICICLES"]                  = "Icicles",
+        ["SOUL_FRAGMENTS_VENGEANCE"] = "SoulFragments",
+        ["SOUL_FRAGMENTS_DEVOURER"]  = "SoulFragments",
+        ["MAELSTROM_WEAPON"]         = "MaelstromWeapon",
+        ["TIP_OF_THE_SPEAR"]         = "TipOfTheSpear",
+        ["WHIRLWIND_STACKS"]         = "WhirlwindStacks",
+    }
+    local PKEY = {
+        ["LUNAR_POWER_BAR"] = "LUNAR_POWER",
+        ["MAELSTROM_BAR"]   = "MAELSTROM",
+        ["INSANITY_BAR"]    = "INSANITY",
+        ["FOCUS_BAR"]       = "FOCUS",
+    }
+    function ERB.ResolveSecondaryResourceColor(powerKey)
+        local rk = RKEY[powerKey]
+        if rk and EllesmereUI.GetClassResourceColor then
+            local c = EllesmereUI.GetClassResourceColor(rk)
+            if c then return c.r, c.g, c.b end
+        end
+        local pk = PKEY[powerKey]
+        if pk and EllesmereUI.GetPowerColor then
+            local c = EllesmereUI.GetPowerColor(pk)
+            if c then return c.r, c.g, c.b end
+        end
+        return nil
+    end
+    _G._ERB_ResolveSecondaryResourceColor = ERB.ResolveSecondaryResourceColor
+end
+
+-------------------------------------------------------------------------------
 --  Bar-type spec lookup: maps specID -> true for specs that use a bar-type
 --  secondary resource (Astral Power, Maelstrom, Insanity, Stagger, Focus,
 --  Devourer Soul Fragments). Built once at init; exposed for options panel.
@@ -712,6 +758,7 @@ local DEFAULTS = {
             borderTexture = "solid",
             darkTheme   = false,
             classColored = true,
+            resourceColored = false,  -- "Class Resource Color" fill mode (per-spec resource/power color); takes precedence over classColored when on
             fillR       = 0.95, fillG = 0.90, fillB = 0.60, fillA = 1,
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
@@ -722,6 +769,11 @@ local DEFAULTS = {
             textXOffset = 0,
             textYOffset = 0,
             barBgR      = 0, barBgG = 0, barBgB = 0, barBgA = 0.5,
+            -- Opt-in gap color (color of the spacing between pips). Off by
+            -- default -> the gap-fill layer is never drawn and the bar is
+            -- unchanged. Only consulted when gapColorEnabled is true.
+            gapColorEnabled = false,
+            gapR        = 0, gapG = 0, gapB = 0, gapA = 1,
             barAlpha    = 1.0,
             thresholdEnabled = false,
             thresholdCount   = 3,
@@ -1159,6 +1211,57 @@ local function CreatePip(parent, w, h, idx, borderSize, borderR, borderG, border
     return pip
 end
 
+-------------------------------------------------------------------------------
+--  Optional gap-fill layer ("Bar Spacing" color). Opt-in: when disabled,
+--  nothing is drawn and the bar renders exactly as before (the gaps keep
+--  showing the full-bar background). When enabled, one texture is placed in
+--  each inter-pip gap so the spacing can be colored independently of the bar
+--  background. It only READS the already-computed pip slot positions; it never
+--  changes pip sizing or spacing geometry.
+-------------------------------------------------------------------------------
+-- Attached to ERB (not a new file-scope local) -- this file is at the Lua 200-local cap.
+function ERB.ApplyGapFills(frame, slots, count, isVertical, isReversed, sp)
+    local fills = frame._gapFills
+    if not (sp.gapColorEnabled and slots and count and count > 1) then
+        if fills then for i = 1, #fills do fills[i]:Hide() end end
+        return
+    end
+    if not fills then fills = {}; frame._gapFills = fills end
+    local r, g, b, a = sp.gapR or 0, sp.gapG or 0, sp.gapB or 0, sp.gapA or 1
+    local n = 0
+    for i = 1, count - 1 do
+        local x1 = slots[i].x1          -- trailing edge of pip i
+        local x0 = slots[i + 1].x0      -- leading edge of pip i+1
+        local gapLen = x0 - x1
+        if gapLen and gapLen > 0 then
+            n = n + 1
+            local tex = fills[n]
+            if not tex then
+                tex = frame:CreateTexture(nil, "BACKGROUND", nil, 0)  -- above _barBg (sublevel -1)
+                fills[n] = tex
+            end
+            tex:SetColorTexture(r, g, b, a)
+            tex:ClearAllPoints()
+            if isVertical then
+                if isReversed then
+                    tex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, x1)
+                    tex:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, x1)
+                else
+                    tex:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -x1)
+                    tex:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, -x1)
+                end
+                tex:SetHeight(gapLen)
+            else
+                tex:SetPoint("TOPLEFT", frame, "TOPLEFT", x1, 0)
+                tex:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", x1, 0)
+                tex:SetWidth(gapLen)
+            end
+            tex:Show()
+        end
+    end
+    for i = n + 1, #fills do fills[i]:Hide() end
+end
+
 
 -------------------------------------------------------------------------------
 --  Main frame construction
@@ -1360,6 +1463,7 @@ local function RegisterUnlockElements()
                 Rebuild()
             end,
             setHeight = function(_, h) S().pipHeight = PP.Snap(h); Rebuild() end,
+            isHidden = function() return IsSpecDisabled(S()) end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -2207,7 +2311,7 @@ local function BuildBars()
         secondaryFrame:SetFrameStrata(g.frameStrata or "MEDIUM")
         secondaryFrame:SetFrameLevel(10)
     end
-    if sp.enabled ~= false and cachedSecondary then
+    if sp.enabled ~= false and not IsSpecDisabled(sp) and cachedSecondary then
 
         local maxPts = cachedSecondary.max or 5
         if cachedSecondary.type == "custom" and EllesmereUI then
@@ -2316,6 +2420,7 @@ local function BuildBars()
             for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
             for i = 1, #runeFrames do if runeFrames[i] then runeFrames[i]:Hide() end end
             for i = 1, #secondaryPipTicks do secondaryPipTicks[i]:Hide() end
+            ERB.ApplyGapFills(secondaryFrame, nil, 0, isVertical, isReversed, sp)  -- no pips -> hide any gap fills
 
             if not secondaryBar then
                 secondaryBar = CreateStatusBar(secondaryFrame, "ERB_SecondaryBar", totalW, pipH,
@@ -2362,6 +2467,15 @@ local function BuildBars()
                 -- Brewmaster Stagger: always use threshold colors (green/yellow/red), start with green
                 secondaryBar:GetStatusBarTexture():SetVertexColor(0.2, 0.8, 0.2, 1)
                 secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB = 0.2, 0.8, 0.2
+                secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
+            elseif sp.resourceColored then
+                -- Per-spec resource/power color; falls back to class color.
+                local rr, rg, rb = ERB.ResolveSecondaryResourceColor(cachedSecondary.power)
+                if not rr then
+                    local cc = CLASS_COLORS[cachedClass]
+                    if cc then rr, rg, rb = cc[1], cc[2], cc[3] else rr, rg, rb = 1, 1, 1 end
+                end
+                secondaryBar:GetStatusBarTexture():SetVertexColor(rr, rg, rb, sp.fillA or 1)
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             elseif sp.classColored ~= false then
                 -- Power types in secondary slot use power color; class resources use class color
@@ -2481,6 +2595,7 @@ local function BuildBars()
             local _runeHB = _runeTsEntry and _runeTsEntry.hashColorB or 1
             local _runeHA = _runeTsEntry and _runeTsEntry.hashColorA or 0.7
             ApplyResourceBarTicks(secondaryFrame, 6, _runeTickStr, secondaryPipTicks, _runeHW, _runeHR, _runeHG, _runeHB, _runeHA)
+            ERB.ApplyGapFills(secondaryFrame, slots, numPips, isVertical, isReversed, sp)
         else
             -- Frame size already set above with the SAME _crEs. Slot
             -- positions are computed within that fixed frame; no resize.
@@ -2528,6 +2643,7 @@ local function BuildBars()
                 pips[i]:Show()
             end
             for i = maxPts + 1, #pips do if pips[i] then pips[i]:Hide() end end
+            ERB.ApplyGapFills(secondaryFrame, slots, maxPts, isVertical, isReversed, sp)
             for i = 1, #runeFrames do if runeFrames[i] then runeFrames[i]:Hide() end end
             if secondaryBar then secondaryBar:Hide() end
             for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
@@ -3252,6 +3368,15 @@ local function UpdateSecondaryResource()
     -- Color: dark theme > class colored > custom fill color
     if sp.darkTheme then
         r, g, b = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
+    elseif sp.resourceColored then
+        -- Per-spec resource/power color; falls back to class color.
+        local rr, rg, rb = ERB.ResolveSecondaryResourceColor(powerType)
+        if rr then r, g, b = rr, rg, rb
+        else
+            local cc = CLASS_COLORS[cachedClass]
+            if cc then r, g, b = cc[1], cc[2], cc[3] end
+        end
+        a = sp.fillA or 1
     elseif sp.classColored ~= false then
         -- Power types in secondary slot use power color; class resources use class color
         local pc = POWER_COLORS[powerType]
@@ -3700,8 +3825,11 @@ local function UpdateSecondaryResource()
             cur = GetIcicleCount()
             maxC = 5
         end
-        -- For pips using class color, prefer the per-class resource color
-        if sp.classColored ~= false and not sp.darkTheme then
+        -- For pips using class/resource color, prefer the per-spec resource color
+        if sp.resourceColored and not sp.darkTheme then
+            local rr, rg, rb = ERB.ResolveSecondaryResourceColor(powerType)
+            if rr then r, g, b = rr, rg, rb end
+        elseif sp.classColored ~= false and not sp.darkTheme then
             local pc2 = POWER_COLORS[powerType]
             if pc2 then
                 r, g, b = pc2[1], pc2[2], pc2[3]
@@ -4028,7 +4156,7 @@ local function UpdateVisibility()
     -- Secondary resource visibility + ooc alpha
     if secondaryFrame then
         local sp = ERB.db.profile.secondary
-        if sp and sp.enabled ~= false and cachedSecondary and ShouldShowSecondary() and not inVehicle then
+        if sp and sp.enabled ~= false and not IsSpecDisabled(sp) and cachedSecondary and ShouldShowSecondary() and not inVehicle then
             secondaryFrame:Show()
             EllesmereUI.SetElementVisibility(secondaryFrame, true)
             local base = sp.barAlpha or 1
@@ -5804,7 +5932,10 @@ function ERB:OnInitialize()
         if not sp or not sp.enabled then return 0 end
         local mode = sp.shiftElementsIfNoResource
         if mode ~= "Up" and mode ~= "Down" then return 0 end
-        if GetSecondaryResource() then return 0 end
+        -- Fires whenever the class resource bar leaves an empty slot: disabled
+        -- for the CURRENT spec via the spec picker, or the spec has no class
+        -- resource. (Master-disabled returns 0 above -- no frame to anchor to.)
+        if not IsSpecDisabled(sp) and GetSecondaryResource() then return 0 end
         return (mode == "Up") and 1 or -1
     end
     local function ResolveShiftDirPower()

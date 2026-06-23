@@ -2625,8 +2625,11 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = row._rightRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Dispel Icon Offset",
+                title = "Dispel Icon",
                 rows = {
+                    { type="slider", label="Icon Size", min=8, max=48, step=1,
+                      get=function() return SVal("dispelIconSize", 16) end,
+                      set=function(v) SSet("dispelIconSize", v) end },
                     { type="slider", label="Offset X", min=-50, max=50, step=1,
                       get=function() return SVal("dispelIconOffsetX", 0) end,
                       set=function(v) SSet("dispelIconOffsetX", v) end },
@@ -2642,10 +2645,10 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             cogBtn:SetAlpha(SVal("showDispelIcons", false) and 0.4 or 0.15)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            cogBtn:SetScript("OnEnter", function(self) if SVal("showDispelIcons", false) then self:SetAlpha(0.7) end end)
             cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(SVal("showDispelIcons", false) and 0.4 or 0.15) end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            cogBtn:SetScript("OnClick", function(self) if SVal("showDispelIcons", false) then cogShow(self) end end)
         end
 
         -- Row 3: Dispel Colors -- five always-active swatches, one per dispel type.
