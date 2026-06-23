@@ -4154,7 +4154,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- X slider row
                 local X_ROW_Y = -(TOP_PAD + TITLE_H + TITLE_GAP + GAP)
                 local xLabel = MakeFont(pf, 12, nil, 1, 1, 1)
-                xLabel:SetAlpha(0.6); xLabel:SetText("X Offset")
+                xLabel:SetAlpha(0.6); xLabel:SetText(EllesmereUI.L("X Offset"))
                 xLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, X_ROW_Y - SLIDER_H / 2)
                 local xTrack, xValBox = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, SLIDER_H, 11, SL_INPUT_A,
                     -100, 100, 1,
@@ -4168,7 +4168,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Y slider row
                 local Y_ROW_Y = X_ROW_Y - SLIDER_H - GAP
                 local yLabel = MakeFont(pf, 12, nil, 1, 1, 1)
-                yLabel:SetAlpha(0.6); yLabel:SetText("Y Offset")
+                yLabel:SetAlpha(0.6); yLabel:SetText(EllesmereUI.L("Y Offset"))
                 yLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, Y_ROW_Y - SLIDER_H / 2)
                 local yTrack, yValBox = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, SLIDER_H, 11, SL_INPUT_A,
                     -100, 100, 1,
@@ -4403,7 +4403,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local entry = vals and vals[bi]
                     if entry then
                         btn._value = entry.value
-                        btn._lbl:SetText(entry.label)
+                        btn._lbl:SetText(EllesmereUI.L(entry.label))
                         local active = (entry.value == cur)
                         btn._bg:SetColorTexture(
                             active and 0.973 or 0.15,
@@ -4600,7 +4600,7 @@ initFrame:SetScript("OnEvent", function(self)
                     }
                 end
                 local opts = {
-                    title = EllesmereUI.Lf("%1$s Slot Settings", slotLabel),
+                    title = EllesmereUI.Lf("%1$s Slot Settings", EllesmereUI.L(slotLabel)),
                     xGet = function() return CorePosXGet(posKey) end,
                     xSet = function(v) CorePosXSet(posKey, v) end,
                     yGet = function() return CorePosYGet(posKey) end,
@@ -4894,7 +4894,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if TextPosDisabled(slotKey) then return end
                 local sizeKey = slotKey .. "Size"
                 ShowCogPopup(self, {
-                    title = EllesmereUI.Lf("%1$s Settings", slotLabel),
+                    title = EllesmereUI.Lf("%1$s Settings", EllesmereUI.L(slotLabel)),
                     xGet = function() return TextPosXGet(slotKey) end,
                     xSet = function(v) TextPosXSet(slotKey, v) end,
                     yGet = function() return TextPosYGet(slotKey) end,
@@ -5201,14 +5201,14 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             tmCogBtn:SetScript("OnClick", function(self)
                 ShowCogPopup(self, {
-                    title = "Cast Timer Settings",
+                    title = EllesmereUI.L("Cast Timer Settings"),
                     xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
                     xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                     yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
                     ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
                     sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
                     sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                    sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
                     sizeFirst = true,
                 })
             end)
@@ -6378,14 +6378,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 snCogBtn:SetScript("OnClick", function(self)
                     ShowCogPopup(self, {
-                        title = "Spell Name Settings",
+                        title = EllesmereUI.L("Spell Name Settings"),
                         xGet = function() return DBVal("castNameOffsetX") or defaults.castNameOffsetX end,
                         xSet = function(v) DB().castNameOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         yGet = function() return DBVal("castNameOffsetY") or defaults.castNameOffsetY end,
                         ySet = function(v) DB().castNameOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         sizeGet = function() return DBVal("castNameSize") or defaults.castNameSize end,
                         sizeSet = function(v) DB().castNameSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                        sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                        sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
                         sizeFirst = true,
                     })
                 end)
@@ -6470,14 +6470,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 stCogBtn:SetScript("OnClick", function(self)
                     ShowCogPopup(self, {
-                        title = "Spell Target Settings",
+                        title = EllesmereUI.L("Spell Target Settings"),
                         xGet = function() return DBVal("castTargetOffsetX") or defaults.castTargetOffsetX end,
                         xSet = function(v) DB().castTargetOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         yGet = function() return DBVal("castTargetOffsetY") or defaults.castTargetOffsetY end,
                         ySet = function(v) DB().castTargetOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         sizeGet = function() return DBVal("castTargetSize") or defaults.castTargetSize end,
                         sizeSet = function(v) DB().castTargetSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                        sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                        sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
                         sizeFirst = true,
                     })
                 end)
