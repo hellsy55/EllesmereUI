@@ -2932,7 +2932,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  BAR GROUPING (shared across all bars)
         -------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "Bar Grouping", y);  y = y - h
+        _, h = W:SectionHeader(parent, "BAR GROUPING", y);  y = y - h
 
         -- Group Tracking Bars (per-bar checkbox dropdown) | Grouped Grow Direction
         -- The checkbox dropdown lists every bar; checked bars chain together and
@@ -3015,7 +3015,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  BAR LAYOUT
         -------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
+        _, h = W:SectionHeader(parent, "BAR LAYOUT", y);  y = y - h
 
         -- Height | Width
         -- The whole group shares one width/height, so a grouped member inherits
@@ -3701,7 +3701,7 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         --  EXTRAS
         -----------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "Extras", y);  y = y - h
+        _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
         -- Row 1: Enable Max Stacks (toggle + inline slider) | Ticks at Stacks (label + inline input)
         local function maxStacksOff()
@@ -9364,7 +9364,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         if not isFocusKick then
-        _, h = W:SectionHeader(parent, "Bar Layout", y);  y = y - h
+        _, h = W:SectionHeader(parent, "BAR LAYOUT", y);  y = y - h
 
         -- Row 1: (Sync) Visibility | Visibility Options (checkbox dropdown)
         local visRow, visH = W:DualRow(parent, y,
@@ -9967,7 +9967,7 @@ initFrame:SetScript("OnEvent", function(self)
             hint:SetTextColor(0.62, 0.62, 0.62, 0.9)
             y = y - 32
         end
-        _, h = W:SectionHeader(parent, "Icon Display", y);  y = y - h
+        _, h = W:SectionHeader(parent, "ICON DISPLAY", y);  y = y - h
 
         -- Active State Animation dropdown values
         local ACTIVE_ANIM_VALUES = {
@@ -11171,7 +11171,7 @@ initFrame:SetScript("OnEvent", function(self)
         local isCustomBuffBar = (barData.barType == "custom_buff")
         local isAnyBuffBar = isBuffGlowBar  -- buffs or custom_buff
         if not isCustomBuffBar and not isFocusKick then
-        _, h = W:SectionHeader(parent, "Extras", y);  y = y - h
+        _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
         -- Show Tooltip | Show Keybind (not for buff bars)
         if not isAnyBuffBar then

@@ -4932,7 +4932,7 @@ function EllesmereUI:ShowInfoPopup(opts)
     local popup = CreateInfoPopup()
 
     popup._title:SetText(EllesmereUI.L(opts.title or "Information"))
-    popup._contentFS:SetText(opts.content or "")
+    popup._contentFS:SetText(EllesmereUI.L(opts.content) or "")
 
     -- Resize scroll child to fit content after a frame
     C_Timer.After(0.01, function()
@@ -5887,7 +5887,7 @@ local function CreateMainFrame()
 
     local sbPlaceholder = MakeFont(sidebarSearchFrame, 12, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.3)
     sbPlaceholder:SetPoint("LEFT", sidebarSearchFrame, "LEFT", 10, 0)
-    sbPlaceholder:SetText("Search Features...")
+    sbPlaceholder:SetText(EllesmereUI.L("Search Features..."))
 
     local sbClearBtn = CreateFrame("Button", nil, sidebarSearchFrame)
     sbClearBtn:SetSize(20, 20)

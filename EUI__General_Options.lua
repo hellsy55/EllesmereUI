@@ -60,7 +60,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
 
     -- Display title: "Module: Title" -- the module name is prepended to every entry.
     local function TitleOf(e)
-        return ((e.module and e.module .. ": ") or "") .. (e.title or "")
+        return ((e.module and EllesmereUI.L(e.module) .. ": ") or "") .. (EllesmereUI.L(e.title) or "")
     end
 
     -- Stable sort by module display name so same-module entries group together
@@ -115,7 +115,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         PP.Point(descFs, "TOPLEFT", titleFs, "BOTTOMLEFT", 0, -7)
         PP.Point(descFs, "RIGHT", card, "RIGHT", -16, 0)
         descFs:SetJustifyH("LEFT"); descFs:SetJustifyV("TOP"); descFs:SetWordWrap(true)
-        descFs:SetText(entry.desc or "")
+        descFs:SetText(EllesmereUI.L(entry.desc) or "")
 
         -- Clickable only when the entry has a nav target. An entry with no nav
         -- (automatic behavior with no setting to open -- e.g. party frames in
@@ -158,7 +158,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         PP.Point(subFs, "TOPLEFT", titleFs, "BOTTOMLEFT", 0, -4)
         PP.Point(subFs, "RIGHT", row, "RIGHT", -10, 0)
         subFs:SetJustifyH("LEFT"); subFs:SetWordWrap(false)
-        subFs:SetText(entry.desc or "")
+        subFs:SetText(EllesmereUI.L(entry.desc) or "")
 
         -- Clickable only when the entry has a nav target (see MakeHeroCard); a
         -- nav-less listing renders static with no hover or click.
@@ -255,7 +255,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
             local _, sh = W:SectionHeader(parent, "BUG FIXES", y); y = y - sh
             y = y - 10  -- extra spacing below the divider
             for _, fx in ipairs(fixes) do
-                local fh = MakeFixLine(y, ((fx.module and fx.module .. ": ") or "") .. (fx.text or "")); y = y - fh
+                local fh = MakeFixLine(y, ((fx.module and EllesmereUI.L(fx.module) .. ": ") or "") .. (EllesmereUI.L(fx.text) or "")); y = y - fh
             end
         end
 
@@ -280,7 +280,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Keep Buffs in Same Place",
                 desc  = "Reserve a fixed slot for every tracked buff so active buffs stop shifting when others fall off, while empty slots stay invisible.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Bar Layout", highlight = "Keep Buffs in Same Place",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "BAR LAYOUT", highlight = "Keep Buffs in Same Place",
                     preSelect = function()
                         if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("buffs") end
                     end },
@@ -514,7 +514,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Always Show Buffs is now Per-Bar",
                 desc  = "Always Show Buffs is now a per-bar toggle, so each buff bar can keep its tracked buffs on screen even when they are off cooldown.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Icon Display", highlight = "Always Show Buffs",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Always Show Buffs",
                     preSelect = function()
                         if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("buffs") end
                     end },
@@ -758,7 +758,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Always Show Buffs, Now Per-Bar",
                 desc  = "Always Show Buffs is now a per-bar toggle, so each buff bar can independently keep its tracked buffs on screen even when they are off cooldown, with its own option to grey out the inactive ones.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Icon Display", highlight = "Always Show Buffs",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Always Show Buffs",
                     preSelect = function()
                         if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("buffs") end
                     end },
@@ -797,13 +797,13 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Customizable Pixel Glow",
                 desc  = "CD and Utility bars get a Pixel Glow Thickness slider plus a cog for Lines and Speed, and the Buff Glow's Pixel Glow gets a matching Lines, Thickness, and Speed cog.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Icon Display", highlight = "Pixel Glow Thickness" },
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Pixel Glow Thickness" },
             },
             {
                 module = "Cooldown Manager",
                 title = "Charge & Stack Text Positioning",
                 desc  = "Place the charge or stack count in any corner or the center, and preset potions and healthstones now show a sample count in the preview.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Icon Display", highlight = "Charge/Stack Size" },
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Charge/Stack Size" },
             },
             {
                 module = "Raid Frames",
@@ -849,7 +849,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Group Tracking Bars",
                 desc  = "Pick which tracking bars chain together and share width and height, with a per-bar checklist.",
-                nav   = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "Bar Grouping", highlight = "Group Tracking" },
+                nav   = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "BAR GROUPING", highlight = "Group Tracking" },
             },
             {
                 module = "Nameplates",
@@ -863,7 +863,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Bloodlust & Heroism Bars",
                 desc  = "Add Bloodlust or Heroism to a Custom Auras bar as a self-timed 40-second icon.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Bar Layout", highlight = "" },
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "BAR LAYOUT", highlight = "" },
             },
             {
                 module = "Nameplates",
@@ -970,7 +970,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Cooldown Manager",
                 title = "Hide Items if Missing",
                 desc  = "Hide a bar's consumables entirely when you have none, instead of dimming them.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "Extras", highlight = "Hide Items if Missing" },
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "EXTRAS", highlight = "Hide Items if Missing" },
             },
             {
                 module = "Resource Bars",
@@ -1699,18 +1699,18 @@ initFrame:SetScript("OnEvent", function(self)
             -- who booted the wrong language can always read and change it.
             local langValues = {
                 _noLoc = true,
-                ["auto"] = { text = "Automatic (Client)" },
+                ["auto"] = { text = EllesmereUI.L("Automatic (Client)") },
                 ["enUS"] = { text = "English" },
                 ["deDE"] = { text = "Deutsch" },
-                ["frFR"] = { text = "Francais" },
-                ["esES"] = { text = "Espanol (EU)" },
-                ["esMX"] = { text = "Espanol (LatAm)" },
+                ["frFR"] = { text = "Français" },
+                ["esES"] = { text = "Español (EU)" },
+                ["esMX"] = { text = "Español (LatAm)" },
                 ["itIT"] = { text = "Italiano" },
-                ["ptBR"] = { text = "Portugues (BR)" },
-                ["ruRU"] = { text = "Russian" },
-                ["koKR"] = { text = "Korean" },
-                ["zhCN"] = { text = "Chinese (Simplified)" },
-                ["zhTW"] = { text = "Chinese (Traditional)" },
+                ["ptBR"] = { text = "Português (BR)" },
+                ["ruRU"] = { text = "Русский" },
+                ["koKR"] = { text = "한국어" },
+                ["zhCN"] = { text = "简体中文" },
+                ["zhTW"] = { text = "繁體中文" },
             }
             local langOrder = { "auto", "enUS", "deDE", "frFR", "esES", "esMX", "itIT", "ptBR", "ruRU", "koKR", "zhCN", "zhTW" }
 
@@ -2625,10 +2625,10 @@ initFrame:SetScript("OnEvent", function(self)
                 local names = {}
                 for i, me in ipairs(moduleEntries) do
                     if selectedModuleMap[i] then
-                        names[#names + 1] = me.display
+                        names[#names + 1] = EllesmereUI.L(me.display)
                     end
                 end
-                if #names == 0 then return "Select Module" end
+                if #names == 0 then return EllesmereUI.L("Select Module") end
                 return table.concat(names, ", ")
             end
 
@@ -2821,7 +2821,7 @@ initFrame:SetScript("OnEvent", function(self)
                 lbl2:SetPoint("RIGHT", item, "RIGHT", -8, 0)
                 lbl2:SetJustifyH("LEFT")
                 lbl2:SetWordWrap(false)
-                lbl2:SetText(me.display)
+                lbl2:SetText(EllesmereUI.L(me.display))
 
                 item:SetScript("OnClick", function()
                     selectedModuleMap[i] = not selectedModuleMap[i]
@@ -3013,7 +3013,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Use W:DualRow for the standard label-left / dropdown-right layout
                     local dualRow, dualH
                     dualRow, dualH = W:DualRow(listContainer, -totalH,
-                        { type = "dropdown", text = entry.display .. " Font",
+                        { type = "dropdown", text = EllesmereUI.L(entry.display) .. EllesmereUI.L(" Font"),
                           values = mfFontValues, order = mfFontOrder,
                           getValue = function()
                               local fdb = EllesmereUI.GetFontsDB()
@@ -3029,7 +3029,7 @@ initFrame:SetScript("OnEvent", function(self)
                               end
                               FontReload()
                           end },
-                        { type = "dropdown", text = entry.display .. " Outline",
+                        { type = "dropdown", text = EllesmereUI.L(entry.display) .. EllesmereUI.L(" Outline"),
                           values = outlineValues, order = outlineOrder,
                           getValue = function()
                               local fdb = EllesmereUI.GetFontsDB()
@@ -3111,7 +3111,7 @@ initFrame:SetScript("OnEvent", function(self)
             local lbl = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]) or CLASS_LABELS[token]
             local def = CLASS_COLOR_MAP[token] or { r = 1, g = 1, b = 1 }
             classItems[#classItems + 1] = {
-                label = lbl,
+                label = EllesmereUI.L(lbl),
                 classToken = token,
                 getColor = function()
                     local db = GetCustomColorsDB()
@@ -3149,7 +3149,7 @@ initFrame:SetScript("OnEvent", function(self)
             local lbl = _G[pk] or POWER_LABELS[pk] or pk
             local def = DEFAULT_POWER_COLORS[pk] or { r = 1, g = 1, b = 1 }
             powerItems[#powerItems + 1] = {
-                label = lbl,
+                label = EllesmereUI.L(lbl),
                 classToken = nil,
                 getColor = function()
                     local db = GetCustomColorsDB()
@@ -3430,7 +3430,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local function FormatKey(key)
-            if not key then return "Not Bound" end
+            if not key then return EllesmereUI.L("Not Bound") end
             local parts = {}
             for mod in key:gmatch("(%u+)%-") do
                 parts[#parts + 1] = mod:sub(1, 1) .. mod:sub(2):lower()
@@ -4118,7 +4118,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local names = {}
                             for f in pairs(members) do
                                 if f ~= item.canon then
-                                    names[#names + 1] = (CANON_DISPLAY[f] or f)
+                                    names[#names + 1] = EllesmereUI.L(CANON_DISPLAY[f] or f)
                                 end
                             end
                             if #names > 0 then
@@ -4589,7 +4589,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local lbl = EllesmereUI.MakeFont(btn, 12, nil, EG.r, EG.g, EG.b)
                 lbl:SetAlpha(0.7)
                 lbl:SetPoint("CENTER")
-                lbl:SetText(text)
+                lbl:SetText(EllesmereUI.L(text))
                 local prog, target = 0, 0
                 local FADE = 0.1
                 local lerp = EllesmereUI.lerp
@@ -5123,14 +5123,14 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Point(titleFs, "RIGHT", card, "RIGHT", -14, 0)
                 titleFs:SetJustifyH("LEFT")
                 titleFs:SetWordWrap(false)
-                titleFs:SetText(cardTitle)
+                titleFs:SetText(EllesmereUI.L(cardTitle))
 
                 local descFs = EllesmereUI.MakeFont(card, 11, nil, 1, 1, 1, 0.35)
                 PP.Point(descFs, "TOPLEFT", titleFs, "BOTTOMLEFT", 0, -4)
                 PP.Point(descFs, "RIGHT", card, "RIGHT", -14, 0)
                 descFs:SetJustifyH("LEFT")
                 descFs:SetWordWrap(false)
-                descFs:SetText(cardDesc)
+                descFs:SetText(EllesmereUI.L(cardDesc))
 
                 card:SetScript("OnEnter", function()
                     bg:SetColorTexture(0.11, 0.13, 0.15, 0.50)
@@ -5460,12 +5460,12 @@ initFrame:SetScript("OnEvent", function(self)
                                         newName = newName and strtrim(newName) or ""
                                         if newName == "" or newName == capName then return end
                                         if newName == "Default" then
-                                            print("|cffff6060[EllesmereUI]|r Cannot rename to \"Default\".")
+                                            print(EllesmereUI.L("|EllesmereUI]|r Cannot rename to \"Default\"."))
                                             return
                                         end
                                         local _, profs = EllesmereUI.GetProfileList()
                                         if profs and profs[newName] then
-                                            print("|cffff6060[EllesmereUI]|r A profile named \"" .. newName .. "\" already exists.")
+                                            print(EllesmereUI.Lf("|cffff6060[EllesmereUI]|r A profile named \"%1$s\" already exists.", newName))
                                             return
                                         end
                                         EllesmereUI.RenameProfile(capName, newName)
@@ -5968,7 +5968,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local names = {}
                             for f in pairs(members) do
                                 if f ~= item.folder then
-                                    names[#names + 1] = (FOLDER_DISPLAY[f] or f)
+                                    names[#names + 1] = (EllesmereUI.L(FOLDER_DISPLAY[f] or f))
                                 end
                             end
                             if #names > 0 then
