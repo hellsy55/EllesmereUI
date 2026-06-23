@@ -234,12 +234,13 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- TEMP: Reskin LFG Menu toggle is commented out until the backend is
-        -- wired up. DO NOT DELETE -- re-enable by removing the --[[ / --]] markers.
+        -- TEMP DISABLED: Group Finder reskin + QoL toggles. The feature file is
+        -- also commented out of EllesmereUIBlizzardSkin.toc. Revert both by
+        -- removing the --[[ and --]] markers here and uncommenting the TOC line.
         --[[
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Reskin LFG Menu",
-              tooltip="Reskins the Group Finder / LFG window with the EUI dark style.",
+              tooltip="Reskins the Group Finder / Premade Groups window with the EUI dark style.",
               getValue=function()
                   if not EllesmereUIDB then return false end
                   -- Seed the default ONCE on first read: enabled only if both
@@ -254,6 +255,38 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.reskinLFGMenu = v
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Changing the Group Finder reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+              end },
+            { type="toggle", text="Auto-Refresh Group Search",
+              tooltip="Automatically refreshes the Premade Groups list every few seconds while you are browsing, so newly posted groups appear without clicking Refresh.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lfgAutoRefresh == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lfgAutoRefresh = v
+                  if EllesmereUI._GroupFinder_RefreshQoL then EllesmereUI._GroupFinder_RefreshQoL() end
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Remember Sign-Up Roles",
+              tooltip="Remembers the Tank/Healer/DPS roles you last applied with and restores them the next time you sign up to a premade group (limited to roles your current spec can fill).",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lfgRememberRoles == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lfgRememberRoles = v
+                  if EllesmereUI._GroupFinder_RefreshQoL then EllesmereUI._GroupFinder_RefreshQoL() end
               end },
             { type="label", text="" }
         );  y = y - h

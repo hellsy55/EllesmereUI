@@ -1345,27 +1345,52 @@ initFrame:SetScript("OnEvent", function(self)
             SetPVFont(castParts.timerFS, fontPath, ctmSz, npOutline)
             castParts.timerFS:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
             castParts.nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
-            castParts.nameFS:ClearAllPoints()
-            castParts.nameFS:SetPoint("LEFT", cast, "LEFT", 5 + cnOX, cnOY)
-            castParts.timerFS:ClearAllPoints()
-            castParts.timerFS:SetPoint("RIGHT", cast, "RIGHT", -3 + tmOX, tmOY)
             local dbRef = DB()
             local pvShowTimer = defaults.showCastTimer
             if dbRef and dbRef.showCastTimer ~= nil then pvShowTimer = dbRef.showCastTimer end
+            local pvNameSide   = (dbRef and dbRef.castNameSide)   or defaults.castNameSide
+            local pvTargetSide = (dbRef and dbRef.castTargetSide) or defaults.castTargetSide
+            local pvTimerSide  = (dbRef and dbRef.castTimerSide)  or defaults.castTimerSide
+            local pvTimerW = ctmSz * 2.2
+            local pvTextW = barW * 0.42
+            -- Spell name
+            castParts.nameFS:ClearAllPoints()
+            if pvNameSide == "none" then
+                castParts.nameFS:Hide()
+            else
+                local pt, xb, jh = ns.GetCastTextAnchor(pvNameSide, pvShowTimer and pvTimerSide == pvNameSide, pvTimerW, false)
+                castParts.nameFS:SetWidth(pvTextW)
+                castParts.nameFS:SetJustifyH(jh)
+                castParts.nameFS:SetPoint(pt, cast, pt, xb + cnOX, cnOY)
+                castParts.nameFS:Show()
+            end
+            -- Spell target
+            castParts.targetFS:ClearAllPoints()
+            if pvTargetSide == "none" then
+                castParts.targetFS:Hide()
+            else
+                local pt, xb, jh = ns.GetCastTextAnchor(pvTargetSide, pvShowTimer and pvTimerSide == pvTargetSide, pvTimerW, false)
+                castParts.targetFS:SetWidth(pvTextW)
+                castParts.targetFS:SetJustifyH(jh)
+                castParts.targetFS:SetPoint(pt, cast, pt, xb + ctOX, ctOY)
+                castParts.targetFS:Show()
+            end
+            -- Cast timer (side only "left"/"right"; visibility via showCastTimer)
+            castParts.timerFS:ClearAllPoints()
             if pvShowTimer then
+                local tpt, txb, tjh = ns.GetCastTextAnchor(pvTimerSide, false, pvTimerW, true)
+                castParts.timerFS:SetWidth(pvTimerW)
+                castParts.timerFS:SetJustifyH(tjh)
+                castParts.timerFS:SetPoint(tpt, cast, tpt, txb + tmOX, tmOY)
                 castParts.timerFS:Show()
-                -- Anchor target to a fixed offset from cast bar edge (matching
-                -- the timer's base reservation) so timer X/Y offsets don't
-                -- drag the target along. At default offsets (0,0) the result
-                -- is identical to anchoring directly to the timer fontstring.
-                local pvTimerW = ctmSz * 2.2
-                castParts.targetFS:ClearAllPoints()
-                castParts.targetFS:SetPoint("RIGHT", cast, "RIGHT", -3 - pvTimerW + ctOX, ctOY)
             else
                 castParts.timerFS:Hide()
-                castParts.targetFS:ClearAllPoints()
-                castParts.targetFS:SetPoint("RIGHT", cast, "RIGHT", -3 + ctOX, ctOY)
             end
+            -- Force the new justify onto already-rendered text (a JustifyH change
+            -- alone does not re-flow it; only a fresh build does). See ns.ReflowFontString.
+            ns.ReflowFontString(castParts.nameFS)
+            ns.ReflowFontString(castParts.targetFS)
+            ns.ReflowFontString(castParts.timerFS)
             local useClassColor = defaults.castTargetClassColor
             if dbRef and dbRef.castTargetClassColor ~= nil then useClassColor = dbRef.castTargetClassColor end
             if useClassColor then
@@ -1381,14 +1406,8 @@ initFrame:SetScript("OnEvent", function(self)
                 castParts.targetFS:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
             end
 
-            -- Dynamic cast name width: fill space minus target text and timer minus gaps
-            local rightTextW = castParts.targetFS:GetUnboundedStringWidth()
-            if pvShowTimer then
-                rightTextW = rightTextW + 4 + castParts.timerFS:GetUnboundedStringWidth()
-            end
-            local castNameMaxW = barW - 5 - 3 - rightTextW - 5
-            if castNameMaxW < 20 then castNameMaxW = 20 end
-            castParts.nameFS:SetWidth(castNameMaxW)
+            -- Name/target/timer widths are set per-element above (barW * 0.42 for
+            -- text, the reserved slot for the timer) to mirror the in-game layout.
 
             -- Helper: position a single preview frame into a slot
             local function PlaceInSlot(frame, slotName, index, count, iconW, iconH, slotSpacing, sxOff, syOff)
@@ -5225,81 +5244,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Row 3: Cast Timer toggle | Cast Timer size + inline color swatch
-        local castTimerRow
-        castTimerRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Cast Timer",
-              getValue=function()
-                local db = DB()
-                if db and db.showCastTimer ~= nil then return db.showCastTimer end
-                return defaults.showCastTimer
-              end,
-              setValue=function(v)
-                DB().showCastTimer = v
-                ns.RefreshAllSettings()
-                UpdatePreview()
-                EllesmereUI:RefreshPage()
-              end },
-            { type="slider", text="Cast Timer", min=6, max=20, step=1,
-              getValue=function() return DBVal("castTimerSize") or defaults.castTimerSize end,
-              setValue=function(v)
-                DB().castTimerSize = v
-                for _, plate in pairs(plates) do
-                    if plate.castTimer then SetFSFont(plate.castTimer, v, GetNPOutline()) end
-                end
-                UpdatePreview()
-              end });  y = y - h
-        -- Inline color swatch on Cast Timer size (right region)
-        do
-            local rightRgn = castTimerRow._rightRegion
-            local ctColorGet = function()
-                local c = (DB() and DB().castTimerColor) or defaults.castTimerColor
-                return c.r, c.g, c.b
-            end
-            local ctColorSet = function(r, g, b)
-                DB().castTimerColor = { r = r, g = g, b = b }
-                for _, plate in pairs(plates) do
-                    if plate.castTimer then plate.castTimer:SetTextColor(r, g, b, 1) end
-                end
-                UpdatePreview()
-            end
-            local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
-            PP.Point(ctSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
-            EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
-
-            -- Inline cog for Cast Timer X/Y offset
-            local tmCogBtn = CreateFrame("Button", nil, rightRgn)
-            tmCogBtn:SetSize(26, 26)
-            tmCogBtn:SetPoint("RIGHT", ctSwatch, "LEFT", -6, 0)
-            tmCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
-            tmCogBtn:SetAlpha(0.4)
-            local tmCogTex = tmCogBtn:CreateTexture(nil, "OVERLAY")
-            tmCogTex:SetAllPoints()
-            tmCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            tmCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            tmCogBtn:SetScript("OnLeave", function(self)
-                EllesmereUI.HideWidgetTooltip()
-                if cogPopupOwner ~= self then self:SetAlpha(0.4) end
-            end)
-            tmCogBtn:SetScript("OnClick", function(self)
-                ShowCogPopup(self, {
-                    title = "Cast Timer Settings",
-                    xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
-                    xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
-                    ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
-                    sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
-                    sizeFirst = true,
-                })
-            end)
-            EllesmereUI.RegisterWidgetRefresh(function()
-                tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
-            end)
-        end
-
-        -- Row 4: Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
+        -- Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
         local castBgRow
         castBgRow, h = W:DualRow(parent, y,
             { type="slider", text="Cast Background", min=0, max=100, step=1,
@@ -5357,6 +5302,85 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(cbSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
             rightRgn._lastInline = cbSwatch
             EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
+        end
+
+        -- Cast Timer: position dropdown (None / Right / Left), styled like the
+        -- duration dropdowns. "None" hides the timer (showCastTimer = false);
+        -- Right/Left choose the side -- which reserves space and pushes whichever
+        -- cast text shares that side. Size / X / Y live in the inline cog.
+        local castTimerRow
+        castTimerRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Cast Timer",
+              values={ none = "None", right = "Right", left = "Left" },
+              order={ "none", "right", "left" },
+              getValue=function()
+                local db = DB()
+                local shown = defaults.showCastTimer
+                if db and db.showCastTimer ~= nil then shown = db.showCastTimer end
+                if not shown then return "none" end
+                return (db and db.castTimerSide) or defaults.castTimerSide
+              end,
+              setValue=function(v)
+                if v == "none" then
+                    DB().showCastTimer = false
+                else
+                    DB().showCastTimer = true
+                    DB().castTimerSide = v
+                end
+                ns.RefreshAllSettings()
+                UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" });  y = y - h
+        do
+            local leftRgn = castTimerRow._leftRegion
+            local ctColorGet = function()
+                local c = (DB() and DB().castTimerColor) or defaults.castTimerColor
+                return c.r, c.g, c.b
+            end
+            local ctColorSet = function(r, g, b)
+                DB().castTimerColor = { r = r, g = g, b = b }
+                for _, plate in pairs(plates) do
+                    if plate.castTimer then plate.castTimer:SetTextColor(r, g, b, 1) end
+                end
+                UpdatePreview()
+            end
+            local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
+            PP.Point(ctSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            leftRgn._lastInline = ctSwatch
+            EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
+
+            -- Inline cog for Cast Timer Size / X / Y
+            local tmCogBtn = CreateFrame("Button", nil, leftRgn)
+            tmCogBtn:SetSize(26, 26)
+            tmCogBtn:SetPoint("RIGHT", ctSwatch, "LEFT", -6, 0)
+            leftRgn._lastInline = tmCogBtn
+            tmCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            tmCogBtn:SetAlpha(0.4)
+            local tmCogTex = tmCogBtn:CreateTexture(nil, "OVERLAY")
+            tmCogTex:SetAllPoints()
+            tmCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            tmCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            tmCogBtn:SetScript("OnLeave", function(self)
+                EllesmereUI.HideWidgetTooltip()
+                if cogPopupOwner ~= self then self:SetAlpha(0.4) end
+            end)
+            tmCogBtn:SetScript("OnClick", function(self)
+                ShowCogPopup(self, {
+                    title = "Cast Timer Settings",
+                    xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
+                    xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
+                    ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
+                    sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                    sizeFirst = true,
+                })
+            end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
+            end)
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -6407,26 +6431,37 @@ initFrame:SetScript("OnEvent", function(self)
             auraStackCogBtn:SetScript("OnClick", function(self) auraStackCogShow(self) end)
         end
 
-        -- Spell Name | Spell Target
+        -- Spell Name | Spell Target -- position dropdowns (None / Left / Right /
+        -- Center) styled like the duration dropdowns. The name and target may not
+        -- share a side: setting one onto the side the other occupies bumps the
+        -- other to None. Size / X / Y live in each row's inline cog.
+        local castTextPosValues = { none = "None", left = "Left", right = "Right", center = "Center" }
+        local castTextPosOrder = { "none", "left", "right", "center" }
         local spellNameRow
         spellNameRow, h = W:DualRow(parent, y,
-            { type="slider", text="Spell Name", min=6, max=16, step=1,
-              getValue=function() return DBVal("castNameSize") or defaults.castNameSize end,
+            { type="dropdown", text="Spell Name", values=castTextPosValues, order=castTextPosOrder,
+              getValue=function() return (DB() and DB().castNameSide) or defaults.castNameSide end,
               setValue=function(v)
-                DB().castNameSize = v
-                for _, plate in pairs(plates) do
-                    if plate.castName then SetFSFont(plate.castName, v, GetNPOutline()) end
+                DB().castNameSide = v
+                if v ~= "none" then
+                    local ts = (DB() and DB().castTargetSide) or defaults.castTargetSide
+                    if ts == v then DB().castTargetSide = "none" end
                 end
+                ns.RefreshAllSettings()
                 UpdatePreview()
+                EllesmereUI:RefreshPage()
               end },
-            { type="slider", text="Spell Target", min=6, max=16, step=1,
-              getValue=function() return DBVal("castTargetSize") or defaults.castTargetSize end,
+            { type="dropdown", text="Spell Target", values=castTextPosValues, order=castTextPosOrder,
+              getValue=function() return (DB() and DB().castTargetSide) or defaults.castTargetSide end,
               setValue=function(v)
-                DB().castTargetSize = v
-                for _, plate in pairs(plates) do
-                    if plate.castTarget then SetFSFont(plate.castTarget, v, GetNPOutline()) end
+                DB().castTargetSide = v
+                if v ~= "none" then
+                    local nss = (DB() and DB().castNameSide) or defaults.castNameSide
+                    if nss == v then DB().castNameSide = "none" end
                 end
+                ns.RefreshAllSettings()
                 UpdatePreview()
+                EllesmereUI:RefreshPage()
               end })
         do
             -- LEFT: Spell Name inline color swatch
@@ -6927,11 +6962,11 @@ initFrame:SetScript("OnEvent", function(self)
             end
             -- Cast spell name and target text (above the cast bar overlay)
             local castTextLevel = (castOverlayLevel or 30) + 5
-            if pv._castNameFS then
+            if pv._castNameFS and pv._castNameFS:IsShown() then
                 local ov = CreateHitOverlay(pv._castNameFS, "castName", true, castTextLevel)
                 textOverlays[#textOverlays + 1] = ov
             end
-            if pv._castTargetFS then
+            if pv._castTargetFS and pv._castTargetFS:IsShown() then
                 local ov = CreateHitOverlay(pv._castTargetFS, "castTarget", true, castTextLevel)
                 textOverlays[#textOverlays + 1] = ov
             end
@@ -7410,39 +7445,52 @@ initFrame:SetScript("OnEvent", function(self)
             local cts = math.min(DBVal("castTargetSize") or defaults.castTargetSize, 13)
             local cnc = (DB() and DB().castNameColor) or defaults.castNameColor
 
-            local nameFS = cast:CreateFontString(nil, "OVERLAY")
-            SetPVFont(nameFS, fontPath, cns, GetNPOptOutline())
-            nameFS:SetPoint("LEFT", cast, "LEFT", 5, 0)
-            nameFS:SetJustifyH("LEFT")
-            nameFS:SetWordWrap(false)
-            nameFS:SetMaxLines(1)
-            nameFS:SetText(isHalf and EllesmereUI.L("Spell Name") or EllesmereUI.L("Spell Name"))
-            nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
-
-            local colShowTimer = defaults.showCastTimer
             local dbRef = DB()
+            local colShowTimer = defaults.showCastTimer
             if dbRef and dbRef.showCastTimer ~= nil then colShowTimer = dbRef.showCastTimer end
             local colCtmSz = math.min((dbRef and dbRef.castTimerSize) or defaults.castTimerSize, 13)
             local colCtmC = (dbRef and dbRef.castTimerColor) or defaults.castTimerColor
+            local colNameSide   = (dbRef and dbRef.castNameSide)   or defaults.castNameSide
+            local colTargetSide = (dbRef and dbRef.castTargetSide) or defaults.castTargetSide
+            local colTimerSide  = (dbRef and dbRef.castTimerSide)  or defaults.castTimerSide
+            local colTimerW = colCtmSz * 2.2
+            local colTextW = BAR_W * 0.42
 
+            -- Spell name
+            local nameFS = cast:CreateFontString(nil, "OVERLAY")
+            SetPVFont(nameFS, fontPath, cns, GetNPOptOutline())
+            nameFS:SetWordWrap(false)
+            nameFS:SetMaxLines(1)
+            nameFS:SetText(EllesmereUI.L("Spell Name"))
+            nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
+            if colNameSide == "none" then
+                nameFS:Hide()
+            else
+                local pt, xb, jh = ns.GetCastTextAnchor(colNameSide, colShowTimer and colTimerSide == colNameSide, colTimerW, false)
+                nameFS:SetWidth(colTextW)
+                nameFS:SetJustifyH(jh)
+                nameFS:SetPoint(pt, cast, pt, xb, 0)
+            end
+
+            -- Cast timer (side only "left"/"right"; visibility via showCastTimer)
             local timerFS = cast:CreateFontString(nil, "OVERLAY")
             SetPVFont(timerFS, fontPath, colCtmSz, GetNPOptOutline())
-            timerFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
-            timerFS:SetJustifyH("RIGHT")
             timerFS:SetWordWrap(false)
             timerFS:SetMaxLines(1)
             timerFS:SetTextColor(colCtmC.r, colCtmC.g, colCtmC.b, 1)
             timerFS:SetText("2.3")
-            if not colShowTimer then timerFS:Hide() end
+            if colShowTimer then
+                local tpt, txb, tjh = ns.GetCastTextAnchor(colTimerSide, false, colTimerW, true)
+                timerFS:SetWidth(colTimerW)
+                timerFS:SetJustifyH(tjh)
+                timerFS:SetPoint(tpt, cast, tpt, txb, 0)
+            else
+                timerFS:Hide()
+            end
 
+            -- Spell target
             local targetFS = cast:CreateFontString(nil, "OVERLAY")
             SetPVFont(targetFS, fontPath, cts, GetNPOptOutline())
-            if colShowTimer then
-                targetFS:SetPoint("RIGHT", timerFS, "LEFT", -4, 0)
-            else
-                targetFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
-            end
-            targetFS:SetJustifyH("RIGHT")
             targetFS:SetWordWrap(false)
             targetFS:SetMaxLines(1)
             targetFS:SetText(isHalf and (UnitName("player") or EllesmereUI.L("Target")) or (UnitName("player") or EllesmereUI.L("Spell Target")))
@@ -7460,15 +7508,14 @@ initFrame:SetScript("OnEvent", function(self)
                 local ctc = (dbRef and dbRef.castTargetColor) or defaults.castTargetColor
                 targetFS:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
             end
-
-            -- Dynamic name width: fill available space minus right-side text minus gaps
-            local rightW = targetFS:GetUnboundedStringWidth()
-            if colShowTimer then
-                rightW = rightW + 4 + timerFS:GetUnboundedStringWidth()
+            if colTargetSide == "none" then
+                targetFS:Hide()
+            else
+                local pt, xb, jh = ns.GetCastTextAnchor(colTargetSide, colShowTimer and colTimerSide == colTargetSide, colTimerW, false)
+                targetFS:SetWidth(colTextW)
+                targetFS:SetJustifyH(jh)
+                targetFS:SetPoint(pt, cast, pt, xb, 0)
             end
-            local nameMaxW = BAR_W - 5 - 3 - rightW - 5
-            if nameMaxW < 20 then nameMaxW = 20 end
-            nameFS:SetWidth(nameMaxW)
 
             -- Shield for uninterruptible
             if colorType == "castLocked" then

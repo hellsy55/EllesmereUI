@@ -1211,6 +1211,10 @@ initFrame:SetScript("OnEvent", function(self)
                       rawTooltip = true,
                       get=function() return SVal("absorbEdgeMode", "overlay") end,
                       set=function(v) SSet("absorbEdgeMode", v) end },
+                    { type="toggle", label="Show Overshield",
+                      tooltip="Show the part of an absorb that exceeds your empty health and backfills over your current health. When off, absorbs only fill the empty part of the health bar; on Default Blizz Frames the glow line stays pinned at the right edge.",
+                      get=function() return SVal("showOvershield", true) end,
+                      set=function(v) SSet("showOvershield", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)

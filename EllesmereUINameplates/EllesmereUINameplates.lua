@@ -296,12 +296,20 @@ local defaults = {
     castNameColor = { r = 1, g = 1, b = 1 },
     castNameOffsetX = 0,
     castNameOffsetY = 0,
+    -- Side the spell name occupies on the cast bar text line: "left" | "right" | "center" | "none".
+    -- Default "left" reproduces the historical fixed layout.
+    castNameSide = "left",
     castTargetSize = 10,
     castTargetClassColor = true,
     castTargetColor = { r = 1, g = 1, b = 1 },
     castTargetOffsetX = 0,
     castTargetOffsetY = 0,
+    -- Side the spell target occupies: "left" | "right" | "center" | "none". Default "right".
+    castTargetSide = "right",
     showCastTimer = true,
+    -- Side the cast timer occupies when shown: "left" | "right". Visibility stays governed
+    -- by showCastTimer (the dropdown's "None" option simply sets showCastTimer = false).
+    castTimerSide = "right",
     castTimerSize = 10,
     castTimerColor = { r = 1, g = 1, b = 1 },
     castTimerOffsetX = 0,
@@ -4510,6 +4518,45 @@ ns._pandemicTickFrame:SetScript("OnUpdate", function(self, elapsed)
 end)
 ns._pandemicTickFrame:Hide()  -- start hidden; shown when pandemic glows activate
 
+-- Shared cast-bar text anchoring. The cast bar text line holds three elements --
+-- spell name, spell target, cast timer -- each assigned to a side ("left" |
+-- "right" | "center"). The cast timer reserves a fixed slot of width on its side;
+-- a non-center element sharing the timer's side is shifted inward by that width to
+-- make room (mirrors how the target has always been pushed left by the timer).
+-- Center elements anchor to the bar center and are never pushed.
+--
+--   side    : "left" | "right" | "center"
+--   pushed  : true when the timer occupies this same side and this element must move inward
+--   reserve : timer reserved width (only consumed when pushed)
+--   isTimer : the timer uses slightly tighter base insets than text
+-- Returns: point (anchor), xOff (base, before the user X offset), justify
+function ns.GetCastTextAnchor(side, pushed, reserve, isTimer)
+    if side == "center" then
+        return "CENTER", 0, "CENTER"
+    elseif side == "left" then
+        local base = isTimer and 3 or 5
+        if pushed then base = base + reserve end
+        return "LEFT", base, "LEFT"
+    else -- "right"
+        local base = -3
+        if pushed then base = base - reserve end
+        return "RIGHT", base, "RIGHT"
+    end
+end
+
+-- WoW does not visually re-lay-out a FontString when only its SetJustifyH changes;
+-- a fresh build does, which is why a /reload looked right but an in-place side
+-- change did not. Clearing then re-setting the text forces the new alignment to
+-- take effect, and it MUST be a real change -- re-setting the identical string is
+-- deduped and skips the re-layout. (Same trick as the raid frame name text.)
+-- GetText may return a secret (cast name/target); SetText accepts secrets and the
+-- value is never inspected, so the round-trip is safe.
+function ns.ReflowFontString(fs)
+    local t = fs:GetText()
+    fs:SetText("")
+    fs:SetText(t or "")
+end
+
 local NameplateFrame = {}
 
 -- Appearance generation: bumped by RefreshAllSettings so plates re-apply
@@ -4561,26 +4608,48 @@ function NameplateFrame:ApplyAppearance()
     SetFSFont(self.castName, cns, GetNPOutline())
     SetFSFont(self.castTarget, cts, GetNPOutline())
     SetFSFont(self.castTimer, ctmSz, GetNPOutline())
-    self.castName:SetJustifyH("LEFT")
-    self.castTarget:SetJustifyH("RIGHT")
-    self.castTimer:SetJustifyH("RIGHT")
     self.castTimer:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
     local showTimer = defaults.showCastTimer
     if p and p.showCastTimer ~= nil then showTimer = p.showCastTimer end
     self._showCastTimer = showTimer
+    local nameSide   = (p and p.castNameSide)   or defaults.castNameSide
+    local targetSide = (p and p.castTargetSide) or defaults.castTargetSide
+    local timerSide  = (p and p.castTimerSide)  or defaults.castTimerSide
     local castW = self.cast:GetWidth()
     local timerW = ctmSz * 2.2
     if castW and castW > 0 then
-        self.castName:SetWidth(castW * 0.42)
+        local textW = castW * 0.42
+        if nameSide ~= "none" then
+            local pt, xb, jh = ns.GetCastTextAnchor(nameSide, showTimer and timerSide == nameSide, timerW, false)
+            self.castName:SetWidth(textW)
+            self.castName:SetJustifyH(jh)
+            self.castName:ClearAllPoints()
+            self.castName:SetPoint(pt, self.cast, pt, xb + cnOX, cnOY)
+        end
+        if targetSide ~= "none" then
+            local pt, xb, jh = ns.GetCastTextAnchor(targetSide, showTimer and timerSide == targetSide, timerW, false)
+            self.castTarget:SetWidth(textW)
+            self.castTarget:SetJustifyH(jh)
+            self.castTarget:ClearAllPoints()
+            self.castTarget:SetPoint(pt, self.cast, pt, xb + ctOX, ctOY)
+        end
+        -- Timer side is only "left"/"right"; visibility stays governed by showTimer.
+        local tpt, txb, tjh = ns.GetCastTextAnchor(timerSide, false, timerW, true)
         self.castTimer:SetWidth(timerW)
-        self.castTarget:SetWidth(castW * 0.42)
-        self.castName:ClearAllPoints()
-        self.castName:SetPoint("LEFT", self.cast, "LEFT", 5 + cnOX, cnOY)
-        self.castTarget:ClearAllPoints()
-        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW + ctOX, ctOY)
+        self.castTimer:SetJustifyH(tjh)
         self.castTimer:ClearAllPoints()
-        self.castTimer:SetPoint("RIGHT", self.cast, "RIGHT", -3 + tmOX, tmOY)
+        self.castTimer:SetPoint(tpt, self.cast, tpt, txb + tmOX, tmOY)
     end
+    -- Base visibility by side (UpdateCast refines the target per cast on hasTarget).
+    self.castName:SetShown(nameSide ~= "none")
+    self.castTarget:SetShown(targetSide ~= "none")
+    self.castTimer:SetShown(showTimer)
+    -- Force the new justify to take effect on text that is already rendered (e.g.
+    -- changing the side while a plate is mid-cast). A fresh cast re-flows on its own
+    -- because UpdateCast sets the text after this, but a live setting change does not.
+    ns.ReflowFontString(self.castName)
+    ns.ReflowFontString(self.castTarget)
+    ns.ReflowFontString(self.castTimer)
     self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
     local function GetAuraDurationCfg(kind)
         local sizeKey = kind .. "DurationTextSize"
@@ -6547,7 +6616,10 @@ function NameplateFrame:UpdateCast()
             self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
         end
 
-        self.castTarget:SetShown(hasTarget)
+        local nameSide   = db.castNameSide   or defaults.castNameSide
+        local targetSide = db.castTargetSide or defaults.castTargetSide
+        self.castName:SetShown(nameSide ~= "none")
+        self.castTarget:SetShown(hasTarget and targetSide ~= "none")
         self.castTimer:SetShown(self._showCastTimer)
 
         if type(kickProtected) == "nil" then
@@ -7886,6 +7958,9 @@ do
     ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextX"
     ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextY"
     ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextColor"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "castNameSide"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "castTargetSide"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "castTimerSide"
     ns._appendDisplayPresetKeys(ns._displayPresetKeys)
 
     -- Also handle spec changes that happen before the UI is ever opened

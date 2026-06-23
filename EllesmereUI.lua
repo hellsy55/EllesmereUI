@@ -6360,6 +6360,11 @@ local function CreateMainFrame()
             local SYNC_HOVER_B = math.min(1, SYNC_ON_B * 1.25)
             local isGlobalOnly = EllesmereUI._syncGlobalOnly and EllesmereUI._syncGlobalOnly[info.folder]
             local function RefreshSyncState()
+                -- Hide the sync icon for disabled modules: an addon that isn't
+                -- loaded has no live settings to sync, so showing (and letting the
+                -- user click) its sync state is meaningless. Uses the same loaded
+                -- check as the power button so the two stay consistent.
+                if not IsAddonLoaded(info.folder) then syncBtn:Hide(); return end
                 -- Hide if only one profile exists
                 local profCount = 0
                 if EllesmereUIDB and EllesmereUIDB.profiles then
@@ -9130,7 +9135,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.8"
+EllesmereUI.VERSION = "8.2.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -734,11 +734,25 @@ qolFrame:SetScript("OnEvent", function(self)
 
         local function PatchedShow(self, resultID)
             if resultID then
-                local info = C_LFGList.GetSearchResultInfo(resultID)
-                if info then
-                    self.resultID   = resultID
-                    self.activityID = info.activityID or (info.activityIDs and info.activityIDs[1])
-                end
+                self.resultID = resultID
+                -- In Midnight the apply-phase search result is SECRET: activityID
+                -- can be a secret value and activityIDs is a secret table whose
+                -- indexing throws. Guard every read so we degrade to a nil
+                -- activityID rather than erroring out the whole sign-up dialog.
+                pcall(function()
+                    -- Degrade to nil up-front so a mid-read throw cannot leave a
+                    -- stale activityID from a previous dialog open.
+                    self.activityID = nil
+                    local info = C_LFGList.GetSearchResultInfo(resultID)
+                    if type(info) ~= "table" then return end
+                    local aid = info.activityID
+                    if issecretvalue(aid) then aid = nil end
+                    if aid == nil and info.activityIDs and not issecretvalue(info.activityIDs) then
+                        aid = info.activityIDs[1]
+                        if issecretvalue(aid) then aid = nil end
+                    end
+                    self.activityID = aid
+                end)
             end
             LFGListApplicationDialog_UpdateRoles(self)
             StaticPopupSpecial_Show(self)

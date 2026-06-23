@@ -5456,10 +5456,11 @@ initFrame:SetScript("OnEvent", function(self)
         pf.container:SetScale(_castBarPreviewScale * fitScale)
 
         pf.container:ClearAllPoints(); pf.container:SetPoint("CENTER", hdr, "CENTER", 0, 0)
-        -- Bar frame
+        -- Bar frame (sits beside the icon; iconOnRight puts the icon on the right)
+        local iconOnRight = hasIcon and cb.iconOnRight
         pf.barFrame:SetSize(w, h)
         pf.barFrame:ClearAllPoints()
-        pf.barFrame:SetPoint("LEFT", pf.container, "LEFT", iconW, 0)
+        pf.barFrame:SetPoint("LEFT", pf.container, "LEFT", iconOnRight and 0 or iconW, 0)
 
         -- Background
         local texKey = cb.texture
@@ -5525,22 +5526,37 @@ initFrame:SetScript("OnEvent", function(self)
             pf.spark:Hide()
         end
 
-        -- Icon: left side of container, full size
+        -- Icon: left or right side of container, full size
         do
             local iSize = Snap(h)
             pf.iconFrame:SetSize(iSize, iSize)
             pf.iconFrame:ClearAllPoints()
-            pf.iconFrame:SetPoint("TOPLEFT", pf.container, "TOPLEFT", 0, 0)
+            if iconOnRight then
+                pf.iconFrame:SetPoint("TOPRIGHT", pf.container, "TOPRIGHT", 0, 0)
+            else
+                pf.iconFrame:SetPoint("TOPLEFT", pf.container, "TOPLEFT", 0, 0)
+            end
             if hasIcon then pf.iconFrame:Show() else pf.iconFrame:Hide() end
         end
 
-        -- Timer text
+        -- Cast text side-aware layout (mirrors the live cast bar)
+        local cbTimerW   = (cb.timerSize or 11) * 2.2
+        local cbDurSide   = cb.timerSide or "right"
+        local cbSpellSide = cb.spellTextSide or "left"
+        local cbBarW = pf.bar:GetWidth() or 0
+        -- Timer / duration text
         if cb.showTimer then
             SetPVFont(pf.timerText, FONT_PATH, cb.timerSize or 11)
+            local pt, xb, jh = ns.GetCastTextAnchor(cbDurSide, false, cbTimerW)
             pf.timerText:ClearAllPoints()
-            pf.timerText:SetPoint("RIGHT", pf.bar, "RIGHT", -4 + (cb.timerX or 0), cb.timerY or 0)
-            local remaining = 3.0 * (1 - _castBarPreviewFill)
-            pf.timerText:SetText(string.format("%.1f", remaining))
+            pf.timerText:SetJustifyH(jh)
+            pf.timerText:SetPoint(pt, pf.bar, pt, xb + (cb.timerX or 0), cb.timerY or 0)
+            -- Preview total cast time is 3.0s; mirror the live "elapsed / total" mode.
+            if cb.showTotalDuration then
+                pf.timerText:SetText(string.format("%.1f / %.1f", 3.0 * _castBarPreviewFill, 3.0))
+            else
+                pf.timerText:SetText(string.format("%.1f", 3.0 * (1 - _castBarPreviewFill)))
+            end
             pf.timerText:Show()
         else
             pf.timerText:Hide()
@@ -5549,13 +5565,23 @@ initFrame:SetScript("OnEvent", function(self)
         -- Spell name text
         if cb.showSpellText then
             SetPVFont(pf.spellText, FONT_PATH, cb.spellTextSize or 11)
+            local pt, xb, jh = ns.GetCastTextAnchor(cbSpellSide, cb.showTimer and cbDurSide == cbSpellSide, cbTimerW)
             pf.spellText:ClearAllPoints()
-            pf.spellText:SetPoint("LEFT", pf.bar, "LEFT", 4 + (cb.spellTextX or 0), cb.spellTextY or 0)
+            pf.spellText:SetJustifyH(jh)
+            pf.spellText:SetPoint(pt, pf.bar, pt, xb + (cb.spellTextX or 0), cb.spellTextY or 0)
+            if cbSpellSide == "center" then
+                pf.spellText:SetWidth(cbBarW * 0.6)
+            elseif cbBarW > 0 then
+                pf.spellText:SetWidth(cbBarW - 8 - (cb.showTimer and cbTimerW or 0))
+            end
             pf.spellText:SetText(EllesmereUI.L("Spell Name"))
             pf.spellText:Show()
         else
             pf.spellText:Hide()
         end
+        -- Re-flow so a live JustifyH change takes effect on already-rendered text.
+        ns.ReflowFontString(pf.timerText)
+        ns.ReflowFontString(pf.spellText)
 
         -- Update header height: 80px preview + optional hint text
         local hintH = (_previewHintFS and _previewHintFS:IsShown()) and 35 or 0
@@ -5678,8 +5704,11 @@ initFrame:SetScript("OnEvent", function(self)
         timerText:SetPoint("RIGHT", bar, "RIGHT", -4 + (cb.timerX or 0), cb.timerY or 0)
         timerText:SetJustifyH("RIGHT")
         if cb.showTimer then
-            local remaining = 3.0 * (1 - _castBarPreviewFill)
-            timerText:SetText(string.format("%.1f", remaining))
+            if cb.showTotalDuration then
+                timerText:SetText(string.format("%.1f / %.1f", 3.0 * _castBarPreviewFill, 3.0))
+            else
+                timerText:SetText(string.format("%.1f", 3.0 * (1 - _castBarPreviewFill)))
+            end
         else
             timerText:Hide()
         end
@@ -5889,8 +5918,9 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 3: Show Spell Icon | Show Spark
-        _, h = W:DualRow(parent, y,
+        -- Row 3: Show Spell Icon (cog: Icon on Right) | Show Spark
+        local iconRow
+        iconRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Show Spell Icon",
               disabled = castOff,
               disabledTooltip = "Player Cast Bar",
@@ -5909,6 +5939,40 @@ initFrame:SetScript("OnEvent", function(self)
                   p.castBar.showSpark = v; RefreshCast()
               end }
         );  y = y - h
+        -- Inline cog on Show Spell Icon: Icon on Right
+        do
+            local rgn = iconRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Spell Icon Settings",
+                rows = {
+                    { type = "toggle", label = "Icon on Right",
+                      tooltip = "Attach the spell icon to the right of the cast bar instead of the left.",
+                      get = function() local p = DB(); return p and p.castBar.iconOnRight end,
+                      set = function(v)
+                          local p = DB(); if not p then return end
+                          p.castBar.iconOnRight = v; RefreshCast()
+                      end },
+                },
+            })
+            local cogBtn = MakeCogBtn(rgn, cogShow)
+            local cogDis = CreateFrame("Frame", nil, rgn)
+            cogDis:SetAllPoints(cogBtn)
+            cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
+            cogDis:EnableMouse(true)
+            cogDis:SetScript("OnEnter", function()
+                local p = DB()
+                local req = (p and not p.castBar.enabled) and "Player Cast Bar" or "Show Spell Icon"
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip(req))
+            end)
+            cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateCogDisIcon()
+                local p = DB()
+                if p and (not p.castBar.enabled or p.castBar.showIcon == false) then cogDis:Show() else cogDis:Hide() end
+            end
+            cogBtn:HookScript("OnShow", UpdateCogDisIcon)
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogDisIcon)
+            UpdateCogDisIcon()
+        end
 
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
@@ -6235,13 +6299,24 @@ initFrame:SetScript("OnEvent", function(self)
                   local p = DB(); if not p then return end
                   p.castBar.texture = v; RefreshCast()
               end },
-            { type = "toggle", text = "Spell Text",
+            { type = "dropdown", text = "Spell Text",
               disabled = castOff,
               disabledTooltip = "Player Cast Bar",
-              getValue = function() local p = DB(); return p and p.castBar.showSpellText end,
+              values = { none = "None", left = "Left", right = "Right", center = "Center" },
+              order = { "none", "left", "right", "center" },
+              getValue = function()
+                  local p = DB(); if not p or not p.castBar.showSpellText then return "none" end
+                  return p.castBar.spellTextSide or "left"
+              end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.castBar.showSpellText = v; RefreshCast()
+                  if v == "none" then
+                      p.castBar.showSpellText = false
+                  else
+                      p.castBar.showSpellText = true
+                      p.castBar.spellTextSide = v
+                  end
+                  RefreshCast(); EllesmereUI:RefreshPage()
               end }
         );  y = y - h
         -- Inline cog (RESIZE) on Spell Text for text size + x/y
@@ -6290,13 +6365,24 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 4: Duration Text (cog RESIZE: timer size + x/y) | Show Total Duration
         local timerRow
         timerRow, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Duration Text",
+            { type = "dropdown", text = "Duration Text",
               disabled = castOff,
               disabledTooltip = "Player Cast Bar",
-              getValue = function() local p = DB(); return p and p.castBar.showTimer end,
+              values = { none = "None", right = "Right", left = "Left" },
+              order = { "none", "right", "left" },
+              getValue = function()
+                  local p = DB(); if not p or not p.castBar.showTimer then return "none" end
+                  return p.castBar.timerSide or "right"
+              end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.castBar.showTimer = v; RefreshCast()
+                  if v == "none" then
+                      p.castBar.showTimer = false
+                  else
+                      p.castBar.showTimer = true
+                      p.castBar.timerSide = v
+                  end
+                  RefreshCast(); EllesmereUI:RefreshPage()
               end },
             { type = "toggle", text = "Show Total Duration",
               tooltip = "Shows elapsed / total duration (e.g. 0.4 / 2.0) instead of counting down from the total.",

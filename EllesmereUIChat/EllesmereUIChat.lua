@@ -573,15 +573,24 @@ function ECHAT.ApplySidebarIconScale()
     local BASE_ICON = 22
     local BASE_FONT = 9
 
+    -- _freeMoveH mirrors each icon's height from these known size constants so
+    -- the free-move natural-position walk (TopYFromSidebarTop) never has to call
+    -- GetHeight() -- a geometry resolve that can taint the Edit-Mode ChatFrame1.
+    -- These are our own frames, so writing the field is safe.
     for _, key in ipairs({ "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
         local btn = CFD(cf1)[key]
-        if btn then btn:SetSize(BASE_ICON * scale, BASE_ICON * scale) end
+        if btn then
+            btn:SetSize(BASE_ICON * scale, BASE_ICON * scale)
+            btn._freeMoveH = BASE_ICON * scale
+        end
     end
     if CFD(cf1).friendsBtn then
         CFD(cf1).friendsBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
+        CFD(cf1).friendsBtn._freeMoveH = BASE_FRIEND * scale
     end
     if CFD(cf1).friendsCount then
         CFD(cf1).friendsCount:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
+        CFD(cf1).friendsCount._freeMoveH = max(7, BASE_FONT * scale)
     end
 end
 
@@ -602,17 +611,25 @@ local function SaveIconOffset(key, x, y)
     cfg.iconPositions[key] = { x = x, y = y }
 end
 
--- Y offset of `frame`'s TOP edge below the SIDEBAR's TOP edge, from GetPoint
--- (anchor data) + GetHeight (intrinsic font height / SetSize'd icon size) only.
--- Walks the anchor chain but STOPS at the sidebar and never reads the sidebar's
--- own geometry -- so it never resolves up to the Edit-Mode-secured ChatFrame1
--- (that resolve is what GetCenter did, tainting chat -> BN-whisper errors).
+-- Y offset of `frame`'s TOP edge below the SIDEBAR's TOP edge, computed from
+-- GetPoint (stored anchor data, no geometry resolve) plus each frame's STORED
+-- height (_freeMoveH, written from known size constants in ApplySidebarIconScale).
+--
+-- CRITICAL: this deliberately never calls GetHeight()/GetWidth()/GetCenter() or
+-- any geometry-RESOLVING getter. Those resolve a frame's rect by walking its
+-- anchor chain, which for our icons runs icon -> sidebar -> chat bg -> ChatFrame1.
+-- ChatFrame1 is Edit-Mode-secured; forcing its layout to resolve from our
+-- insecure code TAINTS it, and the next BN whisper then errors in HistoryKeeper /
+-- FCFManager. GetHeight here used to taint ChatFrame1 whenever its geometry was
+-- still unresolved at the moment of the walk (login timing / saved chat layout) --
+-- which is why it only hit some users. Reading the pre-stored _freeMoveH removes
+-- the resolve entirely while keeping the math identical.
 local function TopYFromSidebarTop(frame, sb, depth)
     if frame == sb or (depth or 0) > 12 then return 0 end
     local point, relTo, relPoint, _, dy = frame:GetPoint(1)
     if not point or not relTo then return 0 end
     local relTopY = TopYFromSidebarTop(relTo, sb, (depth or 0) + 1)
-    local relH = (relTo ~= sb) and (relTo:GetHeight() or 0) or 0
+    local relH = (relTo ~= sb) and (relTo._freeMoveH or 0) or 0
     local relEdgeY = relTopY
     if relPoint and relPoint:find("BOTTOM") then
         relEdgeY = relTopY - relH
@@ -621,8 +638,8 @@ local function TopYFromSidebarTop(frame, sb, depth)
     end
     local edgeY = relEdgeY + (dy or 0)
     if point:find("TOP") then return edgeY end
-    if point:find("BOTTOM") then return edgeY + (frame:GetHeight() or 0) end
-    return edgeY + (frame:GetHeight() or 0) / 2
+    if point:find("BOTTOM") then return edgeY + (frame._freeMoveH or 0) end
+    return edgeY + (frame._freeMoveH or 0) / 2
 end
 
 -- Capture each icon's natural position as an offset from a sidebar EDGE (TOP for
@@ -715,6 +732,18 @@ function ECHAT.ApplyIconFreeMove()
     local sb = cf1 and CFD(cf1).sidebar
     if not sb then return end
 
+    -- Free move is opt-in. When it is OFF (the common case) we do NOTHING here:
+    -- no anchor-chain capture, no drag-hook install, no offsets. This guard is
+    -- the actual fix for the on-some-profiles taint -- CaptureNatural walks the
+    -- icon anchor chain, and running that walk while the feature is disabled was
+    -- pure cost that, for users whose chat geometry was still unresolved at
+    -- login, resolved up to and tainted the Edit-Mode ChatFrame1. The setting
+    -- previously gated only the offset APPLY; the capture ran unconditionally.
+    -- Enabling the toggle re-runs ApplySidebarIcons -> ApplyIconFreeMove, so the
+    -- hooks install the moment the feature is turned on. Icons left untouched
+    -- here simply keep their natural chain layout, which is exactly what we want.
+    if not cfg.freeMoveIcons then return end
+
     local btns = {
         { ref = "friendsBtn", key = "friends" },
         { ref = "copyBtn",    key = "copy" },
@@ -724,12 +753,14 @@ function ECHAT.ApplyIconFreeMove()
         { ref = "scrollBtn",  key = "scroll" },
     }
 
-    -- TAINT-SAFE setup: capture each icon's offset-free anchor via GetPoint
-    -- (anchor data only, no geometry resolve) and install the drag hooks. There
-    -- is deliberately NO GetCenter here -- the old sb:GetCenter()/btn:GetCenter()
-    -- forced the icons' anchor chain to resolve up to the Edit-Mode-secured
-    -- ChatFrame1, tainting it and breaking chat on the next BN whisper
-    -- (HistoryKeeper / FCFManager_GetChatTarget "tainted by EllesmereUIChat").
+    -- PHASE 1 -- capture every icon's natural anchor (GetPoint anchor data +
+    -- stored heights, never a geometry-resolving getter; see TopYFromSidebarTop)
+    -- and install the drag hooks. This MUST complete for ALL icons before any
+    -- icon is re-anchored in Phase 2. The capture walks each icon's anchor chain,
+    -- so if Phase 2 ran interleaved, a later icon's walk would read an earlier
+    -- icon's already-applied offset and bake it into its "natural" position --
+    -- making icons drift on every reload. Two phases keep the chain pristine
+    -- throughout capture.
     for _, info in ipairs(btns) do
         local btn = CFD(cf1)[info.ref]
         if btn then
@@ -739,13 +770,11 @@ function ECHAT.ApplyIconFreeMove()
         end
     end
 
-    -- Apply saved offsets only when the feature is enabled. Each icon is
-    -- re-anchored to its sidebar edge (natural + offset), independent of others.
-    if cfg.freeMoveIcons then
-        for _, info in ipairs(btns) do
-            local btn = CFD(cf1)[info.ref]
-            if btn then ApplyIconOffset(btn, sb) end
-        end
+    -- PHASE 2 -- re-anchor each icon to its sidebar edge at natural + saved
+    -- offset, so the icons move independently of one another.
+    for _, info in ipairs(btns) do
+        local btn = CFD(cf1)[info.ref]
+        if btn then ApplyIconOffset(btn, sb) end
     end
 end
 

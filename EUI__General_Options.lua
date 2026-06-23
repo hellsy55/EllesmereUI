@@ -274,6 +274,43 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.2.9",
+        heroes = {
+            {
+                module = "Cast Bars",
+                title = "Text Positioning",
+                desc  = "Move or hide each cast bar's spell name, target, and timer independently, across nameplates, unit frames, and resource bars.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "CAST BAR", highlight = "Spell Name",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Boss Frames",
+                title = "Cast Bar Customization",
+                desc  = "Boss frames gain a full cast bar section, with a master toggle, fill and background colors, reverse fill, and spell name and timer positioning.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Boss Frames", section = "CAST BAR", highlight = "Show Cast Bar" },
+            },
+        },
+        features = {
+            {
+                module = "Raid Frames",
+                title = "Show Overshield",
+                desc  = "Choose whether absorbs that exceed your health backfill over your current health, or only fill the empty part of the bar.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "ABSORBS", highlight = "Absorb Style" },
+            },
+        },
+        fixes = {
+            { module = "General", text = "Fixed square boxes and missing characters that could appear across the Blizzard UI and other addons in non-Latin languages." },
+            { module = "Chat", text = "Fixed Lua errors that could appear after receiving a Battle.net whisper." },
+            { module = "Quality of Life", text = "Fixed an error that could stop the group sign-up dialog from opening when using a persistent signup note." },
+            { module = "Cooldown Manager", text = "With Suppress GCD on, a charge spell's recharge swipe no longer disappears while another ability is on cooldown." },
+            { module = "Character Sheet", text = "Fixed the oversized X on equipment set delete buttons." },
+            { module = "Mythic+ Timer", text = "Fixed a startup error caused by some saved best-time split data." },
+        },
+    },
+    {
         version = "8.2.8",
         heroes = {
             {

@@ -927,17 +927,39 @@ local function DecorateFrame(frame, barData)
                 -- duration timers work correctly during GCD.
                 local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
                 local _gcdSuppressed = false
-                -- During the Hide-Active override window we are forcing the real
-                -- recharge display, so a GCD pushed onto this frame (e.g. by
-                -- pressing another ability) is moot -- suppressing it here would
-                -- alpha-0 the recharge we are showing. Skip suppression while the
-                -- override is active; the re-arm path keeps the swipe visible.
+                -- Per-bar "Suppress GCD": alpha-0 the swipe while the displayed
+                -- cooldown is just a GCD. Two cases must NEVER be suppressed:
+                --   1. The Hide-Active override window is forcing the real recharge
+                --      display (a GCD pushed by pressing another ability is moot).
+                --   2. A charge spell with a recharge in flight (>=1 charge in hand,
+                --      the next one filling). That swipe IS the recharge, never a
+                --      GCD -- alpha-0'ing it blanks the recharge for the entire GCD
+                --      whenever another ability is pressed. Charge recharges are
+                --      shown as their own swipe, so the GCD on top is irrelevant.
                 if bd2 and bd2.suppressGCD and sid2 and not fd._hideActiveOverriding
                    and C_Spell and C_Spell.GetSpellCooldown then
-                    local cdInfo = C_Spell.GetSpellCooldown(sid2)
-                    if cdInfo and cdInfo.isOnGCD then
-                        cd:SetSwipeColor(0, 0, 0, 0)
-                        _gcdSuppressed = true
+                    -- Charge-recharge guard. GetSpellCharges().isActive is a clean
+                    -- bool (true only while a charge is filling); the secret
+                    -- currentCharges is never read. Override ID resolved for
+                    -- transform spells, mirroring the re-arm paths below.
+                    local chargeRecharging = false
+                    if C_Spell.GetSpellCharges
+                       and type(frame.HasVisualDataSource_Charges) == "function"
+                       and frame:HasVisualDataSource_Charges() then
+                        local effIDc = sid2
+                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                            if ovr and ovr > 0 and ovr ~= sid2 then effIDc = ovr end
+                        end
+                        local ci = C_Spell.GetSpellCharges(effIDc) or C_Spell.GetSpellCharges(sid2)
+                        chargeRecharging = (ci and ci.isActive == true) or false
+                    end
+                    if not chargeRecharging then
+                        local cdInfo = C_Spell.GetSpellCooldown(sid2)
+                        if cdInfo and cdInfo.isOnGCD then
+                            cd:SetSwipeColor(0, 0, 0, 0)
+                            _gcdSuppressed = true
+                        end
                     end
                 end
                 -- Check per-spell settings

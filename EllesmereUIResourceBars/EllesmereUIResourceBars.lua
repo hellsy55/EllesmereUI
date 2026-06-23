@@ -110,6 +110,40 @@ local function SetRBFont(fs, font, size)
     fs:SetFont(font, size, f)
 end
 
+-- Cast-bar text side anchoring (mirrors the nameplate / unit-frame cast text system).
+-- The cast bar text line holds spell text + duration; the duration reserves a slot on
+-- its side and pushes the spell text inward when they share a side. Center is never
+-- pushed. Defined on ns (not a file local) to respect this file's local-variable cap.
+--   side    : "left" | "right" | "center"
+--   pushed  : true when the duration occupies this same side and the element moves inward
+--   reserve : duration reserved width (only consumed when pushed)
+-- Returns: point (anchor), xOff (base, before the user X offset), justify
+function ns.GetCastTextAnchor(side, pushed, reserve)
+    if side == "center" then
+        return "CENTER", 0, "CENTER"
+    elseif side == "left" then
+        local base = 4
+        if pushed then base = base + reserve end
+        return "LEFT", base, "LEFT"
+    else -- "right"
+        local base = -4
+        if pushed then base = base - reserve end
+        return "RIGHT", base, "RIGHT"
+    end
+end
+
+-- WoW does not visually re-lay-out a FontString when only its SetJustifyH changes; a
+-- fresh build does. Clearing then re-setting the text forces the new alignment, and it
+-- MUST be a real change -- re-setting the identical string is deduped and skips the
+-- re-layout. GetText may return a secret cast name; SetText accepts secrets and the
+-- value is never inspected, so the round-trip is safe.
+function ns.ReflowFontString(fs)
+    if not fs then return end
+    local t = fs:GetText()
+    fs:SetText("")
+    fs:SetText(t or "")
+end
+
 -- PowerType enum values (Enum.PowerType)
 local PT = {
     MANA        = 0,
@@ -808,6 +842,7 @@ local DEFAULTS = {
         castBar = {
             enabled       = true,
             showIcon      = true,
+            iconOnRight   = false,  -- attach the spell icon to the right of the bar instead of the left
             width         = 220,
             height        = 20,
             anchorX       = 0,
@@ -827,10 +862,12 @@ local DEFAULTS = {
             timerSize     = 11,
             timerX        = 0,
             timerY        = 0,
+            timerSide     = "right",  -- "left" | "right" (duration position; "None" = showTimer false)
             showSpellText = true,
             spellTextSize = 11,
             spellTextX    = 0,
             spellTextY    = 0,
+            spellTextSide = "left",   -- "left" | "right" | "center" (spell text position; "None" = showSpellText false)
             unlockPos     = nil,
             showChannelTicks  = true,
             showTickMarks     = true,
@@ -4618,24 +4655,29 @@ BuildCastBar = function()
             cb.borderTextureShiftX, cb.borderTextureShiftY, "resourcebars", bs)
     end
 
-    -- Icon: left side, full height, no inset
+    -- Icon: left or right side (iconOnRight), full height, no inset
     local iconFrame = castBarFrame._iconFrame
+    local iconOnRight = hasIcon and cb.iconOnRight
     if hasIcon then
         iconFrame:SetSize(h, h)
         iconFrame:ClearAllPoints()
-        iconFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", 0, 0)
+        if iconOnRight then
+            iconFrame:SetPoint("TOPRIGHT", castBarFrame, "TOPRIGHT", 0, 0)
+        else
+            iconFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", 0, 0)
+        end
         iconFrame:Show()
     else
         iconFrame:Hide()
     end
 
-    -- Clip frame + bar: right of icon (or full width), full height
+    -- Clip frame + bar: beside the icon (or full width), full height
     local clipFrame = castBarFrame._barClip
     local bar = castBarFrame._bar
     local bdrInset = (PP and PP.mult) or 1
     clipFrame:ClearAllPoints()
-    clipFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", (hasIcon and h or 0) + bdrInset, -bdrInset)
-    clipFrame:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", -bdrInset, bdrInset)
+    clipFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", ((hasIcon and not iconOnRight) and h or 0) + bdrInset, -bdrInset)
+    clipFrame:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", -((iconOnRight and h or 0)) - bdrInset, bdrInset)
     clipFrame:SetFrameLevel(castBarFrame:GetFrameLevel() + 1)
     bar:ClearAllPoints()
     bar:SetAllPoints(clipFrame)
@@ -4750,12 +4792,22 @@ end
     local barW = bar:GetWidth()
     if not barW or barW < 10 then barW = cb.width end
 
-    -- Timer text
+    -- Cast text side-aware layout (mirrors nameplates / unit frames). The duration
+    -- reserves a slot on its side and pushes the spell text inward when they share a
+    -- side; center is never pushed. Visibility stays governed by showTimer / showSpellText
+    -- (the dropdown "None" sets those flags false).
+    local timerW   = (cb.timerSize or 11) * 2.2
+    local durSide   = cb.timerSide or "right"
+    local spellSide = cb.spellTextSide or "left"
+
+    -- Timer / duration text (auto-sized, anchored to its side)
     local timerText = castBarFrame._timerText
     if cb.showTimer then
         SetRBFont(timerText, GetRBFont(), cb.timerSize or 11)
+        local pt, xb, jh = ns.GetCastTextAnchor(durSide, false, timerW)
         timerText:ClearAllPoints()
-        timerText:SetPoint("RIGHT", bar, "RIGHT", -4 + (cb.timerX or 0), cb.timerY or 0)
+        timerText:SetJustifyH(jh)
+        timerText:SetPoint(pt, bar, pt, xb + (cb.timerX or 0), cb.timerY or 0)
         timerText:Show()
     else
         timerText:Hide()
@@ -4765,13 +4817,22 @@ end
     local nameText = castBarFrame._nameText
     if cb.showSpellText then
         SetRBFont(nameText, GetRBFont(), cb.spellTextSize or 11)
+        local pt, xb, jh = ns.GetCastTextAnchor(spellSide, cb.showTimer and durSide == spellSide, timerW)
         nameText:ClearAllPoints()
-        nameText:SetPoint("LEFT", bar, "LEFT", 4 + (cb.spellTextX or 0), cb.spellTextY or 0)
-        nameText:SetWidth(barW * (cb.showTimer and 0.88 or 0.95))
+        nameText:SetJustifyH(jh)
+        nameText:SetPoint(pt, bar, pt, xb + (cb.spellTextX or 0), cb.spellTextY or 0)
+        if spellSide == "center" then
+            nameText:SetWidth(barW * 0.6)
+        else
+            nameText:SetWidth(barW - 8 - (cb.showTimer and timerW or 0))
+        end
         nameText:Show()
     else
         nameText:Hide()
     end
+    -- Re-flow so a live JustifyH change takes effect on already-rendered text.
+    ns.ReflowFontString(timerText)
+    ns.ReflowFontString(nameText)
 
     -- Hide pips when not empowering
     if castBarFrame._pips then
