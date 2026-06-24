@@ -5314,7 +5314,7 @@ function NameplateFrame:UpdateHealthValues()
             local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
             pctText = string.format("%d%%", pctVal)
             pctNoSignText = string.format("%d", pctVal)
-            numText = AbbreviateNumbers(UnitHealth(unit))
+            numText = AbbreviateNumbers(curHealth)
             -- Decimal variants computed only when at least one slot opts in.
             if anyDec then
                 pctTextDec = string.format("%.1f%%", pctVal)
