@@ -1628,17 +1628,40 @@ local function DecorateFrame(frame, barData)
                 local cseInfo = C_Spell.GetSpellCooldown(liveSid)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "pixelGlowReady" or cse == "buttonGlowReady" then
-                    if not onCD then
-                        if fd.glowOverlay and not fd._cdStateGlowOn then
-                            local style = cse == "pixelGlowReady" and 1 or 3
-                            local gr, gg, gb = ns.ResolveGlowColor(ss2)
-                            ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
-                            fd._cdStateGlowOn = true
-                        end
-                    elseif fd._cdStateGlowOn then
-                        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
-                        fd._cdStateGlowOn = false
+                    -- Defer by one frame, same as hiddenOnCD/hiddenReady above.
+                    -- SetDesaturated fires inside Blizzard's secure CDM chain where
+                    -- C_Spell.IsSpellUsable can briefly return stale values (e.g. a
+                    -- proc spell reporting not-usable for one tick on CD end).
+                    -- Deferring lets the API settle before we start the glow.
+                    -- The BuffTicker resource-check below handles the reverse
+                    -- direction: stopping the glow when resources drain mid-fight.
+                    if not fd._cdStateGlowPending then
+                        fd._cdStateGlowPending = CreateFrame("Frame")
+                        fd._cdStateGlowPending:Hide()
                     end
+                    fd._cdStateGlowPending.cse  = cse
+                    fd._cdStateGlowPending.onCD  = onCD
+                    fd._cdStateGlowPending.sid   = liveSid
+                    fd._cdStateGlowPending.ss2   = ss2
+                    fd._cdStateGlowPending:SetScript("OnUpdate", function(self)
+                        self:Hide()
+                        local isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(self.sid)
+                        local shouldGlow = (not self.onCD) and (isUsable == nil or isUsable == true)
+                        if shouldGlow then
+                            if fd.glowOverlay and not fd._cdStateGlowOn then
+                                local style = self.cse == "pixelGlowReady" and 1 or 3
+                                local gr, gg, gb = ns.ResolveGlowColor(self.ss2)
+                                ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
+                                fd._cdStateGlowOn = true
+                            end
+                        else
+                            if fd._cdStateGlowOn then
+                                if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                                fd._cdStateGlowOn = false
+                            end
+                        end
+                    end)
+                    fd._cdStateGlowPending:Show()
                 end
             end)
         end
@@ -4287,6 +4310,49 @@ function ns.SetupViewerHooks()
                                         if r and type(r) == "number" and not issecretvalue(r) and r == 0 then
                                             if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
                                             fd._activeGlowOn = false
+                                        end
+                                    end
+                                end
+                                -- CD Ready Glow resource check: SetDesaturated only
+                                -- fires on CD state changes, not on resource changes
+                                -- (e.g. Fury draining below spell cost mid-fight).
+                                -- Poll IsSpellUsable each tick so the glow turns off
+                                -- immediately when resources run out, and back on
+                                -- when they recover. isUsable == nil means the API
+                                -- has no data for this spell; leave the glow alone.
+                                if fd and fd._cdStateGlowOn then
+                                    local isUsable = sid and C_Spell.IsSpellUsable
+                                        and C_Spell.IsSpellUsable(sid)
+                                    if isUsable == false then
+                                        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                                        fd._cdStateGlowOn = false
+                                    end
+                                elseif fd and not fd._cdStateGlowOn and fd.glowOverlay then
+                                    -- Glow is off: re-enable if resources recovered
+                                    -- and the spell is still off cooldown.
+                                    local fc2 = _ecmeFC[frame]
+                                    local sid2 = fc2 and fc2.spellID
+                                    local bk2 = fc2 and fc2.barKey
+                                    if sid2 and bk2 then
+                                        local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+                                        local cse2 = ss2 and ss2.cdStateEffect
+                                        if cse2 == "pixelGlowReady" or cse2 == "buttonGlowReady" then
+                                            local liveSid2 = sid2
+                                            if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                                                liveSid2 = C_SpellBook.FindSpellOverrideByID(sid2) or sid2
+                                            end
+                                            local cseInfo2 = C_Spell.GetSpellCooldown(liveSid2)
+                                            local onCD2 = cseInfo2 and cseInfo2.isActive and not cseInfo2.isOnGCD
+                                            if not onCD2 then
+                                                local isUsable2 = C_Spell.IsSpellUsable
+                                                    and C_Spell.IsSpellUsable(liveSid2)
+                                                if isUsable2 == true then
+                                                    local style = cse2 == "pixelGlowReady" and 1 or 3
+                                                    local gr, gg, gb = ns.ResolveGlowColor(ss2)
+                                                    ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
+                                                    fd._cdStateGlowOn = true
+                                                end
+                                            end
                                         end
                                     end
                                 end
