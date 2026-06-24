@@ -5244,81 +5244,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Row 3: Cast Timer toggle | Cast Timer size + inline color swatch
-        local castTimerRow
-        castTimerRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Cast Timer",
-              getValue=function()
-                local db = DB()
-                if db and db.showCastTimer ~= nil then return db.showCastTimer end
-                return defaults.showCastTimer
-              end,
-              setValue=function(v)
-                DB().showCastTimer = v
-                ns.RefreshAllSettings()
-                UpdatePreview()
-                EllesmereUI:RefreshPage()
-              end },
-            { type="slider", text="Cast Timer", min=6, max=20, step=1,
-              getValue=function() return DBVal("castTimerSize") or defaults.castTimerSize end,
-              setValue=function(v)
-                DB().castTimerSize = v
-                for _, plate in pairs(plates) do
-                    if plate.castTimer then SetFSFont(plate.castTimer, v, GetNPOutline()) end
-                end
-                UpdatePreview()
-              end });  y = y - h
-        -- Inline color swatch on Cast Timer size (right region)
-        do
-            local rightRgn = castTimerRow._rightRegion
-            local ctColorGet = function()
-                local c = (DB() and DB().castTimerColor) or defaults.castTimerColor
-                return c.r, c.g, c.b
-            end
-            local ctColorSet = function(r, g, b)
-                DB().castTimerColor = { r = r, g = g, b = b }
-                for _, plate in pairs(plates) do
-                    if plate.castTimer then plate.castTimer:SetTextColor(r, g, b, 1) end
-                end
-                UpdatePreview()
-            end
-            local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
-            PP.Point(ctSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
-            EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
-
-            -- Inline cog for Cast Timer X/Y offset
-            local tmCogBtn = CreateFrame("Button", nil, rightRgn)
-            tmCogBtn:SetSize(26, 26)
-            tmCogBtn:SetPoint("RIGHT", ctSwatch, "LEFT", -6, 0)
-            tmCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
-            tmCogBtn:SetAlpha(0.4)
-            local tmCogTex = tmCogBtn:CreateTexture(nil, "OVERLAY")
-            tmCogTex:SetAllPoints()
-            tmCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            tmCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            tmCogBtn:SetScript("OnLeave", function(self)
-                EllesmereUI.HideWidgetTooltip()
-                if cogPopupOwner ~= self then self:SetAlpha(0.4) end
-            end)
-            tmCogBtn:SetScript("OnClick", function(self)
-                ShowCogPopup(self, {
-                    title = EllesmereUI.L("Cast Timer Settings"),
-                    xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
-                    xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
-                    ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
-                    sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
-                    sizeFirst = true,
-                })
-            end)
-            EllesmereUI.RegisterWidgetRefresh(function()
-                tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
-            end)
-        end
-
-        -- Row 4: Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
+        -- Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
         local castBgRow
         castBgRow, h = W:DualRow(parent, y,
             { type="slider", text="Cast Background", min=0, max=100, step=1,
@@ -5441,14 +5367,14 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             tmCogBtn:SetScript("OnClick", function(self)
                 ShowCogPopup(self, {
-                    title = "Cast Timer Settings",
+                    title = EllesmereUI.L("Cast Timer Settings"),
                     xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
                     xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                     yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
                     ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
                     sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
                     sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                    sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                    sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
                     sizeFirst = true,
                 })
             end)

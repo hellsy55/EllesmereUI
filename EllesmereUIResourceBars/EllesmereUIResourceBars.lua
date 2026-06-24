@@ -887,6 +887,7 @@ local DEFAULTS = {
             spacing       = 2,
             showTimer     = true,
             timerSize     = 11,
+            orientation   = "HORIZONTAL",  -- "HORIZONTAL" or "VERTICAL"
             borderSize    = 1,
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             borderTexture = "solid",
@@ -1600,8 +1601,12 @@ local function RegisterUnlockElements()
                 local tb = S()
                 local iconSz = tb.iconSize or 30
                 local spacing = tb.spacing or 2
-                -- Estimate width based on max 5 totems
-                return iconSz * 5 + spacing * 4, iconSz
+                -- Estimate extent based on max 5 totems; swap W/H when vertical
+                local maxDim = iconSz * 5 + spacing * 4
+                if tb.orientation == "VERTICAL" then
+                    return iconSz, maxDim
+                end
+                return maxDim, iconSz
             end,
             savePos = totemSave, loadPos = totemLoad, clearPos = totemClear, applyPos = totemApply,
         })
@@ -4546,6 +4551,11 @@ BuildCastBar = function()
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(0)
         castBarFrame._bar = bar
+        -- Smooth the per-frame fill with the same native interpolation the
+        -- resource bars' "Smooth Bars" uses -- always on for the cast bar (no
+        -- toggle). Resets and the finish snap stay instant (plain SetValue) so a
+        -- new cast starts clean instead of easing down from the previous fill.
+        bar._castInterp = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut
 
         -- Spark (in its own child frame inside clip so it gets clipped)
         local sparkFrame = CreateFrame("Frame", nil, clipFrame)
@@ -4993,7 +5003,7 @@ UpdateCastBar = function(dt)
         local castDur = castBarFrame._endTime - castBarFrame._startTime
         local progress = (castDur > 0) and ((now - castBarFrame._startTime) / castDur) or 0
         progress = min(max(progress, 0), 1)
-        bar:SetValue(progress)
+        bar:SetValue(progress, bar._castInterp)
         -- Size the gradient clip frame to match the fill width
         if castBarFrame._gradientFullBar and castBarFrame._gradClip then
             castBarFrame._gradClip:SetWidth(max(0.01, bar:GetWidth() * progress))
@@ -5035,7 +5045,7 @@ UpdateCastBar = function(dt)
         local chanDur = castBarFrame._endTime - castBarFrame._startTime
         local progress = (chanDur > 0) and ((castBarFrame._endTime - now) / chanDur) or 0
         progress = min(max(progress, 0), 1)
-        bar:SetValue(progress)
+        bar:SetValue(progress, bar._castInterp)
         -- Size the gradient clip frame to match the fill width
         if castBarFrame._gradientFullBar and castBarFrame._gradClip then
             castBarFrame._gradClip:SetWidth(max(0.01, bar:GetWidth() * progress))
@@ -5450,6 +5460,20 @@ end
 local _totemLayoutCache = {}
 local _totemActiveSet = {}  -- reusable set for O(1) cleanup lookups
 
+-- The icon cooldown's native countdown number is a C-rendered, secret-safe
+-- FontString. We restyle that FontString (font/size/color) but never read its
+-- value, giving a clean number with no "s" suffix in place of Blizzard's "Xs"
+-- Duration text (which is a protected secret value we cannot read or rewrite).
+local function GetCooldownNumberFS(cd)
+    if not (cd and cd.GetRegions) then return nil end
+    for _, region in ipairs({ cd:GetRegions() }) do
+        if region.GetObjectType and region:GetObjectType() == "FontString" then
+            return region
+        end
+    end
+    return nil
+end
+
 local function LayoutTotemBar()
     if not totemBarFrame or not TotemFrame then return end
     local tb = GetTotemSettings()
@@ -5459,6 +5483,7 @@ local function LayoutTotemBar()
     local PP = EllesmereUI and EllesmereUI.PP
     if PP and PP.Snap then spacing = PP.Snap(spacing) end
     local iconSize = tb.iconSize or 30
+    local vertical = (tb.orientation == "VERTICAL")
 
     -- Use SetScale on TotemFrame rather than SetSize on individual buttons.
     -- Buttons keep their native template size; scale controls visual size.
@@ -5469,7 +5494,7 @@ local function LayoutTotemBar()
     TotemFrame:SetParent(totemBarFrame)
     TotemFrame:SetFrameStrata("HIGH")
     TotemFrame:ClearAllPoints()
-    TotemFrame:SetPoint("LEFT", totemBarFrame, "LEFT", 0, 0)
+    TotemFrame:SetPoint(vertical and "TOP" or "LEFT", totemBarFrame, vertical and "TOP" or "LEFT", 0, 0)
     TotemFrame:Show()
 
     -- Only re-apply scale when setting changed
@@ -5505,7 +5530,9 @@ local function LayoutTotemBar()
 
         btn:ClearAllPoints()
         if i == 1 then
-            btn:SetPoint("LEFT", TotemFrame, "LEFT", 0, 0)
+            btn:SetPoint(vertical and "TOP" or "LEFT", TotemFrame, vertical and "TOP" or "LEFT", 0, 0)
+        elseif vertical then
+            btn:SetPoint("TOP", buttons[i - 1], "BOTTOM", 0, -scaledSpacing)
         else
             btn:SetPoint("LEFT", buttons[i - 1], "RIGHT", scaledSpacing, 0)
         end
@@ -5533,19 +5560,23 @@ local function LayoutTotemBar()
             btn.Icon.Texture:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         end
 
-        -- Timer text
+        -- Timer: show the icon cooldown's native countdown number instead of
+        -- Blizzard's "Xs" Duration string. The number is C-rendered from the
+        -- cooldown (secret-safe, no "s" suffix); we restyle only its FontString
+        -- region, so nothing reads the protected duration value.
         if btn.Duration then
+            btn.Duration:SetTextColor(0, 0, 0, 0)  -- hide the "Xs" text
+        end
+        local cd = btn.Icon and btn.Icon.Cooldown
+        if cd and cd.SetHideCountdownNumbers then
+            cd:SetHideCountdownNumbers(not tb.showTimer)
             if tb.showTimer then
-                btn.Duration:SetTextColor(1, 1, 1, 1)
-            else
-                btn.Duration:SetTextColor(0, 0, 0, 0)
+                local cdText = GetCooldownNumberFS(cd)
+                if cdText then
+                    cdText:SetFont(fontPath, scaledTimerSize, outlineMode)
+                    cdText:SetTextColor(1, 1, 1, 1)
+                end
             end
-            btn.Duration:SetFont(fontPath, scaledTimerSize, outlineMode)
-            btn.Duration:SetDrawLayer("OVERLAY", 7)
-            btn.Duration:ClearAllPoints()
-            btn.Duration:SetPoint("CENTER", btn, "CENTER", 0, 0)
-            btn.Duration:SetJustifyH("CENTER")
-            btn.Duration:SetJustifyV("MIDDLE")
         end
 
         -- Border overlay (our own frame in the button's scale space)
@@ -5574,8 +5605,12 @@ local function LayoutTotemBar()
 
     -- Size container
     local maxButtons = 5
-    local maxW = iconSize * maxButtons + spacing * (maxButtons - 1)
-    totemBarFrame:SetSize(maxW, iconSize)
+    local maxDim = iconSize * maxButtons + spacing * (maxButtons - 1)
+    if vertical then
+        totemBarFrame:SetSize(iconSize, maxDim)
+    else
+        totemBarFrame:SetSize(maxDim, iconSize)
+    end
 end
 
 local function BuildTotemBar()
@@ -5674,7 +5709,9 @@ end
 -- Unit Frames approach: store the interpolation mode on the bar and let the
 -- CreateStatusBar SetValue wrapper pass it to Blizzard's C-side interpolation.
 -- nil = no interpolation = zero added cost (a plain SetValue). Only the three
--- main bars are touched; cast bar / pips never get _smoothing.
+-- main bars are toggled here (pips never smooth). The cast bar smooths its fill
+-- unconditionally via its own bar._castInterp set at creation -- not _smoothing,
+-- and not driven by this toggle.
 function ERB:ApplySmoothing()
     local interp = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut
     local p = ERB.db and ERB.db.profile

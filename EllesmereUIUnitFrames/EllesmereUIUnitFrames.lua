@@ -79,6 +79,9 @@ local defaults = {
         portraitStyle = "attached",
         healthBarTexture = "none",
         darkTheme = false,
+        -- Show one decimal on abbreviated values (240.5k) and percents (77.3%).
+        -- Global, default off; read by the unit-frame text tags via _G flags.
+        showDecimalOnText = false,
         -- Custom enemy reaction colors (empty = use Blizzard FACTION_BAR_COLORS).
         -- Keys: hostile (reactions 1-3), neutral (4), friendly (5-8), tapped.
         enemyColors = {},
@@ -1332,6 +1335,28 @@ end
 ns.EUI_IsSmartPowerPercent = EUI_IsSmartPowerPercent
 EllesmereUI.IsSmartPowerPercent = EUI_IsSmartPowerPercent
 
+-- Show Decimal on Text (global, default off). A Blizzard AbbreviateNumbers config
+-- that emits one decimal per magnitude band: 240500 -> "240.5k", 2405000 -> "2.4m".
+-- AbbreviateNumbers runs in Blizzard's secure context, so feeding it a secret value
+-- PLUS this config stays secret-safe (exactly like the no-config call we already use
+-- on secret health/power). Tags read two _G flags (sandbox falls back to _G):
+--   _G._EUI_AbbrevDecimalCfg = this table when on, nil when off (nil == today's call)
+--   _G._EUI_TextDecimals     = true/false, selects "%.1f" vs "%d" for percents
+ns._decimalAbbrevConfig = { breakpointData = {
+    { breakpoint = 1e9, abbreviation = "b", significandDivisor = 1e8, fractionDivisor = 10, abbreviationIsGlobal = false },
+    { breakpoint = 1e6, abbreviation = "m", significandDivisor = 1e5, fractionDivisor = 10, abbreviationIsGlobal = false },
+    { breakpoint = 1e3, abbreviation = "k", significandDivisor = 1e2, fractionDivisor = 10, abbreviationIsGlobal = false },
+} }
+function ns.ApplyTextDecimalGlobals()
+    if db and db.profile and db.profile.showDecimalOnText then
+        _G._EUI_TextDecimals = true
+        _G._EUI_AbbrevDecimalCfg = ns._decimalAbbrevConfig
+    else
+        _G._EUI_TextDecimals = false
+        _G._EUI_AbbrevDecimalCfg = nil
+    end
+end
+
 do
   local tagName = "curhpshort"
   local function AbbrevHP(unit)
@@ -1339,7 +1364,8 @@ do
     if not UnitIsConnected(unit) then return "OFFLINE" end
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
     local hp = UnitHealth(unit) or 0
-    return AbbreviateNumbers(hp)
+    local cfg = _G._EUI_AbbrevDecimalCfg
+    return cfg and AbbreviateNumbers(hp, cfg) or AbbreviateNumbers(hp)
   end
 
   oUF.Tags.Methods[tagName] = AbbrevHP
@@ -1353,7 +1379,7 @@ do
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
     local pct = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
     if not pct then return "0" end
-    return string_format("%d", pct)
+    return string_format(_G._EUI_TextDecimals and "%.1f" or "%d", pct)
   end
   oUF.Tags.Events["perhpnosign"] = "UNIT_HEALTH UNIT_MAXHEALTH"
 end
@@ -1364,13 +1390,23 @@ end
 _G._EUI_ResolvedPowerType = _G._EUI_ResolvedPowerType or {}
 
 -- eui-perpp: power percent using resolved power type (runs in oUF _PROXY env)
+-- Power percent is intentionally NOT decimal-gated: "Show Decimal on Text"
+-- applies to health text only, so power keeps integer percents.
 oUF.Tags.Methods["eui-perpp"] = [[function(u)
     local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
     return string.format('%d', UnitPowerPercent(u, pType, true, CurveConstants.ScaleTo100))
 end]]
 oUF.Tags.Events["eui-perpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
 
+-- eui-perhp: health percent, EUI-owned so "Show Decimal on Text" can switch
+-- %d / %.1f without editing the vendored oUF [perhp]. Mirrors [perhp] otherwise.
+oUF.Tags.Methods["eui-perhp"] = [[function(u)
+    return string.format(_EUI_TextDecimals and '%.1f' or '%d', UnitHealthPercent(u, true, CurveConstants.ScaleTo100))
+end]]
+oUF.Tags.Events["eui-perhp"] = "UNIT_HEALTH UNIT_MAXHEALTH"
+
 -- eui-curpp: current power as abbreviated number
+-- Power value is intentionally NOT decimal-gated (health-only feature).
 oUF.Tags.Methods["eui-curpp"] = [[function(u)
     local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
     return AbbreviateNumbers(UnitPower(u, pType))
@@ -1390,7 +1426,8 @@ oUF.Tags.Events["eui-absorb"] = "UNIT_ABSORB_AMOUNT_CHANGED"
 -- blank-at-zero; only the full TruncateWhenZero variant blanks).
 oUF.Tags.Methods["eui-absorbshort"] = [[function(u)
     if not u or not UnitExists(u) then return "" end
-    return AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0)
+    local cfg = _EUI_AbbrevDecimalCfg
+    return cfg and AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0, cfg) or AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0)
 end]]
 oUF.Tags.Events["eui-absorbshort"] = "UNIT_ABSORB_AMOUNT_CHANGED"
 
@@ -1661,9 +1698,9 @@ local function GetPlayerTargetHealthTag(unit)
     if display == "curhpshort" then
         return "[curhpshort]"
     elseif display == "perhp" then
-        return "[perhp]%"
+        return "[eui-perhp]%"
     else
-        return "[curhpshort] | [perhp]%"
+        return "[curhpshort] | [eui-perhp]%"
     end
 end
 
@@ -1672,9 +1709,9 @@ local function GetFocusHealthTag()
     if display == "curhpshort" then
         return "[curhpshort]"
     elseif display == "both" then
-        return "[curhpshort] | [perhp]%"
+        return "[curhpshort] | [eui-perhp]%"
     else
-        return "[perhp]%"
+        return "[eui-perhp]%"
     end
 end
 
@@ -1683,9 +1720,9 @@ local function GetBossHealthTag()
     if display == "curhpshort" then
         return "[curhpshort]"
     elseif display == "both" then
-        return "[curhpshort] | [perhp]%"
+        return "[curhpshort] | [eui-perhp]%"
     else
-        return "[perhp]%"
+        return "[eui-perhp]%"
     end
 end
 
@@ -1693,10 +1730,10 @@ end
 -- content: "name", "both", "curhpshort", "perhp", "perhpnosign", "perhpnum", "none"
 local function ContentToTag(content)
     if content == "name" then return "[name]"
-    elseif content == "both" then return "[curhpshort] | [perhp]%"
-    elseif content == "perhpnum" then return "[perhp]% | [curhpshort]"
+    elseif content == "both" then return "[curhpshort] | [eui-perhp]%"
+    elseif content == "perhpnum" then return "[eui-perhp]% | [curhpshort]"
     elseif content == "curhpshort" then return "[curhpshort]"
-    elseif content == "perhp" then return "[perhp]%"
+    elseif content == "perhp" then return "[eui-perhp]%"
     elseif content == "perhpnosign" then return "[perhpnosign]"
     -- Power content uses the secret-safe eui- power tags (identical to the power
     -- bar text). The stock [curpp]/[perpp] tags read raw UnitPower, which is a
@@ -1705,7 +1742,7 @@ local function ContentToTag(content)
     elseif content == "perpp" then return "[eui-perpp]%"
     elseif content == "curpp" then return "[eui-curpp]"
     elseif content == "curhp_curpp" then return "[curhpshort] | [eui-curpp]"
-    elseif content == "perhp_perpp" then return "[perhp]% | [eui-perpp]%"
+    elseif content == "perhp_perpp" then return "[eui-perhp]% | [eui-perpp]%"
     elseif content == "absorb" then return "[eui-absorb]"
     elseif content == "absorbshort" then return "[eui-absorbshort]"
     elseif content == "group" then return "[group]"
@@ -3068,7 +3105,10 @@ local function CreateAbsorbBar(frame, unit, settings)
                         g:SetValue(amt)
                         fsZone = fsZone or { left = self.LeftText, right = self.RightText, center = self.CenterText }
                         local fs = fsZone[zone]
-                        if fs then fs:SetText(AbbreviateNumbers(amt)) end
+                        if fs then
+                            local cfg = _G._EUI_AbbrevDecimalCfg
+                            fs:SetText(cfg and AbbreviateNumbers(amt, cfg) or AbbreviateNumbers(amt))
+                        end
                     end
                 end
             end
@@ -3187,12 +3227,24 @@ local function CreateAbsorbBar(frame, unit, settings)
                     ApplyAbsorbStyle(ab, absStyle, s)
                 end
 
+                -- Show Overshield (opt-in, default ON). The "overshield" is the
+                -- absorb that exceeds the empty health and backfills over current
+                -- health -- drawn by the backfill bar (ab), which is clipped to the
+                -- filled region. When the toggle is OFF (overlay mode only) we feed
+                -- the backfill 0 so only the empty health fills; the forward bar
+                -- (clipped to the missing-health region) still caps at the right
+                -- edge. Right/left edge modes draw the WHOLE absorb through ab (fw
+                -- hidden below), so they are left untouched. ON = byte-identical.
+                local overshieldOn = (not s) or s.showOvershield ~= false
+                local abValue = absorbAmt
+                if not overshieldOn and absorbMode == "overlay" then abValue = 0 end
+
                 -- Both bars get the raw absorb value and the normal maxHealth.
                 -- The clip frames do the "min(absorb, curHealth)" and
                 -- "max(0, absorb - curHealth)" math visually so we never need
                 -- Lua arithmetic on the (possibly secret) absorb value.
                 ab:SetMinMaxValues(0, maxHealth)
-                ab:SetValue(absorbAmt)
+                ab:SetValue(abValue)
                 ab:Show()
 
                 if fw then
@@ -7125,6 +7177,9 @@ ns.ApplyEnemyColors = ApplyEnemyColors
 
 local function ReloadFrames()
     ResolveFontPath()
+    -- Refresh the tag-readable decimal globals before the combat early-return so
+    -- tags pick up the saved state at login and on any settings change.
+    ns.ApplyTextDecimalGlobals()
     if InCombatLockdown() then
         return
     end

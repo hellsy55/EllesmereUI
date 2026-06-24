@@ -1087,6 +1087,15 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Resolve preview text for a content key
         local function PreviewTextForContent(content, s)
+            -- Mirror live "Show Decimal on Text": one decimal on abbreviated values
+            -- and percents when the global flag is on; integer (current) otherwise.
+            local function _pvAbbrev(v)
+                local cfg = _G._EUI_AbbrevDecimalCfg
+                return cfg and AbbreviateNumbers(v, cfg) or AbbreviateNumbers(v)
+            end
+            local function _pvPct(p01)
+                return _G._EUI_TextDecimals and string.format("%.1f", p01 * 100) or tostring(math.floor(p01 * 100))
+            end
             if content == "name" then
                 if unitKey == "player" then
                     return UnitName("player") or "Player"
@@ -1097,12 +1106,11 @@ initFrame:SetScript("OnEvent", function(self)
                 local maxHP = UnitHealthMax("player") or 1
                 local pct = _previewHealthPct or 0.70
                 local curHP = math.floor(maxHP * pct)
-                local pctInt = math.floor(pct * 100)
-                if content == "curhpshort" then return AbbreviateNumbers(curHP)
-                elseif content == "perhp" then return pctInt .. "%"
-                elseif content == "perhpnosign" then return tostring(pctInt)
-                elseif content == "perhpnum" then return pctInt .. "% | " .. AbbreviateNumbers(curHP)
-                else return AbbreviateNumbers(curHP) .. " | " .. pctInt .. "%" end
+                if content == "curhpshort" then return _pvAbbrev(curHP)
+                elseif content == "perhp" then return _pvPct(pct) .. "%"
+                elseif content == "perhpnosign" then return _pvPct(pct)
+                elseif content == "perhpnum" then return _pvPct(pct) .. "% | " .. _pvAbbrev(curHP)
+                else return _pvAbbrev(curHP) .. " | " .. _pvPct(pct) .. "%" end
             elseif content == "perpp" then
                 local ppPct = _previewPowerPct or 0.85
                 return math.floor(ppPct * 100) .. "%"
@@ -1116,17 +1124,17 @@ initFrame:SetScript("OnEvent", function(self)
                 local curHP = math.floor(maxHP * pct)
                 local maxPP = UnitPowerMax("player") or 100
                 local ppPct2 = _previewPowerPct or 0.85
-                return AbbreviateNumbers(curHP) .. " | " .. AbbreviateNumbers(math.floor(maxPP * ppPct2))
+                return _pvAbbrev(curHP) .. " | " .. AbbreviateNumbers(math.floor(maxPP * ppPct2))
             elseif content == "perhp_perpp" then
                 local pct = _previewHealthPct or 0.70
                 local ppPct3 = _previewPowerPct or 0.85
-                return math.floor(pct * 100) .. "% | " .. math.floor(ppPct3 * 100) .. "%"
+                return _pvPct(pct) .. "% | " .. math.floor(ppPct3 * 100) .. "%"
             elseif content == "absorb" then
                 local maxHP = UnitHealthMax("player") or 1
                 return string.format("%d", math.floor(maxHP * 0.14))
             elseif content == "absorbshort" then
                 local maxHP = UnitHealthMax("player") or 1
-                return AbbreviateNumbers(math.floor(maxHP * 0.14))
+                return _pvAbbrev(math.floor(maxHP * 0.14))
             elseif content == "group" then
                 return "3"
             else
@@ -3547,6 +3555,7 @@ initFrame:SetScript("OnEvent", function(self)
         absorbOpacity        = { player=true, target=true, focus=true },
         absorbColor          = { player=true, target=true, focus=true },
         absorbEdgeMode       = { player=true, target=true, focus=true },
+        showOvershield       = { player=true, target=true, focus=true },
         healAbsorbStyle      = { player=true, target=true, focus=true },
         healAbsorbOpacity    = { player=true, target=true, focus=true },
         healAbsorbColor      = { player=true, target=true, focus=true },
@@ -4275,6 +4284,41 @@ initFrame:SetScript("OnEvent", function(self)
             })
             if strataRgn then
                 MakeCogBtn(strataRgn, cogShow)
+            end
+        end
+
+        -- Show Decimal on Health Text (global): one decimal on health value
+        -- (240.5k) and health percent (77.3%) for every unit. Default off.
+        local decRow
+        decRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Decimal on Health Text",
+              tooltip="Show one decimal place on health text: health values like 240.5k and health percent like 77.3%. Power text is unaffected. Off by default.",
+              getValue=function() return db.profile.showDecimalOnText end,
+              setValue=function(v)
+                  db.profile.showDecimalOnText = v
+                  if ns.ApplyTextDecimalGlobals then ns.ApplyTextDecimalGlobals() end
+                  ReloadAndUpdate(); UpdatePreview()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" });  y = y - h
+        -- Smaller dimmed "(Applies to All Units)" subtitle next to the label
+        -- (mirrors the CDM "Anchor to Cursor" subtitle pattern).
+        do
+            local suffix = decRow._leftRegion:CreateFontString(nil, "OVERLAY")
+            suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+            suffix:SetTextColor(1, 1, 1, 0.35)
+            suffix:SetText(EllesmereUI.L("(Applies to All Units)"))
+            local lbl
+            for i = 1, decRow._leftRegion:GetNumRegions() do
+                local reg = select(i, decRow._leftRegion:GetRegions())
+                if reg and reg.GetText and EllesmereUI.EnKey(reg:GetText()) == "Show Decimal on Health Text" then
+                    lbl = reg; break
+                end
+            end
+            if lbl then
+                suffix:SetPoint("LEFT", lbl, "RIGHT", 5, 0)
+            else
+                suffix:SetPoint("LEFT", decRow._leftRegion, "LEFT", 120, 0)
             end
         end
 
@@ -9029,6 +9073,10 @@ initFrame:SetScript("OnEvent", function(self)
                       order = { "overlay", "right", "left" },
                       get=function() return SValSupported("absorbEdgeMode", "overlay") end,
                       set=function(v) SSetSupported("absorbEdgeMode", v) end },
+                    { type="toggle", label="Show Overshield",
+                      tooltip="Show the part of an absorb that exceeds your empty health and backfills over your current health. When off, absorbs only fill the empty part of the health bar.",
+                      get=function() return SValSupported("showOvershield", true) end,
+                      set=function(v) SSetSupported("showOvershield", v) end },
                 },
             })
             MakeCogBtn(rgn, cogShow)

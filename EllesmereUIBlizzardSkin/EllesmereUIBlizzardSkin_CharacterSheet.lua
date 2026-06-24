@@ -2,6 +2,7 @@
 --  Themed Character Sheet
 --------------------------------------------------------------------------------
 local ADDON_NAME = ...
+local L = _G.EllesmereUI and _G.EllesmereUI.L or function(k) return k end
 local skinned = false
 local issecretvalue = issecretvalue or function() return false end
 local activeEquipmentSetID = nil
@@ -1235,7 +1236,7 @@ local function SkinCharacterSheet()
     mythicRatingLabel:SetFont(fontPath, 12, "")
     -- Positioned below iLvlText once that FontString exists (see below).
     mythicRatingLabel:SetTextColor(0.8, 0.8, 0.8, 1)
-    mythicRatingLabel:SetText("M+ Score:")
+    mythicRatingLabel:SetText(L("M+ Score:"))
     GetFFD(frame).mythicRatingLabel = mythicRatingLabel
 
     -- Legacy alias retained for call sites that test existence of the value
@@ -1293,12 +1294,12 @@ local function SkinCharacterSheet()
         local betterItems = GetBetterInventoryItems()
 
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine("Equipped Item Level", 0.6, 0.2, 1, 1)
+        GameTooltip:AddLine(L("Equipped Item Level"), 0.6, 0.2, 1, 1)
 
         if #betterItems > 0 then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine(
-                string.format("You have %d better item%s in inventory", #betterItems, #betterItems == 1 and "" or "s"),
+                string.format(L("You have %d better item%s in inventory"), #betterItems, #betterItems == 1 and "" or "s"),
                 0.2, 1, 0.2
             )
             GameTooltip:AddLine(" ")
@@ -1313,13 +1314,13 @@ local function SkinCharacterSheet()
 
             if #betterItems > 10 then
                 GameTooltip:AddLine(
-                    string.format("  ... and %d more", #betterItems - 10),
+                    string.format(L("  ... and %d more"), #betterItems - 10),
                     0.7, 0.7, 0.7
                 )
             end
         else
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("No better items in inventory", 0.7, 0.7, 0.7, true)
+            GameTooltip:AddLine(L("No better items in inventory"), 0.7, 0.7, 0.7, true)
         end
 
         -- Calculate minimum width based on longest item text
@@ -1389,7 +1390,7 @@ local function SkinCharacterSheet()
             if mythicRating and mythicRating > 0 then
                 local score = math.floor(mythicRating)
                 local hex = GetMPScoreHex(score)
-                GetFFD(frame).mythicRatingLabel:SetText(string.format("M+ Score: |cff%s%d|r", hex, score))
+                GetFFD(frame).mythicRatingLabel:SetText(L("M+ Score:") .. string.format(" |cff%s%d|r", hex, score))
                 GetFFD(frame).mythicRatingLabel:SetShown(isCharTab)
             else
                 GetFFD(frame).mythicRatingLabel:Hide()
@@ -1676,9 +1677,9 @@ local function SkinCharacterSheet()
 
         -- Return fixed order: Primary Stat, Stamina, Health
         return {
-            { name = primaryStat, func = function() return UnitStat("player", primaryStatIndex) end, statIndex = primaryStatIndex, tooltip = (primaryStatIndex == 1 and "Increases melee attack power") or (primaryStatIndex == 2 and "Increases dodge chance and melee attack power") or (primaryStatIndex == 4 and "Increase the magnitude of your attacks and Abilities") or "Primary stat" },
-            { name = "Stamina", func = function() return UnitStat("player", 3) end, statIndex = 3, tooltip = "Increases health" },
-            { name = "Health", func = function() return UnitHealthMax("player") end, tooltip = "The amount of damage you can take" },
+            { name = primaryStat, func = function() return UnitStat("player", primaryStatIndex) end, statIndex = primaryStatIndex, tooltip = (primaryStatIndex == 1 and L("Increases melee attack power")) or (primaryStatIndex == 2 and L("Increases dodge chance and melee attack power")) or (primaryStatIndex == 4 and L("Increase the magnitude of your attacks and Abilities")) or L("Primary stat") },
+            { name = "Stamina", func = function() return UnitStat("player", 3) end, statIndex = 3, tooltip = L("Increases health") },
+            { name = "Health", func = function() return UnitHealthMax("player") end, tooltip = L("The amount of damage you can take") },
         }
     end
 
@@ -1746,8 +1747,8 @@ local function SkinCharacterSheet()
                 colorKey = "Attack",
                 color = GetCategoryColor("Attack"),
                 stats = {
-                    { name = "Spell Power", func = function() return GetSpellBonusDamage(7) end, tooltip = "Increases the power of your spells and abilities" },
-                    { name = "Attack Speed", func = function() return UnitAttackSpeed("player") or 0 end, format = "%.2f", tooltip = "Attacks per second" },
+                    { name = "Spell Power", func = function() return GetSpellBonusDamage(7) end, tooltip = L("Increases the power of your spells and abilities") },
+                    { name = "Attack Speed", func = function() return UnitAttackSpeed("player") or 0 end, format = "%.2f", tooltip = L("Attacks per second") },
                 }
             },
             {
@@ -1755,11 +1756,11 @@ local function SkinCharacterSheet()
                 colorKey = "Defense",
                 color = GetCategoryColor("Defense"),
                 stats = {
-                    { name = "Armor", func = function() local base, effectiveArmor = UnitArmor("player") return effectiveArmor end, tooltip = "Reduces physical damage taken" },
-                    { name = "Dodge", func = function() return GetDodgeChance() or 0 end, format = "%.2f%%", tooltip = "Chance to avoid melee attacks" },
-                    { name = "Parry", func = function() return GetParryChance() or 0 end, format = "%.2f%%", tooltip = "Chance to deflect melee attacks" },
-                    { name = "Block", func = function() return GetBlockChance() or 0 end, format = "%.2f%%", tooltip = "Chance to block incoming attacks with a shield" },
-                    { name = "Stagger Effect", func = function() return C_PaperDollInfo.GetStaggerPercentage("player") or 0 end, format = "%.2f%%", showWhen = "brewmaster", tooltip = "Converts damage into a delayed effect" },
+                    { name = "Armor", func = function() local base, effectiveArmor = UnitArmor("player") return effectiveArmor end, tooltip = L("Reduces physical damage taken") },
+                    { name = "Dodge", func = function() return GetDodgeChance() or 0 end, format = "%.2f%%", tooltip = L("Chance to avoid melee attacks") },
+                    { name = "Parry", func = function() return GetParryChance() or 0 end, format = "%.2f%%", tooltip = L("Chance to deflect melee attacks") },
+                    { name = "Block", func = function() return GetBlockChance() or 0 end, format = "%.2f%%", tooltip = L("Chance to block incoming attacks with a shield") },
+                    { name = "Stagger Effect", func = function() return C_PaperDollInfo.GetStaggerPercentage("player") or 0 end, format = "%.2f%%", showWhen = "brewmaster", tooltip = L("Converts damage into a delayed effect") },
                 }
             },
             {
@@ -1856,7 +1857,7 @@ local function SkinCharacterSheet()
 
                         if newStats[labelIndex] then
                             -- Update label text
-                            stat.label:SetText(newStats[labelIndex].name)
+                            stat.label:SetText(L(newStats[labelIndex].name))
                             stat.label:Show()
 
                             if stat.value then
@@ -2065,7 +2066,7 @@ local function SkinCharacterSheet()
         sectionTitle:SetFont(fontPath, 11, "")
         sectionTitle:SetTextColor(section.color.r, section.color.g, section.color.b, 1)
         sectionTitle:SetPoint("CENTER", titleContainer, "CENTER", 0, 0)
-        sectionTitle:SetText(section.title)
+        sectionTitle:SetText(L(section.title))
 
         -- Absolute physical-pixel-perfect 1px dividers, same technique as
         -- PP.CreateBorder: disable engine snap and set height to exactly
@@ -2139,7 +2140,7 @@ local function SkinCharacterSheet()
                 label:SetFont(fontPath, 10, "")
                 label:SetTextColor(0.7, 0.7, 0.7, 0.8)
                 label:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", 0, statYOffset)
-                label:SetText(stat.name)
+                label:SetText(L(stat.name))
 
                 -- Stat value
                 local value = sectionContainer:CreateFontString(nil, "OVERLAY")
@@ -2172,7 +2173,7 @@ local function SkinCharacterSheet()
                     end
 
                     -- Build title line based on stat type
-                    local titleLine = stat.name .. " " .. displayValue
+                    local titleLine = L(stat.name) .. " " .. displayValue
 
                     -- Currency (Crests)
                     if stat.currencyID then
@@ -2180,7 +2181,7 @@ local function SkinCharacterSheet()
                         if currencyInfo then
                             local earned = currencyInfo.totalEarned or 0
                             local maximum = currencyInfo.maxQuantity or 0
-                            GameTooltip:AddLine(stat.name .. " Crests", section.color.r, section.color.g, section.color.b, 1)
+                            GameTooltip:AddLine(L(stat.name) .. " Crests", section.color.r, section.color.g, section.color.b, 1)
                             GameTooltip:AddLine(string.format("%d / %d", earned, maximum), 1, 1, 1, true)
                         end
                     -- Secondary stats with raw rating
@@ -2188,15 +2189,15 @@ local function SkinCharacterSheet()
                         local percentValue = stat.func()
                         local rawValue = stat.rawFunc()
                         GameTooltip:AddLine(
-                            string.format("%s %.2f%% (%d rating)", stat.name, percentValue, rawValue),
+                            string.format(L("%s %.2f%% (%d rating)"), L(stat.name), percentValue, rawValue),
                             section.color.r, section.color.g, section.color.b, 1  -- Use category color
                         )
                         -- Description for secondary stats
                         local description = ""
                         if stat.name == "Crit" then
-                            description = string.format("Increases your chance to critically hit by %.2f%%.", percentValue)
+                            description = string.format(L("Increases your chance to critically hit by %.2f%%."), percentValue)
                         elseif stat.name == "Haste" then
-                            description = string.format("Increases attack and casting speed by %.2f%%.", percentValue)
+                            description = string.format(L("Increases attack and casting speed by %.2f%%."), percentValue)
                         elseif stat.name == "Mastery" then
                             -- Pull the actual spec mastery spell description (e.g.
                             -- "Mastery: Razor Claws") so the tooltip explains what
@@ -2215,16 +2216,16 @@ local function SkinCharacterSheet()
                                 end
                             end
                             if description == "" then
-                                description = string.format("Increases the effectiveness of your Mastery by %.2f%%.", percentValue)
+                                description = string.format(L("Increases the effectiveness of your Mastery by %.2f%%."), percentValue)
                             end
                         elseif stat.name == "Versatility" then
-                            description = string.format("Increases damage and healing done by %.2f%% and reduces damage taken by %.2f%%.", percentValue, percentValue / 2)
+                            description = string.format(L("Increases damage and healing done by %.2f%% and reduces damage taken by %.2f%%."), percentValue, percentValue / 2)
                         elseif stat.name == "Leech" then
-                            description = string.format("Heals for %.2f%% of damage and healing done.", percentValue)
+                            description = string.format(L("Heals for %.2f%% of damage and healing done."), percentValue)
                         elseif stat.name == "Avoidance" then
-                            description = string.format("Reduces damage taken from area attacks by %.2f%%.", percentValue)
+                            description = string.format(L("Reduces damage taken from area attacks by %.2f%%."), percentValue)
                         elseif stat.name == "Speed" then
-                            description = string.format("Increases movement speed by %.2f%%.", percentValue)
+                            description = string.format(L("Increases movement speed by %.2f%%."), percentValue)
                         end
                         GameTooltip:AddLine(description, 1, 1, 1, true)
 
@@ -2235,19 +2236,19 @@ local function SkinCharacterSheet()
                                 EllesmereUI.GetStatDR(stat.name, rawValue)
                             if adjusted then
                                 GameTooltip:AddLine(" ")
-                                GameTooltip:AddLine(string.format("Adjusted Rating: %s",
+                                GameTooltip:AddLine(string.format(L("Adjusted Rating: %s"),
                                     BreakUpLargeNumbers(math.floor(adjusted + 0.5))),
                                     section.color.r, section.color.g, section.color.b, 1)
-                                GameTooltip:AddLine(string.format("Wasted Rating: %s",
+                                GameTooltip:AddLine(string.format(L("Wasted Rating: %s"),
                                     BreakUpLargeNumbers(math.floor(wasted + 0.5))),
                                     section.color.r, section.color.g, section.color.b, 1)
-                                GameTooltip:AddLine(string.format("Penalty Percentage: %d%%", penalty),
+                                GameTooltip:AddLine(string.format(L("Penalty Percentage: %d%%"), penalty),
                                     section.color.r, section.color.g, section.color.b, 1)
                                 if nextThreshold then
                                     local nextRating = math.floor(nextThreshold + 0.5)
                                     local needed = nextRating - math.floor(rawValue + 0.5)
                                     if needed < 0 then needed = 0 end
-                                    GameTooltip:AddLine(string.format("Next %d%% Penalty At: %s (+%s)",
+                                    GameTooltip:AddLine(string.format(L("Next %d%% Penalty At: %s (+%s)"),
                                         nextPenalty, BreakUpLargeNumbers(nextRating),
                                         BreakUpLargeNumbers(needed)),
                                         section.color.r, section.color.g, section.color.b, 1)
@@ -2261,13 +2262,13 @@ local function SkinCharacterSheet()
 
                         -- Map to Blizzard global names
                         if stat.name == "Strength" then
-                            statLabel = STAT_STRENGTH or "Strength"
+                            statLabel = STAT_STRENGTH or L("Strength")
                         elseif stat.name == "Agility" then
-                            statLabel = STAT_AGILITY or "Agility"
+                            statLabel = STAT_AGILITY or L("Agility")
                         elseif stat.name == "Intellect" then
-                            statLabel = STAT_INTELLECT or "Intellect"
+                            statLabel = STAT_INTELLECT or L("Intellect")
                         elseif stat.name == "Stamina" then
-                            statLabel = STAT_STAMINA or "Stamina"
+                            statLabel = STAT_STAMINA or L("Stamina")
                         end
 
                         local bonus = (posBuff or 0) + (negBuff or 0)
@@ -2276,12 +2277,12 @@ local function SkinCharacterSheet()
                             statLine = statLine .. " (" .. base .. (bonus > 0 and "+" or "") .. bonus .. ")"
                         end
                         GameTooltip:AddLine(statLine, section.color.r, section.color.g, section.color.b, 1)
-                        GameTooltip:AddLine(stat.tooltip, 1, 1, 1, true)
+                        GameTooltip:AddLine(L(stat.tooltip), 1, 1, 1, true)
                     -- Generic stats (Attack, Defense, etc.)
                     else
                         GameTooltip:AddLine(titleLine, section.color.r, section.color.g, section.color.b, 1)
                         if stat.tooltip then
-                            GameTooltip:AddLine(stat.tooltip, 1, 1, 1, true)
+                            GameTooltip:AddLine(L(stat.tooltip), 1, 1, 1, true)
                         end
                     end
 
@@ -2662,7 +2663,7 @@ local function SkinCharacterSheet()
     end
 
     -- Character button (will be updated after stats panel is created)
-    local characterBtn = CreateEUIButton("Stats", "Character", function() end)
+    local characterBtn = CreateEUIButton("Stats", L("Character"), function() end)
 
     -- Expose a closure that re-highlights the Character top-button so
     -- ApplyTabVisibility can invoke it when the Blizzard bottom-tab swaps
@@ -2702,7 +2703,7 @@ local function SkinCharacterSheet()
     -- Hint text
     local hintText = titlesSearchBox:CreateFontString(nil, "OVERLAY")
     hintText:SetFont(fontPath, 10, "")
-    hintText:SetText("Search titles...")
+    hintText:SetText(L("Search titles..."))
     hintText:SetTextColor(0.6, 0.6, 0.6, 0.7)
     hintText:SetPoint("LEFT", titlesSearchBox, "LEFT", 4, 0)
 
@@ -2822,7 +2823,7 @@ local function SkinCharacterSheet()
         -- Title indices 1+ are real titles; using 0 here would be a silent
         -- no-op and the server-saved title would persist across logins.
         local noTitleBtn = _createTitleButton(-1)
-        noTitleBtn._text:SetText("No Title")
+        noTitleBtn._text:SetText(L("No Title"))
         titleButtons[-1] = { btn = noTitleBtn, bg = noTitleBtn._bg }
 
         -- All known titles
@@ -2867,7 +2868,7 @@ local function SkinCharacterSheet()
         for _, idx in ipairs(_titlesOrder) do
             local btnData = titleButtons[idx]
             local btn = btnData.btn
-            local name = (idx == -1) and "No Title" or (btn._titleName or "")
+            local name = (idx == -1) and L("No Title") or (btn._titleName or "")
             local visible = (searchText == "")
                 or (idx == -1)   -- keep "No Title" always visible
                 or name:lower():find(searchText, 1, true)
@@ -2956,7 +2957,7 @@ local function SkinCharacterSheet()
     end)
 
     -- Titles button to show titles
-    CreateEUIButton("Titles", "Titles", function()
+    CreateEUIButton("Titles", L("Titles"), function()
         if not GetFFD(CharacterFrame).titlesPanel:IsShown() then
             GetFFD(CharacterFrame).titlesPanel:SetShown(true)
             statsPanel:SetShown(false)
@@ -3017,7 +3018,7 @@ local function SkinCharacterSheet()
 
     local setsHeaderText = setsHeaderFrame:CreateFontString(nil, "OVERLAY")
     setsHeaderText:SetFont(fontPath, 11, "")
-    setsHeaderText:SetText("Gear Sets")
+    setsHeaderText:SetText(L("Gear Sets"))
     setsHeaderText:SetTextColor(0.047, 0.824, 0.616, 1)
     setsHeaderText:SetPoint("CENTER", setsHeaderFrame, "CENTER", 0, 0)
 
@@ -3063,12 +3064,12 @@ local function SkinCharacterSheet()
         return btn
     end
 
-    local newSetBtn = MakeTextLink(linksRow, "New", function()
+    local newSetBtn = MakeTextLink(linksRow, L("New"), function()
         if InCombatLockdown() then return end
         StaticPopupDialogs["EUI_NEW_EQUIPMENT_SET"] = {
-            text = "New equipment set name:",
-            button1 = "Create",
-            button2 = "Cancel",
+            text = L("New equipment set name:"),
+            button1 = L("Create"),
+            button2 = L("Cancel"),
             OnAccept = function(dialog)
                 local newName = dialog.EditBox:GetText()
                 if newName ~= "" then
@@ -3083,9 +3084,9 @@ local function SkinCharacterSheet()
     end)
 
     local equipTopBtn, equipTopText
-    equipTopBtn = MakeTextLink(linksRow, "Equip", function()
+    equipTopBtn = MakeTextLink(linksRow, L("Equip"), function()
         if InCombatLockdown() then return end
-        equipTopText:SetText("Equipped!")
+        equipTopText:SetText(L("Equipped!"))
         equipTopText:SetTextColor(0.047, 0.824, 0.616, 1)
         if selectedSetID then
             EUI_EquipSet(selectedSetID)
@@ -3095,7 +3096,7 @@ local function SkinCharacterSheet()
         end
         C_Timer.After(1, function()
             if equipTopText then
-                equipTopText:SetText("Equip")
+                equipTopText:SetText(L("Equip"))
                 equipTopText:SetTextColor(1, 1, 1, 0.7)
             end
         end)
@@ -3103,14 +3104,14 @@ local function SkinCharacterSheet()
     equipTopText = equipTopBtn._fs
 
     local saveTopBtn, saveTopText
-    saveTopBtn = MakeTextLink(linksRow, "Save", function()
+    saveTopBtn = MakeTextLink(linksRow, L("Save"), function()
         if InCombatLockdown() then return end
-        saveTopText:SetText("Saved!")
+        saveTopText:SetText(L("Saved!"))
         saveTopText:SetTextColor(0.047, 0.824, 0.616, 1)
         if selectedSetID then C_EquipmentSet.SaveEquipmentSet(selectedSetID) end
         C_Timer.After(1, function()
             if saveTopText then
-                saveTopText:SetText("Save")
+                saveTopText:SetText(L("Save"))
                 saveTopText:SetTextColor(1, 1, 1, 0.7)
             end
         end)
@@ -3325,8 +3326,8 @@ local function SkinCharacterSheet()
                 local sid, sname = tile._setID, tile._setName
                 if not (sid and sname) then return end
                 StaticPopupDialogs["EUI_DELETE_EQUIPMENT_SET"] = {
-                    text = "Delete equipment set '" .. sname .. "'?",
-                    button1 = "Delete", button2 = "Cancel",
+                    text = string.format(L("Delete equipment set '%s'?"), sname),
+                    button1 = L("Delete"), button2 = L("Cancel"),
                     OnAccept = function()
                         C_EquipmentSet.DeleteEquipmentSet(sid)
                         RefreshEquipmentSets()
@@ -3553,7 +3554,7 @@ local function SkinCharacterSheet()
     -- Activate Blizzard's equipment sidebar (PaperDollSidebarTab3) so the
     -- per-slot flyout arrows appear. Our equipPanel overlays Blizzard's
     -- EquipmentManagerPane with our own gear-sets UI.
-    CreateEUIButton("Equipment", "Equipment", function()
+    CreateEUIButton("Equipment", L("Equipment"), function()
         if not GetFFD(CharacterFrame).equipPanel:IsShown() then
             GetFFD(CharacterFrame).equipPanel:SetShown(true)
             statsPanel:SetShown(false)

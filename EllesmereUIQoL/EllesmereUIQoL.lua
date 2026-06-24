@@ -1231,6 +1231,7 @@ do
 
             local showWorld = db.fpsShowWorldMS
             local showLocal = (db.fpsShowLocalMS == nil) and true or db.fpsShowLocalMS
+            local hideLabel = db.fpsHideLabel
             local _, _, latHome, latWorld = GetNetStats()
 
             fsFps:ClearAllPoints()
@@ -1239,41 +1240,57 @@ do
 
             if showWorld then
                 fsWorldVal:SetText(latWorld .. " ms")
-                fsWorldLbl:SetText("(world)")
                 divWorld:ClearAllPoints()
                 divWorld:SetPoint("LEFT", anchor, "RIGHT", DIV_PAD, 0)
                 divWorld:Show()
                 fsWorldVal:ClearAllPoints()
                 fsWorldVal:SetPoint("LEFT", divWorld, "RIGHT", DIV_PAD, 0)
                 fsWorldVal:Show()
-                fsWorldLbl:ClearAllPoints()
-                fsWorldLbl:SetPoint("LEFT", fsWorldVal, "RIGHT", 3, 0)
-                fsWorldLbl:Show()
-                anchor = fsWorldLbl
+                if hideLabel then
+                    fsWorldLbl:Hide()
+                    anchor = fsWorldVal
+                else
+                    fsWorldLbl:SetText("(world)")
+                    fsWorldLbl:ClearAllPoints()
+                    fsWorldLbl:SetPoint("LEFT", fsWorldVal, "RIGHT", 3, 0)
+                    fsWorldLbl:Show()
+                    anchor = fsWorldLbl
+                end
             else
                 divWorld:Hide(); fsWorldVal:Hide(); fsWorldLbl:Hide()
             end
 
             if showLocal then
                 fsLocalVal:SetText(latHome .. " ms")
-                fsLocalLbl:SetText("(local)")
                 divLocal:ClearAllPoints()
                 divLocal:SetPoint("LEFT", anchor, "RIGHT", DIV_PAD, 0)
                 divLocal:Show()
                 fsLocalVal:ClearAllPoints()
                 fsLocalVal:SetPoint("LEFT", divLocal, "RIGHT", DIV_PAD, 0)
                 fsLocalVal:Show()
-                fsLocalLbl:ClearAllPoints()
-                fsLocalLbl:SetPoint("LEFT", fsLocalVal, "RIGHT", 3, 0)
-                fsLocalLbl:Show()
-                anchor = fsLocalLbl
+                if hideLabel then
+                    fsLocalLbl:Hide()
+                    anchor = fsLocalVal
+                else
+                    fsLocalLbl:SetText("(local)")
+                    fsLocalLbl:ClearAllPoints()
+                    fsLocalLbl:SetPoint("LEFT", fsLocalVal, "RIGHT", 3, 0)
+                    fsLocalLbl:Show()
+                    anchor = fsLocalLbl
+                end
             else
                 divLocal:Hide(); fsLocalVal:Hide(); fsLocalLbl:Hide()
             end
 
             local totalW = fsFps:GetStringWidth()
-            if showWorld then totalW = totalW + DIV_PAD + DIV_W + DIV_PAD + fsWorldVal:GetStringWidth() + 3 + fsWorldLbl:GetStringWidth() end
-            if showLocal then totalW = totalW + DIV_PAD + DIV_W + DIV_PAD + fsLocalVal:GetStringWidth() + 3 + fsLocalLbl:GetStringWidth() end
+            if showWorld then
+                totalW = totalW + DIV_PAD + DIV_W + DIV_PAD + fsWorldVal:GetStringWidth()
+                if not hideLabel then totalW = totalW + 3 + fsWorldLbl:GetStringWidth() end
+            end
+            if showLocal then
+                totalW = totalW + DIV_PAD + DIV_W + DIV_PAD + fsLocalVal:GetStringWidth()
+                if not hideLabel then totalW = totalW + 3 + fsLocalLbl:GetStringWidth() end
+            end
             self:SetSize(totalW + 4, 20)
         end
 

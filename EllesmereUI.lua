@@ -9135,7 +9135,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.9"
+EllesmereUI.VERSION = "8.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -10407,6 +10407,24 @@ EllesmereUI.VIS_VALUES = {
 }
 EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
+-- Action Bars variant: adds "Show when Dragonriding". Only the SECURE action
+-- bars (1-8, stance, pet) can express it as [advflyable,mounted,flying] in their
+-- state driver, which re-evaluates the flying transition in real time. The
+-- non-secure bars (Micro/Bag/XP/Rep) and other modules can't catch the takeoff
+-- event, so they don't expose this option.
+EllesmereUI.VIS_VALUES_AB = {
+    never      = "Never",
+    always     = "Always",
+    mouseover  = "Mouseover",
+    in_combat      = "In Combat",
+    out_of_combat  = "Out of Combat",
+    show_dragonriding = "Show when Dragonriding",
+    in_raid        = "In Raid Group",
+    in_party   = "In Party",
+    solo       = "Solo",
+}
+EllesmereUI.VIS_ORDER_AB = { "never", "always", "mouseover", "in_combat", "out_of_combat", "show_dragonriding", "---", "in_raid", "in_party", "solo" }
+
 -- CDM variant (no mouseover -- CDM bars don't support mouseover visibility)
 EllesmereUI.VIS_VALUES_CDM = {
     never          = "Never",
@@ -10536,6 +10554,18 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
     if mode == "in_raid" then return state.inRaid end
     if mode == "in_party" then return state.inParty or state.inRaid end
     if mode == "solo" then return not state.inRaid and not state.inParty end
+    if mode == "show_dragonriding" then
+        -- Mirrors the secure-macro [advflyable,mounted,flying]: show only while
+        -- flying on a glide-capable (skyriding) mount. IsMounted/IsFlying are
+        -- combat-safe and non-tainting; GetGlidingInfo's 2nd return (canGlide)
+        -- is the advanced-flyable flag.
+        if not (IsMounted and IsMounted() and IsFlying and IsFlying()) then return false end
+        if C_PlayerInfo and C_PlayerInfo.GetGlidingInfo then
+            local _, canGlide = C_PlayerInfo.GetGlidingInfo()
+            return canGlide == true
+        end
+        return true
+    end
     -- "always" and "mouseover" both return true (mouseover handled separately)
     return true
 end

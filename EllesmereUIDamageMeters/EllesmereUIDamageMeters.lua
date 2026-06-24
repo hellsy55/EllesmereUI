@@ -125,6 +125,7 @@ local ICON_ALPHA        = 0.4
 local ICON_HOVER_ALPHA  = 0.9
 local RESIZE_ICON       = "Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png"
 local MAX_WINDOWS       = 5
+local L = _G.EllesmereUI.L
 
 local DM_TYPE_NAMES = {
     [Enum.DamageMeterType.DamageDone]           = "Damage Done",
@@ -468,6 +469,7 @@ instanceFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 instanceFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 instanceFrame:RegisterEvent("DAMAGE_METER_RESET")
 instanceFrame:RegisterEvent("DAMAGE_METER_COMBAT_SESSION_UPDATED")
+instanceFrame:RegisterEvent("DAMAGE_METER_CURRENT_SESSION_UPDATED")
 instanceFrame:SetScript("OnEvent", function(_, event)
     local t0 = ns.ProfBegin("Instance:" .. event)
     if event == "CHALLENGE_MODE_START" then
@@ -523,6 +525,20 @@ instanceFrame:SetScript("OnEvent", function(_, event)
                 end
             end)
         end
+    elseif event == "DAMAGE_METER_CURRENT_SESSION_UPDATED" then
+        -- Authoritative "the Current session just rolled to a new one" signal --
+        -- this is the boss-pull reset trigger. The ticker-only model could miss it
+        -- when the roll lands between polls at a combat boundary (occasional
+        -- no-reset-on-pull). Force an immediate repaint reading the fresh session,
+        -- and revive the live ticker if we are mid-fight. Cheap and rare (fires at
+        -- combat-segment boundaries, not per damage event).
+        for _, w in ipairs(_windows) do
+            w._barCacheKey = nil
+            w._barSources = nil
+            w._cachedTargets = nil
+            w.Refresh()
+        end
+        if _inCombat and not _sharedTicker then StartSharedTicker() end
     elseif event == "DAMAGE_METER_RESET" then
         -- Blizzard cleared all session data (auto-reset CVar, manual reset, etc.)
         _combatEndTime = 0; _curViewFrozenDur = 0
@@ -1328,7 +1344,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         local players = AggregateEnemyPlayers(srcData, GetBreakdownDuration(curSession, curSessionID))
         if not players then return false end
 
-        ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", "Damage Taken")
+        ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", L("Damage Taken"))
         local texPath, texKey = GetBreakdownBarTexturePath()
         local maxAmt = players[1].total
         local ttMax = TT_MAX()
@@ -1382,7 +1398,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     end
     if not srcData or not srcData.combatSpells or #srcData.combatSpells == 0 then return false end
 
-    ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", DM_TYPE_NAMES[curDMType] or "Damage Done")
+    ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", L(DM_TYPE_NAMES[curDMType] or "Damage Done"))
 
     wipe(_ttSorted)
     for _, spell in ipairs(srcData.combatSpells) do
@@ -1930,7 +1946,7 @@ local function CreateDMWindow(winIdx)
                 EnsureTooltipFrame()
                 -- Show header with player name + type
                 local playerName = StripRealm(bar._src and bar._src.name) or "Unknown"
-                local typeName = DM_TYPE_NAMES[W.curDMType] or "Damage Done"
+                local typeName = L(DM_TYPE_NAMES[W.curDMType] or "Damage Done")
                 _ttFrame._hdrText:SetText(playerName .. "'s " .. typeName .. " Breakdown")
                 local cfg2 = DB()
                 local hc = cfg2.hdrBgColor; local hR = hc and hc.r or 0x1B/255; local hG = hc and hc.g or 0x1B/255; local hB = hc and hc.b or 0x1B/255
@@ -2053,8 +2069,8 @@ local function CreateDMWindow(winIdx)
         else local tc = cfg.hdrTextColor; tR = tc and tc.r or 1; tG = tc and tc.g or 1; tB = tc and tc.b or 1 end
         W.titleText:SetTextColor(tR, tG, tB, 1)
     end
-    W._fullTitle = "Damage Done"
-    W.titleText:SetText("Damage Done")
+    W._fullTitle = L("Damage Done")
+    W.titleText:SetText(L("Damage Done"))
 
     W.timerText = header:CreateFontString(nil, "OVERLAY"); SetDMFont(W.timerText, hdrFS)
     W.timerText:SetTextColor(1, 1, 1, 0.7); W.timerText:SetPoint("LEFT", W.titleText, "RIGHT", 4, 0); W.timerText:SetText("(0:00)")
@@ -2122,33 +2138,33 @@ local function CreateDMWindow(winIdx)
                      onClick = function() wdb.mythicStartDMType = dmType end }
         end
         local mStartChildren = {
-            { text = "Off", isActive = (not wdb.mythicStartDMType),
+            { text = L("Off"), isActive = (not wdb.mythicStartDMType),
               onClick = function() wdb.mythicStartDMType = false end },
             "---",
-            mStartEntry("Damage Done", Enum.DamageMeterType.DamageDone),
-            mStartEntry("Healing", Enum.DamageMeterType.HealingDone),
-            mStartEntry("Damage Taken", Enum.DamageMeterType.DamageTaken),
-            mStartEntry("Avoidable Damage Taken", Enum.DamageMeterType.AvoidableDamageTaken),
-            mStartEntry("Enemy Damage Taken", Enum.DamageMeterType.EnemyDamageTaken),
-            mStartEntry("Interrupts", Enum.DamageMeterType.Interrupts),
-            mStartEntry("Dispels", Enum.DamageMeterType.Dispels),
-            mStartEntry("Deaths", Enum.DamageMeterType.Deaths),
+            mStartEntry(L("Damage Done"), Enum.DamageMeterType.DamageDone),
+            mStartEntry(L("Healing"), Enum.DamageMeterType.HealingDone),
+            mStartEntry(L("Damage Taken"), Enum.DamageMeterType.DamageTaken),
+            mStartEntry(L("Avoidable Damage Taken"), Enum.DamageMeterType.AvoidableDamageTaken),
+            mStartEntry(L("Enemy Damage Taken"), Enum.DamageMeterType.EnemyDamageTaken),
+            mStartEntry(L("Interrupts"), Enum.DamageMeterType.Interrupts),
+            mStartEntry(L("Dispels"), Enum.DamageMeterType.Dispels),
+            mStartEntry(L("Deaths"), Enum.DamageMeterType.Deaths),
         }
         ShowEDMMenu({
-            { text = "Hide in Dungeons", isActive = wdb.hideInDungeon, onClick = function()
+            { text = L("Hide in Dungeons"), isActive = wdb.hideInDungeon, onClick = function()
                 wdb.hideInDungeon = not wdb.hideInDungeon
                 for _, w in ipairs(_windows) do w.UpdateVisibility() end
             end },
-            { text = "Hide in Raids", isActive = wdb.hideInRaid, onClick = function()
+            { text = L("Hide in Raids"), isActive = wdb.hideInRaid, onClick = function()
                 wdb.hideInRaid = not wdb.hideInRaid
                 for _, w in ipairs(_windows) do w.UpdateVisibility() end
             end },
-            { text = "Hide out of Instances", isActive = wdb.hideOutOfInstance, onClick = function()
+            { text = L("Hide out of Instances"), isActive = wdb.hideOutOfInstance, onClick = function()
                 wdb.hideOutOfInstance = not wdb.hideOutOfInstance
                 for _, w in ipairs(_windows) do w.UpdateVisibility() end
             end },
             "---",
-            { text = "Width", isInput = true,
+            { text = L("Width"), isInput = true,
               getValue = function() return math.floor(frame:GetWidth() + 0.5) end,
               setValue = function(v)
                   local left, top = frame:GetLeft(), frame:GetTop()
@@ -2157,7 +2173,7 @@ local function CreateDMWindow(winIdx)
                   wdb.width = math.floor(frame:GetWidth() + 0.5)
               end,
               min = MIN_W },
-            { text = "Height", isInput = true,
+            { text = L("Height"), isInput = true,
               getValue = function() return math.floor(frame:GetHeight() + 0.5) end,
               setValue = function(v)
                   local left, top = frame:GetLeft(), frame:GetTop()
@@ -2166,28 +2182,28 @@ local function CreateDMWindow(winIdx)
                   wdb.height = math.floor(frame:GetHeight() + 0.5)
               end,
               min = MIN_H },
-            { text = W.snapDisabled and "Enable Snapping" or "Disable Snapping", onClick = function()
+            { text = W.snapDisabled and L("Enable Snapping") or L("Disable Snapping"), onClick = function()
                 W.snapDisabled = not W.snapDisabled
             end },
-            { text = "Hide Timer", isActive = wdb.hideTimer, onClick = function()
+            { text = L("Hide Timer"), isActive = wdb.hideTimer, onClick = function()
                 wdb.hideTimer = not wdb.hideTimer
                 W.timerText:SetShown(not wdb.hideTimer)
             end },
-            { text = "Auto Swap Current/Overall",
-              tooltip = "Auto switch your window to overall at the end of an M+ run, and current at the start",
+            { text = L("Auto Swap Current/Overall"),
+              tooltip = L("Auto switch your window to overall at the end of an M+ run, and current at the start"),
               isActive = wdb.autoSwapMythic, onClick = function()
                 wdb.autoSwapMythic = not wdb.autoSwapMythic
             end },
-            { text = "Default on M+ Start",
-              tooltip = "Set your window to this Meter Type on dungeon start",
+            { text = L("Default on M+ Start"),
+              tooltip = L("Set your window to this Meter Type on dungeon start"),
               children = mStartChildren },
-            { text = "Settings", onClick = function()
+            { text = L("Settings"), onClick = function()
                 if EUI.ShowModule then EUI:ShowModule("EllesmereUIDamageMeters") end
             end },
         }, W.settingsBtn)
     end)
 
-    W.segmentBtn = MakeHeaderBtn("dm_sheet.png", -(btnSize + btnPad * 2 + 2), "Select Segment", function()
+    W.segmentBtn = MakeHeaderBtn("dm_sheet.png", -(btnSize + btnPad * 2 + 2), L("Select Segment"), function()
         local items = {}
         -- Segments first (top of upward menu)
         if C_DamageMeter and C_DamageMeter.GetAvailableCombatSessions then
@@ -2211,7 +2227,7 @@ local function CreateDMWindow(winIdx)
         items[#items + 1] = "---"
         for _, sType in ipairs(SESSION_TYPES) do
             items[#items + 1] = {
-                text = SESSION_TYPE_NAMES[sType] or "Unknown",
+                text = L(SESSION_TYPE_NAMES[sType] or "Unknown"),
                 isActive = (not W.curSessionID and sType == W.curSession),
                 onClick = function() W.curSession = sType; wdb.curSession = sType; W.curSessionID = nil; W.CloseSource(); W.Refresh() end,
             }
@@ -2237,13 +2253,13 @@ local function CreateDMWindow(winIdx)
         local dmActive = (cur == Enum.DamageMeterType.DamageDone or cur == Enum.DamageMeterType.DamageTaken or cur == Enum.DamageMeterType.AvoidableDamageTaken or cur == Enum.DamageMeterType.EnemyDamageTaken)
         local actActive = (cur == Enum.DamageMeterType.Interrupts or cur == Enum.DamageMeterType.Dispels or cur == Enum.DamageMeterType.Deaths)
         ShowEDMMenu({
-            { text = "Damage", isActive = dmActive, children = {
-                entry("Damage Done", Enum.DamageMeterType.DamageDone), entry("Damage Taken", Enum.DamageMeterType.DamageTaken),
-                entry("Avoidable Damage Taken", Enum.DamageMeterType.AvoidableDamageTaken), entry("Enemy Damage Taken", Enum.DamageMeterType.EnemyDamageTaken),
+            { text = L("Damage"), isActive = dmActive, children = {
+                entry(L("Damage Done"), Enum.DamageMeterType.DamageDone), entry(L("Damage Taken"), Enum.DamageMeterType.DamageTaken),
+                entry(L("Avoidable Damage Taken"), Enum.DamageMeterType.AvoidableDamageTaken), entry(L("Enemy Damage Taken"), Enum.DamageMeterType.EnemyDamageTaken),
             }},
-            entry("Healing", Enum.DamageMeterType.HealingDone),
-            { text = "Actions", isActive = actActive, children = {
-                entry("Interrupts", Enum.DamageMeterType.Interrupts), entry("Dispels", Enum.DamageMeterType.Dispels), entry("Deaths", Enum.DamageMeterType.Deaths),
+            entry(L("Healing"), Enum.DamageMeterType.HealingDone),
+            { text = L("Actions"), isActive = actActive, children = {
+                entry(L("Interrupts"), Enum.DamageMeterType.Interrupts), entry(L("Dispels"), Enum.DamageMeterType.Dispels), entry(L("Deaths"), Enum.DamageMeterType.Deaths),
             }},
         }, W.modeBtn)
     end)
@@ -2253,7 +2269,7 @@ local function CreateDMWindow(winIdx)
 
     -- + (new window) or x (close window) button, left of mode icon
     local winActionIcon = (winIdx == 1) and (MEDIA .. "dm_open.png") or (MEDIA .. "dm_close.png")
-    local winActionTip = (winIdx == 1) and "New Window" or "Close Window"
+    local winActionTip = (winIdx == 1) and L("New Window") or L("Close Window")
     W.winActionBtn = MakeHeaderBtn("dm_settings.png", -(btnSize * 4 + btnPad * 5 + 2), winActionTip, function()
         if winIdx ~= 1 and W.windowLocked then return end
         if winIdx == 1 then
@@ -2855,7 +2871,7 @@ local function CreateDMWindow(winIdx)
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(ovLabel, true) end
     ovLabel:SetFont(ovFont, 10, "")
     ovLabel:SetPoint("CENTER")
-    ovLabel:SetText("Damage Meters"); ovLabel:SetTextColor(1, 1, 1, 0.9)
+    ovLabel:SetText(L("Damage Meters")); ovLabel:SetTextColor(1, 1, 1, 0.9)
 
     -- Overlay absorbs clicks to block interaction with the window beneath.
     -- Dragging the overlay uses the same snap logic as the header drag.
@@ -3298,7 +3314,7 @@ local function CreateDMWindow(winIdx)
             W.timerText:SetText("")
         end
         local titlePrefix = isOverall and "Overall " or ""
-        W._fullTitle = titlePrefix .. (DM_TYPE_NAMES[W.curDMType] or "Damage Done")
+        W._fullTitle = L(titlePrefix .. (DM_TYPE_NAMES[W.curDMType] or "Damage Done"))
         W.FitTitle()
         if winIdx == 1 then UpdateSATimerText() end
 
@@ -3739,7 +3755,7 @@ local function CreateDMWindow(winIdx)
                 homeCards[idx] = card
             end
 
-            local label = DM_TYPE_NAMES[dmType] or "Unknown"
+            local label = L(DM_TYPE_NAMES[dmType] or "Unknown")
             local isActive = (dmType == W.curDMType)
 
             -- Position in grid

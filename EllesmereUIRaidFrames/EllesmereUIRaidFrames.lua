@@ -410,8 +410,13 @@ local defaults = {
         -- Health bar
         healthBarTexture = "atrocity",
         healthBarOpacity = 100,
-        healthColorMode  = "class",  -- "class", "dark", "classic", "custom"
+        healthColorMode  = "class",  -- "class", "dark", "classic", "custom", "customDynamic"
         customFillColor  = { r = 37/255, g = 193/255, b = 29/255 },
+        -- Custom Dynamic Colors: user-chosen health-percent gradient stops. Defaults
+        -- match the Classic curve so switching from Classic looks identical at first.
+        dynamicColor100  = { r = 0, g = 1, b = 0 },   -- full health
+        dynamicColor50   = { r = 1, g = 1, b = 0 },   -- half health
+        dynamicColor0    = { r = 1, g = 0, b = 0 },   -- empty health
         customBgColor    = { r = 17/255, g = 17/255, b = 17/255 },
         bgClassColored   = false,
         bgDarkness       = 50,
@@ -1192,6 +1197,60 @@ local function GetClassicHealthCurve()
     return curve
 end
 
+-- Custom Dynamic Colors: like Classic, but the three gradient stops (full / half /
+-- empty health) are user-chosen. Live frames feed a C_CurveUtil curve to
+-- UnitHealthPercent (secret-value safe, identical to the Classic path); the curve
+-- is cached and rebuilt only when one of the three colors changes. Wrapped in a
+-- do-block so the cache state does not consume main-chunk local slots (this file
+-- is at the Lua 5.1 200-local cap).
+do
+    local DEF100 = { r = 0, g = 1, b = 0 }
+    local DEF50  = { r = 1, g = 1, b = 0 }
+    local DEF0   = { r = 1, g = 0, b = 0 }
+    local dynCurve
+    local r0, g0, b0, r50, g50, b50, r100, g100, b100
+    function ns.GetCustomDynamicCurve(s)
+        s = s or db.profile
+        local c0   = s.dynamicColor0   or DEF0
+        local c50  = s.dynamicColor50  or DEF50
+        local c100 = s.dynamicColor100 or DEF100
+        if not (dynCurve
+            and r0   == c0.r   and g0   == c0.g   and b0   == c0.b
+            and r50  == c50.r  and g50  == c50.g  and b50  == c50.b
+            and r100 == c100.r and g100 == c100.g and b100 == c100.b) then
+            dynCurve = C_CurveUtil.CreateColorCurve()
+            dynCurve:SetType(Enum.LuaCurveType.Linear)
+            dynCurve:AddPoint(0,   CreateColor(c0.r,   c0.g,   c0.b,   1))
+            dynCurve:AddPoint(0.5, CreateColor(c50.r,  c50.g,  c50.b,  1))
+            dynCurve:AddPoint(1,   CreateColor(c100.r, c100.g, c100.b, 1))
+            r0, g0, b0       = c0.r, c0.g, c0.b
+            r50, g50, b50    = c50.r, c50.g, c50.b
+            r100, g100, b100 = c100.r, c100.g, c100.b
+        end
+        return dynCurve
+    end
+
+    -- Clean-number interpolation matching the curve above, for preview surfaces
+    -- where the health percent is a known fake value (0-1). Linear between the
+    -- 0%/50% stops below half, and the 50%/100% stops at or above half.
+    function ns.ResolveDynamicColor(s, pct01)
+        s = s or db.profile
+        local c0   = s.dynamicColor0   or DEF0
+        local c50  = s.dynamicColor50  or DEF50
+        local c100 = s.dynamicColor100 or DEF100
+        if pct01 >= 0.5 then
+            local t = (pct01 - 0.5) * 2
+            return c50.r + (c100.r - c50.r) * t,
+                   c50.g + (c100.g - c50.g) * t,
+                   c50.b + (c100.b - c50.b) * t
+        end
+        local t = pct01 * 2
+        return c0.r + (c50.r - c0.r) * t,
+               c0.g + (c50.g - c0.g) * t,
+               c0.b + (c50.b - c0.b) * t
+    end
+end
+
 -- Dark mode colors (must match UnitFrames exactly)
 local DARK_FILL_R, DARK_FILL_G, DARK_FILL_B = 0x11/255, 0x11/255, 0x11/255  -- #111111
 local DARK_FILL_A = 0.9
@@ -1251,6 +1310,13 @@ local function GetHealthColor(unit, s)
     elseif mode == "classic" then
         -- Native WoW health gradient via Blizzard's curve system (secret-value safe)
         local color = UnitHealthPercent(unit, true, GetClassicHealthCurve())
+        if color and color.GetRGB then
+            return color:GetRGB()
+        end
+        return 0, 1, 0
+    elseif mode == "customDynamic" then
+        -- User-customizable gradient via the same secret-safe curve path as Classic
+        local color = UnitHealthPercent(unit, true, ns.GetCustomDynamicCurve(s))
         if color and color.GetRGB then
             return color:GetRGB()
         end
@@ -8537,7 +8603,8 @@ do
     local map = {
         healthBar = {
             "healthBarTexture", "healthBarOpacity", "healthColorMode",
-            "customFillColor", "customBgColor", "bgClassColored", "bgDarkness", "smoothBars",
+            "customFillColor", "dynamicColor100", "dynamicColor50", "dynamicColor0",
+            "customBgColor", "bgClassColored", "bgDarkness", "smoothBars",
             "healPrediction", "healPredOpacity", "healPredColor",
         },
         absorbs = {
@@ -11182,6 +11249,10 @@ local function ApplyPreviewData(f, index)
             local r = pct < 0.5 and 1 or (1 - (pct - 0.5) * 2)
             local g = pct > 0.5 and 1 or (pct * 2)
             f._health:SetStatusBarColor(r, g, 0, (s.healthBarOpacity or 100) / 100)
+        elseif mode == "customDynamic" then
+            if fillTex then fillTex:SetAlpha(1) end
+            local r, g, b = ns.ResolveDynamicColor(s, healthPct / 100)
+            f._health:SetStatusBarColor(r, g, b, (s.healthBarOpacity or 100) / 100)
         elseif mode == "custom" then
             if fillTex then fillTex:SetAlpha(1) end
             local c = s.customFillColor

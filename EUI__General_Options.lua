@@ -274,6 +274,107 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.3",
+        heroes = {
+            {
+                module = "Cooldown Manager",
+                title = "Reorder Buff Icons",
+                desc  = "Drag to rearrange the icons on your buff bars, the same way cooldown and utility bars already let you.",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars",
+                    preSelect = function()
+                        if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("buffs") end
+                    end },
+            },
+            {
+                module = "Cooldown Manager",
+                title = "Buff Activation Sounds",
+                desc  = "Give any tracked buff its own sound that plays the moment it becomes active, with a speaker button to preview from the full sound list.",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars",
+                    preSelect = function()
+                        if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("buffs") end
+                    end },
+            },
+            {
+                module = "Raid Frames",
+                title = "Custom Dynamic Health Colors",
+                desc  = "A new Custom Dynamic Colors fill mode smoothly blends each raid health bar between three colors you pick for full, half, and empty health.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "HEALTH BAR", highlight = "Fill Color" },
+            },
+            {
+                module = "Quest Tracker",
+                title = "Native Quest Icons",
+                desc  = "A new toggle shows Blizzard's own quest type icons and POI buttons instead of the custom EllesmereUI icons.",
+                nav   = { module = "EllesmereUIQuestTracker", page = "Quest Tracker", section = "DISPLAY", highlight = "Show Quest Icons" },
+            },
+        },
+        features = {
+            {
+                module = "Action Bars",
+                title = "Show Bars When Skyriding",
+                desc  = "A new Show when Dragonriding visibility mode reveals a bar only while you are flying on a skyriding mount.",
+                nav   = { module = "EllesmereUIActionBars", page = "Bar Display", section = "VISIBILITY", highlight = "Visibility",
+                    preSelect = function()
+                        if EllesmereUI._setActionBarKey then EllesmereUI._setActionBarKey("MainBar") end
+                        EllesmereUI._pendingActionBarSelect = "MainBar"
+                    end },
+            },
+            {
+                module = "Cooldown Manager",
+                title = "Hide Recharge Timer With Charges",
+                desc  = "On cooldown and utility bars, an icon can hide its recharge countdown while you still have a charge banked, showing the number again only once all charges are spent.",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars",
+                    preSelect = function()
+                        if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("cooldowns") end
+                    end },
+            },
+            {
+                module = "Quality of Life",
+                title = "Compact Latency Display",
+                desc  = "The FPS counter gains an option to hide the (local) and (world) labels next to your latency for a more compact readout.",
+                nav   = { module = "EllesmereUIQoL", page = "Quality of Life", section = "EXTRAS", highlight = "Show FPS Counter" },
+            },
+            {
+                module = "Resource Bars",
+                title = "Vertical Totem Bar",
+                desc  = "The Totem Bar can now be laid out vertically as well as horizontally.",
+                nav   = { module = "EllesmereUIResourceBars", page = "Totem Bar", section = "LAYOUT", highlight = "Orientation" },
+            },
+            {
+                module = "Unit Frames",
+                title = "Decimal Health Text",
+                desc  = "A new option adds one decimal place to health text, showing values like 240.5k and 77.3% across all unit frames.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "DISPLAY", highlight = "Show Decimal on Health Text",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title = "Show Overshield",
+                desc  = "A per-unit option lets absorbs backfill over your current health, or fill only the empty part of the bar when turned off.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "ABSORBS", highlight = "Absorb Style",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "A new option controls whether charge spells show their recharge countdown while a charge is still banked." },
+            { module = "Action Bars", text = "A new toggle can hide the highlight overlay shown on the current or active action." },
+            { module = "Cooldown Manager", text = "Preset and custom buffs now reserve their slot when inactive, the same as tracked buffs, when Always Show Buffs or Keep Buffs in Same Place is on." },
+            { module = "Cooldown Manager", text = "With Suppress GCD on, a charge spell that has spent all of its charges now keeps its recharge swipe instead of briefly blanking it." },
+            { module = "Cooldown Manager", text = "Adding a custom spell by ID now notes that manually entered spells cannot show charge counts." },
+            { module = "Damage Meters", text = "The Current session now reliably resets at the start of a new boss pull instead of occasionally carrying data over." },
+            { module = "General", text = "Fixed spell activation glows so the Classic WoW glow no longer flickers backwards each loop and the marching ants border glow animates again." },
+            { module = "General", text = "Long setting names in the options panels now trim with an ellipsis and show the full text on hover instead of overlapping their control." },
+            { module = "Raid Frames", text = "Mage Remove Curse is now recognized for dispel click-casting." },
+            { module = "Resource Bars", text = "Totem timers now show a clean countdown number instead of Blizzard's Xs duration text." },
+            { module = "Resource Bars", text = "The Resource Bars cast bar fill now animates smoothly as a cast progresses." },
+        },
+    },
+    {
         version = "8.2.9",
         heroes = {
             {
@@ -1817,9 +1918,9 @@ initFrame:SetScript("OnEvent", function(self)
                 ["itIT"] = { text = "Italiano" },
                 ["ptBR"] = { text = "Português (BR)" },
                 ["ruRU"] = { text = "Русский" },
-                ["koKR"] = { text = "한국어" },
-                ["zhCN"] = { text = "简体中文" },
-                ["zhTW"] = { text = "繁體中文" },
+                ["koKR"] = { text = "한국어 (Korean)" },
+                ["zhCN"] = { text = "简体中文 (Simplified Chinese)" },
+                ["zhTW"] = { text = "繁體中文 (Traditional Chinese)" },
             }
             local langOrder = { "auto", "enUS", "deDE", "frFR", "esES", "esMX", "itIT", "ptBR", "ruRU", "koKR", "zhCN", "zhTW" }
 
@@ -3122,7 +3223,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Use W:DualRow for the standard label-left / dropdown-right layout
                     local dualRow, dualH
                     dualRow, dualH = W:DualRow(listContainer, -totalH,
-                        { type = "dropdown", text = EllesmereUI.L(entry.display) .. EllesmereUI.L(" Font"),
+                        { type = "dropdown", text = EllesmereUI.Lf("%1$s Font", EllesmereUI.L(entry.display)),
                           values = mfFontValues, order = mfFontOrder,
                           getValue = function()
                               local fdb = EllesmereUI.GetFontsDB()
@@ -3138,7 +3239,7 @@ initFrame:SetScript("OnEvent", function(self)
                               end
                               FontReload()
                           end },
-                        { type = "dropdown", text = EllesmereUI.L(entry.display) .. EllesmereUI.L(" Outline"),
+                        { type = "dropdown", text = EllesmereUI.Lf("%1$s Outline", EllesmereUI.L(entry.display)),
                           values = outlineValues, order = outlineOrder,
                           getValue = function()
                               local fdb = EllesmereUI.GetFontsDB()
@@ -5618,7 +5719,7 @@ initFrame:SetScript("OnEvent", function(self)
                                         newName = newName and strtrim(newName) or ""
                                         if newName == "" or newName == capName then return end
                                         if newName == "Default" then
-                                            print(EllesmereUI.L("|EllesmereUI]|r Cannot rename to \"Default\"."))
+                                            print(EllesmereUI.L("|cffff6060[EllesmereUI]|r Cannot rename to \"Default\"."))
                                             return
                                         end
                                         local _, profs = EllesmereUI.GetProfileList()

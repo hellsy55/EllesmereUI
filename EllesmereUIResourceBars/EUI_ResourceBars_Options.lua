@@ -6904,7 +6904,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 4: Frame Strata | (empty)
+        -- Row 4: Frame Strata | Orientation
         local tmStrataValues = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
         local tmStrataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
         _, h = W:DualRow(parent, y,
@@ -6920,7 +6920,16 @@ initFrame:SetScript("OnEvent", function(self)
                   local p = DB(); if not p then return end
                   p.totemBar.frameStrata = v; RefreshTotem()
               end },
-            { type = "label", text = "" }
+            { type = "dropdown", text = "Orientation",
+              disabled = totemOff,
+              disabledTooltip = "Select a class above", rawTooltip = true,
+              values = { HORIZONTAL = "Horizontal", VERTICAL = "Vertical" },
+              order = { "HORIZONTAL", "VERTICAL" },
+              getValue = function() local p = DB(); return p and (p.totemBar.orientation or "HORIZONTAL") end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.totemBar.orientation = v; RefreshTotem()
+              end }
         );  y = y - h
 
         return math.abs(y)

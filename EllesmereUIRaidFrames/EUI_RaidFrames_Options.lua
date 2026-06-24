@@ -461,12 +461,13 @@ initFrame:SetScript("OnEvent", function(self)
     --  Value tables for dropdowns
     ---------------------------------------------------------------------------
     local healthColorValues = {
-        ["class"]    = "Class Color",
-        ["dark"]     = "Dark Mode",
-        ["classic"]  = "Classic",
-        ["custom"]   = "Custom Color",
+        ["class"]         = "Class Color",
+        ["dark"]          = "Dark Mode",
+        ["classic"]       = "Classic",
+        ["custom"]        = "Custom Color",
+        ["customDynamic"] = "Custom Dynamic Colors",
     }
-    local healthColorOrder = { "class", "dark", "classic", "custom" }
+    local healthColorOrder = { "class", "dark", "classic", "custom", "customDynamic" }
 
     local namePositionValues = {
         ["topleft"]    = "Top Left",
@@ -735,6 +736,9 @@ initFrame:SetScript("OnEvent", function(self)
                                     local r = pct < 0.5 and 1 or (1 - (pct - 0.5) * 2)
                                     local g = pct > 0.5 and 1 or (pct * 2)
                                     f._health:SetStatusBarColor(r, g, 0, (s.healthBarOpacity or 100) / 100)
+                                elseif s.healthColorMode == "customDynamic" then
+                                    local r, g, b = ns.ResolveDynamicColor(s, st.current / 100)
+                                    f._health:SetStatusBarColor(r, g, b, (s.healthBarOpacity or 100) / 100)
                                 end
                             end -- snapTimer ready
                         end
@@ -906,6 +910,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 2: Fill Color | Background
         row, h = W:DualRow(parent, y,
             { type="dropdown", text="Fill Color", values=healthColorValues, order=healthColorOrder,
+              tooltip="Custom Dynamic Colors: the health bar smoothly blends between three colors you pick -- one for full health (100%), one for half (50%), and one for empty (0%) -- shifting through them as the unit takes damage or is healed.",
               getValue=function() return SVal("healthColorMode", "class") end,
               setValue=function(v)
                   SSet("healthColorMode", v)
@@ -916,9 +921,13 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Not available in Dark Mode", rawTooltip=true,
               getValue=function() return SVal("bgDarkness", 50) end,
               setValue=function(v) SSet("bgDarkness", v) end });  y = y - h
-        -- Inline color swatch for custom fill color
+        -- Inline color swatch for custom fill color, plus the three Custom Dynamic
+        -- Colors stop swatches (100% / 50% / 0%). Only one set is interactive at a
+        -- time depending on the Fill Color mode; they share the same inline slot.
         do
             local rgn = row._leftRegion
+
+            -- Single custom-color swatch (Custom Color mode)
             local swatch = EllesmereUI.BuildColorSwatch(
                 rgn, row:GetFrameLevel() + 3,
                 function()
@@ -939,9 +948,52 @@ initFrame:SetScript("OnEvent", function(self)
             block:EnableMouse(true)
             block:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(swatch, "Only available with Custom fill color") end)
             block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Custom Dynamic Colors: three gradient-stop swatches, built right-to-left
+            -- from the dropdown control so the visual order reads 100% | 50% | 0%.
+            -- The percentage is conveyed via each swatch's tooltip.
+            local dynDefs = {
+                { key = "dynamicColor100", def = { r = 0, g = 1, b = 0 }, label = "100%", tip = "Health bar color at full (100%) health" },
+                { key = "dynamicColor50",  def = { r = 1, g = 1, b = 0 }, label = "50%",  tip = "Health bar color at half (50%) health" },
+                { key = "dynamicColor0",   def = { r = 1, g = 0, b = 0 }, label = "0%",   tip = "Health bar color at empty (0%) health" },
+            }
+            local dynSwatches = {}
+            local prevAnchor = rgn._control
+            for i = #dynDefs, 1, -1 do
+                local dd = dynDefs[i]
+                local sw = EllesmereUI.BuildColorSwatch(
+                    rgn, row:GetFrameLevel() + 3,
+                    function()
+                        local c = SGet(dd.key) or dd.def
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        SWrite(dd.key, { r=r, g=g, b=b })
+                        ReloadAndUpdate()
+                    end, false, 18)
+                sw:SetPoint("RIGHT", prevAnchor, "LEFT", (prevAnchor == rgn._control) and -8 or -6, 0)
+                sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, dd.tip) end)
+                sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                dynSwatches[i] = sw
+                prevAnchor = sw
+            end
+
             local function UpdateSwatchVis()
-                local enabled = SVal("healthColorMode", "class") == "custom"
-                if enabled then swatch:SetAlpha(1); block:Hide() else swatch:SetAlpha(0.3); block:Show() end
+                local mode = SVal("healthColorMode", "class")
+                local isDynamic = mode == "customDynamic"
+                -- Single custom swatch: active only in Custom mode; dimmed + blocked in
+                -- other modes (existing behavior), but fully hidden in Dynamic mode so
+                -- it does not sit behind the three dynamic swatches.
+                if isDynamic then
+                    swatch:Hide(); block:Hide()
+                else
+                    swatch:Show()
+                    if mode == "custom" then swatch:SetAlpha(1); block:Hide()
+                    else swatch:SetAlpha(0.3); block:Show() end
+                end
+                for _, sw in ipairs(dynSwatches) do
+                    if isDynamic then sw:Show() else sw:Hide() end
+                end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateSwatchVis)
             UpdateSwatchVis()
