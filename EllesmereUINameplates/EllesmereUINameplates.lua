@@ -4352,14 +4352,12 @@ local function HideBlizzardFrame(nameplate, unit)
                     -- First paint for this plate: rebuild immediately
                     plate:UpdateAuras(nil)
                 else
-                    -- No stash: Blizzard's UF received UNIT_AURA before our
-                    -- handler (uf registers first in SetUnit, and WoW
-                    -- dispatches in registration order), or this is a
-                    -- non-event re-filter (faction flip). Rebuilding HERE
-                    -- with nil updateInfo bypasses every relevance gate and
-                    -- caused a full rebuild per aura event. Instead owe ONE
-                    -- authoritative full rebuild next frame; bursts coalesce.
-                    plate._auraOwedFull = true
+                    -- No stash yet: either this RefreshAuras is about to be
+                    -- paired with our UNIT_AURA handler, or it is a non-event
+                    -- re-filter. Wait one frame so UNIT_AURA can supply a
+                    -- gated payload; if it never arrives, drain does one full
+                    -- rebuild.
+                    plate._auraAwaitingUnitAura = true
                     plate:QueueAuraFallback()
                 end
             end
@@ -5081,6 +5079,7 @@ function NameplateFrame:ClearUnit()
     self._pendingCoalesced = nil
     self._auraFallbackPending = nil
     self._auraOwedFull = nil
+    self._auraAwaitingUnitAura = nil
     self._lastFullRebuildT = nil
     self._absorbHidden = nil
     self._auraGroupMask = nil
@@ -5315,7 +5314,7 @@ function NameplateFrame:UpdateHealthValues()
             local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
             pctText = string.format("%d%%", pctVal)
             pctNoSignText = string.format("%d", pctVal)
-            numText = AbbreviateNumbers(UnitHealth(unit))
+            numText = AbbreviateNumbers(curHealth)
             -- Decimal variants computed only when at least one slot opts in.
             if anyDec then
                 pctTextDec = string.format("%.1f%%", pctVal)
@@ -7196,6 +7195,7 @@ function NameplateFrame:UNIT_AURA(_, updateInfo)
         if not meta then meta = {}; self._pendingMeta = meta end
         meta.updateInfo = updateInfo
         meta.hasAdds, meta.hasRemoves, meta.hasUpdates = hasAdds, hasRemoves, hasUpdates
+        self._auraAwaitingUnitAura = nil
         -- Fallback: if RefreshAuras doesn't fire (e.g. Blizzard's UnitFrame
         -- suppressed), process next frame.
         self:QueueAuraFallback()
@@ -7222,11 +7222,9 @@ function ns._npClassifyAuraUpdate(updateInfo)
 end
 
 -- Shared next-frame aura processing queue. Used by the UNIT_AURA stash
--- path AND the RefreshAuras hook's owed-rebuild path. An owed FULL
--- rebuild always supersedes a stashed pending update: the pending path
--- runs relevance gates that may skip, and a gated skip must never
--- consume an authoritative refresh (faction flips / re-filters change
--- debuffList membership with no UNIT_AURA event).
+-- path, same-frame owed full rebuilds, and RefreshAuras re-filters. A
+-- RefreshAuras event first waits for the paired UNIT_AURA payload; only
+-- if no payload arrives does the drain do an authoritative full rebuild.
 -- Zero-allocation dispatcher: one parentless frame + swap queues replace
 -- a C_Timer.After timer object per deferred aura event. Parentless so
 -- draining continues while UIParent is hidden (cinematics, alt-Z),
@@ -7239,8 +7237,9 @@ do
 
     local function DrainPlate(plate)
         plate._auraFallbackPending = nil
-        if plate._auraOwedFull then
+        if plate._auraOwedFull or plate._auraAwaitingUnitAura then
             plate._auraOwedFull = nil
+            plate._auraAwaitingUnitAura = nil
             plate._pendingAuraUpdate = nil
             if plate._pendingMeta then plate._pendingMeta.updateInfo = nil end
             if plate.unit then plate:UpdateAuras(nil) end
