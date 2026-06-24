@@ -310,6 +310,7 @@ local defaults = {
             castbarKickTickEnabled = true,
             castbarInterruptMidCastEnabled = false,
             castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
+            castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
             castbarClassColored = false,
             healthDisplay = "both",
             showBuffs = true,
@@ -615,6 +616,7 @@ local defaults = {
             castbarKickTickEnabled = true,
             castbarInterruptMidCastEnabled = false,
             castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
+            castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
             castbarClassColored = false,
             healthDisplay = "perhp",
             leftTextContent = "name",
@@ -932,6 +934,43 @@ local function SetFSFont(fs, size, flags)
     EllesmereUI.PrimeFontShadow(fs, f == "")
   end
   fs:SetFont(GetSelectedFont(), size or 12, f)
+end
+
+-- Shared cast-bar text anchoring (mirrors the nameplate cast text system). The
+-- cast bar text line holds three elements -- spell name, spell target, duration --
+-- each assigned a side ("left" | "right" | "center"). The duration reserves a fixed
+-- slot of width on its side; a non-center element sharing the duration's side is
+-- shifted inward by that width. Center elements anchor to the bar center and are
+-- never pushed.
+--   side    : "left" | "right" | "center"
+--   pushed  : true when the duration occupies this same side and this element moves inward
+--   reserve : duration reserved width (only consumed when pushed)
+--   isTimer : the duration uses slightly tighter base insets than text
+-- Returns: point (anchor), xOff (base, before the user X offset), justify
+function ns.GetCastTextAnchor(side, pushed, reserve, isTimer)
+    if side == "center" then
+        return "CENTER", 0, "CENTER"
+    elseif side == "left" then
+        local base = isTimer and 3 or 5
+        if pushed then base = base + reserve end
+        return "LEFT", base, "LEFT"
+    else -- "right"
+        local base = -3
+        if pushed then base = base - reserve end
+        return "RIGHT", base, "RIGHT"
+    end
+end
+
+-- WoW does not visually re-lay-out a FontString when only its SetJustifyH changes;
+-- a fresh build does. Clearing then re-setting the text forces the new alignment to
+-- take effect, and it MUST be a real change -- re-setting the identical string is
+-- deduped and skips the re-layout. GetText may return a secret (cast name/target);
+-- SetText accepts secrets and the value is never inspected, so the round-trip is safe.
+function ns.ReflowFontString(fs)
+    if not fs then return end
+    local t = fs:GetText()
+    fs:SetText("")
+    fs:SetText(t or "")
 end
 
 -- Disable WoW's automatic pixel snapping on a texture (prevents sub-pixel jitter)
@@ -2074,9 +2113,11 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
     local function ApplyBTBPowerColor(fs, contentKey, usePowerColor)
         if not fs or not usePowerColor then return end
         if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then fs:SetTextColor(info.r, info.g, info.b)
+            -- Secret-safe per-unit power color: player resolves via the clean
+            -- string token (identical to before); non-player units recover it
+            -- from the clean integer power type instead of falling back to white.
+            local r, g, b = EllesmereUI.ResolveUnitPowerColor(unit)
+            if r then fs:SetTextColor(r, g, b)
             else fs:SetTextColor(1, 1, 1) end
         end
     end
@@ -3279,9 +3320,11 @@ local function CreatePowerBar(frame, unit, settings)
             local cf = s2.customPowerFillColor
             if cf then bR, bG, bB = cf.r, cf.g, cf.b else bR, bG, bB = 0, 0, 1 end
         else
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then bR, bG, bB = info.r, info.g, info.b end
+            -- Secret-safe: player via the clean token, non-player via the clean
+            -- integer power type, so the custom power color applies on EVERY unit
+            -- (the bar no longer depends on oUF's colors.power sync). Unmapped
+            -- power types return nil and keep oUF's resolved color.
+            bR, bG, bB = EllesmereUI.ResolveUnitPowerColor(unit)
         end
         if s2.powerGradientEnabled and bR then
             local gc = s2.powerGradientColor
@@ -3341,9 +3384,11 @@ local function CreatePowerBar(frame, unit, settings)
     -- approach). No-power units are NOT special-cased -- they keep showing 0%.
     local function ApplyPowerTextColor(s)
         if s.powerPercentTextPowerColor then
-            local _, pToken = UnitPowerType(unit)
-            local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-            if info then ppFS:SetTextColor(info.r, info.g, info.b)
+            -- Secret-safe per-unit power color (see EllesmereUI.ResolveUnitPowerColor):
+            -- player keeps the exact token color; non-player units recover it from
+            -- the clean integer power type instead of falling back to white.
+            local r, g, b = EllesmereUI.ResolveUnitPowerColor(unit)
+            if r then ppFS:SetTextColor(r, g, b)
             else ppFS:SetTextColor(1, 1, 1) end
         elseif s.powerTextColor then
             local tc = s.powerTextColor
@@ -3814,6 +3859,12 @@ local function ApplyUnitFrameCastColor(castbar)
     end
     castbar.castTintLayer:SetVertexColor(cc.r, cc.g, cc.b)
     if castbar._shieldedTint then
+        -- Uninterruptible overlay colour (customizable; defaults to the
+        -- previously-hardcoded grey). The overlay's alpha is toggled from the
+        -- secret "not interruptible" flag, so the colour is always set and only
+        -- becomes visible on uninterruptible casts.
+        local uc = (settings and settings.castbarUninterruptibleColor) or { r = 0.5, g = 0.5, b = 0.5 }
+        castbar._shieldedTint:SetVertexColor(uc.r, uc.g, uc.b)
         local uninterruptible = GetCastbarUninterruptible(castbar)
         if castbar._shieldedTint.SetAlphaFromBoolean then
             castbar._shieldedTint:SetAlphaFromBoolean(uninterruptible, 1, 0)
@@ -4163,28 +4214,56 @@ local function CreateCastBar(frame, unit, settings)
     target:Hide()
     castbar.Target = target
 
-    -- Layout: spell name 42% LEFT, timer RIGHT (sized to font), target 42% between them.
-    -- Matches nameplate RefreshNamePosition exactly. Offsets from settings.
+    -- Side-aware three-zone layout (mirrors the nameplate cast text system). Each
+    -- element has a side ("left"/"right"/"center"); the duration reserves its slot and
+    -- pushes whichever non-center element shares its side. Center is never pushed.
+    -- Spell name hides on the "none" side; target/duration visibility is governed by
+    -- _showTarget / _showDuration (their dropdown "None" sets those flags false).
     local function LayoutCastTextZones(cb)
         local barW = cb:GetWidth()
         if not barW or barW <= 0 then return end
-        local timerSz = cb._durationSize or 10
-        local timerW = timerSz * 2.2
-        local snX = cb._nameOX or 0
-        local snY = cb._nameOY or 0
-        local dtX = cb._durOX or 0
-        local dtY = cb._durOY or 0
-        local tgX = cb._tgtOX or 0
-        local tgY = cb._tgtOY or 0
+        local timerW = (cb._durationSize or 10) * 2.2
+        local showDur = cb._showDuration ~= false
+        local nameSide = cb._nameSide or "left"
+        local tgtSide  = cb._tgtSide or "right"
+        local durSide  = cb._durSide or "right"
+        local textW = barW * 0.42
+        -- Spell name width: the 42% above reserves the opposite half for the cast
+        -- target. When this unit never shows a target (boss frames -- showCastTarget
+        -- is false with no UI to enable it), the name has the row to itself, so let
+        -- it use 80% of the bar before truncating.
+        local nameW = (cb._showTarget == false) and (barW * 0.80) or textW
+        -- Spell name
         cb.Text:ClearAllPoints()
-        cb.Text:SetWidth(barW * 0.42)
-        cb.Text:SetPoint("LEFT", cb, "LEFT", 5 + snX, 1 + snY)
-        cb.Time:ClearAllPoints()
-        cb.Time:SetWidth(timerW)
-        cb.Time:SetPoint("RIGHT", cb, "RIGHT", -3 + dtX, dtY)
-        cb.Target:ClearAllPoints()
-        cb.Target:SetWidth(barW * 0.42)
-        cb.Target:SetPoint("RIGHT", cb, "RIGHT", -3 - timerW + tgX, tgY)
+        if nameSide == "none" then
+            cb.Text:Hide()
+        else
+            local pt, xb, jh = ns.GetCastTextAnchor(nameSide, showDur and durSide == nameSide, timerW, false)
+            cb.Text:SetWidth(nameW)
+            cb.Text:SetJustifyH(jh)
+            cb.Text:SetPoint(pt, cb, pt, xb + (cb._nameOX or 0), 1 + (cb._nameOY or 0))
+            cb.Text:Show()
+        end
+        -- Spell target (visibility handled by _showTarget / hasTarget elsewhere)
+        do
+            local pt, xb, jh = ns.GetCastTextAnchor(tgtSide, showDur and durSide == tgtSide, timerW, false)
+            cb.Target:ClearAllPoints()
+            cb.Target:SetWidth(textW)
+            cb.Target:SetJustifyH(jh)
+            cb.Target:SetPoint(pt, cb, pt, xb + (cb._tgtOX or 0), (cb._tgtOY or 0))
+        end
+        -- Duration / timer (side only "left"/"right"; visibility via _showDuration)
+        do
+            local pt, xb, jh = ns.GetCastTextAnchor(durSide, false, timerW, true)
+            cb.Time:ClearAllPoints()
+            cb.Time:SetWidth(timerW)
+            cb.Time:SetJustifyH(jh)
+            cb.Time:SetPoint(pt, cb, pt, xb + (cb._durOX or 0), (cb._durOY or 0))
+        end
+        -- Re-flow so a live JustifyH change takes effect on already-rendered text.
+        ns.ReflowFontString(cb.Text)
+        ns.ReflowFontString(cb.Target)
+        ns.ReflowFontString(cb.Time)
     end
     castbar._durationSize = settings.castDurationSize or 10
     castbar._nameOX = settings.castSpellNameX or 0
@@ -4193,10 +4272,15 @@ local function CreateCastBar(frame, unit, settings)
     castbar._durOY = settings.castDurationY or 0
     castbar._tgtOX = settings.castSpellTargetX or 0
     castbar._tgtOY = settings.castSpellTargetY or 0
+    castbar._nameSide = settings.castSpellNameSide or "left"
+    castbar._tgtSide  = settings.castSpellTargetSide or "right"
+    castbar._durSide  = settings.castDurationSide or "right"
+    castbar._showDuration = settings.showCastDuration ~= false
+    castbar._showTarget = settings.showCastTarget ~= false
     castbar._layoutTextZones = LayoutCastTextZones
     LayoutCastTextZones(castbar)
 
-    -- Helper: sync all offset/size cache values from settings onto
+    -- Helper: sync all offset/size/side cache values from settings onto
     -- the castbar, then re-layout. Called from live refresh paths.
     castbar._syncOffsetsAndLayout = function(self, s)
         self._durationSize = s.castDurationSize or 10
@@ -4206,6 +4290,10 @@ local function CreateCastBar(frame, unit, settings)
         self._durOY  = s.castDurationY or 0
         self._tgtOX  = s.castSpellTargetX or 0
         self._tgtOY  = s.castSpellTargetY or 0
+        self._nameSide = s.castSpellNameSide or "left"
+        self._tgtSide  = s.castSpellTargetSide or "right"
+        self._durSide  = s.castDurationSide or "right"
+        self._showDuration = s.showCastDuration ~= false
         if self._layoutTextZones then self:_layoutTextZones() end
     end
 
@@ -7560,6 +7648,9 @@ local function ReloadFrames()
                                 local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
                                 frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
                                 frame.Castbar._showTarget = settings.showCastTarget ~= false
+                                frame.Castbar._nameSide = settings.castSpellNameSide or "left"
+                                frame.Castbar._tgtSide  = settings.castSpellTargetSide or "right"
+                                frame.Castbar._durSide  = settings.castDurationSide or "right"
                                 if not frame.Castbar._showTarget then
                                     frame.Castbar.Target:Hide()
                                 end
@@ -8395,6 +8486,9 @@ local function ReloadFrames()
                         local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
                         frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
                         frame.Castbar._showTarget = settings.showCastTarget ~= false
+                        frame.Castbar._nameSide = settings.castSpellNameSide or "left"
+                        frame.Castbar._tgtSide  = settings.castSpellTargetSide or "right"
+                        frame.Castbar._durSide  = settings.castDurationSide or "right"
                         if not frame.Castbar._showTarget then
                             frame.Castbar.Target:Hide()
                         end
@@ -8708,6 +8802,9 @@ local function ReloadFrames()
                         local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
                         frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
                         frame.Castbar._showTarget = settings.showCastTarget ~= false
+                        frame.Castbar._nameSide = settings.castSpellNameSide or "left"
+                        frame.Castbar._tgtSide  = settings.castSpellTargetSide or "right"
+                        frame.Castbar._durSide  = settings.castDurationSide or "right"
                         if not frame.Castbar._showTarget then
                             frame.Castbar.Target:Hide()
                         end
@@ -8984,9 +9081,10 @@ local function ReloadFrames()
                         local cf = s2.customPowerFillColor
                         if cf then bR, bG, bB = cf.r, cf.g, cf.b else bR, bG, bB = 0, 0, 1 end
                     else
-                        local _, pToken = UnitPowerType(unit)
-                        local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-                        if info then bR, bG, bB = info.r, info.g, info.b end
+                        -- Secret-safe per-unit power color (player via token,
+                        -- non-player via the clean integer type), so custom power
+                        -- colors apply on EVERY unit independent of oUF's sync.
+                        bR, bG, bB = EllesmereUI.ResolveUnitPowerColor(unit)
                     end
                     if s2.powerGradientEnabled and bR then
                         local gc = s2.powerGradientColor
@@ -8998,6 +9096,12 @@ local function ReloadFrames()
                     elseif not useP then
                         local cf = s2.customPowerFillColor
                         if cf then self:SetStatusBarColor(cf.r, cf.g, cf.b) else self:SetStatusBarColor(0, 0, 1) end
+                    elseif bR then
+                        -- Power-color mode (no gradient): explicitly paint the bar
+                        -- so it does not depend on oUF's colors.power being synced
+                        -- (block 1 does this; this settings-refresh copy did not,
+                        -- which is why non-player bars showed oUF's default color).
+                        self:SetStatusBarColor(bR, bG, bB)
                     end
                     -- Keep the power-percent text color in sync with this unit
                     -- (per-unit power color; set up in CreatePowerBar). Gated on
@@ -9084,6 +9188,19 @@ local function ReloadFrames()
                 if frame.Castbar.Time then
                     local dtSz = s.castDurationSize or 10
                     SetMiniFont(frame.Castbar.Time, dtSz)
+                end
+                -- Boss frames get their full cast text refresh in the boss branch above
+                -- (colors / show / sides / bg). Two gaps remain here: the donor-font line
+                -- just above set the boss cast text to the DONOR size, and the boss branch
+                -- re-runs layout from the CACHED offsets. Re-apply the size from the boss
+                -- settings (keeping the donor typeface) and sync the X/Y offsets + side
+                -- layout so live boss frames update on every cast-text option change.
+                if unit:match("^boss") then
+                    local cb = frame.Castbar
+                    if cb.Text then SetMiniFont(cb.Text, settings.castSpellNameSize or 11) end
+                    if cb.Time then SetMiniFont(cb.Time, settings.castDurationSize or 10) end
+                    if cb.Target then SetMiniFont(cb.Target, settings.castSpellTargetSize or 11) end
+                    if cb._syncOffsetsAndLayout then cb:_syncOffsetsAndLayout(settings) end
                 end
             end
             end -- else (enabled frame processing)

@@ -126,7 +126,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
-        _, h = W:SectionHeader(parent, "GROUP FINDER QUEUE", y);  y = y - h
+        _, h = W:SectionHeader(parent, "BLIZZARD WINDOW RESKINS", y);  y = y - h
 
         local _eqolLoaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EnhanceQoL")
         local queueRow
@@ -187,10 +187,6 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        _, h = W:Spacer(parent, y, 20);  y = y - h
-
-        _, h = W:SectionHeader(parent, "GAME PAUSE MENU", y);  y = y - h
-
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Reskin Pause Menu",
               tooltip="Reskins the ESC / Game Menu with the EUI dark style, matching fonts, and accent-colored title.",
@@ -214,14 +210,7 @@ initFrame:SetScript("OnEvent", function(self)
                       })
                   end
               end },
-            { type="label", text="" }
-        );  y = y - h
-
-        _, h = W:Spacer(parent, y, 20); y = y - h
-        _, h = W:SectionHeader(parent, "THE GREAT VAULT", y);  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Great Vault Skin",
+            { type="toggle", text="Reskin Great Vault",
               tooltip="Reskins the Great Vault window with custom tile backgrounds, progress colors, and completion states.",
               getValue=function()
                   if not EllesmereUIDB then return false end
@@ -242,9 +231,66 @@ initFrame:SetScript("OnEvent", function(self)
                           onConfirm   = function() ReloadUI() end,
                       })
                   end
+              end }
+        );  y = y - h
+
+        -- TEMP DISABLED: Group Finder reskin + QoL toggles. The feature file is
+        -- also commented out of EllesmereUIBlizzardSkin.toc. Revert both by
+        -- removing the --[[ and --]] markers here and uncommenting the TOC line.
+        --[[
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Reskin LFG Menu",
+              tooltip="Reskins the Group Finder / Premade Groups window with the EUI dark style.",
+              getValue=function()
+                  if not EllesmereUIDB then return false end
+                  -- Seed the default ONCE on first read: enabled only if both
+                  -- Reskin Blizzard Elements (customTooltips) and Reskin Queue
+                  -- Popup are enabled at that moment; stored thereafter so it
+                  -- stays fixed regardless of later changes to those toggles.
+                  if EllesmereUIDB.reskinLFGMenu == nil then
+                      EllesmereUIDB.reskinLFGMenu = (EllesmereUIDB.customTooltips ~= false) and (EllesmereUIDB.reskinQueuePopup ~= false)
+                  end
+                  return EllesmereUIDB.reskinLFGMenu
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.reskinLFGMenu = v
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Changing the Group Finder reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+              end },
+            { type="toggle", text="Auto-Refresh Group Search",
+              tooltip="Automatically refreshes the Premade Groups list every few seconds while you are browsing, so newly posted groups appear without clicking Refresh.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lfgAutoRefresh == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lfgAutoRefresh = v
+                  if EllesmereUI._GroupFinder_RefreshQoL then EllesmereUI._GroupFinder_RefreshQoL() end
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Remember Sign-Up Roles",
+              tooltip="Remembers the Tank/Healer/DPS roles you last applied with and restores them the next time you sign up to a premade group (limited to roles your current spec can fill).",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lfgRememberRoles == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lfgRememberRoles = v
+                  if EllesmereUI._GroupFinder_RefreshQoL then EllesmereUI._GroupFinder_RefreshQoL() end
               end },
             { type="label", text="" }
         );  y = y - h
+        --]]
 
         return math.abs(y)
     end

@@ -2891,7 +2891,12 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
-            -- Row 3: Show Blizzard Icon Background (+ cog) | empty
+            -- Row 3: Show Blizzard Icon Background (+ cog) | Show Cooldown Numbers
+            -- "Show Cooldown Numbers" is a LIVE toggle of Blizzard's
+            -- countdownForCooldowns CVar -- it is never stored in our DB. getValue
+            -- reads the CVar; setValue writes it. We only touch the CVar when the
+            -- user actively flips the toggle (same approach as the global-settings
+            -- CVar controls, e.g. Lag Tolerance).
             local zoomIbgRow
             zoomIbgRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Blizzard Icon Background",
@@ -2904,7 +2909,13 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" });  y = y - h
+                { type="toggle", text="Show Cooldown Numbers",
+                  tooltip="Toggles Blizzard's Show Numbers for Cooldowns setting (the countdownForCooldowns CVar) live. This is never saved to EllesmereUI -- it is the same as changing the option in Blizzard's settings.",
+                  getValue=function() return GetCVarBool("countdownForCooldowns") end,
+                  setValue=function(v)
+                      if InCombatLockdown() then return end
+                      SetCVar("countdownForCooldowns", v and "1" or "0")
+                  end });  y = y - h
             -- Inline cog: Icon Background Opacity (left region)
             do
                 local rgn = zoomIbgRow._leftRegion

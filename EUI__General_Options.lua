@@ -274,6 +274,115 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.2.9",
+        heroes = {
+            {
+                module = "Cast Bars",
+                title = "Text Positioning",
+                desc  = "Move or hide each cast bar's spell name, target, and timer independently, across nameplates, unit frames, and resource bars.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "CAST BAR", highlight = "Spell Name",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Boss Frames",
+                title = "Cast Bar Customization",
+                desc  = "Boss frames gain a full cast bar section, with a master toggle, fill and background colors, reverse fill, and spell name and timer positioning.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Boss Frames", section = "CAST BAR", highlight = "Show Cast Bar" },
+            },
+        },
+        features = {
+            {
+                module = "Raid Frames",
+                title = "Show Overshield",
+                desc  = "Choose whether absorbs that exceed your health backfill over your current health, or only fill the empty part of the bar.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "ABSORBS", highlight = "Absorb Style" },
+            },
+        },
+        fixes = {
+            { module = "General", text = "Fixed square boxes and missing characters that could appear across the Blizzard UI and other addons in non-Latin languages." },
+            { module = "Chat", text = "Fixed Lua errors that could appear after receiving a Battle.net whisper." },
+            { module = "Quality of Life", text = "Fixed an error that could stop the group sign-up dialog from opening when using a persistent signup note." },
+            { module = "Cooldown Manager", text = "With Suppress GCD on, a charge spell's recharge swipe no longer disappears while another ability is on cooldown." },
+            { module = "Character Sheet", text = "Fixed the oversized X on equipment set delete buttons." },
+            { module = "Mythic+ Timer", text = "Fixed a startup error caused by some saved best-time split data." },
+        },
+    },
+    {
+        version = "8.2.8",
+        heroes = {
+            {
+                module = "Profiles",
+                title = "Shadow Lily Preset",
+                desc  = "A new built-in profile preset: the damage dealer cut of Midnight Lily, a focused low-clutter layout that keeps your rotation and cooldowns front and center.",
+                nav   = { module = "_EUIProfiles", page = "Profiles" },
+            },
+            {
+                module = "General",
+                title = "Class Resource Colors",
+                desc  = "Pick a custom color for each class resource such as combo points, runes, soul shards, and holy power, and color the class resource bar by your spec's resource with the new Class Resource Color fill mode.",
+                nav   = { module = "_EUIGlobal", page = "Fonts & Colors", section = "CLASS RESOURCE COLORS", highlight = "" },
+            },
+        },
+        features = {
+            {
+                module = "Resource Bars",
+                title = "Per-Spec Class Resource Bar",
+                desc  = "The class resource bar gains a spec picker to choose which specs show it, matching the power and health bars.",
+                nav   = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "CLASS RESOURCE BAR", highlight = "Show Class Resource" },
+            },
+            {
+                module = "Nameplates",
+                title = "Separate Cast Bar Texture",
+                desc  = "Choose a texture for the nameplate cast bar separately from the health bar.",
+                nav   = { module = "EllesmereUINameplates", page = "Display", section = "STYLE", highlight = "Cast Bar Texture" },
+            },
+            {
+                module = "Nameplates",
+                title = "More Absorb Shield Textures",
+                desc  = "Absorb shields gain several more stripe textures plus a tint color and an opacity setting that applies to every style.",
+                nav   = { module = "EllesmereUINameplates", page = "Display", section = "STYLE", highlight = "Absorb Style" },
+            },
+            {
+                module = "Unit Frames",
+                title = "Custom Uninterruptible Cast Color",
+                desc  = "Choose the color shown over uninterruptible casts on the target and focus cast bars, instead of the fixed grey.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "CAST BAR", highlight = "Show Cast Bar",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end
+                        EllesmereUI._pendingUnitSelect = "target"
+                    end },
+            },
+            {
+                module = "Cooldown Manager",
+                title = "Hide Recharge Edge",
+                desc  = "Charge cooldowns gain a per-spell Hide Recharge Edge option that removes the bright sweeping edge shown while a charge is recharging.",
+                nav   = { module = "EllesmereUICooldownManager", page = "Tracking Bars" },
+            },
+            {
+                module = "Raid Frames",
+                title = "Resize the Dispel Icon",
+                desc  = "The dispel type icon gains an Icon Size slider in its cog menu so you can make it larger or smaller.",
+                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "DISPELS", highlight = "Dispel Icon Position" },
+            },
+        },
+        fixes = {
+            { module = "Resource Bars", text = "You can now color the gaps between class resource pips and set the color and opacity of the empty slot overlay." },
+            { module = "Nameplates", text = "Health bars can now be up to 50 pixels tall and cast bars up to 40 pixels tall." },
+            { module = "Nameplates", text = "The interrupt flash now clears the instant a target dies, so the cast bar no longer looks squished by the death animation." },
+            { module = "Cooldown Manager", text = "The spell picker now ends with a Missing Spells? shortcut that opens Blizzard's Cooldown Manager so you can add spells that are not listed." },
+            { module = "Cooldown Manager", text = "With Hide Active State on, a charge cooldown's recharge swipe and edge now stay visible instead of disappearing while a charge is in hand or when you press another ability." },
+            { module = "Cooldown Manager", text = "Switching specialization no longer briefly flashes placeholder icons across your tracked buff bars." },
+            { module = "Cooldown Manager", text = "Grouped tracking bars now stay anchored together when you enter combat instead of a member detaching from the group." },
+            { module = "Unit Frames", text = "Power-colored bars and power text now show the correct color on target, focus, and boss frames instead of white or a default color." },
+            { module = "Action Bars", text = "Abilities with multiple charges now show the recharge countdown number while charging when cooldown numbers are on, and you can toggle cooldown numbers from the Action Bars options." },
+            { module = "Chat", text = "Fixed a taint issue with the chat box that could cause Lua errors, most often when receiving a whisper during combat." },
+            { module = "General", text = "Custom class, power, and resource colors no longer reset to default after switching specs or profiles." },
+        },
+    },
+    {
         version = "8.2.7",
         heroes = {
             {
@@ -3166,6 +3275,55 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         h = BuildColorGrid(parent, y, powerItems)
+        y = y - h
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        -------------------------------------------------------------------
+        --  CLASS RESOURCE COLORS section
+        --  Standalone swatches, mirrors the POWER COLORS pattern. Saved under
+        --  the "classResource" custom-colors category; nothing consumes that
+        --  category yet, so these are set up but not wired to anything.
+        -------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "CLASS RESOURCE COLORS", y);  y = y - h
+        do
+            -- Order + labels only; default colors live in the shared
+            -- EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS so the resource bar's
+            -- "Class Resource Color" fill mode reads the same source.
+            local items = {
+                { key = "ComboPoints",     label = "Combo Points"     },
+                { key = "Runes",           label = "Runes"            },
+                { key = "SoulShards",      label = "Soul Shards"      },
+                { key = "HolyPower",       label = "Holy Power"       },
+                { key = "ArcaneCharges",   label = "Arcane Charges"   },
+                { key = "Icicles",         label = "Icicles"          },
+                { key = "Chi",             label = "Chi"              },
+                { key = "Essence",         label = "Essence"          },
+                { key = "SoulFragments",   label = "Soul Fragments"   },
+                { key = "MaelstromWeapon", label = "Maelstrom Weapon" },
+                { key = "TipOfTheSpear",   label = "Tip of the Spear" },
+                { key = "WhirlwindStacks", label = "Whirlwind Stacks" },
+            }
+            local resourceItems = {}
+            for _, it in ipairs(items) do
+                local key = it.key
+                resourceItems[#resourceItems + 1] = {
+                    label = it.label,
+                    getColor = function()
+                        return EllesmereUI.GetClassResourceColor(key)
+                            or { r = 1, g = 1, b = 1 }
+                    end,
+                    setColor = function(c)
+                        SaveColorEntry("classResource", key, c)
+                    end,
+                    resetFn = function()
+                        local cdb = GetCustomColorsDB()
+                        if cdb.classResource then cdb.classResource[key] = nil end
+                    end,
+                }
+            end
+            h = BuildColorGrid(parent, y, resourceItems)
+        end
         y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h

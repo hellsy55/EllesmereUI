@@ -2499,52 +2499,66 @@ initFrame:SetScript("OnEvent", function(self)
                             castIconFrame._iconTex:SetTexture(spellIcon)
                         end
                     end
+                    -- Side-aware three-zone layout (mirrors the live cast bar). Name and
+                    -- duration position for every unit (player has no target zone).
+                    local pvNameSide = s.castSpellNameSide or "left"
+                    local pvTgtSide  = s.castSpellTargetSide or "right"
+                    local pvDurSide  = s.castDurationSide or "right"
+                    local showDur    = s.showCastDuration ~= false
+                    local showTgt    = s.showCastTarget ~= false
+                    local pvBarW     = castbar:GetWidth()
+                    local pvHasW     = pvBarW and pvBarW > 0
+                    local pvTimerW   = (s.castDurationSize or 10) * 2.2
+                    local pvTextW    = pvHasW and (pvBarW * 0.42) or 0
                     if castNameFS2 then
                         local spellName = (unitKey == "player") and (_previewCastSpell and _previewCastSpell.name or "Spell Name") or "Spell Name"
                         castNameFS2:SetText(spellName)
-                        local snSz = s.castSpellNameSize or 11
-                        castNameFS2:SetFont(PREVIEW_FONT, snSz, GetUFOptOutline())
+                        castNameFS2:SetFont(PREVIEW_FONT, s.castSpellNameSize or 11, GetUFOptOutline())
                         local snC = s.castSpellNameColor or { r=1, g=1, b=1 }
                         castNameFS2:SetTextColor(snC.r, snC.g, snC.b)
+                        castNameFS2:ClearAllPoints()
+                        if pvNameSide == "none" then
+                            castNameFS2:Hide()
+                        elseif pvHasW then
+                            local pt, xb, jh = ns.GetCastTextAnchor(pvNameSide, showDur and pvDurSide == pvNameSide, pvTimerW, false)
+                            castNameFS2:SetWidth(pvTextW)
+                            castNameFS2:SetJustifyH(jh)
+                            castNameFS2:SetPoint(pt, castbar, pt, xb + (s.castSpellNameX or 0), 1 + (s.castSpellNameY or 0))
+                            castNameFS2:Show()
+                        end
                     end
-                    local showDur = s.showCastDuration ~= false
                     if castTimeFS then
                         local spCastTime = (_previewCastSpell and _previewCastSpell.castTime) or 3.0
                         castTimeFS:SetText(string.format("%.1f", spCastTime * (1 - (_previewCastFill or 0.6))))
-                        local dtSz = s.castDurationSize or 10
-                        castTimeFS:SetFont(PREVIEW_FONT, dtSz, GetUFOptOutline())
+                        castTimeFS:SetFont(PREVIEW_FONT, s.castDurationSize or 10, GetUFOptOutline())
                         local dtC = s.castDurationColor or { r=1, g=1, b=1 }
                         castTimeFS:SetTextColor(dtC.r, dtC.g, dtC.b)
                         castTimeFS:SetShown(showDur)
+                        if pvHasW then
+                            local pt, xb, jh = ns.GetCastTextAnchor(pvDurSide, false, pvTimerW, true)
+                            castTimeFS:SetWidth(pvTimerW)
+                            castTimeFS:SetJustifyH(jh)
+                            castTimeFS:ClearAllPoints()
+                            castTimeFS:SetPoint(pt, castbar, pt, xb + (s.castDurationX or 0), (s.castDurationY or 0))
+                        end
                     end
-                    local showTgt = s.showCastTarget ~= false
                     if castTargetFS then
-                        local tsSz = s.castSpellTargetSize or 11
-                        castTargetFS:SetFont(PREVIEW_FONT, tsSz, GetUFOptOutline())
+                        castTargetFS:SetFont(PREVIEW_FONT, s.castSpellTargetSize or 11, GetUFOptOutline())
                         local tsC = s.castSpellTargetColor or { r=1, g=1, b=1 }
                         castTargetFS:SetTextColor(tsC.r, tsC.g, tsC.b)
                         castTargetFS:SetShown(showTgt)
-                        -- Three-zone layout with offsets
-                        local barW = castbar:GetWidth()
-                        if barW and barW > 0 then
-                            local timerW = (s.castDurationSize or 10) * 2.2
-                            local snX = s.castSpellNameX or 0
-                            local snY = s.castSpellNameY or 0
-                            local dtX = s.castDurationX or 0
-                            local dtY = s.castDurationY or 0
-                            local tgX = s.castSpellTargetX or 0
-                            local tgY = s.castSpellTargetY or 0
-                            castNameFS2:SetWidth(barW * 0.42)
-                            castTargetFS:SetWidth(barW * 0.42)
-                            castTimeFS:SetWidth(timerW)
-                            castNameFS2:ClearAllPoints()
-                            castNameFS2:SetPoint("LEFT", castbar, "LEFT", 5 + snX, 1 + snY)
+                        if pvHasW then
+                            local pt, xb, jh = ns.GetCastTextAnchor(pvTgtSide, showDur and pvDurSide == pvTgtSide, pvTimerW, false)
+                            castTargetFS:SetWidth(pvTextW)
+                            castTargetFS:SetJustifyH(jh)
                             castTargetFS:ClearAllPoints()
-                            castTargetFS:SetPoint("RIGHT", castbar, "RIGHT", -3 - timerW + tgX, tgY)
-                            castTimeFS:ClearAllPoints()
-                            castTimeFS:SetPoint("RIGHT", castbar, "RIGHT", -3 + dtX, dtY)
+                            castTargetFS:SetPoint(pt, castbar, pt, xb + (s.castSpellTargetX or 0), (s.castSpellTargetY or 0))
                         end
                     end
+                    -- Re-flow so a live JustifyH change takes effect on already-rendered text.
+                    if castNameFS2 then ns.ReflowFontString(castNameFS2) end
+                    if castTimeFS then ns.ReflowFontString(castTimeFS) end
+                    if castTargetFS then ns.ReflowFontString(castTargetFS) end
                     castbar:ClearAllPoints()
                     local pvBtbVisible = (btbFrame and s.bottomTextBar and btbPos == "bottom")
                     local cbAnchorFrame = pvBtbVisible and btbFrame or ((pvPpIsAtt and power and power:IsShown()) and power or health)
@@ -3577,6 +3591,9 @@ initFrame:SetScript("OnEvent", function(self)
         castSpellTargetColor = { player=true, target=true, focus=true },
         showCastDuration     = { player=true, target=true, focus=true },
         showCastTarget       = { player=true, target=true, focus=true },
+        castSpellNameSide    = { player=true, target=true, focus=true },
+        castSpellTargetSide  = { player=true, target=true, focus=true },
+        castDurationSide     = { player=true, target=true, focus=true },
         castbarFillColor     = { player=true, target=true, focus=true },
         castbarInterruptReadyColor = { target=true, focus=true },
         castbarKickTickEnabled     = { target=true, focus=true },
@@ -6548,6 +6565,7 @@ initFrame:SetScript("OnEvent", function(self)
                 AddCastColorSwatch("Interrupt Ready Mid-Cast", "castbarInterruptMidCastColor", { r = 0.318, g = 0.820, b = 0.357 },
                     function() return not SValSupported("castbarInterruptMidCastEnabled", false) end)
                 AddCastColorSwatch("Interrupt on CD", "castbarInterruptReadyColor", { r = 0.92, g = 0.35, b = 0.20 })
+                AddCastColorSwatch("Uninterruptible Cast", "castbarUninterruptibleColor", { r = 0.5, g = 0.5, b = 0.5 })
                 AddCastColorSwatch("Interruptible Cast", "castbarFillColor", { r = 0.863, g = 0.820, b = 0.639 })
             else
                 AddCastColorSwatch("Fill Color", "castbarFillColor", { r = 1, g = 0.7, b = 0 })
@@ -6565,11 +6583,13 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
                     local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local unintC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarUninterruptibleColor
                     local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
                     for _, key in ipairs(keys) do
                         SetCastbarEnabled(key, v)
                         if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
                         if readyC then UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b } end
+                        if unintC then UNIT_DB_MAP[key]().castbarUninterruptibleColor = { r = unintC.r, g = unintC.g, b = unintC.b } end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
@@ -6577,6 +6597,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = GetCastbarEnabled(selectedUnit)
                     local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
                     local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                    local unintC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarUninterruptibleColor
                     local keys = isKickUnit and { "target", "focus" } or GROUP_UNIT_ORDER
                     for _, key in ipairs(keys) do
                         if GetCastbarEnabled(key) ~= v then return false end
@@ -6589,6 +6610,10 @@ initFrame:SetScript("OnEvent", function(self)
                             if readyC and kr then
                                 if kr.r ~= readyC.r or kr.g ~= readyC.g or kr.b ~= readyC.b then return false end
                             elseif readyC ~= kr then return false end
+                            local ku = UNIT_DB_MAP[key]().castbarUninterruptibleColor
+                            if unintC and ku then
+                                if ku.r ~= unintC.r or ku.g ~= unintC.g or ku.b ~= unintC.b then return false end
+                            elseif unintC ~= ku then return false end
                         end
                     end
                     return true
@@ -6602,11 +6627,15 @@ initFrame:SetScript("OnEvent", function(self)
                         local v = GetCastbarEnabled(selectedUnit)
                         local c = UNIT_DB_MAP[selectedUnit]().castbarFillColor
                         local readyC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarInterruptReadyColor
+                        local unintC = isKickUnit and UNIT_DB_MAP[selectedUnit]().castbarUninterruptibleColor
                         for _, key in ipairs(checkedKeys) do
                             SetCastbarEnabled(key, v)
                             if c then UNIT_DB_MAP[key]().castbarFillColor = { r = c.r, g = c.g, b = c.b } end
                             if readyC and (key == "target" or key == "focus") then
                                 UNIT_DB_MAP[key]().castbarInterruptReadyColor = { r = readyC.r, g = readyC.g, b = readyC.b }
+                            end
+                            if unintC and (key == "target" or key == "focus") then
+                                UNIT_DB_MAP[key]().castbarUninterruptibleColor = { r = unintC.r, g = unintC.g, b = unintC.b }
                             end
                         end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -6887,15 +6916,44 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 3: Spell Name Size (with inline color swatch) | Duration Size (with inline color swatch)
+        -- Row 3: Spell Name (position dropdown + swatch + cog) | Duration (position dropdown + swatch + cog)
+        -- Cast text position dropdowns mirror nameplates: Name/Target are None/Left/Right/
+        -- Center; the name and target may not share a side (setting one onto the other's
+        -- side bumps the other to None). Duration is None/Right/Left -- "None" sets
+        -- showCastDuration=false; it reserves a slot on its side and pushes same-side text.
+        -- Size / X / Y live in each row's inline cog. Existing users keep their layout:
+        -- Name defaults Left, Target Right, Duration Right.
+        local castTextPosValues = { none = "None", left = "Left", right = "Right", center = "Center" }
+        local castTextPosOrder = { "none", "left", "right", "center" }
         local castTextRow
         castTextRow, h = W:DualRow(parent, y,
-            { type="slider", text="Spell Name Size", min=6, max=20, step=1,
-              getValue=function() return SValSupported("castSpellNameSize", 11) end,
-              setValue=function(v) SSetSupported("castSpellNameSize", v); ReloadAndUpdate(); UpdatePreview() end },
-            { type="slider", text="Duration Size", min=6, max=20, step=1,
-              getValue=function() return SValSupported("castDurationSize", 11) end,
-              setValue=function(v) SSetSupported("castDurationSize", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+            { type="dropdown", text="Spell Name", values=castTextPosValues, order=castTextPosOrder,
+              getValue=function() return SValSupported("castSpellNameSide", "left") end,
+              setValue=function(v)
+                local s = UNIT_DB_MAP[selectedUnit]()
+                s.castSpellNameSide = v
+                if v ~= "none" and (s.showCastTarget ~= false) and (s.castSpellTargetSide or "right") == v then
+                    s.showCastTarget = false
+                end
+                ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+              end },
+            { type="dropdown", text="Duration",
+              values={ none = "None", right = "Right", left = "Left" },
+              order={ "none", "right", "left" },
+              getValue=function()
+                if SValSupported("showCastDuration", true) == false then return "none" end
+                return SValSupported("castDurationSide", "right")
+              end,
+              setValue=function(v)
+                local s = UNIT_DB_MAP[selectedUnit]()
+                if v == "none" then
+                    s.showCastDuration = false
+                else
+                    s.showCastDuration = true
+                    s.castDurationSide = v
+                end
+                ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+              end });  y = y - h
         -- Inline color swatch on Spell Name Size
         do
             local snRgn = castTextRow._leftRegion
@@ -6916,8 +6974,11 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local snCogRgn = castTextRow._leftRegion
             local _, snCogShowRaw = EllesmereUI.BuildCogPopup({
-                title = "Spell Name Position",
+                title = "Spell Name",
                 rows = {
+                    { type="slider", label="Size", min=6, max=20, step=1,
+                      get=function() return SValSupported("castSpellNameSize", 11) end,
+                      set=function(v) SSetSupported("castSpellNameSize", v); ReloadAndUpdate(); UpdatePreview() end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return SValSupported("castSpellNameX", 0) end,
                       set=function(v) SSetSupported("castSpellNameX", v); ReloadAndUpdate(); UpdatePreview() end },
@@ -6953,12 +7014,9 @@ initFrame:SetScript("OnEvent", function(self)
             local _, dtCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Duration",
                 rows = {
-                    { type="toggle", label="Show Duration",
-                      get=function() return SValSupported("showCastDuration", true) ~= false end,
-                      set=function(v)
-                          SSetSupported("showCastDuration", v)
-                          ReloadAndUpdate(); UpdatePreview()
-                      end },
+                    { type="slider", label="Size", min=6, max=20, step=1,
+                      get=function() return SValSupported("castDurationSize", 10) end,
+                      set=function(v) SSetSupported("castDurationSize", v); ReloadAndUpdate(); UpdatePreview() end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return SValSupported("castDurationX", 0) end,
                       set=function(v) SSetSupported("castDurationX", v); ReloadAndUpdate(); UpdatePreview() end },
@@ -7061,12 +7119,25 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 4: Spell Target Size (with inline color swatch) | Reverse Fill
+        -- Row 4: Spell Target (position dropdown + swatch + cog) | Reverse Fill
         local castTargetRow
         castTargetRow, h = W:DualRow(parent, y,
-            { type="slider", text="Spell Target Size", min=6, max=20, step=1,
-              getValue=function() return SValSupported("castSpellTargetSize", 10) end,
-              setValue=function(v) SSetSupported("castSpellTargetSize", v); ReloadAndUpdate(); UpdatePreview() end },
+            { type="dropdown", text="Spell Target", values=castTextPosValues, order=castTextPosOrder,
+              getValue=function()
+                if SValSupported("showCastTarget", true) == false then return "none" end
+                return SValSupported("castSpellTargetSide", "right")
+              end,
+              setValue=function(v)
+                local s = UNIT_DB_MAP[selectedUnit]()
+                if v == "none" then
+                    s.showCastTarget = false
+                else
+                    s.showCastTarget = true
+                    s.castSpellTargetSide = v
+                    if (s.castSpellNameSide or "left") == v then s.castSpellNameSide = "none" end
+                end
+                ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+              end },
             { type="toggle", text="Reverse Fill",
               getValue=function() return SValSupported("castReverseFill", false) end,
               setValue=function(v) SSetSupported("castReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
@@ -7092,12 +7163,9 @@ initFrame:SetScript("OnEvent", function(self)
             local _, tgCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Spell Target",
                 rows = {
-                    { type="toggle", label="Show Spell Target",
-                      get=function() return SValSupported("showCastTarget", true) ~= false end,
-                      set=function(v)
-                          SSetSupported("showCastTarget", v)
-                          ReloadAndUpdate(); UpdatePreview()
-                      end },
+                    { type="slider", label="Size", min=6, max=20, step=1,
+                      get=function() return SValSupported("castSpellTargetSize", 10) end,
+                      set=function(v) SSetSupported("castSpellTargetSize", v); ReloadAndUpdate(); UpdatePreview() end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return SValSupported("castSpellTargetX", 0) end,
                       set=function(v) SSetSupported("castSpellTargetX", v); ReloadAndUpdate(); UpdatePreview() end },
@@ -10705,7 +10773,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- can point at them. growthRow holds Show Cast Icon + Cast Bar Height
         -- after the swap; simpleRow/simpleBuffRow/bossAuraRow + bossAuraHeader are
         -- the aura rows under the "Buffs and Debuffs" section.
-        local portraitRow, growthRow, simpleRow, simpleBuffRow, bossAuraRow, bossAuraHeader
+        local portraitRow, growthRow, simpleRow, simpleBuffRow, bossAuraRow, bossAuraHeader, bossCastHeader, castMainRow
         local function enableRow(Ww, pp, yy)
             local eh
             portraitRow, eh = Ww:DualRow(pp, yy,
@@ -10735,92 +10803,9 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="slider", text="Vertical Spacing", min=-200, max=200, step=1,
                   getValue=function() return db.profile.bossSpacing or 80 end,
                   setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
-            local gh
-            growthRow, gh = Ww:DualRow(pp, yy - eh - ch,
-                { type="toggle", text="Show Cast Icon",
-                  getValue=function() return db.profile.boss.showCastIcon ~= false end,
-                  setValue=function(v)
-                    db.profile.boss.showCastIcon = v
-                    ReloadAndUpdate()
-                  end },
-                { type="slider", text="Cast Bar Height", min=1, max=40, step=1,
-                  getValue=function() return db.profile.boss.castbarHeight or 14 end,
-                  setValue=function(v) db.profile.boss.castbarHeight = v; ReloadAndUpdate() end })
-            -- Inline cog: "Make Icon Part of the Bar" on the boss Show Cast Icon toggle.
-            do
-                local rgn = growthRow._leftRegion
-                local _, cogShow = EllesmereUI.BuildCogPopup({
-                    title = "Cast Icon",
-                    rows = {
-                        { type = "toggle", label = "Make Icon Part of the Bar",
-                          tooltip = "This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
-                          get = function() return db.profile.boss.castbarIconInWidth ~= false end,
-                          set = function(v) db.profile.boss.castbarIconInWidth = v; ReloadAndUpdate() end },
-                        { type = "toggle", label = "Show Icon on Right",
-                          tooltip = "Place the cast icon on the right side of the bar instead of the left.",
-                          get = function() return db.profile.boss.castbarIconRight == true end,
-                          set = function(v) db.profile.boss.castbarIconRight = v; ReloadAndUpdate() end },
-                    },
-                })
-                local cogBtn = CreateFrame("Button", nil, rgn)
-                cogBtn:SetSize(26, 26)
-                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                rgn._lastInline = cogBtn
-                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-                cogBtn:SetAlpha(0.4)
-                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-                cogTex:SetAllPoints()
-                cogTex:SetTexture(EllesmereUI.COGS_ICON)
-                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-                cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-            end
-            -- Inline cast-background swatch + text-size cog on Cast Bar Height. Both
-            -- use nil-defaulted keys so existing boss frames are unchanged until set.
-            do
-                local rgn = growthRow._rightRegion
-                -- Background color swatch (RGB + alpha; default black 0.5)
-                local bgSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                    function()
-                        local c = db.profile.boss.castBgColor or { r = 0, g = 0, b = 0 }
-                        return c.r, c.g, c.b, db.profile.boss.castBgAlpha or 0.5
-                    end,
-                    function(r, g, b, a)
-                        db.profile.boss.castBgColor = { r = r, g = g, b = b }
-                        db.profile.boss.castBgAlpha = a
-                        ReloadAndUpdate()
-                    end, true, 20)
-                bgSw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                bgSw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Cast Background") end)
-                bgSw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                rgn._lastInline = bgSw
-                -- Text-size cog: one slider drives BOTH the spell name and timer.
-                local _, textCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Cast Text",
-                    rows = {
-                        { type="slider", label="Text Size", min=6, max=20, step=1,
-                          get=function() return db.profile.boss.castSpellNameSize or 11 end,
-                          set=function(v)
-                              db.profile.boss.castSpellNameSize = v
-                              db.profile.boss.castDurationSize = v
-                              ReloadAndUpdate()
-                          end },
-                    },
-                })
-                local cogBtn = CreateFrame("Button", nil, rgn)
-                cogBtn:SetSize(26, 26)
-                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                rgn._lastInline = cogBtn
-                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-                cogBtn:SetAlpha(0.4)
-                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-                cogTex:SetAllPoints()
-                cogTex:SetTexture(EllesmereUI.COGS_ICON)
-                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-                cogBtn:SetScript("OnClick", function(self) textCogShow(self) end)
-            end
-            return growthRow, eh + ch + gh
+            -- Show Cast Icon + Cast Bar Height moved to their own "CAST BAR"
+            -- section below the Power Bar (see bossCastBar()).
+            return portraitRow, eh + ch
         end
 
         local function bossAfterSize(Ww, pp, yy)
@@ -11489,8 +11474,232 @@ initFrame:SetScript("OnEvent", function(self)
             return yy
         end
 
+        -- CAST BAR section, rendered below the Power Bar. Mirrors the player cast
+        -- bar's Show Cast Bar / Height / Bar Background / Spell Name / Duration /
+        -- Reverse Fill settings. All keys are boss-scoped (db.profile.boss.*) and read
+        -- by the shared castbar runtime + preview, so they live-update both. "Show Cast
+        -- Bar" off (showCastbar=false) hides the cast bar entirely (runtime disables the
+        -- Castbar element; preview gives it zero height).
+        local function bossCastBar(Ww, pp, yy)
+            local B = db.profile.boss
+            local hh
+            -- Inline cog-button helper (boss-section style).
+            local function CCogBtn(rgn, showFn)
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+                return cogBtn
+            end
+
+            -- The Show Cast Bar toggle gates the rest of the section. AddCastBlock
+            -- greys a region (its slider/dropdown/toggle plus any inline swatch or
+            -- cog) to 0.3 and drops an invisible mouse-blocker over it while the
+            -- cast bar is off, tracking the toggle live via the widget-refresh fast
+            -- path. Mirrors AddDarkModeBlock. The Show Cast Bar toggle's own fill
+            -- swatch is gated on its own so the toggle itself stays interactive.
+            local castFillSwatch
+            local function AddCastBlock(rgn)
+                if not rgn then return end
+                local block = CreateFrame("Frame", nil, rgn)
+                block:SetAllPoints()
+                block:SetFrameLevel(rgn:GetFrameLevel() + 50)
+                block:EnableMouse(true)
+                block:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(block, EllesmereUI.DisabledTooltip("Show Cast Bar"))
+                end)
+                block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function Update()
+                    if B.showCastbar == false then
+                        rgn:SetAlpha(0.3); block:Show()
+                    else
+                        rgn:SetAlpha(1); block:Hide()
+                    end
+                end
+                Update()
+                EllesmereUI.RegisterWidgetRefresh(Update)
+            end
+
+            bossCastHeader, hh = Ww:SectionHeader(pp, "CAST BAR", yy);  yy = yy - hh
+
+            -- Row 1: Show Cast Bar (+ inline fill-color swatch) | Cast Bar Height
+            castMainRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Show Cast Bar",
+                  getValue=function() return B.showCastbar ~= false end,
+                  setValue=function(v) B.showCastbar = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
+                { type="slider", text="Cast Bar Height", min=1, max=40, step=1,
+                  getValue=function() return B.castbarHeight or 14 end,
+                  setValue=function(v) B.castbarHeight = v; ReloadAndUpdate() end });  yy = yy - hh
+            -- Inline fill-color swatch on Show Cast Bar (left region).
+            do
+                local rgn = castMainRow._leftRegion
+                local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function() local c = B.castbarFillColor or { r=0.863, g=0.820, b=0.639 }; return c.r, c.g, c.b end,
+                    function(r, g, b) B.castbarFillColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Fill Color") end)
+                sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                rgn._lastInline = sw
+                castFillSwatch = sw
+            end
+
+            -- Row 2: Show Cast Icon (+ icon cog) | Bar Background (opacity slider + color swatch)
+            growthRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Show Cast Icon",
+                  getValue=function() return B.showCastIcon ~= false end,
+                  setValue=function(v) B.showCastIcon = v; ReloadAndUpdate() end },
+                { type="slider", text="Bar Background", min=0, max=100, step=1,
+                  getValue=function() return math.floor((B.castBgAlpha or 0.5) * 100 + 0.5) end,
+                  setValue=function(v) B.castBgAlpha = v / 100; ReloadAndUpdate() end });  yy = yy - hh
+            -- Icon cog (left): "Make Icon Part of the Bar" / "Show Icon on Right".
+            do
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Cast Icon",
+                    rows = {
+                        { type = "toggle", label = "Make Icon Part of the Bar",
+                          tooltip = "This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
+                          get = function() return B.castbarIconInWidth ~= false end,
+                          set = function(v) B.castbarIconInWidth = v; ReloadAndUpdate() end },
+                        { type = "toggle", label = "Show Icon on Right",
+                          tooltip = "Place the cast icon on the right side of the bar instead of the left.",
+                          get = function() return B.castbarIconRight == true end,
+                          set = function(v) B.castbarIconRight = v; ReloadAndUpdate() end },
+                    },
+                })
+                CCogBtn(growthRow._leftRegion, cogShow)
+            end
+            -- Inline color swatch on Bar Background (right region).
+            do
+                local rgn = growthRow._rightRegion
+                local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function()
+                        local c = B.castBgColor
+                        if c then return c.r, c.g, c.b end
+                        return 0, 0, 0
+                    end,
+                    function(r, g, b) B.castBgColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Cast Background") end)
+                sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                rgn._lastInline = sw
+            end
+
+            -- Row 3: Spell Name (dropdown + swatch + Size/X/Y cog) | Duration (same)
+            local castTextRow
+            castTextRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Spell Name",
+                  values={ none="None", left="Left", right="Right", center="Center" },
+                  order={ "none", "left", "right", "center" },
+                  getValue=function() return B.castSpellNameSide or "left" end,
+                  setValue=function(v)
+                    B.castSpellNameSide = v
+                    -- Conflict rule (mirrors player): name and the spell target may
+                    -- not share a side -- setting the name onto the target's side
+                    -- turns the target (Indicators) off.
+                    if v ~= "none" and (B.showCastTarget ~= false) and (B.castSpellTargetSide or "right") == v then
+                        B.showCastTarget = false
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                  end },
+                { type="dropdown", text="Duration",
+                  values={ none="None", right="Right", left="Left" },
+                  order={ "none", "right", "left" },
+                  getValue=function()
+                    if B.showCastDuration == false then return "none" end
+                    return B.castDurationSide or "right"
+                  end,
+                  setValue=function(v)
+                    if v == "none" then
+                        B.showCastDuration = false
+                    else
+                        B.showCastDuration = true
+                        B.castDurationSide = v
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                  end });  yy = yy - hh
+            -- Spell Name (left): color swatch + Size/X/Y cog
+            do
+                local rgn = castTextRow._leftRegion
+                local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function() local c = B.castSpellNameColor or { r=1, g=1, b=1 }; return c.r, c.g, c.b end,
+                    function(r, g, b) B.castSpellNameColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
+                rgn._lastInline = sw
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Spell Name",
+                    rows = {
+                        { type="slider", label="Size", min=6, max=20, step=1,
+                          get=function() return B.castSpellNameSize or 11 end,
+                          set=function(v) B.castSpellNameSize = v; ReloadAndUpdate() end },
+                        { type="slider", label="X Offset", min=-50, max=50, step=1,
+                          get=function() return B.castSpellNameX or 0 end,
+                          set=function(v) B.castSpellNameX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                          get=function() return B.castSpellNameY or 0 end,
+                          set=function(v) B.castSpellNameY = v; ReloadAndUpdate() end },
+                    },
+                })
+                CCogBtn(rgn, cogShow)
+            end
+            -- Duration (right): color swatch + Size/X/Y cog
+            do
+                local rgn = castTextRow._rightRegion
+                local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function() local c = B.castDurationColor or { r=1, g=1, b=1 }; return c.r, c.g, c.b end,
+                    function(r, g, b) B.castDurationColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
+                rgn._lastInline = sw
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Duration",
+                    rows = {
+                        { type="slider", label="Size", min=6, max=20, step=1,
+                          get=function() return B.castDurationSize or 10 end,
+                          set=function(v) B.castDurationSize = v; ReloadAndUpdate() end },
+                        { type="slider", label="X Offset", min=-50, max=50, step=1,
+                          get=function() return B.castDurationX or 0 end,
+                          set=function(v) B.castDurationX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                          get=function() return B.castDurationY or 0 end,
+                          set=function(v) B.castDurationY = v; ReloadAndUpdate() end },
+                    },
+                })
+                CCogBtn(rgn, cogShow)
+            end
+
+            -- Row 4: Reverse Fill | (blank)
+            local reverseRow
+            reverseRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Reverse Fill",
+                  getValue=function() return B.castReverseFill == true end,
+                  setValue=function(v) B.castReverseFill = v; ReloadAndUpdate() end },
+                { type="label", text="" });  yy = yy - hh
+
+            -- Gate the whole section on the Show Cast Bar toggle: when off, grey +
+            -- block the height slider, the icon row, the background row, the spell
+            -- name / duration row, reverse fill, and the inline fill swatch.
+            if castFillSwatch then AddCastBlock(castFillSwatch) end
+            AddCastBlock(castMainRow._rightRegion)
+            AddCastBlock(growthRow._leftRegion)
+            AddCastBlock(growthRow._rightRegion)
+            AddCastBlock(castTextRow._leftRegion)
+            AddCastBlock(castTextRow._rightRegion)
+            AddCastBlock(reverseRow._leftRegion)
+            return yy
+        end
+
         local displayHeader, sizeRow, textHeader, textRow
-        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow, bossAfterSize, { hasPowerBar = true, afterPowerRow = bossIndicators })
+        y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow, bossAfterSize, { hasPowerBar = true, afterPowerRow = function(Ww, pp, yy)
+            yy = bossCastBar(Ww, pp, yy)
+            return bossIndicators(Ww, pp, yy)
+        end })
 
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
@@ -11504,8 +11713,8 @@ initFrame:SetScript("OnEvent", function(self)
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             -- Cast bar -> Cast Bar Height; spell icon -> Show Cast Icon. Both live
             -- in growthRow after the swap (Show Cast Icon left, Cast Bar Height right).
-            castBar    = { section = displayHeader,  target = growthRow,  slotSide = "right" },
-            castIcon   = { section = displayHeader,  target = growthRow,  slotSide = "left" },
+            castBar    = { section = bossCastHeader or displayHeader,  target = castMainRow or growthRow,  slotSide = "left" },
+            castIcon   = { section = bossCastHeader or displayHeader,  target = growthRow,  slotSide = "left" },
             -- Buffs/Debuffs scroll to the active control: Simple Display when it's
             -- on (the column is forced), otherwise the normal Location dropdown.
             buffIcon   = function()

@@ -475,6 +475,11 @@ local defaults = {
         absorbStyle      = "striped",   -- "none", "striped", "clean", "blizzard"
         absorbOpacity    = 90,
         absorbColor      = { r = 1, g = 1, b = 1 },
+        -- Show the "overshield" -- the part of an absorb that exceeds the empty
+        -- health and backfills over your current health. When off, absorbs only
+        -- fill the empty part of the health bar (and on Default Blizz Frames the
+        -- glow line stays pinned at the right edge during overshields).
+        showOvershield   = true,
         healAbsorbStyle  = "clean",
         healAbsorbOpacity = 75,
         healAbsorbColor  = { r = 0.8, g = 0.15, b = 0.15 },
@@ -565,6 +570,7 @@ local defaults = {
         dispelIconPosition = "right",
         dispelIconOffsetX  = 0,
         dispelIconOffsetY  = 0,
+        dispelIconSize     = 16,
         -- Per-dispel-type colors (defaults mirror DISPEL_COLORS). "Bleed" is the
         -- no-dispelName/physical type (stored under the "" key in DISPEL_COLORS).
         dispelColorMagic   = { r = 0.349, g = 0.475, b = 1.0 },
@@ -2203,10 +2209,23 @@ local function UpdateAbsorb(button, unit)
         ApplyAbsorbStyle(ab, absStyle, s)
     end
 
+    -- Show Overshield (opt-in, default ON). The "overshield" is the absorb that
+    -- exceeds the empty health and backfills over current health -- drawn by the
+    -- backfill bar (ab) in overlay + Default-Blizz modes. When the toggle is OFF
+    -- we feed the backfill 0 so only the empty health fills; the forward bar (fw,
+    -- clipped to the missing-health region) still caps exactly at the health-bar
+    -- right edge. The right/left edge modes draw the WHOLE absorb through ab (fw
+    -- is hidden below), so they are left untouched -- overshield is meaningless
+    -- there. With the toggle ON this is byte-for-byte the previous behavior.
+    local overshieldOn = s.showOvershield ~= false
+    local overlayLike = absStyle == "blizzardModern" or (s.absorbEdgeMode or "overlay") == "overlay"
+    local abValue = absorbAmt
+    if not overshieldOn and overlayLike then abValue = 0 end
+
     -- Both bars get the raw absorb value and maxHealth.
     -- Clip frames do the visual math so we never compare secret values.
     ab:SetMinMaxValues(0, maxHealth)
-    ab:SetValue(absorbAmt)
+    ab:SetValue(abValue)
     ab:Show()
 
     if fw then
@@ -2237,12 +2256,20 @@ local function UpdateAbsorb(button, unit)
                 if sp.SetAlphaFromBoolean then sp:SetAlphaFromBoolean(isClamped, 0, 1) else sp:SetAlpha(1) end
                 sp:Show()
             end
-            -- Overshield spark: ride the backfill's left edge; shown only while overshielding.
+            -- Overshield spark: normally rides the backfill's LEFT edge (slides
+            -- left over the health fill as the overshield grows). With Show
+            -- Overshield OFF the backfill is suppressed, so pin the glow to the
+            -- health-bar RIGHT edge (ab spans the health bar) -- it stays put
+            -- instead of sliding over the fill. Shown only while overshielding.
             local bsp = fw._bfSpark
             if bsp then
                 bsp:SetSize(16, hpH)
                 bsp:ClearAllPoints()
-                bsp:SetPoint("CENTER", ab:GetStatusBarTexture(), "LEFT", -1, 0)
+                if overshieldOn then
+                    bsp:SetPoint("CENTER", ab:GetStatusBarTexture(), "LEFT", -1, 0)
+                else
+                    bsp:SetPoint("CENTER", ab, "RIGHT", -1, 0)
+                end
                 if bsp.SetAlphaFromBoolean then bsp:SetAlphaFromBoolean(isClamped, 1, 0) else bsp:SetAlpha(0) end
                 bsp:Show()
             end
@@ -2675,6 +2702,8 @@ local function StyleButton(button)
 
     local function AnchorDispelIcon()
         dispelIcon:ClearAllPoints()
+        local sz = s.dispelIconSize or 16
+        dispelIcon:SetSize(sz, sz)
         local pos = s.dispelIconPosition or "center"
         local ox = s.dispelIconOffsetX or 0
         local oy = s.dispelIconOffsetY or 0
@@ -8512,7 +8541,7 @@ do
             "healPrediction", "healPredOpacity", "healPredColor",
         },
         absorbs = {
-            "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode",
+            "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode", "showOvershield",
             "absorbBarEnabled", "absorbBarPosition", "absorbBarHeight", "absorbBarColor",
             "healAbsorbBarPosition", "healAbsorbBarHeight", "healAbsorbBarColor",
             "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
@@ -8546,7 +8575,7 @@ do
         },
         dispels = {
             "dispelBorderSize", "dispelOverlay", "dispelOverlayOpacity", "dispelShowAll",
-            "showDispelIcons", "dispelIconPosition", "dispelIconOffsetX", "dispelIconOffsetY",
+            "showDispelIcons", "dispelIconPosition", "dispelIconOffsetX", "dispelIconOffsetY", "dispelIconSize",
             "dispelColorMagic", "dispelColorCurse", "dispelColorDisease",
             "dispelColorPoison", "dispelColorBleed",
         },
@@ -11313,9 +11342,14 @@ local function ApplyPreviewData(f, index)
                 end
             end
 
-            -- Feed both bars with the same absorb value; clip frames do the visual math
+            -- Feed both bars with the same absorb value; clip frames do the visual math.
+            -- Mirror the live Show Overshield gate: when off (overlay-like modes) feed
+            -- the backfill 0 so the overshield does not render in the preview.
+            local pvOvershieldOn = s.showOvershield ~= false
+            local pvOverlayLike = modern or (s.absorbEdgeMode or "overlay") == "overlay"
+            local pvAbValue = (not pvOvershieldOn and pvOverlayLike) and 0 or absorbAmt
             f._absorbBar:SetMinMaxValues(0, 100)
-            f._absorbBar:SetValue(absorbAmt)
+            f._absorbBar:SetValue(pvAbValue)
             f._absorbBar:Show()
             if fw then
                 fw:SetMinMaxValues(0, 100)
@@ -11342,7 +11376,11 @@ local function ApplyPreviewData(f, index)
                     if bsp then
                         bsp:SetSize(16, hpH)
                         bsp:ClearAllPoints()
-                        bsp:SetPoint("CENTER", f._absorbBar:GetStatusBarTexture(), "LEFT", -1, 0)
+                        if pvOvershieldOn then
+                            bsp:SetPoint("CENTER", f._absorbBar:GetStatusBarTexture(), "LEFT", -1, 0)
+                        else
+                            bsp:SetPoint("CENTER", f._absorbBar, "RIGHT", -1, 0)
+                        end
                         bsp:SetAlpha(previewOver and 1 or 0)
                         bsp:Show()
                     end
@@ -11681,6 +11719,8 @@ local function ApplyPreviewData(f, index)
             local atlas = DISPEL_ICON_ATLAS[dispelType]
             if atlas then f._dispelIconTex:SetAtlas(atlas) end
             f._dispelIcon:ClearAllPoints()
+            local diSz = s.dispelIconSize or 16
+            f._dispelIcon:SetSize(diSz, diSz)
             local diPos = s.dispelIconPosition or "center"
             local diOX = s.dispelIconOffsetX or 0
             local diOY = s.dispelIconOffsetY or 0

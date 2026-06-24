@@ -2801,6 +2801,37 @@ EllesmereUI.DEFAULT_RESOURCE_COLORS = {
     DEMONHUNTER = { r = 0.34, g = 0.06, b = 0.46 },
 }
 
+-- Default class-resource colors (keyed by the specific resource, NOT the class,
+-- so specs whose class has multiple resources -- e.g. Arcane Charges vs Icicles
+-- -- get distinct colors). Customized via the Class Resource Colors section
+-- (saved under customColors.classResource). Defaults below mirror that section.
+EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS = {
+    ComboPoints     = { r = 1.0,    g = 0.9608, b = 0.4118 },
+    Runes           = { r = 0.0,    g = 0.8196, b = 1.0    },
+    SoulShards      = { r = 0.5059, g = 0.3412, b = 0.8431 },
+    HolyPower       = { r = 0.949,  g = 0.902,  b = 0.6    },
+    ArcaneCharges   = { r = 0.7176, g = 0.4902, b = 0.8118 },
+    Icicles         = { r = 0.7098, g = 1.0,    b = 0.9216 },
+    Chi             = { r = 0.0,    g = 1.0,    b = 0.6    },
+    Essence         = { r = 0.2,    g = 0.58,   b = 0.502  },
+    SoulFragments   = { r = 0.6,    g = 0.8,    b = 0.2    },
+    MaelstromWeapon = { r = 0.0,    g = 0.4392, b = 0.8706 },
+    TipOfTheSpear   = { r = 0.6667, g = 0.8275, b = 0.4471 },
+    WhirlwindStacks = { r = 0.7765, g = 0.6078, b = 0.4275 },
+}
+
+-- Get a class-resource color (custom override or default), keyed by resource.
+function EllesmereUI.GetClassResourceColor(key)
+    if not key then return nil end
+    local db = EllesmereUI.GetCustomColorsDB()
+    if db.classResource and db.classResource[key] then
+        return db.classResource[key]
+    end
+    local def = EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS[key]
+    if def then return { r = def.r, g = def.g, b = def.b } end
+    return nil
+end
+
 -- Class -> primary power type name mapping
 EllesmereUI.CLASS_POWER_MAP = {
     WARRIOR      = "RAGE",
@@ -3302,6 +3333,43 @@ EllesmereUI.POWER_KEY_TO_ENUM = {
     FURY         = 17,
     PAIN         = 18,
 }
+
+-- Clean integer power-type -> string key (reverse of POWER_KEY_TO_ENUM). The
+-- integer power type (1st return of UnitPowerType) is readable on EVERY unit, so
+-- it recovers a color key when the string token (2nd return) is unreadable --
+-- which it is on non-player units (boss/target/focus) in Midnight.
+EllesmereUI.POWER_ENUM_TO_KEY = {}
+for k, v in pairs(EllesmereUI.POWER_KEY_TO_ENUM) do
+    EllesmereUI.POWER_ENUM_TO_KEY[v] = k
+end
+
+-- EUI power color (r,g,b, or nil) for a unit's CURRENT power. Mirrors oUF's bar
+-- ladder so unit-frame TEXT matches the bar on EVERY unit, including non-player:
+--   1) Named token -> custom/default color. Covers all standard power types; the
+--      player is always here so its color is identical to before.
+--   2) NON-STANDARD power types (creatures/NPCs -- e.g. POWER_TYPE_COSMIC_ENERGY)
+--      report an unmapped token but the integer type collides with a standard
+--      slot (cosmic energy -> 3 = Energy). The engine hands the REAL color back
+--      in altR/altG/altB (the value oUF paints the bar with) -- use it so text
+--      matches the bar instead of resolving to the wrong standard color.
+--   3) Token unmatched and no alt color, but the integer type is standard ->
+--      custom color (safety net, e.g. if a token is ever unreadable).
+function EllesmereUI.ResolveUnitPowerColor(unit)
+    local pType, pToken, altR, altG, altB = UnitPowerType(unit)
+    local info = EllesmereUI.GetPowerColor(pToken)
+    if info then return info.r, info.g, info.b end
+    if altR then
+        -- UnitPowerType may hand back 0-255 or 0-1 ranges; normalize (per oUF).
+        if altR > 1 or altG > 1 or altB > 1 then
+            return altR / 255, altG / 255, altB / 255
+        end
+        return altR, altG, altB
+    end
+    local key = EllesmereUI.POWER_ENUM_TO_KEY[pType]
+    info = key and EllesmereUI.GetPowerColor(key)
+    if info then return info.r, info.g, info.b end
+    return nil
+end
 
 -- Apply custom class colors to oUF (call after settings change)
 function EllesmereUI.ApplyColorsToOUF()
@@ -6292,6 +6360,11 @@ local function CreateMainFrame()
             local SYNC_HOVER_B = math.min(1, SYNC_ON_B * 1.25)
             local isGlobalOnly = EllesmereUI._syncGlobalOnly and EllesmereUI._syncGlobalOnly[info.folder]
             local function RefreshSyncState()
+                -- Hide the sync icon for disabled modules: an addon that isn't
+                -- loaded has no live settings to sync, so showing (and letting the
+                -- user click) its sync state is meaningless. Uses the same loaded
+                -- check as the power button so the two stay consistent.
+                if not IsAddonLoaded(info.folder) then syncBtn:Hide(); return end
                 -- Hide if only one profile exists
                 local profCount = 0
                 if EllesmereUIDB and EllesmereUIDB.profiles then
@@ -9062,7 +9135,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.7"
+EllesmereUI.VERSION = "8.2.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

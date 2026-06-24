@@ -606,12 +606,20 @@ local function ApplyCdmChargeStyle(frame, cd)
     local hide = false
     if ns._cdmAnyChargeStyle then
         local ss2 = ns._ResolveCdmSS(frame)
-        if ss2 and ss2.chargeHideSwipe then
-            -- Hide only the recharge swipe. The active-state overlay IS the
-            -- (colored) swipe, so keep it drawn while the active state is
-            -- showing (active AND not "hide active state").
-            local showActive = ss2.activeSwipeMode ~= "none" and CdmFrameIsActive(frame)
-            hide = not showActive
+        if ss2 then
+            -- Hide Recharge Edge (per-spell): drop the recharge edge line that
+            -- ApplyCdmEdge just drew. Secret-safe: ss flag is ours, SetDrawEdge
+            -- takes no secret.
+            if ss2.hideRechargeEdge and cd.SetDrawEdge then
+                cd:SetDrawEdge(false)
+            end
+            if ss2.chargeHideSwipe then
+                -- Hide only the recharge swipe. The active-state overlay IS the
+                -- (colored) swipe, so keep it drawn while the active state is
+                -- showing (active AND not "hide active state").
+                local showActive = ss2.activeSwipeMode ~= "none" and CdmFrameIsActive(frame)
+                hide = not showActive
+            end
         end
     end
     if cd.SetDrawSwipe then cd:SetDrawSwipe(not hide) end
@@ -919,11 +927,39 @@ local function DecorateFrame(frame, barData)
                 -- duration timers work correctly during GCD.
                 local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
                 local _gcdSuppressed = false
-                if bd2 and bd2.suppressGCD and sid2 and C_Spell and C_Spell.GetSpellCooldown then
-                    local cdInfo = C_Spell.GetSpellCooldown(sid2)
-                    if cdInfo and cdInfo.isOnGCD then
-                        cd:SetSwipeColor(0, 0, 0, 0)
-                        _gcdSuppressed = true
+                -- Per-bar "Suppress GCD": alpha-0 the swipe while the displayed
+                -- cooldown is just a GCD. Two cases must NEVER be suppressed:
+                --   1. The Hide-Active override window is forcing the real recharge
+                --      display (a GCD pushed by pressing another ability is moot).
+                --   2. A charge spell with a recharge in flight (>=1 charge in hand,
+                --      the next one filling). That swipe IS the recharge, never a
+                --      GCD -- alpha-0'ing it blanks the recharge for the entire GCD
+                --      whenever another ability is pressed. Charge recharges are
+                --      shown as their own swipe, so the GCD on top is irrelevant.
+                if bd2 and bd2.suppressGCD and sid2 and not fd._hideActiveOverriding
+                   and C_Spell and C_Spell.GetSpellCooldown then
+                    -- Charge-recharge guard. GetSpellCharges().isActive is a clean
+                    -- bool (true only while a charge is filling); the secret
+                    -- currentCharges is never read. Override ID resolved for
+                    -- transform spells, mirroring the re-arm paths below.
+                    local chargeRecharging = false
+                    if C_Spell.GetSpellCharges
+                       and type(frame.HasVisualDataSource_Charges) == "function"
+                       and frame:HasVisualDataSource_Charges() then
+                        local effIDc = sid2
+                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                            local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                            if ovr and ovr > 0 and ovr ~= sid2 then effIDc = ovr end
+                        end
+                        local ci = C_Spell.GetSpellCharges(effIDc) or C_Spell.GetSpellCharges(sid2)
+                        chargeRecharging = (ci and ci.isActive == true) or false
+                    end
+                    if not chargeRecharging then
+                        local cdInfo = C_Spell.GetSpellCooldown(sid2)
+                        if cdInfo and cdInfo.isOnGCD then
+                            cd:SetSwipeColor(0, 0, 0, 0)
+                            _gcdSuppressed = true
+                        end
                     end
                 end
                 -- Check per-spell settings
@@ -949,7 +985,7 @@ local function DecorateFrame(frame, barData)
                 -- Same one-shot gate for the per-spell charge Hide Swipe so the
                 -- SetDrawSwipe hook can early-out for everyone who never enables
                 -- it. Covers /reload (runs for every icon).
-                if ss2 and ss2.chargeHideSwipe then ns._cdmAnyChargeStyle = true end
+                if ss2 and (ss2.chargeHideSwipe or ss2.hideRechargeEdge) then ns._cdmAnyChargeStyle = true end
                 if ss2 and ss2.maxStacksGlow and ss2.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
@@ -1102,6 +1138,28 @@ local function DecorateFrame(frame, barData)
                 cd:SetDrawSwipe(true)
                 fd._isProcessingOverride = false
             end)
+            -- Hide Recharge Edge enforcement. Blizzard re-enables the leading
+            -- edge on every cooldown re-push -- notably while a cooldown-reduction
+            -- effect repeatedly re-arms a charge recharge -- and the SetDrawSwipe
+            -- hook above only catches re-pushes that ALSO toggle the swipe, so the
+            -- edge flickers back on between them. Hook SetDrawEdge directly so a
+            -- charge spell with Hide Recharge Edge on keeps the edge suppressed.
+            -- Mirror of the SetDrawSwipe hook: clean getters + our own ss flag,
+            -- guarded so ApplyCdmEdge's own SetDrawEdge(true) never recurses.
+            if cd.SetDrawEdge then
+                hooksecurefunc(cd, "SetDrawEdge", function(_, show)
+                    if fd._isProcessingOverride then return end
+                    if not show then return end
+                    if type(frame.HasVisualDataSource_Charges) ~= "function"
+                       or not frame:HasVisualDataSource_Charges() then return end
+                    if not ns._cdmAnyChargeStyle then return end
+                    local ss2 = ns._ResolveCdmSS(frame)
+                    if not (ss2 and ss2.hideRechargeEdge) then return end
+                    fd._isProcessingOverride = true
+                    cd:SetDrawEdge(false)
+                    fd._isProcessingOverride = false
+                end)
+            end
             -- Charge-spell recharge swipe restore.
             -- The swipe is rendered from the widget's armed duration, NOT from
             -- the SetDrawSwipe flag (the flag only gates an existing swipe). When
@@ -1152,7 +1210,17 @@ local function DecorateFrame(frame, barData)
                     end
                 end
                 local cdInfo = C_Spell.GetSpellCooldown(effID)
-                if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
+                local cdActive = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
+                -- Charge-in-hand Hide-Active window: GetSpellCooldown().isActive is
+                -- false while a castable charge remains, so the cd gate above never
+                -- re-arms the recharge, and Blizzard's per-aura-refresh wipe leaves
+                -- the swipe blank. Re-arm off the clean recharge flag instead, but
+                -- ONLY inside our Hide-Active override so non-override charge spells
+                -- keep Blizzard's native display untouched. Secret-safe: GetSpellCharges
+                -- .isActive is a clean bool; currentCharges is never read.
+                local chargeActive = fd._hideActiveOverriding and C_Spell.GetSpellCharges
+                    and (C_Spell.GetSpellCharges(effID) or C_Spell.GetSpellCharges(sid2) or {}).isActive == true
+                if not (cdActive or chargeActive) then return end
                 -- Re-derive the charge recharge duration. The duration object is
                 -- opaque and fed straight to the widget, never inspected, so it is
                 -- secret-safe.
@@ -1170,6 +1238,76 @@ local function DecorateFrame(frame, barData)
                 ApplyCdmChargeStyle(frame, cd)
                 fd._isProcessingOverride = false
             end)
+            -- During the Hide-Active window Blizzard re-pushes the cooldown widget
+            -- for a charge-in-hand spell via SetCooldownFromDurationObject (the aura
+            -- display) and toggles SetUseAuraDisplayTime -- NOT plain SetCooldown.
+            -- Those pushes wipe the recharge we armed (the Clear/SetDesaturated hooks
+            -- fire far too rarely to keep up). Re-assert the recharge on each of
+            -- those two real drivers, gated to EXACTLY (charge frame + Hide-Active
+            -- window + recharge running) so it is a no-op for everything else. The
+            -- fd._isProcessingOverride guard blocks recursion from our own
+            -- SetUseAuraDisplayTime / SetCooldownFromDurationObject writes below.
+            local function ReArmChargeRecharge()
+                if fd._isProcessingOverride then return end
+                if not fd._hideActiveOverriding then return end
+                local hasCharges = type(frame.HasVisualDataSource_Charges) == "function"
+                    and frame:HasVisualDataSource_Charges()
+                if not hasCharges then return end
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                if not sid2 or not C_Spell or not C_Spell.GetSpellCharges
+                    or not C_Spell.GetSpellChargeDuration then
+                    return
+                end
+                local effID = sid2
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                    if ovr and ovr > 0 and ovr ~= sid2 then effID = ovr end
+                end
+                -- Only while a recharge is genuinely running. isActive is a clean
+                -- bool; currentCharges (secret) is never read.
+                local ci = C_Spell.GetSpellCharges(effID) or C_Spell.GetSpellCharges(sid2)
+                if not (ci and ci.isActive == true) then return end
+                local durObj = C_Spell.GetSpellChargeDuration(effID)
+                if not durObj and effID ~= sid2 then
+                    durObj = C_Spell.GetSpellChargeDuration(sid2)
+                end
+                if not durObj then return end
+                fd._isProcessingOverride = true
+                if cd.SetUseAuraDisplayTime then
+                    cd:SetUseAuraDisplayTime(false)
+                end
+                cd:SetCooldownFromDurationObject(durObj)
+                ApplyCdmChargeStyle(frame, cd)
+                -- We have just re-armed the REAL recharge, so whatever is now
+                -- displayed is the recharge -- never a GCD. Suppress-GCD's alpha-0
+                -- swipe (set while isOnGCD, e.g. right after pressing ANOTHER
+                -- ability) must not stick here or the recharge stays invisible
+                -- until the active state ends. Restore the normal black
+                -- hide-active swipe unconditionally; black where black is already
+                -- correct is a no-op for the Suppress-GCD-off case.
+                local bkSw = fc2 and fc2.barKey
+                local bdSw = bkSw and barDataByKey and barDataByKey[bkSw]
+                cd:SetSwipeColor(0, 0, 0, (bdSw and bdSw.swipeAlpha) or 0.7)
+                fd._isProcessingOverride = false
+            end
+            if cd.SetCooldownFromDurationObject then
+                hooksecurefunc(cd, "SetCooldownFromDurationObject", ReArmChargeRecharge)
+            end
+            if cd.SetUseAuraDisplayTime then
+                hooksecurefunc(cd, "SetUseAuraDisplayTime", ReArmChargeRecharge)
+            end
+            -- Pressing ANOTHER ability pushes the global cooldown onto this frame
+            -- via SetCooldown (not the aura-display setters above), replacing the
+            -- charge recharge geometry. In the Hide-Active window that wipes the
+            -- real recharge we are showing -- it returns only when the active
+            -- state ends. Re-arm on SetCooldown too so the recharge survives an
+            -- off-GCD push. ReArmChargeRecharge fully gates itself (override window
+            -- + charge frame + recharge running) and is re-entry guarded, so this
+            -- is a no-op for every normal cooldown and outside the override window.
+            if cd.SetCooldown then
+                hooksecurefunc(cd, "SetCooldown", ReArmChargeRecharge)
+            end
         end
         -- Hook SetDesaturated AND SetDesaturation on icon texture: Blizzard
         -- calls these on every cooldown tick. When we're overriding the CD
@@ -1252,18 +1390,20 @@ local function DecorateFrame(frame, barData)
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
         fd.cooldown:SetReverse(isBuff)
 
-        -- NOTE: Clear IS hooked above (in the _swipeColorHooked block) ONLY to
-        -- restore the recharge swipe on charge spells. SetCooldown is still
-        -- deliberately NOT hooked. A hooksecurefunc post-hook does not taint the
-        -- secure caller; taint would only stick if the hook BODY wrote a Blizzard
-        -- frame field (e.g. isActive, allowAvailableAlert) or called
-        -- Show/Hide/SetAlpha on a Blizzard frame. The Clear hook does neither: it
-        -- reads only clean getters (HasVisualDataSource_Charges,
-        -- GetSpellCooldown().isActive) and calls pure cooldown-widget setters
-        -- (SetUseAuraDisplayTime / SetCooldownFromDurationObject / SetDrawSwipe),
-        -- the same setters already used safely by the SetSwipeColor and
-        -- SetDesaturated hooks. All hook state lives on the external fd table,
-        -- never on the Blizzard frame.
+        -- NOTE: Clear IS hooked above (in the _swipeColorHooked block) to restore
+        -- the recharge swipe on charge spells, and SetCooldown is hooked there too
+        -- (-> ReArmChargeRecharge) so an off-GCD push from pressing another ability
+        -- cannot wipe the recharge during the Hide-Active window. A hooksecurefunc
+        -- post-hook does not taint the secure caller; taint would only stick if the
+        -- hook BODY wrote a Blizzard frame field (e.g. isActive, allowAvailableAlert)
+        -- or called Show/Hide/SetAlpha on a Blizzard frame. Neither hook does that:
+        -- they read only clean getters (HasVisualDataSource_Charges,
+        -- GetSpellCooldown().isActive, GetSpellCharges().isActive) and call pure
+        -- cooldown-widget setters (SetUseAuraDisplayTime / SetCooldownFromDurationObject
+        -- / SetDrawSwipe / SetSwipeColor), the same setters already used safely by the
+        -- SetSwipeColor and SetDesaturated hooks. ReArmChargeRecharge also self-gates
+        -- to the override window so SetCooldown is a no-op for normal cooldowns. All
+        -- hook state lives on the external fd table, never on the Blizzard frame.
 
         -- Cooldown State Effect: separate additive hook on SetDesaturated.
         -- Blizzard calls SetDesaturated on every CD tick AND on CD end,
@@ -2230,7 +2370,8 @@ local function CollectAndReanchor()
                                         end
                                     end
                                     if bd and bd.enabled and bd.barType == "buffs"
-                                       and showInactive and targetBar ~= ns.FOCUSKICK_BAR_KEY then
+                                       and showInactive and targetBar ~= ns.FOCUSKICK_BAR_KEY
+                                       and not ns._cdmSpecRebuildStale then
                                         -- Two displayed-but-inactive viewer items can resolve to the
                                         -- SAME live spell (split-form talents share one override
                                         -- target). They share one pooled placeholder frame, so guard

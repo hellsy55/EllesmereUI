@@ -140,6 +140,7 @@ end
 local defaults = {
     absorbStyle = "blizzard",
     absorbCleanAlpha = 30,
+    absorbColor = { r = 1, g = 1, b = 1 },
     hostile = { r = 0.39, g = 0.11, b = 0.09 },
     neutral = { r = 0.81, g = 0.72, b = 0.19 },
     tapped  = { r = 0.50, g = 0.50, b = 0.50 },
@@ -295,12 +296,20 @@ local defaults = {
     castNameColor = { r = 1, g = 1, b = 1 },
     castNameOffsetX = 0,
     castNameOffsetY = 0,
+    -- Side the spell name occupies on the cast bar text line: "left" | "right" | "center" | "none".
+    -- Default "left" reproduces the historical fixed layout.
+    castNameSide = "left",
     castTargetSize = 10,
     castTargetClassColor = true,
     castTargetColor = { r = 1, g = 1, b = 1 },
     castTargetOffsetX = 0,
     castTargetOffsetY = 0,
+    -- Side the spell target occupies: "left" | "right" | "center" | "none". Default "right".
+    castTargetSide = "right",
     showCastTimer = true,
+    -- Side the cast timer occupies when shown: "left" | "right". Visibility stays governed
+    -- by showCastTimer (the dropdown's "None" option simply sets showCastTimer = false).
+    castTimerSide = "right",
     castTimerSize = 10,
     castTimerColor = { r = 1, g = 1, b = 1 },
     castTimerOffsetX = 0,
@@ -381,6 +390,7 @@ local defaults = {
     textSlotCenterColor = { r = 1, g = 1, b = 1 },
     -- Bar texture overlay
     healthBarTexture = "none",
+    castBarTexture = "none",
 }
 local BAR_W = 150
 ns.defaults = defaults
@@ -541,18 +551,53 @@ local function ApplyHealthBarTexture(plate)
 end
 ns.ApplyHealthBarTexture = ApplyHealthBarTexture
 
+-- Cast bar texture -- mirrors ApplyHealthBarTexture exactly, using the same
+-- texture set (EUI built-ins + SharedMedia, appended into ns.healthBarTextures
+-- at options-build time). Attached to ns (no new file-scope local).
+function ns.ApplyCastBarTexture(plate)
+    local cast = plate.cast
+    if not cast then return end
+    local texKey = (p and p.castBarTexture) or defaults.castBarTexture or "none"
+    local path   = EllesmereUI.ResolveTexturePath(ns.healthBarTextures, texKey, "Interface\\Buttons\\WHITE8x8")
+    cast:SetStatusBarTexture(path)
+    -- The uninterruptible overlay is a flat WHITE8x8 drawn over the fill (tinted
+    -- grey, shown via SetAlphaFromBoolean), so it would hide the fill texture on
+    -- uninterruptible casts. Give it the same texture so the pattern shows
+    -- through in the uninterruptible colour. The per-cast SetVertexColor (grey)
+    -- is re-applied on every cast start, so changing the texture here is safe.
+    if plate.castBarOverlay then
+        plate.castBarOverlay:SetTexture(path)
+    end
+end
+
 function ns.ApplyAbsorbStyle(plate)
     local style = (p and p.absorbStyle) or defaults.absorbStyle
-    local tex   = ns.NP_ABSORB_STYLE_TEX[style] or ns.NP_ABSORB_STYLE_TEX.blizzard
-    local alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
-    if style == "clean" then
+    -- blizzard/striped/clean live in NP_ABSORB_STYLE_TEX; the stripe keys
+    -- (shared with the Focus Texture dropdown) resolve via ResolveOverlayTexPath.
+    local tex   = ns.NP_ABSORB_STYLE_TEX[style] or ns.ResolveOverlayTexPath(style) or ns.NP_ABSORB_STYLE_TEX.blizzard
+    -- Opacity applies to every style. absorbAlpha (0-100) is the single source
+    -- of truth once the user touches the slider or picks a style; until then we
+    -- fall back to the original per-style defaults so existing profiles are
+    -- unchanged.
+    local alpha = p and p.absorbAlpha
+    if alpha then
+        alpha = alpha / 100
+    elseif style == "clean" then
         alpha = ((p and p.absorbCleanAlpha) or defaults.absorbCleanAlpha or 30) / 100
+    else
+        alpha = ns.NP_ABSORB_STYLE_ALPHA[style] or 0.8
+    end
+    -- Tint applies to every style EXCEPT Blizzard, which keeps its own coloring.
+    local r, g, b = 1, 1, 1
+    if style ~= "blizzard" then
+        local c = (p and p.absorbColor) or defaults.absorbColor
+        if c then r, g, b = c.r, c.g, c.b end
     end
     local mask = plate._absorbMask
     for _, bar in ipairs({ plate.absorb, plate.absorbForward, plate.absorbOverflow }) do
         if bar then
             bar:SetStatusBarTexture(tex)
-            bar:SetStatusBarColor(1, 1, 1, alpha)
+            bar:SetStatusBarColor(r, g, b, alpha)
             local fill = bar:GetStatusBarTexture()
             if fill then
                 fill:SetDrawLayer("ARTWORK", 1)
@@ -4473,6 +4518,45 @@ ns._pandemicTickFrame:SetScript("OnUpdate", function(self, elapsed)
 end)
 ns._pandemicTickFrame:Hide()  -- start hidden; shown when pandemic glows activate
 
+-- Shared cast-bar text anchoring. The cast bar text line holds three elements --
+-- spell name, spell target, cast timer -- each assigned to a side ("left" |
+-- "right" | "center"). The cast timer reserves a fixed slot of width on its side;
+-- a non-center element sharing the timer's side is shifted inward by that width to
+-- make room (mirrors how the target has always been pushed left by the timer).
+-- Center elements anchor to the bar center and are never pushed.
+--
+--   side    : "left" | "right" | "center"
+--   pushed  : true when the timer occupies this same side and this element must move inward
+--   reserve : timer reserved width (only consumed when pushed)
+--   isTimer : the timer uses slightly tighter base insets than text
+-- Returns: point (anchor), xOff (base, before the user X offset), justify
+function ns.GetCastTextAnchor(side, pushed, reserve, isTimer)
+    if side == "center" then
+        return "CENTER", 0, "CENTER"
+    elseif side == "left" then
+        local base = isTimer and 3 or 5
+        if pushed then base = base + reserve end
+        return "LEFT", base, "LEFT"
+    else -- "right"
+        local base = -3
+        if pushed then base = base - reserve end
+        return "RIGHT", base, "RIGHT"
+    end
+end
+
+-- WoW does not visually re-lay-out a FontString when only its SetJustifyH changes;
+-- a fresh build does, which is why a /reload looked right but an in-place side
+-- change did not. Clearing then re-setting the text forces the new alignment to
+-- take effect, and it MUST be a real change -- re-setting the identical string is
+-- deduped and skips the re-layout. (Same trick as the raid frame name text.)
+-- GetText may return a secret (cast name/target); SetText accepts secrets and the
+-- value is never inspected, so the round-trip is safe.
+function ns.ReflowFontString(fs)
+    local t = fs:GetText()
+    fs:SetText("")
+    fs:SetText(t or "")
+end
+
 local NameplateFrame = {}
 
 -- Appearance generation: bumped by RefreshAllSettings so plates re-apply
@@ -4524,26 +4608,48 @@ function NameplateFrame:ApplyAppearance()
     SetFSFont(self.castName, cns, GetNPOutline())
     SetFSFont(self.castTarget, cts, GetNPOutline())
     SetFSFont(self.castTimer, ctmSz, GetNPOutline())
-    self.castName:SetJustifyH("LEFT")
-    self.castTarget:SetJustifyH("RIGHT")
-    self.castTimer:SetJustifyH("RIGHT")
     self.castTimer:SetTextColor(ctmC.r, ctmC.g, ctmC.b, 1)
     local showTimer = defaults.showCastTimer
     if p and p.showCastTimer ~= nil then showTimer = p.showCastTimer end
     self._showCastTimer = showTimer
+    local nameSide   = (p and p.castNameSide)   or defaults.castNameSide
+    local targetSide = (p and p.castTargetSide) or defaults.castTargetSide
+    local timerSide  = (p and p.castTimerSide)  or defaults.castTimerSide
     local castW = self.cast:GetWidth()
     local timerW = ctmSz * 2.2
     if castW and castW > 0 then
-        self.castName:SetWidth(castW * 0.42)
+        local textW = castW * 0.42
+        if nameSide ~= "none" then
+            local pt, xb, jh = ns.GetCastTextAnchor(nameSide, showTimer and timerSide == nameSide, timerW, false)
+            self.castName:SetWidth(textW)
+            self.castName:SetJustifyH(jh)
+            self.castName:ClearAllPoints()
+            self.castName:SetPoint(pt, self.cast, pt, xb + cnOX, cnOY)
+        end
+        if targetSide ~= "none" then
+            local pt, xb, jh = ns.GetCastTextAnchor(targetSide, showTimer and timerSide == targetSide, timerW, false)
+            self.castTarget:SetWidth(textW)
+            self.castTarget:SetJustifyH(jh)
+            self.castTarget:ClearAllPoints()
+            self.castTarget:SetPoint(pt, self.cast, pt, xb + ctOX, ctOY)
+        end
+        -- Timer side is only "left"/"right"; visibility stays governed by showTimer.
+        local tpt, txb, tjh = ns.GetCastTextAnchor(timerSide, false, timerW, true)
         self.castTimer:SetWidth(timerW)
-        self.castTarget:SetWidth(castW * 0.42)
-        self.castName:ClearAllPoints()
-        self.castName:SetPoint("LEFT", self.cast, "LEFT", 5 + cnOX, cnOY)
-        self.castTarget:ClearAllPoints()
-        self.castTarget:SetPoint("RIGHT", self.cast, "RIGHT", -3 - timerW + ctOX, ctOY)
+        self.castTimer:SetJustifyH(tjh)
         self.castTimer:ClearAllPoints()
-        self.castTimer:SetPoint("RIGHT", self.cast, "RIGHT", -3 + tmOX, tmOY)
+        self.castTimer:SetPoint(tpt, self.cast, tpt, txb + tmOX, tmOY)
     end
+    -- Base visibility by side (UpdateCast refines the target per cast on hasTarget).
+    self.castName:SetShown(nameSide ~= "none")
+    self.castTarget:SetShown(targetSide ~= "none")
+    self.castTimer:SetShown(showTimer)
+    -- Force the new justify to take effect on text that is already rendered (e.g.
+    -- changing the side while a plate is mid-cast). A fresh cast re-flows on its own
+    -- because UpdateCast sets the text after this, but a live setting change does not.
+    ns.ReflowFontString(self.castName)
+    ns.ReflowFontString(self.castTarget)
+    ns.ReflowFontString(self.castTimer)
     self.castName:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
     local function GetAuraDurationCfg(kind)
         local sizeKey = kind .. "DurationTextSize"
@@ -4678,6 +4784,7 @@ function NameplateFrame:ApplyAppearance()
         self.absorbOverflow:SetHeight(GetHealthBarHeight())
     end
     ApplyHealthBarTexture(self)
+    ns.ApplyCastBarTexture(self)
     ns.ApplyAbsorbStyle(self)
     self:ApplyBorder()
     self:ApplyBorderColor()
@@ -6509,7 +6616,10 @@ function NameplateFrame:UpdateCast()
             self.castTarget:SetTextColor(ctc.r, ctc.g, ctc.b, 1)
         end
 
-        self.castTarget:SetShown(hasTarget)
+        local nameSide   = db.castNameSide   or defaults.castNameSide
+        local targetSide = db.castTargetSide or defaults.castTargetSide
+        self.castName:SetShown(nameSide ~= "none")
+        self.castTarget:SetShown(hasTarget and targetSide ~= "none")
         self.castTimer:SetShown(self._showCastTimer)
 
         if type(kickProtected) == "nil" then
@@ -7014,6 +7124,21 @@ function NameplateFrame:ShowCastLockout()
     end)
 end
 function NameplateFrame:UNIT_HEALTH()
+    -- If the mob dies while the "Interrupted" flash is held up, Blizzard's
+    -- nameplate death animation scales the still-shown cast bar and it looks
+    -- squished/warped. Tear the flash down the instant death is detected.
+    -- Gated on _interrupted first, so UnitIsDeadOrGhost is only ever called
+    -- during the brief flash window -- ~free on normal health ticks. (Same
+    -- safe death check already used by the health-text path.)
+    if self._interrupted and self.unit and UnitIsDeadOrGhost(self.unit) then
+        self._interrupted = nil
+        if self._interruptTimer then
+            self._interruptTimer:Cancel()
+            self._interruptTimer = nil
+        end
+        self.cast:Hide()
+        self:ApplyNameVisibility()
+    end
     self:UpdateHealthValues()
 end
 function NameplateFrame:UNIT_ABSORB_AMOUNT_CHANGED()
@@ -7833,6 +7958,9 @@ do
     ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextX"
     ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextY"
     ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "ccDurationTextColor"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "castNameSide"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "castTargetSide"
+    ns._displayPresetKeys[#ns._displayPresetKeys + 1] = "castTimerSide"
     ns._appendDisplayPresetKeys(ns._displayPresetKeys)
 
     -- Also handle spec changes that happen before the UI is ever opened
