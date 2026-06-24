@@ -4255,7 +4255,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- X slider row
                 local X_ROW_Y = -(TOP_PAD + TITLE_H + TITLE_GAP + GAP)
                 local xLabel = MakeFont(pf, 12, nil, 1, 1, 1)
-                xLabel:SetAlpha(0.6); xLabel:SetText("X Offset")
+                xLabel:SetAlpha(0.6); xLabel:SetText(EllesmereUI.L("X Offset"))
                 xLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, X_ROW_Y - SLIDER_H / 2)
                 local xTrack, xValBox = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, SLIDER_H, 11, SL_INPUT_A,
                     -100, 100, 1,
@@ -4269,7 +4269,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Y slider row
                 local Y_ROW_Y = X_ROW_Y - SLIDER_H - GAP
                 local yLabel = MakeFont(pf, 12, nil, 1, 1, 1)
-                yLabel:SetAlpha(0.6); yLabel:SetText("Y Offset")
+                yLabel:SetAlpha(0.6); yLabel:SetText(EllesmereUI.L("Y Offset"))
                 yLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, Y_ROW_Y - SLIDER_H / 2)
                 local yTrack, yValBox = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, SLIDER_H, 11, SL_INPUT_A,
                     -100, 100, 1,
@@ -4504,7 +4504,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local entry = vals and vals[bi]
                     if entry then
                         btn._value = entry.value
-                        btn._lbl:SetText(entry.label)
+                        btn._lbl:SetText(EllesmereUI.L(entry.label))
                         local active = (entry.value == cur)
                         btn._bg:SetColorTexture(
                             active and 0.973 or 0.15,
@@ -4701,7 +4701,7 @@ initFrame:SetScript("OnEvent", function(self)
                     }
                 end
                 local opts = {
-                    title = EllesmereUI.Lf("%1$s Slot Settings", slotLabel),
+                    title = EllesmereUI.Lf("%1$s Slot Settings", EllesmereUI.L(slotLabel)),
                     xGet = function() return CorePosXGet(posKey) end,
                     xSet = function(v) CorePosXSet(posKey, v) end,
                     yGet = function() return CorePosYGet(posKey) end,
@@ -4995,7 +4995,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if TextPosDisabled(slotKey) then return end
                 local sizeKey = slotKey .. "Size"
                 ShowCogPopup(self, {
-                    title = EllesmereUI.Lf("%1$s Settings", slotLabel),
+                    title = EllesmereUI.Lf("%1$s Settings", EllesmereUI.L(slotLabel)),
                     xGet = function() return TextPosXGet(slotKey) end,
                     xSet = function(v) TextPosXSet(slotKey, v) end,
                     yGet = function() return TextPosYGet(slotKey) end,
@@ -5244,7 +5244,81 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
+        -- Row 3: Cast Timer toggle | Cast Timer size + inline color swatch
+        local castTimerRow
+        castTimerRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Cast Timer",
+              getValue=function()
+                local db = DB()
+                if db and db.showCastTimer ~= nil then return db.showCastTimer end
+                return defaults.showCastTimer
+              end,
+              setValue=function(v)
+                DB().showCastTimer = v
+                ns.RefreshAllSettings()
+                UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Cast Timer", min=6, max=20, step=1,
+              getValue=function() return DBVal("castTimerSize") or defaults.castTimerSize end,
+              setValue=function(v)
+                DB().castTimerSize = v
+                for _, plate in pairs(plates) do
+                    if plate.castTimer then SetFSFont(plate.castTimer, v, GetNPOutline()) end
+                end
+                UpdatePreview()
+              end });  y = y - h
+        -- Inline color swatch on Cast Timer size (right region)
+        do
+            local rightRgn = castTimerRow._rightRegion
+            local ctColorGet = function()
+                local c = (DB() and DB().castTimerColor) or defaults.castTimerColor
+                return c.r, c.g, c.b
+            end
+            local ctColorSet = function(r, g, b)
+                DB().castTimerColor = { r = r, g = g, b = b }
+                for _, plate in pairs(plates) do
+                    if plate.castTimer then plate.castTimer:SetTextColor(r, g, b, 1) end
+                end
+                UpdatePreview()
+            end
+            local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
+            PP.Point(ctSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
+
+            -- Inline cog for Cast Timer X/Y offset
+            local tmCogBtn = CreateFrame("Button", nil, rightRgn)
+            tmCogBtn:SetSize(26, 26)
+            tmCogBtn:SetPoint("RIGHT", ctSwatch, "LEFT", -6, 0)
+            tmCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            tmCogBtn:SetAlpha(0.4)
+            local tmCogTex = tmCogBtn:CreateTexture(nil, "OVERLAY")
+            tmCogTex:SetAllPoints()
+            tmCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            tmCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            tmCogBtn:SetScript("OnLeave", function(self)
+                EllesmereUI.HideWidgetTooltip()
+                if cogPopupOwner ~= self then self:SetAlpha(0.4) end
+            end)
+            tmCogBtn:SetScript("OnClick", function(self)
+                ShowCogPopup(self, {
+                    title = EllesmereUI.L("Cast Timer Settings"),
+                    xGet = function() return DBVal("castTimerOffsetX") or defaults.castTimerOffsetX end,
+                    xSet = function(v) DB().castTimerOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    yGet = function() return DBVal("castTimerOffsetY") or defaults.castTimerOffsetY end,
+                    ySet = function(v) DB().castTimerOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    sizeGet = function() return DBVal("castTimerSize") or defaults.castTimerSize end,
+                    sizeSet = function(v) DB().castTimerSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
+                    sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
+                    sizeFirst = true,
+                })
+            end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                tmCogBtn:SetAlpha(cogPopupOwner == tmCogBtn and 0.7 or 0.4)
+            end)
+        end
+
+        -- Row 4: Cast Background Opacity (+ swatch) | Cast Bar Border (+ swatch)
         local castBgRow
         castBgRow, h = W:DualRow(parent, y,
             { type="slider", text="Cast Background", min=0, max=100, step=1,
@@ -6495,14 +6569,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 snCogBtn:SetScript("OnClick", function(self)
                     ShowCogPopup(self, {
-                        title = "Spell Name Settings",
+                        title = EllesmereUI.L("Spell Name Settings"),
                         xGet = function() return DBVal("castNameOffsetX") or defaults.castNameOffsetX end,
                         xSet = function(v) DB().castNameOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         yGet = function() return DBVal("castNameOffsetY") or defaults.castNameOffsetY end,
                         ySet = function(v) DB().castNameOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         sizeGet = function() return DBVal("castNameSize") or defaults.castNameSize end,
                         sizeSet = function(v) DB().castNameSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                        sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                        sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
                         sizeFirst = true,
                     })
                 end)
@@ -6587,14 +6661,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 stCogBtn:SetScript("OnClick", function(self)
                     ShowCogPopup(self, {
-                        title = "Spell Target Settings",
+                        title = EllesmereUI.L("Spell Target Settings"),
                         xGet = function() return DBVal("castTargetOffsetX") or defaults.castTargetOffsetX end,
                         xSet = function(v) DB().castTargetOffsetX = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         yGet = function() return DBVal("castTargetOffsetY") or defaults.castTargetOffsetY end,
                         ySet = function(v) DB().castTargetOffsetY = v; ns.RefreshAllSettings(); UpdatePreview() end,
                         sizeGet = function() return DBVal("castTargetSize") or defaults.castTargetSize end,
                         sizeSet = function(v) DB().castTargetSize = v; ns.RefreshAllSettings(); UpdatePreview() end,
-                        sizeMin = 6, sizeMax = 20, sizeLabel = "Size",
+                        sizeMin = 6, sizeMax = 20, sizeLabel = EllesmereUI.L("Size"),
                         sizeFirst = true,
                     })
                 end)

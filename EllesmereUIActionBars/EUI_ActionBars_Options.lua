@@ -1792,7 +1792,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local target = wt or ht
                       if target then
                           local name = (EllesmereUI.GetBarLabel and EllesmereUI.GetBarLabel(target)) or target
-                          return "Size matched to " .. name .. ". Unmatch in Unlock Mode to edit."
+                          return EllesmereUI.Lf("Size matched to %1$s. Unmatch in Unlock Mode to edit.", name)
                       end
                       return BLIZZ_DIS_TIP
                   end,
