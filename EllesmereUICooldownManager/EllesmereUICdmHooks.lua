@@ -106,6 +106,55 @@ end
 ns.FD = FD
 
 -------------------------------------------------------------------------------
+--  Resource verification for the CD Ready Glow.
+--
+--  C_Spell.IsSpellUsable() can briefly report a resource-gated spell as
+--  usable right after login/reload (observed with Void Ray on Devourer
+--  Demon Hunter) before Blizzard's internal power data has fully settled.
+--  Rather than guess at a timing window, HasEnoughResources re-derives the
+--  answer from live UnitPower()/UnitPowerMax() values, which are always
+--  accurate -- including immediately after login. Callers AND this with
+--  IsSpellUsable so cooldown/form/lockout gating is unaffected; only the
+--  resource portion gets a deterministic second opinion.
+--
+--  Declared early in the file (before FD/ResolveSpellSettings usage further
+--  down) since Lua locals are only visible after their textual declaration --
+--  defining it later but using it earlier produced a nil-call error.
+-------------------------------------------------------------------------------
+local function HasEnoughResources(spellID)
+    if not (C_Spell and C_Spell.GetSpellPowerCost) then return true end
+    local costs = C_Spell.GetSpellPowerCost(spellID)
+    if not costs or #costs == 0 then return true end
+    for _, c in ipairs(costs) do
+        local powerType = c.type
+        if powerType then
+            local cost = c.cost or 0
+            if c.costPercent and c.costPercent > 0 then
+                local maxP = UnitPowerMax("player", powerType)
+                cost = math.max(cost, (c.costPercent / 100) * maxP)
+            end
+            if cost > 0 and UnitPower("player", powerType) < cost then
+                return false
+            end
+        end
+    end
+    return true
+end
+ns.HasEnoughResources = HasEnoughResources
+
+-- True once we've received at least one genuine UNIT_POWER_UPDATE for the
+-- player since the last PLAYER_ENTERING_WORLD. Both C_Spell.IsSpellUsable()
+-- and C_Spell.GetSpellPowerCost() can briefly return stale/empty data right
+-- at login/reload (observed: GetSpellPowerCost reporting 0 cost for a 100-Fury
+-- spell, making HasEnoughResources default to "enough" when it should not).
+-- Rather than guess a delay, we simply don't trust resource-gated glow
+-- decisions until the client has actually pushed us a real power value.
+-- This is event-driven, not polled: setting it costs one boolean write, and
+-- it naturally self-corrects via the already-registered UNIT_POWER_UPDATE
+-- listener below, which re-triggers QueueCDGlowUpdate on every change.
+ns._cdGlowPowerConfirmed = true
+
+-------------------------------------------------------------------------------
 --  Constants
 -------------------------------------------------------------------------------
 local VIEWER_NAMES = {
@@ -114,6 +163,21 @@ local VIEWER_NAMES = {
     "BuffIconCooldownViewer",
     "BuffBarCooldownViewer",
 }
+
+-- Blizzard creates these 4 viewer frames once and never replaces the frame
+-- object for the rest of the session, so a global-table lookup (_G[name])
+-- is wasted work once we've found it -- cache the resolved frame reference.
+-- Used from both the 10Hz active-aura ticker and the CD Ready Glow update,
+-- both of which loop over all 4 viewers frequently.
+local _viewerFrameCache = {}
+local function GetViewerFrame(vi)
+    local f = _viewerFrameCache[vi]
+    if not f then
+        f = _G[VIEWER_NAMES[vi]]
+        if f then _viewerFrameCache[vi] = f end
+    end
+    return f
+end
 
 local VIEWER_TO_BAR = {
     EssentialCooldownViewer = "cooldowns",
@@ -1628,13 +1692,24 @@ local function DecorateFrame(frame, barData)
                 local cseInfo = C_Spell.GetSpellCooldown(liveSid)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "pixelGlowReady" or cse == "buttonGlowReady" then
+                    -- CDM viewer frames are pooled and get reassigned to a different
+                    -- spell over time. If the bound spell changed since our last
+                    -- pass, any inherited glow state belongs to the OLD spell and
+                    -- must be cleared immediately -- otherwise it can sit lit until
+                    -- the next event happens to fire for this frame.
+                    if fd._cdGlowBoundSid ~= sid2 then
+                        fd._cdGlowBoundSid = sid2
+                        if fd._cdStateGlowOn then
+                            ns.StopNativeGlow(fd.glowOverlay)
+                            fd._cdStateGlowOn = false
+                        end
+                    end
                     -- Defer by one frame, same as hiddenOnCD/hiddenReady above.
                     -- SetDesaturated fires inside Blizzard's secure CDM chain where
-                    -- C_Spell.IsSpellUsable can briefly return stale values (e.g. a
-                    -- proc spell reporting not-usable for one tick on CD end).
+                    -- C_Spell.IsSpellUsable can briefly return stale values.
                     -- Deferring lets the API settle before we start the glow.
-                    -- The BuffTicker resource-check below handles the reverse
-                    -- direction: stopping the glow when resources drain mid-fight.
+                    -- Mid-fight resource changes are handled by the SPELL_UPDATE_USABLE
+                    -- event listener below, so no polling is needed here.
                     if not fd._cdStateGlowPending then
                         fd._cdStateGlowPending = CreateFrame("Frame")
                         fd._cdStateGlowPending:Hide()
@@ -1646,13 +1721,28 @@ local function DecorateFrame(frame, barData)
                     fd._cdStateGlowPending:SetScript("OnUpdate", function(self)
                         self:Hide()
                         local isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(self.sid)
-                        local shouldGlow = (not self.onCD) and (isUsable == nil or isUsable == true)
+                        -- Note: isUsable == nil means the API has no data yet (e.g. on
+                        -- login before spell data is initialised). Treat nil as not-usable
+                        -- rather than usable to avoid starting the glow prematurely.
+                        -- The UNIT_POWER_UPDATE / SPELL_UPDATE_COOLDOWN listeners below
+                        -- will re-evaluate and start the glow once data has settled.
+                        -- Additionally cross-check live resource values: IsSpellUsable can
+                        -- briefly report a resource-gated spell as usable right after
+                        -- login/reload before Blizzard's power data has settled (observed
+                        -- with Void Ray on Devourer Demon Hunter).
+                        if isUsable == true and (not ns._cdGlowPowerConfirmed or not HasEnoughResources(self.sid)) then
+                            isUsable = false
+                        end
+                        local shouldGlow = (not self.onCD) and (isUsable == true)
                         if shouldGlow then
                             if fd.glowOverlay and not fd._cdStateGlowOn then
                                 local style = self.cse == "pixelGlowReady" and 1 or 3
                                 local gr, gg, gb = ns.ResolveGlowColor(self.ss2)
                                 ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
                                 fd._cdStateGlowOn = true
+                                if ns.QueueCDGlowResourceCheck then
+                                    ns.QueueCDGlowResourceCheck()
+                                end
                             end
                         else
                             if fd._cdStateGlowOn then
@@ -1909,6 +1999,134 @@ _trinketEventFrame:SetScript("OnEvent", function(_, event, arg1)
         end
     end
 end)
+
+-------------------------------------------------------------------------------
+--  CD Ready Glow: resource gate via event-driven dirty flag
+--
+--  SPELL_UPDATE_USABLE alone does not fire reliably for all resource types
+--  (e.g. Fury). We listen to SPELL_UPDATE_COOLDOWN (fires on every cast and
+--  CD transition) and UNIT_POWER_FREQUENT (fires on resource changes) instead.
+--
+--  High-frequency events only set a dirty flag — no work is done in the
+--  handler itself. A hidden frame processes the flag on the next OnUpdate,
+--  then immediately hides itself again. This means the evaluation runs at
+--  most once per frame when something changed, and costs nothing otherwise.
+-------------------------------------------------------------------------------
+do
+    local _cdGlowDirty = false
+
+    local _cdGlowUpdateFrame = CreateFrame("Frame")
+    _cdGlowUpdateFrame:Hide()
+    _cdGlowUpdateFrame:SetScript("OnUpdate", function(self)
+        self:Hide()
+        _cdGlowDirty = false
+        local hfd = ns._hookFrameData
+        local efc = ns._ecmeFC
+        local RSP = ns.ResolveSpellSettings
+        if not hfd or not efc or not RSP then return end
+        for vi = 1, 4 do
+            local vf = GetViewerFrame(vi)
+            if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+                for frame in vf.itemFramePool:EnumerateActive() do
+                    local fd = hfd[frame]
+                    if fd and fd.glowOverlay then
+                        local fc2 = efc[frame]
+                        local sid2 = fc2 and fc2.spellID
+                        local bk2 = fc2 and fc2.barKey
+                        if sid2 and bk2 then
+                            local ss2 = RSP(frame, sid2, ns.GetBarSpellData(bk2))
+                            local cse2 = ss2 and ss2.cdStateEffect
+                            if cse2 == "pixelGlowReady" or cse2 == "buttonGlowReady" then
+                                -- CDM viewer frames are pooled and get reassigned to a
+                                -- different spell over time. If the bound spell changed
+                                -- since our last pass, any inherited glow state belongs
+                                -- to the OLD spell and must be cleared immediately --
+                                -- otherwise it can sit lit until the next event happens
+                                -- to fire for this frame, which may take a while.
+                                if fd._cdGlowBoundSid ~= sid2 then
+                                    fd._cdGlowBoundSid = sid2
+                                    if fd._cdStateGlowOn then
+                                        ns.StopNativeGlow(fd.glowOverlay)
+                                        fd._cdStateGlowOn = false
+                                    end
+                                end
+                                local liveSid = sid2
+                                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                                    liveSid = C_SpellBook.FindSpellOverrideByID(sid2) or sid2
+                                end
+                                local cseInfo = C_Spell.GetSpellCooldown(liveSid)
+                                local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
+                                if onCD then
+                                    -- Spell is on cooldown: always stop the glow here, regardless
+                                    -- of resources. This is a deliberate safety net independent of
+                                    -- the SetDesaturated-based hook (which stops the glow on cast),
+                                    -- in case that hook doesn't fire for a given spell/transition.
+                                    if fd._cdStateGlowOn then
+                                        ns.StopNativeGlow(fd.glowOverlay)
+                                        fd._cdStateGlowOn = false
+                                    end
+                                else
+                                    local isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(liveSid)
+                                    -- Cross-check live resource values: IsSpellUsable can briefly
+                                    -- report a resource-gated spell as usable right after
+                                    -- login/reload before Blizzard's power data has settled
+                                    -- (observed with Void Ray on Devourer Demon Hunter). Treat
+                                    -- nil the same as "not yet known" -> not usable, consistent
+                                    -- with the deferred check above.
+                                    if isUsable == true and (not ns._cdGlowPowerConfirmed or not HasEnoughResources(liveSid)) then
+                                        isUsable = false
+                                    end
+                                    if isUsable ~= true and fd._cdStateGlowOn then
+                                        ns.StopNativeGlow(fd.glowOverlay)
+                                        fd._cdStateGlowOn = false
+                                    elseif isUsable == true and not fd._cdStateGlowOn then
+                                        local style = cse2 == "pixelGlowReady" and 1 or 3
+                                        local gr, gg, gb = ns.ResolveGlowColor(ss2)
+                                        ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
+                                        fd._cdStateGlowOn = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    local function QueueCDGlowUpdate()
+        if not _cdGlowDirty then
+            _cdGlowDirty = true
+            _cdGlowUpdateFrame:Show()
+        end
+    end
+    -- Export so CDMFinishSetup (EllesmereUICooldownManager.lua) can trigger
+    -- a resource check once all frames are fully decorated after login/reload.
+    ns.QueueCDGlowResourceCheck = QueueCDGlowUpdate
+
+    local _cdGlowEventFrame = CreateFrame("Frame")
+    -- SPELL_UPDATE_COOLDOWN: fires on every cast and CD state change.
+    -- Catches the "update trigger" case where a cast changes usability.
+    _cdGlowEventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+    -- UNIT_POWER_UPDATE: fires when player resources change (Fury, Mana etc).
+    -- More reliable than SPELL_UPDATE_USABLE for resource-gated proc spells.
+    -- It also doubles as our "data is now trustworthy" signal -- see
+    -- ns._cdGlowPowerConfirmed above.
+    _cdGlowEventFrame:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
+    -- PLAYER_ENTERING_WORLD: marks resource data as unconfirmed again (fresh
+    -- login/reload/zone-in). The very next UNIT_POWER_UPDATE flips it back to
+    -- confirmed. If Fury genuinely never leaves 0, the glow correctly never
+    -- starts -- which is exactly the right outcome for a 100-Fury spell.
+    _cdGlowEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    _cdGlowEventFrame:SetScript("OnEvent", function(self, event)
+        if event == "PLAYER_ENTERING_WORLD" then
+            ns._cdGlowPowerConfirmed = false
+        elseif event == "UNIT_POWER_UPDATE" then
+            ns._cdGlowPowerConfirmed = true
+        end
+        QueueCDGlowUpdate()
+    end)
+end
 
 -------------------------------------------------------------------------------
 --  Desaturation curve for custom frames (taint-safe).
@@ -4313,49 +4531,6 @@ function ns.SetupViewerHooks()
                                         end
                                     end
                                 end
-                                -- CD Ready Glow resource check: SetDesaturated only
-                                -- fires on CD state changes, not on resource changes
-                                -- (e.g. Fury draining below spell cost mid-fight).
-                                -- Poll IsSpellUsable each tick so the glow turns off
-                                -- immediately when resources run out, and back on
-                                -- when they recover. isUsable == nil means the API
-                                -- has no data for this spell; leave the glow alone.
-                                if fd and fd._cdStateGlowOn then
-                                    local isUsable = sid and C_Spell.IsSpellUsable
-                                        and C_Spell.IsSpellUsable(sid)
-                                    if isUsable == false then
-                                        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
-                                        fd._cdStateGlowOn = false
-                                    end
-                                elseif fd and not fd._cdStateGlowOn and fd.glowOverlay then
-                                    -- Glow is off: re-enable if resources recovered
-                                    -- and the spell is still off cooldown.
-                                    local fc2 = _ecmeFC[frame]
-                                    local sid2 = fc2 and fc2.spellID
-                                    local bk2 = fc2 and fc2.barKey
-                                    if sid2 and bk2 then
-                                        local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
-                                        local cse2 = ss2 and ss2.cdStateEffect
-                                        if cse2 == "pixelGlowReady" or cse2 == "buttonGlowReady" then
-                                            local liveSid2 = sid2
-                                            if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-                                                liveSid2 = C_SpellBook.FindSpellOverrideByID(sid2) or sid2
-                                            end
-                                            local cseInfo2 = C_Spell.GetSpellCooldown(liveSid2)
-                                            local onCD2 = cseInfo2 and cseInfo2.isActive and not cseInfo2.isOnGCD
-                                            if not onCD2 then
-                                                local isUsable2 = C_Spell.IsSpellUsable
-                                                    and C_Spell.IsSpellUsable(liveSid2)
-                                                if isUsable2 == true then
-                                                    local style = cse2 == "pixelGlowReady" and 1 or 3
-                                                    local gr, gg, gb = ns.ResolveGlowColor(ss2)
-                                                    ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
-                                                    fd._cdStateGlowOn = true
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
                             end
                         end
                     end
@@ -4374,7 +4549,7 @@ function ns.SetupViewerHooks()
                 local ac = _activeCache
                 wipe(ac)
                 for vi = 1, 4 do
-                    local vf = _G[VIEWER_NAMES[vi]]
+                    local vf = GetViewerFrame(vi)
                     if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
                         for frame in vf.itemFramePool:EnumerateActive() do
                             if frame.wasSetFromAura == true or frame.auraInstanceID ~= nil then
