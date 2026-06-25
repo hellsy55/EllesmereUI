@@ -78,6 +78,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     --- Shorten a buff/aura label to its first word, with special overrides.
     local LABEL_OVERRIDES = {
+        ["Battle Stance"]           = "Stance",
         ["Defensive Stance"]        = "Stance",
         ["Berserker Stance"]        = "Stance",
         ["Devotion Aura"]           = "Aura",
