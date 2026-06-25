@@ -543,7 +543,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Macro name text (bottom-center, mirrors real button Name position)
             local macroFS = bf:CreateFontString(nil, "OVERLAY")
             if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(macroFS, false) end
-            macroFS:SetFont(DEFAULT_FONT, 12, "OUTLINE, SLUG")
+            macroFS:SetFont(DEFAULT_FONT, 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
             macroFS:SetTextColor(1, 1, 1)
             macroFS:SetPoint("BOTTOMLEFT", bf, "BOTTOMLEFT", 1, 4)
             macroFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
@@ -1029,7 +1029,7 @@ initFrame:SetScript("OnEvent", function(self)
                             macroFS:SetText(mcText)
                         end
                         if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(macroFS, false) end
-                        macroFS:SetFont(fontPath, scaledMCSize, "OUTLINE, SLUG")
+                        macroFS:SetFont(fontPath, scaledMCSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
                         macroFS:SetTextColor(mcColor.r, mcColor.g, mcColor.b)
                         local mcOX = (settings.macroOffsetX or 0) * totalScale
                         local mcOY = (settings.macroOffsetY or 0) * totalScale
@@ -1433,7 +1433,7 @@ initFrame:SetScript("OnEvent", function(self)
             local visRow1
             visRow1, h = W:DualRow(parent, y,
                 { type="dropdown", text="Visibility",
-                  values=EllesmereUI.VIS_VALUES, order=EllesmereUI.VIS_ORDER,
+                  values=EllesmereUI.VIS_VALUES_AB, order=EllesmereUI.VIS_ORDER_AB,
                   disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil, rawTooltip=true,
                   getValue=function()
                       return GetVisibilityKey(SB())
@@ -1792,7 +1792,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local target = wt or ht
                       if target then
                           local name = (EllesmereUI.GetBarLabel and EllesmereUI.GetBarLabel(target)) or target
-                          return "Size matched to " .. name .. ". Unmatch in Unlock Mode to edit."
+                          return EllesmereUI.Lf("Size matched to %1$s. Unmatch in Unlock Mode to edit.", name)
                       end
                       return BLIZZ_DIS_TIP
                   end,
@@ -2891,7 +2891,12 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
-            -- Row 3: Show Blizzard Icon Background (+ cog) | empty
+            -- Row 3: Show Blizzard Icon Background (+ cog) | Show Cooldown Numbers
+            -- "Show Cooldown Numbers" is a LIVE toggle of Blizzard's
+            -- countdownForCooldowns CVar -- it is never stored in our DB. getValue
+            -- reads the CVar; setValue writes it. We only touch the CVar when the
+            -- user actively flips the toggle (same approach as the global-settings
+            -- CVar controls, e.g. Lag Tolerance).
             local zoomIbgRow
             zoomIbgRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Blizzard Icon Background",
@@ -2904,7 +2909,15 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" });  y = y - h
+                { type="toggle", text="Show Cooldown Numbers",
+                  tooltip="Toggles Blizzard's Show Numbers for Cooldowns setting, which will show number text on any spells that are on cooldown on your action bars.",
+                  getValue=function() return GetCVarBool("countdownForCooldowns") end,
+                  setValue=function(v)
+                      if InCombatLockdown() then return end
+                      SetCVar("countdownForCooldowns", v and "1" or "0")
+                      -- Refresh so the inline cog dims/undims with the CVar state.
+                      EllesmereUI:RefreshPage()
+                  end });  y = y - h
             -- Inline cog: Icon Background Opacity (left region)
             do
                 local rgn = zoomIbgRow._leftRegion
@@ -2943,6 +2956,46 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
                 EllesmereUI.RegisterWidgetRefresh(function()
                     ibgCogBtn:SetAlpha(IbgOff() and 0.15 or 0.4)
+                end)
+            end
+            -- Inline cog: Show Cooldown Numbers (right region). Holds the optional
+            -- charge-spell recharge-number toggle (our feature, saved to the DB).
+            -- Dimmed when the parent CVar is off (no cooldown numbers show at all).
+            do
+                local rgn = zoomIbgRow._rightRegion
+                local _, cdnCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Cooldown Numbers",
+                    rows = {
+                        { type="toggle", label="Charge Recharge Numbers",
+                          tooltip="Show the recharge countdown on charge spells while a charge is still banked. When off, the recharge timer only appears at 0 charges (Blizzard default).",
+                          get=function() return EAB.db.profile.showChargeRechargeNumbers ~= false end,
+                          set=function(v)
+                              EAB.db.profile.showChargeRechargeNumbers = v
+                              EAB:RefreshChargeRechargeNumbers()
+                          end },
+                    },
+                })
+                local cdnCtrl = rgn._control
+                local cdnCogBtn = MakeCogBtn(rgn, cdnCogShow, cdnCtrl, EllesmereUI.COGS_ICON)
+                local function CdnOff() return not GetCVarBool("countdownForCooldowns") end
+                cdnCogBtn:SetAlpha(CdnOff() and 0.15 or 0.4)
+                cdnCogBtn:SetScript("OnEnter", function(self)
+                    if CdnOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Cooldown Numbers"))
+                    else
+                        self:SetAlpha(0.7)
+                    end
+                end)
+                cdnCogBtn:SetScript("OnLeave", function(self)
+                    EllesmereUI.HideWidgetTooltip()
+                    self:SetAlpha(CdnOff() and 0.15 or 0.4)
+                end)
+                cdnCogBtn:SetScript("OnClick", function(self)
+                    if CdnOff() then return end
+                    cdnCogShow(self)
+                end)
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    cdnCogBtn:SetAlpha(CdnOff() and 0.15 or 0.4)
                 end)
             end
             -------------------------------------------------------------------
@@ -3322,7 +3375,7 @@ initFrame:SetScript("OnEvent", function(self)
                       SSet("hideKeybind", v, function(k) EAB:ApplyFontsForBar(k) end)
                       SUpdatePreview()
                   end },
-                { type="slider", text="Keybind Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Keybind Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("keybindFontSize", 12) end,
                   setValue=function(v)
                       SSet("keybindFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3480,7 +3533,7 @@ initFrame:SetScript("OnEvent", function(self)
                       SSet("hideMacroText", v, function(k) EAB:ApplyFontsForBar(k) end)
                       SUpdatePreview()
                   end },
-                { type="slider", text="Macro Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Macro Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("macroFontSize", 12) end,
                   setValue=function(v)
                       SSet("macroFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3628,13 +3681,13 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Row 3: Charges Text Size slider + inline swatch (left) | Cooldown Text Size slider + inline swatch (right)
             chargesRow, h = W:DualRow(parent, y,
-                { type="slider", text="Charges Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Charges Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("countFontSize", 12) end,
                   setValue=function(v)
                       SSet("countFontSize", v, function(k) EAB:ApplyFontsForBar(k) end)
                       SUpdatePreview()
                   end },
-                { type="slider", text="Cooldown Text Size", min=6, max=24, step=1, trackWidth=120,
+                { type="slider", text="Cooldown Text Size", min=6, max=30, step=1, trackWidth=120,
                   getValue=function() return SVal("cooldownFontSize", 12) end,
                   setValue=function(v)
                       SSet("cooldownFontSize", v, function(k) EAB:ApplyCooldownFontsForBar(k) end)
@@ -4665,7 +4718,14 @@ initFrame:SetScript("OnEvent", function(self)
                   -- ActionBarActionEventsFrame is killed at file-load time.
                   -- Casting animation visibility is handled by ApplySettings.
               end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Show Highlight on Spell Cast",
+              tooltip="The highlight overlay that appears on a spell button while it is the active/current action. Disable to hide it.",
+              rawTooltip=true,
+              getValue=function() return p.showCastHighlight ~= false end,
+              setValue=function(v)
+                  p.showCastHighlight = v
+                  EAB:ApplyCheckedTextures()
+              end });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 

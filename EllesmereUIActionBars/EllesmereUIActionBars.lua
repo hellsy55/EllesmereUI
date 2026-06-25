@@ -347,6 +347,11 @@ local defaults = {
         highlightUseClassColor = false,
         highlightCustomColor = { r = 0.973, g = 0.839, b = 0.604, a = 1 },
         highlightBorderSize = 4,
+        showCastHighlight = true,
+        -- Show the recharge countdown on charge spells while a charge is still
+        -- banked (mirrors the "Show numbers for cooldowns" CVar onto the recharge
+        -- timer). Off = Blizzard default (recharge number only at 0 charges).
+        showChargeRechargeNumbers = true,
         desaturateOnCooldown = false,
         procGlowType = 1,
         procGlowColor = { r = 1, g = 0.776, b = 0.376 },
@@ -1856,7 +1861,7 @@ local function SetupPagingFrame()
 
     -- Page number text
     local pageText = f:CreateFontString(nil, "OVERLAY")
-    pageText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE, SLUG")
+    pageText:SetFont(STANDARD_TEXT_FONT, 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     pageText:SetTextColor(1, 1, 1, 0.9)
     pageText:SetText("1")
     f._pageText = pageText
@@ -1975,7 +1980,7 @@ LayoutPagingFrame = function()
 
     f._upBtn:SetSize(arrowSize, arrowSize)
     f._downBtn:SetSize(arrowSize, arrowSize)
-    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, "OUTLINE, SLUG")
+    f._pageText:SetFont(STANDARD_TEXT_FONT, textSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
 
     f._upBtn:ClearAllPoints()
     f._downBtn:ClearAllPoints()
@@ -2437,6 +2442,7 @@ do
         dispatcher:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
         dispatcher:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
         dispatcher:RegisterEvent("PLAYER_TARGET_CHANGED")
+        dispatcher:RegisterEvent("CVAR_UPDATE")  -- "Show numbers for cooldowns" toggled -> re-apply charge recharge numbers
         -- Direct API calls bypass the mixin's OnEvent dispatch, which
         -- triggers UpdateButtonArt (noop + hook), icon bg hook, and other
         -- per-button overhead. With 60 populated buttons, the mixin path
@@ -2517,6 +2523,24 @@ do
                                     if chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1 then
                                         local chargeCd = btn.chargeCooldown
                                         if chargeCd then
+                                            -- Extend the WoW "Show numbers for cooldowns" setting to
+                                            -- recharging charge spells. Blizzard hides the countdown
+                                            -- number on the charge (recharge) cooldown unconditionally,
+                                            -- so a number normally only shows at 0 charges (the main
+                                            -- cooldown). Mirror the "Show numbers for cooldowns" CVar
+                                            -- here: un-hide the recharge timer only when the setting is
+                                            -- on, hide it when off. Cached per-frame so we only call on a
+                                            -- state change; CVAR_UPDATE re-applies it live on toggle.
+                                            if chargeCd.SetHideCountdownNumbers then
+                                                -- Show recharge numbers only when the feature is on
+                                                -- AND Blizzard's cooldown-numbers CVar is on.
+                                                local hideNums = (EAB.db.profile.showChargeRechargeNumbers == false)
+                                                    or (not GetCVarBool("countdownForCooldowns"))
+                                                if EFD(chargeCd).rechargeNumbersHidden ~= hideNums then
+                                                    EFD(chargeCd).rechargeNumbersHidden = hideNums
+                                                    chargeCd:SetHideCountdownNumbers(hideNums)
+                                                end
+                                            end
                                             if chargeInfo.isActive then
                                                 local chargeDur = C_ActionBar.GetActionChargeDuration(action)
                                                 if chargeDur then chargeCd:SetCooldownFromDurationObject(chargeDur) end
@@ -2527,6 +2551,21 @@ do
                                     elseif btn.chargeCooldown then
                                         btn.chargeCooldown:Clear()
                                     end
+                                end
+                            end
+                        elseif event == "CVAR_UPDATE" then
+                            -- "Show numbers for cooldowns" toggled: re-apply the recharge-number
+                            -- visibility to every charge cooldown immediately (the main cooldown
+                            -- numbers update natively; this keeps the recharge timer consistent).
+                            -- Cached per chargeCd, so unrelated CVAR_UPDATEs are near-free.
+                            local hideNums = (EAB.db.profile.showChargeRechargeNumbers == false)
+                                or (not GetCVarBool("countdownForCooldowns"))
+                            for _, btn in ipairs(btns) do
+                                local chargeCd = btn.chargeCooldown
+                                if chargeCd and chargeCd.SetHideCountdownNumbers
+                                   and EFD(chargeCd).rechargeNumbersHidden ~= hideNums then
+                                    EFD(chargeCd).rechargeNumbersHidden = hideNums
+                                    chargeCd:SetHideCountdownNumbers(hideNums)
                                 end
                             end
                         elseif event == "ACTIONBAR_UPDATE_USABLE" then
@@ -4433,7 +4472,7 @@ function EAB:ApplyFontsForBar(barKey)
             else
                 nm:SetAlpha(1)
                 if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nm, false) end
-                nm:SetFont(fontPath, macroSize, "OUTLINE, SLUG")
+                nm:SetFont(fontPath, macroSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
                 nm:SetTextColor(macroColor.r, macroColor.g, macroColor.b)
                 nm:ClearAllPoints()
                 nm:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1 + macroOX, 4 + macroOY)
@@ -5404,6 +5443,8 @@ local function BuildVisibilityString(info, s, visOverride)
             petShow = "[combat] show; hide"
         elseif vis == "out_of_combat" then
             petShow = "[nocombat] show; hide"
+        elseif vis == "show_dragonriding" then
+            petShow = "[advflyable,mounted,flying] show; hide"
         elseif s.combatShowEnabled then
             petShow = "[combat] show; hide"
         elseif s.combatHideEnabled then
@@ -5440,6 +5481,10 @@ local function BuildVisibilityString(info, s, visOverride)
         return hidePrefix .. "[group:party] show; [group:raid] show; hide"
     elseif vis == "solo" then
         return hidePrefix .. "[nogroup] show; hide"
+    elseif vis == "show_dragonriding" then
+        -- Show only while flying on a skyriding mount. The secure state driver
+        -- re-evaluates this automatically (incl. the flying transition).
+        return hidePrefix .. "[advflyable,mounted,flying] show; hide"
     end
     return hidePrefix .. "show"
 end
@@ -6025,7 +6070,25 @@ function EAB:UpdateHousingVisibility()
                     -- need the full check since they have no state driver.
                     local isSecure = not info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable and barFrames[key]
                     local shouldHide = isSecure and ShouldHideNonMacro(s) or (not isSecure and EllesmereUI.CheckVisibilityOptions(s))
-                    if shouldHide then
+                    -- Runtime "Toggle Action Bar" keybind override wins over the saved
+                    -- mode and the non-macro hide checks, exactly as RefreshRuntimeVisibility
+                    -- does. Without these two branches any event routed through here
+                    -- (target change, group/mount/housing) re-applies the saved visibility
+                    -- and re-shows a bar the player toggled off with its keybind. Secure
+                    -- managed bars only (the override is never set for other frame types).
+                    local _visToggleOv = isSecure and self._visOverride and self._visOverride[key]
+                    if _visToggleOv == "never" then
+                        if frame._eabLastVisStr ~= "hide" then
+                            frame._eabLastVisStr = "hide"
+                            RegisterAttributeDriver(frame, "state-visibility", "hide")
+                        end
+                    elseif _visToggleOv == "always" then
+                        local ovStr = BuildVisibilityString(info, s, "always")
+                        if frame._eabLastVisStr ~= ovStr then
+                            frame._eabLastVisStr = ovStr
+                            RegisterAttributeDriver(frame, "state-visibility", ovStr)
+                        end
+                    elseif shouldHide then
                         if isSecure then
                             if frame._eabLastVisStr ~= "hide" then
 
@@ -6979,6 +7042,54 @@ function EAB:ApplyMiscTextures()
     -- dispatcher + ACTIONBAR_UPDATE_COOLDOWN handles cooldown/GCD swipes.
 end
 
+-- "Show Highlight on Spell Cast": the CheckedTexture is the highlight that
+-- appears when a spell is the current/active action. When the option is off
+-- we drive the CheckedTexture alpha to 0 (same hide-via-alpha pattern the
+-- "none" pushed/highlight types use). This is the single source of truth so
+-- every site that sets CheckedTexture alpha stays consistent.
+function EAB:GetCheckedAlpha()
+    return (self.db.profile.showCastHighlight == false) and 0 or 1
+end
+
+function EAB:ApplyCheckedTextures()
+    local a = self:GetCheckedAlpha()
+    for _, info in ipairs(BAR_CONFIG) do
+        local buttons = barButtons[info.key]
+        if buttons then
+            for i = 1, #buttons do
+                local btn = buttons[i]
+                if btn and btn.CheckedTexture then
+                    btn.CheckedTexture:SetAlpha(a)
+                end
+            end
+        end
+    end
+end
+
+-- Re-apply charge-spell recharge-number visibility across all buttons. Same
+-- logic the dispatcher's per-tick + CVAR_UPDATE paths use; called when the
+-- "Show Cooldown Numbers" cog toggle flips so the change is immediate (a DB
+-- toggle does not fire CVAR_UPDATE). Cached per chargeCd, so it is near-free.
+function EAB:RefreshChargeRechargeNumbers()
+    local hideNums = (self.db.profile.showChargeRechargeNumbers == false)
+        or (not GetCVarBool("countdownForCooldowns"))
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local buttons = barButtons[info.key]
+            if buttons then
+                for _, btn in ipairs(buttons) do
+                    local chargeCd = btn.chargeCooldown
+                    if chargeCd and chargeCd.SetHideCountdownNumbers
+                       and EFD(chargeCd).rechargeNumbersHidden ~= hideNums then
+                        EFD(chargeCd).rechargeNumbersHidden = hideNums
+                        chargeCd:SetHideCountdownNumbers(hideNums)
+                    end
+                end
+            end
+        end
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Keybind System
 --  Hybrid routing: empower/flyout slots use SetOverrideBindingClick so our
@@ -7180,13 +7291,15 @@ do
                         if ct then ct:SetAlpha(0) end
                     else
                         -- Slot has an action; restore alpha so Blizzard's
-                        -- UpdateState manages checked visuals.
-                        if ct then ct:SetAlpha(1) end
+                        -- UpdateState manages checked visuals (honors the
+                        -- Show Highlight on Spell Cast setting).
+                        if ct then ct:SetAlpha(EAB:GetCheckedAlpha()) end
                     end
                 else
                     -- Normal page: restore alpha on all buttons so checked
-                    -- state renders correctly when spells are dragged in.
-                    if ct then ct:SetAlpha(1) end
+                    -- state renders correctly when spells are dragged in
+                    -- (honors the Show Highlight on Spell Cast setting).
+                    if ct then ct:SetAlpha(EAB:GetCheckedAlpha()) end
                 end
             end
         end
@@ -7366,6 +7479,7 @@ local function ApplyAll()
     EAB:ApplyCooldownFonts()
     EAB:ApplyCooldownEdge()
     EAB:ApplyMiscTextures()
+    EAB:ApplyCheckedTextures()
     if not inCombat then EAB:ApplyCombatVisibility() end
     if not inCombat then EAB:RefreshRuntimeVisibility() end
     EAB:RefreshMouseover()
@@ -8267,7 +8381,7 @@ function EAB:FinishSetup()
                     -- normal OnLeave fade it on real exit. Otherwise hide as before.
                     local state = hoverStates[key]
                     StopFade(frame)
-                    if MouseIsOver(frame) then
+                    if frame:IsMouseOver() then
                         if state then state.isHovered = true; state.fadeDir = "in" end
                         frame:SetAlpha(s._savedBarAlpha or 1)
                         if key == "MainBar" then SyncPagingAlpha(s._savedBarAlpha or 1) end
@@ -8672,7 +8786,7 @@ function EAB:FinishSetup()
         local softOnly = (hasSoftInteract or hasSoftEnemy or hasSoftFriend) and not hasHardTarget
         for _, info in ipairs(ALL_BARS) do
             local s = self.db.profile.bars[info.key]
-            if s and s.visHideNoTarget then
+            if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
                 local frame = barFrames[info.key]
                 if frame then
                     if softOnly then
@@ -8714,7 +8828,7 @@ function EAB:FinishSetup()
         regenFrame:SetScript("OnEvent", function()
             for _, info in ipairs(ALL_BARS) do
                 local s = self.db.profile.bars[info.key]
-                if s and s.visHideNoTarget then
+                if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
                     local frame = barFrames[info.key]
                     if frame then
                         local newStr = BuildVisibilityString(info, s)
@@ -8878,13 +8992,14 @@ function EAB:FinishSetup()
                         -- SetChecked / StartFlash / StopFlash are visual-only and safe
                         -- to call during combat lockdown.
                         local ct = btn:GetCheckedTexture()
+                        local ctA = EAB:GetCheckedAlpha()
                         if isActive then
                             if IsPetAttackAction(i) then
                                 btn:StartFlash()
-                                if ct then ct:SetAlpha(0.5) end
+                                if ct then ct:SetAlpha(0.5 * ctA) end
                             else
                                 btn:StopFlash()
-                                if ct then ct:SetAlpha(1.0) end
+                                if ct then ct:SetAlpha(1.0 * ctA) end
                             end
                             btn:SetChecked(true)
                         else
@@ -10006,8 +10121,7 @@ AttachExtraBarHoverHooks = function(info)
             end
         end
 
-        if not MouseIsOver then return true end
-        return MouseIsOver(hoverRoot)
+        return hoverRoot:IsMouseOver()
     end
 
     local OnEnter, OnLeave = EAB_VTABLE.Hover.BuildHandlers(info.key, state, {

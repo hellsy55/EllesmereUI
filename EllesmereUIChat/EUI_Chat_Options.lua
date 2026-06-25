@@ -319,6 +319,12 @@ initFrame:SetScript("OnEvent", function(self)
                 sidebarIconItems,
                 function(k) return Cfg(k) ~= false end,
                 function(k, v)
+                    -- Enabling an icon whose button was not created at login
+                    -- (it was disabled then) needs a sidebar rebuild to show it.
+                    -- Disabling, or re-enabling an already-created icon, applies
+                    -- live with no reload.
+                    local needReload = v and ECHAT.SidebarIconExists
+                        and not ECHAT.SidebarIconExists(k)
                     Set(k, v)
                     local order = Cfg("sidebarIconOrder") or {}
                     if v then
@@ -332,6 +338,15 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     Set("sidebarIconOrder", order)
                     if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
+                    if needReload then
+                        EllesmereUI:ShowConfirmPopup({
+                            title       = "Reload Required",
+                            message     = "A UI reload is needed to add this icon to the sidebar.",
+                            confirmText = "Reload Now",
+                            cancelText  = "Later",
+                            onConfirm   = function() ReloadUI() end,
+                        })
+                    end
                 end)
             PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
             rightRgn._control = cbDD

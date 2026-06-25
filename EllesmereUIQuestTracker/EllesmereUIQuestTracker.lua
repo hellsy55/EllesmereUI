@@ -23,6 +23,7 @@ local QT_DEFAULTS = {
     profile = {
         questTracker = {
             enabled              = true,
+            forceOnScreen        = true,
             visibility           = "always",
             visOnlyInstances     = false,
             visHideHousing       = false,
@@ -33,6 +34,9 @@ local QT_DEFAULTS = {
             -- Skin toggles
             skinHeaders          = true,
             accentHeaders        = true,
+            -- Show Blizzard's native quest type icons/buttons (right side)
+            -- instead of our custom classified icons. Off = our icons. Reload-gated.
+            showQuestIcons       = false,
 
             -- Font sizes (single source of truth used by skin code)
             titleFontSize        = 12,
@@ -147,6 +151,7 @@ _G._EQT_RefreshAll = function()
     if EQT.UpdateVisibility then EQT.UpdateVisibility() end
     if EQT.RestyleAll then EQT.RestyleAll() end
     if EQT.ApplyBackground then EQT.ApplyBackground() end
+    if EQT.ApplyForceOnScreen then EQT.ApplyForceOnScreen() end
 end
 
 -------------------------------------------------------------------------------

@@ -533,7 +533,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS["PALADIN"]
+                        local cc = EllesmereUI.GetClassColor("PALADIN")
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,
@@ -733,7 +733,9 @@ initFrame:SetScript("OnEvent", function(self)
               min = 0, max = 1, step = 0.01,
               getValue = function() return Cfg("barBgAlpha") or 0 end,
               setValue = function(v) Set("barBgAlpha", v); if ns.ApplyBarBg then ns.ApplyBarBg() end end })
-        -- Inline color swatch on Background (right region)
+        -- Inline custom + class color swatches on Background (right region).
+        -- Custom paints a fixed track color; class tints each bar's track with
+        -- that player's class color. Mirrors the Left/Right Text Size swatches.
         do
             local rgn = bdRow._rightRegion
             local ctrl = rgn._control
@@ -743,12 +745,60 @@ initFrame:SetScript("OnEvent", function(self)
                     return (Cfg("barBgR") or 0), (Cfg("barBgG") or 0), (Cfg("barBgB") or 0)
                 end,
                 function(r, g, b)
+                    Set("barBgUseClassColor", false)
                     Set("barBgR", r); Set("barBgG", g); Set("barBgB", b)
                     if ns.ApplyBarBg then ns.ApplyBarBg() end
+                    EllesmereUI:RefreshPage()
                 end,
                 false, 20)
             PP.Point(barBgSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-            EllesmereUI.RegisterWidgetRefresh(function() barBgSwatchRefresh() end)
+            local origClick = barBgSwatch:GetScript("OnClick")
+            barBgSwatch:SetScript("OnClick", function(self, ...)
+                if Cfg("barBgUseClassColor") then
+                    Set("barBgUseClassColor", false)
+                    if ns.ApplyBarBg then ns.ApplyBarBg() end
+                    EllesmereUI:RefreshPage()
+                    return
+                end
+                if origClick then origClick(self, ...) end
+            end)
+            barBgSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(barBgSwatch, "Custom Color")
+            end)
+            barBgSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local barBgClassSwatch, barBgClassRefresh = EllesmereUI.BuildColorSwatch(
+                rgn, bdRow:GetFrameLevel() + 3,
+                function()
+                    local clr = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                    if clr then return clr.r, clr.g, clr.b end
+                    return 1, 1, 1
+                end,
+                function()
+                    Set("barBgUseClassColor", true)
+                    if ns.ApplyBarBg then ns.ApplyBarBg() end
+                    EllesmereUI:RefreshPage()
+                end,
+                false, 20)
+            PP.Point(barBgClassSwatch, "RIGHT", barBgSwatch, "LEFT", -8, 0)
+            barBgClassSwatch:SetScript("OnClick", function()
+                Set("barBgUseClassColor", true)
+                if ns.ApplyBarBg then ns.ApplyBarBg() end
+                EllesmereUI:RefreshPage()
+            end)
+            barBgClassSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(barBgClassSwatch, "Class Color")
+            end)
+            barBgClassSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function refreshBarBg()
+                barBgSwatchRefresh(); barBgClassRefresh()
+                local useClass = Cfg("barBgUseClassColor")
+                barBgSwatch:SetAlpha(useClass and 0.3 or 1)
+                barBgClassSwatch:SetAlpha(useClass and 1 or 0.3)
+            end
+            EllesmereUI.RegisterWidgetRefresh(refreshBarBg)
+            refreshBarBg()
         end
         do
             local rgn = bdRow._leftRegion
@@ -868,7 +918,7 @@ initFrame:SetScript("OnEvent", function(self)
             local classSwatch, updateClass = EllesmereUI.BuildColorSwatch(
                 rgn, btRow:GetFrameLevel() + 3,
                 function()
-                    local clr = EllesmereUI.CLASS_COLOR_MAP and EllesmereUI.CLASS_COLOR_MAP[EllesmereUI._playerClass]
+                    local clr = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                     if clr then return clr.r, clr.g, clr.b end
                     return 1, 1, 1
                 end,
@@ -932,7 +982,7 @@ initFrame:SetScript("OnEvent", function(self)
             local classSwatch, updateClass = EllesmereUI.BuildColorSwatch(
                 rgn, btRow:GetFrameLevel() + 3,
                 function()
-                    local clr = EllesmereUI.CLASS_COLOR_MAP and EllesmereUI.CLASS_COLOR_MAP[EllesmereUI._playerClass]
+                    local clr = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                     if clr then return clr.r, clr.g, clr.b end
                     return 1, 1, 1
                 end,
@@ -1068,6 +1118,17 @@ initFrame:SetScript("OnEvent", function(self)
               order = { "free", "topleft", "topright", "bottomleft", "bottomright" },
               getValue = function() return Cfg("standaloneTimerAnchor") or "free" end,
               setValue = function(v) Set("standaloneTimerAnchor", v); ApplySAT() end })
+        y = y - h
+
+        -- ── EXTRAS ───────────────────────────────────────────────────
+        _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Spell Tooltips on Hover",
+              tooltip="Show the game's spell tooltip when you hover a spell in a breakdown window.",
+              getValue = function() return Cfg("showSpellTooltips") ~= false end,
+              setValue = function(v) Set("showSpellTooltips", v) end },
+            { type="label", text="" })
         y = y - h
 
         return math.abs(y)
@@ -1325,7 +1386,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[select(2, UnitClass("player"))]
+                        local cc = EllesmereUI.GetClassColor(select(2, UnitClass("player")))
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,

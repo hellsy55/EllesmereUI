@@ -206,6 +206,7 @@ local CDM_SHAPES = {
 ns.CDM_SHAPE_MASKS   = CDM_SHAPES.masks
 ns.CDM_SHAPE_BORDERS = CDM_SHAPES.borders
 ns.CDM_SHAPE_ZOOM_DEFAULTS = CDM_SHAPES.zoomDefaults
+ns.CDM_SHAPE_EDGE_SCALES = CDM_SHAPES.edgeScales
 -- Forward declarations for glow helpers (defined later, used by consolidated helpers)
 local StartNativeGlow, StopNativeGlow
 
@@ -492,6 +493,7 @@ local DEFAULTS = {
                     -- the inline cog. Off by default for new installs; the
                     -- migration turns it on for users who had the old global on.
                     showInactiveBuffIcons = false, desaturateInactiveBuffs = true,
+                    hidePlaceholderIcon = false,
                     iconSize = 32, numRows = 1, spacing = 2,
                     borderSize = 1, borderR = 0, borderG = 0, borderB = 0, borderA = 1,
                     borderClassColor = false, borderTexture = "solid",
@@ -613,6 +615,90 @@ function ns.GetBarSpellDataForSpec(barKey, specKey)
     local bs = prof.barSpells[barKey]
     if not bs then return nil end
     return bs
+end
+
+-- Max Stacks Glow gate: set ns._cdmAnyMaxStacksGlow once if any saved spell (any
+-- spec) has the glow enabled. RefreshCDMIconAppearance then skips its per-icon
+-- watch check entirely for anyone who never uses the feature -- 0 cost when off.
+-- Monotonic + scanned-once: a runtime enable is handled by the option's setValue,
+-- so this only needs to discover already-saved settings at/after login.
+function ns.RescanMaxStacksGlowFlag()
+    if ns._cdmAnyMaxStacksGlow or ns._maxStacksFlagScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._maxStacksFlagScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                local ssAll = bs and bs.spellSettings
+                if ssAll then
+                    for _, ss in pairs(ssAll) do
+                        if ss and ss.maxStacksGlow and ss.maxStacksGlow > 0 then
+                            ns._cdmAnyMaxStacksGlow = true
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Audio Effect gate: set ns._cdmAnyBuffSound once if any saved buff icon (any
+-- spec) has an Audio Effect sound chosen. DecorateFrame / RefreshCDMIconAppearance
+-- then skip attaching the apply-edge sound hook entirely for anyone who never uses
+-- the feature -- 0 cost when off. Same scanned-once + runtime-enable contract as
+-- RescanMaxStacksGlowFlag (the option's setValue flips the flag live).
+function ns.RescanBuffSoundFlag()
+    if ns._cdmAnyBuffSound or ns._buffSoundFlagScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._buffSoundFlagScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                local ssAll = bs and bs.spellSettings
+                if ssAll then
+                    for _, ss in pairs(ssAll) do
+                        if ss and ss.buffActiveSoundKey and ss.buffActiveSoundKey ~= "none" then
+                            ns._cdmAnyBuffSound = true
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- "Hide CD Text (Charges)" gate: set ns._cdmAnyChargeHideCdText once if any saved
+-- spell (any spec) has the toggle enabled, so RefreshCDMIconAppearance skips its
+-- per-icon watch check for anyone who never uses the feature. Same monotonic,
+-- scanned-once contract as RescanMaxStacksGlowFlag (runtime enables are handled by
+-- the option's setValue).
+function ns.RescanChargeCdTextFlag()
+    if ns._cdmAnyChargeHideCdText or ns._chargeCdTextFlagScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._chargeCdTextFlagScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                local ssAll = bs and bs.spellSettings
+                if ssAll then
+                    for _, ss in pairs(ssAll) do
+                        if ss and ss.chargeHideCdText then
+                            ns._cdmAnyChargeHideCdText = true
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -952,8 +1038,16 @@ local function ProcessSpecChange(newSpecKey)
     -- _hookFrameData, clears all FC caches on viewer pool frames, then
     -- runs a direct synchronous CollectAndReanchor. After this returns,
     -- cdmBarIcons is populated with the new spec's icons.
+    -- Hold placeholder injection across this synchronous talent_reconcile pass:
+    -- on a spec switch it runs BEFORE the per-spec profile swap, so barDataByKey
+    -- still carries the OLD spec's Always-Show / Keep-in-Place flags. Injecting
+    -- here would flash placeholders the new spec never asked for. The reanchor
+    -- that follows (profile_import for per-spec, or the next buff event) re-injects
+    -- correctly from the now-active profile.
     if ns.FullCDMRebuild then
+        ns._cdmSpecRebuildStale = true
         ns.FullCDMRebuild("talent_reconcile")
+        ns._cdmSpecRebuildStale = false
     end
 
     -- Signal the profile system that CDM's spec rebuild is complete.
@@ -1467,26 +1561,14 @@ local function ShowProcGlow(icon, cr, cg, cb)
     if sid then
         local bk = fc and fc.barKey
         local sd = bk and ns.GetBarSpellData(bk)
-        local ss = sd and sd.spellSettings and sd.spellSettings[sid]
-        -- Fallback: sid may be a base/override variant while settings
-        -- are stored under the assigned spell ID.
-        if not ss and sd and sd.spellSettings and sd.assignedSpells then
-            if fc.linkedSpellIDs then
-                for _, lid in ipairs(fc.linkedSpellIDs) do
-                    if sd.spellSettings[lid] then ss = sd.spellSettings[lid]; break end
-                end
-            end
-            if not ss and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-                for _, asid in ipairs(sd.assignedSpells) do
-                    if asid and asid > 0 and asid ~= sid
-                       and sd.spellSettings[asid] then
-                        if C_SpellBook.FindSpellOverrideByID(asid) == sid then
-                            ss = sd.spellSettings[asid]; break
-                        end
-                    end
-                end
-            end
-        end
+        -- Shared resolver: matches the stored key against the frame's FULL
+        -- identity set (canon, resolvedSid, baseSpellID, linkedSpellIDs, and
+        -- GetBaseSpell) so a setting on the base spell resolves on its talent
+        -- "proc into a second ability" override form (e.g. Reap -> base 344862).
+        -- The old assignedSpells-only fallback missed this on default Essential/
+        -- Utility bars, whose assignedSpells list is empty.
+        local ss = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(icon, sid, sd))
+            or (sd and sd.spellSettings and sd.spellSettings[sid])
         if ss then
             -- Custom shapes are locked to Shape Glow: ignore the per-spell glow type
             -- (including "None") so a custom-shaped icon always shows Shape Glow. The
@@ -1607,6 +1689,8 @@ local function GetCDMFont()
     return CDM_FONT_FALLBACK
 end
 local function GetCDMOutline()
+    -- Forced crisp outline; the global "Never Show Slug" toggle drops the slug.
+    if EllesmereUI and EllesmereUI.SlugFlag then return EllesmereUI.SlugFlag("OUTLINE, SLUG") end
     return "OUTLINE, SLUG"
 end
 local function SetBlizzCDMFont(fs, font, size, r, g, b)
@@ -1944,6 +2028,28 @@ function ns.MigrateAlwaysShowBuffsToPerBar()
         if bd.barType == "buffs" then
             if oldOn ~= nil then bd.showInactiveBuffIcons = oldOn and true or false end
             if oldDesat ~= nil then bd.desaturateInactiveBuffs = oldDesat end
+        end
+    end
+end
+
+-- One-time per-profile migration: the custom_buff ("Auras") bar type was merged
+-- into the buff-family bars. Convert every custom_buff bar to a "buffs" bar in
+-- place -- its key, assignedSpells, spellDurations, customSpellIDs, position and
+-- all visual settings carry over unchanged. The buff phase now injects its
+-- cast-timer custom buffs (the same own-frames the Auras renderer built), so a
+-- converted bar looks and behaves identically, just as an extra buff-family bar
+-- (its key is custom_*, never "buffs"). Runs once per profile (flag on cdmBars);
+-- re-runs on swap to a pre-migration profile because that profile carries no flag.
+-- Runs AFTER MigrateAlwaysShowBuffsToPerBar so the old global Always-Show value
+-- only lands on original buff bars, not on converted Auras bars.
+function ns.MigrateCustomBuffBarsToBuffBars()
+    local p = ECME.db and ECME.db.profile
+    if not p or not p.cdmBars or p.cdmBars._customBuffMergedV1 then return end
+    p.cdmBars._customBuffMergedV1 = true
+    if type(p.cdmBars.bars) ~= "table" then return end
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.barType == "custom_buff" then
+            bd.barType = "buffs"
         end
     end
 end
@@ -3188,7 +3294,7 @@ ns.ApplyCDMTooltipState = ApplyCDMTooltipState
 -------------------------------------------------------------------------------
 --  Apply custom shape to a CDM icon
 -------------------------------------------------------------------------------
-ApplyShapeToCDMIcon = function(icon, shape, barData)
+ApplyShapeToCDMIcon = function(icon, shape, barData, ssb)
     if not icon then return end
     local fd = _getFD(icon)
     local tex = fd and fd.tex or icon._tex
@@ -3203,6 +3309,17 @@ ApplyShapeToCDMIcon = function(icon, shape, barData)
     if barData.borderClassColor then
         local cc = _playerClass and RAID_CLASS_COLORS[_playerClass]
         if cc then brdR, brdG, brdB = cc.r, cc.g, cc.b end
+    end
+    -- Per-icon Border override (buff-family bars): size + color only, never
+    -- style. ssb is the resolved per-icon settings passed in from
+    -- RefreshCDMIconAppearance; nil for cd/utility bars and uncustomized icons,
+    -- so this is a no-op unless a buff icon has a per-icon border set. Feeds both
+    -- the square (ApplyBorderStyle) and shaped (shapeBorder) paths below.
+    if ssb then
+        if ssb.borderSize ~= nil then borderSz = ssb.borderSize end
+        if ssb.borderR ~= nil then brdR = ssb.borderR end
+        if ssb.borderG ~= nil then brdG = ssb.borderG end
+        if ssb.borderB ~= nil then brdB = ssb.borderB end
     end
 
     local ifc = FC(icon)
@@ -3406,6 +3523,72 @@ local function RefreshCDMIconAppearance(barKey)
         local iconScale = icon:GetScale() or 1
         if iconScale < 0.01 then iconScale = 1 end
         local fontScale = 1 / iconScale
+        -- Per-icon override settings (buff-family bars only). Resolve once and
+        -- reuse for Buff Glow + Duration Text + Charge/Stack below. nil => inherit
+        -- the bar's value. Variant-aware: a setting stored under any spell in the
+        -- icon's family (base / talent-override) resolves here -- the options side
+        -- keys off the live/canonical id, which may differ from fc.spellID.
+        local ssb
+        local isBuffFamilyBar = (barData.barType == "buffs" or barKey == "buffs")
+        -- Login / refresh coverage for Max Stacks Glow: a charge spell sitting at
+        -- max never fires the swipe hook, so register it here too. Gated on the
+        -- feature flag (set once by RescanMaxStacksGlowFlag / the option) so anyone
+        -- who never enables it pays nothing here -- the call is skipped entirely.
+        if ns._cdmAnyMaxStacksGlow and not isBuffFamilyBar and ns.WatchMaxStacksIfEnabled then
+            ns.WatchMaxStacksIfEnabled(icon)
+        end
+        -- Same login/refresh coverage for "Hide CD Text (Charges)": a charge spell
+        -- at max shows no recharge text and never fires the swipe hook, so register
+        -- it here. Gated on the feature flag so unused = skipped entirely.
+        if ns._cdmAnyChargeHideCdText and not isBuffFamilyBar and ns.WatchChargeCdTextIfEnabled then
+            ns.WatchChargeCdTextIfEnabled(icon)
+        end
+        if isBuffFamilyBar then
+            -- Per-icon Audio Effect: attach the apply-edge sound hook once, and only
+            -- when the feature is in use anywhere (gate = 0 cost otherwise).
+            if ns._cdmAnyBuffSound and ns.EnsureBuffSoundHook then ns.EnsureBuffSoundHook(icon) end
+            local fcb = _ecmeFC[icon]
+            -- Resolve by the DISPLAYED spell first (GetCanonicalSpellIDForFrame --
+            -- the same id the options menu writes settings under) rather than
+            -- fc.spellID (the cooldownInfo base). For buffs whose cooldownInfo base
+            -- is a generic spec spell shared across icons (e.g. Consecration's
+            -- standing-in aura -> Prot Paladin 137028), keying off the base both
+            -- misses the real buff and lets one icon's setting shadow another's.
+            -- Passing canon as the primary id makes settings[canon] the fast-path
+            -- hit. Own placeholder/custom frames have no live spell -> fc.spellID.
+            local sidb = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
+                or (fcb and fcb.spellID)
+            if sidb then
+                local sdb = ns.GetBarSpellData(barKey)
+                if sdb and sdb.spellSettings then
+                    -- Shared resolver: matches the key against the frame's full
+                    -- identity set (canon first, then resolvedSid / baseSpellID).
+                    ssb = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(icon, sidb, sdb))
+                        or sdb.spellSettings[sidb]
+                end
+            end
+            -- Stash the effective Buff Glow on fd so the BuffTicker hot path reads
+            -- it without a per-tick lookup. Only restart the live glow when the
+            -- effective value actually changed (no flicker on no-op rebuilds).
+            local nT = ssb and ssb.buffGlow           -- nil = inherit, number = override (0 = None)
+            local nColor = ssb and ssb.buffGlowColor  -- nil / "class" / "custom"
+            local nR, nG, nB
+            if nColor == "custom" and ssb then
+                nR, nG, nB = ssb.buffGlowColorR, ssb.buffGlowColorG, ssb.buffGlowColorB
+            end
+            if fd then
+                if fd._bgT ~= nT or fd._bgColor ~= nColor
+                   or fd._bgR ~= nR or fd._bgG ~= nG or fd._bgB ~= nB then
+                    fd._bgT = nT; fd._bgColor = nColor; fd._bgR = nR; fd._bgG = nG; fd._bgB = nB
+                    if fd.buffGlowActive and fd.buffGlowOverlay then
+                        StopNativeGlow(fd.buffGlowOverlay)
+                        fd.buffGlowActive = false
+                    end
+                end
+                -- Per-icon Desaturate Inactive override, read by the BuffTicker.
+                fd._desatOverride = (ssb and ssb.desatInactive) or nil
+            end
+        end
         -- Update texture -- fill the entire frame. The border renders on
         -- top via PP.CreateBorder so no inset is needed.
         if tex then
@@ -3413,30 +3596,48 @@ local function RefreshCDMIconAppearance(barKey)
             tex:SetAllPoints(icon)
             tex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
         end
-        -- Update cooldown (full frame so swipe covers the entire icon)
+        -- Update cooldown (full frame so swipe covers the entire icon). The swipe
+        -- and the countdown number both live on the Cooldown widget, so raise the
+        -- whole widget ABOVE our border (icon+13) so the number renders on top of
+        -- it -- it previously sat below the border and got drawn over (most visible
+        -- when the text is offset to an edge). Anchoring the number to cd (below)
+        -- keeps the X/Y offset working. Side effect: the dark swipe now sits over
+        -- the thin border, lightly tinting it during an active cooldown.
         if cd then
             cd:ClearAllPoints()
             cd:SetAllPoints(icon)
+            -- Above the border (icon+13); still below glow (icon+16) / text (icon+23).
+            pcall(cd.SetFrameLevel, cd, icon:GetFrameLevel() + 14)
+            -- Per-icon Duration Text override (ssb) falls back to the bar's values.
+            local showCD = barData.showCooldownText
+            if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
             cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
-            cd:SetHideCountdownNumbers(not barData.showCooldownText)
+            -- Per-spell "Hide CD Text (Charges)" can additionally hide the recharge
+            -- numbers while a charge is in hand; the font block below still styles
+            -- the text (using the bar's showCD) so it is ready when numbers return.
+            local hideCD = not showCD
+            if ns.CdmShouldHideCountdown then hideCD = ns.CdmShouldHideCountdown(icon, hideCD) end
+            cd:SetHideCountdownNumbers(hideCD)
             -- Apply cooldown text font directly (old tick loop is gone)
-            if barData.showCooldownText then
+            if showCD then
                 local cdFont = GetCDMFont()
-                local cdSize = (barData.cooldownFontSize or 12) * fontScale
-                local cdR = barData.cooldownTextR or 1
-                local cdG = barData.cooldownTextG or 1
-                local cdB = barData.cooldownTextB or 1
-                local cdX = barData.cooldownTextX or 0
-                local cdY = barData.cooldownTextY or 0
-                -- Find Blizzard's countdown text FontString on the Cooldown widget
+                local cdSize = ((ssb and ssb.cooldownFontSize) or barData.cooldownFontSize or 12) * fontScale
+                local cdR = (ssb and ssb.cooldownTextR) or barData.cooldownTextR or 1
+                local cdG = (ssb and ssb.cooldownTextG) or barData.cooldownTextG or 1
+                local cdB = (ssb and ssb.cooldownTextB) or barData.cooldownTextB or 1
+                local cdX = (ssb and ssb.cooldownTextX) or barData.cooldownTextX or 0
+                local cdY = (ssb and ssb.cooldownTextY) or barData.cooldownTextY or 0
+                -- Find Blizzard's countdown text FontString on the Cooldown widget.
+                -- Keep it on the Cooldown widget (anchored to cd) so the user's
+                -- X/Y offset works -- reparenting it makes Blizzard's engine
+                -- re-center and ignore the offset. CENTER anchor also overrides
+                -- the engine's stale baseline (raw SetFont vs SetCountdownFont).
                 for _, rgn in pairs({ cd:GetRegions() }) do
                     if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
                         EllesmereUI.ApplyIconTextFont(rgn, cdFont, cdSize, "cdm")
                         rgn:SetTextColor(cdR, cdG, cdB)
-                        if cdX ~= 0 or cdY ~= 0 then
-                            rgn:ClearAllPoints()
-                            rgn:SetPoint("CENTER", cd, "CENTER", cdX, cdY)
-                        end
+                        rgn:ClearAllPoints()
+                        rgn:SetPoint("CENTER", cd, "CENTER", cdX, cdY)
                     end
                 end
             end
@@ -3455,20 +3656,25 @@ local function RefreshCDMIconAppearance(barKey)
         -- Raise Blizzard's text sub-frames above our border frame (+5)
         -- by bumping their frame level. Safe because these are Blizzard's
         -- own children of the icon, and they follow frame reuse naturally.
+        -- Per-icon Charge/Stack override (ssb) falls back to the bar's values.
         local scFont = GetCDMFont()
-        local scSize = (barData.stackCountSize or 11) * fontScale
-        local scR, scG, scB = barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1
-        local scX, scY = barData.stackCountX or 0, barData.stackCountY or 0
+        local scSize = ((ssb and ssb.stackCountSize) or barData.stackCountSize or 11) * fontScale
+        local scR = (ssb and ssb.stackCountR) or barData.stackCountR or 1
+        local scG = (ssb and ssb.stackCountG) or barData.stackCountG or 1
+        local scB = (ssb and ssb.stackCountB) or barData.stackCountB or 1
+        local scX = (ssb and ssb.stackCountX) or barData.stackCountX or 0
+        local scY = (ssb and ssb.stackCountY) or barData.stackCountY or 0
         -- Stack/charge/item-count text anchor. Default bottom-right keeps the
         -- historical +2 vertical nudge so existing bars stay pixel-identical;
         -- top and center positions sit flush with no baseline nudge.
-        local scPoint = barData.stackCountPosition or "bottomright"
+        local scPoint = (ssb and ssb.stackCountPosition) or barData.stackCountPosition or "bottomright"
         if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
         elseif scPoint == "topright" then scPoint = "TOPRIGHT"
         elseif scPoint == "topleft" then scPoint = "TOPLEFT"
         elseif scPoint == "center" then scPoint = "CENTER"
         else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
         local showItemCount = barData.showItemCount ~= false
+        if ssb and ssb.showItemCount ~= nil then showItemCount = ssb.showItemCount end
         -- Text must render above borders. Levels are relative to the
         -- icon's own frame level (CdmHooks: border +13, text +23).
         local textLvl = icon:GetFrameLevel() + 23
@@ -3523,9 +3729,11 @@ local function RefreshCDMIconAppearance(barKey)
             kbText:SetTextColor(barData.keybindR or 1, barData.keybindG or 1, barData.keybindB or 1, barData.keybindA or 0.9)
         end
 
-        -- Apply custom shape (overrides border/zoom set above)
+        -- Apply custom shape (overrides border/zoom set above). Pass the resolved
+        -- per-icon settings so the buff-family Border override (size + color)
+        -- applies on the authoritative border render, square or shaped.
         local shape = barData.iconShape or "none"
-        ApplyShapeToCDMIcon(icon, shape, barData)
+        ApplyShapeToCDMIcon(icon, shape, barData, ssb)
 
         -- Reset glow so glow type change takes effect on next tick.
         -- Do NOT reset isActive -- that causes a 1-frame flash where the
@@ -3978,6 +4186,50 @@ local function EnsureFocusCastProxy()
     return _focusCastProxy
 end
 ns.EnsureFocusCastProxy = EnsureFocusCastProxy
+
+-- Per-icon "Audio Effect": play a sound when a buff becomes active. Blizzard's
+-- buff cooldown-viewer item frames fire TriggerAuraAppliedAlert on the apply
+-- edge, so we hooksecurefunc it (taint-safe post-hook, no polling) and play the
+-- per-icon sound. The frame's GetSpellID is a SECRET value while the aura is
+-- active, so we resolve the clean canonical id via GetCanonicalSpellIDForFrame
+-- (the same id the options menu writes the setting under) -- never index a table
+-- with the live secret id. Hooked-frame + throttle state live in a do-block,
+-- off the Blizzard frame table per the no-custom-props rule. Reuses the
+-- FocusKick sound table so the option list stays identical to Focus Cast Sound.
+do
+    local _soundHooked = setmetatable({}, { __mode = "k" })
+    local _soundThrottle = {}            -- [spellID] = last GetTime() (dedupe rapid re-applies)
+    local SOUND_MIN_GAP = 0.3
+    function ns.EnsureBuffSoundHook(frame)
+        if not frame or _soundHooked[frame] then return end
+        -- Own placeholder/custom frames (and anything that isn't a Blizzard buff
+        -- viewer item) have no aura alert -- mark hooked so we never retry.
+        if type(frame.TriggerAuraAppliedAlert) ~= "function" then
+            _soundHooked[frame] = true
+            return
+        end
+        _soundHooked[frame] = true
+        hooksecurefunc(frame, "TriggerAuraAppliedAlert", function(f)
+            local fc = _ecmeFC[f]
+            local barKey = fc and fc.barKey
+            if not barKey then return end
+            local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
+            if not sd or not sd.spellSettings then return end
+            local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(f)
+            if not sid then return end
+            local ss = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd))
+                or sd.spellSettings[sid]
+            local key = ss and ss.buffActiveSoundKey
+            if not key or key == "none" then return end
+            local now = GetTime()
+            local last = _soundThrottle[sid]
+            if last and (now - last) < SOUND_MIN_GAP then return end
+            _soundThrottle[sid] = now
+            local path = FOCUSKICK_SOUND_PATHS[key]
+            if path then PlaySoundFile(path, "Master") end
+        end)
+    end
+end
 
 -- "FOCUS" reminder text shown on caster/miniboss nameplates when the
 -- player has no focus set. Activated by the FocusKick bar's
@@ -4464,7 +4716,13 @@ _CDMApplyVisibility = function()
                                 end
                             end
                             local icfc = _ecmeFC[ic]
-                            if not (icfc and icfc._cdStateHidden) then
+                            -- Off-by-default flag tested first: non-users short-circuit
+                            -- straight to the original branch (identical code, no added work).
+                            if barData.hidePlaceholderIcon and ic._isPlaceholderFrame then
+                                -- Hide Icon: an Always-Show placeholder keeps its reserved
+                                -- layout slot but stays fully invisible (icon, border, bg).
+                                ic:SetAlpha(0)
+                            elseif not (icfc and icfc._cdStateHidden) then
                                 ic:SetAlpha(visAlpha)
                             end
                         end
@@ -4547,7 +4805,13 @@ local function ApplyBarOpacity(barKey)
             local ic = icons[i]
             if ic then
                 local icfc = _ecmeFC[ic]
-                if not (icfc and icfc._cdStateHidden) then
+                -- Off-by-default flag tested first: non-users short-circuit straight
+                -- to the original branch (identical code, no added work).
+                if barData.hidePlaceholderIcon and ic._isPlaceholderFrame then
+                    -- Hide Icon: an Always-Show placeholder keeps its reserved
+                    -- layout slot but stays fully invisible (icon, border, bg).
+                    ic:SetAlpha(0)
+                elseif not (icfc and icfc._cdStateHidden) then
                     ic:SetAlpha(a)
                 end
             end
@@ -4755,6 +5019,9 @@ BuildAllCDMBars = function()
     -- Ensure ghost bars exist before iterating bars
     EnsureGhostBars()
     EnsureFocusKickBar()
+    ns.RescanMaxStacksGlowFlag()  -- set the Max Stacks Glow gate (once) before refresh
+    ns.RescanChargeCdTextFlag()   -- set the Hide CD Text (Charges) gate (once) before refresh
+    ns.RescanBuffSoundFlag()      -- set the Audio Effect gate (once) before refresh
 
     local p = ECME.db.profile
 
@@ -4770,6 +5037,8 @@ BuildAllCDMBars = function()
     -- Migrate the old global Always Show Buffs settings to per-bar before
     -- anything reads them (placeholder injection / desaturate ticker).
     if ns.MigrateAlwaysShowBuffsToPerBar then ns.MigrateAlwaysShowBuffsToPerBar() end
+    -- Then merge legacy custom_buff (Auras) bars into the buff-family bars.
+    if ns.MigrateCustomBuffBarsToBuffBars then ns.MigrateCustomBuffBarsToBuffBars() end
 
     -- Force Blizzard's EditMode CooldownViewer to "Always Visible" so
     -- hideWhenInactive and other viewer settings don't fight with CDM.
@@ -5386,10 +5655,20 @@ RegisterCDMUnlockElements = function()
                     -- stays off (pure absolute pin). require-re-save: existing bars
                     -- pick this up only when next dragged + Save & Exit.
                     local tgtx, tgty
+                    local tgtL, tgtR, tgtT, tgtB
                     if grow and grow ~= "CENTER" and EllesmereUI.GetAnchorTargetCenterUI then
                         tgtx, tgty = EllesmereUI.GetAnchorTargetCenterUI("CDM_" .. key)
+                        -- Corner-follow baseline: the target's edges at save time,
+                        -- captured ONLY when anchored to another CDM bar. Lets
+                        -- ApplyAnchorPosition hold a perpendicular (corner) bar
+                        -- against the target edge when the target's width/height
+                        -- changes. nil otherwise -> corner follow stays off.
+                        if EllesmereUI.GetAnchorTargetEdgesUI then
+                            tgtL, tgtR, tgtT, tgtB = EllesmereUI.GetAnchorTargetEdgesUI("CDM_" .. key)
+                        end
                     end
-                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY, tgtx = tgtx, tgty = tgty }
+                    p.cdmBarPositions[key] = { point = storePoint, relPoint = relPoint, x = storeX, y = storeY,
+                        tgtx = tgtx, tgty = tgty, tgtL = tgtL, tgtR = tgtR, tgtT = tgtT, tgtB = tgtB }
                     -- Skip rebuild when called from anchor propagation or while
                     -- unlock mode is active (unlock mode owns positioning then).
                     if not EllesmereUI._propagatingSave and not EllesmereUI._unlockActive then
@@ -6496,5 +6775,217 @@ SlashCmdList.CDMDBG = function()
     end
 
     P("=== END SNAPSHOT ===")
+end
+
+-------------------------------------------------------------------------------
+-- /cdmbuffid -- default buffs bar identity-collapse probe.
+--
+-- Adding drag-to-reorder to the DEFAULT buffs bar hinges on ONE question: for
+-- each buff, does the id the PREVIEW + per-icon SETTINGS use (canonical /
+-- GetSpellID-derived, == slot._previewSpellID / ResolveBuffSettingsKey) collapse
+-- to the same number as the id the SEED + SORT use (fc.spellID, which the layout
+-- writes as baseSpellID or spellID and which EnsureBarOrderSeeded persists)? If
+-- a transform/override buff derives two different ids, a drag in the options
+-- preview targets a different entry than the one the render path orders -- a
+-- silent wrong-icon reorder. The probe also reports whether the preview slot
+-- indices line up with the rendered-icon indices (they won't when inactive
+-- tracked buffs exist -- the default-bar index-space mismatch).
+--
+-- Run on a spec with active transform/override buffs (e.g. Holy Paladin) and
+-- read the OK / DIVERGE and ALIGNED / MISALIGNED verdicts.
+-------------------------------------------------------------------------------
+SLASH_CDMBUFFID1 = "/cdmbuffid"
+SLASH_CDMBUFFID2 = "/cdmbid"
+SlashCmdList.CDMBUFFID = function()
+    local ACCENT = "|cff0cd29f"
+    local DIM    = "|cff7f7f7f"
+    local BAD    = "|cffff5555"
+    local GOOD   = "|cff55ff55"
+    local OFF    = "|r"
+    local function P(s) print(ACCENT .. "[CDMBUFFID]" .. OFF .. " " .. s) end
+
+    -- Live buff GetSpellID is a secret value while the aura is active; guard
+    -- every numeric so the probe never compares or prints a secret.
+    local function IsSecret(v) return issecretvalue and issecretvalue(v) end
+    local function SN(v)
+        if v == nil then return "nil" end
+        if IsSecret(v) then return "<secret>" end
+        return tostring(v)
+    end
+    local function NM(sid)
+        if not sid or IsSecret(sid) or type(sid) ~= "number" or sid <= 0 then return "?" end
+        return (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)) or "?"
+    end
+
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    P("=== DEFAULT BUFFS BAR ID PROBE (spec " .. tostring(specKey) .. ") ===")
+
+    -- A. Stored order state for the buffs bar (what reorder would manipulate).
+    local sd = ns.GetBarSpellData and ns.GetBarSpellData("buffs")
+    local assigned = sd and sd.assignedSpells
+    P(ACCENT .. "--- stored assignedSpells (\"buffs\") ---" .. OFF)
+    if assigned and #assigned > 0 then
+        for i, sid in ipairs(assigned) do
+            P(string.format("  [%d] %s (%s)", i, SN(sid), NM(sid)))
+        end
+    else
+        P("  " .. DIM .. "(empty -- not yet seeded; reorder seeds from rendered icons)" .. OFF)
+    end
+
+    -- B. Preview source: viewer enumeration (active + inactive). This is the
+    --    order + id space the options grid is built from. e.sid == the id the
+    --    preview slot and per-icon settings key off.
+    local enumByCdID    = {}   -- cdID -> enum index
+    local enumSidByCdID = {}   -- cdID -> canonical sid
+    local enumCount     = 0
+    P(ACCENT .. "--- EnumerateCDMViewerSpells(true) [preview + settings id = e.sid] ---" .. OFF)
+    if ns.EnumerateCDMViewerSpells then
+        local entries = ns.EnumerateCDMViewerSpells(true)
+        P("  count: " .. #entries)
+        for i, e in ipairs(entries) do
+            if e.cdID ~= nil then
+                enumByCdID[e.cdID]    = i
+                enumSidByCdID[e.cdID] = e.sid
+                enumCount = enumCount + 1
+            end
+            P(string.format("  [%d] sid=%s cdID=%s name=%s",
+                i, SN(e.sid), SN(e.cdID), NM(e.sid)))
+        end
+    end
+
+    -- C. Live rendered icons: walk cdmBarIcons["buffs"] in render order and
+    --    compare SEED/SORT id (fc.spellID) vs PREVIEW/SETTINGS id (canonical),
+    --    and render order vs preview-enum order.
+    P(ACCENT .. "--- live cdmBarIcons[\"buffs\"] [seed + sort id = fc.spellID] ---" .. OFF)
+    local gci      = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    local fcCache  = ns._ecmeFC
+    local icons    = ns.cdmBarIcons and ns.cdmBarIcons["buffs"]
+    local nDiverge, nTotal = 0, 0
+    local lastEnumIdx, orderAligned = 0, true
+    if icons and #icons > 0 then
+        for j = 1, #icons do
+            local frame = icons[j]
+            if frame then
+                nTotal = nTotal + 1
+                local fc      = fcCache and fcCache[frame]
+                local fcSpell = fc and fc.spellID
+                local fcBase  = fc and fc.baseSpellID
+                local cdID    = frame.cooldownID
+                local canon   = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(frame)
+                local enumIdx = (cdID ~= nil) and enumByCdID[cdID] or nil
+
+                -- id-collapse verdict: seed/sort (fcSpell) vs preview/settings (canon)
+                local verdict
+                if IsSecret(fcSpell) or IsSecret(canon) then
+                    verdict = BAD .. "SECRET" .. OFF; nDiverge = nDiverge + 1
+                elseif type(fcSpell) == "number" and type(canon) == "number" and fcSpell == canon then
+                    verdict = GOOD .. "OK" .. OFF
+                else
+                    verdict = BAD .. "DIVERGE" .. OFF; nDiverge = nDiverge + 1
+                end
+
+                -- raw cooldownInfo for context (helps explain a divergence)
+                local infoSpell, infoOvr
+                if cdID ~= nil and gci then
+                    local info = gci(cdID)
+                    if info then infoSpell = info.spellID; infoOvr = info.overrideSpellID end
+                end
+
+                -- order-alignment: render order should follow preview-enum order
+                local enumTag
+                if enumIdx then
+                    if enumIdx < lastEnumIdx then orderAligned = false end
+                    lastEnumIdx = enumIdx
+                    enumTag = "enumIdx=" .. enumIdx
+                else
+                    enumTag = BAD .. "no-enum(custom/injected?)" .. OFF
+                end
+
+                local shown = frame.IsShown and frame:IsShown()
+                P(string.format("  render#%d %s  fc.spellID=%s fc.base=%s canon=%s | cdID=%s info.sID=%s info.ovr=%s | %s shown=%s name=%s",
+                    j, verdict, SN(fcSpell), SN(fcBase), SN(canon),
+                    SN(cdID), SN(infoSpell), SN(infoOvr), enumTag, tostring(shown), NM(canon)))
+            end
+        end
+    else
+        P("  " .. DIM .. "(no live buff icons -- be on a spec with buffs currently up)" .. OFF)
+    end
+
+    -- D. Conclusion.
+    P(ACCENT .. "--- verdict ---" .. OFF)
+    P(string.format("  rendered icons=%d  diverge=%d  preview entries=%d", nTotal, nDiverge, enumCount))
+    if nTotal == 0 then
+        P("  " .. DIM .. "inconclusive: no rendered buffs to sample" .. OFF)
+    elseif nDiverge == 0 then
+        P("  " .. GOOD .. "id-collapse: ALL buffs agree (seed/sort == preview/settings). Default-bar reorder is safe with the simple approach." .. OFF)
+    else
+        P("  " .. BAD .. string.format("id-collapse: %d buff(s) DIVERGE -- those need a canonical-id reconcile before drag is trustworthy on the default bar.", nDiverge) .. OFF)
+    end
+    if nTotal > 0 then
+        if enumCount > nTotal then
+            P("  " .. BAD .. string.format("index-space: preview shows %d entries but only %d render -> preview slot index != assignedSpells index. Default-bar drag must map by spellID, not raw slot index.", enumCount, nTotal) .. OFF)
+        else
+            P("  " .. GOOD .. "index-space: preview entry count == rendered count (no inactive stragglers right now)." .. OFF)
+        end
+        P("  render-order vs preview-order: " .. (orderAligned and (GOOD .. "ALIGNED" .. OFF) or (BAD .. "MISALIGNED" .. OFF)))
+    end
+
+    -- E. Display-order match simulation (stable-key format: "c"..cooldownID for
+    --    Blizzard buffs, "s"..spellID for customs). A MISS means that buff sorts
+    --    to the END -- the "reorder messes up while active" symptom. With the
+    --    cooldownID fix, a buff's active frame and its placeholder share one key,
+    --    so every buff should HIT regardless of proc state.
+    P(ACCENT .. "--- buffDisplayOrder match (stable-key sort simulation) ---" .. OFF)
+    local sdBuf2 = ns.GetBarSpellData and ns.GetBarSpellData("buffs")
+    local order = sdBuf2 and sdBuf2.buffDisplayOrder
+    if not order or #order == 0 then
+        P("  " .. DIM .. "(buffDisplayOrder empty -- reorder the default bar once first, then re-run)" .. OFF)
+    elseif type(order[1]) == "number" then
+        P("  " .. DIM .. "(stale numeric format -- open CDM options once to re-seed, then re-run)" .. OFF)
+    else
+        local gci2 = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+        local orderIdx = {}
+        for i, key in ipairs(order) do
+            if orderIdx[key] == nil then orderIdx[key] = i end
+            local nm, pfx, num = "?", string.sub(key, 1, 1), tonumber(string.sub(key, 2))
+            if pfx == "s" then
+                nm = NM(num)
+            elseif pfx == "c" and num and gci2 then
+                local info = gci2(num)
+                nm = (info and info.spellID) and NM(info.spellID) or "?"
+            end
+            P(string.format("  stored[%d] = %s (%s)", i, key, nm))
+        end
+        if icons then
+            local nMiss = 0
+            for j = 1, #icons do
+                local frame = icons[j]
+                if frame then
+                    local fc = fcCache and fcCache[frame]
+                    local fcSpell = fc and fc.spellID
+                    local cd = frame.cooldownID
+                    local key
+                    if type(cd) == "number" then key = "c" .. cd
+                    elseif fcSpell then key = "s" .. fcSpell end
+                    local hit = key and orderIdx[key]
+                    local tag
+                    if hit then
+                        tag = GOOD .. "HIT@" .. hit .. OFF
+                    else
+                        tag = BAD .. "MISS->end" .. OFF
+                        nMiss = nMiss + 1
+                    end
+                    P(string.format("  render#%d %s  key=%s cdID=%s fc.spellID=%s",
+                        j, tag, tostring(key), SN(cd), SN(fcSpell)))
+                end
+            end
+            if nMiss > 0 then
+                P("  " .. BAD .. string.format("%d live buff(s) MISS -> jump to end. Order key still not stable.", nMiss) .. OFF)
+            else
+                P("  " .. GOOD .. "all live buffs match the stored order (stable across active/inactive)." .. OFF)
+            end
+        end
+    end
+    P("=== END PROBE ===")
 end
 

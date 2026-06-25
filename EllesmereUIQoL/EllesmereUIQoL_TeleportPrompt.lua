@@ -58,6 +58,7 @@ local pendingSpellID       -- resolved teleport spell (static integer) to use
 local pendingName          -- dungeon display name for the title (guaranteed clean)
 local pendingAttrSpellID   -- spell attr stashed to write when leaving combat
 local pendingShow          -- join landed in combat; show on PLAYER_REGEN_ENABLED
+local pendingHide          -- hide requested in combat; hide on PLAYER_REGEN_ENABLED
 
 -- Forward declarations (closures reference each other)
 local BuildPopup, ShowPrompt, HidePrompt, ClearPending
@@ -331,17 +332,27 @@ ShowPrompt = function()
         -- Defer the whole show to PLAYER_REGEN_ENABLED.
         pendingAttrSpellID = pendingSpellID
         pendingShow = true
+        pendingHide = nil   -- a deferred show supersedes any deferred hide
         return
     end
     secureBtn:SetAttribute("spell", pendingSpellID)  -- always a static integer
     pendingAttrSpellID = nil
+    pendingHide = nil
     UpdateButtonVisuals()
     popup:Show()
 end
 
 HidePrompt = function()
     pendingShow = nil
-    if popup then popup:Hide() end
+    -- popup parents a SecureActionButton, so popup:Hide() is a protected call the
+    -- game blocks in combat. If it's already hidden there is nothing to do (avoids
+    -- the blocked call entirely -- the common case when leaving an instance in
+    -- combat). If it's genuinely shown during combat, defer the hide to
+    -- PLAYER_REGEN_ENABLED instead of calling the protected method now.
+    if not (popup and popup:IsShown()) then pendingHide = nil; return end
+    if InCombatLockdown() then pendingHide = true; return end
+    pendingHide = nil
+    popup:Hide()
 end
 
 ClearPending = function()
@@ -393,6 +404,11 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2)
             pendingShow = nil
             UpdateButtonVisuals()
             if popup then popup:Show() end
+        end
+        -- Flush a hide that was blocked during combat (protected popup:Hide()).
+        if pendingHide then
+            pendingHide = nil
+            if popup and popup:IsShown() then popup:Hide() end
         end
         return
     elseif event == "PLAYER_REGEN_DISABLED" then

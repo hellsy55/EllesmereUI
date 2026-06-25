@@ -76,7 +76,8 @@ local DISPEL_SPELLS = {
     { id = 51886,  name = "Cleanse Spirit", class = "SHAMAN" }, -- Ele & Enh
     { id = 360823, name = "Naturalize",    class = "EVOKER" },  -- Pres
     { id = 365585, name = "Expunge",       class = "EVOKER" },  -- Aug & Dev
-    { id = 89808,  name = "Singe Magic",   class = "WARLOCK" },
+    { id = 89808,  name = "Singe Magic",   class = "WARLOCK" }, -- Warlock
+    { id = 475,    name = "Remove Curse",  class = "MAGE" },  -- All specs (Curse only)
 }
 
 -- External defensive spells by class
@@ -147,6 +148,12 @@ local bindProxy          = nil   -- SecureActionButtonTemplate (unnamed frame fa
 local globalBtn        = nil   -- SecureActionButtonTemplate (hovercast bindings)
 local registeredFrames = {}
 local ownedFrames      = {}
+-- Native left-click target attrs (type1 / *type1) captured the first time a frame
+-- is registered, so DoUnregisterFrame restores EXACTLY what the frame had: raid
+-- frames target on left-click, EUI unit frames don't. Without this, disabling
+-- click-cast would force the raid default (left-click targets) onto unit frames.
+-- Weak-keyed so dead frames drop out.
+local originalTargetAttrs = setmetatable({}, { __mode = "k" })
 local regQueue         = {}
 local unregQueue       = {}
 local pendingApply     = false
@@ -761,15 +768,42 @@ local function ModPrefixForAttr(modsStr)
     return modsStr:lower()
 end
 
+-- Set a secure "type" attribute, optionally gated to out-of-combat only.
+-- Unlike spell/macro (which carry their own [combat] conditional in the macro
+-- text), menu/target are raw action types with no conditional, so when oocOnly
+-- is set we drive the type attribute by combat state: the real action out of
+-- combat, an inert "none" in combat.
+--
+-- "none" (not nil) matters: unit buttons set a default type2 = "click" wildcard
+-- (the right-click menu via the secure proxy, see AttachSecureUnitMenu). The
+-- secure resolver falls back to that wildcard whenever the specific type<N> is
+-- nil, so clearing the attribute in combat would let the wildcard menu open
+-- anyway. A non-nil unrecognized type ("none") suppresses the wildcard fallback
+-- and performs no action.
+--
+-- Binding application is deferred out of combat (see the InCombatLockdown guards
+-- in DoRegisterFrame / CC_ApplyBindings) so these driver calls never run in
+-- combat. Unregister first so a stale driver can't survive a rebuild that
+-- changed the binding type.
+local function SetGatedType(frame, attrName, value, oocOnly)
+    UnregisterAttributeDriver(frame, attrName)
+    if oocOnly then
+        RegisterAttributeDriver(frame, attrName, "[combat] none; " .. value)
+    else
+        frame:SetAttribute(attrName, value)
+    end
+end
+
 -- Apply click (mouse button 1-5) attributes on a frame for one binding.
-local function SetClickAttr(frame, parsed, actionType, spellOrMacro, macrotext)
+local function SetClickAttr(frame, parsed, actionType, spellOrMacro, macrotext, oocOnly)
     local prefix = ModPrefixForAttr(parsed.modifiers)
     local suffix = tostring(parsed.buttonNum)
+    local typeAttr = prefix .. "type" .. suffix
     -- 12.0.7 gates a raw "togglemenu" on unit buttons (and an insecure reopen
     -- taints its protected items). Route the menu through the secure proxy via
     -- the ungated "click" action instead.
     if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
-        frame:SetAttribute(prefix .. "type" .. suffix, "click")
+        SetGatedType(frame, typeAttr, "click", oocOnly)
         frame:SetAttribute(prefix .. "clickbutton" .. suffix, EllesmereUI.GetSecureMenuProxy(frame))
         return
     end
@@ -779,11 +813,14 @@ local function SetClickAttr(frame, parsed, actionType, spellOrMacro, macrotext)
     -- target binding (other buttons / modifiers) through the ungated "click"
     -- proxy. Keeps the change scoped to users who rebound target off left-click.
     if actionType == "target" and (suffix ~= "1" or prefix ~= "") and EllesmereUI.GetSecureTargetProxy then
-        frame:SetAttribute(prefix .. "type" .. suffix, "click")
+        SetGatedType(frame, typeAttr, "click", oocOnly)
         frame:SetAttribute(prefix .. "clickbutton" .. suffix, EllesmereUI.GetSecureTargetProxy(frame))
         return
     end
-    frame:SetAttribute(prefix .. "type" .. suffix, actionType)
+    -- Raw action type. Only menu/target honor oocOnly via the combat driver;
+    -- spell/macro carry their own conditional in the macro text.
+    local gate = oocOnly and (actionType == "togglemenu" or actionType == "target")
+    SetGatedType(frame, typeAttr, actionType, gate)
     if actionType == "spell" then
         frame:SetAttribute(prefix .. "spell" .. suffix, spellOrMacro or "")
     elseif actionType == "macro" then
@@ -794,6 +831,7 @@ end
 local function ClearClickAttr(frame, parsed)
     local prefix = ModPrefixForAttr(parsed.modifiers)
     local suffix = tostring(parsed.buttonNum)
+    UnregisterAttributeDriver(frame, prefix .. "type" .. suffix)
     frame:SetAttribute(prefix .. "type" .. suffix, nil)
     frame:SetAttribute(prefix .. "spell" .. suffix, nil)
     frame:SetAttribute(prefix .. "macrotext" .. suffix, nil)
@@ -801,22 +839,26 @@ local function ClearClickAttr(frame, parsed)
 end
 
 -- Apply keyboard binding attributes on a frame (virtual button suffix).
-local function SetKeyAttr(frame, idx, actionType, spellOrMacro, macrotext)
+local function SetKeyAttr(frame, idx, actionType, spellOrMacro, macrotext, oocOnly)
     local suffix = "eui_" .. idx
+    local typeAttr = "type-" .. suffix
     -- Route a "menu" keybind through the secure proxy (see SetClickAttr).
     if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
-        frame:SetAttribute("type-" .. suffix, "click")
+        SetGatedType(frame, typeAttr, "click", oocOnly)
         frame:SetAttribute("clickbutton-" .. suffix, EllesmereUI.GetSecureMenuProxy(frame))
         return
     end
     -- A "target" keybind is never plain left-click, so it always hits the 12.0.7
     -- gate -- route it through the ungated "click" proxy (see SetClickAttr).
     if actionType == "target" and EllesmereUI.GetSecureTargetProxy then
-        frame:SetAttribute("type-" .. suffix, "click")
+        SetGatedType(frame, typeAttr, "click", oocOnly)
         frame:SetAttribute("clickbutton-" .. suffix, EllesmereUI.GetSecureTargetProxy(frame))
         return
     end
-    frame:SetAttribute("type-" .. suffix, actionType)
+    -- Only menu/target honor oocOnly via the combat driver; spell/macro carry
+    -- their own conditional in the macro text.
+    local gate = oocOnly and (actionType == "togglemenu" or actionType == "target")
+    SetGatedType(frame, typeAttr, actionType, gate)
     if actionType == "spell" then
         frame:SetAttribute("spell-" .. suffix, spellOrMacro or "")
     elseif actionType == "macro" then
@@ -827,6 +869,7 @@ end
 local function ClearKeyAttrs(frame, count)
     for i = 1, count do
         local suffix = "eui_" .. i
+        UnregisterAttributeDriver(frame, "type-" .. suffix)
         frame:SetAttribute("type-" .. suffix, nil)
         frame:SetAttribute("spell-" .. suffix, nil)
         frame:SetAttribute("macrotext-" .. suffix, nil)
@@ -838,6 +881,7 @@ end
 local function ClearHoverAttrs(btn, count)
     for i = 1, count do
         local suffix = "eui_hc_" .. i
+        UnregisterAttributeDriver(btn, "type-" .. suffix)
         btn:SetAttribute("type-" .. suffix, nil)
         btn:SetAttribute("spell-" .. suffix, nil)
         btn:SetAttribute("macrotext-" .. suffix, nil)
@@ -948,6 +992,37 @@ local function GetClickDirection()
     return (cc and cc.enabled and cc.downClick) and "AnyDown" or "AnyUp"
 end
 
+-- After a frame's click-cast bindings are applied, neutralize the no-click-cast
+-- defaults so an UNBOUND left/right click does nothing. A unit button is created
+-- with type1/*type1 = "target" and the menu wildcard *type2 = "click" (+
+-- *clickbutton2). Clearing the wildcards is not enough on its own:
+--   * The creation-time SPECIFIC type1 = "target" survives, and even if it were
+--     cleared, plain left-click still targets via Blizzard's native ClickBindings
+--     interaction -- which a nil type1 falls through to. So when nothing is bound
+--     to plain left-click we write an inert type1 = "none": a non-nil,
+--     unrecognized action the secure handler performs (i.e. nothing), which also
+--     suppresses the wildcard / native-interaction fallback.
+--   * Same idea for the menu on type2.
+-- A button the user DID bind already wrote its own type<N> via SetClickAttr, so
+-- we leave those alone. Own secure frame, only ever reached out of combat -> no taint.
+local function NeutralizeDefaultClicks(frame, bindings)
+    local b1, b2 = false, false
+    for _, b in ipairs(bindings) do
+        if not b.hovercast and b.key then
+            local parsed = ParseKeyString(b.key)
+            if parsed.isMouseButton and parsed.modifiers == "" then
+                if parsed.buttonNum == 1 then b1 = true
+                elseif parsed.buttonNum == 2 then b2 = true end
+            end
+        end
+    end
+    frame:SetAttribute("*type1", nil)
+    frame:SetAttribute("*type2", nil)
+    frame:SetAttribute("*clickbutton2", nil)
+    if not b1 then frame:SetAttribute("type1", "none") end
+    if not b2 then frame:SetAttribute("type2", "none") end
+end
+
 local function DoRegisterFrame(frame)
     if registeredFrames[frame] then return end
     if not frame or not frame.RegisterForClicks then return end
@@ -959,6 +1034,15 @@ local function DoRegisterFrame(frame)
     local cc = GetClickCastDB()
     if not (cc and cc.enabled) then return end
     registeredFrames[frame] = true
+    -- Capture the frame's native left-click target attrs once, before we touch
+    -- anything, so DoUnregisterFrame restores them exactly (raid -> target, EUI
+    -- unit frames -> none). Kept across register/unregister cycles.
+    if originalTargetAttrs[frame] == nil then
+        originalTargetAttrs[frame] = {
+            type1     = frame:GetAttribute("type1"),
+            starType1 = frame:GetAttribute("*type1"),
+        }
+    end
     frame:RegisterForClicks(GetClickDirection())
     if frame.EnableMouseWheel then frame:EnableMouseWheel(true) end
     if not wrappedFrames[frame] then
@@ -992,13 +1076,18 @@ local function DoRegisterFrame(frame)
             local aType, spellName, macrotext = ResolveBinding(b)
             if aType then
                 if parsed.isMouseButton and parsed.buttonNum and parsed.buttonNum <= 5 then
-                    SetClickAttr(frame, parsed, aType, spellName, macrotext)
+                    SetClickAttr(frame, parsed, aType, spellName, macrotext, b.oocOnly)
                 else
-                    SetKeyAttr(frame, i, aType, spellName, macrotext)
+                    SetKeyAttr(frame, i, aType, spellName, macrotext, b.oocOnly)
                 end
             end
         end
     end
+
+    -- Neutralize the default left-click target / right-click menu for any button
+    -- the user did not bind (see NeutralizeDefaultClicks). Restored in
+    -- DoUnregisterFrame on disable.
+    NeutralizeDefaultClicks(frame, bindings)
 
 end
 
@@ -1018,10 +1107,19 @@ local function DoUnregisterFrame(frame)
     end
     ClearKeyAttrs(frame, lastBindingCount)
 
-    -- Restore default click behavior (target + menu). The menu goes through the
-    -- secure SecureActionButton proxy (12.0.7 gates a raw togglemenu on unit
-    -- buttons, and an insecure reopen taints the menu's protected items).
-    frame:SetAttribute("type1", "target")
+    -- Restore the frame's NATIVE left-click target attrs captured at register
+    -- time: raid frames revert to type1/*type1 = "target", EUI unit frames revert
+    -- to NO left-click target (their native state) rather than being forced to
+    -- target. The menu's *type2 / *clickbutton2 are restored by AttachSecureUnitMenu.
+    local o = originalTargetAttrs[frame]
+    if o then
+        frame:SetAttribute("type1", o.type1)
+        frame:SetAttribute("*type1", o.starType1)
+    else
+        -- Never captured (shouldn't happen): fall back to the historical raid default.
+        frame:SetAttribute("type1", "target")
+        frame:SetAttribute("*type1", "target")
+    end
     if EllesmereUI.AttachSecureUnitMenu then
         EllesmereUI.AttachSecureUnitMenu(frame)
     else
@@ -1202,20 +1300,23 @@ function ns.CC_ApplyBindings()
             local aType, spellName, macrotext = ResolveBinding(fb.b)
             if aType then
                 if parsed.isMouseButton and parsed.buttonNum and parsed.buttonNum <= 5 then
-                    SetClickAttr(frame, parsed, aType, spellName, macrotext)
+                    SetClickAttr(frame, parsed, aType, spellName, macrotext, fb.b.oocOnly)
                 else
-                    SetKeyAttr(frame, fb.idx, aType, spellName, macrotext)
+                    SetKeyAttr(frame, fb.idx, aType, spellName, macrotext, fb.b.oocOnly)
                 end
             else
             end
         end
+        -- Re-neutralize the unbound left/right defaults after the rebuild (the
+        -- clear pass above may have stripped a previous binding's type<N>).
+        NeutralizeDefaultClicks(frame, bindings)
     end
     -- Bind proxy gets keyboard attrs too (unnamed frame fallback)
     for _, fb in ipairs(frameBindings) do
         local parsed = ParseKeyString(fb.b.key)
         local aType, spellName, macrotext = ResolveBinding(fb.b)
         if aType and (not parsed.isMouseButton or not parsed.buttonNum or parsed.buttonNum > 5) then
-            SetKeyAttr(bindProxy, fb.idx, aType, spellName, macrotext)
+            SetKeyAttr(bindProxy, fb.idx, aType, spellName, macrotext, fb.b.oocOnly)
         end
     end
 
@@ -1278,7 +1379,10 @@ function ns.CC_ApplyBindings()
                 globalBtn:SetAttribute("type-" .. suffix, "macro")
                 globalBtn:SetAttribute("macrotext-" .. suffix, mt)
             else
-                globalBtn:SetAttribute("type-" .. suffix, aType)
+                -- menu/target carry no macro conditional, so honor oocOnly via
+                -- the combat driver (present out of combat, cleared in combat).
+                SetGatedType(globalBtn, "type-" .. suffix, aType,
+                    hb.b.oocOnly and (aType == "togglemenu" or aType == "target"))
             end
             globalBtn:SetAttribute("unit-" .. suffix, "mouseover")
             -- Route the key/button to the global button for EVERY action type, not
@@ -1301,13 +1405,17 @@ function ns.CC_ApplyBindings()
     header:SetAttribute("eui_hover_set", table.concat(hoverSetLines, "\n"))
     header:SetAttribute("eui_hover_clear", table.concat(hoverClearLines, "\n"))
 
-    -- Teardown executed on the NEXT rebuild: drop every override binding this
-    -- build owns (hover keys + frame-based keys) and reset the active flag.
-    local teardown = {}
-    for _, line in ipairs(hoverClearLines) do teardown[#teardown + 1] = line end
-    for _, line in ipairs(kbClearLines) do teardown[#teardown + 1] = line end
-    teardown[#teardown + 1] = "eui_hoveractive = false"
-    header._ccClearScript = table.concat(teardown, "\n")
+    -- Teardown executed on the NEXT rebuild (line ~1311): drop every override
+    -- binding this header owns and reset the active flag. self:ClearBindings()
+    -- wipes them ALL in one shot rather than replaying a per-key ClearBinding
+    -- list. The per-key list was fragile: when the LAST hover/keyboard binding is
+    -- unbound, the state driver is not re-registered (the gate just below), so any
+    -- override the per-key teardown missed -- e.g. one still active because the
+    -- user was hovering a frame when they unbound -- had nothing left to clear it
+    -- and kept firing until /reload (the unbind-doesn't-take-effect bug). The
+    -- header owns only click-cast overrides and they re-establish on the next
+    -- hover, so a full wipe is always safe.
+    header._ccClearScript = "self:ClearBindings()\neui_hoveractive = false"
 
     if #hoverSetLines > 0 or #kbClearLines > 0 then
         local fbFailsafe = table.concat(kbClearLines, "\n")
@@ -3265,17 +3373,26 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
             or selectedBinding.type == "item" or selectedBinding.type == "dispel" or selectedBinding.type == "external"
             or selectedBinding.type == "trinket1" or selectedBinding.type == "trinket2"
             or selectedBinding.type == "dynamicrez"
-        if hasAdvancedOpts then
-            -- OOC Only row
-            do
-                local row = MakeRow(centerY)
-                RowLabel(row, "Only Cast Out of Combat")
-                RowToggle(row,
-                    function() return selectedBinding.oocOnly end,
-                    function(v) selectedBinding.oocOnly = v; ns.CC_ApplyBindings() end)
-                centerY = centerY - ROW_H
+        -- OOC-Only is available for spell/macro AND for menu/target, so the
+        -- right-click context menu (or targeting) can be suppressed in combat to
+        -- avoid accidental opens. Combat-gating for menu/target is enforced
+        -- securely via an attribute driver (see SetGatedType).
+        if hasAdvancedOpts or selectedBinding.type == "menu" or selectedBinding.type == "target" then
+            local row = MakeRow(centerY)
+            local oocLabel = "Only Cast Out of Combat"
+            if selectedBinding.type == "menu" then
+                oocLabel = "Only Open Menu Out of Combat"
+            elseif selectedBinding.type == "target" then
+                oocLabel = "Only Target Out of Combat"
             end
+            RowLabel(row, oocLabel)
+            RowToggle(row,
+                function() return selectedBinding.oocOnly end,
+                function(v) selectedBinding.oocOnly = v; ns.CC_ApplyBindings() end)
+            centerY = centerY - ROW_H
+        end
 
+        if hasAdvancedOpts then
             -- Hovercast row (disabled for bare left/right click)
             do
                 local row = MakeRow(centerY)

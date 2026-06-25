@@ -182,6 +182,7 @@ local TBB_DEFAULT_BAR = {
     spellID   = 0,
     name      = "New Bar",
     enabled   = true,
+    hideWhenInactive = true,  -- hide the bar unless the tracked aura is active
     grouped   = true,   -- per-bar "Group Tracking Bars" checkbox; checked bars chain + share width/height
     height    = 24,
     width     = 270,
@@ -286,6 +287,7 @@ function ns.AddTrackedBuffBar()
     newBar.name = "Bar " .. (#tbb.bars + 1)
     newBar.popularKey = nil
     newBar.spellIDs = nil
+    newBar.baseSpellID = nil
     -- A new bar joins the group only if EVERY existing bar is already checked,
     -- otherwise it starts unchecked (independent). Vacuously true for the 1st bar.
     local allGrouped = true
@@ -439,10 +441,21 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     bg:SetColorTexture(0, 0, 0, 0.4)
     wrapFrame._bg = bg
 
-    -- Spark
-    local spark = bar:CreateTexture(nil, "OVERLAY", nil, 2)
+    -- Spark on a dedicated overlay frame one level above the (gradient) fill so
+    -- it always draws OVER the fill, still clipped to the bar so it never spills
+    -- past the ends. SnapToPixelGrid off so it tracks the smoothly-interpolated
+    -- fill edge at sub-pixel precision instead of jumping a pixel as the edge
+    -- crosses a grid line.
+    local sparkOverlay = CreateFrame("Frame", nil, bar)
+    sparkOverlay:SetAllPoints(bar)
+    sparkOverlay:SetClipsChildren(true)
+    sparkOverlay:SetFrameLevel(bar:GetFrameLevel() + 2)
+    wrapFrame._sparkOverlay = sparkOverlay
+    local spark = sparkOverlay:CreateTexture(nil, "OVERLAY", nil, 7)
     spark:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\cast_spark.tga")
     spark:SetBlendMode("ADD")
+    spark:SetSnapToPixelGrid(false)
+    spark:SetTexelSnappingBias(0)
     spark:Hide()
     wrapFrame._spark = spark
 
@@ -451,10 +464,13 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     wrapFrame._gradTex  = nil
 
     -- Text overlay: parented to wrapFrame (not bar) so bar's SetClipsChildren
-    -- doesn't chop text when font size exceeds bar height.
+    -- doesn't chop text when font size exceeds bar height. Level sits ABOVE the
+    -- border (set to bar +5 in ApplySettings) and the pandemic glow (wrapFrame
+    -- +6) so the timer/name/stacks text renders on top of the border instead of
+    -- beneath it. Keyed off bar (like the border) so the two track together.
     local textOverlay = CreateFrame("Frame", nil, wrapFrame)
     textOverlay:SetAllPoints(bar)
-    textOverlay:SetFrameLevel(bar:GetFrameLevel() + 3)
+    textOverlay:SetFrameLevel(bar:GetFrameLevel() + 6)
     wrapFrame._textOverlay = textOverlay
 
     -- Timer text
@@ -766,7 +782,8 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
         if isVert then
             bar._spark:SetPoint("CENTER", sparkAnchor, "TOP", 0, 0)
         else
-            bar._spark:SetPoint("CENTER", sparkAnchor, "RIGHT", 0, 0)
+            -- 1px left so the spark sits over the fill edge, not past it.
+            bar._spark:SetPoint("CENTER", sparkAnchor, "RIGHT", -1, 0)
         end
         bar._spark:Show()
     else
@@ -902,6 +919,19 @@ local function MatchFrameToConfig(frame, cfg)
     if not gci then return false end
     local info = gci(cdID)
     if not info then return false end
+    -- Self-healing base capture for hero-talent override spells. When a bar was
+    -- saved for the OVERRIDE form (e.g. Death Charge) and is currently matched
+    -- while talented, the frame reports the override in info.overrideSpellID and
+    -- the BASE form (Death's Advance) in info.spellID. Record that base on the
+    -- config so the bar keeps matching once the talent is removed: cooldownInfo
+    -- only carries the override id WHILE talented, so without the stored base the
+    -- bar would go dark when untalented (cast becomes the base spell). This
+    -- backfills bars created before baseSpellID was captured at pick time.
+    if cfg.spellID and cfg.spellID > 0 and not cfg.baseSpellID
+       and info.overrideSpellID == cfg.spellID
+       and info.spellID and info.spellID > 0 and info.spellID ~= cfg.spellID then
+        cfg.baseSpellID = info.spellID
+    end
     -- Fast path: match via cooldownInfo struct fields.
     if cfg.spellIDs then
         for _, sid in ipairs(cfg.spellIDs) do
@@ -909,6 +939,11 @@ local function MatchFrameToConfig(frame, cfg)
         end
     elseif cfg.spellID and cfg.spellID > 0 then
         if MatchesSID(info, cfg.spellID) then return true end
+        -- Talent-override fallback: a bar saved for the override form also
+        -- tracks its base form, so it keeps showing after the talent is removed.
+        if cfg.baseSpellID and cfg.baseSpellID > 0 and MatchesSID(info, cfg.baseSpellID) then
+            return true
+        end
     else
         return false
     end
@@ -924,7 +959,8 @@ local function MatchFrameToConfig(frame, cfg)
                     if frameSID == sid then return true end
                 end
             elseif cfg.spellID and cfg.spellID > 0 then
-                return frameSID == cfg.spellID
+                if frameSID == cfg.spellID then return true end
+                if cfg.baseSpellID and frameSID == cfg.baseSpellID then return true end
             end
         end
     end
@@ -1318,11 +1354,22 @@ local function UpdateLustBar(bar, cfg)
         if bar:IsShown() then bar:Hide() end
         return
     end
-    if not bar:IsShown() then bar:Show() end
+    local wasShown = bar:IsShown()
+    if not wasShown then bar:Show() end
     local sb = bar._bar
     if sb then
         sb:SetMinMaxValues(0, 40)
-        sb:SetValue(remaining)
+        -- Smooth fill is baseline for tracking bars: they move in one direction
+        -- at a known rate (no sudden jumps to read instantly, unlike a health
+        -- bar), so interpolation only removes judder. wasShown snaps a fresh
+        -- appearance instead of animating from a stale value.
+        local smooth = wasShown and Enum and Enum.StatusBarInterpolation
+            and Enum.StatusBarInterpolation.ExponentialEaseOut
+        if smooth then
+            sb:SetValue(remaining, smooth)
+        else
+            sb:SetValue(remaining)
+        end
         if cfg.showSpark and bar._spark then bar._spark:Show() end
     end
     if cfg.showTimer and bar._timerText then
@@ -1376,13 +1423,27 @@ function ns.UpdateTrackedBuffBarTimers()
             local blzChild = FindChild(cfg)
             if blzChild then ns.HookPandemicState(blzChild) end
 
-            local isActive = blzChild and blzChild.IsShown and blzChild:IsShown() or false
+            -- Active state must come from the CooldownViewer item's IsActive()
+            -- (real aura state: expirationTime > now, or infinite auras), NOT
+            -- IsShown(). A buff-bar item stays SHOWN even while inactive unless
+            -- the user enabled Blizzard's "Hide When Inactive" edit-mode option
+            -- (off by default), so IsShown() would make our mirrored bar visible
+            -- 100% of the time. Fall back to IsShown() only if IsActive is absent.
+            local isActive = false
+            if blzChild then
+                if blzChild.IsActive then
+                    isActive = blzChild:IsActive() and true or false
+                elseif blzChild.IsShown then
+                    isActive = blzChild:IsShown() or false
+                end
+            end
 
             -- Read Blizzard's StatusBar (the data source for fill/timer)
             local blizzBar = blzChild and blzChild.Bar
 
             if isActive then
-                if not bar:IsShown() then bar:Show() end
+                local wasShown = bar:IsShown()
+                if not wasShown then bar:Show() end
                 local sb = bar._bar
 
                 -- Stacks (gated)
@@ -1392,7 +1453,14 @@ function ns.UpdateTrackedBuffBarTimers()
                     -- Mirror Blizzard's bar onto ours. Secret values pass
                     -- through natively to widget setters -- no Lua comparison.
                     sb:SetMinMaxValues(blizzBar:GetMinMaxValues())
-                    sb:SetValue(blizzBar:GetValue())
+                    -- Smooth fill is baseline (see UpdateLustBar note).
+                    local smooth = wasShown and Enum and Enum.StatusBarInterpolation
+                        and Enum.StatusBarInterpolation.ExponentialEaseOut
+                    if smooth then
+                        sb:SetValue(blizzBar:GetValue(), smooth)
+                    else
+                        sb:SetValue(blizzBar:GetValue())
+                    end
                     if cfg.showSpark and bar._spark then bar._spark:Show() end
 
                     -- Auto fill color from Blizzard's bar texture
@@ -1530,14 +1598,24 @@ function ns.UpdateTrackedBuffBarTimers()
                     end
                 end
             else
-                -- Inactive: clear state and hide
-                bar._nameSet = nil
+                -- Inactive: clear transient state
                 bar._cachedBlizzFillTex = nil
                 bar._cachedOurFillTex = nil
                 if _anyPandemic and bar._pandemicGlowActive then ClearPandemic(bar) end
                 if bar._stacksText then bar._stacksText:Hide() end
                 bar._stackCount = 0
-                if bar:IsShown() then bar:Hide() end
+                if cfg.hideWhenInactive == false then
+                    -- "Hide When Inactive" off: keep the bar on screen as an
+                    -- empty idle bar (name visible, no fill / timer / spark).
+                    if not bar:IsShown() then bar:Show() end
+                    local sb = bar._bar
+                    if sb then sb:SetMinMaxValues(0, 1); sb:SetValue(0) end
+                    if bar._timerText then bar._timerText:Hide() end
+                    if bar._spark then bar._spark:Hide() end
+                else
+                    bar._nameSet = nil
+                    if bar:IsShown() then bar:Hide() end
+                end
             end
         end
     end
@@ -1566,7 +1644,8 @@ function ns.UpdateTrackedBuffBarTimers()
             end
             if anchor then
                 bar._spark:SetPoint("CENTER", anchor,
-                    bar._lastVertical and "TOP" or "RIGHT", 0, 0)
+                    bar._lastVertical and "TOP" or "RIGHT",
+                    bar._lastVertical and 0 or -1, 0)
             end
         end
     end
@@ -1810,6 +1889,19 @@ function ns.RegisterTBBUnlockElements()
                     -- OR disabled (a disabled member re-enables straight into the
                     -- chain, so its own mover would be a phantom). When no checked
                     -- bar is enabled the anchor is nil and all are hidden.
+                    return idx ~= ns.TBBGroupAnchorIndex()
+                end,
+                -- Grouped non-anchor members are positioned by the relative
+                -- SetPoint chain in BuildTrackedBuffBars. Report them as
+                -- addon-owned so the generic anchor system never repositions
+                -- them -- otherwise a cascade/override SetPoint severs the chain
+                -- (e.g. in combat via a stale per-member anchor link). The group
+                -- ANCHOR returns false, so it stays fully element-anchorable.
+                isAnchored = function()
+                    local t = ns.GetTrackedBuffBars()
+                    local b = t and t.bars
+                    local c = b and b[idx]
+                    if not c or not ns.TBBBarGrouped(c) then return false end
                     return idx ~= ns.TBBGroupAnchorIndex()
                 end,
                 getFrame = function() return tbbFrames[idx] end,

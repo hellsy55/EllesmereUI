@@ -1699,6 +1699,11 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
     -- target bounds is safe even if the target is protected (e.g. oUF
     -- unit frames) -- we only call SetPoint on the child, not the target.
     if InCombatLockdown() and childBar:IsProtected() then return end
+    -- Addon owns this element's position (e.g. a grouped Tracking Bar member
+    -- chained to its group anchor) -- never generically reposition it, so its
+    -- relative SetPoint to the anchor is never clobbered (in or out of combat).
+    local cElem = registeredElements[childKey]
+    if cElem and cElem.isAnchored and cElem.isAnchored(childKey) then return end
 
 
     -- If the target frame has no valid screen bounds (hidden / not yet laid out),
@@ -1889,22 +1894,84 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
                     if sp then savedEdge = sp end
                 end
                 -- Phase 2 follow: shift the absolute saved growth edge by how far
-                -- the anchor target's center has moved SINCE this bar was saved
-                -- (savedEdge.tgtx/.tgty, captured by savePos in the same UIParent
-                -- space as tCX/tCY). Both terms are UIParent space, added straight
-                -- to the UIParent-space center -- no ratio. Gated on
-                -- _anchorFollowReady (false until the post-settle flip, so the
-                -- whole login is a pure absolute pin) and on a saved baseline
-                -- existing (only bars re-saved since this shipped). CDM growth bars
-                -- only; StanceBar, ERB-shift bars, and unlock mode keep the pure
-                -- absolute pin (delta 0).
+                -- the anchor target has moved/resized SINCE this bar was saved.
+                -- When the anchor side aligns with this bar's own growth direction
+                -- (e.g. anchored to the target's RIGHT side while itself growing
+                -- RIGHT), the saved growth edge IS the near edge facing the target,
+                -- so the saved target edge can be recovered as
+                -- (savedNearEdge - ai.offsetX/Y) and diffed against the target's
+                -- CURRENT edge. This tracks the target both moving AND resizing --
+                -- e.g. a different character's main CDM bar having a different
+                -- icon count/width, which a center-delta can't detect (the center
+                -- doesn't move when a CENTER-anchored bar only changes width).
+                -- Misaligned anchors (or no ai.offsetX/Y yet) fall back to the
+                -- original center-delta, which is correct for non-resizing targets
+                -- (unit frames, ERB bars). Gated on _anchorFollowReady (false until
+                -- the post-settle flip, so the whole login is a pure absolute pin)
+                -- and on a saved baseline existing (only bars re-saved since this
+                -- shipped). CDM growth bars only; StanceBar, ERB-shift bars, and
+                -- unlock mode keep the pure absolute pin (delta 0).
+                local uw, uh = UIParent:GetSize()
                 local dTX, dTY = 0, 0
                 if isCDM and childKey ~= "StanceBar" and not shiftActive
                    and not isUnlocked and EllesmereUI._anchorFollowReady and savedEdge then
-                    if savedEdge.tgtx then dTX = tCX - savedEdge.tgtx end
-                    if savedEdge.tgty then dTY = tCY - savedEdge.tgty end
+                    -- Corner-follow is scoped to CDM bars anchored to ANOTHER CDM
+                    -- bar (the only target that resizes by icon count). Any other
+                    -- target keeps the original center-delta path untouched.
+                    local targetIsCDM = targetKey and targetKey:sub(1, 4) == "CDM_"
+                    if ai and ai.offsetX ~= nil and savedEdge.x then
+                        local childEdgeX = (uw / 2 + savedEdge.x) * ratio
+                        if side == "RIGHT" and growDir == "RIGHT" then
+                            dTX = tR - (childEdgeX - ai.offsetX)
+                        elseif side == "LEFT" and growDir == "LEFT" then
+                            dTX = tL - (childEdgeX - ai.offsetX)
+                        elseif targetIsCDM and (side == "TOP" or side == "BOTTOM")
+                               and (growDir == "RIGHT" or growDir == "LEFT")
+                               and savedEdge.tgtL and savedEdge.tgtR and savedEdge.tgtx then
+                            -- Corner case: anchored to the target's TOP/BOTTOM edge
+                            -- while growing horizontally. Hold the bar against the
+                            -- target's NEAR horizontal edge (chosen by which side of
+                            -- the target center the bar sits) so it keeps its corner
+                            -- when the target's WIDTH changes -- a center delta is 0
+                            -- for a center-anchored resize. Idempotent: reads only
+                            -- saved data + the target's live edge, never the child's
+                            -- own position, so it cannot drift.
+                            if childEdgeX < savedEdge.tgtx then
+                                dTX = tL - savedEdge.tgtL
+                            else
+                                dTX = tR - savedEdge.tgtR
+                            end
+                        elseif savedEdge.tgtx then
+                            dTX = tCX - savedEdge.tgtx
+                        end
+                    elseif savedEdge.tgtx then
+                        dTX = tCX - savedEdge.tgtx
+                    end
+                    if ai and ai.offsetY ~= nil and savedEdge.y then
+                        local childEdgeY = (uh / 2 + savedEdge.y) * ratio
+                        if side == "TOP" and growDir == "UP" then
+                            dTY = tT - (childEdgeY - ai.offsetY)
+                        elseif side == "BOTTOM" and growDir == "DOWN" then
+                            dTY = tB - (childEdgeY - ai.offsetY)
+                        elseif targetIsCDM and (side == "LEFT" or side == "RIGHT")
+                               and (growDir == "UP" or growDir == "DOWN")
+                               and savedEdge.tgtT and savedEdge.tgtB and savedEdge.tgty then
+                            -- Corner case: anchored to the target's LEFT/RIGHT edge
+                            -- while growing vertically. Hold the bar against the
+                            -- target's NEAR vertical edge so it keeps its corner when
+                            -- the target's HEIGHT changes. Same idempotent guarantee.
+                            if childEdgeY < savedEdge.tgty then
+                                dTY = tB - savedEdge.tgtB
+                            else
+                                dTY = tT - savedEdge.tgtT
+                            end
+                        elseif savedEdge.tgty then
+                            dTY = tCY - savedEdge.tgty
+                        end
+                    elseif savedEdge.tgty then
+                        dTY = tCY - savedEdge.tgty
+                    end
                 end
-                local uw, uh = UIParent:GetSize()
                 if growDir == "RIGHT" then
                     if savedEdge and savedEdge.point == "LEFT" and savedEdge.x then
                         cx = (uw / 2 + savedEdge.x) * ratio + cW / 2 + dTX
@@ -2298,8 +2365,10 @@ EllesmereUI.ReapplyAllUnlockAnchorsForced = function()
         if info and info.target then
             local childBar = GetBarFrame(childKey)
             local targetBar = GetBarFrame(info.target)
+            local rcElem = registeredElements[childKey]
             if childBar and targetBar
-               and not (inCombat and childBar:IsProtected()) then
+               and not (inCombat and childBar:IsProtected())
+               and not (rcElem and rcElem.isAnchored and rcElem.isAnchored(childKey)) then
                 -- AB bars with growth direction: skip entirely. Their position
                 -- is set authoritatively by applyPos from barPositions (edge
                 -- format, width-independent, updated on every LayoutBar).
@@ -2340,6 +2409,28 @@ function EllesmereUI.GetAnchorTargetCenterUI(childKey)
     local tT = (targetBar:GetTop() or 0) * tS / uiS
     local tB = (targetBar:GetBottom() or 0) * tS / uiS
     return (tL + tR) / 2, (tT + tB) / 2
+end
+
+-- UIParent-space edges (left, right, top, bottom) of childKey's anchor target,
+-- computed identically to ApplyAnchorPosition's tL/tR/tT/tB. Returned ONLY when
+-- the target is ANOTHER CDM bar -- this baseline exists purely for the corner-
+-- follow of CDM-anchored-to-CDM bars; nothing else reads it. CDM savePos stores
+-- these as sp.tgtL/.tgtR/.tgtT/.tgtB. Returns nil if there is no CDM anchor
+-- target or it has no screen bounds yet.
+function EllesmereUI.GetAnchorTargetEdgesUI(childKey)
+    local adb = GetAnchorDB()
+    local info = adb and adb[childKey]
+    if not info or not info.target then return nil end
+    if info.target:sub(1, 4) ~= "CDM_" then return nil end
+    local targetBar = GetBarFrame(info.target)
+    if not targetBar or not targetBar:GetLeft() then return nil end
+    local uiS = UIParent:GetEffectiveScale()
+    local tS = targetBar:GetEffectiveScale()
+    local tL = (targetBar:GetLeft() or 0) * tS / uiS
+    local tR = (targetBar:GetRight() or 0) * tS / uiS
+    local tT = (targetBar:GetTop() or 0) * tS / uiS
+    local tB = (targetBar:GetBottom() or 0) * tS / uiS
+    return tL, tR, tT, tB
 end
 
 -- Resync anchor offsets from actual frame positions. Called AFTER a profile

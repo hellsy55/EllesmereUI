@@ -266,36 +266,36 @@ local EXPRESSWAY = MEDIA_PATH .. "fonts\\Expressway.ttf"
 -- too. nil on Western Latin locales -> callers keep the bundled Expressway.
 local LOCALE_FONT_FALLBACK = _G.EllesmereUI and _G.EllesmereUI._localeFont or nil
 -------------------------------------------------------------------------------
---  Addon Roster  --  per-addon icon on/off from EllesmereUI/media
+--  Addon Roster  --  per-addon display name + search alias from EllesmereUI/media
 -------------------------------------------------------------------------------
 local ICONS_PATH    = MEDIA_PATH .. "icons\\"
 
 local ADDON_ROSTER = {
-    { folder = "EllesmereUIActionBars",        display = "Action Bars",        search_name = "EllesmereUI Action Bars",        icon_on = ICONS_PATH .. "sidebar\\actionbars-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\actionbars-ig.png"      },
-    { folder = "EllesmereUINameplates",        display = "Nameplates",         search_name = "EllesmereUI Nameplates",         icon_on = ICONS_PATH .. "sidebar\\nameplates-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\nameplates-ig.png"      },
-    { folder = "EllesmereUIUnitFrames",        display = "Unit Frames",        search_name = "EllesmereUI Unit Frames",        icon_on = ICONS_PATH .. "sidebar\\unitframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\unitframes-ig.png"      },
-    { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",        search_name = "EllesmereUI Raid Frames",        icon_on = ICONS_PATH .. "sidebar\\raidframes-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\raidframes-ig.png"      },
-    { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",   search_name = "EllesmereUI Cooldown Manager",   icon_on = ICONS_PATH .. "sidebar\\cdmeffects-ig-on.png",      icon_off = ICONS_PATH .. "sidebar\\cdmeffects-ig.png"      },
-    { folder = "EllesmereUIResourceBars",      display = "Resource & Cast Bars", search_name = "EllesmereUI Resource Bars Cast Bars",      icon_on = ICONS_PATH .. "sidebar\\resourcebars-ig-on-2.png",  icon_off = ICONS_PATH .. "sidebar\\resourcebars-ig-2.png"  },
-    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders", search_name = "EllesmereUI AuraBuff Reminders", icon_on = ICONS_PATH .. "sidebar\\beacons-ig-on.png",         icon_off = ICONS_PATH .. "sidebar\\beacons-ig.png" },
+    { folder = "EllesmereUIActionBars",        display = "Action Bars",          search_name = "EllesmereUI Action Bars"             },
+    { folder = "EllesmereUINameplates",        display = "Nameplates",           search_name = "EllesmereUI Nameplates"              },
+    { folder = "EllesmereUIUnitFrames",        display = "Unit Frames",          search_name = "EllesmereUI Unit Frames"             },
+    { folder = "EllesmereUIRaidFrames",        display = "Raid Frames",          search_name = "EllesmereUI Raid Frames"             },
+    { folder = "EllesmereUICooldownManager",   display = "Cooldown Manager",     search_name = "EllesmereUI Cooldown Manager"        },
+    { folder = "EllesmereUIResourceBars",      display = "Resource & Cast Bars", search_name = "EllesmereUI Resource Bars Cast Bars" },
+    { folder = "EllesmereUIAuraBuffReminders", display = "AuraBuff Reminders",   search_name = "EllesmereUI AuraBuff Reminders"      },
     -- Basics is intentionally NOT in the roster: its code has been split into
     -- the per-module addons below. The Basics folder still exists as a shim
     -- addon purely so the v6.6 split-migration can read its enable state.
-    { folder = "EllesmereUIQoL",               display = "Quality of Life",    search_name = "EllesmereUI Quality of Life",    icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png"      },
-    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",  search_name = "EllesmereUI Blizz UI Enhanced",  icon_on = ICONS_PATH .. "sidebar\\blizzard-ig-on.png",        icon_off = ICONS_PATH .. "sidebar\\blizzard-ig.png"      },
-    { folder = "EllesmereUIFriends",           display = "Friends List",       search_name = "EllesmereUI Friends List",       icon_on = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",         icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png"       },
-    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",      search_name = "EllesmereUI Mythic+ Timer",      icon_on = ICONS_PATH .. "sidebar\\mplus-ig-on.png",           icon_off = ICONS_PATH .. "sidebar\\mplus-ig.png"         },
-    { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",      search_name = "EllesmereUI Quest Tracker",      icon_on = ICONS_PATH .. "sidebar\\quests-ig-on-2.png",          icon_off = ICONS_PATH .. "sidebar\\quests-ig-2.png"        },
-    { folder = "EllesmereUIMinimap",           display = "Minimap",            search_name = "EllesmereUI Minimap",            icon_on = ICONS_PATH .. "sidebar\\map-ig-on.png",             icon_off = ICONS_PATH .. "sidebar\\map-ig.png"           },
-    { folder = "EllesmereUIChat",              display = "Chat",               search_name = "EllesmereUI Chat",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",      search_name = "EllesmereUI Damage Meters",      icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIBags",              display = "Bags",               search_name = "EllesmereUI Bags",               icon_on = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png" },
-    { folder = "EllesmereUIPartyMode",         display = "Party Mode",         search_name = "EllesmereUI Party Mode",         icon_on = ICONS_PATH .. "sidebar\\partymode-ig-on.png",       icon_off = ICONS_PATH .. "sidebar\\partymode-ig.png",       alwaysLoaded = true },
+    { folder = "EllesmereUIQoL",               display = "Quality of Life",      search_name = "EllesmereUI Quality of Life"         },
+    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",    search_name = "EllesmereUI Blizz UI Enhanced"       },
+    { folder = "EllesmereUIFriends",           display = "Friends List",         search_name = "EllesmereUI Friends List"            },
+    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",        search_name = "EllesmereUI Mythic+ Timer"           },
+    { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",        search_name = "EllesmereUI Quest Tracker"           },
+    { folder = "EllesmereUIMinimap",           display = "Minimap",              search_name = "EllesmereUI Minimap"                 },
+    { folder = "EllesmereUIChat",              display = "Chat",                 search_name = "EllesmereUI Chat"                    },
+    { folder = "EllesmereUIDamageMeters",      display = "Damage Meters",        search_name = "EllesmereUI Damage Meters"           },
+    { folder = "EllesmereUIBags",              display = "Bags",                 search_name = "EllesmereUI Bags"                    },
+    { folder = "EllesmereUIPartyMode",         display = "Party Mode",           search_name = "EllesmereUI Party Mode",             alwaysLoaded = true },
 }
 
 -------------------------------------------------------------------------------
 --  Addon Groups  --  ordered categories that drive the sidebar layout.
---  Each group has its own parent header (icon + label, no power toggle); the
+--  Each group has its own text-only parent header (label, no power toggle); the
 --  listed members render as child rows beneath it (label + power only, no
 --  left icon). Member order is authoritative -- coming-soon entries are
 --  placed at the end of their group.
@@ -307,8 +307,6 @@ EllesmereUI.ADDON_GROUPS = {
     {
         key     = "core",
         label   = "Core Addons",
-        icon_on  = ICONS_PATH .. "sidebar\\actionbars-ig-on.png",
-        icon_off = ICONS_PATH .. "sidebar\\actionbars-ig.png",
         members = {
             "EllesmereUIActionBars",
             "EllesmereUINameplates",
@@ -321,8 +319,6 @@ EllesmereUI.ADDON_GROUPS = {
     {
         key     = "qol",
         label   = "QoL Addons",
-        icon_on  = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",
-        icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",
         members = {
             "EllesmereUIQoL",
             "EllesmereUIAuraBuffReminders",
@@ -332,8 +328,6 @@ EllesmereUI.ADDON_GROUPS = {
     {
         key     = "reskin",
         label   = "UI Reskin Addons",
-        icon_on  = ICONS_PATH .. "sidebar\\friends-ig-on-2.png",
-        icon_off = ICONS_PATH .. "sidebar\\friends-ig-2.png",
         members = {
             "EllesmereUIBlizzardSkin",
             "EllesmereUIDamageMeters",
@@ -378,8 +372,6 @@ if IS_STANDALONE then
         table.insert(EllesmereUI.ADDON_GROUPS, 1, {
             key     = "standalone",
             label   = "Standalone",
-            icon_on  = ICONS_PATH .. "sidebar\\basics-ig-on-2.png",
-            icon_off = ICONS_PATH .. "sidebar\\basics-ig-2.png",
             members = { selfFolder },
         })
     end
@@ -2492,9 +2484,15 @@ do
     function EllesmereUI.GetBorderDefaultSize(addonKey, textureKey)
         if textureKey == "shadow" then textureKey = "glow" end  -- Shadow shares Glow's defaults
         local addon = _borderDefaults[addonKey]
-        if not addon then return nil end
-        local tex = addon[textureKey]
-        return tex and tex.defaultSize or nil
+        local tex = addon and addon[textureKey]
+        if tex and tex.defaultSize then return tex.defaultSize end
+        -- Any SharedMedia border ("sm:<name>") defaults to size 1 unless a
+        -- specific defaultSize was registered above. This is the shared engine
+        -- function, so it applies to every consumer. It is only called from a
+        -- dropdown setValue (style change), never on load/apply, so stored
+        -- sizes are never touched until the user actively picks a SharedMedia style.
+        if type(textureKey) == "string" and textureKey:sub(1, 3) == "sm:" then return 1 end
+        return nil
     end
 
     -- Built-in border textures (always available, no SharedMedia required)
@@ -2803,6 +2801,37 @@ EllesmereUI.DEFAULT_RESOURCE_COLORS = {
     DEMONHUNTER = { r = 0.34, g = 0.06, b = 0.46 },
 }
 
+-- Default class-resource colors (keyed by the specific resource, NOT the class,
+-- so specs whose class has multiple resources -- e.g. Arcane Charges vs Icicles
+-- -- get distinct colors). Customized via the Class Resource Colors section
+-- (saved under customColors.classResource). Defaults below mirror that section.
+EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS = {
+    ComboPoints     = { r = 1.0,    g = 0.9608, b = 0.4118 },
+    Runes           = { r = 0.0,    g = 0.8196, b = 1.0    },
+    SoulShards      = { r = 0.5059, g = 0.3412, b = 0.8431 },
+    HolyPower       = { r = 0.949,  g = 0.902,  b = 0.6    },
+    ArcaneCharges   = { r = 0.7176, g = 0.4902, b = 0.8118 },
+    Icicles         = { r = 0.7098, g = 1.0,    b = 0.9216 },
+    Chi             = { r = 0.0,    g = 1.0,    b = 0.6    },
+    Essence         = { r = 0.2,    g = 0.58,   b = 0.502  },
+    SoulFragments   = { r = 0.6,    g = 0.8,    b = 0.2    },
+    MaelstromWeapon = { r = 0.0,    g = 0.4392, b = 0.8706 },
+    TipOfTheSpear   = { r = 0.6667, g = 0.8275, b = 0.4471 },
+    WhirlwindStacks = { r = 0.7765, g = 0.6078, b = 0.4275 },
+}
+
+-- Get a class-resource color (custom override or default), keyed by resource.
+function EllesmereUI.GetClassResourceColor(key)
+    if not key then return nil end
+    local db = EllesmereUI.GetCustomColorsDB()
+    if db.classResource and db.classResource[key] then
+        return db.classResource[key]
+    end
+    local def = EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS[key]
+    if def then return { r = def.r, g = def.g, b = def.b } end
+    return nil
+end
+
 -- Class -> primary power type name mapping
 EllesmereUI.CLASS_POWER_MAP = {
     WARRIOR      = "RAGE",
@@ -3081,18 +3110,19 @@ function EllesmereUI.GetFontOutlineFlag(addonKey)
     else
         mode = db.outlineMode or "none"
     end
-    if mode == "outline" then return "OUTLINE, SLUG"
-    elseif mode == "thick" then return "THICKOUTLINE, SLUG"
-    else return "" end
+    local flag
+    if mode == "outline" then flag = "OUTLINE, SLUG"
+    elseif mode == "thick" then flag = "THICKOUTLINE, SLUG"
+    else flag = "" end
+    return EllesmereUI.SlugFlag(flag)
 end
 
--- Per-module "Disable Slug Outline" toggle. When a module's box in that control
--- is checked, its non-aura body text drops the SLUG token (a crisp but
--- un-slugged outline). Stored centrally in EllesmereUIDB.disableSlugOutline;
--- unchecked (slug kept) by default. moduleKey: "nameplates"/"unitFrames"/"raidFrames".
-function EllesmereUI.IsSlugDisabled(moduleKey)
-    local t = EllesmereUIDB and EllesmereUIDB.disableSlugOutline
-    return (t and t[moduleKey] == true) or false
+-- Global "Never Show Slug" toggle. When ON, the SLUG token is stripped from
+-- every outline flag the UI produces -- body text and icon/aura text across all
+-- modules, plus the global Outline Mode itself. Stored centrally in
+-- EllesmereUIDB.neverShowSlug; OFF by default (slug outlines render as normal).
+function EllesmereUI.IsSlugDisabled()
+    return (EllesmereUIDB and EllesmereUIDB.neverShowSlug == true) or false
 end
 
 -- Strip the SLUG token from a font outline flag:
@@ -3100,6 +3130,14 @@ end
 function EllesmereUI.StripSlugFlag(flag)
     if not flag or flag == "" then return flag or "" end
     return (flag:gsub("%s*,%s*SLUG", ""))
+end
+
+-- Central gate: returns `flag` with SLUG removed when "Never Show Slug" is on,
+-- otherwise unchanged. Use this at every point a slug outline flag is produced
+-- (the outline helpers above and any hardcoded icon-text literal).
+function EllesmereUI.SlugFlag(flag)
+    if EllesmereUI.IsSlugDisabled() then return EllesmereUI.StripSlugFlag(flag) end
+    return flag
 end
 
 -- Returns true when the outline mode uses drop shadow instead of outline.
@@ -3181,9 +3219,11 @@ end
 function EllesmereUI.GetIconTextOutlineFlag(moduleKey)
     local t = EllesmereUIDB and EllesmereUIDB.outlineIconText
     if t and t[moduleKey] == false then
+        -- Follows the outline mode, which is already slug-gated at the source.
         return (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag(moduleKey)) or ""
     end
-    return "OUTLINE, SLUG"
+    -- Forced crisp outline; "Never Show Slug" still drops the slug token.
+    return EllesmereUI.SlugFlag("OUTLINE, SLUG")
 end
 
 -- Applies the icon-text outline flag AND the matching shadow in one call.
@@ -3294,6 +3334,43 @@ EllesmereUI.POWER_KEY_TO_ENUM = {
     PAIN         = 18,
 }
 
+-- Clean integer power-type -> string key (reverse of POWER_KEY_TO_ENUM). The
+-- integer power type (1st return of UnitPowerType) is readable on EVERY unit, so
+-- it recovers a color key when the string token (2nd return) is unreadable --
+-- which it is on non-player units (boss/target/focus) in Midnight.
+EllesmereUI.POWER_ENUM_TO_KEY = {}
+for k, v in pairs(EllesmereUI.POWER_KEY_TO_ENUM) do
+    EllesmereUI.POWER_ENUM_TO_KEY[v] = k
+end
+
+-- EUI power color (r,g,b, or nil) for a unit's CURRENT power. Mirrors oUF's bar
+-- ladder so unit-frame TEXT matches the bar on EVERY unit, including non-player:
+--   1) Named token -> custom/default color. Covers all standard power types; the
+--      player is always here so its color is identical to before.
+--   2) NON-STANDARD power types (creatures/NPCs -- e.g. POWER_TYPE_COSMIC_ENERGY)
+--      report an unmapped token but the integer type collides with a standard
+--      slot (cosmic energy -> 3 = Energy). The engine hands the REAL color back
+--      in altR/altG/altB (the value oUF paints the bar with) -- use it so text
+--      matches the bar instead of resolving to the wrong standard color.
+--   3) Token unmatched and no alt color, but the integer type is standard ->
+--      custom color (safety net, e.g. if a token is ever unreadable).
+function EllesmereUI.ResolveUnitPowerColor(unit)
+    local pType, pToken, altR, altG, altB = UnitPowerType(unit)
+    local info = EllesmereUI.GetPowerColor(pToken)
+    if info then return info.r, info.g, info.b end
+    if altR then
+        -- UnitPowerType may hand back 0-255 or 0-1 ranges; normalize (per oUF).
+        if altR > 1 or altG > 1 or altB > 1 then
+            return altR / 255, altG / 255, altB / 255
+        end
+        return altR, altG, altB
+    end
+    local key = EllesmereUI.POWER_ENUM_TO_KEY[pType]
+    info = key and EllesmereUI.GetPowerColor(key)
+    if info then return info.r, info.g, info.b end
+    return nil
+end
+
 -- Apply custom class colors to oUF (call after settings change)
 function EllesmereUI.ApplyColorsToOUF()
     -- 1. Update oUF color objects (unit frames)
@@ -3365,6 +3442,10 @@ function EllesmereUI.ApplyColorsToOUF()
     if ok and EAB and EAB.ApplyBorders and not InCombatLockdown() then
         EAB:ApplyBorders()
         if EAB.ApplyShapes then EAB:ApplyShapes() end
+    end
+    -- 6. Refresh damage meters (bars/text class colors)
+    if EllesmereUI._DM_RefreshColors then
+        EllesmereUI._DM_RefreshColors()
     end
 end
 
@@ -4919,7 +5000,7 @@ function EllesmereUI:ShowInfoPopup(opts)
     local popup = CreateInfoPopup()
 
     popup._title:SetText(EllesmereUI.L(opts.title or "Information"))
-    popup._contentFS:SetText(opts.content or "")
+    popup._contentFS:SetText(EllesmereUI.L(opts.content) or "")
 
     -- Resize scroll child to fit content after a frame
     C_Timer.After(0.01, function()
@@ -5496,12 +5577,12 @@ local function CreateMainFrame()
     EllesmereUI._sidebar = sidebar
 
     -- Nav buttons -- start below the logo area with proper spacing
-    local NAV_TOP     = -128   -- distance from sidebar top to first nav item
-    local NAV_ROW_H   = 50    -- height per nav row (Unlock / Global Settings)
-    local NAV_ICON_W  = 52    -- exact pixel width
-    local NAV_ICON_H  = 37    -- exact pixel height
+    local NAV_TOP     = -114   -- distance from sidebar top to first nav item
+    local NAV_ROW_H   = 40    -- height per nav row (Unlock / Global / Patch Notes / Profiles)
+    local NAV_ICON_W  = 46    -- exact pixel width
+    local NAV_ICON_H  = 31    -- exact pixel height
     local NAV_LEFT    = 20    -- left padding for icon
-    local NAV_TXT_GAP = 14    -- gap between icon and label
+    local NAV_TXT_GAP = 10    -- gap between icon and label
 
     -- Helper: create a 1px horizontal glow line on a sidebar button (TOP or BOTTOM edge)
     local function MakeNavEdgeLine(btn, edge)
@@ -5585,9 +5666,9 @@ local function CreateMainFrame()
         btn._iconOn  = ICONS_PATH .. "sidebar\\unlockmode-ig-on.png"
         btn._iconOff = ICONS_PATH .. "sidebar\\unlockmode-ig.png"
 
-        local label = MakeFont(btn, 15, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
-        label:SetText("Unlock Mode")
+        label:SetText(EllesmereUI.L("Unlock Mode"))
         btn._label = label
 
         -- Always "loaded" appearance
@@ -5652,9 +5733,9 @@ local function CreateMainFrame()
         btn._iconOn  = ICONS_PATH .. "sidebar\\settings-ig-on-2.png"
         btn._iconOff = ICONS_PATH .. "sidebar\\settings-ig-2.png"
 
-        local label = MakeFont(btn, 15, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
         label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
-        label:SetText("Global Settings")
+        label:SetText(EllesmereUI.L("Global Settings"))
         btn._label = label
 
         -- No download icon for global settings
@@ -5698,13 +5779,156 @@ local function CreateMainFrame()
         sidebarButtons[GLOBAL_KEY] = btn
     end
 
-    -- Addon offset: first addon starts two rows below (Unlock Mode + Global Settings)
-    local ORIG_ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 2
+    -------------------------------------------------------------------
+    --  Patch Notes button  (own page -- selects the _EUIPatchNotes module)
+    -------------------------------------------------------------------
+    do
+        local btn = CreateFrame("Button", nil, sidebar)
+        btn:SetSize(SIDEBAR_W, NAV_ROW_H)
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, NAV_TOP - NAV_ROW_H * 2)
+        btn:SetFrameLevel(sidebar:GetFrameLevel() + 1)
+
+        DecorateSidebarButton(btn)
+
+        -- Glow layer (behind icon): tinted version of the -on texture
+        local iconGlow = btn:CreateTexture(nil, "ARTWORK", nil, 0)
+        iconGlow:SetTexture(ICONS_PATH .. "sidebar\\notes-on.png")
+        iconGlow:SetSize(NAV_ICON_W, NAV_ICON_H)
+        iconGlow:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        iconGlow:SetDesaturated(true)
+        iconGlow:SetVertexColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
+        iconGlow:Hide()
+        btn._iconGlow = iconGlow
+        RegAccent({ type="vertex", obj=iconGlow })
+
+        -- Icon layer (on top of glow): always the white off texture
+        local icon = btn:CreateTexture(nil, "ARTWORK", nil, 1)
+        icon:SetTexture(ICONS_PATH .. "sidebar\\notes-off.png")
+        icon:SetSize(NAV_ICON_W, NAV_ICON_H)
+        icon:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        btn._icon    = icon
+        btn._iconOn  = ICONS_PATH .. "sidebar\\notes-on.png"
+        btn._iconOff = ICONS_PATH .. "sidebar\\notes-off.png"
+
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
+        label:SetText(EllesmereUI.L("Patch Notes"))
+        btn._label = label
+
+        label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+        icon:SetDesaturated(false)
+        icon:SetAlpha(NAV_ENABLED_ICON_A)
+
+        btn._folder = "_EUIPatchNotes"
+        btn._loaded = true
+
+        local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
+        hlTex:SetAllPoints()
+        btn:SetScript("OnEnter", function(self)
+            hlTex:SetAlpha(0.06)
+            if activeModule ~= self._folder then
+                self._hoverGlow:Show()
+                self._hoverIndicator:Show()
+                self._label:SetTextColor(NAV_HOVER_ENABLED_TEXT.r, NAV_HOVER_ENABLED_TEXT.g, NAV_HOVER_ENABLED_TEXT.b, NAV_HOVER_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            hlTex:SetAlpha(0)
+            self._hoverGlow:Hide()
+            self._hoverIndicator:Hide()
+            if activeModule ~= self._folder then
+                self._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnClick", function(self)
+            if modules[self._folder] then
+                EllesmereUI:SelectModule(self._folder)
+            end
+        end)
+
+        sidebarButtons["_EUIPatchNotes"] = btn
+        EllesmereUI._patchNotesSidebarBtn = btn
+    end
+
+    -------------------------------------------------------------------
+    --  Profiles & Presets button  (own page -- selects the _EUIProfiles module)
+    -------------------------------------------------------------------
+    do
+        local btn = CreateFrame("Button", nil, sidebar)
+        btn:SetSize(SIDEBAR_W, NAV_ROW_H)
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, NAV_TOP - NAV_ROW_H * 3)
+        btn:SetFrameLevel(sidebar:GetFrameLevel() + 1)
+
+        DecorateSidebarButton(btn)
+
+        -- Glow layer (behind icon): tinted version of the -on texture
+        local iconGlow = btn:CreateTexture(nil, "ARTWORK", nil, 0)
+        iconGlow:SetTexture(ICONS_PATH .. "sidebar\\profiles-on.png")
+        iconGlow:SetSize(NAV_ICON_W, NAV_ICON_H)
+        iconGlow:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        iconGlow:SetDesaturated(true)
+        iconGlow:SetVertexColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
+        iconGlow:Hide()
+        btn._iconGlow = iconGlow
+        RegAccent({ type="vertex", obj=iconGlow })
+
+        -- Icon layer (on top of glow): always the white off texture
+        local icon = btn:CreateTexture(nil, "ARTWORK", nil, 1)
+        icon:SetTexture(ICONS_PATH .. "sidebar\\profiles-off.png")
+        icon:SetSize(NAV_ICON_W, NAV_ICON_H)
+        icon:SetPoint("LEFT", btn, "LEFT", NAV_LEFT, 0)
+        btn._icon    = icon
+        btn._iconOn  = ICONS_PATH .. "sidebar\\profiles-on.png"
+        btn._iconOff = ICONS_PATH .. "sidebar\\profiles-off.png"
+
+        local label = MakeFont(btn, 14, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+        label:SetPoint("LEFT", icon, "RIGHT", NAV_TXT_GAP, 0)
+        label:SetText(EllesmereUI.L("Profiles & Presets"))
+        btn._label = label
+
+        label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+        icon:SetDesaturated(false)
+        icon:SetAlpha(NAV_ENABLED_ICON_A)
+
+        btn._folder = "_EUIProfiles"
+        btn._loaded = true
+
+        local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
+        hlTex:SetAllPoints()
+        btn:SetScript("OnEnter", function(self)
+            hlTex:SetAlpha(0.06)
+            if activeModule ~= self._folder then
+                self._hoverGlow:Show()
+                self._hoverIndicator:Show()
+                self._label:SetTextColor(NAV_HOVER_ENABLED_TEXT.r, NAV_HOVER_ENABLED_TEXT.g, NAV_HOVER_ENABLED_TEXT.b, NAV_HOVER_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            hlTex:SetAlpha(0)
+            self._hoverGlow:Hide()
+            self._hoverIndicator:Hide()
+            if activeModule ~= self._folder then
+                self._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+            end
+        end)
+        btn:SetScript("OnClick", function(self)
+            if modules[self._folder] then
+                EllesmereUI:SelectModule(self._folder)
+            end
+        end)
+
+        sidebarButtons["_EUIProfiles"] = btn
+        EllesmereUI._profilesSidebarBtn = btn
+    end
+
+    -- Addon offset: first addon starts four rows below
+    -- (Unlock Mode + Global Settings + Patch Notes + Profiles & Presets)
+    local ORIG_ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 4
 
     -----------------------------------------------------------------------
     --  Sidebar search bar (filters addon list by display name or page name)
     -----------------------------------------------------------------------
-    local SB_TOP_PAD     = 18   -- gap between Global Settings and the search bar
+    local SB_TOP_PAD     = 13   -- gap between Profiles & Presets and the search bar
     local SB_H           = 28
     local SB_BOT_PAD     = 6
     local SB_SIDE_INSET  = 20
@@ -5731,7 +5955,7 @@ local function CreateMainFrame()
 
     local sbPlaceholder = MakeFont(sidebarSearchFrame, 12, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.3)
     sbPlaceholder:SetPoint("LEFT", sidebarSearchFrame, "LEFT", 10, 0)
-    sbPlaceholder:SetText("Search Features...")
+    sbPlaceholder:SetText(EllesmereUI.L("Search Features..."))
 
     local sbClearBtn = CreateFrame("Button", nil, sidebarSearchFrame)
     sbClearBtn:SetSize(20, 20)
@@ -5783,10 +6007,12 @@ local function CreateMainFrame()
     --  class art, so addon buttons live inside a ScrollFrame with smooth
     --  mouse-wheel scrolling and a thin thumb on the right edge.
     -----------------------------------------------------------------------
-    local ADDON_VISIBLE_ROWS    = 10.5
+    local ADDON_VISIBLE_ROWS    = 12   -- nav rows shrank to 40px; bump count so the addon viewport still fills to the bottom
     -- +30 = 20px viewport bonus plus 10px offsetting the SB_TOP_PAD bump above,
     -- so growing the search-bar padding doesn't silently shrink the viewport.
-    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30
+    -- Reserve a strip below the viewport for the scroll-to-bottom arrow button.
+    local ADDON_ARROW_RESERVE   = 24
+    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30 - ADDON_ARROW_RESERVE
     local ADDON_SCROLL_STEP     = 60   -- match the main content scroll
     local ADDON_SMOOTH_SPEED    = 12   -- match the main content scroll
 
@@ -5823,8 +6049,47 @@ local function CreateMainFrame()
     addonThumb:SetWidth(3)
     addonThumb:SetHeight(40)
 
+    -- Scroll-to-bottom arrow, centered just below the viewport. Dims when the
+    -- list is at the bottom (or doesn't scroll at all); click animates the list
+    -- to the bottom. OnClick is wired further below, once the smooth-scroll
+    -- state locals exist. Alpha tiers are stored on the frame (it's ours).
+    local arrowBtn = CreateFrame("Button", nil, sidebar)
+    arrowBtn:SetSize(22, 19)
+    arrowBtn:SetPoint("TOP", addonScrollFrame, "BOTTOM", 0, -5)
+    arrowBtn:SetFrameLevel(sidebar:GetFrameLevel() + 5)
+    arrowBtn:SetHitRectInsets(-12, -12, -6, -8)
+    arrowBtn._aEnabled, arrowBtn._aDisabled, arrowBtn._aHover = 0.7, 0.2, 1.0
+    arrowBtn._atBottom = false
+    do
+        local t = arrowBtn:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(ICONS_PATH .. "eui-arrow-down3.png")
+        t:SetAllPoints()
+    end
+    arrowBtn:SetAlpha(arrowBtn._aEnabled)
+    arrowBtn:SetScript("OnEnter", function(self)
+        if not self._atBottom then self:SetAlpha(self._aHover) end
+    end)
+    arrowBtn:SetScript("OnLeave", function(self)
+        self:SetAlpha(self._atBottom and self._aDisabled or self._aEnabled)
+    end)
+    EllesmereUI._addonScrollArrow = arrowBtn
+
     local function UpdateAddonThumb()
         local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        -- Scroll-to-bottom arrow state: disabled (dimmed) when there's nothing
+        -- below, enabled otherwise. Runs before the no-scroll early return.
+        do
+            local cur = tonumber(addonScrollFrame:GetVerticalScroll()) or 0
+            local atBottom = (maxScroll <= 0.5) or (cur >= maxScroll - 0.5)
+            arrowBtn._atBottom = atBottom
+            if atBottom then
+                arrowBtn:SetAlpha(arrowBtn._aDisabled)
+            elseif arrowBtn:IsMouseOver() then
+                arrowBtn:SetAlpha(arrowBtn._aHover)
+            else
+                arrowBtn:SetAlpha(arrowBtn._aEnabled)
+            end
+        end
         if maxScroll <= 0 then
             addonTrack:Hide()
             return
@@ -5897,6 +6162,20 @@ local function CreateMainFrame()
     addonScrollFrame:SetScript("OnScrollRangeChanged", UpdateAddonThumb)
     addonScrollFrame:HookScript("OnSizeChanged", UpdateAddonThumb)
 
+    -- Scroll-to-bottom arrow click: smooth-animate to the bottom (no-op when
+    -- already there). Reuses the same smooth-scroll state as the mouse wheel.
+    arrowBtn:SetScript("OnClick", function()
+        local maxScroll = EllesmereUI.SafeScrollRange and EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        if maxScroll <= 0 then return end
+        local scale = addonScrollFrame:GetEffectiveScale()
+        maxScroll = math.floor(maxScroll * scale) / scale
+        addonScrollTarget = maxScroll
+        if not addonIsSmoothing then
+            addonIsSmoothing = true
+            addonSmoothFrame:Show()
+        end
+    end)
+
     -- Click / drag on the scrollbar track. Clicking anywhere on the track
     -- jumps the scroll to that position; holding the button drags.
     -- The visible track is 3px wide so we add a wider invisible hit frame.
@@ -5968,7 +6247,7 @@ local function CreateMainFrame()
         local EG = ELLESMERE_GREEN
         local label = MakeFont(row, 15, nil, EG.r, EG.g, EG.b, 1)
         label:SetPoint("LEFT", row, "LEFT", NAV_LEFT, 0)
-        label:SetText(group.label)
+        label:SetText(EllesmereUI.L(group.label))
         RegAccent({ type="callback", fn = function(r, g, b)
             label:SetTextColor(r, g, b, 1)
         end })
@@ -6081,6 +6360,11 @@ local function CreateMainFrame()
             local SYNC_HOVER_B = math.min(1, SYNC_ON_B * 1.25)
             local isGlobalOnly = EllesmereUI._syncGlobalOnly and EllesmereUI._syncGlobalOnly[info.folder]
             local function RefreshSyncState()
+                -- Hide the sync icon for disabled modules: an addon that isn't
+                -- loaded has no live settings to sync, so showing (and letting the
+                -- user click) its sync state is meaningless. Uses the same loaded
+                -- check as the power button so the two stay consistent.
+                if not IsAddonLoaded(info.folder) then syncBtn:Hide(); return end
                 -- Hide if only one profile exists
                 local profCount = 0
                 if EllesmereUIDB and EllesmereUIDB.profiles then
@@ -7015,7 +7299,7 @@ local function CreateMainFrame()
         local bg = SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, .92)
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, textR, textG, textB)
-        lbl:SetAlpha(textA); lbl:SetPoint("CENTER"); lbl:SetText(label)
+        lbl:SetAlpha(textA); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L(label))
         btn._label = lbl
         do
             local FADE_DUR = 0.1
@@ -7074,11 +7358,28 @@ local function CreateMainFrame()
     footerFrame._resetBtn = resetBtn
 
     -- Reload UI  (next to Reset, 40px gap, same white/muted style)
-    MakeFooterBtn(footerFrame, FOOTER_BTN_W, FOOTER_BTN_H,
+    local reloadBtn = MakeFooterBtn(footerFrame, FOOTER_BTN_W, FOOTER_BTN_H,
         "BOTTOMLEFT", resetBtn, "BOTTOMRIGHT", FOOTER_BTN_GAP, 0,
         RS_TEXT_R, RS_TEXT_G, RS_TEXT_B, RS_TEXT_A, RS_TEXT_HR, RS_TEXT_HG, RS_TEXT_HB, RS_TEXT_HA,
         RS_BRD_R, RS_BRD_G, RS_BRD_B, RS_BRD_A, RS_BRD_HR, RS_BRD_HG, RS_BRD_HB, RS_BRD_HA,
         "Reload UI", function() ReloadUI() end)
+    footerFrame._reloadBtn = reloadBtn
+
+    -- Show/hide the Reset button per module. Modules without an onReset (Patch
+    -- Notes, Profiles) have nothing to reset, so Reset is hidden and Reload UI
+    -- slides left into its slot to avoid a gap. Called from SelectModule.
+    EllesmereUI._UpdateResetButtonVisible = function(hasReset)
+        local rb, rl = footerFrame._resetBtn, footerFrame._reloadBtn
+        if not rb or not rl then return end
+        rl:ClearAllPoints()
+        if hasReset then
+            rb:Show()
+            rl:SetPoint("BOTTOMLEFT", rb, "BOTTOMRIGHT", FOOTER_BTN_GAP, 0)
+        else
+            rb:Hide()
+            rl:SetPoint("BOTTOMLEFT", footerFrame, "BOTTOMLEFT", FOOTER_PAD, FOOTER_Y)
+        end
+    end
 
     -- Social icons  (to the left of Done button)
     do
@@ -7219,7 +7520,7 @@ local function CreateMainFrame()
         local bg = SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, .92)
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b)
-        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText("Done")
+        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L("Done"))
         -- Hover animation reads from ELLESMERE_GREEN live
         local FADE_DUR = 0.1
         local progress, target = 0, 0
@@ -8429,6 +8730,9 @@ function EllesmereUI:SelectModule(folderName)
         rb._label:SetWordWrap(false)
         rb._label:SetMaxLines(1)
     end
+    if EllesmereUI._UpdateResetButtonVisible then
+        EllesmereUI._UpdateResetButtonVisible(config.onReset ~= nil)
+    end
     headerFrame._desc:SetText(EllesmereUI.L(config.description or ""))
     BuildTabs(config.pages, config.disabledPages, config.disabledPageTooltips)
     local savedPage = _lastPagePerModule[folderName]
@@ -8831,7 +9135,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.2.2"
+EllesmereUI.VERSION = "8.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -9011,6 +9315,7 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "TellMeWhen",               label = "TellMeWhen",                 targets = "all",                              message = "TellMeWhen overlaps with EllesmereUI's core positional architecture. If you ONLY use for sound alerts it should be okay but may still cause issues." },
             { addon = "Bartender4",               label = "Bartender4",                 targets = { "EllesmereUIActionBars" } },
             { addon = "Dominos",                  label = "Dominos",                    targets = { "EllesmereUIActionBars" } },
+            { addon = "ImprovedTalentLoadouts",   label = "Improved Talent Loadouts",   targets = { "EllesmereUIActionBars" } },
             { addon = "UnhaltedUnitFrames",       label = "Unhalted Unit Frames",       targets = { "EllesmereUIUnitFrames" } },
             { addon = "Platynator",               label = "Platynator",                 targets = { "EllesmereUINameplates" } },
             { addon = "Plater",                   label = "Plater Nameplates",          targets = { "EllesmereUINameplates" } },
@@ -9350,6 +9655,101 @@ SlashCmdList.EUIDEV = function()
     end
     local state = newVal == "1" and "ON" or "OFF"
     EllesmereUI.Print("|cff00ff00[EllesmereUI]|r Dev mode: all addon restriction CVars " .. state .. ".")
+    if EllesmereUI.UpdateDevModeIndicator then EllesmereUI.UpdateDevModeIndicator() end
+end
+
+-------------------------------------------------------------------------------
+--  Dev Mode badge: a small top-left indicator shown while /euidev is active
+--  (the addon-restriction-forced CVars are on, so the restricted / secret-value
+--  environment is being forced for testing). Toggled by /euidev and re-checked
+--  on login, since the CVars persist across sessions.
+-------------------------------------------------------------------------------
+do
+    local DEV_CVAR = "addonChallengeModeRestrictionsForced"
+
+    function EllesmereUI.IsDevModeActive()
+        return GetCVar(DEV_CVAR) == "1"
+    end
+
+    local badge
+
+    local function CreateDevBadge()
+        if badge then return badge end
+        local PP = EllesmereUI.PP
+        local accent = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+
+        local f = CreateFrame("Frame", "EllesmereUIDevModeBadge", UIParent)
+        f:SetFrameStrata("HIGH")
+        f:SetHeight(26)
+        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -16)
+        f:EnableMouse(false)
+        f:Hide()
+
+        -- Dark base + faint accent wash for an on-brand tint
+        local bg = f:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.02, 0.02, 0.03, 0.62)
+        local wash = f:CreateTexture(nil, "BORDER")
+        wash:SetAllPoints()
+        wash:SetColorTexture(accent.r, accent.g, accent.b, 0.06)
+
+        -- Accent 1px border (our own frame, safe)
+        if PP and PP.CreateBorder then
+            PP.CreateBorder(f, accent.r, accent.g, accent.b, 0.9, 1, "OVERLAY", 7)
+        end
+
+        -- Pulsing accent "LED" dot (recording-indicator vibe)
+        local dot = f:CreateTexture(nil, "ARTWORK")
+        dot:SetTexture("Interface\\Buttons\\WHITE8x8")
+        dot:SetVertexColor(accent.r, accent.g, accent.b, 1)
+        dot:SetSize(7, 7)
+        dot:SetPoint("LEFT", f, "LEFT", 9, 0)
+        if dot.SetSnapToPixelGrid then dot:SetSnapToPixelGrid(false); dot:SetTexelSnappingBias(0) end
+        local ag = dot:CreateAnimationGroup()
+        ag:SetLooping("BOUNCE")
+        local pulse = ag:CreateAnimation("Alpha")
+        pulse:SetFromAlpha(1); pulse:SetToAlpha(0.1)
+        pulse:SetDuration(0.7); pulse:SetSmoothing("IN_OUT")
+        f._pulse = ag
+
+        -- Label
+        local label = f:CreateFontString(nil, "OVERLAY")
+        label:SetFont(EllesmereUI.EXPRESSWAY, 11,
+            (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE")
+        label:SetText("DEV MODE ACTIVE")
+        label:SetTextColor(accent.r, accent.g, accent.b, 1)
+        label:SetPoint("LEFT", dot, "RIGHT", 8, 0)
+
+        -- Size to content: dotPad(9) + dot(7) + gap(8) + text + rightPad(12)
+        f:SetWidth(9 + 7 + 8 + label:GetStringWidth() + 12)
+
+        badge = f
+        return f
+    end
+
+    function EllesmereUI.UpdateDevModeIndicator()
+        if not EllesmereUI.IsDevModeActive() then
+            if badge then
+                if badge._pulse then badge._pulse:Stop() end
+                badge:Hide()
+            end
+            return
+        end
+        local f = CreateDevBadge()
+        f:Show()
+        if f._pulse then f._pulse:Play() end
+    end
+
+    -- CVars persist across sessions: check on login (deferred so the theme accent
+    -- is fully resolved). PLAYER_LOGIN re-fires on /reload, so this covers both.
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        C_Timer.After(2, function()
+            if EllesmereUI.UpdateDevModeIndicator then EllesmereUI.UpdateDevModeIndicator() end
+        end)
+    end)
 end
 
 -- Open the panel with a specific addon's tab selected
@@ -10007,6 +10407,24 @@ EllesmereUI.VIS_VALUES = {
 }
 EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
+-- Action Bars variant: adds "Show when Dragonriding". Only the SECURE action
+-- bars (1-8, stance, pet) can express it as [advflyable,mounted,flying] in their
+-- state driver, which re-evaluates the flying transition in real time. The
+-- non-secure bars (Micro/Bag/XP/Rep) and other modules can't catch the takeoff
+-- event, so they don't expose this option.
+EllesmereUI.VIS_VALUES_AB = {
+    never      = "Never",
+    always     = "Always",
+    mouseover  = "Mouseover",
+    in_combat      = "In Combat",
+    out_of_combat  = "Out of Combat",
+    show_dragonriding = "Show when Dragonriding",
+    in_raid        = "In Raid Group",
+    in_party   = "In Party",
+    solo       = "Solo",
+}
+EllesmereUI.VIS_ORDER_AB = { "never", "always", "mouseover", "in_combat", "out_of_combat", "show_dragonriding", "---", "in_raid", "in_party", "solo" }
+
 -- CDM variant (no mouseover -- CDM bars don't support mouseover visibility)
 EllesmereUI.VIS_VALUES_CDM = {
     never          = "Never",
@@ -10136,6 +10554,18 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
     if mode == "in_raid" then return state.inRaid end
     if mode == "in_party" then return state.inParty or state.inRaid end
     if mode == "solo" then return not state.inRaid and not state.inParty end
+    if mode == "show_dragonriding" then
+        -- Mirrors the secure-macro [advflyable,mounted,flying]: show only while
+        -- flying on a glide-capable (skyriding) mount. IsMounted/IsFlying are
+        -- combat-safe and non-tainting; GetGlidingInfo's 2nd return (canGlide)
+        -- is the advanced-flyable flag.
+        if not (IsMounted and IsMounted() and IsFlying and IsFlying()) then return false end
+        if C_PlayerInfo and C_PlayerInfo.GetGlidingInfo then
+            local _, canGlide = C_PlayerInfo.GetGlidingInfo()
+            return canGlide == true
+        end
+        return true
+    end
     -- "always" and "mouseover" both return true (mouseover handled separately)
     return true
 end

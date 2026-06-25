@@ -396,7 +396,7 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "FPS Counter Settings",
                 rows = {
                     { type="slider", label="Text Size",
-                      min=8, max=24, step=1,
+                      min=8, max=30, step=1,
                       get=function()
                         return (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
                       end,
@@ -422,6 +422,15 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         if not EllesmereUIDB then EllesmereUIDB = {} end
                         EllesmereUIDB.fpsShowWorldMS = v
+                        if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
+                      end },
+                    { type="toggle", label="Hide Local/World Label",
+                      get=function()
+                        return EllesmereUIDB and EllesmereUIDB.fpsHideLabel or false
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.fpsHideLabel = v
                         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
                       end },
                 },

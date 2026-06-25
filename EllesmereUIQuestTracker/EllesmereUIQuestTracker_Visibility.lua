@@ -370,12 +370,25 @@ function EQT.ApplyBackground()
     ApplyTopDivider()
 end
 
+-- Force Quest Tracker on Screen: when the saved preference is on, keep the
+-- ObjectiveTrackerFrame clamped to the screen; otherwise allow it to be dragged
+-- off-screen (the default). Applied at load and whenever the options toggle
+-- changes. Persists via the quest tracker DB.
+function EQT.ApplyForceOnScreen()
+    local otf = GetTracker()
+    if not otf then return end
+    local cfg = EQT.DB()
+    local force = cfg and cfg.forceOnScreen == true or false
+    otf:SetClampedToScreen(force)
+end
+
 function EQT.InitVisibility()
     local otf = GetTracker()
     if not otf then return end
 
     EnsureBG()
     EQT.ApplyBackground()
+    EQT.ApplyForceOnScreen()
     InstallShowHook()
 
     -- Live-update the top accent divider when the user changes UI Accent Color.

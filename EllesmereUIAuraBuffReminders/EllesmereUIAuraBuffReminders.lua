@@ -26,6 +26,96 @@ local AURA_SCAN_LIMIT = 255  -- Midnight supports more than the legacy 40 buff l
 local DEFAULT_GLOW_COLOR = {r=1, g=0.776, b=0.376}
 local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 
+-------------------------------------------------------------------------------
+--  Profiler: zero cost when off, /eabrprof to toggle. debugprofilestop for
+--  per-label timing + C_AddOnProfiler for whole-addon avg/peak. Mirrors the
+--  RaidFrames /erfprof pattern. (do..end block adds no file-scope locals.)
+-------------------------------------------------------------------------------
+do
+    local _profData, _profActive = {}, false
+    local dps = debugprofilestop
+    local _addonName = "EllesmereUIAuraBuffReminders"
+    local _frameCount, _totalAddonMs, _peakAddonMs, _startTime = 0, 0, 0, 0
+    local _curFrameLabels, _curFrameTotal, _curFrameTime = {}, 0, 0
+    local _peakFrameLabels, _peakFrameTotal = {}, 0
+
+    EABR.ProfBegin = function(label)
+        if not _profActive then return 0 end
+        return dps()
+    end
+    EABR.ProfEnd = function(label, t0)
+        if not _profActive then return end
+        local elapsed = dps() - t0
+        local now = GetTime()
+        if now ~= _curFrameTime then
+            if _curFrameTotal > _peakFrameTotal then
+                _peakFrameTotal = _curFrameTotal
+                wipe(_peakFrameLabels)
+                for k, v in pairs(_curFrameLabels) do _peakFrameLabels[k] = v end
+            end
+            wipe(_curFrameLabels); _curFrameTotal = 0; _curFrameTime = now
+        end
+        local d = _profData[label]
+        if not d then d = { n = 0, total = 0 }; _profData[label] = d end
+        d.n = d.n + 1
+        d.total = d.total + elapsed
+        _curFrameLabels[label] = (_curFrameLabels[label] or 0) + elapsed
+        _curFrameTotal = _curFrameTotal + elapsed
+    end
+
+    local profFrame = CreateFrame("Frame")
+    profFrame:Hide()
+    profFrame:SetScript("OnUpdate", function()
+        if not _profActive then profFrame:Hide(); return end
+        if not C_AddOnProfiler or not C_AddOnProfiler.GetAddOnMetric then return end
+        local addonMs = C_AddOnProfiler.GetAddOnMetric(_addonName, Enum.AddOnProfilerMetric.LastTime) or 0
+        _frameCount = _frameCount + 1
+        _totalAddonMs = _totalAddonMs + addonMs
+        if addonMs > _peakAddonMs then _peakAddonMs = addonMs end
+    end)
+
+    local function ResetProf()
+        wipe(_profData); wipe(_curFrameLabels); wipe(_peakFrameLabels)
+        _frameCount = 0; _totalAddonMs = 0; _peakAddonMs = 0
+        _peakFrameTotal = 0; _curFrameTotal = 0; _curFrameTime = 0; _startTime = 0
+    end
+
+    SLASH_EABRPROF1 = "/eabrprof"
+    SlashCmdList["EABRPROF"] = function(msg)
+        if msg == "reset" then ResetProf(); print("|cff00ccffEABRProf:|r data cleared"); return end
+        _profActive = not _profActive
+        if _profActive then
+            ResetProf(); _startTime = GetTime(); profFrame:Show()
+            print("|cff00ccffEABRProf:|r ON -- type /eabrprof again to stop")
+        else
+            profFrame:Hide()
+            if _curFrameTotal > _peakFrameTotal then
+                _peakFrameTotal = _curFrameTotal
+                wipe(_peakFrameLabels)
+                for k, v in pairs(_curFrameLabels) do _peakFrameLabels[k] = v end
+            end
+            local dur = GetTime() - _startTime
+            local avgAddon = _frameCount > 0 and (_totalAddonMs / _frameCount) or 0
+            print("|cff00ccffEABRProf Report:|r  " .. _frameCount .. " frames, " .. format("%.1f", dur) .. "s")
+            print(format("  |cff00ccffAddon Peak:|r  %.3f ms   |cff00ccffAvg:|r %.3f ms", _peakAddonMs, avgAddon))
+            local scale = (_peakFrameTotal > 0) and (_peakAddonMs / _peakFrameTotal) or 1
+            local sorted = {}
+            for label, ms in pairs(_peakFrameLabels) do
+                local d = _profData[label]
+                local avg = (d and _frameCount > 0) and (d.total / _frameCount) or 0
+                local n = d and d.n or 0
+                local per = (n > 0) and (d.total / n) or 0
+                sorted[#sorted + 1] = { label = label, peak = ms * scale, avg = avg, n = n, per = per }
+            end
+            table.sort(sorted, function(a, b) return a.avg > b.avg end)
+            print(format("  %-20s %8s %8s %7s %8s", "Label", "avg ms", "peak ms", "calls", "ms/call"))
+            for _, e in ipairs(sorted) do
+                print(format("  %-20s %8.3f %8.3f %7d %8.4f", e.label, e.avg, e.peak, e.n, e.per))
+            end
+        end
+    end
+end
+
 -- Hunter's Mark combat state: set true on PLAYER_REGEN_DISABLED, cleared on
 -- cast or combat end. OOC falls back to target debuff check.
 local _huntersMarkNeeded = false
@@ -142,18 +232,24 @@ local function InMythicZeroDungeon()
     return false
 end
 
+-- Mythic raid difficulty: fixed 20-player (16, PrimaryRaidMythic) or
+-- flexible (233, RaidMythicFlexible, added in 12.0.x). Add future Mythic
+-- raid difficulty IDs here so every gate below stays correct.
+local function IsMythicRaidDiff(d)
+    return d == 16 or d == 233
+end
 
--- Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (difficulty 16)
+-- Mythic 0 dungeon (party, normal difficulty 1) or Mythic raid (fixed or flex)
 local function InMythicZeroDungeonOrMythicRaid()
     if InMythicZeroDungeon() then return true end
-    if IsInRaid() and _cachedDiffID == 16 then return true end
+    if IsInRaid() and IsMythicRaidDiff(_cachedDiffID) then return true end
     return false
 end
 
 -- Heroic+ content (heroic dungeon/raid or mythic dungeon/raid/M+)
 local function InHeroicOrMythicContent()
     if _cachedIType == "party" and (_cachedDiffID == 2 or _cachedDiffID == 23 or _cachedDiffID == 8) then return true end
-    if _cachedIType == "raid" and (_cachedDiffID == 5 or _cachedDiffID == 6 or _cachedDiffID == 15 or _cachedDiffID == 16) then return true end
+    if _cachedIType == "raid" and (_cachedDiffID == 5 or _cachedDiffID == 6 or _cachedDiffID == 15 or IsMythicRaidDiff(_cachedDiffID)) then return true end
     return false
 end
 
@@ -297,14 +393,29 @@ function _AC.ensureNames()
 end
 
 local function IsUnderDuration(duration, expirationTime)
-    if InMythicZeroDungeon() and db and db.profile.display.showUnderDurationDungeon > 0 and duration >= db.profile.display.showUnderDurationDungeon*60 and expirationTime - GetTime() < db.profile.display.showUnderDurationDungeon*60 then
-        return true
+    if not (db and db.profile and db.profile.display and duration and expirationTime) then return false end
+
+    local d = db.profile.display
+    local thresholdSeconds
+    if InMythicZeroDungeon() then
+        thresholdSeconds = (d.showUnderDurationDungeon or 0) * 60
+    elseif IsInRaid() then
+        thresholdSeconds = (d.showUnderDurationRaid or 0) * 60
     end
-    if IsInRaid() and db and db.profile.display.showUnderDurationRaid > 0 and duration >= db.profile.display.showUnderDurationRaid*60 and expirationTime - GetTime() < db.profile.display.showUnderDurationRaid*60 then
-        return true
+
+    if thresholdSeconds and thresholdSeconds > 0 and duration >= thresholdSeconds then
+        local now = GetTime()
+        if expirationTime - now < thresholdSeconds then
+            return true
+        end
+
+        local refreshAt = expirationTime - thresholdSeconds
+        if refreshAt > now and (not EABR._nextDurationRefreshTime or refreshAt < EABR._nextDurationRefreshTime) then
+            EABR._nextDurationRefreshTime = refreshAt
+        end
     end
-    
-    return false 
+
+    return false
 end
 
 local function PlayerHasAuraByID(spellIDs)
@@ -1013,27 +1124,57 @@ local function PlayerHasFlaskBuff()
 end
 
 -------------------------------------------------------------------------------
---  Item count cache: GetItemCount is a bag scan. Cache results and only
---  invalidate on BAG_UPDATE_DELAYED (bags don't change during combat or
---  between events). Saves dozens of redundant bag scans per refresh.
+--  Item count snapshot: GetItemCount is a per-item bag scan, and the consumable
+--  resolve queries ~135 items -- doing that cold was ~7ms. Instead walk all bags
+--  ONCE into an {itemID -> count} table (rebuilt only when bags change) so every
+--  CachedGetItemCount is a hash lookup. Bags 0-4 only; consumables never live in
+--  the reagent bag. The item-use tracker (DetectUsedItem) shares this exact
+--  snapshot, so there is one bag walk per bag change, not two.
 -------------------------------------------------------------------------------
-local _itemCountCache = {}
+local _bagCounts = {}
 local _itemCountDirty = true
+
+-- Resolved consumable cache: WHICH item to show for each bag/equip-derived
+-- category. Rebuilt only when bags, the equipped weapon, or a preferred-item
+-- setting changes (see EABR.ResolveConsumables). Hung on EABR to avoid new
+-- file-scope locals (200 cap). Only SELECTION state is cached (itemID / cat /
+-- hasBags / availability booleans); the icon is derived at each emit site so it
+-- stays byte-identical to the per-refresh GetItemIcon calls. Records default to
+-- nil/false = no reminder until the first resolve. dirty starts true so the
+-- first out-of-combat CollectConsumables fully populates the cache.
+EABR._resolved = {
+    dirty = true,                   -- rebuild pending
+    sig = {},                       -- last preferred-setting signature
+    rune = {},                      -- {itemID}
+    flask = {},                     -- {itemID, hasBags}
+    food = {},                      -- {itemID}
+    inky = {},                      -- {hasPotion}
+    healthstone = {},               -- {hasStone}
+    we = { [16] = {}, [17] = {} },  -- per-slot {cat, itemID, hasBags}
+}
 
 local function InvalidateItemCountCache()
     _itemCountDirty = true
+    EABR._resolved.dirty = true
+end
+
+local function RebuildBagCounts()
+    wipe(_bagCounts)
+    _itemCountDirty = false
+    for bag = 0, 4 do
+        local numSlots = C_Container and C_Container.GetContainerNumSlots(bag) or 0
+        for slot = 1, numSlots do
+            local info = C_Container and C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
+                _bagCounts[info.itemID] = (_bagCounts[info.itemID] or 0) + (info.stackCount or 1)
+            end
+        end
+    end
 end
 
 local function CachedGetItemCount(itemID)
-    if _itemCountDirty then
-        wipe(_itemCountCache)
-        _itemCountDirty = false
-    end
-    local cached = _itemCountCache[itemID]
-    if cached ~= nil then return cached end
-    local count = GetItemCount(itemID, false) or 0
-    _itemCountCache[itemID] = count
-    return count
+    if _itemCountDirty then RebuildBagCounts() end
+    return _bagCounts[itemID] or 0
 end
 
 -------------------------------------------------------------------------------
@@ -1106,6 +1247,122 @@ local function FindWeaponEnchantItem(preferredKey, lastUsedItemID, targetCat)
     return nil
 end
 
+-------------------------------------------------------------------------------
+--  Resolve bag/equip-derived consumable display items. This is the costly part
+--  of the consumable check (Find*Item data-table walks + GetWeaponCategory) and
+--  depends ONLY on bags, equipped weapon type, and the preferred-item settings
+--  (+ db.char.lastUsed*), none of which change between refreshes. Rebuilt lazily
+--  when one of those changes; CollectConsumables reads the resolved records each
+--  refresh and derives the icon at emit. Preserves every branch's exact item
+--  selection, fallback ordering, and hasBags/desaturated behavior.
+--  NOTE: any FUTURE input added to resolution must also set _resolved.dirty (or
+--  be added to the signature below), or a stale item could be shown.
+-------------------------------------------------------------------------------
+function EABR.ResolveConsumables()
+    if not db then return end
+    local co = db.profile and db.profile.consumables
+    if not co then return end
+
+    local R = EABR._resolved
+    local pf  = co.preferredFlask or "last_used"
+    local pfd = co.preferredFood or "last_used"
+    local pwe = co.preferredWeaponEnchant or "last_used"
+    -- Lazy gate: rebuild only when a bag/equip event marked us dirty, or when a
+    -- preferred-item setting changed. The options setters only RequestRefresh
+    -- with no bag event, so a cheap signature compare catches that here.
+    local sig = R.sig
+    if not R.dirty and sig.pf == pf and sig.pfd == pfd and sig.pwe == pwe then
+        return
+    end
+    R.dirty = false
+    sig.pf, sig.pfd, sig.pwe = pf, pfd, pwe
+
+    local luf  = db.char and db.char.lastUsedFlask or nil
+    local lufd = db.char and db.char.lastUsedFood or nil
+    local luwe = db.char and db.char.lastUsedWeaponEnchant or nil
+
+    -- Augment Rune: void preferred over ethereal; nil if neither in bags.
+    local runeItem = nil
+    if CachedGetItemCount(259085) > 0 then runeItem = 259085
+    elseif CachedGetItemCount(243191) > 0 then runeItem = 243191 end
+    R.rune.itemID = runeItem
+
+    -- Flask: resolve a display item even when out of stock (shown desaturated).
+    local flaskItemID = FindFlaskItem(pf, luf)
+    R.flask.hasBags = (flaskItemID ~= nil)
+    if not flaskItemID then
+        if pf == "last_used" then
+            flaskItemID = luf
+        else
+            for _, f in ipairs(FLASK_ITEMS) do
+                if f.key == pf then flaskItemID = f.items[1]; break end
+            end
+        end
+        if not flaskItemID and FLASK_ITEMS[1] then
+            flaskItemID = FLASK_ITEMS[1].items[1]
+        end
+    end
+    R.flask.itemID = flaskItemID
+
+    -- Food: resolve a display item even when out of stock (never desaturated).
+    local foodItemID = FindFoodItem(pfd, lufd)
+    if not foodItemID then
+        if pfd == "last_used" then
+            foodItemID = lufd
+        else
+            for _, f in ipairs(FOOD_ITEMS) do
+                if f.key == pfd then foodItemID = f.itemID; break end
+            end
+        end
+        if not foodItemID and FOOD_ITEMS[1] then
+            foodItemID = FOOD_ITEMS[1].itemID
+        end
+    end
+    R.food.itemID = foodItemID
+
+    -- Weapon enchant: per slot. cat (equipped weapon type) gates the reminder in
+    -- CollectConsumables and selects the item; resolve a display item even when
+    -- out of stock (shown desaturated). Same fallback order as the inline code.
+    for _, slot in ipairs({16, 17}) do
+        local r = R.we[slot]
+        local cat = GetWeaponCategory(slot)
+        r.cat = cat
+        local bestItemID = FindWeaponEnchantItem(pwe, luwe, cat)
+        r.hasBags = (bestItemID ~= nil)
+        if not bestItemID then
+            if pwe == "last_used" then
+                bestItemID = luwe
+            else
+                for _, choice in ipairs(WEAPON_ENCHANT_CHOICES) do
+                    if choice.key == pwe then
+                        for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
+                            if we.name == choice.name then bestItemID = we.itemID; break end
+                        end
+                        break
+                    end
+                end
+            end
+            if not bestItemID then
+                for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
+                    if we.weaponType == "NEUTRAL" or we.weaponType == cat then
+                        bestItemID = we.itemID; break
+                    end
+                end
+            end
+        end
+        r.itemID = bestItemID
+    end
+
+    -- Inky Black Potion: constant item; only availability is bag-derived.
+    R.inky.hasPotion = CachedGetItemCount(INKY_BLACK_ITEM) > 0
+
+    -- Healthstone: constant texture; only availability is bag-derived.
+    local hasStone = false
+    for _, itemID in ipairs(HEALTHSTONE_ITEM_IDS) do
+        if CachedGetItemCount(itemID) > 0 then hasStone = true; break end
+    end
+    R.healthstone.hasStone = hasStone
+end
 
 -------------------------------------------------------------------------------
 --  Glow Types (shared with options)
@@ -1815,6 +2072,14 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
     -- Only check consumables out of combat (secret value protection)
     if not inCombat then
 
+        -- Rebuild the bag/equip-derived item cache only when its inputs changed
+        -- (bags, equipped weapon, or a preferred-item setting). Lazy: a clean
+        -- refresh just does three scalar compares and returns. Gated on inInstance
+        -- because EVERY bag-derived reminder (rune/flask/food/weapon-enchant/inky/
+        -- healthstone) is instance-only, so the open world never resolves. The
+        -- dirty flag persists until the next in-instance refresh consumes it.
+        if inInstance then EABR.ResolveConsumables() end
+
         -- === SPECIALS (respect showSpecialsNonInstanced) ===
         if specialsActive then
             -- Rogue Poisons: unified scan counts active per category,
@@ -1962,12 +2227,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
             if showRune then
                 local hasRuneBuff = InMythicPlusKey() or PlayerHasAuraByID(RUNE_BUFF_IDS)
                 if not hasRuneBuff then
-                    local voidCount = CachedGetItemCount(259085)
-                    local etherCount = CachedGetItemCount(243191)
-                    local runeItem = nil
-                    if voidCount > 0 then runeItem = 259085       -- Void-Touched Augment Rune
-                    elseif etherCount > 0 then runeItem = 243191  -- Ethereal Augment Rune
-                    end
+                    local runeItem = EABR._resolved.rune.itemID
                     if runeItem then
                         local e = AcquireEntry()
                         e.mode = "item"; e.itemID = runeItem
@@ -1981,10 +2241,10 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
         end
 
         -- Consumables (weapon enchants, flask, food) only in Mythic dungeons
-        -- (M0/M+) and Normal/Heroic/Mythic raids.
+        -- (M0/M+) and Normal/Heroic/Mythic raids (fixed 16 or flex 233).
         if inInstance and (InMythicPlusKey()
             or (_cachedIType == "party" and (_cachedDiffID == 23 or _cachedDiffID == 8))
-            or (_cachedIType == "raid" and (_cachedDiffID == 14 or _cachedDiffID == 15 or _cachedDiffID == 16))) then
+            or (_cachedIType == "raid" and (_cachedDiffID == 14 or _cachedDiffID == 15 or IsMythicRaidDiff(_cachedDiffID)))) then
 
         -- Weapon Enchants (temp weapon enchant items)
         -- Skip if the player knows any imbue spell (Shaman imbues, Paladin rites).
@@ -1996,59 +2256,35 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
         end
         if co.enabled.weapon_enchant and not _hasImbueSpell then
             local hasMH, mhExpire, _, _, hasOH, ohExpire = GetWeaponEnchantInfo()
-            local mhCat = GetWeaponCategory(16)
-            local ohCat = GetWeaponCategory(17)
 
             -- Check each weapon slot independently (both can show at once).
             -- Remind if: no enchant, OR enchant is under the duration threshold.
-            local preferredKey = co.preferredWeaponEnchant or "last_used"
-            local lastUsedID = db.char and db.char.lastUsedWeaponEnchant or nil
-            for _, si in ipairs({{slot=16, cat=mhCat, has=hasMH, expire=mhExpire}, {slot=17, cat=ohCat, has=hasOH, expire=ohExpire}}) do
+            -- Item / category / hasBags are resolved off the hot path; the icon is
+            -- derived here at emit so it matches the per-refresh result exactly.
+            for _, si in ipairs({{slot=16, has=hasMH, expire=mhExpire}, {slot=17, has=hasOH, expire=ohExpire}}) do
+                local r = EABR._resolved.we[si.slot]
+                local cat = r.cat
                 local shouldRemind = false
-                if si.cat and not si.has then
+                if cat and not si.has then
                     shouldRemind = true
-                elseif si.cat and si.has and si.expire and si.expire > 0 then
+                elseif cat and si.has and si.expire and si.expire > 0 then
                     local expireTime = si.expire / 1000 + GetTime()
                     if IsUnderDuration(3600, expireTime) then
                         shouldRemind = true
                     end
                 end
-                if shouldRemind then
-                    local bestItemID = FindWeaponEnchantItem(preferredKey, lastUsedID, si.cat)
-                    local hasBags = (bestItemID ~= nil)
-                    if not bestItemID then
-                        if preferredKey == "last_used" then
-                            bestItemID = lastUsedID
-                        else
-                            for _, choice in ipairs(WEAPON_ENCHANT_CHOICES) do
-                                if choice.key == preferredKey then
-                                    for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
-                                        if we.name == choice.name then bestItemID = we.itemID; break end
-                                    end
-                                    break
-                                end
-                            end
-                        end
-                        if not bestItemID then
-                            for _, we in ipairs(WEAPON_ENCHANT_ITEMS) do
-                                if we.weaponType == "NEUTRAL" or we.weaponType == si.cat then
-                                    bestItemID = we.itemID; break
-                                end
-                            end
-                        end
-                    end
-                    if bestItemID then
-                        local e = AcquireEntry()
-                        e.mode = "macro"
-                        e.macro = "/use item:" .. bestItemID .. "\n/use " .. si.slot
-                        e.texture = GetItemIcon(bestItemID) or 134400
-                        e.label = ShortLabel(si.slot == 16 and "Main Hand" or "Off Hand")
-                        e.tooltipItem = bestItemID
-                        e.desaturated = not hasBags
-                        e.cat = "consumable"; e.scale = co.scale or 1.0
-                        e.dismissKey = "consumable:weapon_enchant_" .. si.slot
-                        missing[#missing+1] = e
-                    end
+                if shouldRemind and r.itemID then
+                    local bestItemID = r.itemID
+                    local e = AcquireEntry()
+                    e.mode = "macro"
+                    e.macro = "/use item:" .. bestItemID .. "\n/use " .. si.slot
+                    e.texture = GetItemIcon(bestItemID) or 134400
+                    e.label = ShortLabel(si.slot == 16 and "Main Hand" or "Off Hand")
+                    e.tooltipItem = bestItemID
+                    e.desaturated = not r.hasBags
+                    e.cat = "consumable"; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:weapon_enchant_" .. si.slot
+                    missing[#missing+1] = e
                 end
             end
         end
@@ -2056,30 +2292,14 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
         -- Flask (OOC only; detection uses snapshot during keystones and PvP)
         if co.enabled.flask then
             if not PlayerHasFlaskBuff() then
-                local preferredKey = co.preferredFlask or "last_used"
-                local lastUsedID = db.char and db.char.lastUsedFlask or nil
-                local flaskItemID = FindFlaskItem(preferredKey, lastUsedID)
-                local hasBags = (flaskItemID ~= nil)
-                -- Resolve display item even when out of stock
-                if not flaskItemID then
-                    if preferredKey == "last_used" then
-                        flaskItemID = lastUsedID
-                    else
-                        for _, f in ipairs(FLASK_ITEMS) do
-                            if f.key == preferredKey then flaskItemID = f.items[1]; break end
-                        end
-                    end
-                    -- Final fallback: first flask in data table
-                    if not flaskItemID and FLASK_ITEMS[1] then
-                        flaskItemID = FLASK_ITEMS[1].items[1]
-                    end
-                end
+                local rf = EABR._resolved.flask
+                local flaskItemID = rf.itemID
                 if flaskItemID then
                     local e = AcquireEntry()
                     e.mode = "item"; e.itemID = flaskItemID
                     e.texture = GetItemIcon(flaskItemID) or 134830
                     e.label = "Flask"
-                    e.desaturated = not hasBags
+                    e.desaturated = not rf.hasBags
                     e.cat = "consumable"; e.scale = co.scale or 1.0
                     e.dismissKey = "consumable:flask"
                     missing[#missing+1] = e
@@ -2090,21 +2310,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
         -- Food / Well Fed (OOC only; detection uses snapshot during keystones)
         if co.enabled.food then
             if not PlayerHasWellFed() then
-                local preferredKey = co.preferredFood or "last_used"
-                local lastUsedID = db.char and db.char.lastUsedFood or nil
-                local foodItemID = FindFoodItem(preferredKey, lastUsedID)
-                if not foodItemID then
-                    if preferredKey == "last_used" then
-                        foodItemID = lastUsedID
-                    else
-                        for _, f in ipairs(FOOD_ITEMS) do
-                            if f.key == preferredKey then foodItemID = f.itemID; break end
-                        end
-                    end
-                    if not foodItemID and FOOD_ITEMS[1] then
-                        foodItemID = FOOD_ITEMS[1].itemID
-                    end
-                end
+                local foodItemID = EABR._resolved.food.itemID
                 if foodItemID then
                     local e = AcquireEntry()
                     e.mode = "item"; e.itemID = foodItemID
@@ -2131,7 +2337,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                 end
                 local currentZone = tostring(C_Map.GetBestMapForUnit("player") or 0)
                 if co._inkyZoneSet[currentZone] then
-                    local hasPotion = CachedGetItemCount(INKY_BLACK_ITEM) > 0
+                    local hasPotion = EABR._resolved.inky.hasPotion
                     local hasBuff = PlayerHasAuraByID({INKY_BLACK_BUFF})
                     if not hasBuff and hasPotion then
                         local e = AcquireEntry()
@@ -2187,10 +2393,7 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                     end
                 end
             end
-            local hasHealthstone = false
-            for _, itemID in ipairs(HEALTHSTONE_ITEM_IDS) do
-                if CachedGetItemCount(itemID) > 0 then hasHealthstone = true; break end
-            end
+            local hasHealthstone = EABR._resolved.healthstone.hasStone
             if hasWarlock and not hasHealthstone then
                 local e = AcquireEntry()
                 e.mode = "texture"; e.texture = 538745
@@ -2260,6 +2463,7 @@ local UpdateDurationTicker  -- forward-declare; defined after RequestRefresh
 
 local function Refresh()
     _cachedOutline = nil
+    EABR._nextDurationRefreshTime = nil
     if not db then return end
     if euiPanelOpen then HideCombatIcons(); HideAllIcons(); return end
 
@@ -2295,7 +2499,9 @@ local function Refresh()
     local _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7
     if _memProbe then collectgarbage("stop"); _m0 = collectgarbage("count") end
 
+    local _pt = EABR.ProfBegin("AuraCache")
     BuildPlayerAuraCache()
+    EABR.ProfEnd("AuraCache", _pt)
     if _memProbe then _m1 = collectgarbage("count") end
 
     local playerClass = GetPlayerClass()
@@ -2313,7 +2519,9 @@ local function Refresh()
     ---------------------------------------------------------------------------
     if remindersOn then
         local inInstance = InRealInstancedContent()
+        _pt = EABR.ProfBegin("RaidBuffs")
         CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
+        EABR.ProfEnd("RaidBuffs", _pt)
     end
     if _memProbe then _m2 = collectgarbage("count") end
 
@@ -2333,7 +2541,9 @@ local function Refresh()
     --  2) Auras (suppressed in M+ keystones and combat)
     ---------------------------------------------------------------------------
     if remindersOn and not inCombat and not inKeystone then
+        _pt = EABR.ProfBegin("Auras")
         CollectAuras(missing, playerClass, specID, inInstance, inCombat)
+        EABR.ProfEnd("Auras", _pt)
     end
     if _memProbe then _m3 = collectgarbage("count") end
 
@@ -2341,7 +2551,9 @@ local function Refresh()
     --  3) Consumables (suppressed in M+ keystones, combat, and PvP)
     ---------------------------------------------------------------------------
     if remindersOn and not inCombat and not inKeystone and not inPvP then
+        _pt = EABR.ProfBegin("Consumables")
         CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
+        EABR.ProfEnd("Consumables", _pt)
     end
     if _memProbe then _m4 = collectgarbage("count") end
 
@@ -2408,6 +2620,7 @@ local function Refresh()
     --  Apply results
     ---------------------------------------------------------------------------
     if inCombat then
+        _pt = EABR.ProfBegin("Display")
         -- Combat path: use non-secure visual-only icons.
         -- Fade out stale secure buttons (SetAlpha is safe during combat).
         FadeOutSecureIcons()
@@ -2461,10 +2674,12 @@ local function Refresh()
             if combatIdx > 0 then EllesmereUI.SetElementVisibility(combatAnchor, true); LayoutCombatIcons() end
             if cursorIdx > 0 then cursorAnchor:Show(); EllesmereUI.SetElementVisibility(cursorAnchor, true); LayoutCursorIcons() end
         end
+        EABR.ProfEnd("Display", _pt)
         return
     end
 
     -- OOC path: full secure button display
+    _pt = EABR.ProfBegin("Display")
     HideCombatIcons()
     HideCursorIcons()
     HideAllIcons()
@@ -2515,6 +2730,8 @@ local function Refresh()
         EllesmereUI.SetElementVisibility(iconAnchor, false)
     end
 
+    EABR.ProfEnd("Display", _pt)
+
     -- MEMORY PROBE REPORT (temporary)
     if _memProbe then
         _m6 = collectgarbage("count")
@@ -2560,33 +2777,26 @@ local function RequestRefresh()
     end
 end
 
--- Duration-threshold ticker: polls every 15s so expiring buffs trigger
--- reminders even when no event fires. Only runs when OOC, in a dungeon
--- or raid, not in an active keystone, and a threshold is set.
-local _durationTicker
+-- Duration-threshold timer: arm one refresh for the next known buff/enchant
+-- threshold crossing instead of polling while idle.
 UpdateDurationTicker = function()
-    local shouldTick = false
-    if db and not InCombat() and not InMythicPlusKey() then
-        local d = db.profile.display
-        if d and ((d.showUnderDurationDungeon or 0) > 0
-              or  (d.showUnderDurationRaid or 0) > 0) then
-            if (_cachedIType == "party" or _cachedIType == "raid") then
-                shouldTick = true
-            end
-        end
+    if EABR._durationTimer then
+        EABR._durationTimer:Cancel()
+        EABR._durationTimer = nil
     end
-    if shouldTick and not _durationTicker then
-        _durationTicker = C_Timer.NewTicker(15, function()
-            if InCombat() or InMythicPlusKey() then
-                if _durationTicker then _durationTicker:Cancel(); _durationTicker = nil end
-                return
-            end
-            RequestRefresh()
-        end)
-    elseif not shouldTick and _durationTicker then
-        _durationTicker:Cancel()
-        _durationTicker = nil
+
+    if not (EABR._nextDurationRefreshTime and db and not InCombat() and not InMythicPlusKey()) then
+        return
     end
+
+    local delay = EABR._nextDurationRefreshTime - GetTime() + 0.1
+    if delay < 0.1 then delay = 0.1 end
+
+    EABR._durationTimer = C_Timer.NewTimer(delay, function()
+        EABR._durationTimer = nil
+        if InCombat() or InMythicPlusKey() then return end
+        RequestRefresh()
+    end)
 end
 
 
@@ -3215,12 +3425,10 @@ function EABR:OnEnable()
     end
 
     ---------------------------------------------------------------------------
-    --  Range polling (0.5s throttle). Runs in combat too: UnitInRange is not
-    --  protected, and the group-buff reminders gate on member range, so a
-    --  member walking in or out of range mid-fight must retrigger evaluation.
+    --  Range updates. UNIT_IN_RANGE_UPDATE mirrors the raid frames' range
+    --  path, so range changes retrigger group-buff evaluation without polling.
     ---------------------------------------------------------------------------
     local _lastRangeSet = {}   -- [unitToken] = true/false (last known in-range state)
-    local _rangeAccum   = 0    -- seconds since last poll
 
     -- Pre-build unit token strings to avoid per-poll allocations
     local _raidTokens = {}
@@ -3229,44 +3437,85 @@ function EABR:OnEnable()
     for i = 1, 4 do _partyTokens[i] = "party" .. i end
 
     local rangeFrame = CreateFrame("Frame")
-    local _rangeChanged = false
+    local _rangeTrackers = {}
     local function _checkUnit(u)
         if not UnitExists(u) then
             if _lastRangeSet[u] ~= nil then
                 _lastRangeSet[u] = nil
-                _rangeChanged = true
+                return true
             end
-            return
+            return false
         end
         local state = _unitInRange(u)
         if _lastRangeSet[u] ~= state then
             _lastRangeSet[u] = state
-            _rangeChanged = true
+            return true
+        end
+        return false
+    end
+
+    local function _checkAllRangeUnits()
+        local changed = false
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do
+                if _checkUnit(_raidTokens[i]) then changed = true end
+            end
+        elseif IsInGroup() then
+            for i = 1, GetNumSubgroupMembers() do
+                if _checkUnit(_partyTokens[i]) then changed = true end
+            end
+        end
+        return changed
+    end
+
+    local function _onRangeEvent(_, event, unit)
+        if event == "UNIT_PHASE" then
+            if _checkAllRangeUnits() then RequestRefresh() end
+        elseif unit and _checkUnit(unit) then
+            RequestRefresh()
         end
     end
 
-    rangeFrame:SetScript("OnUpdate", function(_, elapsed)
-        -- Only poll while in a group. The poll just reads UnitInRange and
-        -- requests our own (insecure) refresh, so combat is safe.
-        if not IsInGroup() then
-            _rangeAccum = 0
-            return
+    local function _clearRangeTrackers()
+        for _, tracker in pairs(_rangeTrackers) do
+            tracker:UnregisterAllEvents()
         end
-        _rangeAccum = _rangeAccum + elapsed
-        if _rangeAccum < 0.5 then
-            return
-        end
-        _rangeAccum = 0
+    end
 
-        _rangeChanged = false
+    local function _trackRangeUnit(unit)
+        if UnitIsUnit(unit, "player") then return end
+        local tracker = _rangeTrackers[unit]
+        if not tracker then
+            tracker = CreateFrame("Frame")
+            tracker:SetScript("OnEvent", _onRangeEvent)
+            _rangeTrackers[unit] = tracker
+        end
+        tracker:RegisterUnitEvent("UNIT_IN_RANGE_UPDATE", unit)
+        tracker:RegisterUnitEvent("UNIT_CONNECTION", unit)
+    end
+
+    local function _rebuildRangeTracking()
+        _clearRangeTrackers()
+        wipe(_lastRangeSet)
         if IsInRaid() then
-            for i = 1, GetNumGroupMembers() do _checkUnit(_raidTokens[i]) end
-        else
-            for i = 1, GetNumSubgroupMembers() do _checkUnit(_partyTokens[i]) end
+            for i = 1, GetNumGroupMembers() do _trackRangeUnit(_raidTokens[i]) end
+        elseif IsInGroup() then
+            for i = 1, GetNumSubgroupMembers() do _trackRangeUnit(_partyTokens[i]) end
         end
+        if _checkAllRangeUnits() then RequestRefresh() end
+    end
 
-        if _rangeChanged then RequestRefresh() end
+    rangeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    rangeFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    rangeFrame:RegisterEvent("UNIT_PHASE")
+    rangeFrame:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_PHASE" then
+            _onRangeEvent(nil, event)
+        else
+            _rebuildRangeTracking()
+        end
     end)
+    _rebuildRangeTracking()
 end
 
 -------------------------------------------------------------------------------
@@ -3403,44 +3652,51 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     -- full refresh (which scans all group members via AnyGroupMemberMissingBuff).
     if e == "GROUP_ROSTER_UPDATE" then return end
 
-    -- Bag changes: invalidate item count cache so next refresh re-scans
-    if e == "BAG_UPDATE_DELAYED" or e == "BAG_UPDATE" or e == "BAG_UPDATE_COOLDOWN" then
+    -- Bag CONTENT changes (BAG_UPDATE/_DELAYED) change item counts and which item
+    -- we resolve, so re-scan. BAG_UPDATE_COOLDOWN is intentionally NOT handled (or
+    -- registered): it fires ~1/sec from item cooldown ticks, changes neither
+    -- counts nor any reminder, and was both refreshing every second and busting
+    -- the resolved-item cache (re-running the ~1ms resolve on every refresh).
+    if e == "BAG_UPDATE_DELAYED" or e == "BAG_UPDATE" then
         InvalidateItemCountCache()
+    end
+
+    -- Equipped-weapon changes alter weapon-enchant resolution (weapon type ->
+    -- which enchant item and which slots can show). Item counts are unchanged,
+    -- so only the resolved cache needs rebuilding; the next refresh re-resolves.
+    if e == "UNIT_INVENTORY_CHANGED" then
+        -- UNIT_INVENTORY_CHANGED also fires for temp weapon enchants, trinket
+        -- procs, durability, etc. Only the equipped WEAPON TYPE feeds resolution,
+        -- so re-resolve only when a weapon category actually changed (vs the last
+        -- resolved cat, which ResolveConsumables keeps current).
+        local R = EABR._resolved
+        if GetWeaponCategory(16) ~= R.we[16].cat or GetWeaponCategory(17) ~= R.we[17].cat then
+            R.dirty = true
+        end
     end
 
     -- All other events: just refresh
     RequestRefresh()
 end)
 
--- Item use tracking via bag snapshot diffing on BAG_UPDATE_DELAYED
-local lastBagSnapshot = {}
-
-local _bagSnapReuse = {}
-local function SnapshotBags(out)
-    wipe(out)
-    for bag = 0, 4 do
-        local numSlots = C_Container and C_Container.GetContainerNumSlots(bag) or 0
-        for slot = 1, numSlots do
-            local info = C_Container and C_Container.GetContainerItemInfo(bag, slot)
-            if info and info.itemID then
-                out[info.itemID] = (out[info.itemID] or 0) + info.stackCount
-            end
-        end
-    end
-end
+-- Item use tracking: _bagCounts (built by RebuildBagCounts, shared with the
+-- consumable item-count cache) is the single source of truth for bag contents.
+-- On BAG_UPDATE_DELAYED rebuild it ONCE and diff against the previous snapshot
+-- to detect items whose count dropped (used) -- no second bag walk. The main
+-- handler's InvalidateItemCountCache runs first (sets _itemCountDirty), so the
+-- rebuild here also serves the deferred consumable refresh that follows.
+local _prevBagCounts = {}
 
 local function DetectUsedItem()
     if not db or not db.char then return end
-    SnapshotBags(_bagSnapReuse)
-    for itemID, oldCount in pairs(lastBagSnapshot) do
-        local newCount = _bagSnapReuse[itemID] or 0
-        if newCount < oldCount then
+    RebuildBagCounts()
+    for itemID, oldCount in pairs(_prevBagCounts) do
+        if (_bagCounts[itemID] or 0) < oldCount then
             TrackItemUse(itemID)
         end
     end
-    -- Copy new snapshot into lastBagSnapshot (reuse table)
-    wipe(lastBagSnapshot)
-    for k, v in pairs(_bagSnapReuse) do lastBagSnapshot[k] = v end
+    wipe(_prevBagCounts)
+    for k, v in pairs(_bagCounts) do _prevBagCounts[k] = v end
 end
 
 do
@@ -3449,7 +3705,11 @@ do
     f:RegisterEvent("PLAYER_LOGIN")
     f:SetScript("OnEvent", function(_, ev)
         if ev == "PLAYER_LOGIN" then
-            C_Timer.After(1, function() SnapshotBags(lastBagSnapshot) end)
+            C_Timer.After(1, function()
+                RebuildBagCounts()
+                wipe(_prevBagCounts)
+                for k, v in pairs(_bagCounts) do _prevBagCounts[k] = v end
+            end)
         elseif ev == "BAG_UPDATE_DELAYED" then
             DetectUsedItem()
         end
@@ -3482,7 +3742,6 @@ mainFrame:RegisterEvent("PLAYER_DEAD")
 mainFrame:RegisterEvent("PLAYER_ALIVE")
 mainFrame:RegisterEvent("PLAYER_UNGHOST")
 mainFrame:RegisterEvent("BAG_UPDATE")
-mainFrame:RegisterEvent("BAG_UPDATE_COOLDOWN")
 mainFrame:RegisterUnitEvent("UNIT_PET", "player")
 
 -------------------------------------------------------------------------------

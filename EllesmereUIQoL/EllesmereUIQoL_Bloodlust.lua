@@ -139,7 +139,7 @@ local function _applyBuffShape()
     buffCooldown:SetAllPoints(buffOverlay)
 
     -- Match the debuff icon's duration text exactly (font, size, position).
-    buffDurationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, EP("durationSize") or 12, "OUTLINE, SLUG")
+    buffDurationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, EP("durationSize") or 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     buffDurationFS:ClearAllPoints()
     buffDurationFS:SetPoint("CENTER", frame, "CENTER", EP("durationOffsetX") or 0, EP("durationOffsetY") or 0)
 
@@ -204,12 +204,12 @@ local function ApplyShape()
     -- Duration text (centered) and count text (bottom-right). Sated debuffs
     -- have no stacks so the count string stays empty, but we keep the field for
     -- 1:1 parity with the BattleRes icon layout.
-    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, EP("durationSize") or 12, "OUTLINE, SLUG")
+    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, EP("durationSize") or 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     durationFS:ClearAllPoints()
     durationFS:SetPoint("CENTER", frame, "CENTER",
         EP("durationOffsetX") or 0, EP("durationOffsetY") or 0)
 
-    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, EP("countSize") or 11, "OUTLINE, SLUG")
+    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, EP("countSize") or 11, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     countFS:ClearAllPoints()
     countFS:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
         -2 + (EP("countOffsetX") or 0), 2 + (EP("countOffsetY") or 0))
@@ -671,11 +671,11 @@ local function CreateBloodlustFrame()
     cooldownFrame:SetFrameLevel(frame:GetFrameLevel() + 1)
 
     durationFS = cooldownFrame:CreateFontString(nil, "OVERLAY")
-    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 14, "OUTLINE, SLUG")
+    durationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 14, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     durationFS:SetText("")
 
     countFS = cooldownFrame:CreateFontString(nil, "OVERLAY")
-    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 12, "OUTLINE, SLUG")
+    countFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     countFS:SetText("")
 
     -- 40s active-lust overlay. Sits ABOVE the debuff icon and its swipe; shown
@@ -696,7 +696,7 @@ local function CreateBloodlustFrame()
     buffCooldown:SetFrameLevel(buffOverlay:GetFrameLevel() + 1)
 
     buffDurationFS = buffCooldown:CreateFontString(nil, "OVERLAY")
-    buffDurationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 12, "OUTLINE, SLUG")
+    buffDurationFS:SetFont((EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT, 12, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     buffDurationFS:SetText("")
 
     return frame
