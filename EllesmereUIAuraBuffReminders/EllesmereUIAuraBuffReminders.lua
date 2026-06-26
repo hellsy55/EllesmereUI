@@ -172,6 +172,7 @@ end
 --  ShortLabel shorten buff/aura names for icon text display
 -------------------------------------------------------------------------------
 local LABEL_OVERRIDES = {
+    ["Battle Stance"]           = "Stance",
     ["Defensive Stance"]        = "Stance",
     ["Berserker Stance"]        = "Stance",
     ["Devotion Aura"]           = "Aura",
@@ -453,6 +454,20 @@ local function PlayerHasAuraByID(spellIDs)
         end
     end
     return false
+end
+
+-- Warrior stances are shapeshift forms, not auras, so GetPlayerAuraBySpellID can't
+-- detect them. Scan the stance bar instead: return whether the stance (by its cast
+-- spell ID) is known (present in the bar) and whether it is currently active.
+local function GetStanceState(stanceSpellID)
+    local numForms = GetNumShapeshiftForms()
+    for i = 1, numForms do
+        local _, isActive, _, spellID = GetShapeshiftFormInfo(i)
+        if spellID == stanceSpellID then
+            return true, isActive
+        end
+    end
+    return false, false
 end
 
 -- Shared helpers for group aura scanning (hoisted to avoid per-call closure allocation)
@@ -774,11 +789,15 @@ local AURAS = {
     -- Symbiotic Relationship: player gets a buff when active (group only)
     { key="symbiotic",  class="DRUID",   name="Symbiotic Relationship", castSpell=474750, buffIDs={474754},
       check="player", combatOk=false, requireGroup=true },
-    -- Warrior stances: NOT on non-secret list, OOC only
-    { key="def_stance",  class="WARRIOR", name="Defensive Stance",  castSpell=386208, buffIDs={386208},
-      check="player", specs={73}, combatOk=false },
+    -- Warrior stances: shapeshift forms (detected via the stance bar, not auras), OOC only.
+    -- Arms -> Battle Stance; Fury -> Berserker Stance; Prot -> Defensive Stance. The reminder
+    -- hides once the desired stance is active and is suppressed entirely if it isn't known.
+    { key="battle_stance",  class="WARRIOR", name="Battle Stance",   castSpell=386164, buffIDs={386164},
+      check="player", specs={71}, combatOk=false, isStance=true },
     { key="berserk_stance", class="WARRIOR", name="Berserker Stance", castSpell=386196, buffIDs={386196},
-      check="player", specs={71, 72}, combatOk=false },
+      check="player", specs={72}, combatOk=false, isStance=true },
+    { key="def_stance",  class="WARRIOR", name="Defensive Stance",  castSpell=386208, buffIDs={386208},
+      check="player", specs={73}, combatOk=false, isStance=true },
     -- Shadowform: OOC only. Void Form (194249) also satisfies the check.
     -- shapeshiftIndex=1: fallback for PvP instances where aura API is restricted.
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
@@ -1444,7 +1463,7 @@ local defaults = {
             showNonInstanced = true,
             scale = 1.0,
             enabled = {
-                symbiotic=true, def_stance=true, berserk_stance=true, shadowform=true,
+                symbiotic=true, battle_stance=true, def_stance=true, berserk_stance=true, shadowform=true,
                 devo_aura=true, bol=true, bof=true, som=true, blistering_scales=true, 
                 bestow_weyrnstone=true, timelessness=true,
             },
@@ -1987,7 +2006,8 @@ if inInstance or au.showNonInstanced then
     for _, aura in ipairs(AURAS) do
         if aura.standalone then
             -- Handled by standalone system, skip
-        elseif au.enabled[aura.key] and (aura.class == playerClass) and Known(aura.castSpell)
+        elseif au.enabled[aura.key] and (aura.class == playerClass)
+           and ((aura.isStance and GetStanceState(aura.castSpell)) or (not aura.isStance and Known(aura.castSpell)))
            and not (aura.notIfKnown and Known(aura.notIfKnown))
            and not (aura.requireTalent and not Known(aura.requireTalent))
            and not (aura.noPvP and InPvPInstance()) then
@@ -2039,6 +2059,10 @@ if inInstance or au.showNonInstanced then
                     elseif aura.check == "playerSelfCast" then
                         -- Player must have the buff from their OWN cast
                         isMissing = not PlayerHasSelfCastAuraByID(aura.buffIDs)
+                    elseif aura.isStance then
+                        -- Stance is a shapeshift form: hide once it's the active stance
+                        local _, isActive = GetStanceState(aura.castSpell)
+                        isMissing = not isActive
                     else
                         -- Use instance-specific buff list if available and in instance
                         local checkIDs = (inInstance and aura.instanceBuffIDs) or aura.buffIDs
