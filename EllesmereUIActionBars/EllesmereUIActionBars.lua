@@ -9060,6 +9060,38 @@ function EAB:FinishSetup()
     _petEventFrame:RegisterUnitEvent("UNIT_AURA", "pet")
     _petEventFrame:SetScript("OnEvent", UpdatePetBar)
 
+    -- Stance bar GCD / cooldown swipe.
+    --
+    -- Blizzard drives the shapeshift cooldown swipe exclusively through the
+    -- StanceBar frame's UPDATE_SHAPESHIFT_COOLDOWN -> StanceBarMixin:UpdateState.
+    -- HideBlizzardBars() unregisters all events on the StanceBar frame, so that
+    -- path is dead. The swipe only ever appeared by accident: a bar transition
+    -- (form change, Ascendance, etc.) makes ValidateActionBarTransition re-Show()
+    -- StanceBar, whose OnShow -> Update -> UpdateState sets the cooldown on the
+    -- (reparented but identical) StanceButton frames before our OnShow hook
+    -- re-hides the now-empty bar. A plain GCD from a spell that does NOT change
+    -- form fires UPDATE_SHAPESHIFT_COOLDOWN with no transition, so nothing ran
+    -- and the form-lockout swipe was invisible.
+    --
+    -- Mirror Blizzard's cooldown update directly on our reused StanceButtons.
+    -- Visual-only (CooldownFrame_Set touches no protected state), so it is safe
+    -- during combat, same as the pet PET_BAR_UPDATE_COOLDOWN path above.
+    local function UpdateStanceCooldowns()
+        local numForms = GetNumShapeshiftForms()
+        for i = 1, numForms do
+            local btn = _G["StanceButton" .. i]
+            if btn and btn.cooldown then
+                local start, duration, enable = GetShapeshiftFormCooldown(i)
+                CooldownFrame_Set(btn.cooldown, start, duration, enable)
+            end
+        end
+    end
+    local _stanceEventFrame = CreateFrame("Frame")
+    _stanceEventFrame:RegisterEvent("UPDATE_SHAPESHIFT_COOLDOWN")
+    _stanceEventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    _stanceEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    _stanceEventFrame:SetScript("OnEvent", UpdateStanceCooldowns)
+
 
     -- Talent changes can cause Blizzard to re-show hidden bars.
     -- Re-run the hider and re-unregister events on the affected frames.
