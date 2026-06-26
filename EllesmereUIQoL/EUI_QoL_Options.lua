@@ -1401,6 +1401,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   local s = "Changes the crosshair colour when your current target is out of melee range."
                   if sid == 65 then s = s .. " Holy uses Hammer of Justice (10yd)." end
+				  if sid == 1480 then s = s .. " Devourer uses Consume (25yd)." end
                   return s
               end,
               disabled=function() return crosshairOff() end,
