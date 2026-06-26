@@ -1043,6 +1043,8 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ECL_ApplyTrail then _G._ECL_ApplyTrail() end
     if _G._ECL_ApplyGCDCircle then _G._ECL_ApplyGCDCircle() end
     if _G._ECL_ApplyCastCircle then _G._ECL_ApplyCastCircle() end
+    -- Crosshair
+    if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
     -- AuraBuffReminders (refresh + position)
     if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
     if _G._EABR_ApplyUnlockPos then _G._EABR_ApplyUnlockPos() end

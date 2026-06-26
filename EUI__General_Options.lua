@@ -6447,7 +6447,12 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Developer settings defaults
                 EllesmereUIDB.showSpellID = false
                 EllesmereUIDB.suppressErrors = true
+                -- Crosshair: the root is the inherited global default, so reset it
+                -- here (per-profile overrides are cleared by the profile's own
+                -- reset). With the root off, profiles without an override inherit
+                -- "None".
                 EllesmereUIDB.crosshairSize = "None"
+                if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
                 -- Reset unlock mode layout data
                 EllesmereUIDB.unlockAnchors = nil
                 EllesmereUIDB.unlockWidthMatch = nil
