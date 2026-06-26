@@ -1461,6 +1461,9 @@ ShowWidgetTooltip = function(label, text, opts)
         if iType == "raid" and InCombatLockdown() then return end
         if (iType == "pvp" or iType == "arena") and InCombatLockdown() then return end
     end
+    -- Allow a function for dynamic text (re-evaluated on each show). Resolved
+    -- after the suppression checks so it isn't called when the tooltip is hidden.
+    if type(text) == "function" then text = text() end
     local tt = GetTooltipFrame()
     local MAX_W = 250
     local PAD = 8  -- horizontal padding each side (matches text anchor insets)
@@ -1984,6 +1987,15 @@ local function BuildDropdownControl(parent, ddW, fLevel, values, order, getValue
             ddBtn._ddRefresh = nil
         end
         -- Also refresh the label text in case the current selection's label changed
+        ddLbl:SetText(DDResolveLabel(values, order, getValue()))
+    end
+
+    -- Public: refresh only the displayed label from getValue, without rebuilding
+    -- or invalidating the menu. Safe to call while the menu is wired/open (unlike
+    -- _invalidateMenu, which nils the cached menu and would break the wired
+    -- click). Use when an external change can alter what getValue returns
+    -- (e.g. the crosshair size dropdown showing "Custom" after a cog edit).
+    ddBtn._refreshLabel = function()
         ddLbl:SetText(DDResolveLabel(values, order, getValue()))
     end
 
@@ -6365,9 +6377,12 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             row:SetScript("OnClick", function()
                 if item.locked or (item.lockedFn and item.lockedFn()) then return end
                 setFn(item.key, not getFn(item.key))
-                UpdateCheck(); UpdateLabel()
-                -- Refresh dynamic action labels (e.g. All/None toggle)
+                UpdateLabel()
+                -- Refresh checkbox visuals + dynamic action labels, so items
+                -- whose checked state depends on others (e.g. "Always" in
+                -- crosshair) update live.
                 for _, r in ipairs(_allRows) do
+                    if r.frame._updateCheck then r.frame._updateCheck() end
                     if r.frame._updateActionLabel then r.frame._updateActionLabel() end
                 end
                 if onChanged then
