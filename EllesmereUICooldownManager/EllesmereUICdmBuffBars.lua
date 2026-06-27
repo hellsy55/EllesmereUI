@@ -1094,9 +1094,16 @@ local _findChildGeneration = 0
 -- SavedVariables). Prevents frame references from leaking into serialization.
 local _findChildCache = {}
 
+-- Sticky cfg->frame bindings for the one-to-one assignment pass below. Keyed by
+-- cfg table, value is the Blizzard frame last paired to it. Lives in its own
+-- table (never on cfg, which is in SavedVariables) so frame refs don't leak into
+-- serialization. Dropped on cache invalidation (spec swap, pool rebuild).
+local _tbbStickyFrame = {}
+
 function ns.InvalidateTBBFrameCache()
     _findChildGeneration = _findChildGeneration + 1
     wipe(_findChildCache)
+    wipe(_tbbStickyFrame)
 end
 
 local function FindChild(cfg)
@@ -1123,6 +1130,140 @@ local function FindChild(cfg)
     return nil
 end
 ns.FindTBBChild = FindChild
+
+-------------------------------------------------------------------------------
+--  AssignFramesToConfigs
+--
+--  Pairs each tracked-bar config to AT MOST ONE BuffBarCooldownViewer frame,
+--  consuming every frame once so two configs can never mirror the same frame.
+--  This is the fix for multi-variant spells like Eclipse: Solar and Lunar
+--  expose sibling frames that SHARE one cooldownInfo (linkedSpellIDs lists both
+--  variants), so per-config FindChild() greedily binds BOTH configs to whichever
+--  frame enumerates first -- "Lunar shows twice, Solar never" (and the mirror,
+--  double Solar). Going frame-driven mirrors how the icon viewer works: it
+--  decorates one display per Blizzard child instead of matching a stored spell
+--  back to an ambiguous frame.
+--
+--  Three passes, each only over still-unconsumed frames:
+--    1. Sticky  -- reuse last tick's binding. The frame OBJECT identity never
+--                  goes secret, so a pairing locked in out of combat stays put
+--                  when GetAuraSpellID turns secret mid-fight. Revalidated
+--                  against a clean read when one is available (self-heals a
+--                  recycled pool frame); trusted blindly only while secret.
+--    2. Exact   -- per-frame canonical id == the config's spell (clean reads
+--                  pair frameSolar->cfgSolar, frameLunar->cfgLunar). Locks the
+--                  sticky binding for future ticks.
+--    3. Fallback-- cooldownInfo/linkedSpellIDs struct match for configs still
+--                  unpaired (combat with no prior sticky binding). Consumption
+--                  still guarantees no two configs land on the same frame.
+--
+--  Returns a cfg->frame map (a reused module table; copy if you must retain it).
+-------------------------------------------------------------------------------
+local _tbbAssignment   = {}
+local _tbbFrameScratch = {}
+local _tbbConsumed     = {}
+local _tbbFrameSID     = {}  -- frame -> canonical spell id, computed once per call
+
+local function CfgWantsSID(cfg, sid)
+    if not sid then return false end
+    if cfg.spellIDs then
+        for _, s in ipairs(cfg.spellIDs) do if s == sid then return true end end
+        return false
+    end
+    if cfg.spellID and cfg.spellID > 0 then
+        if sid == cfg.spellID then return true end
+        if cfg.baseSpellID and cfg.baseSpellID > 0 and sid == cfg.baseSpellID then return true end
+    end
+    return false
+end
+
+local function FrameIsActive(frames, target)
+    for i = 1, #frames do if frames[i] == target then return true end end
+    return false
+end
+
+local function AssignFramesToConfigs(bars)
+    local assignment = _tbbAssignment
+    wipe(assignment)
+    if not bars then return assignment end
+
+    local viewer = _G["BuffBarCooldownViewer"]
+    if not viewer or not viewer.itemFramePool then return assignment end
+
+    -- Snapshot the active pool once (enumeration is consumed by EnumerateActive)
+    -- and resolve each frame's canonical spell id ONCE here -- the passes below
+    -- would otherwise re-query it O(configs x frames) per tick, and each call
+    -- pcalls live WoW frame APIs. Caching also gives every pass a consistent
+    -- within-tick view of each frame's identity.
+    local GetCanonical = ns.GetCanonicalSpellIDForFrame
+    local frames = _tbbFrameScratch
+    wipe(frames)
+    wipe(_tbbFrameSID)
+    for frame in viewer.itemFramePool:EnumerateActive() do
+        frames[#frames + 1] = frame
+        _tbbFrameSID[frame] = GetCanonical and GetCanonical(frame) or nil
+    end
+
+    local consumed = _tbbConsumed
+    wipe(consumed)
+
+    -- Pass 1: sticky.
+    for _, cfg in ipairs(bars) do
+        local bound = _tbbStickyFrame[cfg]
+        if bound and not consumed[bound] and FrameIsActive(frames, bound) then
+            local sid = _tbbFrameSID[bound]
+            if sid then
+                -- Clean read available: keep only if still the right variant.
+                if CfgWantsSID(cfg, sid) then
+                    assignment[cfg]   = bound
+                    consumed[bound]   = true
+                else
+                    _tbbStickyFrame[cfg] = nil
+                end
+            else
+                -- Secret/combat: trust the binding locked in earlier.
+                assignment[cfg] = bound
+                consumed[bound] = true
+            end
+        end
+    end
+
+    -- Pass 2: exact per-frame identity.
+    for _, cfg in ipairs(bars) do
+        if not assignment[cfg] then
+            for i = 1, #frames do
+                local frame = frames[i]
+                if not consumed[frame] then
+                    local sid = _tbbFrameSID[frame]
+                    if sid and CfgWantsSID(cfg, sid) then
+                        assignment[cfg]      = frame
+                        consumed[frame]      = true
+                        _tbbStickyFrame[cfg] = frame
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    -- Pass 3: cooldownInfo/linkedSpellIDs struct fallback. Do NOT sticky a fuzzy
+    -- match -- let a later clean read re-pair it exactly in pass 2.
+    for _, cfg in ipairs(bars) do
+        if not assignment[cfg] then
+            for i = 1, #frames do
+                local frame = frames[i]
+                if not consumed[frame] and MatchFrameToConfig(frame, cfg) then
+                    assignment[cfg] = frame
+                    consumed[frame] = true
+                    break
+                end
+            end
+        end
+    end
+
+    return assignment
+end
+ns.AssignTBBFramesToConfigs = AssignFramesToConfigs
 
 --- Frame-based check: is a spellID present in BuffBarCooldownViewer?
 --- Iterates the tiny pool (~3-5 frames) and uses MatchesSID for robust
@@ -1530,6 +1671,11 @@ function ns.UpdateTrackedBuffBarTimers()
     end
 
 
+    -- Pair configs to Blizzard frames ONE-TO-ONE up front, consuming each frame
+    -- once. Prevents two configs (e.g. Eclipse Solar + Lunar, which share a
+    -- cooldownInfo) from both mirroring the same frame and showing twice.
+    local assignment = AssignFramesToConfigs(bars)
+
     for i, cfg in ipairs(bars) do
         local bar = tbbFrames[i]
         if not bar or not bar._tbbReady then
@@ -1542,7 +1688,7 @@ function ns.UpdateTrackedBuffBarTimers()
             -- Self-driven 40s lust bar; no Blizzard frame to mirror.
             UpdateLustBar(bar, cfg)
         else
-            local blzChild = FindChild(cfg)
+            local blzChild = assignment[cfg]
             if blzChild then ns.HookPandemicState(blzChild) end
 
             -- Active state must come from the CooldownViewer item's IsActive()

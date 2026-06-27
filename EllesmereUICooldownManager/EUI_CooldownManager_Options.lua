@@ -1655,6 +1655,35 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end)
 
+    -- Refresh the Tracking Bars page on spec change. TBB config is per-spec, but
+    -- the dropdown label and the selected-bar index are page-local state that
+    -- only recompute on build or on interaction. Swapping spec while the page is
+    -- open therefore leaves a stale selection on screen (the previous spec's
+    -- selected bar -- e.g. Balance's "Eclipse (Solar)" still shown on Feral)
+    -- until the user clicks something. Reset the selection on every spec change,
+    -- and re-run the page's refresh when the Tracking Bars page is the active one
+    -- so the dropdown label and preview rebuild against the new spec's bars.
+    -- _tbbRefreshFn is assigned inside BuildBuffBarsPage (latest closure); the
+    -- watcher frame is created once here so the page can be (re)built freely
+    -- without stacking duplicate event registrations.
+    local _tbbRefreshFn
+    local _tbbSpecWatcher = CreateFrame("Frame")
+    _tbbSpecWatcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    _tbbSpecWatcher:SetScript("OnEvent", function()
+        _tbbSelectedBar = 1
+        -- Only refresh when the options panel is actually OPEN on the Tracking
+        -- Bars page. GetActivePage() reports the last-selected page even while
+        -- the panel is closed, so without the IsShown() gate a spec swap (which
+        -- also fires on login/reload) would run RefreshTBB -> UpdateTBBPlaceholder
+        -- and force the "Move in Unlock Mode" placeholders on with no panel open.
+        if not (EllesmereUI.IsShown and EllesmereUI:IsShown()) then return end
+        local am = EllesmereUI.GetActiveModule and EllesmereUI:GetActiveModule()
+        local ap = EllesmereUI.GetActivePage and EllesmereUI:GetActivePage()
+        if am == "EllesmereUICooldownManager" and ap == PAGE_BUFF_BARS and _tbbRefreshFn then
+            _tbbRefreshFn()
+        end
+    end)
+
     -- Buff spell picker for tracked buff bars (reuses CDM buff spell list)
     local _tbbSpellPickerMenu
 
@@ -2218,6 +2247,9 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdateTBBPlaceholder()
             end)
         end
+        -- Expose this build's RefreshTBB to the outer spec-change watcher so a
+        -- spec swap while this page is open rebuilds the dropdown/preview.
+        _tbbRefreshFn = RefreshTBB
 
         -------------------------------------------------------------------
         --  CONTENT HEADER  (dropdown + bar preview)
@@ -2277,10 +2309,17 @@ initFrame:SetScript("OnEvent", function(self)
                         if info and info.name then label = info.name end
                     end
                     ddLbl:SetText(label)
-                elseif #bars == 0 then
-                    ddLbl:SetText(EllesmereUI.L("No Bars - Click to Add"))
                 else
-                    ddLbl:SetText(EllesmereUI.L("Select a bar"))
+                    -- Re-fetch the live (per-spec) bar count instead of the build-time
+                    -- `bars` upvalue: this header builder is reused across SetContentHeader
+                    -- refreshes (e.g. on spec change) without rebuilding the page, so the
+                    -- captured `bars` can be the previous spec's stale list.
+                    local liveBars = ns.GetTrackedBuffBars().bars
+                    if not liveBars or #liveBars == 0 then
+                        ddLbl:SetText(EllesmereUI.L("No Bars - Click to Add"))
+                    else
+                        ddLbl:SetText(EllesmereUI.L("Select a bar"))
+                    end
                 end
             end
             UpdateDDLabel()
