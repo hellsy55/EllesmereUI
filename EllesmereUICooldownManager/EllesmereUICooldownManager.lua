@@ -782,6 +782,34 @@ function ns.RescanChargeCdTextFlag()
     end
 end
 
+-- Custom Item gate: set ns._cdmAnyCustomItem once if any saved bar (any spec)
+-- tracks a custom item (an assignedSpells entry <= -100). The buff-bar injection
+-- pass is then skipped entirely for anyone who never adds one -- 0 cost when off.
+-- Same monotonic, scanned-once contract as the flags above (the picker flips the
+-- flag live when an item is added).
+function ns.RescanCustomItemFlag()
+    if ns._cdmAnyCustomItem or ns._customItemFlagScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._customItemFlagScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                local assigned = bs and bs.assignedSpells
+                if assigned then
+                    for _, sid in ipairs(assigned) do
+                        if type(sid) == "number" and sid <= -100 then
+                            ns._cdmAnyCustomItem = true
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Spec helpers
 --
@@ -5300,6 +5328,7 @@ BuildAllCDMBars = function()
     ns.RescanMaxStacksGlowFlag()  -- set the Max Stacks Glow gate (once) before refresh
     ns.RescanChargeCdTextFlag()   -- set the Hide CD Text (Charges) gate (once) before refresh
     ns.RescanBuffSoundFlag()      -- set the Audio Effect gate (once) before refresh
+    ns.RescanCustomItemFlag()     -- set the custom-item buff-injection gate (once)
 
     local p = ECME.db.profile
 

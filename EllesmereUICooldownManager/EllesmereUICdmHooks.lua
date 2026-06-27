@@ -2068,6 +2068,68 @@ local function GetOrCreateCustomBuffFrame(barKey, sid)
 end
 ns.GetOrCreateCustomBuffFrame = GetOrCreateCustomBuffFrame
 
+-- Own-frame for an item (icon + item cooldown + bag count), shared by the
+-- CD/utility injection (Phase 3) and the buff-family injection. Created once per
+-- (barKey, itemID). Uses the preset icon when known, else the live item icon for
+-- arbitrary user-added IDs. Returns nil if the icon isn't loaded yet.
+local function GetOrCreateItemPresetFrame(barKey, itemID)
+    local fkey = barKey .. ":item:" .. itemID
+    local f = _presetFrames[fkey]
+    if f then return f end
+
+    local itemPresets = ns.CDM_ITEM_PRESETS
+    local preset
+    if itemPresets then
+        for _, pr in ipairs(itemPresets) do
+            if pr.itemID == itemID then preset = pr; break end
+            if pr.altItemIDs then
+                for _, alt in ipairs(pr.altItemIDs) do
+                    if alt == itemID then preset = pr; break end
+                end
+            end
+        end
+    end
+    local icon = preset and preset.icon or C_Item.GetItemIconByID(itemID)
+    if not icon then return nil end
+
+    f = CreateFrame("Frame", nil, UIParent)
+    f:SetSize(36, 36); f:Hide()
+    -- Enable mouse motion (OnEnter/OnLeave) for tooltips but pass through clicks.
+    f:EnableMouse(true)
+    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+    local tex = f:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints(); tex:SetTexture(icon)
+    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    f.Icon = tex; f._tex = tex
+    local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
+    cd:SetAllPoints(); cd:SetDrawEdge(false); cd:SetDrawBling(false)
+    cd:SetHideCountdownNumbers(true)
+    cd:EnableMouse(false)
+    if cd.SetMouseClickEnabled then cd:SetMouseClickEnabled(false) end
+    if cd.SetMouseMotionEnabled then cd:SetMouseMotionEnabled(false) end
+    f.Cooldown = cd; f._cooldown = cd
+    f._isItemPresetFrame = true
+    f._presetItemID = itemID; f._presetData = preset
+    f.cooldownID = nil; f.cooldownInfo = nil
+    f.layoutIndex = 99999
+    local countFS = f:CreateFontString(nil, "OVERLAY")
+    EllesmereUI.ApplyIconTextFont(countFS, GetCDMFont(), 11, "cdm")
+    countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 2)
+    f._itemCountText = countFS
+    f:SetScript("OnEnter", function(self)
+        if not self._presetItemID then return end
+        local ffc = _ecmeFC[self]
+        local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
+        if not bd2 or not bd2.showTooltip then return end
+        GameTooltip_SetDefaultAnchor(GameTooltip, self)
+        GameTooltip:SetItemByID(self._presetItemID)
+        GameTooltip:Show()
+    end)
+    f:SetScript("OnLeave", GameTooltip_Hide)
+    _presetFrames[fkey] = f
+    return f
+end
+ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 
 -- Guard: after ENCOUNTER_END clears item-preset caches, subsequent events
 -- fire before Blizzard has finished resetting potion CDs. Without this guard
@@ -2712,6 +2774,49 @@ local function CollectAndReanchor()
         end
     end
 
+    -- Inject item own-frames into buff bars so items (e.g. food) can be tracked
+    -- there too. Negative IDs (<= -100) in assignedSpells are item markers; the
+    -- shared frame + ProcessPresetCooldowns key off _isItemPresetFrame rather than
+    -- bar type, so cooldown/count work the same as on CD/utility bars. Tracked via
+    -- HideAllInjectedCustomBuffs so removed items drop out on the next pass.
+    -- Gated behind ns._cdmAnyCustomItem (set once from saved data / the picker) so
+    -- this pass is skipped entirely for anyone who never adds a custom item.
+    if ns._cdmAnyCustomItem then
+        for _, bd in ipairs(p.cdmBars.bars) do
+            if bd.enabled and bd.barType == "buffs" then
+                local injKey = bd.key
+                local sdInj = ns.GetBarSpellData(injKey)
+                local spellList = sdInj and sdInj.assignedSpells
+                if spellList then
+                    for idx, sid in ipairs(spellList) do
+                        if type(sid) == "number" and sid <= -100 then
+                            local itemID = -sid
+                            local f = GetOrCreateItemPresetFrame(injKey, itemID)
+                            if f then
+                                _injectedCustomBuffFrames[f] = true
+                                f._ownerBarKey = injKey
+                                f.layoutIndex = 6000 + idx
+                                if f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur) then
+                                    f._cooldown:SetCooldown(f._cdStart, f._cdDur)
+                                end
+                                if f._lastDesat ~= nil and f._tex then
+                                    f._tex:SetDesaturated(f._lastDesat)
+                                end
+                                f:Show()
+                                local fc = FC(f)
+                                fc.barKey = injKey
+                                fc.spellID = sid
+                                if not barLists[injKey] then barLists[injKey] = {} end
+                                barLists[injKey][#barLists[injKey] + 1] =
+                                    AcquireEntry(f, sid, sid, f.layoutIndex)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     local LayoutCDMBar = ns.LayoutCDMBar
     local RefreshCDMIconAppearance = ns.RefreshCDMIconAppearance
     local ApplyCDMTooltipState = ns.ApplyCDMTooltipState
@@ -2772,7 +2877,12 @@ local function CollectAndReanchor()
                             if orderList then
                                 local oidx = 0
                                 for _, sid in ipairs(orderList) do
-                                    if type(sid) == "number" and sid > 0 then
+                                    -- Negative IDs are custom-item markers: order them
+                                    -- by their slot too (no override/base variants).
+                                    if type(sid) == "number" and sid <= -100 then
+                                        oidx = oidx + 1
+                                        if not buffOrder[sid] then buffOrder[sid] = oidx end
+                                    elseif type(sid) == "number" and sid > 0 then
                                         oidx = oidx + 1
                                         if not buffOrder[sid] then buffOrder[sid] = oidx end
                                         if _FindOverride then
@@ -3058,63 +3168,12 @@ local function CollectAndReanchor()
                                 tf:Hide()
                             end
                         elseif sid and sid <= -100 then
-                            -- Item preset (potions, healthstone, etc.)
+                            -- Item preset (potions, healthstone, etc.) or a
+                            -- user-added custom item ID. Frame creation (incl.
+                            -- the live-icon fallback for arbitrary items) is
+                            -- shared with the buff-family injection.
                             local itemID = -sid
-                            local fkey = barKey .. ":item:" .. itemID
-                            local f = _presetFrames[fkey]
-                            if not f then
-                                local itemPresets = ns.CDM_ITEM_PRESETS
-                                local preset
-                                if itemPresets then
-                                    for _, pr in ipairs(itemPresets) do
-                                        if pr.itemID == itemID then preset = pr; break end
-                                        if pr.altItemIDs then
-                                            for _, alt in ipairs(pr.altItemIDs) do
-                                                if alt == itemID then preset = pr; break end
-                                            end
-                                        end
-                                    end
-                                end
-                                local icon = preset and preset.icon or C_Item.GetItemIconByID(itemID)
-                                if icon then
-                                    f = CreateFrame("Frame", nil, UIParent)
-                                    f:SetSize(36, 36); f:Hide()
-                                    -- Enable mouse motion (OnEnter/OnLeave) for
-                                    -- tooltips but pass through clicks.
-                                    f:EnableMouse(true)
-                                    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
-                                    local tex = f:CreateTexture(nil, "ARTWORK")
-                                    tex:SetAllPoints(); tex:SetTexture(icon)
-                                    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                                    f.Icon = tex; f._tex = tex
-                                    local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
-                                    cd:SetAllPoints(); cd:SetDrawEdge(false); cd:SetDrawBling(false)
-                                    cd:SetHideCountdownNumbers(true)
-                                    cd:EnableMouse(false)
-                                    if cd.SetMouseClickEnabled then cd:SetMouseClickEnabled(false) end
-                                    if cd.SetMouseMotionEnabled then cd:SetMouseMotionEnabled(false) end
-                                    f.Cooldown = cd; f._cooldown = cd
-                                    f._isItemPresetFrame = true
-                                    f._presetItemID = itemID; f._presetData = preset
-                                    f.cooldownID = nil; f.cooldownInfo = nil
-                                    f.layoutIndex = 99999
-                                    local countFS = f:CreateFontString(nil, "OVERLAY")
-                                    EllesmereUI.ApplyIconTextFont(countFS, GetCDMFont(), 11, "cdm")
-                                    countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 2)
-                                    f._itemCountText = countFS
-                                    f:SetScript("OnEnter", function(self)
-                                        if not self._presetItemID then return end
-                                        local ffc = _ecmeFC[self]
-                                        local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
-                                        if not bd2 or not bd2.showTooltip then return end
-                                        GameTooltip_SetDefaultAnchor(GameTooltip, self)
-                                        GameTooltip:SetItemByID(self._presetItemID)
-                                        GameTooltip:Show()
-                                    end)
-                                    f:SetScript("OnLeave", GameTooltip_Hide)
-                                    _presetFrames[fkey] = f
-                                end
-                            end
+                            local f = GetOrCreateItemPresetFrame(barKey, itemID)
                             if f then
                                 -- Remember the bar that owns this frame so bag
                                 -- events can re-evaluate it even while hidden.

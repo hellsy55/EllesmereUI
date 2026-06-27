@@ -4666,6 +4666,158 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
+    --  Custom Item ID popup (shared by ShowSpellPicker + ShowBuffBarPicker).
+    --  Item is stored as a negative marker (-itemID) so the item-preset path
+    --  renders icon/cooldown/count. onAdded runs after validation; the caller
+    --  handles AddTrackedSpell.
+    ---------------------------------------------------------------------------
+    local function ShowCustomItemIDPopup(barKey, onAdded)
+        local popupName = "EUI_CDM_ItemIDPopup"
+        local popup = _G[popupName]
+        if not popup then
+            local POPUP_W, POPUP_H = 320, 164
+            local dimmer = CreateFrame("Frame", popupName .. "Dimmer", UIParent)
+            dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+            dimmer:SetAllPoints(UIParent)
+            dimmer:EnableMouse(true)
+            dimmer:Hide()
+            local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
+            dimTex:SetAllPoints(); dimTex:SetColorTexture(0, 0, 0, 0.25)
+            dimmer:SetScript("OnMouseDown", function(self) self:Hide() end)
+
+            popup = CreateFrame("Frame", popupName, dimmer)
+            popup:SetSize(POPUP_W, POPUP_H)
+            popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+            popup:SetFrameStrata("FULLSCREEN_DIALOG")
+            popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+            popup:EnableMouse(true)
+            local popBg = popup:CreateTexture(nil, "BACKGROUND")
+            popBg:SetAllPoints(); popBg:SetColorTexture(0.06, 0.08, 0.10, 1)
+            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, EllesmereUI.PP)
+
+            local title = popup:CreateFontString(nil, "OVERLAY")
+            title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
+            title:SetPoint("TOP", popup, "TOP", 0, -18)
+            title:SetTextColor(1, 1, 1, 1)
+            title:SetText(EllesmereUI.L("Add Custom Item"))
+            popup._title = title
+
+            local editBox = CreateFrame("EditBox", nil, popup)
+            editBox:SetSize(180, 28)
+            editBox:SetPoint("TOP", title, "BOTTOM", 0, -16)
+            editBox:SetAutoFocus(true)
+            editBox:SetNumeric(true)
+            editBox:SetMaxLetters(9)
+            editBox:SetFont(FONT_PATH, 13, GetCDMOptOutline())
+            editBox:SetTextColor(1, 1, 1, 0.9)
+            editBox:SetJustifyH("CENTER")
+            local ebBg = editBox:CreateTexture(nil, "BACKGROUND")
+            ebBg:SetAllPoints(); ebBg:SetColorTexture(0.04, 0.06, 0.08, 1)
+            EllesmereUI.MakeBorder(editBox, 1, 1, 1, 0.12, EllesmereUI.PP)
+
+            local placeholder = editBox:CreateFontString(nil, "ARTWORK")
+            placeholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            placeholder:SetPoint("CENTER")
+            placeholder:SetTextColor(0.5, 0.5, 0.5, 0.5)
+            placeholder:SetText(EllesmereUI.L("Item ID"))
+            editBox:SetScript("OnTextChanged", function(self)
+                if self:GetText() == "" then placeholder:Show() else placeholder:Hide() end
+            end)
+            popup._editBox = editBox
+
+            local status = popup:CreateFontString(nil, "OVERLAY")
+            status:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            status:SetPoint("TOP", editBox, "BOTTOM", 0, -6)
+            status:SetTextColor(1, 0.3, 0.3, 1)
+            status:SetText("")
+            popup._status = status
+            popup._statusTimer = nil
+
+            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            local addBtn = CreateFrame("Button", nil, popup)
+            addBtn:SetSize(80, 28)
+            addBtn:SetPoint("BOTTOMRIGHT", popup, "BOTTOM", -4, 16)
+            local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
+            addBg:SetAllPoints(); addBg:SetColorTexture(ar, ag, ab, 0.15)
+            EllesmereUI.MakeBorder(addBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
+            local addLbl = addBtn:CreateFontString(nil, "OVERLAY")
+            addLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            addLbl:SetPoint("CENTER"); addLbl:SetText(EllesmereUI.L("Add"))
+            addLbl:SetTextColor(ar, ag, ab, 0.9)
+            addBtn:SetScript("OnEnter", function() addLbl:SetTextColor(1, 1, 1, 1) end)
+            addBtn:SetScript("OnLeave", function() addLbl:SetTextColor(ar, ag, ab, 0.9) end)
+            popup._addBtn = addBtn
+
+            local cancelBtn = CreateFrame("Button", nil, popup)
+            cancelBtn:SetSize(80, 28)
+            cancelBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", 4, 16)
+            local cBg = cancelBtn:CreateTexture(nil, "BACKGROUND")
+            cBg:SetAllPoints(); cBg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+            EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
+            local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
+            cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            cLbl:SetPoint("CENTER"); cLbl:SetText(EllesmereUI.L("Cancel"))
+            cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
+            cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
+            cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
+            cancelBtn:SetScript("OnClick", function() dimmer:Hide() end)
+            popup._cancelBtn = cancelBtn
+
+            editBox:SetScript("OnEscapePressed", function() dimmer:Hide() end)
+
+            popup._dimmer = dimmer
+            _G[popupName] = popup
+        end
+
+        local function SetStatus(text, r, g, b)
+            popup._status:SetText(text)
+            popup._status:SetTextColor(r or 1, g or 0.3, b or 0.3, 1)
+            if popup._statusTimer then popup._statusTimer:Cancel() end
+            if text ~= "" then
+                popup._statusTimer = C_Timer.NewTimer(2.5, function()
+                    popup._status:SetText("")
+                end)
+            end
+        end
+
+        local function DoAdd()
+            local text = popup._editBox:GetText()
+            local itemID = tonumber(text)
+            if not itemID or itemID <= 0 then
+                SetStatus("Enter a valid item ID")
+                return
+            end
+            itemID = math.floor(itemID)
+            local itemName = C_Item.GetItemNameByID(itemID)
+            if not itemName then
+                -- Item data not cached yet -- request it and ask the user to retry.
+                C_Item.RequestLoadItemDataByID(itemID)
+                SetStatus("Loading item data, try again")
+                return
+            end
+            local marker = -itemID
+            local sdChk = ns.GetBarSpellData(barKey)
+            if sdChk and sdChk.assignedSpells then
+                for _, existing in ipairs(sdChk.assignedSpells) do
+                    if existing == marker then
+                        SetStatus("Already tracked")
+                        return
+                    end
+                end
+            end
+            popup._dimmer:Hide()
+            if onAdded then onAdded(marker) end
+        end
+
+        popup._addBtn:SetScript("OnClick", DoAdd)
+        popup._editBox:SetScript("OnEnterPressed", DoAdd)
+        popup._editBox:SetText("")
+        popup._status:SetText("")
+        popup._dimmer:Show()
+        popup._editBox:SetFocus()
+    end
+
+    ---------------------------------------------------------------------------
     --  Buff Bar Spell Picker
     --  Shows ONLY spells from CDM buff categories (2, 3).
     --  None grayed out. Selecting moves the spell to the target bar.
@@ -4787,6 +4939,37 @@ initFrame:SetScript("OnEvent", function(self)
                     ns.AddTrackedSpell(targetBarKey, sid)
                     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
                     if ns.UpdateLustListener then ns.UpdateLustListener() end
+                    if ns.QueueReanchor then ns.QueueReanchor() end
+                    RefreshCDPreview()
+                end)
+            end)
+            mH = mH + ITEM_H
+        end
+
+        -- Custom Item ID entry -- add an arbitrary item by its item ID (e.g. a
+        -- food/consumable), rendered with the item icon + item cooldown + bag
+        -- count. Stored as a negative marker (-itemID) via AddTrackedSpell.
+        do
+            local ciItem = CreateFrame("Button", nil, inner)
+            ciItem:SetHeight(ITEM_H)
+            ciItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            ciItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            ciItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+            local ciHl = ciItem:CreateTexture(nil, "ARTWORK")
+            ciHl:SetAllPoints(); ciHl:SetColorTexture(1, 1, 1, 0); ciHl:SetAlpha(0)
+            local ciLbl = ciItem:CreateFontString(nil, "OVERLAY")
+            ciLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            ciLbl:SetPoint("LEFT", 10, 0); ciLbl:SetJustifyH("LEFT")
+            ciLbl:SetText(EllesmereUI.L("Custom Item ID"))
+            ciLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+            ciItem:SetScript("OnEnter", function() ciLbl:SetTextColor(1, 1, 1, 1); ciHl:SetColorTexture(1, 1, 1, hlA); ciHl:SetAlpha(1) end)
+            ciItem:SetScript("OnLeave", function() ciLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA); ciHl:SetAlpha(0) end)
+            ciItem:SetScript("OnClick", function()
+                menu:Hide()
+                ShowCustomItemIDPopup(targetBarKey, function(marker)
+                    ns._cdmAnyCustomItem = true
+                    ns.AddTrackedSpell(targetBarKey, marker)
+                    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
                     if ns.QueueReanchor then ns.QueueReanchor() end
                     RefreshCDPreview()
                 end)
@@ -7154,6 +7337,46 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + ITEM_H
         end
 
+        -- "Custom Item ID" option -- CD/utility bars only (custom aura bars are
+        -- cast-timer driven and don't render item-cooldown frames). Adds an
+        -- arbitrary item by item ID, stored as a negative marker (-itemID).
+        if not isBuffBar and not isCustomBuff then
+            local ciItem = CreateFrame("Button", nil, inner)
+            ciItem:SetHeight(ITEM_H)
+            ciItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            ciItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            ciItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+
+            local ciHl = ciItem:CreateTexture(nil, "ARTWORK")
+            ciHl:SetAllPoints(); ciHl:SetColorTexture(1, 1, 1, 0); ciHl:SetAlpha(0)
+
+            local ciLbl = ciItem:CreateFontString(nil, "OVERLAY")
+            ciLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            ciLbl:SetPoint("LEFT", 10, 0)
+            ciLbl:SetJustifyH("LEFT")
+            ciLbl:SetText(EllesmereUI.L("Custom Item ID"))
+            ciLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+
+            ciItem:SetScript("OnEnter", function()
+                ciLbl:SetTextColor(1, 1, 1, 1)
+                ciHl:SetColorTexture(1, 1, 1, hlA); ciHl:SetAlpha(1)
+            end)
+            ciItem:SetScript("OnLeave", function()
+                ciLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                ciHl:SetAlpha(0)
+            end)
+            ciItem:SetScript("OnClick", function()
+                menu:Hide()
+                ShowCustomItemIDPopup(bd and bd.key, function(marker)
+                    ns._cdmAnyCustomItem = true
+                    if onSelect then onSelect(marker, true) end
+                end)
+            end)
+
+            allItems[#allItems + 1] = ciItem
+            mH = mH + ITEM_H
+        end
+
         if false then -- misc bar custom item menu removed
             -- Bag scan + Custom Item button (moved from bottom to top)
             local BAG_ITEM_BLACKLIST = {
@@ -8855,6 +9078,16 @@ initFrame:SetScript("OnEvent", function(self)
                 if button == "MiddleButton" then
                     local si = self._slotIdx
                     if isDefaultBuffs then
+                        -- Custom item slot (negative -itemID marker): remove it
+                        -- directly. slotIndex maps to the mixed preview list, so
+                        -- key off the marker, not assignedSpells[si].
+                        if self._previewItemID then
+                            ns.RemoveSpellFromBar(bd.key, -self._previewItemID)
+                            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+                            if ns.QueueReanchor then ns.QueueReanchor() end
+                            RefreshCDPreview()
+                            return
+                        end
                         -- Main buffs bar: only injected custom/preset buffs can be
                         -- deleted (Blizzard-tracked buffs are managed in Blizzard's
                         -- CDM). Remove by spellID since slotIndex maps to the mixed
@@ -8895,6 +9128,11 @@ initFrame:SetScript("OnEvent", function(self)
                     RefreshCDPreview()
                 elseif button == "RightButton" or button == "LeftButton" then
                     local si = self._slotIdx
+                    -- Custom item slots (default buffs bar) have no per-icon
+                    -- settings and don't map to assignedSpells[si]; middle-click
+                    -- removes them. Ignore left/right-click to avoid a mis-indexed
+                    -- settings menu.
+                    if isDefaultBuffs and self._previewItemID then return end
                     -- Translate the preview slot to its underlying assignedSpells
                     -- index (identity unless this buff slot collapsed a duplicate).
                     local dataIdx = BuffDataIdx(si)
@@ -9373,6 +9611,15 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, sid in ipairs(sdSelf.assignedSpells) do
                         if type(sid) == "number" and sid > 0
                            and (sdSelf.spellDurations[sid] or 0) > 0 then
+                            tracked[#tracked + 1] = sid
+                        end
+                    end
+                end
+                -- Also include this bar's custom item IDs (negative -itemID
+                -- markers) so they preview alongside buffs.
+                if sdSelf and sdSelf.assignedSpells then
+                    for _, sid in ipairs(sdSelf.assignedSpells) do
+                        if type(sid) == "number" and sid <= -100 then
                             tracked[#tracked + 1] = sid
                         end
                     end
