@@ -3975,6 +3975,34 @@ initFrame:SetScript("OnEvent", function(self)
             "stripes-small-close", "stripes-small-spread", "striped-tiny",
             "clean",
         }
+        -- Append SharedMedia statusbar textures after a divider, mirroring the
+        -- Bar Texture dropdown. SM keys ("sm:" prefixed) were appended to the
+        -- shared health-bar tables by AppendSharedMediaTextures; render-time
+        -- resolution flows through ns.ResolveOverlayTexPath -> the health-bar
+        -- texture lookup, so a saved SM key paints correctly on the absorb bar.
+        do
+            local sepAdded = false
+            for _, k in ipairs(hbtOrder) do
+                if k ~= "---" and k:find("^sm:") then
+                    if not sepAdded then
+                        absorbStyleOrder[#absorbStyleOrder + 1] = "---"
+                        sepAdded = true
+                    end
+                    absorbStyleOrder[#absorbStyleOrder + 1] = k
+                    absorbStyleValues[k] = hbtValues[k]
+                end
+            end
+            -- Preview swatch behind each menu row. Resolves exactly like the
+            -- render path: NP_ABSORB_STYLE_TEX for blizzard/striped/clean, then
+            -- ns.ResolveOverlayTexPath for stripe overlays and SM keys.
+            absorbStyleValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key)
+                    if not key or key == "---" then return nil end
+                    return ns.NP_ABSORB_STYLE_TEX[key] or ns.ResolveOverlayTexPath(key)
+                end,
+            }
+        end
         local bgHoverRow
         bgHoverRow, h = W:DualRow(parent, y,
             { type="slider", text="Background", min=0, max=100, step=1,

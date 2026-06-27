@@ -267,6 +267,61 @@ local function ResolveSpellSettings(frame, sid2, sd2)
 end
 ns.ResolveSpellSettings = ResolveSpellSettings
 
+-- Apply the per-spell active-state OVERLAYS (glow + border) for a given active
+-- state. This is the context-independent slice of the SetSwipeColor active block:
+-- it touches only OUR own overlays (glowOverlay, borderFrame), never Blizzard's
+-- Cooldown swipe, so it is safe to call from the swipe hook OR from the isolated
+-- Fake-Active engine's own ticker. Idempotent via fd._activeGlowOn /
+-- fd._activeBorderOn, so the two drivers cooperate instead of fighting.
+function ns.ApplyActiveOverlays(frame, fd, ss, isActive, bd)
+    if not fd then return end
+
+    -- Active glow (per-spell)
+    local hasGlow = ss and ss.activeGlow and ss.activeGlow > 0
+    if isActive and hasGlow then
+        if fd.glowOverlay and not fd._activeGlowOn then
+            -- Unified glow color takes priority
+            local gr, gg, gb = ns.ResolveGlowColor(ss)
+            if not gr then
+                if ss.activeGlowClassColor then
+                    local _, ct = UnitClass("player")
+                    if ct then
+                        local cc = RAID_CLASS_COLORS[ct]
+                        if cc then gr, gg, gb = cc.r, cc.g, cc.b end
+                    end
+                end
+                gr = gr or (ss.activeGlowR or 1)
+                gg = gg or (ss.activeGlowG or 0.85)
+                gb = gb or (ss.activeGlowB or 0)
+            end
+            ns.StartNativeGlow(fd.glowOverlay, ss.activeGlow, gr, gg, gb)
+            fd._activeGlowOn = true
+        end
+    elseif fd._activeGlowOn then
+        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+        fd._activeGlowOn = false
+    end
+
+    -- Active border color (per-spell). Recolor the icon border while active;
+    -- restore the bar's default border color on falloff. SetBorderStyleColor
+    -- handles both solid (PP) and textured borders and no-ops on a hidden border.
+    if isActive and ss and ss.activeBorderEnabled then
+        if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
+            EllesmereUI.SetBorderStyleColor(fd.borderFrame,
+                ss.activeBorderR or 1, ss.activeBorderG or 0.776,
+                ss.activeBorderB or 0.376, ss.activeBorderA or 1)
+        end
+        fd._activeBorderOn = true
+    elseif fd._activeBorderOn then
+        if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
+            EllesmereUI.SetBorderStyleColor(fd.borderFrame,
+                (bd and bd.borderR) or 0, (bd and bd.borderG) or 0,
+                (bd and bd.borderB) or 0, (bd and bd.borderA) or 1)
+        end
+        fd._activeBorderOn = false
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Spell Routing State
 --
@@ -356,13 +411,7 @@ function ns.RebuildSpellRouteMap()
         end
     end
 
-    -- Pass 1: ghost bars (lowest priority)
-    for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and bd.isGhostBar then
-            CollectDiversionsFor(bd)
-        end
-    end
-    -- Pass 2: custom buff bars (extra buff bars) + custom_buff (TBB) bars.
+    -- Pass 1: custom buff bars (extra buff bars) + custom_buff (TBB) bars.
     -- TBB bars compete for the same buff icon spells, so their diversions
     -- must land in _divertedSpellsBuff even though IsBarBuffFamily returns
     -- false for custom_buff. We write directly to _divertedSpellsBuff here.
@@ -380,7 +429,20 @@ function ns.RebuildSpellRouteMap()
             end
         end
     end
-    -- Pass 3: custom CD/utility bars
+    -- Pass 2: default bars (cooldowns/utility/buffs) FIRST among the CD family.
+    -- Custom CD/util bars (Pass 3) are processed AFTER and overwrite these, so an
+    -- explicit custom-bar placement OUTRANKS the default bar. Without this, a spell
+    -- that sits on a custom bar AND also lands in cooldowns.assignedSpells (e.g. a
+    -- materialized spillover both-state) would render on the default cooldowns bar
+    -- instead of the custom bar the user built for it.
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and not bd.isGhostBar
+           and (bd.key == "cooldowns" or bd.key == "utility" or bd.key == "buffs") then
+            CollectDiversionsFor(bd)
+        end
+    end
+    -- Pass 3: custom CD/utility bars -- overwrite the default diversions so a spell
+    -- the user deliberately placed on a custom bar wins over the default bar.
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and not bd.isGhostBar
            and bd.key ~= "cooldowns" and bd.key ~= "utility" and bd.key ~= "buffs"
@@ -388,11 +450,13 @@ function ns.RebuildSpellRouteMap()
             CollectDiversionsFor(bd)
         end
     end
-    -- Pass 4: default bars (highest priority -- the user's explicit
-    -- assignment to a default bar overrides everything)
+    -- Pass 4: ghost bars LAST = HIGHEST priority. A spell the user HID stays
+    -- hidden even if it's also on a visible bar (the "both-state"), so a hidden
+    -- spell never reappears regardless of how it ended up in two bars. Adding a
+    -- spell to a visible bar removes it from the ghost (ns.AddSpellToBar), so this
+    -- never hides a spell you deliberately placed.
     for _, bd in ipairs(p.cdmBars.bars) do
-        if bd.enabled and not bd.isGhostBar
-           and (bd.key == "cooldowns" or bd.key == "utility" or bd.key == "buffs") then
+        if bd.enabled and bd.isGhostBar then
             CollectDiversionsFor(bd)
         end
     end
@@ -425,8 +489,17 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     local divertMap = (viewerDefaultBar == "buffs") and _divertedSpellsBuff or _divertedSpellsCD
 
     local info = gci(cdID)
+    if not info then
+        -- Cooldown info not ready yet (transient, e.g. during login / spec
+        -- swaps). Return the spillover fallback WITHOUT writing the cache:
+        -- _cdidRouteMap is only wiped by RebuildSpellRouteMap, so caching the
+        -- fallback here would pin a ghosted/custom spell to its default bar
+        -- until the next rebuild. Leaving it uncached lets a later pass (once
+        -- info is ready) resolve the real bar.
+        return viewerDefaultBar
+    end
     local routedBar = nil
-    if info then
+    do
         if info.spellID and info.spellID > 0 then
             routedBar = RVV(divertMap, info.spellID)
         end
@@ -1203,31 +1276,12 @@ local function DecorateFrame(frame, barData)
                     cd:SetDrawSwipe(ss2.activeSwipeMode ~= "none" and isActive)
                 end
 
-                -- Active glow (per-spell)
-                local hasGlow2 = ss2 and ss2.activeGlow and ss2.activeGlow > 0
-                if isActive and hasGlow2 then
-                    if fd.glowOverlay and not fd._activeGlowOn then
-                        -- Unified glow color takes priority
-                        local gr, gg, gb = ns.ResolveGlowColor(ss2)
-                        if not gr then
-                            if ss2.activeGlowClassColor then
-                                local _, ct = UnitClass("player")
-                                if ct then
-                                    local cc = RAID_CLASS_COLORS[ct]
-                                    if cc then gr, gg, gb = cc.r, cc.g, cc.b end
-                                end
-                            end
-                            gr = gr or (ss2.activeGlowR or 1)
-                            gg = gg or (ss2.activeGlowG or 0.85)
-                            gb = gb or (ss2.activeGlowB or 0)
-                        end
-                        ns.StartNativeGlow(fd.glowOverlay, ss2.activeGlow, gr, gg, gb)
-                        fd._activeGlowOn = true
-                    end
-                elseif fd._activeGlowOn then
-                    if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
-                    fd._activeGlowOn = false
-                end
+                -- Active glow + active border (per-spell). Extracted so the
+                -- isolated Fake-Active engine can drive the same overlays from
+                -- its own ticker; shares fd._activeGlowOn / fd._activeBorderOn so
+                -- the two paths cooperate. Touches only our overlays (never the
+                -- Blizzard swipe), so it is safe from any call context.
+                ns.ApplyActiveOverlays(frame, fd, ss2, isActive, bd2)
 
                 -- Max Stacks Glow (per-spell): glow a multi-charge spell at max charges.
                 -- "At max" = no recharge running, read from GetSpellCharges().isActive
@@ -1243,26 +1297,7 @@ local function DecorateFrame(frame, barData)
                     ns._maxStacksWatch[frame] = nil
                 end
 
-                -- Active border color (per-spell). Recolor the icon border while the
-                -- spell is active; restore the bar's default border color on falloff.
-                -- SetBorderStyleColor handles both solid (PP) and textured borders and
-                -- no-ops on a hidden border (border size 0). Re-applied each tick while
-                -- active so a live color edit shows and other resets can't win.
-                if isActive and ss2 and ss2.activeBorderEnabled then
-                    if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
-                        EllesmereUI.SetBorderStyleColor(fd.borderFrame,
-                            ss2.activeBorderR or 1, ss2.activeBorderG or 0.776,
-                            ss2.activeBorderB or 0.376, ss2.activeBorderA or 1)
-                    end
-                    fd._activeBorderOn = true
-                elseif fd._activeBorderOn then
-                    if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
-                        EllesmereUI.SetBorderStyleColor(fd.borderFrame,
-                            (bd2 and bd2.borderR) or 0, (bd2 and bd2.borderG) or 0,
-                            (bd2 and bd2.borderB) or 0, (bd2 and bd2.borderA) or 1)
-                    end
-                    fd._activeBorderOn = false
-                end
+                -- (Active border moved into ns.ApplyActiveOverlays above.)
 
                 fd._isProcessingOverride = false
             end)
@@ -1570,7 +1605,13 @@ local function DecorateFrame(frame, barData)
                         if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
                         fd._cdStateGlowOn = false
                     end
-                    if fc2 and fc2._cdStateHidden then fc2._cdStateHidden = false end
+                    -- A preset's cdState lives in customActiveStates (driven by the
+                    -- Fake-Active engine), not per-bar spellSettings -- so don't clear
+                    -- its hidden flag here or it flashes visible every desat tick.
+                    if fc2 and fc2._cdStateHidden
+                       and not (ns.PresetHasCdState and ns.PresetHasCdState(frame)) then
+                        fc2._cdStateHidden = false
+                    end
                     return
                 end
                 -- Clear stale hidden state when switching to a non-hidden effect
@@ -2167,6 +2208,11 @@ local function ProcessPresetCooldowns()
 end
 ns._ProcessPresetCooldowns = ProcessPresetCooldowns
 ns._isPresetCdDirty = function() return _presetCdDirty end
+-- Setter so the inject path can request a preset desaturation re-evaluation. A
+-- full rebuild wipes and re-injects preset frames with no cached desat state; if
+-- no game event (bag/cooldown/combat) follows -- e.g. an in-panel sync/import --
+-- ProcessPresetCooldowns would never run and an unowned item would stay saturated.
+ns._MarkPresetCdDirty = function() _presetCdDirty = true end
 
 -- "Hide Items if Missing": detect when a tracked consumable's bag presence
 -- flips (acquired or fully used up) for any bar that opted in, and queue a
@@ -3102,6 +3148,14 @@ local function CollectAndReanchor()
                                     end
                                     if f._lastDesat ~= nil and f._tex then
                                         f._tex:SetDesaturated(f._lastDesat)
+                                    elseif ns._MarkPresetCdDirty then
+                                        -- Fresh frame (no cached desat yet, e.g. after a full
+                                        -- rebuild): its ownership/cooldown desaturation has not
+                                        -- been computed. Flag the preset processor so the next
+                                        -- BuffTicker pass evaluates it -- without this a rebuild
+                                        -- not followed by a game event (an in-panel sync/import)
+                                        -- leaves an unowned pot/healthstone saturated until /reload.
+                                        ns._MarkPresetCdDirty()
                                     end
                                     frames[#frames + 1] = f
                                     local fc = FC(f)
@@ -3409,11 +3463,19 @@ local function CollectAndReanchor()
     ---------------------------------------------------------------------------
     --  PHASE 4: Global cleanup for unclaimed frames
     --  Also protect any frame currently in cdmBarIcons (may be from a
-    --  previous reanchor cycle but still visually active on a bar).
+    --  previous reanchor cycle but still visually active on a bar) -- but ONLY
+    --  for bars that still exist in the active profile. A profile swap that
+    --  removes a bar leaves its old icons in cdmBarIcons (FullCDMRebuild does
+    --  not wipe icon arrays here), and protecting those would shield a stale
+    --  persistent _trinketFrames trinket (which, unlike _presetFrames racials,
+    --  FullCDMRebuild never hides) from the unused-frame sweep below -- leaving
+    --  it floating at its old position after its bar is gone.
     ---------------------------------------------------------------------------
     for bk, icons in pairs(cdmBarIcons) do
-        for ii = 1, #icons do
-            if icons[ii] then usedFrames[icons[ii]] = true end
+        if barDataByKey[bk] then
+            for ii = 1, #icons do
+                if icons[ii] then usedFrames[icons[ii]] = true end
+            end
         end
     end
     local buffViewer = _G["BuffIconCooldownViewer"]

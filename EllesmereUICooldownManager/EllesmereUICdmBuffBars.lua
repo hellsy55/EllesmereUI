@@ -151,41 +151,59 @@ end
 
 local PANDEMIC_THRESHOLD = 0.3
 local LIFEBLOOM_SPELL_ID = 33763
+local _lbName               -- cached Lifebloom spell name (resolved lazily once)
 local _scanLast, _scanResult = 0, false
-local function LifebloomPandemic(blzChild)
+-- Pandemic fallback for auras Blizzard never flags (currently only Lifebloom).
+-- bar._isLifebloom is resolved once and cached on our own frame: the call site
+-- skips this call entirely once a bar is known not to be Lifebloom, so
+-- non-Lifebloom pandemic-glow bars cost nothing per frame. Only the Lifebloom
+-- bar reaches the throttled unit scan below.
+local function LifebloomPandemic(bar, blzChild)
+    -- Resolve "is this the Lifebloom bar" once and cache it. Spell data can be
+    -- late-loading, so leave the flag nil (retry next frame) until both names
+    -- resolve.
+    if bar._isLifebloom == nil then
+        if not _lbName then _lbName = C_Spell.GetSpellName(LIFEBLOOM_SPELL_ID) end
+        local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(blzChild)
+        local sName = sid and C_Spell.GetSpellName(sid)
+        if not (_lbName and sName) then return false end
+        bar._isLifebloom = (_lbName == sName)
+    end
+    if not bar._isLifebloom then return false end
+
+    -- Throttle the unit scan to 10/sec; return the cached result if throttled.
+    local now = GetTime()
+    if (now - _scanLast) < 0.1 then return _scanResult end
+
     local result = false
-	local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(blzChild)
-	local lbName = C_Spell.GetSpellName(LIFEBLOOM_SPELL_ID)
-	local sName = sid and C_Spell.GetSpellName(sid)
-	if not (lbName and sName and lbName == sName) then return result end
-
-	-- throttle to scan 10 times/sec
-	-- return cached result if throttled
-	local now = GetTime()
-	if (now - _scanLast) < 0.1 then return _scanResult end
-
     local function check(unit)
         if not UnitExists(unit) then return end
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, lbName, "HELPFUL|PLAYER")
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellName, unit, _lbName, "HELPFUL|PLAYER")
         if not ok or not aura then return end
         local dur, exp = aura.duration, aura.expirationTime
         if not dur or not exp then return end
-		local isSec = issecretvalue
-		if isSec and (isSec(dur) or isSec(exp)) then return end -- shouldn't be secret, for safety
+        local isSec = issecretvalue
+        if isSec and (isSec(dur) or isSec(exp)) then return end -- shouldn't be secret, for safety
         if dur <= 0 then return end
-        if (exp - now) <= dur * PANDEMIC_THRESHOLD then
-            result = true
-        end
+        if (exp - now) <= dur * PANDEMIC_THRESHOLD then result = true end
     end
 
-	-- first check player, then look at group
+    -- Player first, then the group; stop as soon as one Lifebloom is in pandemic.
     check("player")
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do check("raid" .. i) end
-    elseif IsInGroup() then
-        for i = 1, GetNumGroupMembers() do check("party" .. i) end
+    if not result then
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do
+                check("raid" .. i)
+                if result then break end
+            end
+        elseif IsInGroup() then
+            for i = 1, GetNumGroupMembers() do
+                check("party" .. i)
+                if result then break end
+            end
+        end
     end
-	_scanLast, _scanResult = now, result
+    _scanLast, _scanResult = now, result
     return result
 end
 
@@ -425,62 +443,76 @@ end
 --   active:           Buff 2, Buff 3        -> Buff 2 sits at group anchor
 --   active:           Buff 1, Buff 2, Buff 3 -> Buff 1 sits at group anchor,
 --                                              Buff 2/3 move after it
-local _tbbReflow = { visible = {}, lastKeys = nil }
-local function ReflowVisibleGroupedTBBars(tbb, bars, positions)
+local _tbbReflow = { visible = {}, lastIdx = {}, lastCount = 0, lastGrow = nil, lastSpacing = nil }
+local function ReflowVisibleGroupedTBBars(tbb, bars)
     if not (tbb and bars and tbbFrames) then return end
-    local growDir = ((tbb.groupGrowDirection or "DOWN"):upper())
-    local spacing = tbb.groupSpacing or 2
+    -- Don't fight edit-preview (placeholder) or unlock-mode dragging: in those
+    -- modes BuildTrackedBuffBars and the unlock system own bar positions.
+    if ns._tbbPlaceholderMode or EllesmereUI._unlockActive then return end
 
-    -- Collect only enabled + checked + currently visible bars in saved hierarchy
-    -- order. A bar with hideWhenInactive=false is visible and therefore keeps its
-    -- slot, which matches the user's choice to show inactive bars.
-    local visible = _tbbReflow.visible
-    for i = #visible, 1, -1 do visible[i] = nil end
     local anchorIdx = ns.TBBGroupAnchorIndex and ns.TBBGroupAnchorIndex()
     if not anchorIdx then return end
 
+    local growDir = ((tbb.groupGrowDirection or "DOWN"):upper())
+    local spacing = tbb.groupSpacing or 2
+
+    -- Collect enabled + checked + currently visible bars in saved hierarchy
+    -- order. A bar with hideWhenInactive=false is visible and therefore keeps its
+    -- slot, which matches the user's choice to show inactive bars. Entry tables
+    -- are pooled and reused across ticks to avoid per-frame allocation in this
+    -- hot (every-16ms) path.
+    local visible = _tbbReflow.visible
+    local count = 0
     for i, cfg in ipairs(bars) do
         local f = tbbFrames[i]
         if cfg and cfg.enabled ~= false and ns.TBBBarGrouped(cfg)
            and f and f._tbbReady and f:IsShown() then
-            visible[#visible + 1] = { idx = i, frame = f }
+            count = count + 1
+            local e = visible[count]
+            if not e then e = {}; visible[count] = e end
+            e.idx = i; e.frame = f
         end
     end
 
-    if #visible == 0 then
-        _tbbReflow.lastKeys = nil
+    if count == 0 then
+        _tbbReflow.lastCount = 0
         return
     end
 
-    -- Avoid redundant ClearAllPoints/SetPoint every 16ms. Re-anchor only when
-    -- the visible member sequence or the grow/spacing tuple changes.
-    local key = growDir .. ":" .. tostring(spacing)
-    for n = 1, #visible do key = key .. ":" .. visible[n].idx end
-    if _tbbReflow.lastKeys == key then return end
-    _tbbReflow.lastKeys = key
+    -- Re-anchor only when the visible member sequence or the grow/spacing tuple
+    -- changes. Compared element-wise so no string is allocated each tick.
+    local lastIdx = _tbbReflow.lastIdx
+    local changed = count ~= _tbbReflow.lastCount
+        or growDir ~= _tbbReflow.lastGrow or spacing ~= _tbbReflow.lastSpacing
+    if not changed then
+        for n = 1, count do
+            if visible[n].idx ~= lastIdx[n] then changed = true; break end
+        end
+    end
+    if not changed then return end
+    _tbbReflow.lastCount   = count
+    _tbbReflow.lastGrow    = growDir
+    _tbbReflow.lastSpacing = spacing
+    for n = 1, count do lastIdx[n] = visible[n].idx end
 
     local first = visible[1].frame
     local anchorFrame = tbbFrames[anchorIdx]
-    first:ClearAllPoints()
 
     if anchorFrame and anchorFrame ~= first then
-        -- Reuse the group anchor frame as a hidden/visible position proxy. This
-        -- preserves unlock-mode anchors and external size/position matching even
-        -- when the configured anchor buff is currently inactive and hidden.
+        -- The configured anchor buff is inactive/hidden: pin the first VISIBLE
+        -- member onto the anchor frame's slot so it takes the group origin. The
+        -- anchor frame keeps whatever position BuildTrackedBuffBars / the unlock
+        -- system gave it (including element anchoring), so this preserves it.
+        first:ClearAllPoints()
         first:SetPoint("TOPLEFT", anchorFrame, "TOPLEFT", 0, 0)
-    else
-        local posKey = tostring(anchorIdx)
-        local pos = positions and positions[posKey]
-        if pos and pos.point then
-            if pos.scale then pcall(function() first:SetScale(pos.scale) end) end
-            first:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
-        else
-            first:SetPoint("CENTER", UIParent, "CENTER", 0, 200 - (anchorIdx - 1) * ((bars[anchorIdx] and bars[anchorIdx].height or 24) + 4))
-        end
     end
+    -- else: the first visible bar IS the anchor -- leave its point untouched.
+    -- BuildTrackedBuffBars and the unlock system already position it and honor
+    -- IsUnlockAnchored, so re-deriving from tbbPositions here would clobber an
+    -- element-anchored group (yanking it to a stale coord or screen center).
 
     local prev = first
-    for n = 2, #visible do
+    for n = 2, count do
         local f = visible[n].frame
         f:ClearAllPoints()
         if growDir == "DOWN" then
@@ -1831,9 +1863,11 @@ function ns.UpdateTrackedBuffBarTimers()
                     if _anyPandemic and cfg.pandemicGlow then
                         local inPandemic = blzChild and _pandemicState[blzChild]
                         -- Fallback for auras Blizzard never pandemic-flags
-                        -- Currently only enabled for Lifebloom
-                        if not inPandemic and blzChild then
-							inPandemic = LifebloomPandemic(blzChild)
+                        -- (currently only Lifebloom). bar._isLifebloom is cached
+                        -- after the first resolve, so once a bar is known not to
+                        -- be Lifebloom this is a single table read and skips.
+                        if not inPandemic and blzChild and bar._isLifebloom ~= false then
+                            inPandemic = LifebloomPandemic(bar, blzChild)
                         end
                         -- TBBs always show our glow (including Blizzard Default)
                         -- because Blizzard's native PandemicIcon is on the
@@ -1895,7 +1929,7 @@ function ns.UpdateTrackedBuffBarTimers()
 
     -- Re-pack visible grouped Tracking Bars after the active/inactive pass so
     -- hidden buffs do not reserve a slot in the group.
-    ReflowVisibleGroupedTBBars(tbb, bars, ns.GetTBBPositions and ns.GetTBBPositions())
+    ReflowVisibleGroupedTBBars(tbb, bars)
 
     -- Deferred name fill: if BuildTrackedBuffBars couldn't resolve the spell
     -- name (data not loaded yet), retry here each tick until it succeeds.
@@ -1980,7 +2014,7 @@ function ns.BuildTrackedBuffBars()
     local tbb = ns.GetTrackedBuffBars()
     local bars = tbb.bars
     local _tbbPos = ns.GetTBBPositions()
-    if _tbbReflow then _tbbReflow.lastKeys = nil end
+    if _tbbReflow then _tbbReflow.lastCount = 0 end
 
     -- Hide bars beyond current count
     for i = #bars + 1, #tbbFrames do
@@ -2084,6 +2118,7 @@ function ns.BuildTrackedBuffBars()
             bar._tbbReady    = true
             bar._isPassive   = nil
             bar._stackCount  = 0
+            bar._isLifebloom = nil  -- re-resolve Lifebloom identity after a rebuild
             bar:Hide()  -- tick will show when active
         end
     end

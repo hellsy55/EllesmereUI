@@ -277,6 +277,7 @@ local RACE_RACIALS = {
     ZandalariTroll     = { 291944 },
     Vulpera            = { 312411 },
     Mechagnome         = { 312924 },
+    Nightborne         = { 260364 },
     -- Wing Buffet (357214) is available to every Dracthyr class, but
     -- Evokers already have it tracked by Blizzard's CDM category, so
     -- gate the custom-racial entry off for Evokers to avoid duplicate
@@ -295,6 +296,11 @@ for _, racials in pairs(RACE_RACIALS) do
         ALL_RACIAL_SPELLS[sid] = true
     end
 end
+-- Exposed for the RPT sync: it must recognize the racial slot for ANY race, not
+-- just the current character's, so a profile shared across different-race
+-- characters syncs the racial slot too (NormalizeRacialAssignments then remaps
+-- the stored ID to each character's own racial when the spec builds).
+ns.ALL_RACIAL_SPELLS = ALL_RACIAL_SPELLS
 
 local _myRacials = {}
 local _myRacialsSet = {}
@@ -571,7 +577,37 @@ function ns.GetSpecProfilesForProfile(profileName)
     return bucket.specProfiles
 end
 
--- specProfiles table for the active profile (the live CDM bucket).
+-- Active SPELL LAYOUT name. Layouts are a shared, account-wide library
+-- (spellAssignments.profiles[name] = the layout buckets) with a SINGLE
+-- account-wide active pointer (spellAssignments.activeLayout). Spell layouts are
+-- DETACHED from EUI profiles: a profile only changes the active layout if it has
+-- an opt-in binding (spellAssignments.profileBindings) applied via
+-- ns.ApplyProfileBinding on profile load. Self-heals to a valid layout.
+function ns.GetActiveLayoutName()
+    local sa = SpellStore.Get()
+    if not sa.profiles then sa.profiles = {} end
+    local name = sa.activeLayout
+    if type(name) ~= "string" or type(sa.profiles[name]) ~= "table" then
+        -- Self-heal: prefer a layout named after the current profile (legacy seed
+        -- naming), else any existing layout, else the profile name (creates it).
+        local cur = (EllesmereUIDB and EllesmereUIDB.activeProfile) or "Default"
+        name = nil
+        if type(sa.profiles[cur]) == "table" then
+            name = cur
+        else
+            for n, v in pairs(sa.profiles) do
+                if type(v) == "table" then name = n; break end
+            end
+        end
+        name = name or cur
+        sa.activeLayout = name
+    end
+    return name
+end
+
+-- specProfiles table for the active PROFILE (the live CDM bucket). Spell content
+-- is per-EUI-profile and switches with the profile -- no account-wide layout
+-- pointer mediates rendering.
 function ns.GetActiveSpecProfiles()
     return ns.GetSpecProfilesForProfile(ns.GetActiveProfileName())
 end
@@ -615,6 +651,51 @@ function ns.GetBarSpellDataForSpec(barKey, specKey)
     local bs = prof.barSpells[barKey]
     if not bs then return nil end
     return bs
+end
+
+-- Custom Active State store. Keyed by spellID at the PROFILE level (shared
+-- across every bar and spec in this profile) so a preset's custom active state
+-- travels with the spell wherever it is placed -- no re-adding. The settings key
+-- matches assignedSpells: positive = racial / custom spell; negative = item /
+-- trinket-slot preset. Entry shape: { duration, activeSwipeMode,
+-- activeSwipeClassColor, activeSwipeR/G/B/A, activeGlow, glowColor, glowColorR/G/B }.
+function ns.GetCustomActiveStates()
+    local p = ECME and ECME.db and ECME.db.profile
+    if not p then return nil end
+    if not p.customActiveStates then p.customActiveStates = {} end
+    return p.customActiveStates
+end
+
+-- Read (or, with create=true, lazily create) the entry for one spell key.
+function ns.GetCustomActiveState(spellID, create)
+    local store = ns.GetCustomActiveStates()
+    if not store then return nil end
+    local e = store[spellID]
+    if not e and create then e = {}; store[spellID] = e end
+    return e
+end
+
+-- Map an icon's identity token to its SETTINGS key. Trinket SLOTS (-13/-14) key
+-- their per-spell settings by the EQUIPPED item (-itemID) so each trinket tracks
+-- separately -- bar allocation is untouched (still slot-based). Everything else
+-- (item presets, racials, custom spells) keys by its own token.
+function ns.ResolveCustomActiveKey(frameKey)
+    if frameKey == -13 or frameKey == -14 then
+        local itemID = GetInventoryItemID("player", -frameKey)
+        if itemID then return -itemID end
+    end
+    return frameKey
+end
+
+-- Does this icon have a custom Cooldown State Effect (preset cd-state)? Used by
+-- the appearance refresh so it doesn't clear a preset's _cdStateHidden flag --
+-- presets store cdState in customActiveStates, not per-bar spellSettings.
+function ns.PresetHasCdState(frame)
+    local fc = ns._ecmeFC and ns._ecmeFC[frame]
+    if not fc or not fc.spellID then return false end
+    local key = ns.ResolveCustomActiveKey(fc.spellID)
+    local cas = ns.GetCustomActiveState(key)
+    return (cas and cas.cdStateEffect ~= nil) or false
 end
 
 -- Max Stacks Glow gate: set ns._cdmAnyMaxStacksGlow once if any saved spell (any
@@ -4035,8 +4116,13 @@ local function RefreshCDMIconAppearance(barKey)
                     end
                 end
             elseif fc and fc._cdStateHidden then
-                fc._cdStateHidden = false
-                icon:SetAlpha(barData.barOpacity or 1)
+                -- A preset keeps its hidden state from the Fake-Active engine (its
+                -- cdState lives in customActiveStates, not per-bar spellSettings),
+                -- so don't clear it here or the icon flashes visible.
+                if not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then
+                    fc._cdStateHidden = false
+                    icon:SetAlpha(barData.barOpacity or 1)
+                end
             end
         end
     end
@@ -5596,6 +5682,42 @@ end
 function ns.ReseedAssignedSpellsFromLiveIcons()
     local p = ECME and ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
+
+    -- Both-state guards (mirror EnsureAssignedSpells). This appends live-icon
+    -- spells back into assignedSpells; without these it could re-materialize a
+    -- spell that is currently HIDDEN (ghosted) or already OWNED by another bar,
+    -- recreating a both-state. The sole caller (RepopulateFromBlizzard) pre-wipes
+    -- the ghost and Blizzard-sourced assignments, so these are normally no-ops --
+    -- but they keep Reseed safe regardless of caller or ordering.
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+    local sk = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    local aprof = sp and sk and sp[sk]
+    -- Skip entirely while an imported layout is pending its first-load ghosting:
+    -- its tracked spells spill onto default bars until the migration ghosts them,
+    -- and materializing those spills would defeat the import-authoritative hide.
+    if aprof and aprof._importGhostMode then return end
+
+    -- Spell -> owning bar (variant-aware), built once. A live icon whose stored
+    -- owner is a DIFFERENT bar is a transient spillover we must not materialize.
+    local ownerOf
+    if aprof and aprof.barSpells and ns.StoreVariantValue then
+        for k, bsd in pairs(aprof.barSpells) do
+            if k ~= GHOST_CD_BAR_KEY
+               and type(bsd) == "table" and type(bsd.assignedSpells) == "table" then
+                for _, csid in ipairs(bsd.assignedSpells) do
+                    if type(csid) == "number" and csid > 0 then
+                        ownerOf = ownerOf or {}
+                        ns.StoreVariantValue(ownerOf, csid, k, false)
+                    end
+                end
+            end
+        end
+    end
+
+    local ghostSd = ns.GetBarSpellData and ns.GetBarSpellData(GHOST_CD_BAR_KEY)
+    local ghostList = ghostSd and ghostSd.assignedSpells
+    local FindVar = ns.FindVariantIndexInList
+
     for _, barData in ipairs(p.cdmBars.bars) do
         if not barData.isGhostBar
            and barData.key ~= "buffs"
@@ -5614,8 +5736,15 @@ function ns.ReseedAssignedSpellsFromLiveIcons()
                     local fc = ns._ecmeFC and ns._ecmeFC[icon]
                     local sid = fc and fc.spellID
                     if type(sid) == "number" and sid > 0 and not seen[sid] then
-                        sd.assignedSpells[#sd.assignedSpells + 1] = sid
-                        seen[sid] = true
+                        -- Never materialize a hidden (ghosted) spell, or a spell a
+                        -- DIFFERENT bar already owns (variant-aware).
+                        local owner = ownerOf and ns.ResolveVariantValue
+                                      and ns.ResolveVariantValue(ownerOf, sid)
+                        local ghosted = ghostList and FindVar and FindVar(ghostList, sid)
+                        if not ghosted and not (owner and owner ~= barData.key) then
+                            sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                            seen[sid] = true
+                        end
                     end
                 end
             end

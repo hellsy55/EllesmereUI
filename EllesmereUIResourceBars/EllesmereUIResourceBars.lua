@@ -887,7 +887,7 @@ local DEFAULTS = {
             width         = 220,
             height        = 12,
             anchorX       = 0,
-            anchorY       = 0,
+            anchorY       = -78,  -- below the cast bar's default (-54); matches reset/clear
             orientation   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL_UP","VERTICAL_DOWN"
             classColored  = false,
             fillR         = 0.267, fillG = 0.729, fillB = 0.898, fillA = 1,
@@ -944,8 +944,6 @@ local totemBarFrame
 local _totemBorderOverlays = setmetatable({}, { __mode = "k" })
 local _totemHooked = false
 local _totemOrigParent
-local _latencySendTime      -- GetTime() at CURRENT_SPELL_CAST_CHANGED
-local _latencyEventActive   -- true when CURRENT_SPELL_CAST_CHANGED is registered
 local _erbEventFrame        -- file-scoped ref to the event frame (assigned in OnEnable)
 local isInCombat = false
 local currentAlpha = 1
@@ -1759,9 +1757,11 @@ end
 -- resource: +1 = class resource sits ABOVE the power bar -> grow up; -1 = below
 -- -> grow down. Pure read of stored config (no writes, no live bounds). Falls
 -- back to +1 (grow up -- the default layout has the class resource above) when
--- the class resource is disabled or the two bars are co-located.
+-- there is no class resource config or the two bars are co-located. Direction is
+-- resolved from the STORED class-resource position even when it is disabled, so
+-- expanding into a toggled-off / spec-disabled class resource grows the right way.
 local function ResolveExpandDirSign(pp, sp)
-    if not sp or sp.enabled == false then return 1 end
+    if not sp then return 1 end
     -- Anchored: class resource pinned relative to the power bar.
     if NormalizeAnchorKey(sp.anchorTo) == "erb_powerbar" then
         if sp.anchorPosition == "bottom" then return -1 end
@@ -2255,9 +2255,13 @@ local function BuildBars()
     -- or writes the saved setting -- see _ERB_SuppressExpand in OnInitialize.
     if pp.expandIfNoResource and not _heightMatched
        and not EllesmereUI._erbExpandSuppressed and not EllesmereUI._unlockActive then
-        local secRes = GetSecondaryResource()
-        if not secRes then
-            local sp2 = p.secondary or FALLBACK.secondary
+        local sp2 = p.secondary or FALLBACK.secondary
+        -- The class resource bar leaves an empty slot to expand into when "Show
+        -- Class Resource" is toggled off, when it is disabled for the current
+        -- spec via the spec picker, or when the spec has no class resource at
+        -- all. Mirrors the "Shift Elements if No Resource" absence checks
+        -- (IsSpecDisabled + GetSecondaryResource), plus the master-disable case.
+        if sp2.enabled == false or IsSpecDisabled(sp2) or not GetSecondaryResource() then
             ppExpandDelta = sp2.pipHeight or 20
             ppHeight = ppHeight + ppExpandDelta
             ppDirSign = ResolveExpandDirSign(pp, sp2)
@@ -4885,12 +4889,10 @@ end
         spark:Hide()
     end
 
-    -- Latency overlay: register/unregister event + style overlay based on setting
-    if cb.latencyEnabled and _erbEventFrame then
-        if not _latencyEventActive then
-            _erbEventFrame:RegisterEvent("CURRENT_SPELL_CAST_CHANGED")
-            _latencyEventActive = true
-        end
+    -- Latency overlay: style based on setting. Width is computed per cast from
+    -- GetNetStats (live network latency), so there is no event timing involved
+    -- and spell-queueing cannot break it.
+    if cb.latencyEnabled then
         local lo = castBarFrame._latencyOverlay
         local lR, lG, lB, lA = cb.latencyR or 0.835, cb.latencyG or 0.290, cb.latencyB or 0.290, cb.latencyA or 1
         local texKey = cb.texture
@@ -4906,11 +4908,6 @@ end
             lo:SetColorTexture(lR, lG, lB, lA)
         end
     else
-        if _latencyEventActive and _erbEventFrame then
-            _erbEventFrame:UnregisterEvent("CURRENT_SPELL_CAST_CHANGED")
-            _latencyEventActive = false
-            _latencySendTime = nil
-        end
         if castBarFrame._latencyOverlay then castBarFrame._latencyOverlay:Hide() end
         castBarFrame._latencySuffix = nil
     end
@@ -5106,7 +5103,7 @@ UpdateCastBar = function(dt)
     local cb = ERB.db.profile.castBar
     local showTimer = cb.showTimer
 
-    local latSuffix = _latencyEventActive and castBarFrame._latencySuffix
+    local latSuffix = castBarFrame._latencySuffix
     local totalDurMode = showTimer and cb.showTotalDuration
     -- Cache the " / X.X" suffix once per cast (total duration is constant)
     local totalSuffix = totalDurMode and castBarFrame._totalDurSuffix
@@ -5209,19 +5206,23 @@ local function ShowLatencyOverlay(castType)
     if not overlay then return end
 
     local cb = ERB.db.profile.castBar
-    local sendTime = _latencySendTime
-    _latencySendTime = nil  -- consumed regardless of outcome
-
-    -- Bail early: feature off, no timestamp, or bad timing
-    if not cb.latencyEnabled or not sendTime then
+    if not cb.latencyEnabled then
         overlay:Hide(); castBarFrame._latencySuffix = nil; return
     end
 
-    local latencySec = min(GetTime() - sendTime, 0.4)  -- cap 400ms
+    -- Read live network latency straight from the engine. This is queue-proof:
+    -- it does not depend on the timing between cast events (which spell-queueing
+    -- and frame-coherent GetTime() both make unreliable). Casts round-trip
+    -- through the world server, so its latency is the relevant one; fall back to
+    -- the home/realm value only while world latency has not been measured yet.
+    local _, _, latencyHome, latencyWorld = GetNetStats()
+    local latencyMs = latencyWorld
+    if latencyMs <= 0 then latencyMs = latencyHome end
+    local latencySec = latencyMs / 1000
     local castDur = castBarFrame._endTime - castBarFrame._startTime
     local barWidth = castBarFrame._bar:GetWidth()
 
-    if latencySec <= 0 or castDur <= 0 or latencySec >= castDur or barWidth <= 0 then
+    if latencySec <= 0 or castDur <= 0 or barWidth <= 0 then
         overlay:Hide(); castBarFrame._latencySuffix = nil; return
     end
 
@@ -5232,6 +5233,11 @@ local function ShowLatencyOverlay(castType)
         castBarFrame._latencySuffix = nil
     end
 
+    -- Size as a fraction of the cast, clamped to [1px, full bar] so it always
+    -- renders something and never overruns the bar on a lag spike.
+    local width = barWidth * (latencySec / castDur)
+    if width < 1 then width = 1 elseif width > barWidth then width = barWidth end
+
     local clip = castBarFrame._barClip
     overlay:ClearAllPoints()
     if castType == "channel" then
@@ -5241,7 +5247,7 @@ local function ShowLatencyOverlay(castType)
         overlay:SetPoint("TOPRIGHT", clip, "TOPRIGHT", 0, 0)
         overlay:SetPoint("BOTTOMRIGHT", clip, "BOTTOMRIGHT", 0, 0)
     end
-    overlay:SetWidth(barWidth * (latencySec / castDur))
+    overlay:SetWidth(width)
     overlay:Show()
 end
 
@@ -5289,7 +5295,7 @@ OnCastStart = function()
         end
     end
 
-    if _latencyEventActive then ShowLatencyOverlay("cast") end
+    ShowLatencyOverlay("cast")
 
     castBarFrame:Show()
     EllesmereUI.SetElementVisibility(castBarFrame, true)
@@ -5346,7 +5352,7 @@ OnChannelStart = function()
     -- Channel tick marks
     ShowChannelTicks(spellID)
 
-    if _latencyEventActive then ShowLatencyOverlay("channel") end
+    ShowLatencyOverlay("channel")
 
     castBarFrame:Show()
     EllesmereUI.SetElementVisibility(castBarFrame, true)
@@ -5454,7 +5460,7 @@ OnCastStop = function()
     end
     castBarFrame._numStages = 0
     HideChannelTicks()
-    if _latencyEventActive then HideLatencyOverlay() end
+    HideLatencyOverlay()
     EllesmereUI.SetElementVisibility(castBarFrame, false)
 end
 
@@ -5479,7 +5485,7 @@ OnEmpowerStart = function()
     castBarFrame._endTime = endTimeMS / 1000
     castBarFrame._spellName = name
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
-    if _latencyEventActive then HideLatencyOverlay() end
+    HideLatencyOverlay()
     castBarFrame._nameText:SetText(name)
     castBarFrame._bar:SetValue(0)
     HideChannelTicks()
@@ -5598,7 +5604,7 @@ BuildGCDBar = function()
         bdrFrame:SetAllPoints(gcdBarFrame)
         bdrFrame:SetFrameLevel(gcdBarFrame:GetFrameLevel() + 5)
         gcdBarFrame._border = bdrFrame
-		local PP = EllesmereUI and EllesmereUI.PP
+        local PP = EllesmereUI and EllesmereUI.PP
         if PP then PP.CreateBorder(bdrFrame, 0, 0, 0, 1, 1) end
 
         -- Clip frame
@@ -5611,8 +5617,8 @@ BuildGCDBar = function()
         bar:SetMinMaxValues(0, 1)
         bar:SetValue(0)
         gcdBarFrame._bar = bar
-		-- Smooth, always on
-		bar._castInterp = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut
+        -- Native smoothing, applied via SetValue(progress, _castInterp) like the cast bar.
+        bar._castInterp = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut
 
         -- Spark (same texture/approach as the cast bar)
         local sparkFrame = CreateFrame("Frame", nil, clipFrame)
@@ -5689,7 +5695,7 @@ BuildGCDBar = function()
     -- register the cast events that start a GCD.
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
-	gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
+    gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", "player")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
@@ -5795,18 +5801,12 @@ BuildGCDBar = function()
 
     -- Visibility
     gcdBarFrame:Show()
-    -- if EllesmereUI._unlockActive then
-    --     -- bar:SetValue(0.65)
-    --     -- gcdBarFrame:SetAlpha(1)
-    -- else
-	if g.alwaysShow and not (g.instanceOnly and not IsInInstance()) then
+    if g.alwaysShow and not (g.instanceOnly and not IsInInstance()) then
         bar:SetValue(0)
-		EllesmereUI.SetElementVisibility(gcdBarFrame, true)
-        -- gcdBarFrame:SetAlpha(1)
+        EllesmereUI.SetElementVisibility(gcdBarFrame, true)
     else
         bar:SetValue(0)
-		EllesmereUI.SetElementVisibility(gcdBarFrame, false)
-        -- gcdBarFrame:SetAlpha(0)
+        EllesmereUI.SetElementVisibility(gcdBarFrame, false)
     end
 end
 
@@ -5814,11 +5814,9 @@ UpdateGCDBar = function(_dt)
     if not gcdBarFrame or not gcdBarFrame:IsShown() then return end
     local g = ERB.db.profile.gcdBar
     if not g or not g.enabled then return end
-    -- if EllesmereUI._unlockActive then return end
 
     -- Frame stays shown; visibility is via alpha to avoid the Hide->Show fill
     -- flash. (Re-showing a hidden StatusBar renders its fill full for a frame.)
-    -- if not gcdBarFrame:IsShown() then gcdBarFrame:Show() end
     local bar = gcdBarFrame._bar
 
     if g.instanceOnly and not IsInInstance() then
@@ -5845,14 +5843,14 @@ UpdateGCDBar = function(_dt)
     if not active then
         -- No GCD running: empty, and invisible unless Always Show is on.
         bar:SetValue(0)
-		local visible = false
-		if g.alwaysShow then visible = true end
-		EllesmereUI.SetElementVisibility(gcdBarFrame, visible)
+        local visible = false
+        if g.alwaysShow then visible = true end
+        EllesmereUI.SetElementVisibility(gcdBarFrame, visible)
         return
     end
 
-	EllesmereUI.SetElementVisibility(gcdBarFrame, true)
-    bar:SetValue(elapsed / dur)
+    EllesmereUI.SetElementVisibility(gcdBarFrame, true)
+    bar:SetValue(elapsed / dur, bar._castInterp)
 end
 
 -------------------------------------------------------------------------------
@@ -6350,8 +6348,6 @@ local function OnEvent(self, event, ...)
             ERB:ApplyAll()
             RegisterUnlockElements()
         end)
-    elseif event == "CURRENT_SPELL_CAST_CHANGED" then
-        _latencySendTime = GetTime()
     elseif event == "UNIT_SPELLCAST_START" then
         local unit = ...
         if unit == "player" then OnCastStart() end

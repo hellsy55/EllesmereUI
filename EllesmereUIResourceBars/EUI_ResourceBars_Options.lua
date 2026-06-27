@@ -1960,7 +1960,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "toggle", text = "Expand Power Bar if No Resource",
-              tooltip = "When your spec has no class resource, automatically adds the class resource height to the power bar. Automatically disabled when Power Bar height is matched to another element.",
+              tooltip = "When the class resource bar is not shown, this automatically adds the class resource height to the power bar.",
               -- Mutually exclusive with "Shift Elements if No Resource": grey this
               -- while shift is set, but only when it is itself OFF so a legacy profile
               -- that has both on can still turn this off (no deadlock).
