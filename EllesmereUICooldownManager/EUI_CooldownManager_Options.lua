@@ -678,6 +678,7 @@ initFrame:SetScript("OnEvent", function(self)
                         glowColor = { r = 1, g = 0.82, b = 0.1 },
                         classColor = false,
                         mode = "ACTIVE",
+                        onlyInCombat = false,
                     }
                     local prefix = BAR_BUTTON_PREFIXES[barIdx]
                     local realBtn = prefix and _G[prefix .. btnIdx]
@@ -1407,7 +1408,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Section header per buff
                     _, h = W:SectionHeader(parent, btnSpellName .. " x " .. buffName, y);  y = y - h
 
-                    -- Row 1: Glow When | Remove Glow
+                    -- Row 1: Glow When | Only In Combat
                     local modeRow
                     local removeAIdx = aIdx
                     modeRow, h = W:DualRow(parent, y,
@@ -1419,6 +1420,18 @@ initFrame:SetScript("OnEvent", function(self)
                               Refresh()
                           end,
                         },
+                        { type = "toggle", text = "Only In Combat",
+                          getValue = function() return entry.onlyInCombat == true end,
+                          setValue = function(v)
+                              entry.onlyInCombat = v or nil
+                              Refresh()
+                          end,
+                        }
+                    );  y = y - h
+
+                    local removeRow
+                    removeRow, h = W:DualRow(parent, y,
+                        { type = "spacer" },
                         { type = "labeledButton", text = "Remove Glow", buttonText = "Remove", width = 150,
                           onClick = function()
                               table.remove(buffList, removeAIdx)
@@ -1433,7 +1446,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Buff icon next to the Remove button
                     do
-                        local rightRgn = modeRow._rightRegion
+                        local rightRgn = removeRow._rightRegion
                         if rightRgn and rightRgn._control then
                             local btn = rightRgn._control
                             local btnH = btn:GetHeight()
