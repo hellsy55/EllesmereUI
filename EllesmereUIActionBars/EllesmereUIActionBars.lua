@@ -5444,7 +5444,7 @@ local function BuildVisibilityString(info, s, visOverride)
         elseif vis == "out_of_combat" then
             petShow = "[nocombat] show; hide"
         elseif vis == "show_dragonriding" then
-            petShow = "[advflyable,mounted,flying] show; hide"
+            petShow = "[advflyable,flying] show; hide"
         elseif s.combatShowEnabled then
             petShow = "[combat] show; hide"
         elseif s.combatHideEnabled then
@@ -5482,9 +5482,10 @@ local function BuildVisibilityString(info, s, visOverride)
     elseif vis == "solo" then
         return hidePrefix .. "[nogroup] show; hide"
     elseif vis == "show_dragonriding" then
-        -- Show only while flying on a skyriding mount. The secure state driver
-        -- re-evaluates this automatically (incl. the flying transition).
-        return hidePrefix .. "[advflyable,mounted,flying] show; hide"
+            -- No "mounted": Druid Flight Form is a shapeshift, not a mount, so it
+            -- would never match. This covers skyriding mounts and
+            -- Flight Form (advflyable excludes ordinary flying)
+        return hidePrefix .. "[advflyable,flying] show; hide"
     end
     return hidePrefix .. "show"
 end
@@ -11096,4 +11097,3 @@ end)
         C_Timer.After(0.5, ScanABSwiftmend)
     end)
 end)()
-
