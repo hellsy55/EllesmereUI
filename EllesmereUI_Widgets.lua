@@ -5535,10 +5535,12 @@ local function BuildSyncIcon(opts)
     allBtn:SetScript("OnEnter", function()
         local r, g, b = EllesmereUI.GetAccentColor()
         allText:SetTextColor(r, g, b, 1)
+        if opts.tooltip then ShowWidgetTooltip(allBtn, opts.tooltip, opts.tooltipOpts) end
     end)
     allBtn:SetScript("OnLeave", function()
         local r, g, b = EllesmereUI.GetAccentColor()
         allText:SetTextColor(r, g, b, 0.65)
+        if opts.tooltip then HideWidgetTooltip() end
     end)
 
     -- " | Multiple" link (only when multiApply opts are provided)

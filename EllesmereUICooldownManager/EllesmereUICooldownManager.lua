@@ -1335,6 +1335,198 @@ local GLOW_STYLES = {
 }
 ns.GLOW_STYLES = GLOW_STYLES
 
+-------------------------------------------------------------------------------
+--  Cross-surface Pandemic Glow sync (CDM bars + Nameplates) -- BEST EFFORT
+--  Glow styles are identified by NAME, never by raw index: CDM, Nameplates and
+--  the shared engine order their lists differently, so the same integer means a
+--  different style on each surface (this silently swapped styles). Each surface
+--  also advertises a different subset, so the sync is best-effort: a style a
+--  surface can't render is coerced to its nearest supported one, and the coerced
+--  value is what gets STORED -- so the dropdown name and the preview image always
+--  match what is actually displayed.
+--    - CDM icon bars  : full set + "Blizzard Default" (-1 = Blizzard's own glow)
+--    - Nameplate icons: same set MINUS "Blizzard Default" (no native glow there)
+-------------------------------------------------------------------------------
+local PG_BLIZZ_NAME = "Blizzard Default"
+
+-- CDM icon-bar style index <-> canonical name
+local function PG_CdmNameFromIndex(idx)
+    if idx == -1 then return PG_BLIZZ_NAME end
+    local e = GLOW_STYLES[idx]
+    return (e and e.name) or "Pixel Glow"
+end
+local function PG_CdmIndexFromName(name)
+    if name == PG_BLIZZ_NAME then return -1 end
+    for i = 1, #GLOW_STYLES do
+        if GLOW_STYLES[i].name == name then return i end
+    end
+    return 1  -- Pixel Glow
+end
+
+-- Nameplate style index <-> canonical name (no Blizzard Default; coerce to Pixel)
+local function PG_NameplateNameFromIndex(idx)
+    local list = EllesmereUI.NameplatePandemicGlowStyles
+    local e = list and list[idx]
+    return (e and e.name) or "Pixel Glow"
+end
+local function PG_NameplateIndexFromName(name)
+    local list = EllesmereUI.NameplatePandemicGlowStyles
+    if name and name ~= PG_BLIZZ_NAME and list then
+        for i = 1, #list do
+            if list[i].name == name then return i end
+        end
+    end
+    return 1  -- Pixel Glow (covers Blizzard Default / anything unsupported)
+end
+
+-- Tracked Buff Bars render as rectangles: only Pixel(1)/Auto-Cast(4) work there.
+local function PG_TbbIndexFromName(name)
+    return (name == "Auto-Cast Shine") and 4 or 1
+end
+-- A TBB may STORE a non-renderable style (e.g. -1 default) but DISPLAYS it as
+-- Pixel; compare what's shown, not what's stored.
+local function PG_TbbEffectiveStyle(dst)
+    return (dst.pandemicGlowStyle == 4) and 4 or 1
+end
+
+local function PG_GetNPProfile()
+    if not EllesmereUIDB or not EllesmereUIDB.profiles then return nil end
+    local pName = EllesmereUIDB.activeProfile or "Default"
+    local prof = EllesmereUIDB.profiles[pName]
+    return prof and prof.addons and prof.addons.EllesmereUINameplates
+end
+
+-- Write a canonical payload into a destination, coercing the style through the
+-- destination's own name->index resolver (so the stored index is renderable).
+local function PG_Write(dst, payload, indexFromName)
+    dst.pandemicGlow          = payload.on
+    dst.pandemicGlowStyle     = indexFromName(payload.styleName or "Pixel Glow")
+    dst.pandemicGlowColor     = payload.color and CopyTable(payload.color) or nil
+    dst.pandemicGlowLines     = payload.lines
+    dst.pandemicGlowThickness = payload.thickness
+    dst.pandemicGlowSpeed     = payload.speed
+end
+
+-- True when dst already displays what PG_Write(dst, payload) would store. When
+-- both are off nothing is shown, so leftover style/color is irrelevant.
+-- actualStyleFn lets a surface report its EFFECTIVE (displayed) style when that
+-- differs from the raw stored value (e.g. rectangle TBBs); defaults to stored.
+local function PG_Matches(dst, payload, indexFromName, actualStyleFn)
+    if (dst.pandemicGlow or false) ~= (payload.on or false) then return false end
+    if not payload.on then return true end
+    local actual = actualStyleFn and actualStyleFn(dst) or (dst.pandemicGlowStyle or 1)
+    if actual ~= indexFromName(payload.styleName or "Pixel Glow") then return false end
+    local dc = dst.pandemicGlowColor or {}
+    local pc = payload.color or {}
+    if (dc.r or 1) ~= (pc.r or 1) or (dc.g or 1) ~= (pc.g or 1) or (dc.b or 0) ~= (pc.b or 0) then return false end
+    if (dst.pandemicGlowLines or 8) ~= (payload.lines or 8) then return false end
+    if (dst.pandemicGlowThickness or 2) ~= (payload.thickness or 2) then return false end
+    if (dst.pandemicGlowSpeed or 4) ~= (payload.speed or 4) then return false end
+    return true
+end
+
+-- Build a canonical payload from a CDM icon bar.
+function EllesmereUI.PandemicPayloadFromCdmBar(bd)
+    return {
+        on        = bd.pandemicGlow == true,
+        styleName = PG_CdmNameFromIndex(bd.pandemicGlowStyle or 1),
+        color     = bd.pandemicGlowColor,
+        lines     = bd.pandemicGlowLines,
+        thickness = bd.pandemicGlowThickness,
+        speed     = bd.pandemicGlowSpeed,
+    }
+end
+
+-- Build a payload from a rectangle bar (Tracked Buff Bar): rectangles only
+-- render Pixel/Auto-Cast, so report the EFFECTIVE displayed style, not the raw
+-- stored one (which may be e.g. -1 "Blizzard Default", shown there as Pixel).
+function EllesmereUI.PandemicPayloadFromRectBar(bd)
+    return {
+        on        = bd.pandemicGlow == true,
+        styleName = (bd.pandemicGlowStyle == 4) and "Auto-Cast Shine" or "Pixel Glow",
+        color     = bd.pandemicGlowColor,
+        lines     = bd.pandemicGlowLines,
+        thickness = bd.pandemicGlowThickness,
+        speed     = bd.pandemicGlowSpeed,
+    }
+end
+
+-- Build a payload from the nameplate profile.
+function EllesmereUI.PandemicPayloadFromNameplate(np)
+    return {
+        on        = np.pandemicGlow == true,
+        styleName = PG_NameplateNameFromIndex(np.pandemicGlowStyle or 1),
+        color     = np.pandemicGlowColor,
+        lines     = np.pandemicGlowLines,
+        thickness = np.pandemicGlowThickness,
+        speed     = np.pandemicGlowSpeed,
+    }
+end
+
+-- Apply a canonical payload to all sync surfaces (CDM icon bars, Tracked Buff
+-- Bars, Nameplates), best-effort. opts.skipCdmKey / opts.skipNameplates exclude
+-- the source surface; opts.skipTbbBar excludes one TBB (its source bar table).
+function EllesmereUI.ApplyPandemicGlowToAll(payload, opts)
+    opts = opts or {}
+    if not opts.skipNameplates then
+        local np = PG_GetNPProfile()
+        if np and EllesmereUI.NameplatePandemicGlowStyles then
+            PG_Write(np, payload, PG_NameplateIndexFromName)
+        end
+    end
+    local p = ECME.db and ECME.db.profile
+    if p and p.cdmBars and p.cdmBars.bars then
+        for _, b in ipairs(p.cdmBars.bars) do
+            if b.key ~= opts.skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff" then
+                PG_Write(b, payload, PG_CdmIndexFromName)
+            end
+        end
+    end
+    -- Tracked Buff Bars (active spec) -- rectangles, so style coerces to Pixel/Auto-Cast.
+    local tbb = ns.GetTrackedBuffBars and ns.GetTrackedBuffBars()
+    if tbb and tbb.bars then
+        for _, b in ipairs(tbb.bars) do
+            if b ~= opts.skipTbbBar then
+                PG_Write(b, payload, PG_TbbIndexFromName)
+            end
+        end
+    end
+    if ns.BuildAllCDMBars then ns.BuildAllCDMBars() end
+    if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
+    if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
+end
+
+-- True when every (non-skipped) surface already matches the payload.
+function EllesmereUI.IsPandemicGlowSyncedToAll(payload, opts)
+    opts = opts or {}
+    if not opts.skipNameplates then
+        local np = PG_GetNPProfile()
+        if np and EllesmereUI.NameplatePandemicGlowStyles
+           and not PG_Matches(np, payload, PG_NameplateIndexFromName) then
+            return false
+        end
+    end
+    local p = ECME.db and ECME.db.profile
+    if p and p.cdmBars and p.cdmBars.bars then
+        for _, b in ipairs(p.cdmBars.bars) do
+            if b.key ~= opts.skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff"
+               and not PG_Matches(b, payload, PG_CdmIndexFromName) then
+                return false
+            end
+        end
+    end
+    local tbb = ns.GetTrackedBuffBars and ns.GetTrackedBuffBars()
+    if tbb and tbb.bars then
+        for _, b in ipairs(tbb.bars) do
+            if b ~= opts.skipTbbBar
+               and not PG_Matches(b, payload, PG_TbbIndexFromName, PG_TbbEffectiveStyle) then
+                return false
+            end
+        end
+    end
+    return true
+end
+
 StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
     if not overlay then return end
     local styleIdx = tonumber(style) or 1

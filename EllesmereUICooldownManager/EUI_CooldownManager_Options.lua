@@ -241,67 +241,10 @@ initFrame:SetScript("OnEvent", function(self)
     local PAN_GLOW_BAR_VALUES = { [0] = "None", [1] = "Pixel Glow", [4] = "Auto-Cast Shine" }
     local PAN_GLOW_BAR_ORDER  = { 0, 1, 4 }
 
-    -- Get nameplate profile from central DB
-    local function GetNPProfile()
-        if not EllesmereUIDB or not EllesmereUIDB.profiles then return nil end
-        local pName = EllesmereUIDB.activeProfile or "Default"
-        local prof = EllesmereUIDB.profiles[pName]
-        return prof and prof.addons and prof.addons.EllesmereUINameplates
-    end
-
-    -- Copy pandemic fields from one table to another
-    local function CopyPandemicFields(src, dst)
-        dst.pandemicGlow = src.pandemicGlow
-        dst.pandemicGlowStyle = src.pandemicGlowStyle
-        dst.pandemicGlowColor = src.pandemicGlowColor and CopyTable(src.pandemicGlowColor) or nil
-        dst.pandemicGlowLines = src.pandemicGlowLines
-        dst.pandemicGlowThickness = src.pandemicGlowThickness
-        dst.pandemicGlowSpeed = src.pandemicGlowSpeed
-    end
-
-    -- Compare pandemic fields between two tables
-    local function PandemicFieldsMatch(a, b)
-        if (a.pandemicGlow or false) ~= (b.pandemicGlow or false) then return false end
-        if (a.pandemicGlowStyle or 1) ~= (b.pandemicGlowStyle or 1) then return false end
-        local ac = a.pandemicGlowColor or {}
-        local bc = b.pandemicGlowColor or {}
-        if (ac.r or 1) ~= (bc.r or 1) or (ac.g or 1) ~= (bc.g or 1) or (ac.b or 0) ~= (bc.b or 0) then return false end
-        if (a.pandemicGlowLines or 8) ~= (b.pandemicGlowLines or 8) then return false end
-        if (a.pandemicGlowThickness or 2) ~= (b.pandemicGlowThickness or 2) then return false end
-        if (a.pandemicGlowSpeed or 4) ~= (b.pandemicGlowSpeed or 4) then return false end
-        return true
-    end
-
-    -- Apply pandemic settings to all targets (NP, CDM bars) except skipKey
-    local function ApplyPandemicToAll(src, skipCdmKey)
-        local np = GetNPProfile()
-        if np then CopyPandemicFields(src, np) end
-        local pdb = DB()
-        if pdb and pdb.cdmBars and pdb.cdmBars.bars then
-            for _, b in ipairs(pdb.cdmBars.bars) do
-                if b.key ~= skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff" then
-                    CopyPandemicFields(src, b)
-                end
-            end
-        end
-        ns.BuildAllCDMBars()
-        if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
-        Refresh()
-    end
-
-    -- Check if pandemic settings are synced across all targets
-    local function IsPandemicSyncedEverywhere(src, skipCdmKey)
-        local np = GetNPProfile()
-        if np and not PandemicFieldsMatch(src, np) then return false end
-        local pdb = DB()
-        if pdb and pdb.cdmBars and pdb.cdmBars.bars then
-            for _, b in ipairs(pdb.cdmBars.bars) do
-                if b.key ~= skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff"
-                   and not PandemicFieldsMatch(src, b) then return false end
-            end
-        end
-        return true
-    end
+    -- Pandemic-glow cross-surface sync (CDM bars + Nameplates) lives in the CDM
+    -- core as EllesmereUI.ApplyPandemicGlowToAll / IsPandemicGlowSyncedToAll
+    -- (best-effort, name-based so styles never shift across surfaces). Callers
+    -- build a payload with EllesmereUI.PandemicPayloadFrom* and pass it.
 
     -- Create a pandemic glow preview icon in a DualRow right-half
     local function BuildPandemicPreview(row, isOffFn, getDataFn)
@@ -3988,17 +3931,18 @@ initFrame:SetScript("OnEvent", function(self)
             BuildPandemicCogButton(tbbPanRow, tbbAntsOff, SelectedTBB, function() RefreshTBB() end)
 
             -- Apply All
-            if EllesmereUI.BuildSyncIcon then
+            if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
                 EllesmereUI.BuildSyncIcon({
                     region = tbbPanRow._leftRegion,
-                    tooltip = "Apply Pandemic Glow settings to all (Nameplates, CDM Bars)",
+                    tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
                     isSynced = function()
                         local src = SelectedTBB(); if not src then return true end
-                        return IsPandemicSyncedEverywhere(src, nil, _tbbSelectedBar)
+                        return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
                     end,
                     onClick = function()
                         local src = SelectedTBB(); if not src then return end
-                        ApplyPandemicToAll(src, nil, _tbbSelectedBar)
+                        EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                        RefreshTBB()
                     end,
                 })
             end
@@ -11640,15 +11584,16 @@ initFrame:SetScript("OnEvent", function(self)
 
             BuildPandemicCogButton(panGlowRow, antsOff, BD, function() ns.BuildAllCDMBars() end)
 
-            if EllesmereUI.BuildSyncIcon then
+            if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
                 EllesmereUI.BuildSyncIcon({
                     region = panGlowRow._leftRegion,
-                    tooltip = "Apply Pandemic Glow settings to all (Nameplates, CDM Bars)",
+                    tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and tracking bars. A surface that can't show a style uses its closest match.",
                     isSynced = function()
-                        return IsPandemicSyncedEverywhere(BD(), barKey)
+                        return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromCdmBar(BD()), { skipCdmKey = barKey })
                     end,
                     onClick = function()
-                        ApplyPandemicToAll(BD(), barKey)
+                        EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromCdmBar(BD()), { skipCdmKey = barKey })
+                        Refresh()
                     end,
                 })
             end
