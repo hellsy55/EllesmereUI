@@ -2749,7 +2749,13 @@ initFrame:SetScript("OnEvent", function(self)
                     previewLabel:SetAlpha(off and 0.3 or 1)
                 end
             end
-            EllesmereUI.RegisterWidgetRefresh(UpdatePreviewGrayOut)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                UpdatePreviewGrayOut()
+                -- Re-render the glow so external changes (e.g. the CDM
+                -- "Apply to: All" sync) update the preview, not just the
+                -- dropdown label. Mirrors the CDM pandemic preview.
+                RefreshPandemicPreview()
+            end)
             UpdatePreviewGrayOut()
         end
 
@@ -2777,6 +2783,25 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             swatch:SetAlpha(pandemicOff() and 0.15 or 1)
             swatch:EnableMouse(not pandemicOff())
+        end
+
+        -- Apply-to-All: push this nameplate pandemic glow out to all CDM bars.
+        -- The coordinator lives in the CDM core, so the link only appears when
+        -- that module is loaded (otherwise there's nothing to sync to).
+        if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
+            EllesmereUI.BuildSyncIcon({
+                region = glowStyleRow._leftRegion,
+                tooltip = "Apply this pandemic glow to all CDM bars and tracking bars. A surface that can't show a style uses its closest match.",
+                isSynced = function()
+                    return EllesmereUI.IsPandemicGlowSyncedToAll(
+                        EllesmereUI.PandemicPayloadFromNameplate(DB()), { skipNameplates = true })
+                end,
+                onClick = function()
+                    EllesmereUI.ApplyPandemicGlowToAll(
+                        EllesmereUI.PandemicPayloadFromNameplate(DB()), { skipNameplates = true })
+                    C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+                end,
+            })
         end
 
         -- Pixel Glow sub-options: only enabled when style is "Pixel Glow" (index 1)
