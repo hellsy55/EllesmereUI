@@ -409,7 +409,10 @@ initFrame:SetScript("OnEvent", function(self)
                     filledCount = _previewPipCount
                 end
                 local useThresh = _pvTsEnabled
-                local tr, tg, tb = sp.thresholdR, sp.thresholdG, sp.thresholdB
+				-- use current spec threshold color if configured
+				local tr = _pvTsEntry2 and _pvTsEntry2.thresholdR or sp.thresholdR
+				local tg = _pvTsEntry2 and _pvTsEntry2.thresholdG or sp.thresholdG
+				local tb = _pvTsEntry2 and _pvTsEntry2.thresholdB or sp.thresholdB
 
                 for i, pip in ipairs(_previewFrames.pips) do
                     if isVertical then
@@ -3722,11 +3725,30 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- threshold input
                     local threshMax = isBar and 100 or 10
+					-- Enhance Five-Bar minimum (7) applies only to the entry that
+					-- targets Enhancement and only while Five-Bar mode is on.
+					local entryIsEnhance = false
+					if p.secondary.enhanceFiveBar == true and entry.specIDs then
+						for _, sid in ipairs(entry.specIDs) do
+							if sid == 263 then entryIsEnhance = true; break end
+						end
+					end
+					local threshMin = entryIsEnhance and 7 or 1
                     ef._threshInput:SetText(tostring(entry.thresholdCount or (isBar and 30 or 3)))
+					-- Enhance-only tooltip on the threshold input to explain minimum
+					if entryIsEnhance then
+						ef._threshInput:SetScript("OnEnter", function(self)
+							EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Enhance 5 Bar minimum is %d (if you want less just change 5 bar color)"):format(threshMin))
+						end)
+						ef._threshInput:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+					else
+						ef._threshInput:SetScript("OnEnter", nil)
+						ef._threshInput:SetScript("OnLeave", nil)
+					end
                     ef._threshInput:SetScript("OnEnterPressed", function(self)
                         local val = tonumber(self:GetText())
                         if not val then self:SetText(tostring(entry.thresholdCount or 3)); self:ClearFocus(); return end
-                        val = math.max(1, math.min(threshMax, math.floor(val + 0.5)))
+                        val = math.max(threshMin, math.min(threshMax, math.floor(val + 0.5)))
                         self:SetText(tostring(val))
                         local p2 = DB(); if not p2 then return end
                         local ent = p2.secondary.thresholdSpecs and p2.secondary.thresholdSpecs[idx]

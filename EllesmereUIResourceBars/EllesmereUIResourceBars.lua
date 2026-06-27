@@ -3394,6 +3394,21 @@ local function UpdateSecondaryResource()
     local _tsEnabled = _tsEntry and (_tsEntry.thresholdEnabled ~= false) or false
     if not _tsEnabled then _tsEntry = nil end
     local _tsThreshCount = _tsEntry and _tsEntry.thresholdCount or sp.thresholdCount
+    -- Enhance Five Bar needs a threshold of at least 7 (the bar is 5 pips + overflow).
+    -- Clamp the value used this update so the live bar is always correct, and persist
+    -- a stale entry saved below 7 (e.g. created before Five Bar) so it actually
+	-- updates (only an Enhancement entry)
+    if powerType == "MAELSTROM_WEAPON" and sp.enhanceFiveBar and _tsEntry
+       and _tsThreshCount and _tsThreshCount < 7 then
+        _tsThreshCount = 7
+        local _specIdx = GetSpecialization()
+        local _specID = _specIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(_specIdx)
+        if _specID and _tsEntry.specIDs then
+            for _, sid in ipairs(_tsEntry.specIDs) do
+                if sid == _specID then _tsEntry.thresholdCount = 7; break end
+            end
+        end
+    end
     local _tsPartialOnly = _tsEntry and _tsEntry.thresholdPartialOnly
     if _tsPartialOnly == nil then _tsPartialOnly = sp.thresholdPartialOnly end
     -- Bar-type only: reverse the threshold direction so the threshold color shows
@@ -3957,13 +3972,21 @@ local function UpdateSecondaryResource()
             local _enhOR, _enhOG, _enhOB = sp.enhanceOverflowR or 1, sp.enhanceOverflowG or 0.6, sp.enhanceOverflowB or 0.2
             if _enhOverflow then cur = 5 end  -- all 5 pips active when overflowing
 
-            local useThresh = _tsEntry and cur >= _tsThreshCount and not _enhFive
+            local useThresh = _tsEntry and (cur >= _tsThreshCount or _enhRealCur >= _tsThreshCount)
             local tr, tg, tb = _tsR, _tsG, _tsB
             for i = 1, maxC do
                 if pips[i] and pips[i]:IsShown() then
                     local active = i <= cur
-                    if active and _enhOverflow and i <= _enhOverCount then
+					-- if no threshold just use enhfive color
+                    if active and _enhOverflow and i <= _enhOverCount and not useThresh then
                         pips[i]:SetActive(true, _enhOR, _enhOG, _enhOB)
+					elseif active and _enhOverflow and i <= _enhOverCount and useThresh then
+						-- if partial, make count 5 based
+						if _tsPartialOnly and i < (_tsThreshCount - cur) then
+							pips[i]:SetActive(true, _enhOR, _enhOG, _enhOB)
+                        else
+                            pips[i]:SetActive(true, tr, tg, tb)
+                        end
                     elseif active and useThresh then
                         if _tsPartialOnly and i < _tsThreshCount then
                             pips[i]:SetActive(true, r, g, b, a)
