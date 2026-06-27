@@ -1266,8 +1266,16 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Inky Black Potion",
               getValue=function() local c = CDB(); return c and c.enabled and c.enabled.inky_black end,
               setValue=function(v)
-                  local c = CDB(); if c and c.enabled then c.enabled.inky_black = v; RefreshAll(); RebuildPreviewHeader() end
+                  local c = CDB(); if not (c and c.enabled) then return end
+                  c.enabled.inky_black = v
+                  RefreshAll()
+                  -- Update widget refreshes (e.g. the "Choose Zones" disabled overlay)
+                  -- BEFORE rebuilding the preview header, so the preview rebuild is the
+                  -- final action. Calling RefreshPage AFTER RebuildPreviewHeader tears
+                  -- down the freshly-built preview (it vanished until /reload). The
+                  -- working Healthstone toggle likewise rebuilds the preview last.
                   EllesmereUI:RefreshPage()
+                  RebuildPreviewHeader()
               end }
         );  y = y - h
 
