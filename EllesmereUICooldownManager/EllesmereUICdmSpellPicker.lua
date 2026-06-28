@@ -1056,8 +1056,10 @@ function ns.AddTrackedSpell(barKey, id)
     -- elsewhere). Family classification handled by ns.IsBarBuffFamily.
     -- custom_buff bars are a separate system and are never swept.
     --
-    -- Negative IDs only auto-move within the non-buff family (trinkets and
-    -- items only belong on CD/util bars).
+    -- Negative IDs auto-move within whichever family the target bar belongs to
+    -- (the sweep keys off IsBarBuffFamily, no positivity gate): trinkets stay on
+    -- CD/util bars, while custom items can live on either family and sweep only
+    -- their own.
     local targetBd = barDataByKey[barKey]
     local p = ECME.db.profile
     local targetIsBuff = IsBarBuffFamily(barKey)

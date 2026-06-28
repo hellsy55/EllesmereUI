@@ -1302,7 +1302,11 @@ initFrame:SetScript("OnEvent", function(self)
                 pfR, pfG, pfB = 0, 0, 1
             end
             local pbR, pbG, pbB
-            if customPBg then
+            if settings.powerBgPowerColored then
+                local _, pbToken = UnitPowerType("player")
+                local pbInfo = EllesmereUI.GetPowerColor(pbToken or "MANA")
+                pbR, pbG, pbB = pbInfo.r, pbInfo.g, pbInfo.b
+            elseif customPBg then
                 pbR, pbG, pbB = customPBg.r, customPBg.g, customPBg.b
             else
                 pbR, pbG, pbB = 17/255, 17/255, 17/255
@@ -2342,7 +2346,11 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 local pvPbR, pvPbG, pvPbB
                 local cpBg = s.customPowerBgColor
-                if cpBg then pvPbR, pvPbG, pvPbB = cpBg.r, cpBg.g, cpBg.b
+                if s.powerBgPowerColored then
+                    local _, pbToken = UnitPowerType("player")
+                    local pbInfo = EllesmereUI.GetPowerColor(pbToken or "MANA")
+                    pvPbR, pvPbG, pvPbB = pbInfo.r, pbInfo.g, pbInfo.b
+                elseif cpBg then pvPbR, pvPbG, pvPbB = cpBg.r, cpBg.g, cpBg.b
                 else pvPbR, pvPbG, pvPbB = 17/255, 17/255, 17/255 end
                 if pf._powerFill then
                     local curTK = s.healthBarTexture or db.profile.healthBarTexture or "none"
@@ -5103,7 +5111,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 2: Bar Color (multiSwatch) + Bar Background (slider + inline swatch)
         local sharedHealthColorRow
         sharedHealthColorRow, h = W:DualRow(parent, y,
-            { type="multiSwatch", text="Bar Color",
+            { type="multiSwatch", text="Fill Color",
               swatches = {
                 { tooltip = "Gradient End Color", hasAlpha = false,
                   disabled = function() return not SVal("gradientEnabled", false) end,
@@ -5198,6 +5206,7 @@ initFrame:SetScript("OnEvent", function(self)
                 bgClassUpdate()
                 bgClassSw:SetAlpha(SVal("bgClassColored", false) and 1 or 0.3)
             end)
+            bgClassSw:SetAlpha(SVal("bgClassColored", false) and 1 or 0.3)
 
             -- Custom background color swatch.
             local bgSwGet = function()
@@ -5227,6 +5236,7 @@ initFrame:SetScript("OnEvent", function(self)
                 bgSwUpdate()
                 bgSw:SetAlpha(SVal("bgClassColored", false) and 0.3 or 1)
             end)
+            bgSw:SetAlpha(SVal("bgClassColored", false) and 0.3 or 1)
         end
         -- Sync icon: Bar Background (right) -- background color + opacity
         do
@@ -5357,7 +5367,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Smooth Health Bars",
               getValue=function() return SVal("smoothBars", false) end,
               setValue=function(v) SSet("smoothBars", v) end },
-            { type="slider", text="Bar Opacity", min=10, max=100, step=1,
+            { type="slider", text="Fill Opacity", min=10, max=100, step=1,
               disabled=function() return db.profile.darkTheme end,
               disabledTooltip="Dark Mode", requireState="disabled",
               getValue=function() return SVal("healthBarOpacity", 90) end,
@@ -6097,7 +6107,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 3: Bar Color (multiSwatch) + Bar Background (slider + inline swatch)
         local sharedPowerRow3
         sharedPowerRow3, h = W:DualRow(parent, y,
-            { type="multiSwatch", text="Bar Color",
+            { type="multiSwatch", text="Fill Color",
               swatches = {
                 { tooltip = "Gradient End Color", hasAlpha = false,
                   disabled = function() return not SVal("powerGradientEnabled", false) end,
@@ -6155,9 +6165,34 @@ initFrame:SetScript("OnEvent", function(self)
             { type="slider", text="Bar Background", min=0, max=100, step=1,
               getValue=function() return SVal("customPowerBgAlpha", 100) end,
               setValue=function(v) SSet("customPowerBgAlpha", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
-        -- Inline color swatch on Bar Background (right region)
+        -- Inline color swatches on Bar Background (right region): a Custom + Power
+        -- Colored pair mirroring the Bar Color picker. Clicking either toggles
+        -- powerBgPowerColored; the inactive one dims to 0.3 (matches the fill swatch).
         do
             local rgn = sharedPowerRow3._rightRegion
+            -- Power-colored background swatch (shows the player's power color; not editable).
+            local bgPwrGet = function()
+                local _, pToken = UnitPowerType("player")
+                local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                return info.r, info.g, info.b
+            end
+            local bgPwrSw, bgPwrUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgPwrGet, function() end, false, 20)
+            bgPwrSw._eabOrigClick = bgPwrSw:GetScript("OnClick")
+            bgPwrSw:SetScript("OnClick", function()
+                SSet("powerBgPowerColored", true)
+                ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+            end)
+            bgPwrSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgPwrSw, "Power Colored Background") end)
+            bgPwrSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            PP.Point(bgPwrSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = bgPwrSw
+            RegisterWidgetRefresh(function()
+                bgPwrUpdate()
+                bgPwrSw:SetAlpha(SVal("powerBgPowerColored", false) and 1 or 0.3)
+            end)
+            bgPwrSw:SetAlpha(SVal("powerBgPowerColored", false) and 1 or 0.3)
+
+            -- Custom background color swatch.
             local bgSwGet = function()
                 local c = SGet("customPowerBgColor")
                 if c then return c.r, c.g, c.b end
@@ -6168,9 +6203,24 @@ initFrame:SetScript("OnEvent", function(self)
                 ReloadAndUpdate(); UpdatePreview()
             end
             local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
+            bgSw._eabOrigClick = bgSw:GetScript("OnClick")
+            bgSw:SetScript("OnClick", function(self)
+                if SVal("powerBgPowerColored", false) then
+                    SSet("powerBgPowerColored", false)
+                    ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+                    return
+                end
+                if self._eabOrigClick then self._eabOrigClick(self) end
+            end)
+            bgSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSw, "Custom Background Color") end)
+            bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgSw
-            RegisterWidgetRefresh(function() bgSwUpdate() end)
+            RegisterWidgetRefresh(function()
+                bgSwUpdate()
+                bgSw:SetAlpha(SVal("powerBgPowerColored", false) and 0.3 or 1)
+            end)
+            bgSw:SetAlpha(SVal("powerBgPowerColored", false) and 0.3 or 1)
         end
         -- Sync icon: Bar Background (right) -- background color + opacity
         do
@@ -6179,11 +6229,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local src = UNIT_DB_MAP[selectedUnit]()
                 local bc = src.customPowerBgColor or { r=17/255, g=17/255, b=17/255 }
                 local bgA = src.customPowerBgAlpha or 100
+                local bgPwr = src.powerBgPowerColored or false
                 for _, key in ipairs(keys) do
                     if key ~= selectedUnit then
                         local d = UNIT_DB_MAP[key]()
                         d.customPowerBgColor = { r=bc.r, g=bc.g, b=bc.b }
                         d.customPowerBgAlpha = bgA
+                        d.powerBgPowerColored = bgPwr
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -6203,6 +6255,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local d = UNIT_DB_MAP[key]()
                         if not colEq(d.customPowerBgColor, src.customPowerBgColor) then return false end
                         if (d.customPowerBgAlpha or 100) ~= (src.customPowerBgAlpha or 100) then return false end
+                        if (d.powerBgPowerColored or false) ~= (src.powerBgPowerColored or false) then return false end
                     end
                     return true
                 end,
@@ -10466,12 +10519,29 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) settingsTable.healthHeight = v; ReloadAndUpdate() end },
             rightSlot);  y = y - h
 
-        -- Row 2: Bar Color (multiSwatch) + Bar Opacity
+        -- Row 2: Fill Color + Bar Background / Bar Opacity. Boss frames present
+        -- Fill Color AND Bar Background each as an opacity slider with inline
+        -- class/custom swatches (mirroring Main Frames' Bar Background); other mini
+        -- units keep the combined "Bar Color" multiSwatch + a "Bar Opacity" slider.
         do
-            local colorRow
-            colorRow, h = W:DualRow(parent, y,
-                { type="multiSwatch", text="Bar Color",
-                  swatches = {
+            local isBoss = (unitKey == "boss")
+
+            local leftSlot2, rightSlot2
+            if isBoss then
+                -- Fill Color = the health fill opacity (formerly "Fill Opacity")
+                -- with the fill color swatches moved inline below.
+                leftSlot2 = { type="slider", text="Fill Color", min=10, max=100, step=1,
+                  disabled=function() return db.profile.darkTheme end,
+                  disabledTooltip="Dark Mode", requireState="disabled",
+                  getValue=function() return MVal("healthBarOpacity", 90) end,
+                  setValue=function(v) MSet("healthBarOpacity", v) end }
+                rightSlot2 = { type="slider", text="Bar Background", min=0, max=100, step=1,
+                  getValue=function() return MVal("customBgAlpha", 100) end,
+                  setValue=function(v) MSet("customBgAlpha", v) end }
+            else
+                -- Combined "Bar Color" picker: inline Bar Background swatch + Custom
+                -- Colored Fill + Class Colored Fill (non-boss mini units, unchanged).
+                local fillSwatches = {
                     { tooltip = "Bar Background", hasAlpha = false,
                       getValue = function()
                           local c = MGet("customBgColor")
@@ -10494,9 +10564,6 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       onClick = function(self)
                           if MVal("healthClassColored", false) then
-                              -- Seed default custom fill when unset (see the matching
-                              -- comment on the main Bar Color swatch) so the bar shows
-                              -- it immediately instead of needing a picker "jump start".
                               if MGet("customFillColor") == nil then
                                   settingsTable.customFillColor = { r = 37/255, g = 193/255, b = 29/255 }
                               end
@@ -10526,20 +10593,144 @@ initFrame:SetScript("OnEvent", function(self)
                       refreshAlpha = function()
                           return MVal("healthClassColored", false) and 1 or 0.3
                       end },
-                  } },
-                { type="slider", text=(unitKey == "boss") and "Fill Opacity" or "Bar Opacity", min=10, max=100, step=1,
+                }
+                leftSlot2 = { type="multiSwatch", text="Bar Color", swatches = fillSwatches }
+                rightSlot2 = { type="slider", text="Bar Opacity", min=10, max=100, step=1,
                   disabled=function() return db.profile.darkTheme end,
                   disabledTooltip="Dark Mode", requireState="disabled",
                   getValue=function() return MVal("healthBarOpacity", 90) end,
-                  setValue=function(v) MSet("healthBarOpacity", v) end });  y = y - h
+                  setValue=function(v) MSet("healthBarOpacity", v) end }
+            end
 
-            -- Dark Mode: disable the mini frame's Bar Color controls (the flat dark
-            -- health bar ignores fill/background colors; Bar Opacity is already
-            -- disabled above via its own disabled= handler).
+            local colorRow
+            colorRow, h = W:DualRow(parent, y, leftSlot2, rightSlot2);  y = y - h
+
+            if isBoss then
+                -- Inline Custom + Class fill swatches on the Fill Color slider (left
+                -- region); both toggle healthClassColored, the inactive one dims to 0.3.
+                do
+                    local rgn = colorRow._leftRegion
+                    local fClassGet = function()
+                        local _, ct = UnitClass("player")
+                        local cc = ct and RAID_CLASS_COLORS[ct]
+                        if cc then return cc.r, cc.g, cc.b end
+                        return 1, 1, 1
+                    end
+                    local fClassSw, fClassUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, fClassGet, function() end, false, 20)
+                    fClassSw._eabOrigClick = fClassSw:GetScript("OnClick")
+                    fClassSw:SetScript("OnClick", function()
+                        settingsTable.healthClassColored = true
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end)
+                    fClassSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(fClassSw, "Class Colored Fill") end)
+                    fClassSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(fClassSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = fClassSw
+                    RegisterWidgetRefresh(function()
+                        fClassUpdate()
+                        fClassSw:SetAlpha(MVal("healthClassColored", false) and 1 or 0.3)
+                    end)
+                    fClassSw:SetAlpha(MVal("healthClassColored", false) and 1 or 0.3)
+
+                    local fCustomGet = function()
+                        local c = MGet("customFillColor")
+                        if c then return c.r, c.g, c.b end
+                        return 37/255, 193/255, 29/255
+                    end
+                    local fCustomSet = function(r, g, b)
+                        settingsTable.customFillColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate()
+                    end
+                    local fCustomSw, fCustomUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, fCustomGet, fCustomSet, false, 20)
+                    fCustomSw._eabOrigClick = fCustomSw:GetScript("OnClick")
+                    fCustomSw:SetScript("OnClick", function(self)
+                        if MVal("healthClassColored", false) then
+                            if MGet("customFillColor") == nil then
+                                settingsTable.customFillColor = { r = 37/255, g = 193/255, b = 29/255 }
+                            end
+                            settingsTable.healthClassColored = false
+                            ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                            return
+                        end
+                        if self._eabOrigClick then self._eabOrigClick(self) end
+                    end)
+                    fCustomSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(fCustomSw, "Custom Colored Fill") end)
+                    fCustomSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(fCustomSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = fCustomSw
+                    RegisterWidgetRefresh(function()
+                        fCustomUpdate()
+                        fCustomSw:SetAlpha(MVal("healthClassColored", false) and 0.3 or 1)
+                    end)
+                    fCustomSw:SetAlpha(MVal("healthClassColored", false) and 0.3 or 1)
+                end
+
+                -- Inline Custom + Class background swatches on the Bar Background
+                -- slider (right region); both toggle bgClassColored, inactive dims to 0.3.
+                do
+                    local rgn = colorRow._rightRegion
+                    local bgClassGet = function()
+                        local _, ct = UnitClass("player")
+                        local cc = ct and RAID_CLASS_COLORS[ct]
+                        if cc then return cc.r, cc.g, cc.b end
+                        return 1, 1, 1
+                    end
+                    local bgClassSw, bgClassUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgClassGet, function() end, false, 20)
+                    bgClassSw._eabOrigClick = bgClassSw:GetScript("OnClick")
+                    bgClassSw:SetScript("OnClick", function()
+                        settingsTable.bgClassColored = true
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end)
+                    bgClassSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgClassSw, "Class Colored Background") end)
+                    bgClassSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(bgClassSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = bgClassSw
+                    RegisterWidgetRefresh(function()
+                        bgClassUpdate()
+                        bgClassSw:SetAlpha(MVal("bgClassColored", false) and 1 or 0.3)
+                    end)
+                    bgClassSw:SetAlpha(MVal("bgClassColored", false) and 1 or 0.3)
+
+                    local bgSwGet = function()
+                        local c = MGet("customBgColor")
+                        if c then return c.r, c.g, c.b end
+                        return 17/255, 17/255, 17/255
+                    end
+                    local bgSwSet = function(r, g, b)
+                        settingsTable.customBgColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate()
+                    end
+                    local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
+                    bgSw._eabOrigClick = bgSw:GetScript("OnClick")
+                    bgSw:SetScript("OnClick", function(self)
+                        if MVal("bgClassColored", false) then
+                            settingsTable.bgClassColored = false
+                            ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                            return
+                        end
+                        if self._eabOrigClick then self._eabOrigClick(self) end
+                    end)
+                    bgSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSw, "Custom Background Color") end)
+                    bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                    rgn._lastInline = bgSw
+                    RegisterWidgetRefresh(function()
+                        bgSwUpdate()
+                        bgSw:SetAlpha(MVal("bgClassColored", false) and 0.3 or 1)
+                    end)
+                    bgSw:SetAlpha(MVal("bgClassColored", false) and 0.3 or 1)
+                end
+            end
+
+            -- Dark Mode: disable the Fill Color controls (the flat dark health bar
+            -- ignores fill/background colors). Boss also blocks the Bar Background
+            -- region so its swatches gray out like Main Frames; for other mini units
+            -- the right-slot Bar Opacity is already disabled via its own handler.
             AddDarkModeBlock(colorRow._leftRegion)
+            if isBoss then AddDarkModeBlock(colorRow._rightRegion) end
         end
 
-        -- Smooth Health Bars + Reverse Fill
+        -- Smooth Health Bars + Reverse Fill.
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Smooth Health Bars",
               getValue=function() return MVal("smoothBars", false) end,
@@ -10848,18 +11039,43 @@ initFrame:SetScript("OnEvent", function(self)
                 MCogBtn(rgn, revCogShow)
             end
 
-            -- Row 2: Bar Background (slider + inline color swatch) | Bar Opacity
+            -- Row 2: Bar Background (opacity slider + power/custom bg swatches) |
+            -- Fill Color (opacity slider + power/custom fill swatches). Mirrors the
+            -- Main Frames power bar; the opacity sliders replace the old plain ones.
             local pwrRow2
             pwrRow2, h = W:DualRow(parent, y,
                 { type="slider", text="Bar Background", min=0, max=100, step=1,
                   getValue=function() return MVal("customPowerBgAlpha", 100) end,
                   setValue=function(v) MSet("customPowerBgAlpha", v) end },
-                { type="slider", text="Fill Opacity", min=10, max=100, step=1,
+                { type="slider", text="Fill Color", min=10, max=100, step=1,
                   getValue=function() return MVal("powerBarOpacity", 100) end,
                   setValue=function(v) MSet("powerBarOpacity", v) end });  y = y - h
-            -- Inline color swatch on Bar Background (left region)
+            -- Inline Power Colored + Custom background swatches on Bar Background
+            -- (left region); both toggle powerBgPowerColored, the inactive one
+            -- dims to 0.3 (mirrors the Main Frames power Bar Background).
             do
                 local rgn = pwrRow2._leftRegion
+                local bgPwrGet = function()
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    return info.r, info.g, info.b
+                end
+                local bgPwrSw, bgPwrUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgPwrGet, function() end, false, 20)
+                bgPwrSw._eabOrigClick = bgPwrSw:GetScript("OnClick")
+                bgPwrSw:SetScript("OnClick", function()
+                    settingsTable.powerBgPowerColored = true
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end)
+                bgPwrSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgPwrSw, "Power Colored Background") end)
+                bgPwrSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                PP.Point(bgPwrSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = bgPwrSw
+                RegisterWidgetRefresh(function()
+                    bgPwrUpdate()
+                    bgPwrSw:SetAlpha(MVal("powerBgPowerColored", false) and 1 or 0.3)
+                end)
+                bgPwrSw:SetAlpha(MVal("powerBgPowerColored", false) and 1 or 0.3)
+
                 local bgGet = function()
                     local c = MGet("customPowerBgColor")
                     if c then return c.r, c.g, c.b end
@@ -10870,9 +11086,79 @@ initFrame:SetScript("OnEvent", function(self)
                     ReloadAndUpdate()
                 end
                 local bgSw, bgSwUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgGet, bgSet, false, 20)
+                bgSw._eabOrigClick = bgSw:GetScript("OnClick")
+                bgSw:SetScript("OnClick", function(self)
+                    if MVal("powerBgPowerColored", false) then
+                        settingsTable.powerBgPowerColored = false
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                        return
+                    end
+                    if self._eabOrigClick then self._eabOrigClick(self) end
+                end)
+                bgSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSw, "Custom Background Color") end)
+                bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = bgSw
-                RegisterWidgetRefresh(function() bgSwUp() end)
+                RegisterWidgetRefresh(function()
+                    bgSwUp()
+                    bgSw:SetAlpha(MVal("powerBgPowerColored", false) and 0.3 or 1)
+                end)
+                bgSw:SetAlpha(MVal("powerBgPowerColored", false) and 0.3 or 1)
+            end
+            -- Inline Power Colored + Custom fill swatches on Fill Color (right
+            -- region); both toggle powerPercentPowerColor (default on = power
+            -- colored), the inactive one dims to 0.3.
+            do
+                local rgn = pwrRow2._rightRegion
+                local fPwrGet = function()
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    return info.r, info.g, info.b
+                end
+                local fPwrSw, fPwrUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, fPwrGet, function() end, false, 20)
+                fPwrSw._eabOrigClick = fPwrSw:GetScript("OnClick")
+                fPwrSw:SetScript("OnClick", function()
+                    settingsTable.powerPercentPowerColor = true
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end)
+                fPwrSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(fPwrSw, "Power Colored Fill") end)
+                fPwrSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                PP.Point(fPwrSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = fPwrSw
+                RegisterWidgetRefresh(function()
+                    fPwrUpdate()
+                    fPwrSw:SetAlpha((MVal("powerPercentPowerColor", true) ~= false) and 1 or 0.3)
+                end)
+                fPwrSw:SetAlpha((MVal("powerPercentPowerColor", true) ~= false) and 1 or 0.3)
+
+                local fGet = function()
+                    local c = MGet("customPowerFillColor")
+                    if c then return c.r, c.g, c.b end
+                    return 0, 0, 1
+                end
+                local fSet = function(r, g, b)
+                    settingsTable.customPowerFillColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate()
+                end
+                local fSw, fSwUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, fGet, fSet, false, 20)
+                fSw._eabOrigClick = fSw:GetScript("OnClick")
+                fSw:SetScript("OnClick", function(self)
+                    if MVal("powerPercentPowerColor", true) ~= false then
+                        settingsTable.powerPercentPowerColor = false
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                        return
+                    end
+                    if self._eabOrigClick then self._eabOrigClick(self) end
+                end)
+                fSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(fSw, "Custom Colored Fill") end)
+                fSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                PP.Point(fSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = fSw
+                RegisterWidgetRefresh(function()
+                    fSwUp()
+                    fSw:SetAlpha((MVal("powerPercentPowerColor", true) ~= false) and 0.3 or 1)
+                end)
+                fSw:SetAlpha((MVal("powerPercentPowerColor", true) ~= false) and 0.3 or 1)
             end
 
             -- Row 3: Power Text (format) + Text Position -- ported from Main Frames.

@@ -87,7 +87,7 @@ local _cdStateTicker
 local _hasUserRules = false                             -- any profile (user) rule armed
 
 -- Forward declarations
-local GetOverlay, ResolveSwipeColor, IconTexture, ApplyToFrame, ApplyRule
+local GetOverlay, ResolveSwipeColor, IconTexture, ApplyToFrame, ApplyRule, RaiseOverlayBorders, RestoreOverlayBorders
 local EnsureTicker, OpenWindow, CloseWindow, CloseAll, CastWindow
 local OpenFromAura, EvalCustom, InitialStamp, OnEvent, UpdateListeners
 local ResolveCastSpells
@@ -114,6 +114,7 @@ GetOverlay = function(iconFrame)
 
     local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
     cd:SetAllPoints(f)
+    cd:SetFrameLevel(lvl + 1)
     cd:SetDrawEdge(false)
     cd:SetDrawBling(false)
     cd:SetHideCountdownNumbers(false)
@@ -130,6 +131,42 @@ GetOverlay = function(iconFrame)
 
     _overlays[iconFrame] = o
     return o
+end
+
+-- ---------------------------------------------------------------------------
+--  While an overlay is open it sits ABOVE the underlying icon (so it covers the
+--  real icon + its swipe). Temporarily lift the icon's border frame(s) above the
+--  overlay so the active swipe never paints over the border; restore on close.
+--  "Show Behind" borders (bd.borderBehind) are intentionally behind the icon, so
+--  leave those alone.
+-- ---------------------------------------------------------------------------
+RaiseOverlayBorders = function(iconFrame, o, bd)
+    if o._brdRaised then return end
+    local lvl = o.frame:GetFrameLevel() + 2
+    local fd  = ns._hookFrameData and ns._hookFrameData[iconFrame]
+    local ifc = ns._ecmeFC and ns._ecmeFC[iconFrame]
+    if fd and fd.borderFrame and not (bd and bd.borderBehind) then
+        o._brdSavedLvl = fd.borderFrame:GetFrameLevel()
+        pcall(fd.borderFrame.SetFrameLevel, fd.borderFrame, lvl)
+    end
+    if ifc and ifc.shapeBorderFrame then
+        o._sbSavedLvl = ifc.shapeBorderFrame:GetFrameLevel()
+        pcall(ifc.shapeBorderFrame.SetFrameLevel, ifc.shapeBorderFrame, lvl)
+    end
+    o._brdRaised = true
+end
+
+RestoreOverlayBorders = function(iconFrame, o)
+    if not o._brdRaised then return end
+    local fd  = ns._hookFrameData and ns._hookFrameData[iconFrame]
+    local ifc = ns._ecmeFC and ns._ecmeFC[iconFrame]
+    if fd and fd.borderFrame and o._brdSavedLvl then
+        pcall(fd.borderFrame.SetFrameLevel, fd.borderFrame, o._brdSavedLvl)
+    end
+    if ifc and ifc.shapeBorderFrame and o._sbSavedLvl then
+        pcall(ifc.shapeBorderFrame.SetFrameLevel, ifc.shapeBorderFrame, o._sbSavedLvl)
+    end
+    o._brdSavedLvl, o._sbSavedLvl, o._brdRaised = nil, nil, false
 end
 
 -- Active swipe colour: class, custom, or default gold. Drives our own swipe.
@@ -173,30 +210,58 @@ end
 -- ---------------------------------------------------------------------------
 ApplyToFrame = function(iconFrame, rule, win)
     local o = GetOverlay(iconFrame)
-    -- User rules carry their own styling entry (profile-level, travels with the
-    -- spell). Built-in rules (e.g. Ebon Might) read the bar's per-spell settings.
+    -- Bar data + per-spell settings. User rules carry their own styling entry
+    -- (profile-level, travels with the spell); built-in rules (e.g. Ebon Might)
+    -- read the bar's per-spell settings. barData is needed either way for the
+    -- overlay's shape geometry, so resolve it unconditionally.
+    local fc = ns._ecmeFC and ns._ecmeFC[iconFrame]
+    local barKey = fc and fc.barKey
+    local bd = barKey and ns.barDataByKey and ns.barDataByKey[barKey]
     local ss = rule.cas
-    local bd
     if not ss then
-        local fc = ns._ecmeFC and ns._ecmeFC[iconFrame]
-        local barKey = fc and fc.barKey
         local sd = barKey and ns.GetBarSpellData and ns.GetBarSpellData(barKey)
         ss = sd and ns.ResolveSpellSettings and ns.ResolveSpellSettings(iconFrame, rule.spellID, sd)
-        bd = barKey and ns.barDataByKey and ns.barDataByKey[barKey]
     end
 
     -- "Hide Active State" dropdown -> never show the overlay.
     local hidden = ss and ss.activeSwipeMode == "none"
 
     if win and not hidden then
+        o._rule = rule  -- remembered so a live restyle can re-sync this overlay
         IconTexture(iconFrame, o, rule)
+        -- Mirror the underlying icon's custom shape onto our overlay so a shaped
+        -- icon stays shaped (mask + swipe), then lift the border above us.
+        if ns.ApplyShapeToOverlay then ns.ApplyShapeToOverlay(iconFrame, o.icon, o.cd, bd) end
+        RaiseOverlayBorders(iconFrame, o, bd)
         o.icon:SetDesaturated(false)
         local cr, cg, cb, ca = ResolveSwipeColor(ss)
         o.cd:SetSwipeColor(cr, cg, cb, ca)
         o.cd:SetCooldown(win.start, win.dur)
+        o._ss = ss
+        -- Match the icon's Duration Text settings on our own countdown number;
+        -- otherwise it renders in Blizzard's default font.
+        if ns.StyleOverlayCooldownText then
+            ns.StyleOverlayCooldownText(o.cd, bd, ss, iconFrame:GetScale())
+        end
+        -- Feed the active glow + border the underlying icon's shape / border so
+        -- Shape Glow masks to the shape (it reads the shape from its glow frame's
+        -- parent FC) and Active Border can recolour the real (now-raised) border.
+        local ufd  = ns._hookFrameData and ns._hookFrameData[iconFrame]
+        local uifc = ns._ecmeFC and ns._ecmeFC[iconFrame]
+        o.borderFrame = (ufd and ufd.borderFrame) or nil
+        local gfc = ns.FC and ns.FC(o.frame)
+        if gfc then
+            gfc.shapeApplied = (uifc and uifc.shapeApplied) or nil
+            gfc.shapeName    = (uifc and uifc.shapeName) or nil
+            gfc.shapeMask    = (uifc and uifc.shapeMask) or nil
+            gfc.shapeBorder  = (uifc and uifc.shapeBorder) or nil
+        end
         if ns.ApplyActiveOverlays then ns.ApplyActiveOverlays(o.frame, o, ss, true, bd) end
         o.frame:SetAlpha(1)
     else
+        o._rule = nil
+        o._ss = nil
+        RestoreOverlayBorders(iconFrame, o)
         if ns.ApplyActiveOverlays then ns.ApplyActiveOverlays(o.frame, o, ss, false, bd) end
         o.cd:Clear()
         o.frame:SetAlpha(0)
@@ -537,6 +602,55 @@ local function AddRule(rule)
         _customRules[#_customRules + 1] = rule; _needCast = true
     else  -- "cast"
         MapCast(rule)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+--  Re-sync a single overlay after its underlying icon was restyled.
+-- ---------------------------------------------------------------------------
+-- Called from RefreshCDMIconAppearance (via ApplyShapeToCDMIcon) whenever an icon
+-- is re-shaped / re-bordered / re-zoomed -- including a settings change made WHILE
+-- a fake-active window is open. That restyle re-textures the shared shapeMask and
+-- resets the icon's border frame back to its normal level (below our overlay), so
+-- without this the overlay would show the old/stale shape and the border would sit
+-- hidden beneath us until the window next reopened. Re-applies our shape (new
+-- mask + geometry + swipe) and forces a fresh border raise. No-op unless an
+-- overlay is currently shown on this icon.
+function ns.FakeActive_OnIconRestyled(iconFrame)
+    local o = _overlays[iconFrame]
+    if not o or not o._rule then return end           -- no overlay / no open window
+    if o.frame:GetAlpha() == 0 then return end         -- overlay not currently shown
+    local fc = ns._ecmeFC and ns._ecmeFC[iconFrame]
+    local barKey = fc and fc.barKey
+    local bd = barKey and ns.barDataByKey and ns.barDataByKey[barKey]
+    IconTexture(iconFrame, o, o._rule)
+    if ns.ApplyShapeToOverlay then ns.ApplyShapeToOverlay(iconFrame, o.icon, o.cd, bd) end
+    -- Re-apply Duration Text styling too (the font/size/colour may have changed).
+    if ns.StyleOverlayCooldownText then
+        ns.StyleOverlayCooldownText(o.cd, bd, o._ss, iconFrame:GetScale())
+    end
+    -- The restyle reset the border to its normal level; clear the stale flag so
+    -- RaiseOverlayBorders re-captures that level and lifts it above us again.
+    o._brdRaised = false
+    RaiseOverlayBorders(iconFrame, o, bd)
+    -- Re-feed the active glow / border the underlying shape + border refs, then
+    -- re-apply so a glow-colour / active-border edit takes effect live (the glow
+    -- only restarts if its style/colour actually changed). ApplyShapeToCDMIcon
+    -- just reset the shape border to its configured colour, so drop the stale
+    -- saved colour first to re-capture it for restore-on-falloff.
+    local ufd  = ns._hookFrameData and ns._hookFrameData[iconFrame]
+    local uifc = ns._ecmeFC and ns._ecmeFC[iconFrame]
+    o.borderFrame = (ufd and ufd.borderFrame) or nil
+    local gfc = ns.FC and ns.FC(o.frame)
+    if gfc then
+        gfc.shapeApplied = (uifc and uifc.shapeApplied) or nil
+        gfc.shapeName    = (uifc and uifc.shapeName) or nil
+        gfc.shapeMask    = (uifc and uifc.shapeMask) or nil
+        gfc.shapeBorder  = (uifc and uifc.shapeBorder) or nil
+    end
+    if o._ss and ns.ApplyActiveOverlays then
+        o._sbColorSaved = false
+        ns.ApplyActiveOverlays(o.frame, o, o._ss, true, bd)
     end
 end
 

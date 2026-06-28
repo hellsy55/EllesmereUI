@@ -3795,6 +3795,104 @@ ApplyShapeToCDMIcon = function(icon, shape, barData, ssb)
 end
 ns.ApplyShapeToCDMIcon = ApplyShapeToCDMIcon
 
+-------------------------------------------------------------------------------
+--  Mirror an icon's custom shape onto a fake-active overlay's own icon + swipe
+-------------------------------------------------------------------------------
+-- The CDM "fake active" engine (EllesmereUICdmFakeActive.lua) draws its own
+-- saturated icon + swipe on top of a CDM icon during a custom active window.
+-- That overlay must copy the underlying icon's custom shape, otherwise a square
+-- icon/swipe is drawn over the shaped icon and the mask looks "broken". We reuse
+-- the underlying icon's shapeMask -- masking is screen-space and the overlay
+-- covers the same region, so one mask masks both. A none/cropped shape clears
+-- any mask we previously added and restores a plain square swipe.
+function ns.ApplyShapeToOverlay(icon, oIcon, oCd, barData)
+    if not icon then return end
+    local ifc = FC(icon)
+    local mask = ifc.shapeMask
+    local shape = ifc.shapeApplied and ifc.shapeName or nil
+
+    -- Drop any mask refs we added before (the shape may have changed / cleared).
+    if mask then
+        if oIcon then pcall(oIcon.RemoveMaskTexture, oIcon, mask) end
+        if oCd then pcall(oCd.RemoveMaskTexture, oCd, mask) end
+    end
+
+    local maskTex = shape and CDM_SHAPES.masks[shape]
+    if not shape or shape == "none" or shape == "cropped" or not mask or not maskTex then
+        -- Square overlay. IconTexture already copied the underlying texcoords.
+        if oIcon then oIcon:ClearAllPoints(); oIcon:SetAllPoints(oIcon:GetParent()) end
+        if oCd then
+            pcall(oCd.SetSwipeTexture, oCd, "Interface\\Buttons\\WHITE8x8")
+            if oCd.SetUseCircularEdge then pcall(oCd.SetUseCircularEdge, oCd, false) end
+        end
+        return
+    end
+
+    local zoom = (barData and barData.iconZoom) or 0.08
+
+    -- Match the underlying tex geometry: point-expand + texcoord-expand.
+    local shapeOffset  = CDM_SHAPES.iconExpandOffsets[shape] or 0
+    local shapeDefault = CDM_SHAPES.zoomDefaults[shape] or 0.06
+    local iconExp = CDM_SHAPES.iconExpand + shapeOffset + ((zoom - shapeDefault) * 200)
+    if iconExp < 0 then iconExp = 0 end
+    local halfIE = iconExp / 2
+    if oIcon then
+        oIcon:ClearAllPoints()
+        EllesmereUI.PP.Point(oIcon, "TOPLEFT", icon, "TOPLEFT", -halfIE, halfIE)
+        EllesmereUI.PP.Point(oIcon, "BOTTOMRIGHT", icon, "BOTTOMRIGHT", halfIE, -halfIE)
+        local insetPx = CDM_SHAPES.insets[shape] or 17
+        local visRatio = (128 - 2 * insetPx) / 128
+        local expand = ((1 / visRatio) - 1) * 0.5
+        oIcon:SetTexCoord(-expand, 1 + expand, -expand, 1 + expand)
+        oIcon:AddMaskTexture(mask)
+    end
+    if oCd then
+        oCd:ClearAllPoints()
+        oCd:SetAllPoints(icon)
+        pcall(oCd.AddMaskTexture, oCd, mask)
+        if oCd.SetSwipeTexture then pcall(oCd.SetSwipeTexture, oCd, maskTex) end
+        local useCircular = (shape ~= "square" and shape ~= "csquare")
+        if oCd.SetUseCircularEdge then pcall(oCd.SetUseCircularEdge, oCd, useCircular) end
+        local edgeScale = CDM_SHAPES.edgeScales[shape] or 0.60
+        if oCd.SetEdgeScale then pcall(oCd.SetEdgeScale, oCd, edgeScale) end
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Style a fake-active overlay's own countdown number to match Duration Text
+-------------------------------------------------------------------------------
+-- The overlay (EllesmereUICdmFakeActive.lua) runs its own Cooldown widget, whose
+-- number would otherwise render in Blizzard's default font. Mirror the same
+-- Duration Text styling the real icon gets in RefreshCDMIconAppearance: font,
+-- size (scale-compensated), colour, centre offset, and the show/hide toggle. ssb
+-- is the resolved per-icon settings and falls back to the bar's values (nil is
+-- fine). Call AFTER SetCooldown so Blizzard's countdown FontString exists.
+function ns.StyleOverlayCooldownText(oCd, barData, ssb, iconScale)
+    if not oCd then return end
+    iconScale = iconScale or 1
+    if iconScale < 0.01 then iconScale = 1 end
+    local fontScale = 1 / iconScale
+    local showCD = barData and barData.showCooldownText
+    if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
+    oCd:SetHideCountdownNumbers(not showCD)
+    if not showCD then return end
+    local cdFont = GetCDMFont()
+    local cdSize = ((ssb and ssb.cooldownFontSize) or (barData and barData.cooldownFontSize) or 12) * fontScale
+    local cdR = (ssb and ssb.cooldownTextR) or (barData and barData.cooldownTextR) or 1
+    local cdG = (ssb and ssb.cooldownTextG) or (barData and barData.cooldownTextG) or 1
+    local cdB = (ssb and ssb.cooldownTextB) or (barData and barData.cooldownTextB) or 1
+    local cdX = (ssb and ssb.cooldownTextX) or (barData and barData.cooldownTextX) or 0
+    local cdY = (ssb and ssb.cooldownTextY) or (barData and barData.cooldownTextY) or 0
+    for _, rgn in pairs({ oCd:GetRegions() }) do
+        if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
+            EllesmereUI.ApplyIconTextFont(rgn, cdFont, cdSize, "cdm")
+            rgn:SetTextColor(cdR, cdG, cdB)
+            rgn:ClearAllPoints()
+            rgn:SetPoint("CENTER", oCd, "CENTER", cdX, cdY)
+        end
+    end
+end
+
 -- (UpdateCustomBarIcons removed -- all bars now use hook-based CollectAndReanchor)
 
 -- (UpdateCDMBarIcons removed -- replaced by hook-based CollectAndReanchor)
@@ -4035,6 +4133,11 @@ local function RefreshCDMIconAppearance(barKey)
         -- applies on the authoritative border render, square or shaped.
         local shape = barData.iconShape or "none"
         ApplyShapeToCDMIcon(icon, shape, barData, ssb)
+        -- A restyle just reset this icon's mask + border level out from under any
+        -- live fake-active overlay (border size / shape change while the active
+        -- window is open). Re-sync the overlay so it re-shapes and re-lifts the
+        -- border above itself instead of waiting for the next trigger.
+        if ns.FakeActive_OnIconRestyled then ns.FakeActive_OnIconRestyled(icon) end
 
         -- Reset glow so glow type change takes effect on next tick.
         -- Do NOT reset isActive -- that causes a 1-frame flash where the

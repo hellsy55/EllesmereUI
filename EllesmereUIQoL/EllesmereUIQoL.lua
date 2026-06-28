@@ -2048,3 +2048,227 @@ do
         end
     end
 end
+
+-------------------------------------------------------------------------------
+--  Hide Error Messages
+--  Swallows the red UIErrorsFrame spam (e.g. "Not enough rage", "Ability is
+--  not ready yet") while keeping a short whitelist of genuinely useful errors
+--  visible. The OnEvent override is only installed while the option is on, so
+--  it costs nothing for anyone who leaves it off.
+-------------------------------------------------------------------------------
+do
+    local origOnEvent
+    local installed = false
+
+    -- Errors worth keeping even while the rest are hidden. Built lazily so we
+    -- only touch the ERR_* globals when someone actually enables the feature.
+    local keep
+    local function BuildKeepList()
+        if keep then return end
+        keep = {}
+        for _, msg in ipairs({
+            ERR_INV_FULL, ERR_QUEST_LOG_FULL, ERR_RAID_GROUP_ONLY,
+            ERR_PARTY_LFG_BOOT_LIMIT, ERR_PARTY_LFG_BOOT_DUNGEON_COMPLETE,
+            ERR_PARTY_LFG_BOOT_IN_COMBAT, ERR_PARTY_LFG_BOOT_IN_PROGRESS,
+            ERR_PARTY_LFG_BOOT_LOOT_ROLLS, ERR_PARTY_LFG_TELEPORT_IN_COMBAT,
+            ERR_PET_SPELL_DEAD, ERR_PLAYER_DEAD,
+            SPELL_FAILED_TARGET_NO_POCKETS, ERR_ALREADY_PICKPOCKETED,
+        }) do
+            if msg then keep[msg] = true end
+        end
+    end
+
+    -- The group-kick "not eligible" line is a format string, so it needs a
+    -- pattern match rather than a plain equality check.
+    local function IsBootNotEligible(err)
+        if type(err) ~= "string" or not ERR_PARTY_LFG_BOOT_NOT_ELIGIBLE_S then return false end
+        local ok, found = pcall(function()
+            return err:find(string.format(ERR_PARTY_LFG_BOOT_NOT_ELIGIBLE_S, ".+"))
+        end)
+        return (ok and found) and true or false
+    end
+
+    local function FilteredOnEvent(self, event, id, err, ...)
+        if event == "UI_ERROR_MESSAGE" then
+            if keep[err] or IsBootNotEligible(err) then
+                return origOnEvent(self, event, id, err, ...)
+            end
+            return
+        end
+        return origOnEvent(self, event, id, err, ...)
+    end
+
+    local function ApplyHideErrorMessages()
+        local on = EllesmereUIDB and EllesmereUIDB.hideErrorMessages
+        if on and not installed then
+            BuildKeepList()
+            origOnEvent = UIErrorsFrame:GetScript("OnEvent")
+            UIErrorsFrame:SetScript("OnEvent", FilteredOnEvent)
+            UIParent:UnregisterEvent("PING_SYSTEM_ERROR")
+            installed = true
+        elseif not on and installed then
+            UIErrorsFrame:SetScript("OnEvent", origOnEvent)
+            origOnEvent = nil
+            UIParent:RegisterEvent("PING_SYSTEM_ERROR")
+            installed = false
+        end
+    end
+    EllesmereUI._applyHideErrorMessages = ApplyHideErrorMessages
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if EllesmereUIDB and EllesmereUIDB.hideErrorMessages then
+            ApplyHideErrorMessages()
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  Hide Tutorial Pop-ups
+-------------------------------------------------------------------------------
+do
+    local function Enabled()
+        return EllesmereUIDB and EllesmereUIDB.hideTutorials
+    end
+
+    -- "i" circles are MainHelpPlateButtons, matched by a method copied from the
+    -- Blizzard mixin. Blizzard_HelpPlate is load-on-demand; resolve lazily and
+    -- only cache once it exists.
+    local fingerprint
+    local function GetFingerprint()
+        if not fingerprint and MainHelpPlateButtonMixin then
+            fingerprint = MainHelpPlateButtonMixin.ShowTooltip
+        end
+        return fingerprint
+    end
+
+    local hiddenByUs = {}
+    local function HideButton(btn)
+        btn:SetAlpha(0)
+        btn:EnableMouse(false)
+        hiddenByUs[btn] = true
+    end
+
+    local function HideOpenTips()
+        if not (HelpTip and HelpTip.framePool and HelpTip.framePool.EnumerateActive) then return end
+        pcall(function()
+            for tip in HelpTip.framePool:EnumerateActive() do
+                if tip:IsShown() then
+                    local info = tip.info
+                    if info and info.cvarBitfield and info.bitfieldFlag then
+                        SetCVarBitfield(info.cvarBitfield, info.bitfieldFlag, true)
+                    end
+                    tip:Hide()
+                end
+            end
+        end)
+    end
+
+    local HideButtonsUnder
+    local function ScanChildren(...)
+        for i = 1, select("#", ...) do
+            HideButtonsUnder((select(i, ...)))
+        end
+    end
+    function HideButtonsUnder(root)
+        if not root then return end
+        local fp = GetFingerprint()
+        if not fp then return end
+        if root.ShowTooltip == fp then HideButton(root) end
+        if root.GetChildren then ScanChildren(root:GetChildren()) end
+    end
+
+    -- One-time full walk (no allocation, never on a timer) to catch panels that
+    -- are already open the moment the feature is switched on.
+    local function SweepAll()
+        local fp = GetFingerprint()
+        if not fp then return end
+        local frame = EnumerateFrames()
+        while frame do
+            if frame.ShowTooltip == fp then HideButton(frame) end
+            frame = EnumerateFrames(frame)
+        end
+    end
+
+    local function RestoreButtons()
+        for btn in pairs(hiddenByUs) do
+            btn:SetAlpha(1)
+            btn:EnableMouse(true)
+            hiddenByUs[btn] = nil
+        end
+    end
+
+    -- Core hooks (HelpTip + ShowUIPanel) install once, only via ApplyHideTutorials
+    -- when the feature is enabled. Each body also gates on Enabled().
+    local coreHooked = false
+    local function InstallCoreHooks()
+        if coreHooked then return end
+        coreHooked = true
+        if HelpTip and HelpTip.Show then
+            hooksecurefunc(HelpTip, "Show", function()
+                if Enabled() then HideOpenTips() end
+            end)
+        end
+        if ShowUIPanel then
+            hooksecurefunc("ShowUIPanel", function(frame)
+                if Enabled() and frame then
+                    HideButtonsUnder(frame)
+                    HideOpenTips()
+                end
+            end)
+        end
+    end
+
+    local tooltipHooked = false
+    local function InstallTooltipHook()
+        if tooltipHooked or not HelpPlateTooltip then return end
+        tooltipHooked = true
+        if HelpPlate and HelpPlate.ShowTutorialTooltip then
+            hooksecurefunc(HelpPlate, "ShowTutorialTooltip", function()
+                if Enabled() and HelpPlateTooltip then HelpPlateTooltip:Hide() end
+            end)
+        end
+        if HelpPlateTooltip.Init then
+            hooksecurefunc(HelpPlateTooltip, "Init", function(self)
+                if Enabled() then self:Hide() end
+            end)
+        end
+    end
+
+    local weSetCVar = false
+    local function ApplyHideTutorials()
+        if Enabled() then
+            InstallCoreHooks()
+            InstallTooltipHook()
+            pcall(SetCVar, "hideHelptips", "1")
+            pcall(SetCVar, "showTutorials", "0")
+            weSetCVar = true
+            SweepAll()
+            HideOpenTips()
+        else
+            if weSetCVar then
+                pcall(SetCVar, "hideHelptips", "0")
+                weSetCVar = false
+            end
+            RestoreButtons()
+        end
+    end
+    EllesmereUI._applyHideTutorials = ApplyHideTutorials
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:RegisterEvent("ADDON_LOADED")
+    f:SetScript("OnEvent", function(_, event, addon)
+        if event == "ADDON_LOADED" then
+            -- Gated: nothing is hooked while the feature is off.
+            if addon == "Blizzard_HelpPlate" and Enabled() then
+                InstallTooltipHook()
+            end
+            return
+        end
+        ApplyHideTutorials()  -- PLAYER_LOGIN
+    end)
+end
+
