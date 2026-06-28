@@ -896,6 +896,7 @@ local DEFAULTS = {
             gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
             texture       = "none",
             showSpark     = false,
+            depleteFill   = false,  -- start full and deplete instead of filling up
             borderSize    = 1,
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             borderTexture = "solid",
@@ -5585,6 +5586,7 @@ BuildGCDBar = function()
             gcdBarFrame._gcdStart = nil
             gcdBarFrame._gcdDur = nil
             gcdBarFrame._gcdActualStart = nil
+            gcdBarFrame._barActive = nil
         end
         return
     end
@@ -5647,7 +5649,12 @@ BuildGCDBar = function()
                         local d, s = cd.duration, cd.startTime
                         return (d and d > 0 and d <= 1.6 and s and s > 0) and true or false
                     end)
-                    stillActive = ok and act
+                    -- If the read succeeded, trust it. If it FAILED (the GCD
+                    -- cooldown came back as a secret value -- common in combat),
+                    -- assume the GCD is still active and keep the bar. Otherwise a
+                    -- single secret read on one of the many FAILED events that
+                    -- spamming generates would wrongly wipe a running GCD.
+                    stillActive = (not ok) or act
                 end
                 if not stillActive then
                     self._gcdStart = nil
@@ -5694,10 +5701,16 @@ BuildGCDBar = function()
                 end)
                 if ok and elapsed and not (issecretvalue and (issecretvalue(elapsed) or issecretvalue(dur))) then
                     local actualStart = GetTime() - elapsed
-                    -- Only (re)start for a freshly started GCD (elapsed near 0).
-                    -- This stops an off-GCD / succeeded spell from restarting the
-                    -- running GCD.
-                    if elapsed < 0.3 and ((not self._gcdActualStart) or actualStart > (self._gcdActualStart + 0.05)) then
+                    -- (Re)start whenever this is a genuinely NEWER GCD than the one we
+                    -- last captured. Do NOT gate on how far the GCD has elapsed:
+                    -- while spamming, the next ability is queued and its SUCCEEDED
+                    -- lands partway into the fresh GCD (elapsed ~0.4-0.7s observed),
+                    -- so an "elapsed near 0" gate rejected every queued cast and the
+                    -- bar stayed dropped for the rest of combat. The newer-start check
+                    -- still stops an off-GCD spell from restarting the running GCD: it
+                    -- reads the SAME start, so actualStart is not newer. The remaining
+                    -- check just skips an already-finished GCD.
+                    if (dur - elapsed) > 0.05 and ((not self._gcdActualStart) or actualStart > (self._gcdActualStart + 0.05)) then
                         self._gcdActualStart = actualStart
                         -- Fill starts visually at 0 fills over the time remaining
                         -- (Using the true start would open the bar at the
@@ -5851,6 +5864,7 @@ UpdateGCDBar = function(_dt)
 
     if g.instanceOnly and not IsInInstance() then
         bar:SetValue(0)
+        gcdBarFrame._barActive = nil
         EllesmereUI.SetElementVisibility(gcdBarFrame, false)
         return
     end
@@ -5872,7 +5886,9 @@ UpdateGCDBar = function(_dt)
 
     if not active then
         -- No GCD running: empty, and invisible unless Always Show is on.
+        -- (In deplete mode "empty" = depleted, which is the right idle state.)
         bar:SetValue(0)
+        gcdBarFrame._barActive = nil
         local visible = false
         if g.alwaysShow then visible = true end
         EllesmereUI.SetElementVisibility(gcdBarFrame, visible)
@@ -5880,7 +5896,18 @@ UpdateGCDBar = function(_dt)
     end
 
     EllesmereUI.SetElementVisibility(gcdBarFrame, true)
-    bar:SetValue(elapsed / dur, bar._castInterp)
+    -- Deplete mode starts full (1) and drains to empty (0); normal mode fills 0->1.
+    local progress = elapsed / dur
+    local value = g.depleteFill and (1 - progress) or progress
+    if gcdBarFrame._barActive then
+        bar:SetValue(value, bar._castInterp)
+    else
+        -- First frame of a fresh GCD: snap to the start value (no interpolation).
+        -- Otherwise deplete mode would briefly ease UP from the empty idle state
+        -- before reversing, flashing a fill at the start of every GCD.
+        bar:SetValue(value)
+        gcdBarFrame._barActive = true
+    end
 end
 
 -------------------------------------------------------------------------------
