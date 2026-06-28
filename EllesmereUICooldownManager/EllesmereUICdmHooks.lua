@@ -279,7 +279,7 @@ function ns.ApplyActiveOverlays(frame, fd, ss, isActive, bd)
     -- Active glow (per-spell)
     local hasGlow = ss and ss.activeGlow and ss.activeGlow > 0
     if isActive and hasGlow then
-        if fd.glowOverlay and not fd._activeGlowOn then
+        if fd.glowOverlay then
             -- Unified glow color takes priority
             local gr, gg, gb = ns.ResolveGlowColor(ss)
             if not gr then
@@ -294,8 +294,16 @@ function ns.ApplyActiveOverlays(frame, fd, ss, isActive, bd)
                 gg = gg or (ss.activeGlowG or 0.85)
                 gb = gb or (ss.activeGlowB or 0)
             end
-            ns.StartNativeGlow(fd.glowOverlay, ss.activeGlow, gr, gg, gb)
-            fd._activeGlowOn = true
+            -- (Re)start on first activation OR when the style/colour changed, so a
+            -- live colour edit takes effect. A steady active window with unchanged
+            -- settings does NOT restart (which would flicker the glow each tick).
+            if not fd._activeGlowOn or fd._activeGlowStyle ~= ss.activeGlow
+               or fd._activeGlowR ~= gr or fd._activeGlowG ~= gg or fd._activeGlowB ~= gb then
+                ns.StartNativeGlow(fd.glowOverlay, ss.activeGlow, gr, gg, gb)
+                fd._activeGlowOn = true
+                fd._activeGlowStyle = ss.activeGlow
+                fd._activeGlowR, fd._activeGlowG, fd._activeGlowB = gr, gg, gb
+            end
         end
     elseif fd._activeGlowOn then
         if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
@@ -303,17 +311,35 @@ function ns.ApplyActiveOverlays(frame, fd, ss, isActive, bd)
     end
 
     -- Active border color (per-spell). Recolor the icon border while active;
-    -- restore the bar's default border color on falloff. SetBorderStyleColor
-    -- handles both solid (PP) and textured borders and no-ops on a hidden border.
+    -- restore the configured color on falloff. A SQUARE border goes through
+    -- SetBorderStyleColor (handles solid + textured, no-ops on a hidden border).
+    -- A CUSTOM SHAPE draws its ring on a separate shapeBorder texture that
+    -- SetBorderStyleColor never touches, so recolor that directly and save/restore
+    -- its configured vertex color. (For the fake-active overlay, frame is the
+    -- overlay frame whose FC is seeded with the underlying shapeBorder, so the
+    -- same lookup hits the real, raised ring.)
+    local ifc = ns._ecmeFC and ns._ecmeFC[frame]
+    local shapeBorder = ifc and ifc.shapeApplied and ifc.shapeBorder
     if isActive and ss and ss.activeBorderEnabled then
-        if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
-            EllesmereUI.SetBorderStyleColor(fd.borderFrame,
-                ss.activeBorderR or 1, ss.activeBorderG or 0.776,
-                ss.activeBorderB or 0.376, ss.activeBorderA or 1)
+        local abR = ss.activeBorderR or 1
+        local abG = ss.activeBorderG or 0.776
+        local abB = ss.activeBorderB or 0.376
+        local abA = ss.activeBorderA or 1
+        if shapeBorder then
+            if not fd._sbColorSaved then
+                fd._sbR, fd._sbG, fd._sbB, fd._sbA = shapeBorder:GetVertexColor()
+                fd._sbColorSaved = true
+            end
+            shapeBorder:SetVertexColor(abR, abG, abB, abA)
+        elseif fd.borderFrame and EllesmereUI.SetBorderStyleColor then
+            EllesmereUI.SetBorderStyleColor(fd.borderFrame, abR, abG, abB, abA)
         end
         fd._activeBorderOn = true
     elseif fd._activeBorderOn then
-        if fd.borderFrame and EllesmereUI.SetBorderStyleColor then
+        if shapeBorder and fd._sbColorSaved then
+            shapeBorder:SetVertexColor(fd._sbR, fd._sbG, fd._sbB, fd._sbA)
+            fd._sbColorSaved = false
+        elseif fd.borderFrame and EllesmereUI.SetBorderStyleColor then
             EllesmereUI.SetBorderStyleColor(fd.borderFrame,
                 (bd and bd.borderR) or 0, (bd and bd.borderG) or 0,
                 (bd and bd.borderB) or 0, (bd and bd.borderA) or 1)
