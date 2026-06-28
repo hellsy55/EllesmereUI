@@ -2324,6 +2324,50 @@ local function RGBtoHSV(r, g, b)
 end
 
 -------------------------------------------------------------------------------
+--  Color Picker recent-colors & favorites storage (file-scope, shared per session)
+-------------------------------------------------------------------------------
+local PICKER_MAX_SWATCHES = 14
+
+local function GetPickerDB()
+    if not EllesmereUIDB then return {} end
+    if not EllesmereUIDB.colorPicker then EllesmereUIDB.colorPicker = {} end
+    return EllesmereUIDB.colorPicker
+end
+local function GetRecentColorsDB()
+    local db = GetPickerDB(); if not db.recentColors then db.recentColors = {} end; return db.recentColors
+end
+local function GetFavoritesDB()
+    local db = GetPickerDB(); if not db.favorites then db.favorites = {} end; return db.favorites
+end
+local function ColorKey(r, g, b)
+    return string.format("%d-%d-%d", math.floor(r*255+.5), math.floor(g*255+.5), math.floor(b*255+.5))
+end
+local function RecordRecentColor(r, g, b)
+    local db = GetRecentColorsDB(); local key = ColorKey(r, g, b)
+    for i = #db, 1, -1 do
+        if ColorKey(db[i][1], db[i][2], db[i][3]) == key then table.remove(db, i) end
+    end
+    table.insert(db, 1, { r, g, b })
+    while #db > PICKER_MAX_SWATCHES do table.remove(db) end
+end
+local function IsFavorite(r, g, b)
+    local key = ColorKey(r, g, b)
+    for _, c in ipairs(GetFavoritesDB()) do
+        if ColorKey(c[1], c[2], c[3]) == key then return true end
+    end
+    return false
+end
+local function ToggleFavorite(r, g, b, description)
+    local db = GetFavoritesDB(); local key = ColorKey(r, g, b)
+    for i = #db, 1, -1 do
+        if ColorKey(db[i][1], db[i][2], db[i][3]) == key then table.remove(db, i); return false end
+    end
+    table.insert(db, 1, { r, g, b, description })
+    while #db > PICKER_MAX_SWATCHES do table.remove(db) end
+    return true
+end
+
+-------------------------------------------------------------------------------
 --  Custom Color Picker Popup (singleton, replaces Blizzard ColorPickerFrame)
 -------------------------------------------------------------------------------
 local function BuildColorPickerPopup()
@@ -2335,7 +2379,7 @@ local function BuildColorPickerPopup()
     local RIGHT_W = 70
     local RIGHT_GAP = 19
     local PAD_RIGHT = 26
-    local POPUP_H = PAD_TOP + 28 + SV_SIZE + PAD
+    local POPUP_H = PAD_TOP + 28 + SV_SIZE + 80 + PAD
     local BASE_W = PAD + SV_SIZE + BAR_GAP + BAR_W + BAR_GAP + BAR_W + RIGHT_GAP + RIGHT_W + PAD_RIGHT
     local BASE_W_NO_ALPHA = PAD + SV_SIZE + BAR_GAP + BAR_W + RIGHT_GAP + RIGHT_W + PAD_RIGHT
 
@@ -2702,7 +2746,10 @@ local function BuildColorPickerPopup()
     okBtn:SetPoint("BOTTOMLEFT", rightCol, "BOTTOMLEFT", 0, 0)
     okBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
     local _confirmed = false
-    MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function() _confirmed = true; popup:Hide() end)
+    MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function()
+        RecordRecentColor(HSVtoRGB(currentH, currentS, currentV))
+        _confirmed = true; popup:Hide()
+    end)
 
     -- Cancel text above OK button
     local cancelBtn = CreateFrame("Button", nil, rightCol)
@@ -2720,6 +2767,96 @@ local function BuildColorPickerPopup()
         _confirmed = false
         popup:Hide()
     end)
+
+    ---------------------------------------------------------------------------
+    --  Favorites & Recent Colors (below HSV picker)
+    ---------------------------------------------------------------------------
+    local RefreshSwatchRows
+    local SWATCH_SZ      = 19
+    local SWATCH_SPACING = 4
+
+    local function MakeSwatchBtn(parent, isFavorites)
+        local btn = CreateFrame("Button", nil, parent)
+        btn:SetSize(SWATCH_SZ, SWATCH_SZ)
+        btn:SetFrameLevel(parent:GetFrameLevel() + 2)
+        local tex = btn:CreateTexture(nil, "ARTWORK"); tex:SetAllPoints(); btn._tex = tex
+        local brd = btn:CreateTexture(nil, "OVERLAY")
+        brd:SetColorTexture(1,1,1,0.08); brd:SetPoint("TOPLEFT",-1,1); brd:SetPoint("BOTTOMRIGHT",1,-1)
+        btn:SetScript("OnEnter", function(self)
+            local c = self._color; if not c then return end
+            local anchor = self:GetParent()._label or self
+            GameTooltip:SetOwner(anchor, "ANCHOR_TOP")
+            local r255, g255, b255 = math.floor(c[1]*255+.5), math.floor(c[2]*255+.5), math.floor(c[3]*255+.5)
+            local hex = string.format("%02X%02X%02X", r255, g255, b255)
+            GameTooltip:AddLine("|cff"..hex.."#|r"..hex, 1, 1, 1)
+            if isFavorites then
+                GameTooltip:AddLine(EllesmereUI.L("Right-click: remove favorite"), 0.5, 0.5, 0.5)
+            else
+                GameTooltip:AddLine(EllesmereUI.L("Right-click: favorite"), 0.5, 0.5, 0.5)
+            end
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:SetScript("OnClick", function(self, mouseButton)
+            local c = self._color; if not c then return end
+            if mouseButton == "RightButton" then
+                if isFavorites or not IsFavorite(c[1], c[2], c[3]) then
+                    ToggleFavorite(c[1], c[2], c[3], c[4])
+                end
+                RefreshSwatchRows()
+            else
+                currentH, currentS, currentV = RGBtoHSV(c[1], c[2], c[3])
+                UpdateAllControls(); FireCallbacks()
+            end
+        end)
+        btn:Hide()
+        return btn
+    end
+
+    -- Favorites label + row
+    local favLbl = MakeFont(popup, 10, nil, 1,1,1); favLbl:SetAlpha(TEXT_DIM_A)
+    favLbl:SetPoint("TOPLEFT", svPad, "BOTTOMLEFT", 0, -10)
+    favLbl:SetText(EllesmereUI.L("Favorites"))
+
+    local favRow = CreateFrame("Frame", nil, popup)
+    favRow:SetSize(BASE_W - PAD - PAD_RIGHT, SWATCH_SZ)
+    favRow:SetPoint("TOPLEFT", favLbl, "BOTTOMLEFT", 0, -3)
+    favRow._label = favLbl; favRow._isFavorites = true
+
+    -- Recent Colors label + row
+    local rcLbl = MakeFont(popup, 10, nil, 1,1,1); rcLbl:SetAlpha(TEXT_DIM_A)
+    rcLbl:SetPoint("TOPLEFT", favRow, "BOTTOMLEFT", 0, -8)
+    rcLbl:SetText(EllesmereUI.L("Recent Colors"))
+
+    local rcRow = CreateFrame("Frame", nil, popup)
+    rcRow:SetSize(BASE_W - PAD - PAD_RIGHT, SWATCH_SZ)
+    rcRow:SetPoint("TOPLEFT", rcLbl, "BOTTOMLEFT", 0, -3)
+    rcRow._label = rcLbl; rcRow._isFavorites = false
+
+    local favSwatches, rcSwatches = {}, {}
+
+    local function PopulateSwatchRow(swatchPool, row, data)
+        local count = math.min(#data, PICKER_MAX_SWATCHES)
+        for i = 1, math.max(count, #swatchPool) do
+            local btn = swatchPool[i]
+            if not btn then btn = MakeSwatchBtn(row, row._isFavorites); swatchPool[i] = btn end
+            if i <= count then
+                btn._color = data[i]
+                btn._tex:SetColorTexture(data[i][1], data[i][2], data[i][3], 1)
+                btn:Show(); btn:ClearAllPoints()
+                if i == 1 then btn:SetPoint("LEFT", row, "LEFT", 0, 0)
+                else btn:SetPoint("LEFT", swatchPool[i-1], "RIGHT", SWATCH_SPACING, 0) end
+            else
+                btn:Hide()
+            end
+        end
+    end
+
+    RefreshSwatchRows = function()
+        PopulateSwatchRow(favSwatches, favRow, GetFavoritesDB())
+        PopulateSwatchRow(rcSwatches,  rcRow,  GetRecentColorsDB())
+    end
 
     -- Hide / Escape
     popup:SetScript("OnHide", function()
@@ -2784,6 +2921,7 @@ local function BuildColorPickerPopup()
         end
         popup:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
         EllesmereUI._colorPickerOpen = true
+        RefreshSwatchRows()
         popup:Show(); UpdateAllControls()
     end
 
