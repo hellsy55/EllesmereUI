@@ -1435,6 +1435,18 @@ do
             if cursorFrame then cursorFrame:Hide() end
         end)
         hooksecurefunc("GameTooltip_SetDefaultAnchor", ApplyCursorAnchor)
+        -- World-unit tooltips fade out (~1-2s) instead of hiding on mouse-off,
+        -- unlike unitframe/item/buff/CDM tips which Hide() instantly. While the
+        -- tip rides the cursor that lingering fade trails the pointer, so collapse
+        -- it to an instant hide -- only while the cursor anchor is actually on.
+        if GameTooltip.FadeOut then
+            hooksecurefunc(GameTooltip, "FadeOut", function(self)
+                if self ~= GameTooltip then return end
+                if EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor then
+                    self:Hide()
+                end
+            end)
+        end
     end
 
     EllesmereUI._applyTooltipCursorAnchor = function()
