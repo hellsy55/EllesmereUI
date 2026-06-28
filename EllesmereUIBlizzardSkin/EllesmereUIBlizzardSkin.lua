@@ -1418,7 +1418,7 @@ do
         if not parent or tooltip:IsForbidden() then return end
         local cf = EnsureCursorFrame()
         cf:Show()
-        local point = POINT_FOR_POS[EllesmereUIDB.tooltipCursorPosition or "topright"] or "BOTTOMLEFT"
+        local point = POINT_FOR_POS[EllesmereUIDB.tooltipCursorPosition or "top"] or "BOTTOM"
         tooltip:SetOwner(parent, "ANCHOR_NONE")
         tooltip:ClearAllPoints()
         tooltip:SetPoint(point, cf, "CENTER",

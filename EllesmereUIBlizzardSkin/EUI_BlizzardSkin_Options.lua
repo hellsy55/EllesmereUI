@@ -168,7 +168,7 @@ initFrame:SetScript("OnEvent", function(self)
                                center="Center" },
                       order={ "bottomright", "bottomleft", "topright", "topleft",
                               "right", "left", "top", "bottom", "center" },
-                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipCursorPosition or "topright" end,
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipCursorPosition or "top" end,
                       set=function(v)
                           if not EllesmereUIDB then EllesmereUIDB = {} end
                           EllesmereUIDB.tooltipCursorPosition = v
