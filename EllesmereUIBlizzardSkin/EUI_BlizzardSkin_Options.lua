@@ -137,6 +137,88 @@ initFrame:SetScript("OnEvent", function(self)
             { type="spacer" }
         );  y = y - h
 
+        local ttCursorRow
+        ttCursorRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Anchor Tooltip to Cursor",
+              tooltip="Makes the game tooltip follow your mouse cursor instead of appearing in the default screen corner. Use the arrows icon to pick the position relative to the cursor and fine-tune the X/Y offset.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipAnchorCursor = v
+                  if EllesmereUI._applyTooltipCursorAnchor then EllesmereUI._applyTooltipCursorAnchor() end
+              end },
+            { type="spacer" }
+        );  y = y - h
+
+        -- Position control on Anchor Tooltip to Cursor (left region): position + X/Y offset
+        do
+            local leftRgn = ttCursorRow._leftRegion
+            local function ttCursorOff()
+                return not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor)
+            end
+            local _, ttCursorPosShow = EllesmereUI.BuildCogPopup({
+                title = "Cursor Tooltip Position",
+                rows = {
+                    { type="dropdown", label="Position",
+                      values={ bottomright="Bottom Right", bottomleft="Bottom Left",
+                               topright="Top Right", topleft="Top Left",
+                               right="Right", left="Left", top="Top", bottom="Bottom",
+                               center="Center" },
+                      order={ "bottomright", "bottomleft", "topright", "topleft",
+                              "right", "left", "top", "bottom", "center" },
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipCursorPosition or "topright" end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.tooltipCursorPosition = v
+                      end },
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return (EllesmereUIDB and EllesmereUIDB.tooltipCursorOffsetX) or 0 end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.tooltipCursorOffsetX = v
+                      end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return (EllesmereUIDB and EllesmereUIDB.tooltipCursorOffsetY) or 0 end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.tooltipCursorOffsetY = v
+                      end },
+                },
+            })
+            -- Manual position button (this file has no shared button helper)
+            local ttPosBtn = CreateFrame("Button", nil, leftRgn)
+            ttPosBtn:SetSize(26, 26)
+            ttPosBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = ttPosBtn
+            ttPosBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            ttPosBtn:SetAlpha(ttCursorOff() and 0.15 or 0.4)
+            local ttPosTex = ttPosBtn:CreateTexture(nil, "OVERLAY")
+            ttPosTex:SetAllPoints()
+            ttPosTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            ttPosBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            ttPosBtn:SetScript("OnLeave", function(self) self:SetAlpha(ttCursorOff() and 0.15 or 0.4) end)
+            ttPosBtn:SetScript("OnClick", function(self) ttCursorPosShow(self) end)
+
+            -- Blocking overlay + disabled tooltip when the toggle is off
+            local ttPosBlock = CreateFrame("Frame", nil, ttPosBtn)
+            ttPosBlock:SetAllPoints()
+            ttPosBlock:SetFrameLevel(ttPosBtn:GetFrameLevel() + 10)
+            ttPosBlock:EnableMouse(true)
+            ttPosBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(ttPosBtn, EllesmereUI.DisabledTooltip("Anchor Tooltip to Cursor"))
+            end)
+            ttPosBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateTtPosState()
+                local off = ttCursorOff()
+                ttPosBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then ttPosBlock:Show() else ttPosBlock:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateTtPosState)
+            UpdateTtPosState()
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         _, h = W:SectionHeader(parent, "BLIZZARD WINDOW RESKINS", y);  y = y - h
@@ -1077,6 +1159,10 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.tooltipFontScale = nil
                 EllesmereUIDB.tooltipMythicScore = nil
                 EllesmereUIDB.calendarLockoutTooltip = nil
+                EllesmereUIDB.tooltipAnchorCursor = nil
+                EllesmereUIDB.tooltipCursorPosition = nil
+                EllesmereUIDB.tooltipCursorOffsetX = nil
+                EllesmereUIDB.tooltipCursorOffsetY = nil
                 EllesmereUIDB.uberTooltips = nil
                 EllesmereUIDB.uberTooltipsManual = nil
                 EllesmereUIDB.reskinQueuePopup = nil
@@ -1090,6 +1176,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.characterFramePos = nil
                 EllesmereUIDB.friendsFramePos = nil
             end
+            if EllesmereUI._applyTooltipCursorAnchor then EllesmereUI._applyTooltipCursorAnchor() end
         end,
     })
 

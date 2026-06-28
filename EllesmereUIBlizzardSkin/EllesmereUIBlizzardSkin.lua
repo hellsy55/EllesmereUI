@@ -1363,3 +1363,92 @@ do
         end
     end)
 end
+
+-------------------------------------------------------------------------------
+--  Anchor Tooltip to Cursor
+--  Re-owns the default GameTooltip to a 1x1 frame that tracks the mouse, so the
+--  tooltip follows the cursor with a user-chosen position + X/Y offset.
+--  GameTooltip_SetDefaultAnchor is the post-hook every default-anchored tooltip
+--  (units, world objects, action buttons) runs through, so re-pointing it there
+--  covers them all. The hook is installed on first enable and re-checks the flag,
+--  so it's a no-op (Blizzard's default anchor stands) when toggled back off, and
+--  the cursor-tracking frame only ticks while a tooltip is actually shown.
+-------------------------------------------------------------------------------
+do
+    -- Selected position = where the tooltip sits relative to the cursor, so the
+    -- tooltip corner that touches the cursor is the opposite one.
+    local POINT_FOR_POS = {
+        bottomright = "TOPLEFT",
+        bottomleft  = "TOPRIGHT",
+        topright    = "BOTTOMLEFT",
+        topleft     = "BOTTOMRIGHT",
+        right       = "LEFT",
+        left        = "RIGHT",
+        top         = "BOTTOM",
+        bottom      = "TOP",
+        center      = "CENTER",
+    }
+
+    local cursorFrame
+    local hooked = false
+
+    local function EnsureCursorFrame()
+        if cursorFrame then return cursorFrame end
+        cursorFrame = CreateFrame("Frame", "EllesmereUI_TooltipCursorAnchor", UIParent)
+        cursorFrame:SetSize(1, 1)
+        cursorFrame:SetFrameStrata("TOOLTIP")
+        cursorFrame:Hide()
+        local lastX, lastY
+        cursorFrame:SetScript("OnUpdate", function(self)
+            local scale = UIParent:GetEffectiveScale()
+            if scale <= 0 then return end
+            local x, y = GetCursorPosition()
+            if x ~= lastX or y ~= lastY then
+                lastX, lastY = x, y
+                self:ClearAllPoints()
+                self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+            end
+        end)
+        return cursorFrame
+    end
+
+    local function ApplyCursorAnchor(tooltip, parent)
+        if tooltip ~= GameTooltip then return end
+        if not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor) then return end
+        if not parent or tooltip:IsForbidden() then return end
+        local cf = EnsureCursorFrame()
+        cf:Show()
+        local point = POINT_FOR_POS[EllesmereUIDB.tooltipCursorPosition or "topright"] or "BOTTOMLEFT"
+        tooltip:SetOwner(parent, "ANCHOR_NONE")
+        tooltip:ClearAllPoints()
+        tooltip:SetPoint(point, cf, "CENTER",
+            EllesmereUIDB.tooltipCursorOffsetX or 0,
+            EllesmereUIDB.tooltipCursorOffsetY or 0)
+    end
+
+    local function InstallHook()
+        if hooked then return end
+        hooked = true
+        EnsureCursorFrame()
+        -- Stop the tracker when the tooltip closes; ApplyCursorAnchor reshows it.
+        GameTooltip:HookScript("OnHide", function()
+            if cursorFrame then cursorFrame:Hide() end
+        end)
+        hooksecurefunc("GameTooltip_SetDefaultAnchor", ApplyCursorAnchor)
+    end
+
+    EllesmereUI._applyTooltipCursorAnchor = function()
+        if EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor then
+            InstallHook()
+        elseif cursorFrame then
+            cursorFrame:Hide()
+        end
+    end
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        EllesmereUI._applyTooltipCursorAnchor()
+    end)
+end
