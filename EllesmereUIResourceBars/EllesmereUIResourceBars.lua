@@ -5630,7 +5630,7 @@ BuildGCDBar = function()
         gcdBarFrame._spark = spark
 
         -- Event-driven GCD capture (like the cursor GCD ring)
-        gcdBarFrame:SetScript("OnEvent", function(self, event, unit, castGUID)
+        gcdBarFrame:SetScript("OnEvent", function(self, event, unit, _, spellID)
             if unit ~= "player" then return end
             local gc = ERB.db.profile.gcdBar
             if not gc or not gc.enabled then return end
@@ -5654,40 +5654,70 @@ BuildGCDBar = function()
                     self._gcdDur = nil
                     self._gcdActualStart = nil
                 end
+                self._realCastSpellID = nil  -- the cast ended; clear the hard-cast flag
                 return
             end
 
             if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START"
                or event == "UNIT_SPELLCAST_EMPOWER_START" then
-                self._hardCastGUID = castGUID  -- remember this cast had a cast time
+                -- Remember this spell had a cast time/channel/empower so the
+                -- succeeded it fires can be skipped under instant-only.
+                -- Channels/empowers fire succeeded on start.
+                -- verify there's an actual cast time, a spell made instant
+                -- (e.g. Swiftness Regrowth) will count as instant cast
+                if event ~= "UNIT_SPELLCAST_START" then
+                    self._realCastSpellID = spellID
+                else
+                    local _, _, _, st, et = UnitCastingInfo("player")
+                    if st and et and et > st then
+                        self._realCastSpellID = spellID
+                    end
+                end
                 if gc.instantOnly then return end  -- instant-only: don't fill for hard casts
             elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
-                -- instant-only: skip the SUCCEEDED that ends a hard cast (same GUID)
-                if gc.instantOnly and castGUID == self._hardCastGUID then return end
+                -- instant-only: skip the succeeded that matches spellID
+                if gc.instantOnly and spellID and spellID == self._realCastSpellID then
+                    self._realCastSpellID = nil
+                    return
+                end
             else
                 return
             end
 
-            local cd = getCD and getCD(61304)
-            if not cd or not cd.startTime then return end
-            local ok, elapsed, dur = pcall(function()
-                local d, s = cd.duration, cd.startTime
-                if d and d > 0 and d <= 1.6 and s and s > 0 then return GetTime() - s, d end
-                return nil
-            end)
-            if ok and elapsed and not (issecretvalue and (issecretvalue(elapsed) or issecretvalue(dur))) then
-                local actualStart = GetTime() - elapsed
-                -- Only (re)start for a freshly started GCD (elapsed near 0).
-                -- This stops an off-GCD / succeeded spell from restarting the
-                -- running GCD.
-                if elapsed < 0.3 and ((not self._gcdActualStart) or actualStart > (self._gcdActualStart + 0.05)) then
-                    self._gcdActualStart = actualStart
-                    -- Fill starts visually at 0 fills over the time remaining
-                    -- (Using the true start would open the bar at the
-                    -- already-elapsed %, e.g. ~30% on a hasted GCD.)
-                    self._gcdStart = GetTime()
-                    self._gcdDur = math.max(dur - elapsed, 0.05)
+            local function captureGCD()
+                local cd = getCD and getCD(61304)
+                if not cd or not cd.startTime then return end
+                local ok, elapsed, dur = pcall(function()
+                    local d, s = cd.duration, cd.startTime
+                    if d and d > 0 and d <= 1.6 and s and s > 0 then return GetTime() - s, d end
+                    return nil
+                end)
+                if ok and elapsed and not (issecretvalue and (issecretvalue(elapsed) or issecretvalue(dur))) then
+                    local actualStart = GetTime() - elapsed
+                    -- Only (re)start for a freshly started GCD (elapsed near 0).
+                    -- This stops an off-GCD / succeeded spell from restarting the
+                    -- running GCD.
+                    if elapsed < 0.3 and ((not self._gcdActualStart) or actualStart > (self._gcdActualStart + 0.05)) then
+                        self._gcdActualStart = actualStart
+                        -- Fill starts visually at 0 fills over the time remaining
+                        -- (Using the true start would open the bar at the
+                        -- already-elapsed %, e.g. ~30% on a hasted GCD.)
+                        self._gcdStart = GetTime()
+                        self._gcdDur = math.max(dur - elapsed, 0.05)
+                    end
                 end
+            end
+
+            if gc.instantOnly and event == "UNIT_SPELLCAST_SUCCEEDED" then
+                -- A channel's succeeded can fire before its channel_start.
+                -- Defer the capture one frame and skip it if channeling.
+				-- Avoids a 1-frame flash on channel start
+                C_Timer.After(0, function()
+                    if UnitChannelInfo and UnitChannelInfo("player") then return end
+                    captureGCD()
+                end)
+            else
+                captureGCD()
             end
         end)
     end
