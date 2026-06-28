@@ -8135,6 +8135,17 @@ function EAB:OnInitialize()
         end
     end
 
+    SLASH_EABQUICKKEYBIND1 = "/kb"
+    SlashCmdList["EABQUICKKEYBIND"] = function(msg)
+        if InCombatLockdown() then return end
+        if not C_AddOns.IsAddOnLoaded("Blizzard_QuickKeybind") then
+            C_AddOns.LoadAddOn("Blizzard_QuickKeybind")
+        end
+        if QuickKeybindFrame then
+            QuickKeybindFrame:Show()
+        end
+    end
+
 end
 
 function EAB:OnEnable()
