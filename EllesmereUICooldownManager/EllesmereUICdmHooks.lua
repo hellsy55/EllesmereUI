@@ -2822,19 +2822,51 @@ local function CollectAndReanchor()
                                 _injectedCustomBuffFrames[f] = true
                                 f._ownerBarKey = injKey
                                 f.layoutIndex = 6000 + idx
-                                if f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur) then
-                                    f._cooldown:SetCooldown(f._cdStart, f._cdDur)
+                                -- "Hide Items if Missing": mirror the CD/utility item
+                                -- path. When the bar opts in and the item (plus alts)
+                                -- isn't in bags, skip injection so it drops out of the
+                                -- layout instead of showing. Setting _hidePresenceCached
+                                -- is REQUIRED: CheckItemPresenceForHide compares
+                                -- (total > 0) ~= f._hidePresenceCached, so a nil cache
+                                -- would read as changed on every bag update and queue a
+                                -- reanchor on every loot/sell/craft for the session.
+                                local skipMissing = false
+                                if bd.hideItemsIfMissing then
+                                    local total = C_Item.GetItemCount(itemID, false, true) or 0
+                                    if total == 0 and f._presetData and f._presetData.altItemIDs then
+                                        for _, altID in ipairs(f._presetData.altItemIDs) do
+                                            total = total + (C_Item.GetItemCount(altID, false, true) or 0)
+                                        end
+                                    end
+                                    f._hidePresenceCached = (total > 0)
+                                    skipMissing = (total == 0)
+                                else
+                                    f._hidePresenceCached = nil
                                 end
-                                if f._lastDesat ~= nil and f._tex then
-                                    f._tex:SetDesaturated(f._lastDesat)
+                                if skipMissing then
+                                    f:Hide()
+                                else
+                                    if f._cdStart and f._cdDur and (GetTime() < f._cdStart + f._cdDur) then
+                                        f._cooldown:SetCooldown(f._cdStart, f._cdDur)
+                                    end
+                                    if f._lastDesat ~= nil and f._tex then
+                                        f._tex:SetDesaturated(f._lastDesat)
+                                    elseif ns._MarkPresetCdDirty then
+                                        -- Fresh frame (no cached desat yet): nudge the
+                                        -- preset processor so the next BuffTicker pass
+                                        -- computes its ownership/cooldown desaturation,
+                                        -- else an in-panel sync/import leaves an unowned
+                                        -- item saturated until /reload.
+                                        ns._MarkPresetCdDirty()
+                                    end
+                                    f:Show()
+                                    local fc = FC(f)
+                                    fc.barKey = injKey
+                                    fc.spellID = sid
+                                    if not barLists[injKey] then barLists[injKey] = {} end
+                                    barLists[injKey][#barLists[injKey] + 1] =
+                                        AcquireEntry(f, sid, sid, f.layoutIndex)
                                 end
-                                f:Show()
-                                local fc = FC(f)
-                                fc.barKey = injKey
-                                fc.spellID = sid
-                                if not barLists[injKey] then barLists[injKey] = {} end
-                                barLists[injKey][#barLists[injKey] + 1] =
-                                    AcquireEntry(f, sid, sid, f.layoutIndex)
                             end
                         end
                     end

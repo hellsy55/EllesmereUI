@@ -110,6 +110,7 @@ local defaults = {
             powerPercentX = 0,
             powerPercentY = 0,
             powerPercentPowerColor = true,
+            powerBgPowerColored = false,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
@@ -293,6 +294,7 @@ local defaults = {
             powerPercentX = 0,
             powerPercentY = 0,
             powerPercentPowerColor = true,
+            powerBgPowerColored = false,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
@@ -448,6 +450,7 @@ local defaults = {
             powerPercentX = 0,
             powerPercentY = 0,
             powerPercentPowerColor = true,
+            powerBgPowerColored = false,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
             castbarHeight = 14,
@@ -599,6 +602,7 @@ local defaults = {
             powerPercentX = 0,
             powerPercentY = 0,
             powerPercentPowerColor = true,
+            powerBgPowerColored = false,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
@@ -756,6 +760,7 @@ local defaults = {
             powerPercentX = 0,
             powerPercentY = 0,
             powerPercentPowerColor = true,
+            powerBgPowerColored = false,
             powerPercentTextPowerColor = false,
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
@@ -3502,6 +3507,15 @@ local function CreatePowerBar(frame, unit, settings)
             -- the bar on its built-in default color instead of the user's.
             self:SetStatusBarColor(bR, bG, bB)
         end
+        -- Bar Background: when power-colored, track this unit's power color each
+        -- update so the bg follows target / power-type changes (mirrors the fill).
+        -- Opacity stays driven by customPowerBgAlpha (SetAlpha), so a full-color
+        -- set is correct here. Gated -> when off, the custom/dark bg set at
+        -- creation/refresh stands, for zero per-update cost in the default case.
+        if s2.powerBgPowerColored and self.bg then
+            local pr, pg, pb = EllesmereUI.ResolveUnitPowerColor(unit)
+            if pr then self.bg:SetColorTexture(pr, pg, pb, 1) end
+        end
         -- Keep the power-percent text color in sync with THIS unit (fires on
         -- target/focus change + UNIT_DISPLAYPOWER, so the text follows the unit
         -- instead of the color resolved at creation). Gated on the feature being
@@ -3667,11 +3681,19 @@ local function CreatePowerBar(frame, unit, settings)
             end
         elseif not shouldGray and self._grayedOut then
             self._grayedOut = false
-            local customBg = s.customPowerBgColor
-            if customBg then
-                if self.bg then self.bg:SetColorTexture(customBg.r, customBg.g, customBg.b, 1) end
+            if s.powerBgPowerColored and self.bg then
+                -- Power-colored bg: restore this unit's power color (mirrors fill);
+                -- the next PostUpdateColor keeps it tracking thereafter.
+                local pr, pg, pb = EllesmereUI.ResolveUnitPowerColor(u)
+                if pr then self.bg:SetColorTexture(pr, pg, pb, 1)
+                else self.bg:SetColorTexture(17/255, 17/255, 17/255, 1) end
             else
-                if self.bg then self.bg:SetColorTexture(17/255, 17/255, 17/255, 1) end
+                local customBg = s.customPowerBgColor
+                if customBg then
+                    if self.bg then self.bg:SetColorTexture(customBg.r, customBg.g, customBg.b, 1) end
+                else
+                    if self.bg then self.bg:SetColorTexture(17/255, 17/255, 17/255, 1) end
+                end
             end
             -- Restore bg alpha from unified opacity setting
             if self.bg then
@@ -9488,6 +9510,12 @@ local function ReloadFrames()
                         -- (block 1 does this; this settings-refresh copy did not,
                         -- which is why non-player bars showed oUF's default color).
                         self:SetStatusBarColor(bR, bG, bB)
+                    end
+                    -- Bar Background: power-colored bg tracks this unit's power
+                    -- color each update (mirrors the fill); see CreatePowerBar.
+                    if s2.powerBgPowerColored and self.bg then
+                        local pr, pg, pb = EllesmereUI.ResolveUnitPowerColor(unit)
+                        if pr then self.bg:SetColorTexture(pr, pg, pb, 1) end
                     end
                     -- Keep the power-percent text color in sync with this unit
                     -- (per-unit power color; set up in CreatePowerBar). Gated on

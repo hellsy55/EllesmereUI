@@ -1429,40 +1429,6 @@ initFrame:SetScript("OnEvent", function(self)
                         }
                     );  y = y - h
 
-                    local removeRow
-                    removeRow, h = W:DualRow(parent, y,
-                        { type = "spacer" },
-                        { type = "labeledButton", text = "Remove Glow", buttonText = "Remove", width = 150,
-                          onClick = function()
-                              table.remove(buffList, removeAIdx)
-                              if #buffList == 0 then
-                                  bg.assignments[assignKey] = nil
-                              end
-                              Refresh()
-                              EllesmereUI:RefreshPage(true)
-                          end,
-                        }
-                    );  y = y - h
-
-                    -- Buff icon next to the Remove button
-                    do
-                        local rightRgn = removeRow._rightRegion
-                        if rightRgn and rightRgn._control then
-                            local btn = rightRgn._control
-                            local btnH = btn:GetHeight()
-                            local ico = rightRgn:CreateTexture(nil, "ARTWORK")
-                            ico:SetSize(btnH, btnH)
-                            PP.Point(ico, "RIGHT", btn, "LEFT", -8, 0)
-                            ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                            if entry.spellID and entry.spellID > 0 then
-                                local info = C_Spell.GetSpellInfo(entry.spellID)
-                                if info and info.iconID then
-                                    ico:SetTexture(info.iconID)
-                                end
-                            end
-                        end
-                    end
-
                     -- Helper: resolve current glow color and restart preview if active
                     local pvKey = assignKey .. "_" .. aIdx
                     local function RefreshPreviewGlow()
@@ -1592,6 +1558,41 @@ initFrame:SetScript("OnEvent", function(self)
                                 end,
                                 false, 20)
                             PP.Point(glowSwatch, "RIGHT", toggle, "LEFT", -8, 0)
+                        end
+                    end
+
+                    -- Row 3: Remove Glow on its own row (left slot), after the glow config.
+                    local removeRow
+                    removeRow, h = W:DualRow(parent, y,
+                        { type = "labeledButton", text = "Remove Glow", buttonText = "Remove", width = 150,
+                          onClick = function()
+                              table.remove(buffList, removeAIdx)
+                              if #buffList == 0 then
+                                  bg.assignments[assignKey] = nil
+                              end
+                              Refresh()
+                              EllesmereUI:RefreshPage(true)
+                          end,
+                        },
+                        { type = "spacer" }
+                    );  y = y - h
+
+                    -- Buff icon to the LEFT of the Remove button
+                    do
+                        local leftRgn = removeRow._leftRegion
+                        if leftRgn and leftRgn._control then
+                            local btn = leftRgn._control
+                            local btnH = btn:GetHeight()
+                            local ico = leftRgn:CreateTexture(nil, "ARTWORK")
+                            ico:SetSize(btnH, btnH)
+                            PP.Point(ico, "RIGHT", btn, "LEFT", -8, 0)
+                            ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                            if entry.spellID and entry.spellID > 0 then
+                                local info = C_Spell.GetSpellInfo(entry.spellID)
+                                if info and info.iconID then
+                                    ico:SetTexture(info.iconID)
+                                end
+                            end
                         end
                     end
                 end
@@ -8602,7 +8603,6 @@ initFrame:SetScript("OnEvent", function(self)
                     slotOf[key] = #dispList
                 end
             end
-            print("|cff44ff44[EUI DEDUP]|r result dispList="..#dispList.." (was "..#raw..")")
             return dispList, dispGroups
         end
 

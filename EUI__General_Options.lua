@@ -324,6 +324,44 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.3.2",
+        heroes = {
+            {
+                module = "CDM",
+                title = "Track Any Item by ID",
+                desc  = "Cooldown Manager's add menu gains a Custom Item ID option so you can track any item by its item ID, with its own icon, cooldown swipe, and bag count. Works on cooldown, utility, and buff bars.",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars",
+                    preSelect = function()
+                        if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("cooldowns") end
+                    end },
+            },
+        },
+        features = {
+            {
+                module = "Unit Frames",
+                title = "Power-Colored Bar Background",
+                desc  = "The power bar background can now follow your power type color (blue for mana, yellow for energy, and so on), matching the power-colored fill. Available on main frames and boss frames.",
+                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "POWER BAR", highlight = "Bar Background",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Quality of Life",
+                title = "Hide Error Messages",
+                desc  = "A new toggle hides most red error spam such as \"Not enough rage\" or \"Ability is not ready yet\", while still showing important alerts like a full bag or full quest log.",
+                nav   = { module = "EllesmereUIQoL", page = "Quality of Life", section = "GENERAL", highlight = "Hide Error Messages" },
+            },
+        },
+        fixes = {
+            { module = "CDM", text = "Each assigned bar-button buff glow gains an \"Only In Combat\" toggle so the glow only lights up while you are in combat." },
+            { module = "CDM", text = "The active-state overlay on tracked icons such as Ebon Might now keeps custom icon shapes, recolors the correct border, and matches your duration-text font instead of drawing a plain square. Glow and border edits also apply live while the buff is active." },
+            { module = "Unit Frames", text = "Boss frame health and power bars now use the same separate Fill Color and Bar Background controls with inline class, custom, and power color swatches as the main frames." },
+            { module = "Auras, Buffs & Consumables", text = "Fixed the Hearty Flora Frenzy food reminder using the wrong item ID, so it now tracks correctly." },
+        },
+    },
+    {
         version = "8.3.1",
         heroes = {
             {

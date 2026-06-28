@@ -1029,7 +1029,7 @@ local FOOD_ITEMS = {
     -- Hearty Food Items
     { key="hearty_royal_roast",            itemID=242747, name="Hearty Royal Roast" },
     { key="hearty_impossibly_royal_roast",  itemID=268679, name="Hearty Impossibly Royal Roast" },
-    { key="hearty_flora_frenzy",            itemID=267000, name="Hearty Flora Frenzy" },
+    { key="hearty_flora_frenzy",            itemID=268680, name="Hearty Flora Frenzy" },
     { key="hearty_champions_bento",         itemID=242746, name="Hearty Champion's Bento" },
     { key="hearty_warped_wise_wings",       itemID=242757, name="Hearty Warped Wise Wings" },
     { key="hearty_void_kissed_fish_rolls",  itemID=242756, name="Hearty Void-Kissed Fish Rolls" },
