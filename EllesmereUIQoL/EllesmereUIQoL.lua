@@ -2124,3 +2124,151 @@ do
         end
     end)
 end
+
+-------------------------------------------------------------------------------
+--  Hide Tutorial Pop-ups
+-------------------------------------------------------------------------------
+do
+    local function Enabled()
+        return EllesmereUIDB and EllesmereUIDB.hideTutorials
+    end
+
+    -- "i" circles are MainHelpPlateButtons, matched by a method copied from the
+    -- Blizzard mixin. Blizzard_HelpPlate is load-on-demand; resolve lazily and
+    -- only cache once it exists.
+    local fingerprint
+    local function GetFingerprint()
+        if not fingerprint and MainHelpPlateButtonMixin then
+            fingerprint = MainHelpPlateButtonMixin.ShowTooltip
+        end
+        return fingerprint
+    end
+
+    local hiddenByUs = {}
+    local function HideButton(btn)
+        btn:SetAlpha(0)
+        btn:EnableMouse(false)
+        hiddenByUs[btn] = true
+    end
+
+    local function HideOpenTips()
+        if not (HelpTip and HelpTip.framePool and HelpTip.framePool.EnumerateActive) then return end
+        pcall(function()
+            for tip in HelpTip.framePool:EnumerateActive() do
+                if tip:IsShown() then
+                    local info = tip.info
+                    if info and info.cvarBitfield and info.bitfieldFlag then
+                        SetCVarBitfield(info.cvarBitfield, info.bitfieldFlag, true)
+                    end
+                    tip:Hide()
+                end
+            end
+        end)
+    end
+
+    local HideButtonsUnder
+    local function ScanChildren(...)
+        for i = 1, select("#", ...) do
+            HideButtonsUnder((select(i, ...)))
+        end
+    end
+    function HideButtonsUnder(root)
+        if not root then return end
+        local fp = GetFingerprint()
+        if not fp then return end
+        if root.ShowTooltip == fp then HideButton(root) end
+        if root.GetChildren then ScanChildren(root:GetChildren()) end
+    end
+
+    -- One-time full walk (no allocation, never on a timer) to catch panels that
+    -- are already open the moment the feature is switched on.
+    local function SweepAll()
+        local fp = GetFingerprint()
+        if not fp then return end
+        local frame = EnumerateFrames()
+        while frame do
+            if frame.ShowTooltip == fp then HideButton(frame) end
+            frame = EnumerateFrames(frame)
+        end
+    end
+
+    local function RestoreButtons()
+        for btn in pairs(hiddenByUs) do
+            btn:SetAlpha(1)
+            btn:EnableMouse(true)
+            hiddenByUs[btn] = nil
+        end
+    end
+
+    -- Core hooks (HelpTip + ShowUIPanel) install once, only via ApplyHideTutorials
+    -- when the feature is enabled. Each body also gates on Enabled().
+    local coreHooked = false
+    local function InstallCoreHooks()
+        if coreHooked then return end
+        coreHooked = true
+        if HelpTip and HelpTip.Show then
+            hooksecurefunc(HelpTip, "Show", function()
+                if Enabled() then HideOpenTips() end
+            end)
+        end
+        if ShowUIPanel then
+            hooksecurefunc("ShowUIPanel", function(frame)
+                if Enabled() and frame then
+                    HideButtonsUnder(frame)
+                    HideOpenTips()
+                end
+            end)
+        end
+    end
+
+    local tooltipHooked = false
+    local function InstallTooltipHook()
+        if tooltipHooked or not HelpPlateTooltip then return end
+        tooltipHooked = true
+        if HelpPlate and HelpPlate.ShowTutorialTooltip then
+            hooksecurefunc(HelpPlate, "ShowTutorialTooltip", function()
+                if Enabled() and HelpPlateTooltip then HelpPlateTooltip:Hide() end
+            end)
+        end
+        if HelpPlateTooltip.Init then
+            hooksecurefunc(HelpPlateTooltip, "Init", function(self)
+                if Enabled() then self:Hide() end
+            end)
+        end
+    end
+
+    local weSetCVar = false
+    local function ApplyHideTutorials()
+        if Enabled() then
+            InstallCoreHooks()
+            InstallTooltipHook()
+            pcall(SetCVar, "hideHelptips", "1")
+            pcall(SetCVar, "showTutorials", "0")
+            weSetCVar = true
+            SweepAll()
+            HideOpenTips()
+        else
+            if weSetCVar then
+                pcall(SetCVar, "hideHelptips", "0")
+                weSetCVar = false
+            end
+            RestoreButtons()
+        end
+    end
+    EllesmereUI._applyHideTutorials = ApplyHideTutorials
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:RegisterEvent("ADDON_LOADED")
+    f:SetScript("OnEvent", function(_, event, addon)
+        if event == "ADDON_LOADED" then
+            -- Gated: nothing is hooked while the feature is off.
+            if addon == "Blizzard_HelpPlate" and Enabled() then
+                InstallTooltipHook()
+            end
+            return
+        end
+        ApplyHideTutorials()  -- PLAYER_LOGIN
+    end)
+end
+
