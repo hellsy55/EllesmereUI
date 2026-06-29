@@ -7316,6 +7316,16 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) local p = DB(); if not p then return end; p.gcdBar.showSpark = v; RefreshGCD() end }
         );  y = y - h
 
+        -- Row: Deplete Fill (left half only)
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Deplete Fill",
+              tooltip = "Start the bar full and drain it as the global cooldown elapses, instead of filling it up.",
+              disabled = gcdOff, disabledTooltip = "GCD Bar",
+              getValue = function() local p = DB(); return p and p.gcdBar.depleteFill end,
+              setValue = function(v) local p = DB(); if not p then return end; p.gcdBar.depleteFill = v; RefreshGCD() end },
+            { type = "spacer" }
+        );  y = y - h
+
         return math.abs(y)
     end
 

@@ -310,6 +310,16 @@ local function FormatTime(seconds, withMilliseconds)
     return format("%02d:%02d", m, s)
 end
 
+-- Like FormatTime, but once the run is over time the remaining clock keeps
+-- counting into the negative (e.g. "-01:04") instead of sitting frozen at
+-- "00:00", so it's obvious by how much you're over.
+local function FormatRemaining(remaining)
+    if remaining and remaining < 0 then
+        return "-" .. FormatTime(-remaining)
+    end
+    return FormatTime(remaining)
+end
+
 local function RoundToInt(value)
     if not value then return 0 end
     return floor(value + 0.5)
@@ -1390,7 +1400,7 @@ local function RenderStandalone()
         local mode = p.timerDisplayMode or "REMAINING_TOTAL"
         local elaStr = FormatTime(elapsed)
         local maxStr = FormatTime(maxTime)
-        local remStr = FormatTime(timeLeft)
+        local remStr = FormatRemaining(maxTime - elapsed)
         if mode == "REMAINING_TOTAL" then
             timerText = elaStr .. " / " .. maxStr
         elseif mode == "ELAPSED" then

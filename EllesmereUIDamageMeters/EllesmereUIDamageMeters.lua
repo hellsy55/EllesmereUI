@@ -390,6 +390,13 @@ ns._DM_TYPE_NAMES = DM_TYPE_NAMES
 local _combatEndTime = 0       -- GetTime() at combat end; control-flow sentinel (ticker teardown / freeze-once)
 local _needsFinalRefresh = false
 local _curViewFrozenDur = 0    -- final Current-session duration, pinned when combat ends
+-- This handles cases where C_DamageMeter gives a feign a valid deathRecapID,
+-- which the deathRecapID > 0 filter would otherwise treat as a real death.
+--
+-- Entries are cleared at combat / encounter start to avoid stale tags, and when
+-- the unit reaches 0 HP, which confirms a real death. UnitIsFeignDeath can remain
+-- true through a feign-then-die transition, so it cannot be used to clear safely.
+local _feignDeathGUIDs = {}
 
 -- Single source of truth for the "Current" session timer (window AND standalone
 -- both read this). While combat is live it returns the live session duration
@@ -453,6 +460,39 @@ local function IsGroupInCombat()
         end
     end
     return false
+end
+
+-- Clear cached feign GUIDs before filtering so real deaths after Feign Death
+-- are not hidden by stale cache entries
+local function CleanupFeignCache()
+    if not next(_feignDeathGUIDs) then return end
+    -- Build GUID -> unit map for the current group so the cache iteration
+    -- below runs in O(N + M) instead of O(N * M).
+    local present = {}
+    local function note(unit)
+        local g = UnitGUID(unit)
+        if g and not (issecretvalue and issecretvalue(g)) then present[g] = unit end
+    end
+    note("player")
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do note(_raidUnits[i]) end
+    elseif IsInGroup() then
+        for i = 1, GetNumGroupMembers() - 1 do note(_partyUnits[i]) end
+    end
+-- HP == 0 confirms a real death. Feign Death keeps the hunter's actual HP,
+-- and UnitIsFeignDeath can linger in Midnight after a feign-then-die transition.
+
+    for guid in pairs(_feignDeathGUIDs) do
+        local unit = present[guid]
+        if not unit then
+            _feignDeathGUIDs[guid] = nil  -- player left the group: untrackable
+        else
+            local hp = UnitHealth(unit)
+            if hp and not (issecretvalue and issecretvalue(hp)) and hp <= 0 then
+                _feignDeathGUIDs[guid] = nil
+            end
+        end
+    end
 end
 
 local StopSharedTicker   -- forward declaration (defined in refresh section)
@@ -3118,13 +3158,24 @@ local function CreateDMWindow(winIdx)
             local isDeaths = (W.curDMType == Enum.DamageMeterType.Deaths)
             local isCount = (W.curDMType == Enum.DamageMeterType.Interrupts or W.curDMType == Enum.DamageMeterType.Dispels)
             -- Deaths: reverse to chronological (API returns most recent first)
-            -- Filter out feign deaths (deathRecapID <= 0 = no valid recap)
+            -- Filter feign deaths. CleanupFeignCache runs first so real deaths after
+            -- Feign Death are no longer hidden by the cached spell 5384 GUID.
+
+
             if isDeaths then
+                CleanupFeignCache()
                 local rev = {}
                 for ri = #sources, 1, -1 do
                     local s = sources[ri]
                     local rid = s.deathRecapID
-                    if not (issecretvalue and issecretvalue(rid)) and rid and rid > 0 then
+                    local sg = s.sourceGUID
+                    -- _feignDeathGUIDs[secret] throws ("cannot be indexed with
+                    -- secret keys"), so only consult the cache when the GUID is
+                    -- a plain string. Secret-GUID rows fall back to the
+                    -- deathRecapID-only filter.
+                    local sgOk = sg and (not issecretvalue or not issecretvalue(sg))
+                    if not (issecretvalue and issecretvalue(rid)) and rid and rid > 0
+                       and not (sgOk and _feignDeathGUIDs[sg]) then
                         rev[#rev + 1] = s
                     end
                 end
@@ -4391,9 +4442,6 @@ local function SharedRefreshTick()
     ns.ProfEnd("SharedRefreshTick", t0)
 end
 
--- Feign death cache: tracks hunter feign deaths via UNIT_FLAGS so they
--- can be filtered from the C_DamageMeter Deaths session (which sometimes
--- assigns a valid deathRecapID to feign deaths).
 -- Only active during combat to avoid idle CPU cost.
 StartSharedTicker = function()
     if _sharedTicker then _sharedTicker:Cancel() end
@@ -4427,7 +4475,30 @@ combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 combatFrame:RegisterEvent("UNIT_FLAGS")
 combatFrame:RegisterEvent("ENCOUNTER_START")
 combatFrame:RegisterEvent("ENCOUNTER_END")
+-- Detect Feign Death via UNIT_SPELLCAST_SUCCEEDED (Blizzard does not fire UNIT_AURA for FD,
+--and the combat log is not reliable for this purpose). This is a high-frequency event, so we gate it with a tight integer compare.
+combatFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 combatFrame:SetScript("OnEvent", function(_, event, ...)
+    -- UNIT_SPELLCAST_SUCCEEDED is the highest-frequency event in this handler;
+    -- check first with a tight integer compare so non-FD casts cost ~nothing.
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local unit, _, spellID = ...
+        if not unit then return end
+        -- spellID can be a secret number when our execution is tainted by
+        -- C_DamageMeter; comparing one throws "attempt to compare a secret
+        -- value." Without a usable spellID we can't classify the cast, so bail.
+        if issecretvalue and issecretvalue(spellID) then return end
+        if spellID == 5384 then -- Feign Death
+            local guid = UnitGUID(unit)
+            if guid and not (issecretvalue and issecretvalue(guid)) then
+                _feignDeathGUIDs[guid] = true
+            end
+        end
+-- Do not clear on non-FD casts. A live hunter can still have a feign entry with
+-- a valid deathRecapID; CleanupFeignCache clears it once they are truly dead.
+
+        return
+    end
     if event == "UNIT_FLAGS" then
         -- Moved profiling inside the gate so filtered-out calls are truly zero-cost
         -- Quick bail: only care when in an instance, out of combat, and ticker not running
@@ -4461,6 +4532,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         -- (the old synchronous GetSessionDurationSeconds read raced the roll and is
         -- removed -- it returned the stale pre-pull duration).
         _combatGen = _combatGen + 1
+        if next(_feignDeathGUIDs) then wipe(_feignDeathGUIDs) end -- new segment: stale feign tags would mis-filter real deaths
         _inCombat = true
         _combatEndTime = 0
         _curViewFrozenDur = 0
@@ -4509,6 +4581,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         -- Ignore post-match cleanup combat after a PvP match ends
         if _G._EUIDM_PvpBlocked and _G._EUIDM_PvpBlocked() then ns.ProfEnd("Combat:REGEN_DISABLED", t0); return end
         _combatGen = _combatGen + 1
+        if next(_feignDeathGUIDs) then wipe(_feignDeathGUIDs) end -- new segment: stale feign tags would mis-filter real deaths
         _inCombat = true
         _combatEndTime = 0
         _curViewFrozenDur = 0
