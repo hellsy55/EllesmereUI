@@ -718,10 +718,14 @@ local defaults = {
 
         -- Range & misc
         oorAlpha         = 0.4,
+        -- Raid frame tooltip visibility. showTooltip is the legacy on/off key,
+        -- kept as the fallback the "Show Raid Frames Tooltip" dropdown derives
+        -- from for existing users (see ns._ResolveTooltipMode). Picking a
+        -- dropdown option writes tooltipMode = always | outOfCombat |
+        -- outOfBossCombat | never (unset = derived, so legacy profiles see no
+        -- change). Governs only the raid/party frame tooltips -- no other unit
+        -- tooltips are touched.
         showTooltip      = true,
-        -- "Show in Combat" moved to a global setting that governs all unit
-        -- tooltips: EllesmereUIDB.showUnitTooltipsInCombat (see the tooltip hook
-        -- near the top of this file). No longer a per-profile raid-frame key.
         freeRightClickCamera = false,  -- right-click + drag over a raid/party frame turns the camera (mouselook)
 
         -- Preview mode: "real", "overlay", "none"
@@ -776,26 +780,23 @@ local unitTrackers   = {}  -- [unitToken] = tracker frame
 local inCombat       = false
 
 -------------------------------------------------------------------------------
---  Hide unit tooltips in combat (global). Extends the per-frame "Show in
---  Combat" tooltip control to EVERY unit tooltip -- nameplates, target/focus,
---  world mobs, and our own frames -- by suppressing them through the shared
---  tooltip data pipeline. The setting is global (EllesmereUIDB.showUnitTooltips
---  InCombat); unset/false = hide in combat (matches the original default).
---  Costs ~0 out of combat: InCombatLockdown() early-outs before any other work.
---  do/end keeps the helper out of file scope (this file is at the local cap).
+--  Tooltip visibility mode resolver. The "Show Raid Frames Tooltip" dropdown
+--  stores tooltipMode = always | outOfCombat | outOfBossCombat | never and
+--  governs ONLY the raid/party frame tooltips (gated in their own OnEnter --
+--  no global hook; other unit tooltips are never touched). When unset (legacy
+--  profiles), derive the mode from the old keys so existing users see no change:
+--  showTooltip=false -> never; the old global "show in combat" flag on ->
+--  always; otherwise the original out-of-combat default. `s` is a scaled raid/
+--  party/extra proxy (or db.profile). Lives on ns (not a file local) so the
+--  OnEnter handler can reach it; this file is at the Lua 5.1 local cap.
 -------------------------------------------------------------------------------
-do
-    local function HideUnitTooltipInCombat(tooltip)
-        if tooltip ~= GameTooltip then return end
-        if tooltip.IsForbidden and tooltip:IsForbidden() then return end
-        if not InCombatLockdown() then return end
-        if EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat then return end
-        tooltip:Hide()
-    end
-    if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
-        and Enum and Enum.TooltipDataType then
-        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, HideUnitTooltipInCombat)
-    end
+ns._ResolveTooltipMode = function(s)
+    if not s then return "outOfCombat" end
+    local m = s.tooltipMode
+    if m ~= nil then return m end
+    if s.showTooltip == false then return "never" end
+    if EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat then return "always" end
+    return "outOfCombat"
 end
 
 -------------------------------------------------------------------------------
@@ -1298,10 +1299,11 @@ do
     end
 end
 
--- Dark mode colors (must match UnitFrames exactly)
-local DARK_FILL_R, DARK_FILL_G, DARK_FILL_B = 0x11/255, 0x11/255, 0x11/255  -- #111111
-local DARK_FILL_A = 0.9
-local DARK_BG_R, DARK_BG_G, DARK_BG_B = 0x4f/255, 0x4f/255, 0x4f/255        -- #4f4f4f
+-- Dark mode colours come from the global per-profile Dark Mode palette via
+-- EllesmereUI.GetDarkModeFill() / GetDarkModeBg(), fetched live at each use so a
+-- settings change shows on the next frame refresh -- and so no file-scope locals
+-- are added (this file is at the 200 main-chunk local cap). Opacity is honoured
+-- here (Raid Frames + Unit Frames); only Resource Bars keep their own alpha.
 
 -- Paints the health-bar background (and dims the fill) for the unit's life and
 -- connection state. Dead/offline: the bg covers the FULL bar so the tint reads
@@ -1338,7 +1340,7 @@ function ns._ApplyHealthBg(d, health, s, unit)
     bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
     bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
     if s.healthColorMode == "dark" then
-        bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+        bg:SetColorTexture(EllesmereUI.GetDarkModeBg())
     else
         -- Class-colored when bgClassColored is on, else the custom bg color
         -- (GetBgColor handles the secret-value guard + alpha = bgDarkness). Must
@@ -1353,7 +1355,8 @@ local function GetHealthColor(unit, s)
     local mode = s.healthColorMode or "class"
 
     if mode == "dark" then
-        return DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
+        local dfr, dfg, dfb = EllesmereUI.GetDarkModeFill()
+        return dfr, dfg, dfb
     elseif mode == "classic" then
         -- Native WoW health gradient via Blizzard's curve system (secret-value safe)
         local color = UnitHealthPercent(unit, true, GetClassicHealthCurve())
@@ -3662,16 +3665,17 @@ local function StyleButton(button)
         if fd.ApplyBorderColor then fd.ApplyBorderColor() end
         -- Read through the party-aware proxy (like every other render path), not
         -- raw db.profile -- otherwise party_<key> overrides written by a custom
-        -- party "Range & Tooltip" section are never seen and the toggle (and its
-        -- in-combat sub-toggle) appear to do nothing on party frames.
+        -- party "Range & Tooltip" section are never seen and the tooltip mode
+        -- dropdown appears to do nothing on party frames.
         local s = fd._isParty and ns._scaledPartyProxy or (fd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
-        if not s.showTooltip then return end
-        -- "Show in Combat" is now a global setting that governs ALL unit
-        -- tooltips (see EllesmereUIDB.showUnitTooltipsInCombat). Gate the raid
-        -- frame's own OnEnter on it too, since this handler explicitly Show()s
-        -- the tooltip after SetUnit (so the global suppression hook alone, which
-        -- runs during SetUnit, would be undone here).
-        if inCombat and not (EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat) then return end
+        -- Raid/party frame tooltips are governed by the "Show Raid Frames
+        -- Tooltip" mode, and ONLY these frames -- no other unit tooltips are
+        -- touched. never = no tooltip; outOfCombat = hidden in any combat;
+        -- outOfBossCombat = hidden during an encounter; always = always shown.
+        local ttMode = ns._ResolveTooltipMode(s)
+        if ttMode == "never" then return end
+        if ttMode == "outOfCombat" and inCombat then return end
+        if ttMode == "outOfBossCombat" and ns._inBossCombat then return end
         local u = self:GetAttribute("unit")
         if u and UnitExists(u) then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
@@ -3925,7 +3929,8 @@ local function UpdateButton(button)
         local fillTex = health:GetStatusBarTexture()
         if s.healthColorMode == "dark" then
             health:SetStatusBarColor(r, g, b, 1)
-            if fillTex then fillTex:SetAlpha(DARK_FILL_A) end
+            -- 4th return of GetDarkModeFill() is the Dark Mode Fill Opacity.
+            if fillTex then fillTex:SetAlpha(select(4, EllesmereUI.GetDarkModeFill())) end
         else
             if fillTex then fillTex:SetAlpha(1) end
             health:SetStatusBarColor(r, g, b, (s.healthBarOpacity or 100) / 100)
@@ -5559,6 +5564,22 @@ end
 
 function ERF:UpdateAllFrames()
     UpdateAllButtons()
+    -- Party / Extra / Boss frames are NOT in `allButtons`, so UpdateAllButtons
+    -- misses them. Repaint their health (fill + background) too, so colour and
+    -- Dark Mode changes pushed through ApplyColorsToOUF reach every frame type,
+    -- not just raid. _UpdateButtonHealth is lightweight + combat-safe and self-
+    -- guards on unstyled / non-existent units.
+    if ns._UpdateButtonHealth then
+        if ns._partyUnitToButton then
+            for _, btn in pairs(ns._partyUnitToButton) do ns._UpdateButtonHealth(btn) end
+        end
+        if ns._xfUnitToButton then
+            for _, btn in pairs(ns._xfUnitToButton) do ns._UpdateButtonHealth(btn) end
+        end
+        if ns._FB and ns._FB.buttons then
+            for _, btn in ipairs(ns._FB.buttons) do ns._UpdateButtonHealth(btn) end
+        end
+    end
 end
 
 -- Lightweight: only toggle raid markers on each button (for RAID_TARGET_UPDATE)
@@ -5667,7 +5688,8 @@ ns._UpdateButtonHealth = function(button)
         local fillTex = health:GetStatusBarTexture()
         if s.healthColorMode == "dark" then
             health:SetStatusBarColor(r, g, b, 1)
-            if fillTex then fillTex:SetAlpha(DARK_FILL_A) end
+            -- 4th return of GetDarkModeFill() is the Dark Mode Fill Opacity.
+            if fillTex then fillTex:SetAlpha(select(4, EllesmereUI.GetDarkModeFill())) end
         else
             if fillTex then fillTex:SetAlpha(1) end
             health:SetStatusBarColor(r, g, b, (s.healthBarOpacity or 100) / 100)
@@ -7479,7 +7501,12 @@ function ns._UpdateGroupNumbers()
     end
 end
 
-local function LayoutGroups()
+-- Real layout work. Call only through LayoutGroups() below, which wraps this in a
+-- coalescing re-entrancy guard. Mutating secure group headers here (Hide/Show/
+-- SetAttribute) and resizing the container makes Blizzard re-anchor their children
+-- synchronously, which can re-enter layout through our own hooks. Stored on ns
+-- (not a new file-scope local) because this chunk is at the 200-local cap.
+ns._LayoutGroupsImpl = function()
     if not containerFrame then return end
     if InCombatLockdown() then return end
 
@@ -7716,6 +7743,44 @@ local function LayoutGroups()
 
     -- Update real-frame group numbers now that all headers are positioned.
     ns._UpdateGroupNumbers()
+end
+
+-- Coalescing re-entrancy guard around the secure-header relayout. A LayoutGroups()
+-- call that arrives while a layout is already running is NOT dropped -- dropping it
+-- would leave frames stale (a roster change or size flip mid-layout would be lost).
+-- Instead the re-entrant call marks the pass dirty and the in-flight call re-runs
+-- once it returns. Bounded to 3 passes so a non-converging header feedback loop
+-- (our SetAttribute/SetSize -> Blizzard re-anchors children -> our hook -> here)
+-- can never spin the CPU into a "script ran too long" watchdog kill. pcall keeps the
+-- busy flag honest: if the body errors we clear the flag and rethrow, so a single
+-- error can never freeze every future layout until /reload. State lives on ns to
+-- avoid adding file-scope locals (this chunk is at the 200-local cap); the wrapper
+-- reuses the slot the impl used to hold, so this adds no new main-chunk local.
+local function LayoutGroups()
+    if ns._inLayoutGroups then
+        ns._layoutGroupsDirty = true
+        return
+    end
+    ns._inLayoutGroups = true
+    local passes = 0
+    repeat
+        ns._layoutGroupsDirty = false
+        passes = passes + 1
+        local ok, err = pcall(ns._LayoutGroupsImpl)
+        if not ok then
+            ns._inLayoutGroups = false
+            return geterrorhandler()(err)
+        end
+    until (not ns._layoutGroupsDirty) or passes >= 3
+    ns._inLayoutGroups = false
+    -- Cap reached with work still pending: a genuine non-converging relayout loop.
+    -- The guard kept it from freezing the client; surface it once (out of combat)
+    -- so it stays diagnosable instead of silently masking a real bug.
+    if ns._layoutGroupsDirty and not ns._layoutLoopWarned and not InCombatLockdown() then
+        ns._layoutLoopWarned = true
+        print("|cffff5555EllesmereUI Raid Frames:|r layout did not settle after 3 passes; " ..
+            "a re-entrant loop was bounded. Please report this if frames look wrong.")
+    end
 end
 
 local RangeUpdate  -- forward declaration (defined in Range fading section below)
@@ -8657,6 +8722,12 @@ local function OnEvent(self, event, arg1, ...)
                 ns._LayoutPartyFrames()
             end
         end
+    elseif event == "ENCOUNTER_START" then
+        -- Drives the raid/party frame "Out of Boss Combat" tooltip mode (read in
+        -- the frame OnEnter via ns._inBossCombat).
+        ns._inBossCombat = true
+    elseif event == "ENCOUNTER_END" then
+        ns._inBossCombat = false
     elseif event == "PLAYER_ROLES_ASSIGNED" then
         -- Roles changed: refresh raid sort so the player's-group nameList
         -- (Show Self First) re-orders the rest by the new roles. The other
@@ -9007,6 +9078,12 @@ local function OnEvent(self, event, arg1, ...)
             end
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Re-sync the boss-combat flag on load. IsEncounterInProgress() still
+        -- reports an active encounter after a mid-fight /reload or zone (where
+        -- ENCOUNTER_START already fired and will not fire again), so "Out of Boss
+        -- Combat" keeps suppressing; otherwise this clears a stale flag from a
+        -- missed ENCOUNTER_END so tooltips are not stuck hidden.
+        ns._inBossCombat = (IsEncounterInProgress and IsEncounterInProgress()) or false
         C_Timer.After(0.5, function()
             -- Zoning in mid-combat (e.g. into a raid where trash is already
             -- pulled) must NOT run the reload here: ReloadFrames calls SetSize on
@@ -9145,7 +9222,7 @@ do
             "topNameBarTextOffsetX", "topNameBarTextOffsetY", "topNameBarTextAlign",
         },
         rangeTooltip = {
-            "oorAlpha", "showTooltip",
+            "oorAlpha", "showTooltip", "tooltipMode",
         },
         defensives = {
             "showDefensives", "showExternals",
@@ -11763,8 +11840,9 @@ local function ApplyPreviewData(f, index)
         local mode = s.healthColorMode or "class"
         local fillTex = f._health:GetStatusBarTexture()
         if mode == "dark" then
-            f._health:SetStatusBarColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, 1)
-            if fillTex then fillTex:SetAlpha(DARK_FILL_A) end
+            local dfr, dfg, dfb, dfa = EllesmereUI.GetDarkModeFill()
+            f._health:SetStatusBarColor(dfr, dfg, dfb, 1)
+            if fillTex then fillTex:SetAlpha(dfa) end
         elseif mode == "classic" then
             if fillTex then fillTex:SetAlpha(1) end
             local pct = healthPct / 100
@@ -11805,7 +11883,7 @@ local function ApplyPreviewData(f, index)
             f._bg:ClearAllPoints()
             f._bg:SetPoint("TOPLEFT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
             f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
-            f._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+            f._bg:SetColorTexture(EllesmereUI.GetDarkModeBg())
         else
             -- BG covers the missing-health portion only (never behind the fill),
             -- matching the real-frame themed branch + Dark mode. Keeps the preview
@@ -14393,6 +14471,8 @@ function ERF:OnEnable()
     eventFrame:RegisterEvent("PARTY_MEMBER_DISABLE")
     eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     eventFrame:RegisterEvent("UNIT_PHASE")
+    eventFrame:RegisterEvent("ENCOUNTER_START")
+    eventFrame:RegisterEvent("ENCOUNTER_END")
 
     -- Per-unit event trackers: one frame per unit.
     -- RegisterUnitEvent only accepts 1-2 units per call, so each unit gets

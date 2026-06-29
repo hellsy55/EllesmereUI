@@ -395,6 +395,189 @@ function ns.RemoveTrackedBuffBar(idx)
     ns.BuildTrackedBuffBars()
 end
 
+-- Stable identity for the broadcast toggle, AND the single source of truth for
+-- whether a bar can be broadcast across specs. A bar is broadcastable only when it
+-- points at a spec-agnostic buff:
+--   * a preset (popularKey)            -- curated, cross-spec; keyed "p:<key>"
+--   * a custom buff ID (user-entered)  -- spec-agnostic;       keyed "s:<spellID>"
+-- A Blizzard CDM tracked spell (picked from the live cooldown viewer list) is
+-- spec/class-specific and must NEVER be broadcastable. It is told apart from a
+-- custom buff by having NO customDuration: the custom-buff popup always stores a
+-- duration, while the CDM picker clears it. Freshly-added empty bars return nil.
+function ns.TBBBroadcastKey(cfg)
+    if type(cfg) ~= "table" then return nil end
+    if cfg.popularKey and cfg.popularKey ~= "" then return "p:" .. cfg.popularKey end
+    if cfg.spellID and cfg.spellID > 0
+       and type(cfg.customDuration) == "number" and cfg.customDuration > 0 then
+        return "s:" .. tostring(cfg.spellID)
+    end
+    return nil
+end
+
+-- A bar can be broadcast across specs only when TBBBroadcastKey yields an identity
+-- (preset or custom buff). Blizzard CDM spells and empty bars are excluded.
+function ns.IsTrackedBuffBarBroadcastable(cfg)
+    return ns.TBBBroadcastKey(cfg) ~= nil
+end
+
+-- True when the selected bar's buff is currently marked as broadcast to all specs
+-- (so the button shows "Remove Bar from All Specs"). Read from the persistent
+-- per-profile set.
+function ns.IsTrackedBuffBarBroadcast(cfg)
+    local key = ns.TBBBroadcastKey(cfg)
+    if not key then return false end
+    local set = ns.GetActiveTBBBroadcastSet and ns.GetActiveTBBBroadcastSet()
+    return set ~= nil and set[key] == true
+end
+
+-- Copy a configured bar (preset or custom buff) into every OTHER spec of the
+-- player's current class. The bar config and its screen position are deep-copied
+-- so it appears identically across specs. Specs that already hold the same
+-- preset/custom buff are skipped, so repeated clicks never pile up duplicates.
+-- Returns the number of specs the bar was added to.
+function ns.AddBarToAllSpecs(srcIdx)
+    local DeepCopy = EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy
+    if not DeepCopy then return 0 end
+    local activeKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not activeKey then return 0 end
+
+    local srcTbb = ns.GetTrackedBuffBars()
+    local srcBar = srcTbb and srcTbb.bars and srcTbb.bars[srcIdx]
+    if not ns.IsTrackedBuffBarBroadcastable(srcBar) then return 0 end
+
+    local srcPos = ns.GetTBBPositions()[tostring(srcIdx)]
+
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+    if not sp then return 0 end
+
+    local function HasSameBar(bars)
+        for _, b in ipairs(bars) do
+            if srcBar.popularKey and srcBar.popularKey ~= "" then
+                if b.popularKey == srcBar.popularKey then return true end
+            elseif (not b.popularKey or b.popularKey == "")
+                   and b.spellID and b.spellID == srcBar.spellID then
+                return true
+            end
+        end
+        return false
+    end
+
+    local added = 0
+    local numSpecs = GetNumSpecializations and GetNumSpecializations() or 0
+    for i = 1, numSpecs do
+        local specID = GetSpecializationInfo(i)
+        if specID then
+            local key = tostring(specID)
+            if key ~= activeKey then
+                if not sp[key] then sp[key] = { barSpells = {} } end
+                local prof = sp[key]
+                if not prof.trackedBuffBars then
+                    prof.trackedBuffBars = { selectedBar = 1, bars = {} }
+                end
+                local tbb = prof.trackedBuffBars
+                if not HasSameBar(tbb.bars) then
+                    local newBar = DeepCopy(srcBar)
+                    -- Match the normal "add bar" rule: join the target spec's
+                    -- group only if every existing bar there is already grouped,
+                    -- otherwise start independent (so we never disturb its layout).
+                    local allGrouped = true
+                    for _, b in ipairs(tbb.bars) do
+                        if not ns.TBBBarGrouped(b) then allGrouped = false; break end
+                    end
+                    newBar.grouped = allGrouped
+                    local newIdx = #tbb.bars + 1
+                    tbb.bars[newIdx] = newBar
+                    if srcPos then
+                        if not prof.tbbPositions then prof.tbbPositions = {} end
+                        prof.tbbPositions[tostring(newIdx)] = DeepCopy(srcPos)
+                    end
+                    added = added + 1
+                end
+            end
+        end
+    end
+
+    -- Mark this buff as broadcast so the button flips to "Remove..." in every
+    -- spec (set even when added == 0, i.e. all specs already held it).
+    local set = ns.GetActiveTBBBroadcastSet and ns.GetActiveTBBBroadcastSet()
+    if set then
+        local key = ns.TBBBroadcastKey(srcBar)
+        if key then set[key] = true end
+    end
+
+    return added
+end
+
+-- Inverse of AddBarToAllSpecs: remove the selected bar's buff from every OTHER
+-- spec of the player's class and clear its broadcast flag. The bar in the CURRENT
+-- spec is left untouched -- the user keeps editing it here. Returns the number of
+-- specs a bar was removed from.
+function ns.RemoveBarFromAllSpecs(srcIdx)
+    local activeKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not activeKey then return 0 end
+
+    local srcTbb = ns.GetTrackedBuffBars()
+    local srcBar = srcTbb and srcTbb.bars and srcTbb.bars[srcIdx]
+    local broadcastKey = ns.TBBBroadcastKey(srcBar)
+    if not broadcastKey then return 0 end
+
+    local sp = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+    if not sp then return 0 end
+
+    local function Matches(b)
+        if srcBar.popularKey and srcBar.popularKey ~= "" then
+            return b.popularKey == srcBar.popularKey
+        else
+            return (not b.popularKey or b.popularKey == "")
+                   and b.spellID and b.spellID == srcBar.spellID
+        end
+    end
+
+    local removed = 0
+    local numSpecs = GetNumSpecializations and GetNumSpecializations() or 0
+    for i = 1, numSpecs do
+        local specID = GetSpecializationInfo(i)
+        if specID then
+            local specKey = tostring(specID)
+            if specKey ~= activeKey then
+                local prof = sp[specKey]
+                local tbb = prof and prof.trackedBuffBars
+                if tbb and tbb.bars and #tbb.bars > 0 then
+                    -- Rebuild the bar list excluding matches, re-keying positions
+                    -- so compacted indices and tbbPositions stay aligned (plain
+                    -- table.remove would leave positions keyed by stale indices).
+                    local oldPos = prof.tbbPositions or {}
+                    local newBars, newPos = {}, {}
+                    local didRemove = false
+                    for j, b in ipairs(tbb.bars) do
+                        if Matches(b) then
+                            didRemove = true
+                        else
+                            newBars[#newBars + 1] = b
+                            local p = oldPos[tostring(j)]
+                            if p then newPos[tostring(#newBars)] = p end
+                        end
+                    end
+                    if didRemove then
+                        tbb.bars = newBars
+                        prof.tbbPositions = newPos
+                        if tbb.selectedBar and tbb.selectedBar > #newBars then
+                            tbb.selectedBar = math.max(1, #newBars)
+                        end
+                        removed = removed + 1
+                    end
+                end
+            end
+        end
+    end
+
+    -- Clear the broadcast flag so the button flips back to "Add...".
+    local set = ns.GetActiveTBBBroadcastSet and ns.GetActiveTBBBroadcastSet()
+    if set then set[broadcastKey] = nil end
+
+    return removed
+end
+
 -------------------------------------------------------------------------------
 --  Frame Table & State
 -------------------------------------------------------------------------------

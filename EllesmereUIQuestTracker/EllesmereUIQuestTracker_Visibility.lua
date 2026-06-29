@@ -48,11 +48,23 @@ local function Expand()
 end
 
 -------------------------------------------------------------------------------
--- Auto-hide: hard-coded to raids and arenas only.
+-- Auto-hide: arenas always hide. Raids hide per the "Hide When In Raid"
+-- option -- "always" hides for the whole raid, "boss" (default) only hides
+-- during an encounter. _inEncounter is driven by ENCOUNTER_START/END below.
 -------------------------------------------------------------------------------
+local _inEncounter = false
 local function ShouldAutoHide()
     local _, instanceType = GetInstanceInfo()
-    return instanceType == "raid" or instanceType == "arena"
+    if instanceType == "arena" then return true end
+    if instanceType == "raid" then
+        local cfg = EQT.DB()
+        if cfg and cfg.hideInRaidMode == "always" then
+            return true
+        end
+        -- Default / "boss": only hide during an encounter.
+        return _inEncounter
+    end
+    return false
 end
 
 -- Suspend/resume all QT event frames in raids/arenas/M+. Prevents quest
@@ -410,7 +422,17 @@ function EQT.InitVisibility()
     local evt = CreateFrame("Frame")
     evt:RegisterEvent("PLAYER_ENTERING_WORLD")
     evt:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    evt:SetScript("OnEvent", function()
+    evt:RegisterEvent("ENCOUNTER_START")
+    evt:RegisterEvent("ENCOUNTER_END")
+    evt:SetScript("OnEvent", function(_, event)
+        if event == "ENCOUNTER_START" then
+            _inEncounter = true
+        elseif event == "ENCOUNTER_END" then
+            _inEncounter = false
+        elseif event == "PLAYER_ENTERING_WORLD" then
+            -- Clear stale encounter state from a missed ENCOUNTER_END.
+            _inEncounter = false
+        end
         UpdateVisibility()
         SyncBGToTracker()
     end)

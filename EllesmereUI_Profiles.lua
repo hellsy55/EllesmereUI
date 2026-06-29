@@ -63,8 +63,15 @@ local ADDON_DB_MAP = {
     -- user-visible profile data and listing it produced a misleading
     -- "Not included: Basics" warning on every imported v6.6+ profile.
     { folder = "EllesmereUIQoL",               display = "Quality of Life",     svName = "EllesmereUIQoLDB",               suffix = "QoL"               },
-    -- BlizzardSkin is excluded: it stores settings on the shared
+    -- BlizzardSkin itself is excluded: it stores settings on the shared
     -- EllesmereUIDB root, not through NewDB, so it has no per-profile data.
+    -- Dragon Riding is the one exception inside that addon -- it owns a real
+    -- per-profile DB (EllesmereUIDragonRidingDB) but ships as a file inside the
+    -- BlizzardSkin addon, so it is NOT a separately loadable addon. hostAddon
+    -- tells the loaded check (export strip + import/export checkboxes) to resolve
+    -- "installed?" through the BlizzardSkin folder instead of the (nonexistent)
+    -- EllesmereUIDragonRiding addon. Without this it would always be stripped.
+    { folder = "EllesmereUIDragonRiding",      display = "Dragon Riding",       svName = "EllesmereUIDragonRidingDB",      suffix = "DragonRiding",     hostAddon = "EllesmereUIBlizzardSkin" },
     { folder = "EllesmereUIBags",              display = "Bags",                svName = "EllesmereUIBagsDB",              suffix = "Bags"              },
     { folder = "EllesmereUIFriends",           display = "Friends List",        svName = "EllesmereUIFriendsDB",           suffix = "Friends"           },
     { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",       svName = "EllesmereUIMythicTimerDB",       suffix = "MythicTimer"       },
@@ -95,11 +102,15 @@ EllesmereUI._ADDON_DB_MAP = ADDON_DB_MAP
 local EUI_CANON_PREFIX = "Ellesmere" .. "UI"  -- split literal: rename-immune
 local FOLDER_TO_CANON = {}
 local CANON_TO_FOLDER = {}
+-- folder -> the addon whose loaded-state proves this module is installed. Most
+-- modules host themselves; a sub-module (e.g. Dragon Riding) maps to its host.
+local FOLDER_HOST = {}
 for _, entry in ipairs(ADDON_DB_MAP) do
     local canon = EUI_CANON_PREFIX .. (entry.suffix or "")
     entry.canon = canon
     FOLDER_TO_CANON[entry.folder] = canon
     CANON_TO_FOLDER[canon] = entry.folder
+    FOLDER_HOST[entry.folder] = entry.hostAddon or entry.folder
 end
 
 -- Re-key an addons table from this build's local db.folder keys to canonical
@@ -566,6 +577,7 @@ end
 --      addons = { [folderName] = <snapshot of that addon's profile table> },
 --      fonts  = <snapshot of EllesmereUIDB.fonts>,
 --      customColors = <snapshot of EllesmereUIDB.customColors>,
+--      darkMode = <per-profile Dark Mode palette + class/power/resource darken>,
 --  }
 --  EllesmereUIDB.activeProfile = "Default"  (name of active profile)
 --  EllesmereUIDB.profileOrder  = { "Default", ... }
@@ -594,6 +606,14 @@ local function IsAddonLoaded(name)
     if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(name) end
     if _G.IsAddOnLoaded then return _G.IsAddOnLoaded(name) end
     return false
+end
+
+--- Is the module behind this profile folder actually installed/loaded?
+--- Resolves through hostAddon for sub-modules (e.g. Dragon Riding lives inside
+--- the BlizzardSkin addon, so its folder is never a loadable addon on its own).
+--- Unknown folders fall back to a direct check so behaviour is unchanged.
+function EllesmereUI.IsModuleAddonLoaded(folder)
+    return IsAddonLoaded(FOLDER_HOST[folder] or folder)
 end
 
 --- Re-point all db.profile references to the given profile name.
@@ -710,6 +730,13 @@ local function RepointAllDBs(profileName)
     if EllesmereUIDB and EllesmereUIDB.colorsApplyToAllProfiles == false and EllesmereUI.ApplyColorsToOUF then
         EllesmereUI.ApplyColorsToOUF()
     end
+    -- Dark Mode settings are ALWAYS per-profile, so the active profile's dark
+    -- palette + darken amounts change on every repoint. Re-read and repaint.
+    -- RefreshDarkMode() also runs ApplyColorsToOUF, so the (possibly different)
+    -- darken propagates to class/power colours even in global colour mode.
+    if EllesmereUI.RefreshDarkMode then
+        EllesmereUI.RefreshDarkMode()
+    end
     -- Sidebar sync icons key off the ACTIVE profile's group membership;
     -- re-evaluate them on every repoint (switch/create/delete/rename/import)
     if EllesmereUI._syncRefreshFns then
@@ -817,7 +844,11 @@ end
 function EllesmereUI.SnapshotAllAddons()
     local data = { addons = {} }
     for _, entry in ipairs(ADDON_DB_MAP) do
-        if IsAddonLoaded(entry.folder) then
+        -- Host-aware: Dragon Riding's folder is not a loadable addon (it lives
+        -- inside BlizzardSkin), so a bare IsAddonLoaded(entry.folder) would drop
+        -- it from every full-profile export. IsModuleAddonLoaded resolves through
+        -- the hostAddon, matching the per-addon export path (ExportProfile).
+        if EllesmereUI.IsModuleAddonLoaded(entry.folder) then
             local profile = GetAddonProfile(entry)
             if profile then
                 data.addons[entry.folder] = DeepCopy(profile)
@@ -828,6 +859,8 @@ function EllesmereUI.SnapshotAllAddons()
     data.fonts = DeepCopy(EllesmereUI.GetFontsDB())
     local cc = EllesmereUI.GetCustomColorsDB()
     data.customColors = DeepCopy(cc)
+    -- Dark Mode palette + darken amounts (always the active profile's own).
+    data.darkMode = DeepCopy(EllesmereUI.GetDarkModeDB())
     -- Include unlock mode layout data (anchors, size matches)
     if EllesmereUIDB then
         data.unlockLayout = {
@@ -1050,6 +1083,9 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ECL_ApplyCastCircle then _G._ECL_ApplyCastCircle() end
     -- Crosshair
     if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
+    -- QoL extras (FPS counter + Secondary Stats) -- per-profile, so re-apply on swap
+    if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
+    if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
     -- AuraBuffReminders (refresh + position)
     if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
     if _G._EABR_ApplyUnlockPos then _G._EABR_ApplyUnlockPos() end
@@ -1341,6 +1377,7 @@ function EllesmereUI.ExportProfile(profileName, includedFolders, includeLayout, 
     if profileName == (db.activeProfile or "Default") then
         profileData.fonts = DeepCopy(EllesmereUI.GetFontsDB())
         profileData.customColors = DeepCopy(EllesmereUI.GetCustomColorsDB())
+        profileData.darkMode = DeepCopy(EllesmereUI.GetDarkModeDB())
         profileData.unlockLayout = {
             anchors       = DeepCopy(EllesmereUIDB.unlockAnchors     or {}),
             widthMatch    = DeepCopy(EllesmereUIDB.unlockWidthMatch  or {}),
@@ -1362,7 +1399,7 @@ function EllesmereUI.ExportProfile(profileName, includedFolders, includeLayout, 
     -- When includedFolders is provided, further filter to user's selection
     if exportData.addons then
         for folder in pairs(exportData.addons) do
-            if not IsAddonLoaded(folder) then
+            if not EllesmereUI.IsModuleAddonLoaded(folder) then
                 exportData.addons[folder] = nil
             elseif includedFolders and not includedFolders[folder] then
                 exportData.addons[folder] = nil
@@ -1385,12 +1422,13 @@ function EllesmereUI.ExportProfile(profileName, includedFolders, includeLayout, 
     -- so importing someone else's profile must never overwrite the user's own
     -- click-cast setup. Strip defensively in case a payload ever carries it.
     exportData.clickCast = nil
-    -- fonts/customColors/euiAccent are profile-GLOBAL appearance and are not
-    -- separable per-addon, so a subset export must not carry them (they'd clobber
-    -- the recipient's). Only a full-profile export carries them.
+    -- fonts/customColors/darkMode/euiAccent are profile-GLOBAL appearance and are
+    -- not separable per-addon, so a subset export must not carry them (they'd
+    -- clobber the recipient's). Only a full-profile export carries them.
     if includedFolders then
         exportData.fonts        = nil
         exportData.customColors = nil
+        exportData.darkMode     = nil
         exportData.euiAccent    = nil
     end
     -- Layout relationships (unlockLayout) are governed by the "Include layout"
@@ -1737,7 +1775,7 @@ local function FixupImportedClassColors()
     local cc = classColors and classColors[classFile]
 
     -- Health bar: reset to importer's class color
-    if profile.health and not profile.health.darkTheme then
+    if profile.health then
         profile.health.customColored = false
         if cc then
             profile.health.fillR = cc.r
@@ -1824,6 +1862,7 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         -- these so a subset import keeps the base profile's appearance).
         if imported.fonts then merged.fonts = DeepCopy(imported.fonts) end
         if imported.customColors then merged.customColors = DeepCopy(imported.customColors) end
+        if imported.darkMode then merged.darkMode = DeepCopy(imported.darkMode) end
         -- Layout: the new profile's unlockLayout is the active profile's CURRENT
         -- layout, with the imported relationships merged in PER MODULE.
         --
@@ -1959,6 +1998,9 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if payload.data.customColors then
             merged.customColors = DeepCopy(payload.data.customColors)
         end
+        if payload.data.darkMode then
+            merged.darkMode = DeepCopy(payload.data.darkMode)
+        end
         -- Store as new profile
         merged.spellAssignments = nil
         db.profiles[profileName] = merged
@@ -2041,6 +2083,7 @@ function EllesmereUI.SaveCurrentAsProfile(name)
     -- Ensure fonts/colors/unlock layout are current
     copy.fonts = DeepCopy(EllesmereUI.GetFontsDB())
     copy.customColors = DeepCopy(EllesmereUI.GetCustomColorsDB())
+    copy.darkMode = DeepCopy(EllesmereUI.GetDarkModeDB())
     copy.unlockLayout = {
         anchors       = DeepCopy(EllesmereUIDB.unlockAnchors     or {}),
         widthMatch    = DeepCopy(EllesmereUIDB.unlockWidthMatch  or {}),
@@ -2667,6 +2710,7 @@ do
             if profileData then
                 profileData.fonts = DeepCopy(EllesmereUI.GetFontsDB())
                 profileData.customColors = DeepCopy(EllesmereUI.GetCustomColorsDB())
+                profileData.darkMode = DeepCopy(EllesmereUI.GetDarkModeDB())
                 profileData.unlockLayout = {
                     anchors       = DeepCopy(EllesmereUIDB.unlockAnchors     or {}),
                     widthMatch    = DeepCopy(EllesmereUIDB.unlockWidthMatch  or {}),

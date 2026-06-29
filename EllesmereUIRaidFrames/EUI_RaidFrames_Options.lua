@@ -3780,7 +3780,19 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
 
-        -- Row 1: OOR Alpha | Show Tooltip (+ cog for Tooltip in Combat)
+        -- Row 1: OOR Alpha | Show Raid Frames Tooltip (dropdown + cog)
+        -- The dropdown is a pure VIEW over the legacy keys for existing users:
+        -- when tooltipMode is unset it derives the displayed option from the old
+        -- showTooltip toggle + the old global "show in combat" flag, so nobody's
+        -- behavior changes until they actively pick an option. (Same derive as
+        -- the runtime ns._ResolveTooltipMode.)
+        local function CurTooltipMode()
+            local m = SVal("tooltipMode", nil)
+            if m ~= nil then return m end
+            if SVal("showTooltip", true) == false then return "never" end
+            if EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat then return "always" end
+            return "outOfCombat"
+        end
         row, h = W:DualRow(parent, y,
             { type="slider", text="Out of Range Alpha", min=10, max=100, step=1,
               getValue=function() return floor((SVal("oorAlpha", 0.4)) * 100) end,
@@ -3791,40 +3803,12 @@ initFrame:SetScript("OnEvent", function(self)
                   -- a range re-eval. Seed all buttons so the slider takes effect now.
                   if ns._RangeSeedAll then ns._RangeSeedAll() end
               end },
-            { type="toggle", text="Show Tooltip",
-              getValue=function() return SVal("showTooltip", true) end,
-              setValue=function(v) SSet("showTooltip", v) end });  y = y - h
-        do
-            local rgn = row._rightRegion
-            -- "Show in Combat" is a GLOBAL setting (EllesmereUIDB) that hides or
-            -- shows ALL unit tooltips during combat -- nameplates, target/focus,
-            -- world mobs, and our frames -- not just the raid frames. It is
-            -- therefore independent of the raid-frame-only "Show Tooltip" master,
-            -- so the cog stays interactive regardless of that toggle. Unset =
-            -- false = hide in combat (the original per-frame default).
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Unit Tooltips",
-                rows = {
-                    { type="toggle", label="Show in Combat",
-                      get=function() return EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat or false end,
-                      set=function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.showUnitTooltipsInCombat = v
-                      end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, rgn)
-            cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = cogBtn
-            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-        end
+            { type="dropdown", text="Show Raid Frames Tooltip",
+              tooltip="Controls when the tooltip appears as you hover a raid or party frame",
+              values={ always="Always", outOfCombat="Out of Combat", outOfBossCombat="Out of Boss Combat", never="Never" },
+              order={ "always", "outOfCombat", "outOfBossCombat", "never" },
+              getValue=function() return CurTooltipMode() end,
+              setValue=function(v) SSet("tooltipMode", v) end });  y = y - h
 
         -- Hide Blizzard Party Panel. Shares the exact same global setting and
         -- apply function as the QoL module's toggle (EllesmereUIDB.hideBlizzardPartyFrame

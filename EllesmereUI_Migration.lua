@@ -1540,6 +1540,53 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "cdm_strip_buff_bar_item_ids_v1",
+    scope       = "specProfile",
+    description = "Remove item-ID (negative -itemID) entries from CDM buff bars. Buff bars track auras only (positive spell IDs); items can no longer be placed on them. CD/utility bars (which legitimately hold trinkets/potions) are left untouched.",
+    body = function(ctx)
+        -- Idempotent: only NEGATIVE ids are removed, so a re-run finds none. The
+        -- per-spec-profile flag also stops further runs.
+        local sp = ctx.specProfile
+        local barSpells = sp and sp.barSpells
+        if type(barSpells) ~= "table" then return end
+
+        -- Resolve which bar keys are BUFF bars from this profile's bar config
+        -- (barType). The default buff bar is always "buffs" even if the config is
+        -- absent, so seed it unconditionally. Only buff bars are stripped --
+        -- cooldown/utility bars keep their legitimate trinket/potion markers.
+        local buffKeys = { buffs = true }
+        local prof = EllesmereUIDB.profiles and EllesmereUIDB.profiles[ctx.profileName]
+        local cdm = prof and prof.addons and prof.addons.EllesmereUICooldownManager
+        local bars = cdm and cdm.cdmBars and cdm.cdmBars.bars
+        if type(bars) == "table" then
+            for _, b in ipairs(bars) do
+                if type(b) == "table" and b.barType == "buffs" and type(b.key) == "string" then
+                    buffKeys[b.key] = true
+                end
+            end
+        end
+
+        for barKey, bs in pairs(barSpells) do
+            if buffKeys[barKey] and type(bs) == "table" and type(bs.assignedSpells) == "table" then
+                local as = bs.assignedSpells
+                for i = #as, 1, -1 do
+                    local id = as[i]
+                    -- Negative ids are item markers (-itemID / trinket slots);
+                    -- positive ids are real buff spell IDs and are kept verbatim.
+                    if type(id) == "number" and id < 0 then
+                        table.remove(as, i)
+                        -- Drop any per-id side data so nothing dangles.
+                        if type(bs.spellSettings) == "table" then bs.spellSettings[id] = nil end
+                        if type(bs.spellDurations) == "table" then bs.spellDurations[id] = nil end
+                        if type(bs.customSpellDurations) == "table" then bs.customSpellDurations[id] = nil end
+                    end
+                end
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "cdm_unanchor_buff_bars",
     scope       = "global",
     description = "Clear unlock anchors that target CDM buff/custom_buff bars or the AuraBuff Reminders frame. Dynamic bars (resize with auras) cause cascading position shifts when used as anchor targets.",
@@ -2685,6 +2732,70 @@ EllesmereUI.RegisterMigration({
                 pd.customColors = DeepCopy(db.customColors)
             end
         end
+    end,
+})
+
+-- Secondary Stats + FPS counter moved off the account-wide EllesmereUIDB root
+-- into the per-profile QoL blob (folder EllesmereUIQoL) so they travel with
+-- profiles, export/import, and module sync (see EllesmereUI.QoLExtrasGet/Set in
+-- EllesmereUIQoL.lua). Seed EVERY existing profile from the old account-wide
+-- values -- DeepCopy so each profile owns independent color/position tables --
+-- so nobody loses their current setup on any profile. The root keys are left in
+-- place as the read-time fallback for profiles created later (and as a dormant
+-- backup). Per-key nil guard keeps it safe to re-run.
+EllesmereUI.RegisterMigration({
+    id          = "qol_secondary_stats_fps_per_profile_v1",
+    scope       = "global",
+    description = "Seed every profile's QoL data with the formerly account-wide Secondary Stats + FPS settings.",
+    body        = function(ctx)
+        local db = ctx.db
+        if not db or type(db.profiles) ~= "table" then return end
+        local DeepCopy = EllesmereUI._DeepCopy or (EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy)
+        if not DeepCopy then return end
+        local KEYS = {
+            "showSecondaryStats", "secondaryStatsColor", "showTertiaryStats",
+            "tertiaryStatsColor", "secondaryStatsPos",
+            "showFPS", "fpsTextSize", "fpsColor",
+            "fpsShowWorldMS", "fpsShowLocalMS", "fpsHideLabel", "fpsPos",
+        }
+        for _, pd in pairs(db.profiles) do
+            if type(pd) == "table" then
+                if type(pd.addons) ~= "table" then pd.addons = {} end
+                local q = pd.addons.EllesmereUIQoL
+                if type(q) ~= "table" then q = {}; pd.addons.EllesmereUIQoL = q end
+                for _, k in ipairs(KEYS) do
+                    local v = db[k]
+                    if v ~= nil and q[k] == nil then
+                        if type(v) == "table" then
+                            q[k] = DeepCopy(v)
+                        else
+                            q[k] = v
+                        end
+                    end
+                end
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
+    id          = "blizzskin_reskin_master_split_v1",
+    scope       = "global",
+    description = "Split the old 'Reskin Blizzard Elements' master (customTooltips) into independent Reskin Popups and Menus + per-window reskins, seeding each from the old master value once so what is reskinned stays exactly the same.",
+    body        = function(ctx)
+        local db = ctx.db
+        if not db then return end
+        -- customTooltips is now tooltip-only, but at migration time it still holds
+        -- the OLD combined-master value, so seed the split-out keys from it once.
+        local master = (db.customTooltips ~= false)
+        -- The old game-menu / group-finder defaults ANDed in the queue-popup state
+        -- (a nil queue popup counted as on), matching the live default formula.
+        local queueNotFalse = (db.reskinQueuePopup ~= false)
+        if db.reskinPopupsMenus == nil then db.reskinPopupsMenus = master end
+        if db.reskinQueuePopup  == nil then db.reskinQueuePopup  = master end
+        if db.reskinGreatVault  == nil then db.reskinGreatVault  = master end
+        if db.reskinGameMenu    == nil then db.reskinGameMenu    = master and queueNotFalse end
+        if db.reskinLFGMenu     == nil then db.reskinLFGMenu     = master and queueNotFalse end
     end,
 })
 

@@ -81,10 +81,8 @@ local STYLE = {
 }
 
 local function IsGreatVaultSkinEnabled()
-    if not EllesmereUIDB then return false end
-    local v = EllesmereUIDB.reskinGreatVault
-    if v == nil then return EllesmereUIDB.customTooltips ~= false end
-    return v
+    -- Independent toggle, default on (not tied to any master reskin setting).
+    return not EllesmereUIDB or EllesmereUIDB.reskinGreatVault ~= false
 end
 
 local function BuildThemeContext()

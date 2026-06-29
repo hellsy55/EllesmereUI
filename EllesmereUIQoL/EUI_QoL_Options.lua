@@ -359,11 +359,10 @@ initFrame:SetScript("OnEvent", function(self)
         fpsRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show FPS Counter",
               getValue=function()
-                return EllesmereUIDB and EllesmereUIDB.showFPS or false
+                return EllesmereUI.QoLExtrasGet("showFPS") or false
               end,
               setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.showFPS = v
+                EllesmereUI.QoLExtrasSet("showFPS", v)
                 if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
                 EllesmereUI:RefreshPage()
               end },
@@ -374,17 +373,16 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local leftRgn = fpsRow._leftRegion
             local function fpsOff()
-                return not (EllesmereUIDB and EllesmereUIDB.showFPS)
+                return not EllesmereUI.QoLExtrasGet("showFPS")
             end
 
             local fpsSwGet = function()
-                local c = EllesmereUIDB and EllesmereUIDB.fpsColor
+                local c = EllesmereUI.QoLExtrasGet("fpsColor")
                 if c then return c.r, c.g, c.b, c.a end
                 return 1, 1, 1, 1
             end
             local fpsSwSet = function(r, g, b, a)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.fpsColor = { r = r, g = g, b = b, a = a }
+                EllesmereUI.QoLExtrasSet("fpsColor", { r = r, g = g, b = b, a = a })
                 if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
             end
             local fpsSwatch, fpsUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, fpsSwGet, fpsSwSet, true, 20)
@@ -422,39 +420,36 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Text Size",
                       min=8, max=30, step=1,
                       get=function()
-                        return (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+                        return EllesmereUI.QoLExtrasGet("fpsTextSize") or 12
                       end,
                       set=function(v)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.fpsTextSize = v
+                        EllesmereUI.QoLExtrasSet("fpsTextSize", v)
                         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
                       end },
                     { type="toggle", label="Show Local MS",
                       get=function()
-                        if not EllesmereUIDB or EllesmereUIDB.fpsShowLocalMS == nil then return true end
-                        return EllesmereUIDB.fpsShowLocalMS
+                        local sl = EllesmereUI.QoLExtrasGet("fpsShowLocalMS")
+                        if sl == nil then return true end
+                        return sl
                       end,
                       set=function(v)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.fpsShowLocalMS = v
+                        EllesmereUI.QoLExtrasSet("fpsShowLocalMS", v)
                         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
                       end },
                     { type="toggle", label="Show World MS",
                       get=function()
-                        return EllesmereUIDB and EllesmereUIDB.fpsShowWorldMS or false
+                        return EllesmereUI.QoLExtrasGet("fpsShowWorldMS") or false
                       end,
                       set=function(v)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.fpsShowWorldMS = v
+                        EllesmereUI.QoLExtrasSet("fpsShowWorldMS", v)
                         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
                       end },
                     { type="toggle", label="Hide Local/World Label",
                       get=function()
-                        return EllesmereUIDB and EllesmereUIDB.fpsHideLabel or false
+                        return EllesmereUI.QoLExtrasGet("fpsHideLabel") or false
                       end,
                       set=function(v)
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.fpsHideLabel = v
+                        EllesmereUI.QoLExtrasSet("fpsHideLabel", v)
                         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
                       end },
                 },
@@ -753,7 +748,7 @@ initFrame:SetScript("OnEvent", function(self)
                         if EllesmereUI._durWarnPreview then EllesmereUI._durWarnPreview() end
                       end },
                     { type="slider", label="Repair %",
-                      min=5, max=80, step=1,
+                      min=5, max=100, step=1,
                       get=function()
                         return EllesmereUIDB and EllesmereUIDB.durWarnThreshold or 40
                       end,
@@ -876,11 +871,10 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Secondary Stat Display",
               tooltip="Displays secondary stat percentages (Crit, Haste, Mastery, Vers) at the top left of the screen.",
               getValue=function()
-                return EllesmereUIDB and EllesmereUIDB.showSecondaryStats or false
+                return EllesmereUI.QoLExtrasGet("showSecondaryStats") or false
               end,
               setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.showSecondaryStats = v
+                EllesmereUI.QoLExtrasSet("showSecondaryStats", v)
                 if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
                 EllesmereUI:RefreshPage()
               end },
@@ -900,12 +894,12 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local leftRgn = row4._leftRegion
             local function statsOff()
-                return not (EllesmereUIDB and EllesmereUIDB.showSecondaryStats)
+                return not EllesmereUI.QoLExtrasGet("showSecondaryStats")
             end
 
             -- Color swatch for label color (defaults to class color)
             local ssSwGet = function()
-                local c = EllesmereUIDB and EllesmereUIDB.secondaryStatsColor
+                local c = EllesmereUI.QoLExtrasGet("secondaryStatsColor")
                 if c then return c.r, c.g, c.b end
                 local _, cls = UnitClass("player")
                 local cc = cls and EllesmereUI.GetClassColor(cls)
@@ -913,8 +907,7 @@ initFrame:SetScript("OnEvent", function(self)
                 return 1, 1, 1
             end
             local ssSwSet = function(r, g, b)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.secondaryStatsColor = { r = r, g = g, b = b }
+                EllesmereUI.QoLExtrasSet("secondaryStatsColor", { r = r, g = g, b = b })
                 if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
             end
             local ssSwatch, ssUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, ssSwGet, ssSwSet, nil, 20)
@@ -937,20 +930,19 @@ initFrame:SetScript("OnEvent", function(self)
                 rows = {
                     { type = "toggle", label = "Show Tertiary Stats",
                       get = function()
-                          return EllesmereUIDB and EllesmereUIDB.showTertiaryStats or false
+                          return EllesmereUI.QoLExtrasGet("showTertiaryStats") or false
                       end,
                       set = function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.showTertiaryStats = v
+                          EllesmereUI.QoLExtrasSet("showTertiaryStats", v)
                           if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
                       end },
                     { type = "colorpicker", label = "Tertiary Label Color",
                       disabled = function()
-                          return not (EllesmereUIDB and EllesmereUIDB.showTertiaryStats)
+                          return not EllesmereUI.QoLExtrasGet("showTertiaryStats")
                       end,
                       disabledTooltip = "Show Tertiary Stats",
                       get = function()
-                          local c = EllesmereUIDB and EllesmereUIDB.tertiaryStatsColor
+                          local c = EllesmereUI.QoLExtrasGet("tertiaryStatsColor")
                           if c then return c.r, c.g, c.b end
                           local _, cls = UnitClass("player")
                           local cc = cls and EllesmereUI.GetClassColor(cls)
@@ -958,19 +950,22 @@ initFrame:SetScript("OnEvent", function(self)
                           return 1, 1, 1
                       end,
                       set = function(r, g, b)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          EllesmereUIDB.tertiaryStatsColor = { r = r, g = g, b = b }
+                          EllesmereUI.QoLExtrasSet("tertiaryStatsColor", { r = r, g = g, b = b })
                           if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
                       end },
                     { type = "slider", label = "Scale", min = 50, max = 200, step = 5,
                       get = function()
-                          local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+                          local pos = EllesmereUI.QoLExtrasGet("secondaryStatsPos")
                           return math.floor(((pos and pos.scale) or 1.0) * 100 + 0.5)
                       end,
                       set = function(v)
-                          if not EllesmereUIDB then EllesmereUIDB = {} end
-                          if not EllesmereUIDB.secondaryStatsPos then EllesmereUIDB.secondaryStatsPos = {} end
-                          EllesmereUIDB.secondaryStatsPos.scale = v / 100
+                          -- Shallow-copy so we never mutate the shared account-wide
+                          -- fallback table in place; the write lands per-profile.
+                          local prev = EllesmereUI.QoLExtrasGet("secondaryStatsPos")
+                          local newPos = {}
+                          if prev then for pk, pv in pairs(prev) do newPos[pk] = pv end end
+                          newPos.scale = v / 100
+                          EllesmereUI.QoLExtrasSet("secondaryStatsPos", newPos)
                           if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
                       end },
                 },

@@ -1724,7 +1724,12 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.HideWidgetTooltip()
                 end)
                 kbBtn:SetScript("OnHide", function()
+                    -- Closing the EUI window mid-capture must cancel the capture
+                    -- AND hide the tooltip. OnLeave skips the hide while listening
+                    -- (and may not fire at all if the mouse never left), so the
+                    -- tooltip would otherwise linger after the window is gone.
                     if listening then listening = false; kbBtn:EnableKeyboard(false); RefreshLabel() end
+                    EllesmereUI.HideWidgetTooltip()
                 end)
 
                 RefreshState()
@@ -1778,7 +1783,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Row 1: Icon Size | Button Spacing
             local iconSizeRow
             iconSizeRow, h = W:DualRow(parent, y,
-                { type="slider", text="Icon Size", min=16, max=80, step=1,
+                { type="slider", text="Icon Size", min=16, max=120, step=1,
                   disabled=function()
                       local k = SelectedKey()
                       if EllesmereUI.GetWidthMatchTarget and EllesmereUI.GetWidthMatchTarget(k) then return true end
@@ -3505,13 +3510,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, kbCogShowRaw = EllesmereUI.BuildCogPopup({
                     title = "Keybind Text Offsets",
                     rows = {
-                        { type="slider", label="X Offset", min=-50, max=20, step=1,
+                        { type="slider", label="X Offset", min=-150, max=150, step=1,
                           get=function() return SVal("keybindOffsetX", 0) end,
                           set=function(v)
                               SSet("keybindOffsetX", v, function(k) EAB:ApplyFontsForBar(k) end)
                               SUpdatePreview()
                           end },
-                        { type="slider", label="Y Offset", min=-20, max=20, step=1,
+                        { type="slider", label="Y Offset", min=-150, max=150, step=1,
                           get=function() return SVal("keybindOffsetY", 0) end,
                           set=function(v)
                               SSet("keybindOffsetY", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3662,13 +3667,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, mcCogShowRaw = EllesmereUI.BuildCogPopup({
                     title = "Macro Text Offsets",
                     rows = {
-                        { type="slider", label="X Offset", min=-50, max=20, step=1,
+                        { type="slider", label="X Offset", min=-150, max=150, step=1,
                           get=function() return SVal("macroOffsetX", 0) end,
                           set=function(v)
                               SSet("macroOffsetX", v, function(k) EAB:ApplyFontsForBar(k) end)
                               SUpdatePreview()
                           end },
-                        { type="slider", label="Y Offset", min=-20, max=20, step=1,
+                        { type="slider", label="Y Offset", min=-150, max=150, step=1,
                           get=function() return SVal("macroOffsetY", 0) end,
                           set=function(v)
                               SSet("macroOffsetY", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3779,13 +3784,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, ctCogShowRaw = EllesmereUI.BuildCogPopup({
                     title = "Charges Text Offsets",
                     rows = {
-                        { type="slider", label="X Offset", min=-20, max=20, step=1,
+                        { type="slider", label="X Offset", min=-150, max=150, step=1,
                           get=function() return SVal("countOffsetX", 0) end,
                           set=function(v)
                               SSet("countOffsetX", v, function(k) EAB:ApplyFontsForBar(k) end)
                               SUpdatePreview()
                           end },
-                        { type="slider", label="Y Offset", min=-20, max=20, step=1,
+                        { type="slider", label="Y Offset", min=-150, max=150, step=1,
                           get=function() return SVal("countOffsetY", 0) end,
                           set=function(v)
                               SSet("countOffsetY", v, function(k) EAB:ApplyFontsForBar(k) end)
@@ -3882,13 +3887,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, cdCogShowRaw = EllesmereUI.BuildCogPopup({
                     title = "Cooldown Text Offsets",
                     rows = {
-                        { type="slider", label="X Offset", min=-20, max=20, step=1,
+                        { type="slider", label="X Offset", min=-150, max=150, step=1,
                           get=function() return SVal("cooldownTextXOffset", 0) end,
                           set=function(v)
                               SSet("cooldownTextXOffset", v, function(k) EAB:ApplyCooldownFontsForBar(k) end)
                               SUpdatePreview()
                           end },
-                        { type="slider", label="Y Offset", min=-20, max=20, step=1,
+                        { type="slider", label="Y Offset", min=-150, max=150, step=1,
                           get=function() return SVal("cooldownTextYOffset", 0) end,
                           set=function(v)
                               SSet("cooldownTextYOffset", v, function(k) EAB:ApplyCooldownFontsForBar(k) end)
@@ -4176,7 +4181,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Size(qkbBtn, BTN_W, BTN_H)
             PP.Point(qkbBtn, "RIGHT", rowFrame, "CENTER", -(GAP / 2), 0)
             qkbBtn:SetFrameLevel(rowFrame:GetFrameLevel() + 1)
-            EllesmereUI.MakeStyledButton(qkbBtn, "Quick Keybind Mode", 14,
+            EllesmereUI.MakeStyledButton(qkbBtn, "Quick Keybind Mode (/kb)", 14,
                 EllesmereUI.WB_COLOURS, function()
                     if InCombatLockdown() then return end
                     if not C_AddOns.IsAddOnLoaded("Blizzard_QuickKeybind") then

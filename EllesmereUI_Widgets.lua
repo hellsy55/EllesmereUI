@@ -1512,21 +1512,26 @@ end
 local tooltipFrame
 
 local function GetTooltipFrame()
-    if tooltipFrame then return tooltipFrame end
-    tooltipFrame = CreateFrame("Frame", nil, UIParent)
-    tooltipFrame:SetFrameStrata("TOOLTIP")
-    tooltipFrame:SetFrameLevel(200)
-    tooltipFrame:SetSize(250, 40)
-    local bg = tooltipFrame:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.067, 0.067, 0.067, 0.90)
-    MakeBorder(tooltipFrame, 1, 1, 1, 0.15, PP)
-    tooltipFrame.text = MakeFont(tooltipFrame, 10, nil, 1, 1, 1, 0.80)
-    tooltipFrame.text:SetPoint("TOPLEFT", 8, -8)
-    tooltipFrame.text:SetPoint("TOPRIGHT", -8, -8)
-    tooltipFrame.text:SetWordWrap(true)
-    tooltipFrame.text:SetSpacing(3)
-    tooltipFrame:Hide()
+    if not tooltipFrame then
+        tooltipFrame = CreateFrame("Frame", nil, UIParent)
+        tooltipFrame:SetFrameStrata("TOOLTIP")
+        tooltipFrame:SetFrameLevel(200)
+        tooltipFrame:SetSize(250, 40)
+        local bg = tooltipFrame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        tooltipFrame.bg = bg
+        MakeBorder(tooltipFrame, 1, 1, 1, 0.15, PP)
+        tooltipFrame.text = MakeFont(tooltipFrame, 10, nil, 1, 1, 1, 0.80)
+        tooltipFrame.text:SetPoint("TOPLEFT", 8, -8)
+        tooltipFrame.text:SetPoint("TOPRIGHT", -8, -8)
+        tooltipFrame.text:SetWordWrap(true)
+        tooltipFrame.text:SetSpacing(3)
+        tooltipFrame:Hide()
+    end
+    -- Unified, user-customizable background (shared with the Blizzard tooltip
+    -- reskin via EllesmereUI.GetTooltipBg). Re-applied each call so a settings
+    -- change shows on the next tooltip. Border stays fixed (not customizable).
+    tooltipFrame.bg:SetColorTexture(EllesmereUI.GetTooltipBg())
     return tooltipFrame
 end
 
@@ -2324,6 +2329,50 @@ local function RGBtoHSV(r, g, b)
 end
 
 -------------------------------------------------------------------------------
+--  Color Picker recent-colors & favorites storage (file-scope, shared per session)
+-------------------------------------------------------------------------------
+local PICKER_MAX_SWATCHES = 10
+
+local function GetPickerDB()
+    if not EllesmereUIDB then return {} end
+    if not EllesmereUIDB.colorPicker then EllesmereUIDB.colorPicker = {} end
+    return EllesmereUIDB.colorPicker
+end
+local function GetRecentColorsDB()
+    local db = GetPickerDB(); if not db.recentColors then db.recentColors = {} end; return db.recentColors
+end
+local function GetFavoritesDB()
+    local db = GetPickerDB(); if not db.favorites then db.favorites = {} end; return db.favorites
+end
+local function ColorKey(r, g, b)
+    return string.format("%d-%d-%d", math.floor(r*255+.5), math.floor(g*255+.5), math.floor(b*255+.5))
+end
+local function RecordRecentColor(r, g, b)
+    local db = GetRecentColorsDB(); local key = ColorKey(r, g, b)
+    for i = #db, 1, -1 do
+        if ColorKey(db[i][1], db[i][2], db[i][3]) == key then table.remove(db, i) end
+    end
+    table.insert(db, 1, { r, g, b })
+    while #db > PICKER_MAX_SWATCHES do table.remove(db) end
+end
+local function IsFavorite(r, g, b)
+    local key = ColorKey(r, g, b)
+    for _, c in ipairs(GetFavoritesDB()) do
+        if ColorKey(c[1], c[2], c[3]) == key then return true end
+    end
+    return false
+end
+local function ToggleFavorite(r, g, b)
+    local db = GetFavoritesDB(); local key = ColorKey(r, g, b)
+    for i = #db, 1, -1 do
+        if ColorKey(db[i][1], db[i][2], db[i][3]) == key then table.remove(db, i); return false end
+    end
+    table.insert(db, 1, { r, g, b })
+    while #db > PICKER_MAX_SWATCHES do table.remove(db) end
+    return true
+end
+
+-------------------------------------------------------------------------------
 --  Custom Color Picker Popup (singleton, replaces Blizzard ColorPickerFrame)
 -------------------------------------------------------------------------------
 local function BuildColorPickerPopup()
@@ -2335,9 +2384,13 @@ local function BuildColorPickerPopup()
     local RIGHT_W = 70
     local RIGHT_GAP = 19
     local PAD_RIGHT = 26
-    local POPUP_H = PAD_TOP + 28 + SV_SIZE + PAD
+    local POPUP_H = PAD_TOP + 28 + SV_SIZE + 80 + PAD
     local BASE_W = PAD + SV_SIZE + BAR_GAP + BAR_W + BAR_GAP + BAR_W + RIGHT_GAP + RIGHT_W + PAD_RIGHT
     local BASE_W_NO_ALPHA = PAD + SV_SIZE + BAR_GAP + BAR_W + RIGHT_GAP + RIGHT_W + PAD_RIGHT
+    -- How much taller the RIGHT COLUMN gets when the picker has an alpha slider,
+    -- so OK/Cancel drop down to clear the Opacity input inserted below Hex#. The
+    -- popup height and the (left-side) favorites/recent rows are NOT affected.
+    local OPACITY_BLOCK_H = 50
 
     local currentH, currentS, currentV, currentA = 0, 1, 1, 1
     local prevR, prevG, prevB, prevA = 1, 1, 1, 1
@@ -2424,7 +2477,7 @@ local function BuildColorPickerPopup()
 
     -- Forward declarations
     local UpdateSVPadHue, UpdateSVCrosshair, UpdateHueIndicator
-    local UpdateAlphaBar, UpdateHexInput
+    local UpdateAlphaBar, UpdateHexInput, UpdateOpacityInput
     local newPreviewTex, prevPreviewTex
 
     local function FireCallbacks()
@@ -2442,6 +2495,7 @@ local function BuildColorPickerPopup()
         if UpdateHueIndicator then UpdateHueIndicator(currentH) end
         if UpdateAlphaBar then UpdateAlphaBar(r, g, b, currentA) end
         if UpdateHexInput then UpdateHexInput(r, g, b) end
+        if UpdateOpacityInput then UpdateOpacityInput(currentA) end
         if newPreviewTex then newPreviewTex:SetColorTexture(r, g, b, currentA) end
         updating = false
     end
@@ -2696,13 +2750,71 @@ local function BuildColorPickerPopup()
         end
     end)
 
+    -- Opacity input (shown only when the picker has an alpha slider; sits below
+    -- Hex#, styled identically). Value is an integer percentage, 0-100.
+    local opacityLbl = MakeFont(rightCol, 10, nil, 1,1,1); opacityLbl:SetAlpha(TEXT_DIM_A)
+    opacityLbl:SetPoint("TOPLEFT", hexBox, "BOTTOMLEFT", 0, -10); opacityLbl:SetText(EllesmereUI.L("Opacity"))
+
+    local opacityBox = CreateFrame("EditBox", nil, rightCol)
+    opacityBox:SetSize(RIGHT_W, 24); opacityBox:SetPoint("TOPLEFT", opacityLbl, "BOTTOMLEFT", 0, -4)
+    opacityBox:SetFont(EXPRESSWAY, 10, ""); opacityBox:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A)
+    opacityBox:SetMaxLetters(3); opacityBox:SetAutoFocus(false); opacityBox:EnableMouse(true)
+    opacityBox:SetNumeric(true); opacityBox:SetJustifyH("CENTER")
+    local obg = opacityBox:CreateTexture(nil, "BACKGROUND")
+    obg:SetAllPoints(); obg:SetColorTexture(0.22, 0.24, 0.28, 0.5)
+    MakeBorder(opacityBox, 1, 1, 1, 0.04, PP)
+
+    local lastOpacityPct = -1
+    UpdateOpacityInput = function(a)
+        if opacityBox:HasFocus() then return end
+        local pct = math.floor((a or 1) * 100 + 0.5)
+        if pct == lastOpacityPct then return end
+        lastOpacityPct = pct
+        opacityBox:SetText(tostring(pct))
+    end
+    -- Parse the box and apply as alpha. commit=true means snap-back to the live
+    -- value when the text is unparseable (used on Enter / focus loss).
+    local function ApplyOpacityText(commit)
+        local n = tonumber(opacityBox:GetText())
+        if n then
+            n = math.max(0, math.min(100, math.floor(n + 0.5)))
+            currentA = n / 100
+            lastOpacityPct = n
+            UpdateAllControls(); FireCallbacks()
+            return true
+        elseif commit then
+            opacityBox:SetText(tostring(math.floor(currentA * 100 + 0.5)))
+        end
+        return false
+    end
+    local opacityEscaping = false
+    opacityBox:SetScript("OnEnterPressed", function() ApplyOpacityText(true); opacityBox:ClearFocus() end)
+    opacityBox:SetScript("OnEscapePressed", function()
+        opacityEscaping = true
+        opacityBox:SetText(tostring(math.floor(currentA * 100 + 0.5)))
+        opacityBox:ClearFocus()
+        opacityEscaping = false
+        if cancelFunc then cancelFunc() end
+        popup:Hide()
+    end)
+    opacityBox:SetScript("OnEditFocusLost", function() if not opacityEscaping then ApplyOpacityText(true) end end)
+    opacityBox:SetScript("OnEditFocusGained", function() opacityBox:HighlightText() end)
+    opacityBox:SetScript("OnTextChanged", function(self, userInput)
+        if not self:HasFocus() then return end
+        ApplyOpacityText(false)
+    end)
+    opacityLbl:Hide(); opacityBox:Hide()
+
     -- OK Button (bottom of right column, styled like reset/reload buttons)
     local okBtn = CreateFrame("Button", nil, rightCol)
     okBtn:SetSize(RIGHT_W, 21)
     okBtn:SetPoint("BOTTOMLEFT", rightCol, "BOTTOMLEFT", 0, 0)
     okBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
     local _confirmed = false
-    MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function() _confirmed = true; popup:Hide() end)
+    MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function()
+        RecordRecentColor(HSVtoRGB(currentH, currentS, currentV))
+        _confirmed = true; popup:Hide()
+    end)
 
     -- Cancel text above OK button
     local cancelBtn = CreateFrame("Button", nil, rightCol)
@@ -2720,6 +2832,90 @@ local function BuildColorPickerPopup()
         _confirmed = false
         popup:Hide()
     end)
+
+    ---------------------------------------------------------------------------
+    --  Favorites & Recent Colors (below HSV picker)
+    ---------------------------------------------------------------------------
+    local RefreshSwatchRows
+    local SWATCH_SZ      = 19
+    local SWATCH_SPACING = 4
+
+    local function MakeSwatchBtn(parent, isFavorites)
+        local btn = CreateFrame("Button", nil, parent)
+        btn:SetSize(SWATCH_SZ, SWATCH_SZ)
+        btn:SetFrameLevel(parent:GetFrameLevel() + 2)
+        local tex = btn:CreateTexture(nil, "ARTWORK"); tex:SetAllPoints(); btn._tex = tex
+        btn:SetScript("OnEnter", function(self)
+            local c = self._color; if not c then return end
+            local hex = string.format("%02X%02X%02X",
+                math.floor(c[1]*255+.5), math.floor(c[2]*255+.5), math.floor(c[3]*255+.5))
+            local hint = isFavorites and EllesmereUI.L("Right-click: remove favorite")
+                                      or  EllesmereUI.L("Right-click: favorite")
+            -- Anchor on the hovered swatch itself so the tooltip sits directly
+            -- above it (default placement is tooltip BOTTOM -> anchor TOP).
+            ShowWidgetTooltip(self, "|cff"..hex.."#|r"..hex.."\n"..hint)
+        end)
+        btn:SetScript("OnLeave", function() HideWidgetTooltip() end)
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:SetScript("OnClick", function(self, mouseButton)
+            local c = self._color; if not c then return end
+            if mouseButton == "RightButton" then
+                if isFavorites or not IsFavorite(c[1], c[2], c[3]) then
+                    ToggleFavorite(c[1], c[2], c[3])
+                end
+                RefreshSwatchRows()
+            else
+                currentH, currentS, currentV = RGBtoHSV(c[1], c[2], c[3])
+                UpdateAllControls(); FireCallbacks()
+            end
+        end)
+        btn:Hide()
+        return btn
+    end
+
+    -- Favorites label + row
+    local favLbl = MakeFont(popup, 10, nil, 1,1,1); favLbl:SetAlpha(TEXT_DIM_A)
+    favLbl:SetPoint("TOPLEFT", svPad, "BOTTOMLEFT", 0, -10)
+    favLbl:SetText(EllesmereUI.L("Favorites"))
+
+    local favRow = CreateFrame("Frame", nil, popup)
+    favRow:SetSize(BASE_W - PAD - PAD_RIGHT, SWATCH_SZ)
+    favRow:SetPoint("TOPLEFT", favLbl, "BOTTOMLEFT", 0, -3)
+    favRow._label = favLbl; favRow._isFavorites = true
+
+    -- Recent Colors label + row
+    local rcLbl = MakeFont(popup, 10, nil, 1,1,1); rcLbl:SetAlpha(TEXT_DIM_A)
+    rcLbl:SetPoint("TOPLEFT", favRow, "BOTTOMLEFT", 0, -8)
+    rcLbl:SetText(EllesmereUI.L("Recent Colors"))
+
+    local rcRow = CreateFrame("Frame", nil, popup)
+    rcRow:SetSize(BASE_W - PAD - PAD_RIGHT, SWATCH_SZ)
+    rcRow:SetPoint("TOPLEFT", rcLbl, "BOTTOMLEFT", 0, -3)
+    rcRow._label = rcLbl; rcRow._isFavorites = false
+
+    local favSwatches, rcSwatches = {}, {}
+
+    local function PopulateSwatchRow(swatchPool, row, data)
+        local count = math.min(#data, PICKER_MAX_SWATCHES)
+        for i = 1, math.max(count, #swatchPool) do
+            local btn = swatchPool[i]
+            if not btn then btn = MakeSwatchBtn(row, row._isFavorites); swatchPool[i] = btn end
+            if i <= count then
+                btn._color = data[i]
+                btn._tex:SetColorTexture(data[i][1], data[i][2], data[i][3], 1)
+                btn:Show(); btn:ClearAllPoints()
+                if i == 1 then btn:SetPoint("LEFT", row, "LEFT", 0, 0)
+                else btn:SetPoint("LEFT", swatchPool[i-1], "RIGHT", SWATCH_SPACING, 0) end
+            else
+                btn:Hide()
+            end
+        end
+    end
+
+    RefreshSwatchRows = function()
+        PopulateSwatchRow(favSwatches, favRow, GetFavoritesDB())
+        PopulateSwatchRow(rcSwatches,  rcRow,  GetRecentColorsDB())
+    end
 
     -- Hide / Escape
     popup:SetScript("OnHide", function()
@@ -2752,16 +2948,25 @@ local function BuildColorPickerPopup()
         currentH, currentS, currentV = RGBtoHSV(r, g, b)
         currentA = hasOpacity and a or 1
         prevPreviewTex:SetColorTexture(r, g, b, hasOpacity and a or 1)
-        -- Reposition right column based on alpha bar visibility
+        -- Reposition right column based on alpha bar visibility. When an alpha
+        -- slider is present, only the right column is made taller so OK/Cancel
+        -- drop down to clear the Opacity input inserted below Hex#. The favorites
+        -- and recent rows sit on the LEFT, clear of the right column, so they (and
+        -- the popup height) stay put -- OK/Cancel just drop into the empty space
+        -- beside them. With no alpha slider, everything is the original layout.
         rightCol:ClearAllPoints()
         if hasOpacity then
             alphaBar:Show()
             popup:SetWidth(BASE_W)
             rightCol:SetPoint("TOPLEFT", alphaBar, "TOPRIGHT", RIGHT_GAP, 0)
+            rightCol:SetHeight(SV_SIZE + OPACITY_BLOCK_H)
+            opacityLbl:Show(); opacityBox:Show()
         else
             alphaBar:Hide()
             popup:SetWidth(BASE_W_NO_ALPHA)
             rightCol:SetPoint("TOPLEFT", hueBar, "TOPRIGHT", RIGHT_GAP, 0)
+            rightCol:SetHeight(SV_SIZE)
+            opacityLbl:Hide(); opacityBox:Hide()
         end
         popup:ClearAllPoints()
         -- Position horizontally centered on cursor, vertically smart
@@ -2784,6 +2989,7 @@ local function BuildColorPickerPopup()
         end
         popup:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
         EllesmereUI._colorPickerOpen = true
+        RefreshSwatchRows()
         popup:Show(); UpdateAllControls()
     end
 
@@ -3828,7 +4034,11 @@ function WidgetFactory:WideDualButton(parent, text1, text2, yOffset, onClick1, o
 end
 
 -- WideTripleButton  (three buttons side by side, centered -- for action rows)
-function WidgetFactory:WideTripleButton(parent, text1, text2, text3, yOffset, onClick1, onClick2, onClick3, btnWidth)
+-- disabledOpts (optional): table keyed by button index 1..3, e.g.
+--   { [3] = { disabled = true, tooltip = "why it's off" } }
+-- A disabled button is dimmed, ignores hover highlight + clicks, and shows its
+-- tooltip on hover. Evaluated at build time (callers rebuild on RefreshPage).
+function WidgetFactory:WideTripleButton(parent, text1, text2, text3, yOffset, onClick1, onClick2, onClick3, btnWidth, disabledOpts)
     btnWidth = btnWidth or 205
     local BTN_H = 37
     local ROW_H = BTN_H + 20
@@ -3844,6 +4054,15 @@ function WidgetFactory:WideTripleButton(parent, text1, text2, text3, yOffset, on
         PP.Point(btn, "CENTER", frame, "CENTER", offsets[i], 0)
         btn:SetFrameLevel(frame:GetFrameLevel() + 1)
         MakeStyledButton(btn, info[1], 12, WB_COLOURS, info[2])
+        local dopt = disabledOpts and disabledOpts[i]
+        if dopt and dopt.disabled then
+            btn:SetAlpha(0.4)
+            btn:SetScript("OnEnter", function()
+                if dopt.tooltip then ShowWidgetTooltip(btn, dopt.tooltip) end
+            end)
+            btn:SetScript("OnLeave", function() HideWidgetTooltip() end)
+            btn:SetScript("OnClick", nil)
+        end
     end
     return frame, ROW_H
 end

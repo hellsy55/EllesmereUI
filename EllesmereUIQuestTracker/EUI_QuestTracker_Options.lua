@@ -210,6 +210,17 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Row 5: Hide When In Raid | blank
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Hide When In Raid",
+              tooltip="Always: hide the tracker the whole time you are in a raid.\nBoss Combat: keep it visible and only hide during boss encounters.",
+              values = { always = "Always", boss = "Boss Combat" },
+              order  = { "always", "boss" },
+              getValue=function() return Cfg("hideInRaidMode") or "boss" end,
+              setValue=function(v) Set("hideInRaidMode", v); if EQT.UpdateVisibility then EQT.UpdateVisibility() end end },
+            { type="label", text="" })
+        y = y - h
+
         y = y - 10
 
         -- -- COLORS ----------------------------------------------------------

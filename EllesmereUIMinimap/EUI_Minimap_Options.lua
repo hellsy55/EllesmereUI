@@ -520,7 +520,7 @@ initFrame:SetScript("OnEvent", function(self)
         local omniumRow
         omniumRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Omnium Folio",
-              tooltip="Show the expansion landing page (Omnium Folio) button at the bottom-left of the minimap. Use the cog to nudge its position.",
+              tooltip="Show the expansion landing page (Omnium Folio) button on the minimap. Use the cog to choose its corner and nudge its position.",
               getValue=function() local m = MinimapDB(); return m and m.showOmniumFolio ~= false end,
               setValue=function(v)
                   local m = MinimapDB(); if not m then return end
@@ -539,10 +539,18 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Omnium Folio Position",
                 rows = {
-                    { type="slider", label="X", min=-200, max=200, step=1,
+                    { type="dropdown", label="Corner",
+                      values={ ["BOTTOMLEFT"]="Bottom Left", ["BOTTOMRIGHT"]="Bottom Right", ["TOPLEFT"]="Top Left", ["TOPRIGHT"]="Top Right" },
+                      order={ "BOTTOMLEFT", "BOTTOMRIGHT", "TOPLEFT", "TOPRIGHT" },
+                      get=function() local m=MinimapDB(); return (m and m.omniumFolioCorner) or "BOTTOMLEFT" end,
+                      set=function(v) local m=MinimapDB(); if not m then return end m.omniumFolioCorner=v; RefreshMinimap() end },
+                    -- "X Offset" / "Y Offset" (not "X" / "Y"): labels under ~10px wide make
+                    -- BuildCogPopup fall back to a 60px label column, which left the old cog
+                    -- with a big gap before the sliders. Longer labels avoid that fallback.
+                    { type="slider", label="X Offset", min=-1000, max=1000, step=1,
                       get=function() local m=MinimapDB(); return (m and m.omniumFolioX) or 0 end,
                       set=function(v) local m=MinimapDB(); if not m then return end m.omniumFolioX=v; RefreshMinimap() end },
-                    { type="slider", label="Y", min=-200, max=200, step=1,
+                    { type="slider", label="Y Offset", min=-1000, max=1000, step=1,
                       get=function() local m=MinimapDB(); return (m and m.omniumFolioY) or 0 end,
                       set=function(v) local m=MinimapDB(); if not m then return end m.omniumFolioY=v; RefreshMinimap() end },
                 },
@@ -860,6 +868,20 @@ initFrame:SetScript("OnEvent", function(self)
             if coordsOff() then cogBlock:Show() else cogBlock:Hide() end
         end
 
+        -- Show Calendar Lockouts: minimap calendar button tooltip. Global setting
+        -- (EllesmereUIDB.calendarLockoutTooltip) shared with the runtime; default on.
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Calendar Lockouts",
+              tooltip="Shows saved instance lockouts with boss kill progress on the minimap calendar button tooltip.",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.calendarLockoutTooltip ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.calendarLockoutTooltip = v
+              end },
+            { type="label", text="" }
+        );  y = y - h
 
         return math.abs(y)
     end
@@ -878,6 +900,9 @@ initFrame:SetScript("OnEvent", function(self)
             if _G._EMM_DB and _G._EMM_DB.ResetProfile then
                 _G._EMM_DB:ResetProfile()
             end
+            -- Show Calendar Lockouts is a global setting (not in the per-profile
+            -- MinimapDB), so ResetProfile won't clear it -- reset it explicitly.
+            if EllesmereUIDB then EllesmereUIDB.calendarLockoutTooltip = nil end
             EllesmereUI:InvalidatePageCache()
             if _G._EMM_ApplyMinimap then _G._EMM_ApplyMinimap() end
         end,

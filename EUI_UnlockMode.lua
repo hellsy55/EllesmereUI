@@ -4187,6 +4187,15 @@ local BLIZZ_OWNED_OVERLAY_DEFS = {
     { label = "Encounter Bar", frame = function() return _G.PlayerPowerBarAlt end, showAlways = true, fallbackW = 240, fallbackH = 36, yOffset = 44 },
     { label = "Buffs",         frame = function() return _G.BuffFrame end },
     { label = "Debuffs",       frame = function() return _G.DebuffFrame end },
+    -- Blizzard Edit Mode's default tooltip anchor. The container is small/idle
+    -- when no tooltip is up, so use the showAlways fallback (read its saved
+    -- Edit Mode position) like the Encounter Bar.
+    { label = "Tooltip",       frame = function()
+          -- Hidden while Anchor to Cursor is active: the tooltip follows the
+          -- mouse, so its Edit Mode location no longer applies.
+          if EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor then return nil end
+          return _G.GameTooltipDefaultContainer
+      end, showAlways = true, fallbackW = 280, fallbackH = 165 },
 }
 
 local function CreateBlizzOwnedOverlay(def, parent)
