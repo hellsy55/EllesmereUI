@@ -10905,6 +10905,140 @@ end
 
 _quickKeybindState.macroButtons = setmetatable({}, { __mode = "k" })
 
+-- Macro quick-keybind uses our OWN capture overlay instead of Blizzard's
+-- QuickKeybindButtonTemplateMixin. Driving Blizzard's secure input path from
+-- addon code (the old QuickKeybindFrame:OnKeyDown call) tainted it, so any key
+-- Blizzard passes through during capture -- e.g. F11 = SCREENSHOT, which it RUNs
+-- via the protected RunBinding -- threw ADDON_ACTION_FORBIDDEN. Capturing on a
+-- plain frame we own consumes the key before Blizzard's input handler sees it,
+-- so every key (including system/function keys) binds cleanly with no taint.
+
+_quickKeybindState.GetMacroBindingContext = function(command)
+    return C_KeyBindings and C_KeyBindings.GetBindingContextForAction
+        and C_KeyBindings.GetBindingContextForAction(command)
+end
+
+_quickKeybindState.SetOutput = function(text)
+    if QuickKeybindFrame and QuickKeybindFrame.SetOutputText then
+        QuickKeybindFrame:SetOutputText(text)
+    end
+end
+
+_quickKeybindState.NormalizeMacroBindInput = function(input)
+    input = GetConvertedKeyOrButton and GetConvertedKeyOrButton(input) or input
+    if IsKeyPressIgnoredForBinding and IsKeyPressIgnoredForBinding(input) then return end
+    return input
+end
+
+_quickKeybindState.SetMacroButtonTooltip = function(button)
+    if not button or not button.commandName or not QuickKeybindTooltip then return end
+    QuickKeybindTooltip:SetOwner(button, "ANCHOR_RIGHT")
+    GameTooltip_AddHighlightLine(QuickKeybindTooltip, GetBindingName(button.commandName))
+
+    local key1 = GetBindingKeyForAction(button.commandName)
+    if key1 then
+        GameTooltip_AddInstructionLine(QuickKeybindTooltip, key1)
+        GameTooltip_AddNormalLine(QuickKeybindTooltip, ESCAPE_TO_UNBIND)
+    else
+        GameTooltip_AddErrorLine(QuickKeybindTooltip, NOT_BOUND)
+        GameTooltip_AddNormalLine(QuickKeybindTooltip, PRESS_KEY_TO_BIND)
+    end
+
+    QuickKeybindTooltip:Show()
+end
+
+_quickKeybindState.BindMacroInput = function(input)
+    -- Rebinding during combat is unsafe and the rest of QKB is combat-gated, so
+    -- match that here even though our capture frame is insecure.
+    if InCombatLockdown() then return end
+    local button = _quickKeybindState.hoveredMacroButton
+    if not button then return end
+
+    _quickKeybindState.UpdateMacroButtonCommand(button)
+    local command = button.commandName
+    if not command then return end
+
+    local context = _quickKeybindState.GetMacroBindingContext(command)
+    local old1, old2 = GetBindingKey(command, nil, context)
+
+    if input == "ESCAPE" then
+        -- Full unbind: clear EVERY key bound to this macro, matching the rebind
+        -- path below (which clears both old keys before setting the new one).
+        if old1 then SetBinding(old1, nil, context) end
+        if old2 then SetBinding(old2, nil, context) end
+        _quickKeybindState.SetOutput(KEY_UNBOUND)
+        _quickKeybindState.SetMacroButtonTooltip(button)
+        return
+    end
+
+    local key = _quickKeybindState.NormalizeMacroBindInput(input)
+    if not key then return end
+
+    local newKey = CreateKeyChordStringUsingMetaKeyState and CreateKeyChordStringUsingMetaKeyState(key) or key
+    if old1 then SetBinding(old1, nil, context) end
+    if old2 then SetBinding(old2, nil, context) end
+    SetBinding(newKey, nil, context)
+
+    if SetBinding(newKey, command, context) then
+        _quickKeybindState.SetOutput(KEY_BOUND)
+    else
+        if old1 then SetBinding(old1, command, context) end
+        if old2 then SetBinding(old2, command, context) end
+    end
+
+    _quickKeybindState.SetMacroButtonTooltip(button)
+end
+
+_quickKeybindState.GetMacroBindFrame = function()
+    if _quickKeybindState.macroBindFrame then return _quickKeybindState.macroBindFrame end
+
+    -- A plain (insecure) frame we fully own -- never a secure template. Capturing
+    -- input on it consumes the keypress, so it never reaches Blizzard's secure
+    -- input path (no SetPropagateKeyboardInput, default = consume).
+    local frame = CreateFrame("Frame", nil, UIParent)
+    frame:SetFrameStrata("FULLSCREEN_DIALOG")
+    frame:SetFrameLevel(1000)
+    frame:EnableMouse(true)
+    frame:EnableKeyboard(true)
+    frame:EnableMouseWheel(true)
+    frame:Hide()
+
+    frame:SetScript("OnLeave", function(self)
+        local button = self.button
+        self.button = nil
+        _quickKeybindState.hoveredMacroButton = nil
+        self:Hide()
+        if QuickKeybindTooltip then QuickKeybindTooltip:Hide() end
+        if button then _quickKeybindState.RefreshMacroButton(button) end
+    end)
+    frame:SetScript("OnKeyDown", function(_, key)
+        _quickKeybindState.BindMacroInput(key)
+    end)
+    frame:SetScript("OnMouseUp", function(_, mouseButton)
+        if mouseButton ~= "LeftButton" and mouseButton ~= "RightButton" then
+            _quickKeybindState.BindMacroInput(mouseButton)
+        end
+    end)
+    frame:SetScript("OnMouseWheel", function(_, delta)
+        _quickKeybindState.BindMacroInput(delta > 0 and "MOUSEWHEELUP" or "MOUSEWHEELDOWN")
+    end)
+
+    _quickKeybindState.macroBindFrame = frame
+    return frame
+end
+
+_quickKeybindState.HideMacroBindFrame = function()
+    local frame = _quickKeybindState.macroBindFrame
+    if not frame then return end
+
+    local button = frame.button
+    frame.button = nil
+    _quickKeybindState.hoveredMacroButton = nil
+    frame:Hide()
+    if QuickKeybindTooltip then QuickKeybindTooltip:Hide() end
+    if button then _quickKeybindState.RefreshMacroButton(button, false) end
+end
+
 _quickKeybindState.UpdateMacroButtonCommand = function(button)
     if not button or not MacroFrame or not MacroFrame.GetMacroDataIndex or not GetMacroInfo then return end
 
@@ -10931,14 +11065,36 @@ _quickKeybindState.RefreshMacroButton = function(button, show)
     EAB_SetQuickKeybindEffects(button, show and button:IsShown())
 end
 
+-- On hover (in QKB mode) park the capture overlay over the macro button and arm
+-- its tooltip, so the next key/mouse/wheel press binds to THIS macro.
+_quickKeybindState.SelectMacroButton = function(button)
+    if not _quickKeybindState.open then return end
+    _quickKeybindState.UpdateMacroButtonCommand(button)
+    if not button.commandName then return end
+
+    _quickKeybindState.hoveredMacroButton = button
+
+    local frame = _quickKeybindState.GetMacroBindFrame()
+    frame.button = button
+    frame:ClearAllPoints()
+    frame:SetAllPoints(button)
+    frame:Show()
+
+    _quickKeybindState.RefreshMacroButton(button, true)
+    if button.QuickKeybindHighlightTexture then
+        button.QuickKeybindHighlightTexture:SetAlpha(1)
+    end
+    _quickKeybindState.SetMacroButtonTooltip(button)
+end
+
 _quickKeybindState.InitMacroButton = function(button)
     if not button or EFD(button).qkbMacroHooked or not QuickKeybindButtonTemplateMixin then return end
 
-    Mixin(button, QuickKeybindButtonTemplateMixin)
-    if button.EnableMouseWheel then
-        button:EnableMouseWheel(true)
-    end
-
+    -- No Mixin / QuickKeybindButton* method calls: those invoke Blizzard's secure
+    -- input path from addon code and taint it. Our own capture overlay (above)
+    -- handles all key/mouse/wheel input; these hooks only manage hover + visuals.
+    -- Do NOT EnableMouseWheel on the Blizzard button -- with no wheel handler it
+    -- would swallow scroll and break the macro list; the overlay owns the wheel.
     if not button.QuickKeybindHighlightTexture then
         local tex = button:CreateTexture(nil, "OVERLAY")
         tex:SetAllPoints(button)
@@ -10949,32 +11105,30 @@ _quickKeybindState.InitMacroButton = function(button)
     end
 
     button:HookScript("OnShow", function(self)
-        self:QuickKeybindButtonOnShow()
         _quickKeybindState.RefreshMacroButton(self)
     end)
     button:HookScript("OnHide", function(self)
-        self:QuickKeybindButtonOnHide()
         _quickKeybindState.RefreshMacroButton(self, false)
     end)
-    button:HookScript("OnClick", function(self, mouseButton, down)
+    button:HookScript("OnClick", function(self)
         _quickKeybindState.UpdateMacroButtonCommand(self)
-        self:QuickKeybindButtonOnClick(mouseButton, down)
-    end)
-    button:HookScript("OnMouseUp", function(self, mouseButton)
-        if KeybindFrames_InQuickKeybindMode and KeybindFrames_InQuickKeybindMode()
-            and QuickKeybindFrame and mouseButton ~= "LeftButton" and mouseButton ~= "RightButton" then
-            _quickKeybindState.UpdateMacroButtonCommand(self)
-            QuickKeybindFrame:OnKeyDown(mouseButton)
-            self:QuickKeybindButtonSetTooltip()
+        if _quickKeybindState.open then
+            _quickKeybindState.SetMacroButtonTooltip(self)
         end
     end)
     button:HookScript("OnEnter", function(self)
-        _quickKeybindState.UpdateMacroButtonCommand(self)
-        self:QuickKeybindButtonOnEnter()
-        _quickKeybindState.RefreshMacroButton(self)
+        _quickKeybindState.SelectMacroButton(self)
     end)
     button:HookScript("OnLeave", function(self)
-        self:QuickKeybindButtonOnLeave()
+        -- The overlay sits over the button, so the button's OnLeave fires the
+        -- instant we park it. Ignore that case; the overlay's own OnLeave tears
+        -- down when the cursor truly leaves.
+        local frame = _quickKeybindState.macroBindFrame
+        if frame and frame:IsShown() and frame.button == self then return end
+        if _quickKeybindState.hoveredMacroButton == self then
+            _quickKeybindState.hoveredMacroButton = nil
+        end
+        if QuickKeybindTooltip then QuickKeybindTooltip:Hide() end
         _quickKeybindState.RefreshMacroButton(self)
     end)
 
@@ -10985,8 +11139,11 @@ _quickKeybindState.InitMacroButton = function(button)
 end
 
 _quickKeybindState.UpdateMacroButtons = function(show)
+    if show == false then
+        _quickKeybindState.HideMacroBindFrame()
+    end
     for button in pairs(_quickKeybindState.macroButtons) do
-        _quickKeybindState.RefreshMacroButton(button)
+        _quickKeybindState.RefreshMacroButton(button, show)
     end
 end
 

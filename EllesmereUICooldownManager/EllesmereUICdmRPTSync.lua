@@ -189,13 +189,27 @@ local function ApplyRPT(specProfiles, sourceSpecKey, targetSpecKey)
     end
     if not tgtProf.barSpells then tgtProf.barSpells = {} end
     local srcRPT = CollectRPT(srcProf)
-    -- 1. Strip existing RPT entries (and their settings) from every target bar.
+
+    -- Which bar the source keeps each RPT id on. Bar MEMBERSHIP and per-icon
+    -- settings are synced, but the SLOT POSITION (order within a bar) is NOT:
+    -- each spec keeps its own icon order so a sync never shoves the
+    -- trinket/pot/racial back to default. Preserving existing slots also makes
+    -- this pass idempotent, so re-propagation on spec change / logout no longer
+    -- resets positions.
+    local srcBarOf = {}
+    for barKey, data in pairs(srcRPT) do
+        for _, id in ipairs(data.ids) do srcBarOf[id] = barKey end
+    end
+
+    -- 1. Drop only RPT ids that no longer belong on their current target bar
+    --    (removed from the source, or moved to a different bar). RPT ids that
+    --    stay on the same bar are LEFT IN PLACE so their slot position survives.
     for barKey, sd in pairs(tgtProf.barSpells) do
         if barKey ~= "__ghost_cd" and type(sd.assignedSpells) == "table" then
             local w = 1
             for r = 1, #sd.assignedSpells do
                 local id = sd.assignedSpells[r]
-                if IsRPTId(id) then
+                if IsRPTId(id) and srcBarOf[id] ~= barKey then
                     if sd.spellSettings then sd.spellSettings[id] = nil end
                 else
                     sd.assignedSpells[w] = id; w = w + 1
@@ -204,13 +218,21 @@ local function ApplyRPT(specProfiles, sourceSpecKey, targetSpecKey)
             for i = w, #sd.assignedSpells do sd.assignedSpells[i] = nil end
         end
     end
-    -- 2. Add the source's RPT to the matching target bars.
+
+    -- 2. Add any source RPT ids the target is missing (appended at the end -- a
+    --    newly synced icon has no prior slot here), and sync per-icon settings
+    --    for all source RPT ids. Ids already present keep their current slot.
     for barKey, data in pairs(srcRPT) do
         local sd = tgtProf.barSpells[barKey]
         if not sd then sd = { assignedSpells = {} }; tgtProf.barSpells[barKey] = sd end
         if not sd.assignedSpells then sd.assignedSpells = {} end
+        local present = {}
+        for _, id in ipairs(sd.assignedSpells) do present[id] = true end
         for _, id in ipairs(data.ids) do
-            sd.assignedSpells[#sd.assignedSpells + 1] = id
+            if not present[id] then
+                sd.assignedSpells[#sd.assignedSpells + 1] = id
+                present[id] = true
+            end
         end
         if data.settings then
             if not sd.spellSettings then sd.spellSettings = {} end

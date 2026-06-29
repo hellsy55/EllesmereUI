@@ -269,9 +269,12 @@ local POWER_COLORS = setmetatable({}, { __index = function(_, powerKey)
     return nil
 end })
 
--- Dark theme colors (matches unit frames)
-local DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A = 0x11/255, 0x11/255, 0x11/255, 0.90
-local DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A = 0x4f/255, 0x4f/255, 0x4f/255, 1
+-- Dark theme fill/background COLOUR comes from the global per-profile Dark Mode
+-- palette (EllesmereUI.GetDarkModeFill / GetDarkModeBg), fetched live at each use.
+-- Resource Bars keep their OWN alpha below -- the Dark Mode opacity sliders apply
+-- to Unit Frames and Raid Frames only, not here.
+local DARK_FILL_A = 0.90
+local DARK_BG_A = 1
 
 
 local PRIMARY_CLASS_MAP = {
@@ -1527,7 +1530,7 @@ local function RegisterUnlockElements()
                 Rebuild()
             end,
             setHeight = function(_, h) S().pipHeight = PP.Snap(h); Rebuild() end,
-            isHidden = function() return IsSpecDisabled(S()) end,
+            isHidden = function() local s = S(); return s.enabled == false or IsSpecDisabled(s) end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
@@ -2191,14 +2194,11 @@ local function BuildBars()
         -- Bar texture (must be applied before colors since SetStatusBarTexture resets vertex color)
         ApplyBarTexture(healthBar, g.barTexture or "none")
 
-        -- Colors: dark theme > custom colored > class color.
+        -- Colors: custom colored > class color.
         -- Gradient is additive: when enabled it fills from the resolved custom/class
-        -- base color to the gradient end color. Dark theme ignores gradient.
+        -- base color to the gradient end color.
         local hft = healthBar:GetStatusBarTexture()
-        if hp.darkTheme then
-            hft:SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
-            healthBar._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A)
-        else
+        do
             local fR, fG, fB, fA
             if hp.customColored then
                 fR, fG, fB, fA = hp.fillR, hp.fillG, hp.fillB, hp.fillA
@@ -2367,14 +2367,11 @@ local function BuildBars()
         -- Bar texture (must be applied before colors since SetStatusBarTexture resets vertex color)
         ApplyBarTexture(primaryBar, g.barTexture or "none")
 
-        -- Colors: dark theme > custom colored > power type color.
+        -- Colors: custom colored > power type color.
         -- Gradient is additive: when enabled it fills from the resolved custom/power
-        -- base color to the gradient end color. Dark theme ignores gradient.
+        -- base color to the gradient end color.
         local pft = primaryBar:GetStatusBarTexture()
-        if pp.darkTheme then
-            pft:SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
-            primaryBar._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A)
-        else
+        do
             local fR, fG, fB, fA
             if pp.customColored then
                 fR, fG, fB, fA = pp.fillR, pp.fillG, pp.fillB, pp.fillA
@@ -2444,8 +2441,11 @@ local function BuildBars()
     -- Class resource (secondary: pips / runes)
     cachedSecondary = GetSecondaryResource()
     local sp = p.secondary or FALLBACK.secondary
-    -- Always create the frame when enabled so anchored elements have a target
-    if sp.enabled ~= false and not secondaryFrame then
+    -- Create the frame UNCONDITIONALLY (mirrors the power bar) so anchored
+    -- elements always have a target and "Shift Elements if No Resource" works
+    -- whether the bar is hidden via the spec picker OR the "Show Class Resource"
+    -- toggle. When off, the branch below keeps it sized + zero-alpha.
+    if not secondaryFrame then
         secondaryFrame = CreateFrame("Frame", "ERB_SecondaryFrame", mainFrame)
         secondaryFrame:SetFrameStrata(g.frameStrata or "MEDIUM")
         secondaryFrame:SetFrameLevel(10)
@@ -2600,8 +2600,10 @@ local function BuildBars()
             -- Colors
             local pc = POWER_COLORS[cachedSecondary.power]
             if sp.darkTheme then
-                secondaryBar:GetStatusBarTexture():SetVertexColor(DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, DARK_FILL_A)
-                secondaryBar._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, DARK_BG_A)
+                local _dfr, _dfg, _dfb = EllesmereUI.GetDarkModeFill()
+                local _dbr, _dbg, _dbb = EllesmereUI.GetDarkModeBg()
+                secondaryBar:GetStatusBarTexture():SetVertexColor(_dfr, _dfg, _dfb, DARK_FILL_A)
+                secondaryBar._bg:SetColorTexture(_dbr, _dbg, _dbb, DARK_BG_A)
             elseif cachedSecondary.power == "BREWMASTER_STAGGER" then
                 -- Brewmaster Stagger: always use threshold colors (green/yellow/red), start with green
                 secondaryBar:GetStatusBarTexture():SetVertexColor(0.2, 0.8, 0.2, 1)
@@ -2714,7 +2716,8 @@ local function BuildBars()
                 runeFrames[i]:ApplyBorder(0, 0, 0, 0, 0)
                 runeFrames[i]:ApplyTexture(g.barTexture or "none")
                 if sp.darkTheme then
-                    runeFrames[i]._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+                    local _dbr, _dbg, _dbb = EllesmereUI.GetDarkModeBg()
+                    runeFrames[i]._bg:SetColorTexture(_dbr, _dbg, _dbb, DARK_BG_A)
                 elseif sp.classColored then
                     runeFrames[i]._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
                 else
@@ -2773,7 +2776,8 @@ local function BuildBars()
                 pips[i]:ApplyBorder(0, 0, 0, 0, 0)
                 pips[i]:ApplyTexture(g.barTexture or "none")
                 if sp.darkTheme then
-                    pips[i]._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+                    local _dbr, _dbg, _dbb = EllesmereUI.GetDarkModeBg()
+                    pips[i]._bg:SetColorTexture(_dbr, _dbg, _dbb, DARK_BG_A)
                 elseif sp.classColored then
                     pips[i]._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
                 else
@@ -2950,9 +2954,7 @@ local function UpdateHealthBar()
     local ft = healthBar:GetStatusBarTexture()
     if _hpTsEntry and ft and UnitHealthPercent then
         local baseR, baseG, baseB
-        if hp.darkTheme then
-            baseR, baseG, baseB = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
-        elseif hp.customColored then
+        if hp.customColored then
             baseR, baseG, baseB = hp.fillR, hp.fillG, hp.fillB
         else
             local cc = CLASS_COLORS[cachedClass]
@@ -2968,7 +2970,7 @@ local function UpdateHealthBar()
                 ft:SetVertexColor(colorResult:GetRGBA())
             end
         end
-    elseif ft and not hp.darkTheme and not hp.customColored then
+    elseif ft and not hp.customColored then
         local r, g, b
         local cc = CLASS_COLORS[cachedClass]
         if cc then r, g, b = cc[1], cc[2], cc[3] else r, g, b = 0.15, 0.75, 0.30 end
@@ -3032,9 +3034,9 @@ local function UpdatePrimaryBar()
         primaryBar:SetValue(remaining)
         primaryBar._smoothTarget = remaining
         primaryBar._smoothCurrent = remaining
-        -- Color: dark > custom > power color (same priority as standard)
+        -- Color: custom > power color (same priority as standard)
         local ft = primaryBar:GetStatusBarTexture()
-        if not pp.darkTheme and not pp.customColored then
+        if not pp.customColored then
             local pc = POWER_COLORS["EBON_MIGHT"]
             local r, g, b = 1, 1, 1
             if pc then r, g, b = pc[1], pc[2], pc[3] end
@@ -3081,9 +3083,7 @@ local function UpdatePrimaryBar()
     local ft = primaryBar:GetStatusBarTexture()
     if _ppTsEntry and ft and UnitPowerPercent then
         local baseR, baseG, baseB
-        if pp.darkTheme then
-            baseR, baseG, baseB = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
-        elseif pp.customColored then
+        if pp.customColored then
             baseR, baseG, baseB = pp.fillR, pp.fillG, pp.fillB
         else
             local pc = POWER_COLORS[cachedPrimary]
@@ -3113,7 +3113,7 @@ local function UpdatePrimaryBar()
                 ft:SetVertexColor(colorResult:GetRGBA())
             end
         end
-    elseif not pp.darkTheme and not pp.customColored then
+    elseif not pp.customColored then
         local r, g, b
         local pc = POWER_COLORS[cachedPrimary]
         if pc then r, g, b = pc[1], pc[2], pc[3] else r, g, b = 1, 1, 1 end
@@ -3258,7 +3258,8 @@ local function UpdateIronfurBar()
     -- color while the active Ironfur stack count is at or above the threshold.
     local r, g, b, a
     if sp.darkTheme then
-        r, g, b, a = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B, sp.fillA or 1
+        local _dfr, _dfg, _dfb = EllesmereUI.GetDarkModeFill()
+        r, g, b, a = _dfr, _dfg, _dfb, sp.fillA or 1
     elseif sp.classColored ~= false then
         local cc = CLASS_COLORS[cachedClass]
         if cc then r, g, b = cc[1], cc[2], cc[3] else r, g, b = 1, 1, 1 end
@@ -3521,7 +3522,7 @@ local function UpdateSecondaryResource()
 
     -- Color: dark theme > class colored > custom fill color
     if sp.darkTheme then
-        r, g, b = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
+        r, g, b = EllesmereUI.GetDarkModeFill()
     elseif sp.resourceColored then
         -- Per-spec resource/power color; falls back to class color.
         local rr, rg, rb = ERB.ResolveSecondaryResourceColor(powerType)
@@ -4364,9 +4365,7 @@ local function OnUpdate(self, dt)
                 local ft = healthBar:GetStatusBarTexture()
                 if ft then
                     local baseR, baseG, baseB
-                    if hp.darkTheme then
-                        baseR, baseG, baseB = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
-                    elseif hp.customColored then
+                    if hp.customColored then
                         baseR, baseG, baseB = hp.fillR, hp.fillG, hp.fillB
                     else
                         local cc = CLASS_COLORS[cachedClass]
@@ -6014,8 +6013,22 @@ local function LayoutTotemBar()
             btn.Icon.Texture:RemoveMaskTexture(btn.Icon.TextureMask)
             btn.Icon.TextureMask:Hide()
         end
-        if btn.Icon and btn.Icon.Cooldown and btn.Icon.TextureMask then
-            pcall(btn.Icon.Cooldown.RemoveMaskTexture, btn.Icon.Cooldown, btn.Icon.TextureMask)
+        -- Square the cooldown swipe to match the squared icon: drop the
+        -- circular mask, reset to the default (square) swipe texture, and use
+        -- a non-circular edge so the radial sweep fills the corners. Removing
+        -- the mask alone is not enough; the swipe texture must be reset too or
+        -- it stays cropped to the old circular shape.
+        if btn.Icon and btn.Icon.Cooldown then
+            local cd = btn.Icon.Cooldown
+            if btn.Icon.TextureMask then
+                pcall(cd.RemoveMaskTexture, cd, btn.Icon.TextureMask)
+            end
+            if cd.SetSwipeTexture then pcall(cd.SetSwipeTexture, cd, "") end
+            if cd.SetUseCircularEdge then pcall(cd.SetUseCircularEdge, cd, false) end
+            -- Resetting the swipe texture above drops whatever darkness the old
+            -- circular swipe had, so pin it explicitly for a defined, consistent
+            -- look (matches the standard cooldown swipe darkness used elsewhere).
+            if cd.SetSwipeColor then pcall(cd.SetSwipeColor, cd, 0, 0, 0, 0.8) end
         end
 
         -- Apply icon zoom crop
@@ -6116,16 +6129,28 @@ local function BuildTotemBar()
     -- Position our container
     if tb.unlockPos and tb.unlockPos.point then
         if not EllesmereUI._unlockActive then
-            local PP = EllesmereUI and EllesmereUI.PP
-            local px, py = tb.unlockPos.x or 0, tb.unlockPos.y or 0
-            if PP and PP.SnapForES then
-                local es = totemBarFrame:GetEffectiveScale()
-                px = PP.SnapForES(px, es)
-                py = PP.SnapForES(py, es)
+            -- When the unlock anchor system owns this frame's position (the totem
+            -- is anchored to another element), let it own it -- do NOT slam the
+            -- frame back to the stored absolute unlockPos. Mirrors the cast bar
+            -- and GCD bar. Without this guard every ApplyAll (including the
+            -- rebuild that fires on unlock entry) fights the anchor, so the unlock
+            -- mover snapshots the stale absolute spot and only corrects after a
+            -- manual nudge re-syncs it to the anchored frame -- most visible right
+            -- after a profile import, where the imported absolute pos and the
+            -- imported anchor resolve to different screen positions.
+            local anchored = EllesmereUI.IsUnlockAnchored("ERB_TotemBar")
+            if not (anchored and totemBarFrame:GetLeft()) then
+                local PP = EllesmereUI and EllesmereUI.PP
+                local px, py = tb.unlockPos.x or 0, tb.unlockPos.y or 0
+                if PP and PP.SnapForES then
+                    local es = totemBarFrame:GetEffectiveScale()
+                    px = PP.SnapForES(px, es)
+                    py = PP.SnapForES(py, es)
+                end
+                totemBarFrame:ClearAllPoints()
+                totemBarFrame:SetPoint(tb.unlockPos.point, UIParent,
+                    tb.unlockPos.relPoint or tb.unlockPos.point, px, py)
             end
-            totemBarFrame:ClearAllPoints()
-            totemBarFrame:SetPoint(tb.unlockPos.point, UIParent,
-                tb.unlockPos.relPoint or tb.unlockPos.point, px, py)
         end
     else
         if not EllesmereUI._unlockActive then
@@ -6491,13 +6516,15 @@ function ERB:OnInitialize()
     -- +1 = Up, -1 = Down, 0 = none.
     local function ResolveShiftDir()
         local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
-        if not sp or not sp.enabled then return 0 end
+        if not sp then return 0 end
         local mode = sp.shiftElementsIfNoResource
         if mode ~= "Up" and mode ~= "Down" then return 0 end
-        -- Fires whenever the class resource bar leaves an empty slot: disabled
-        -- for the CURRENT spec via the spec picker, or the spec has no class
-        -- resource. (Master-disabled returns 0 above -- no frame to anchor to.)
-        if not IsSpecDisabled(sp) and GetSecondaryResource() then return 0 end
+        -- Fires whenever the class resource bar leaves an empty slot: hidden via
+        -- the "Show Class Resource" toggle (enabled == false), disabled for the
+        -- CURRENT spec via the spec picker, or the spec has no class resource.
+        -- The frame is now created unconditionally (zero alpha when off), so there
+        -- is always a target to anchor to -- mirrors ResolveShiftDirPower.
+        if sp.enabled ~= false and not IsSpecDisabled(sp) and GetSecondaryResource() then return 0 end
         return (mode == "Up") and 1 or -1
     end
     local function ResolveShiftDirPower()
@@ -6600,6 +6627,17 @@ function ERB:OnEnable()
     -- will re-apply after the full game state is available.
     ERB:ApplyAll()
     RegisterUnlockElements()
+
+    -- Re-render when the global Dark Mode palette changes so the class resource
+    -- bar's dark colours update live. Colours are fetched live each render, so a
+    -- plain rebuild is all that's needed. Guard combat: ApplyAll touches secure
+    -- positioning, so defer to PLAYER_REGEN_ENABLED if locked down.
+    if EllesmereUI.RegisterDarkModeRefresh then
+        EllesmereUI.RegisterDarkModeRefresh(function()
+            if InCombatLockdown() then return end
+            ERB:ApplyAll()
+        end)
+    end
 
     -- Collapse/restore expandIfNoResource when EUI options panel opens/closes
     if EllesmereUI.RegisterOnShow then

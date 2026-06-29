@@ -48,7 +48,8 @@ local defaults = {
             mouseoverExtraBtns   = false,  -- extra buttons only show on minimap mouseover
             greatVaultExtraInfo  = true,
             hideAddonCompartment = false,
-            showOmniumFolio      = true,   -- expansion landing page button (bottom-left)
+            showOmniumFolio      = true,   -- expansion landing page button
+            omniumFolioCorner    = "BOTTOMLEFT",  -- which minimap corner to anchor to
             omniumFolioX         = 0,
             omniumFolioY         = 0,
             omniumFolioScale     = 0.75,
@@ -3057,7 +3058,10 @@ local function PositionOmniumFolio(btn)
     btn:SetFrameLevel((Minimap:GetFrameLevel() or 0) + 10)
     btn:SetScale(mp.omniumFolioScale or 0.75)
     btn:ClearAllPoints()
-    btn:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", mp.omniumFolioX or 0, mp.omniumFolioY or 0)
+    -- Anchor the button's chosen corner to the minimap's same corner; X/Y nudge from
+    -- there (positive X = right, positive Y = up, regardless of corner).
+    local corner = mp.omniumFolioCorner or "BOTTOMLEFT"
+    btn:SetPoint(corner, Minimap, corner, mp.omniumFolioX or 0, mp.omniumFolioY or 0)
     _omniumFolioApplying = false
 end
 

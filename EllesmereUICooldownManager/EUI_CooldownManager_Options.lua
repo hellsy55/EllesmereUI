@@ -177,7 +177,7 @@ initFrame:SetScript("OnEvent", function(self)
                    and bd.barType ~= "custom_buff" then
                     list[#list + 1] = {
                         value = bd.key,
-                        label = bd.name or bd.key,
+                        label = "CDM Bar - " .. (bd.name or bd.key),
                     }
                 end
             end
@@ -196,10 +196,34 @@ initFrame:SetScript("OnEvent", function(self)
         local p = ns.ECME and ns.ECME.db and ns.ECME.db.profile
         if p and p.cdmBars and p.cdmBars.bars then
             for _, bd in ipairs(p.cdmBars.bars) do
-                if bd.key == sel then return bd.name or bd.key end
+                if bd.key == sel then return "CDM Bar - " .. (bd.name or bd.key) end
             end
         end
         return tostring(sel)
+    end
+
+    -- Presets, custom spell IDs, racials, trinkets and custom buffs are
+    -- EllesmereUI-injected icons (not Blizzard cooldown-viewer cooldowns), so they
+    -- have no stable cooldownID to key a glow assignment on. They are NOT
+    -- glow-assignable: the Bar Glows preview leaves their buttons inert.
+    local function IsNonGlowableCDMIcon(frame)
+        if not frame then return false end
+        return (frame._isRacialFrame or frame._isTrinketFrame
+            or frame._isPresetFrame or frame._isItemPresetFrame
+            or frame._isCustomSpellFrame or frame._isCustomBuffFrame) and true or false
+    end
+
+    -- True if any icon on a buff bar has its per-icon "Always Show Buff" override
+    -- set to "on". A single per-icon "on" forces inactive placeholders the same way
+    -- the bar-level "Always Show Buffs" toggle does, so it is mutually exclusive
+    -- with "Keep Buffs in Same Place" -- treated identically to the bar toggle.
+    local function AnyIconAlwaysShowOn(barKey)
+        local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
+        if not sd or type(sd.spellSettings) ~= "table" then return false end
+        for _, ss in pairs(sd.spellSettings) do
+            if type(ss) == "table" and ss.alwaysShow == "on" then return true end
+        end
+        return false
     end
 
     local BG_MODE_VALUES = { ACTIVE = "Buff Active", MISSING = "Buff Missing" }
@@ -1032,6 +1056,9 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     realBtn = prefix and _G[prefix .. i]
                 end
+                -- Preset / custom / racial / trinket / custom-buff icons can't be
+                -- glow-assigned; their button is left inert (no hover, clicks do nothing).
+                local nonGlowable = isCDMBar and IsNonGlowableCDMIcon(realBtn)
                 local _rbTex = realBtn and ((ns._hookFrameData[realBtn] and ns._hookFrameData[realBtn].tex) or realBtn._tex)
                 local hasAction = realBtn and ((realBtn.icon and realBtn.icon:GetTexture()) or (_rbTex and _rbTex:GetTexture()))
                 local iconTex = bf:CreateTexture(nil, "ARTWORK")
@@ -1040,6 +1067,9 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasAction then
                     local srcTex = (realBtn.icon and realBtn.icon:GetTexture()) or (_rbTex and _rbTex:GetTexture())
                     iconTex:SetTexture(srcTex)
+                    -- Desaturate (preview only) icons that can't be glowed so it's
+                    -- clear they're not assignable.
+                    if nonGlowable then iconTex:SetDesaturated(true) end
                     local z = zoom
                     if btnShape == "cropped" then
                         iconTex:SetTexCoord(z, 1 - z, z + 0.10, 1 - z - 0.10)
@@ -1184,7 +1214,7 @@ initFrame:SetScript("OnEvent", function(self)
                 elseif brdSize == 0 then
                     origBrdA = 0
                 end
-                if not isSelected then
+                if not isSelected and not nonGlowable then
                     if hasAssign then
                         bf:SetScript("OnEnter", function()
                             if isCustomShape and bf._shapeBorderTex then
@@ -1265,6 +1295,9 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Left click: always select this button; also open spell picker if no assignments
                 -- Right click: always toggle spell picker
                 bf:SetScript("OnClick", function(self, button)
+                    -- Presets / custom IDs / racials / trinkets / custom buffs are not
+                    -- glow-assignable: ignore both clicks so no glow can be added.
+                    if nonGlowable then return end
                     local pickerOpen = _bgSpellPickerMenu and _bgSpellPickerMenu:IsShown()
                     local pickerOnThis = pickerOpen and _bgSpellPickerMenu._btnIdx == i
 
@@ -1337,6 +1370,15 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 8);  y = y - h
 
+        -- A selected slot that is (now) a preset/custom/racial/trinket icon is not
+        -- glow-assignable -- fall back to the hint instead of showing glow settings.
+        if curBtn and type(curBar) == "string" then
+            local cdmIcons = ns.cdmBarIcons and ns.cdmBarIcons[curBar]
+            if IsNonGlowableCDMIcon(cdmIcons and cdmIcons[curBtn]) then
+                curBtn = nil
+            end
+        end
+
         if not curBtn then
             -- No button selected: show centered hint text
             local hintFrame = CreateFrame("Frame", nil, parent)
@@ -1383,13 +1425,22 @@ initFrame:SetScript("OnEvent", function(self)
                         buffName = C_Spell.GetSpellName(entry.spellID) or ("Spell " .. entry.spellID)
                     end
 
-                    -- Get the button's spell name for the header
+                    -- Get the button's spell name for the header. cooldownID is a
+                    -- CDM cooldown-viewer id, NOT a spell id -- feeding it straight to
+                    -- GetSpellName returns an unrelated ("random") spell. Resolve the
+                    -- icon's real spell id with the same canonical resolver the
+                    -- CD/utility bars use, falling back to the cooldown viewer info.
                     local btnSpellName = "Button " .. curBtn
                     if isCurCDM then
                         local cdmIcons = ns.cdmBarIcons and ns.cdmBarIcons[curBar]
                         local icon = cdmIcons and cdmIcons[curBtn]
-                        if icon and icon.cooldownID then
-                            btnSpellName = C_Spell.GetSpellName(icon.cooldownID) or btnSpellName
+                        if icon then
+                            local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon)
+                            if (not sid) and icon.cooldownID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                                local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(icon.cooldownID)
+                                if info and info.spellID and info.spellID > 0 then sid = info.spellID end
+                            end
+                            if sid then btnSpellName = C_Spell.GetSpellName(sid) or btnSpellName end
                         end
                     else
                         local prefix = BAR_BUTTON_PREFIXES[curBar]
@@ -1669,32 +1720,60 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end)
 
-    -- Refresh the Tracking Bars page on spec change. TBB config is per-spec, but
-    -- the dropdown label and the selected-bar index are page-local state that
-    -- only recompute on build or on interaction. Swapping spec while the page is
-    -- open therefore leaves a stale selection on screen (the previous spec's
-    -- selected bar -- e.g. Balance's "Eclipse (Solar)" still shown on Feral)
-    -- until the user clicks something. Reset the selection on every spec change,
-    -- and re-run the page's refresh when the Tracking Bars page is the active one
-    -- so the dropdown label and preview rebuild against the new spec's bars.
-    -- _tbbRefreshFn is assigned inside BuildBuffBarsPage (latest closure); the
-    -- watcher frame is created once here so the page can be (re)built freely
-    -- without stacking duplicate event registrations.
+    -- Refresh the CDM options pages on spec change. Every CDM page (Bars, Bar
+    -- Glows, Tracking Bars) is per-spec, and so is the page-local selected-bar
+    -- index. The options panel caches built pages, so after a spec swap the cache
+    -- holds wrappers built for the PREVIOUS spec. A shared-profile spec swap never
+    -- runs RefreshAllAddons (which is what clears the cache on a profile swap), so
+    -- without an explicit invalidation, reopening the panel serves the stale page
+    -- (the previous spec's selected bar -- e.g. Balance's "Eclipse (Solar)" still
+    -- shown on Feral). Drop the CDM page cache so the next open rebuilds fresh; if
+    -- a CDM page is open right now, rebuild it in place via RefreshPage.
     local _tbbRefreshFn
+    local function HandleTBBSpecChange()
+        _tbbSelectedBar = 1
+        -- Every CDM page is per-spec; drop the cached wrappers so navigating to
+        -- any of them rebuilds against the new spec.
+        if EllesmereUI.InvalidateModulePageCache then
+            EllesmereUI:InvalidateModulePageCache("EllesmereUICooldownManager")
+        end
+        if EllesmereUI.IsShown and EllesmereUI:IsShown()
+            and EllesmereUI.GetActiveModule and EllesmereUI:GetActiveModule() == "EllesmereUICooldownManager"
+            and EllesmereUI.RefreshPage then
+            -- Panel open on a CDM page: rebuild now (content-header dropdown + body).
+            EllesmereUI:RefreshPage(true)
+        else
+            -- Panel closed (or on another module). Reopening takes the fast
+            -- RefreshPage path (re-reads body widgets but never rebuilds the
+            -- content-header dropdown), and SelectPage early-returns when the last
+            -- page is reselected -- so the dropdown would keep the previous spec's
+            -- bar. Flag a cold rebuild for the next show so the page looks freshly
+            -- built, matching a first open after reload.
+            ns._cdmColdRebuildOnShow = true
+        end
+    end
+
+    -- Authoritative trigger: CDM's ProcessSpecChange calls this AFTER it swaps the
+    -- spec-key cache (_cachedSpecKey), so the rebuild reads the NEW spec. The
+    -- PLAYER_SPECIALIZATION_CHANGED watcher below is a backup that also covers the
+    -- panel-closed cache drop; that event can fire before SPELLS_CHANGED swaps the
+    -- cache, so an in-place rebuild driven from it alone could read the old spec --
+    -- but the ProcessSpecChange call always lands afterward and corrects it.
+    ns.OnTBBSpecChanged = HandleTBBSpecChange
+
     local _tbbSpecWatcher = CreateFrame("Frame")
     _tbbSpecWatcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-    _tbbSpecWatcher:SetScript("OnEvent", function()
-        _tbbSelectedBar = 1
-        -- Only refresh when the options panel is actually OPEN on the Tracking
-        -- Bars page. GetActivePage() reports the last-selected page even while
-        -- the panel is closed, so without the IsShown() gate a spec swap (which
-        -- also fires on login/reload) would run RefreshTBB -> UpdateTBBPlaceholder
-        -- and force the "Move in Unlock Mode" placeholders on with no panel open.
-        if not (EllesmereUI.IsShown and EllesmereUI:IsShown()) then return end
-        local am = EllesmereUI.GetActiveModule and EllesmereUI:GetActiveModule()
-        local ap = EllesmereUI.GetActivePage and EllesmereUI:GetActivePage()
-        if am == "EllesmereUICooldownManager" and ap == PAGE_BUFF_BARS and _tbbRefreshFn then
-            _tbbRefreshFn()
+    _tbbSpecWatcher:SetScript("OnEvent", HandleTBBSpecChange)
+
+    -- A spec swap while the panel is CLOSED can't rebuild the page (nothing is
+    -- shown). Honor the pending cold rebuild here so reopening directly onto a CDM
+    -- page rebuilds the dropdown + body against the new spec, like a fresh open.
+    EllesmereUI:RegisterOnShow(function()
+        if not ns._cdmColdRebuildOnShow then return end
+        if EllesmereUI.GetActiveModule and EllesmereUI:GetActiveModule() == "EllesmereUICooldownManager"
+            and EllesmereUI.RefreshPage then
+            ns._cdmColdRebuildOnShow = false
+            EllesmereUI:RefreshPage(true)
         end
     end)
 
@@ -2215,9 +2294,29 @@ initFrame:SetScript("OnEvent", function(self)
             return math.abs(y)
         end
 
-        -- Action buttons: use Blizzard bars + open Blizzard CDM
-        _, h = W:WideDualButton(parent,
-            "Use Blizzard CDM Bars", "Open Blizzard CDM", y,
+        local tbb = ns.GetTrackedBuffBars()
+        local bars = tbb.bars
+        if _tbbSelectedBar > #bars then _tbbSelectedBar = math.max(1, #bars) end
+
+        local function SelectedTBB()
+            local t = ns.GetTrackedBuffBars()
+            if _tbbSelectedBar < 1 or _tbbSelectedBar > #t.bars then return nil end
+            return t.bars[_tbbSelectedBar]
+        end
+
+        -- Action buttons: use Blizzard bars + open Blizzard CDM + broadcast toggle.
+        -- The third button broadcasts the selected bar to every other spec, then
+        -- flips to "Remove Bar from All Specs" (the inverse). It is disabled unless
+        -- that bar is a preset or a custom buff ID.
+        local _selForBroadcast = SelectedTBB()
+        local _canBroadcast = ns.IsTrackedBuffBarBroadcastable
+            and ns.IsTrackedBuffBarBroadcastable(_selForBroadcast) or false
+        local _isBroadcast = ns.IsTrackedBuffBarBroadcast
+            and ns.IsTrackedBuffBarBroadcast(_selForBroadcast) or false
+        local _broadcastLabel = _isBroadcast and "Remove Bar from All Specs"
+                                              or "Add Bar to All Specs"
+        _, h = W:WideTripleButton(parent,
+            "Use Blizzard CDM Bars", "Open Blizzard CDM", _broadcastLabel, y,
             function()
                 EllesmereUI:ShowConfirmPopup({
                     title = "Use Blizzard Bars",
@@ -2237,17 +2336,41 @@ initFrame:SetScript("OnEvent", function(self)
                 if ns.OpenBlizzardCDMTab then
                     ns.OpenBlizzardCDMTab(true)
                 end
-            end, 310);  y = y - h
-
-        local tbb = ns.GetTrackedBuffBars()
-        local bars = tbb.bars
-        if _tbbSelectedBar > #bars then _tbbSelectedBar = math.max(1, #bars) end
-
-        local function SelectedTBB()
-            local t = ns.GetTrackedBuffBars()
-            if _tbbSelectedBar < 1 or _tbbSelectedBar > #t.bars then return nil end
-            return t.bars[_tbbSelectedBar]
-        end
+            end,
+            function()
+                local bd = SelectedTBB()
+                if not ns.IsTrackedBuffBarBroadcastable(bd) then return end
+                local nm = bd.name or "Bar"
+                if (not bd.popularKey or bd.popularKey == "") and bd.spellID and bd.spellID > 0 then
+                    local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(bd.spellID)
+                    if info and info.name then nm = info.name end
+                end
+                if ns.IsTrackedBuffBarBroadcast and ns.IsTrackedBuffBarBroadcast(bd) then
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Remove Bar from All Specs",
+                        message = EllesmereUI.Lf("Remove \"%1$s\" from every other spec? The bar in this spec is kept.", nm),
+                        confirmText = "Remove from All",
+                        cancelText = "Cancel",
+                        onConfirm = function()
+                            if ns.RemoveBarFromAllSpecs then ns.RemoveBarFromAllSpecs(_tbbSelectedBar) end
+                            EllesmereUI:RefreshPage(true)
+                        end,
+                    })
+                else
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Add Bar to All Specs",
+                        message = EllesmereUI.Lf("Add \"%1$s\" to every spec? It will be copied to each of your specs that doesn't already have it.", nm),
+                        confirmText = "Add to All Specs",
+                        cancelText = "Cancel",
+                        onConfirm = function()
+                            if ns.AddBarToAllSpecs then ns.AddBarToAllSpecs(_tbbSelectedBar) end
+                            EllesmereUI:RefreshPage(true)
+                        end,
+                    })
+                end
+            end, 225,
+            { [3] = { disabled = not _canBroadcast,
+                      tooltip = "Only preset or custom buff bars can be added to all specs" } });  y = y - h
 
         local _tbbRefreshTimer
 
@@ -4960,36 +5083,10 @@ initFrame:SetScript("OnEvent", function(self)
             mH = mH + ITEM_H
         end
 
-        -- Custom Item ID entry -- add an arbitrary item by its item ID (e.g. a
-        -- food/consumable), rendered with the item icon + item cooldown + bag
-        -- count. Stored as a negative marker (-itemID) via AddTrackedSpell.
-        do
-            local ciItem = CreateFrame("Button", nil, inner)
-            ciItem:SetHeight(ITEM_H)
-            ciItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
-            ciItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
-            ciItem:SetFrameLevel(menu:GetFrameLevel() + 2)
-            local ciHl = ciItem:CreateTexture(nil, "ARTWORK")
-            ciHl:SetAllPoints(); ciHl:SetColorTexture(1, 1, 1, 0); ciHl:SetAlpha(0)
-            local ciLbl = ciItem:CreateFontString(nil, "OVERLAY")
-            ciLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-            ciLbl:SetPoint("LEFT", 10, 0); ciLbl:SetJustifyH("LEFT")
-            ciLbl:SetText(EllesmereUI.L("Custom Item ID"))
-            ciLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-            ciItem:SetScript("OnEnter", function() ciLbl:SetTextColor(1, 1, 1, 1); ciHl:SetColorTexture(1, 1, 1, hlA); ciHl:SetAlpha(1) end)
-            ciItem:SetScript("OnLeave", function() ciLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA); ciHl:SetAlpha(0) end)
-            ciItem:SetScript("OnClick", function()
-                menu:Hide()
-                ShowCustomItemIDPopup(targetBarKey, function(marker)
-                    ns._cdmAnyCustomItem = true
-                    ns.AddTrackedSpell(targetBarKey, marker)
-                    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
-                    if ns.QueueReanchor then ns.QueueReanchor() end
-                    RefreshCDPreview()
-                end)
-            end)
-            mH = mH + ITEM_H
-        end
+        -- NOTE: No "Custom Item ID" entry here. Buff bars track auras only (spell
+        -- IDs); items (stored as negative -itemID markers) belong on CD/utility
+        -- bars. The cdm_strip_buff_bar_item_ids_v1 migration removes any legacy
+        -- item markers that were placed on buff bars before this restriction.
 
         -- Divider below Custom Spell ID, separating it from the presets/list.
         do
@@ -5304,7 +5401,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local menuW = 210
         local ITEM_H = 26
-        local MAX_H = 260
+        local MAX_H = 300  -- tall enough for the per-buff settings rows incl. the second Audio row (Gain + Loss)
 
         local menu = CreateFrame("Frame", nil, UIParent)
         menu:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -5602,8 +5699,16 @@ initFrame:SetScript("OnEvent", function(self)
                         lbl:SetJustifyH("LEFT")
                         lbl:SetText(label)
 
+                        -- Optional disabled state (opts.disabled = function -> bool):
+                        -- greys the row, blocks the flyout, and shows a tooltip.
+                        local function RowDisabled()
+                            return opts and opts.disabled and opts.disabled() or false
+                        end
+
                         local function UpdateLabelColor()
-                            if not isDefault() then
+                            if RowDisabled() then
+                                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
+                            elseif not isDefault() then
                                 lbl:SetTextColor(acR, acG, acB, 1)
                             else
                                 lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
@@ -5615,7 +5720,7 @@ initFrame:SetScript("OnEvent", function(self)
                         arrow:SetSize(10, 10)
                         arrow:SetPoint("RIGHT", row, "RIGHT", -8, 0)
                         arrow:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\right-arrow.png")
-                        arrow:SetAlpha(0.7)
+                        arrow:SetAlpha(RowDisabled() and 0.2 or 0.7)
 
                         local hl = row:CreateTexture(nil, "ARTWORK")
                         hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0); hl:SetAlpha(0)
@@ -5986,11 +6091,18 @@ initFrame:SetScript("OnEvent", function(self)
                         end
 
                         row:SetScript("OnEnter", function()
+                            if RowDisabled() then
+                                if opts.disabledTooltip then
+                                    EllesmereUI.ShowWidgetTooltip(row, opts.disabledTooltip)
+                                end
+                                return
+                            end
                             lbl:SetTextColor(1, 1, 1, 1)
                             hl:SetColorTexture(1, 1, 1, hlA); hl:SetAlpha(1)
                             ShowSub()
                         end)
                         row:SetScript("OnLeave", function()
+                            if opts and opts.disabledTooltip then EllesmereUI.HideWidgetTooltip() end
                             UpdateLabelColor()
                             hl:SetAlpha(0)
                             -- Don't auto-close sub here. It closes when:
@@ -6225,10 +6337,10 @@ initFrame:SetScript("OnEvent", function(self)
                                       order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
                                       get=function() return ss.stackCountPosition or (cdmBd and cdmBd.stackCountPosition) or "bottomright" end,
                                       set=function(v) EnsureSS(); ss.stackCountPosition = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
-                                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                                    { type="slider", label="X Offset", min=-150, max=150, step=1,
                                       get=function() return ss.stackCountX or (cdmBd and cdmBd.stackCountX) or 0 end,
                                       set=function(v) EnsureSS(); ss.stackCountX = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
-                                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                                    { type="slider", label="Y Offset", min=-150, max=150, step=1,
                                       get=function() return ss.stackCountY or (cdmBd and cdmBd.stackCountY) or 0 end,
                                       set=function(v) EnsureSS(); ss.stackCountY = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
                                 },
@@ -6274,8 +6386,26 @@ initFrame:SetScript("OnEvent", function(self)
                             }
                             MakeSubnavRow("Always Show Buff", ALWAYS_SHOW_ITEMS,
                                 function() return ss.alwaysShow end,
-                                function(v) EnsureSS(); ss.alwaysShow = v end,
-                                function() return ss.alwaysShow == nil end)
+                                function(v)
+                                    EnsureSS(); ss.alwaysShow = v
+                                    -- Refresh the page so "Keep Buffs in Same Place"
+                                    -- grays/ungrays as this per-icon override flips.
+                                    if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                                end,
+                                function() return ss.alwaysShow == nil end,
+                                nil,
+                                -- Mutually exclusive with the bar's "Keep Buffs in Same
+                                -- Place": that mode reserves every buff's slot and ignores
+                                -- per-icon overrides, so disable this row while it's on.
+                                -- Escape hatch: if THIS icon is the one already forcing
+                                -- "on" (legacy both-enabled data), keep the row editable so
+                                -- the user can clear it, which re-enables Keep Buffs.
+                                { disabled = function()
+                                      local bd = ns.barDataByKey and ns.barDataByKey[barKey]
+                                      return bd and bd.hidePlaceholderIcon == true
+                                          and ss.alwaysShow ~= "on" or false
+                                  end,
+                                  disabledTooltip = "Disabled while Keep Buffs in Same Place is enabled" })
 
                             -- Desaturate Inactive: per-icon tri-state override of the bar's
                             -- Always Show Buffs "Desaturate Off CD" cog setting. Applies to
@@ -6290,11 +6420,13 @@ initFrame:SetScript("OnEvent", function(self)
                                 function(v) EnsureSS(); ss.desatInactive = v end,
                                 function() return ss.desatInactive == nil end)
 
-                            -- Audio Effect: play a sound when this buff becomes active.
-                            -- Sound list + speaker preview mirror the Focus Cast Sound
-                            -- dropdown (shared ns.FOCUSKICK_SOUND_* tables). Stored
-                            -- per-icon as ss.buffActiveSoundKey ("none"/nil = silent);
-                            -- the apply-edge hook (EnsureBuffSoundHook) fires it live.
+                            -- Audio on Buff Gain / Loss: play a sound when this buff
+                            -- becomes active (gain) or drops (loss). Both rows share the
+                            -- same sound list + speaker preview as the Focus Cast Sound
+                            -- dropdown (shared ns.FOCUSKICK_SOUND_* tables). Stored per-icon
+                            -- as ss.buffActiveSoundKey / ss.buffLostSoundKey ("none"/nil =
+                            -- silent); the edge hooks (EnsureBuffSoundHook -> Blizzard's
+                            -- TriggerAuraAppliedAlert / TriggerAuraRemovedAlert) fire live.
                             local AUDIO_ITEMS = {}
                             for _, key in ipairs(ns.FOCUSKICK_SOUND_ORDER or { "none" }) do
                                 if type(key) == "string" and key:sub(1, 3) == "---" then
@@ -6309,37 +6441,51 @@ initFrame:SetScript("OnEvent", function(self)
                                     }
                                 end
                             end
-                            MakeSubnavRow("Audio Effect", AUDIO_ITEMS,
+                            -- Shared speaker-preview decorator: plays a row's focused sound
+                            -- without selecting it (mirrors the dropdown's preview icon).
+                            -- Used by both the Gain and Loss rows so they stay identical.
+                            local function AddSoundPreview(si, item)
+                                if item.val and item.val ~= "none" then
+                                    local play = CreateFrame("Button", nil, si)
+                                    play:SetSize(16, 16)
+                                    play:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                    play:SetFrameLevel(si:GetFrameLevel() + 2)
+                                    play:SetNormalAtlas("common-icon-sound")
+                                    play:SetPushedAtlas("common-icon-sound-pressed")
+                                    play:SetScript("OnClick", function()
+                                        local paths = ns.FOCUSKICK_SOUND_PATHS
+                                        local path = paths and paths[item.val]
+                                        if path then PlaySoundFile(path, "Master") end
+                                    end)
+                                    play:SetScript("OnEnter", function()
+                                        EllesmereUI.ShowWidgetTooltip(play, "Preview Sound")
+                                    end)
+                                    play:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                                end
+                            end
+                            MakeSubnavRow("Audio on Buff Gain", AUDIO_ITEMS,
                                 function() return ss.buffActiveSoundKey or "none" end,
                                 function(v)
                                     EnsureSS()
                                     ss.buffActiveSoundKey = (v ~= "none" and v) or nil
-                                    -- Flip the 0-cost gate live so the apply-edge hook
-                                    -- starts attaching on the next refresh.
+                                    -- Flip the 0-cost gate live so the edge hook starts
+                                    -- attaching on the next refresh.
                                     if ss.buffActiveSoundKey then ns._cdmAnyBuffSound = true end
                                 end,
                                 function() return ss.buffActiveSoundKey == nil end,
-                                function(si, item)
-                                    -- Speaker preview button: plays the sound without
-                                    -- selecting it (mirrors the dropdown's preview icon).
-                                    if item.val and item.val ~= "none" then
-                                        local play = CreateFrame("Button", nil, si)
-                                        play:SetSize(16, 16)
-                                        play:SetPoint("RIGHT", si, "RIGHT", -8, 0)
-                                        play:SetFrameLevel(si:GetFrameLevel() + 2)
-                                        play:SetNormalAtlas("common-icon-sound")
-                                        play:SetPushedAtlas("common-icon-sound-pressed")
-                                        play:SetScript("OnClick", function()
-                                            local paths = ns.FOCUSKICK_SOUND_PATHS
-                                            local path = paths and paths[item.val]
-                                            if path then PlaySoundFile(path, "Master") end
-                                        end)
-                                        play:SetScript("OnEnter", function()
-                                            EllesmereUI.ShowWidgetTooltip(play, "Preview Sound")
-                                        end)
-                                        play:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                                    end
+                                AddSoundPreview,
+                                { searchable = true })
+                            MakeSubnavRow("Audio on Buff Loss", AUDIO_ITEMS,
+                                function() return ss.buffLostSoundKey or "none" end,
+                                function(v)
+                                    EnsureSS()
+                                    ss.buffLostSoundKey = (v ~= "none" and v) or nil
+                                    -- Same 0-cost gate covers both edges; the hook reads
+                                    -- each key independently.
+                                    if ss.buffLostSoundKey then ns._cdmAnyBuffSound = true end
                                 end,
+                                function() return ss.buffLostSoundKey == nil end,
+                                AddSoundPreview,
                                 { searchable = true })
                         end
                     else
@@ -6856,6 +7002,71 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
+                    -- 4b. Audio Effect on CD Ready (cd/utility per-icon): play a sound
+                    -- the moment the spell's real cooldown finishes. Same sound list +
+                    -- speaker preview as the buff Audio rows / Focus Cast Sound (shared
+                    -- ns.FOCUSKICK_SOUND_* tables); stored as ss.cdReadySoundKey
+                    -- ("none"/nil = silent). The per-frame SetDesaturated edge hook
+                    -- (gated by ns._cdmAnyCdReadySound) fires it on the on-CD -> ready edge.
+                    local CDR_AUDIO_ITEMS = {}
+                    for _, key in ipairs(ns.FOCUSKICK_SOUND_ORDER or { "none" }) do
+                        if type(key) == "string" and key:sub(1, 3) == "---" then
+                            CDR_AUDIO_ITEMS[#CDR_AUDIO_ITEMS + 1] = { divider = true }
+                        else
+                            CDR_AUDIO_ITEMS[#CDR_AUDIO_ITEMS + 1] = {
+                                val   = key,
+                                label = (ns.FOCUSKICK_SOUND_NAMES and ns.FOCUSKICK_SOUND_NAMES[key]) or key,
+                            }
+                        end
+                    end
+                    local function AddCdrSoundPreview(si, item)
+                        if item.val and item.val ~= "none" then
+                            local play = CreateFrame("Button", nil, si)
+                            play:SetSize(16, 16)
+                            play:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                            play:SetFrameLevel(si:GetFrameLevel() + 2)
+                            play:SetNormalAtlas("common-icon-sound")
+                            play:SetPushedAtlas("common-icon-sound-pressed")
+                            play:SetScript("OnClick", function()
+                                local paths = ns.FOCUSKICK_SOUND_PATHS
+                                local path = paths and paths[item.val]
+                                if path then PlaySoundFile(path, "Master") end
+                            end)
+                            play:SetScript("OnEnter", function()
+                                EllesmereUI.ShowWidgetTooltip(play, "Preview Sound")
+                            end)
+                            play:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        end
+                    end
+                    local cdReadySoundRow = MakeSubnavRow("Audio Effect on CD Ready", CDR_AUDIO_ITEMS,
+                        function() return ss.cdReadySoundKey or "none" end,
+                        function(v)
+                            EnsureSS()
+                            ss.cdReadySoundKey = (v ~= "none" and v) or nil
+                            -- Flip the 0-cost gate live so the edge hook starts evaluating
+                            -- on the next desaturation tick, and refresh so a CHARGE spell
+                            -- registers on the SPELL_UPDATE_CHARGES watcher immediately.
+                            if ss.cdReadySoundKey then ns._cdmAnyCdReadySound = true end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.cdReadySoundKey == nil end,
+                        AddCdrSoundPreview,
+                        { searchable = true })
+                    -- Custom-injected spells drive their cd-state through the Fake-Active
+                    -- engine, not the SetDesaturated/GetSpellCooldown edge this sound
+                    -- rides, so dim the row for them (same as Cooldown State Effect above).
+                    if isCustomInjected and cdReadySoundRow then
+                        cdReadySoundRow:SetAlpha(0.35)
+                        cdReadySoundRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(cdReadySoundRow, customDisabledTip)
+                            end
+                        end)
+                        cdReadySoundRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
                     -- 5. Glow Effect Color (unified color for all glow types)
                     local GLOW_COLOR_ITEMS = {
                         { val = nil,      label = "Default" },
@@ -7029,6 +7240,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.activeGlowB = ss.activeGlowB
                                     os.maxStacksGlow = ss.maxStacksGlow
                                     os.cdStateEffect = ss.cdStateEffect
+                                    os.cdReadySoundKey = ss.cdReadySoundKey
                                     os.chargeHideSwipe = ss.chargeHideSwipe
                                     os.hideRechargeEdge = ss.hideRechargeEdge
                                     os.chargeHideCdText = ss.chargeHideCdText
@@ -11109,8 +11321,11 @@ initFrame:SetScript("OnEvent", function(self)
         if isBuffBar then
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Keep Buffs in Same Place",
-                  disabled=function() return BD().showInactiveBuffIcons == true end,
-                  disabledTooltip="Disabled while Always Show Buffs is enabled", rawTooltip=true,
+                  disabled=function()
+                      local b = BD()
+                      return b.showInactiveBuffIcons == true or AnyIconAlwaysShowOn(b.key)
+                  end,
+                  disabledTooltip="Disabled while Always Show Buffs is enabled (on the bar, or on any individual buff)", rawTooltip=true,
                   getValue=function() return BD().hidePlaceholderIcon == true end,
                   setValue=function(v)
                       BD().hidePlaceholderIcon = v
@@ -11517,7 +11732,7 @@ initFrame:SetScript("OnEvent", function(self)
             scaleAnimRow, h = W:DualRow(parent, y,
                 row1Left,
                 { type="slider", text="Icon Scale",
-                  min=16, max=80, step=1,
+                  min=16, max=100, step=1,
                   disabled=icsDis, disabledTooltip=icsTip, rawTooltip=true,
                   getValue=function() return BD().iconSize or 36 end,
                   setValue=function(v)
@@ -12026,7 +12241,7 @@ initFrame:SetScript("OnEvent", function(self)
         local icsTip2 = function() if icsWDis2() then return icsWTip2() end if icsHDis2() then return icsHTip2() end return false end
         scaleAnimRow, h = W:DualRow(parent, y,
             { type="slider", text="Icon Scale",
-              min=16, max=80, step=1,
+              min=16, max=100, step=1,
               disabled=icsDis2, disabledTooltip=icsTip2, rawTooltip=true,
               getValue=function() return BD().iconSize or 36 end,
               setValue=function(v)
@@ -12572,13 +12787,13 @@ initFrame:SetScript("OnEvent", function(self)
                           BD().stackCountPosition = v
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                       end },
-                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                    { type="slider", label="X Offset", min=-150, max=150, step=1,
                       get=function() return BD().stackCountX or 0 end,
                       set=function(v)
                           BD().stackCountX = v
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                       end },
-                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                    { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return BD().stackCountY or 0 end,
                       set=function(v)
                           BD().stackCountY = v

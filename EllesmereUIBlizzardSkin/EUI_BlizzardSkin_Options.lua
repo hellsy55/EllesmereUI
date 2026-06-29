@@ -25,14 +25,16 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, "BLIZZARD UI ELEMENTS", y);  y = y - h
 
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Reskin Blizzard Elements",
-              tooltip="Reskins Blizzard tooltips, right-click context menus, and popups with a dark, minimal style matching the EUI aesthetic. Requires reload to apply.",
+            { type="toggle", text="Reskin Popups and Menus",
+              tooltip="Reskins Blizzard's right-click context menus and pop-up dialogs with the EUI dark style. Requires reload to apply.",
               getValue=function()
-                  return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
+                  -- Seeded from the old master by the blizzskin_reskin_master_split_v1
+                  -- migration; independent thereafter. Default on.
+                  return not EllesmereUIDB or EllesmereUIDB.reskinPopupsMenus ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.customTooltips = v
+                  EllesmereUIDB.reskinPopupsMenus = v
                   if EllesmereUI.ShowConfirmPopup then
                       EllesmereUI:ShowConfirmPopup({
                           title       = "Reload Required",
@@ -55,15 +57,6 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
 
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Player Titles in Tooltips",
-              tooltip="Shows a player's RP title on their unit tooltip.",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.tooltipPlayerTitles or false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.tooltipPlayerTitles = v
-              end },
             { type="slider", text="Font Size Scale",
               tooltip="Scales the font size of reskinned Blizzard tooltips, menus, and popups.",
               min=0.7, max=1.5, step=0.05, format="%.0f%%",
@@ -74,73 +67,47 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipFontScale = v
-              end }
+              end },
+            { type="label", text="" }
         );  y = y - h
 
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Detailed Tooltips",
-              tooltip="Shows full spell and ability descriptions in tooltips instead of just the name. Only enforced on login after you toggle this setting.",
-              getValue=function()
-                  return GetCVar("UberTooltips") == "1"
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.uberTooltipsManual = true
-                  EllesmereUIDB.uberTooltips = v
-                  SetCVar("UberTooltips", v and "1" or "0")
-              end },
-            { type="toggle", text="Show M+ Score",
-              tooltip="Displays a player's Mythic+ score on their unit tooltip, colored by rarity.",
-              getValue=function()
-                  return not EllesmereUIDB or EllesmereUIDB.tooltipMythicScore ~= false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.tooltipMythicScore = v
-              end }
-        );  y = y - h
+        _, h = W:Spacer(parent, y, 20);  y = y - h
 
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Item Level",
-              tooltip="Displays a player's equipped item level on their unit tooltip.",
-              getValue=function()
-                  return not EllesmereUIDB or EllesmereUIDB.tooltipItemLevel ~= false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.tooltipItemLevel = v
-              end },
-            -- Front-end duplicate of the toggle in Global Settings > Developer;
-            -- same EllesmereUIDB.showSpellID key read by the tooltip logic in
-            -- EllesmereUI.lua (no separate backend).
-            { type="toggle", text="Show Spell ID on Tooltip",
-              tooltip="Appends the spell or item ID to tooltips. The same setting as Global Settings > Developer.",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.showSpellID or false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.showSpellID = v
-              end }
-        );  y = y - h
+        _, h = W:SectionHeader(parent, "BLIZZARD TOOLTIP", y);  y = y - h
 
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Calendar Lockouts",
-              tooltip="Shows saved instance lockouts with boss kill progress on the minimap calendar button tooltip.",
-              getValue=function()
-                  return not EllesmereUIDB or EllesmereUIDB.calendarLockoutTooltip ~= false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.calendarLockoutTooltip = v
-              end },
-            { type="spacer" }
-        );  y = y - h
+        -- "Reskin Tooltip" (customTooltips) is the master for this section: its
+        -- reskin-driven sub-settings gray out (and stop applying) when it is off.
+        -- "Show Detailed Tooltips" and "Show Spell ID" are NOT gated -- they are
+        -- real, independent settings usable without the EUI tooltip skin, so they
+        -- live at the bottom and stay editable.
+        local function ttReskinOff()
+            return EllesmereUIDB and EllesmereUIDB.customTooltips == false
+        end
 
         local ttCursorRow
         ttCursorRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Anchor Tooltip to Cursor",
+            { type="toggle", text="Reskin Tooltip",
+              tooltip="Reskins Blizzard tooltips with a dark, minimal style matching the EUI aesthetic. Requires reload to apply.",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.customTooltips = v
+                  EllesmereUI:RefreshPage()  -- gray/ungray the rest of the section now
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Reskin setting requires a UI reload to fully apply.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+              end },
+            { type="toggle", text="Anchor to Cursor",
               tooltip="Makes the game tooltip follow your mouse cursor instead of appearing in the default screen corner. Use the arrows icon to pick the position relative to the cursor and fine-tune the X/Y offset.",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
               getValue=function()
                   return EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor or false
               end,
@@ -148,13 +115,12 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipAnchorCursor = v
                   if EllesmereUI._applyTooltipCursorAnchor then EllesmereUI._applyTooltipCursorAnchor() end
-              end },
-            { type="spacer" }
+              end }
         );  y = y - h
 
-        -- Position control on Anchor Tooltip to Cursor (left region): position + X/Y offset
+        -- Position control on Anchor to Cursor (right region): position + X/Y offset
         do
-            local leftRgn = ttCursorRow._leftRegion
+            local rightRgn = ttCursorRow._rightRegion
             local function ttCursorOff()
                 return not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor)
             end
@@ -188,11 +154,11 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             -- Manual position button (this file has no shared button helper)
-            local ttPosBtn = CreateFrame("Button", nil, leftRgn)
+            local ttPosBtn = CreateFrame("Button", nil, rightRgn)
             ttPosBtn:SetSize(26, 26)
-            ttPosBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
-            leftRgn._lastInline = ttPosBtn
-            ttPosBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            ttPosBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = ttPosBtn
+            ttPosBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
             ttPosBtn:SetAlpha(ttCursorOff() and 0.15 or 0.4)
             local ttPosTex = ttPosBtn:CreateTexture(nil, "OVERLAY")
             ttPosTex:SetAllPoints()
@@ -207,7 +173,7 @@ initFrame:SetScript("OnEvent", function(self)
             ttPosBlock:SetFrameLevel(ttPosBtn:GetFrameLevel() + 10)
             ttPosBlock:EnableMouse(true)
             ttPosBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(ttPosBtn, EllesmereUI.DisabledTooltip("Anchor Tooltip to Cursor"))
+                EllesmereUI.ShowWidgetTooltip(ttPosBtn, EllesmereUI.DisabledTooltip("Anchor to Cursor"))
             end)
             ttPosBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateTtPosState()
@@ -217,6 +183,164 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateTtPosState)
             UpdateTtPosState()
+        end
+
+        -- Unified tooltip background: controls BOTH the Blizzard tooltip reskin
+        -- and the EUI custom tooltips (read live via EllesmereUI.GetTooltipBg).
+        -- Defaults to the RESKIN palette (#111111 @ 92%); the next tooltip shown
+        -- picks up changes, so no reload is needed.
+        _, h = W:DualRow(parent, y,
+            { type="colorpicker", text="Background Color",
+              tooltip="Background color for both Blizzard tooltips and EllesmereUI's own tooltips",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  local c = EllesmereUIDB and EllesmereUIDB.tooltipBgColor
+                  if c then return c.r, c.g, c.b end
+                  local R = EllesmereUI.RESKIN
+                  return R.BG_R, R.BG_G, R.BG_B
+              end,
+              setValue=function(r, g, b)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipBgColor = { r = r, g = g, b = b }
+              end },
+            { type="slider", text="Background Opacity", min=0, max=100, step=1,
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  local a = (EllesmereUIDB and EllesmereUIDB.tooltipBgOpacity) or EllesmereUI.RESKIN.TT_ALPHA
+                  return math.floor(a * 100 + 0.5)
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipBgOpacity = v / 100
+              end });  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show M+ Score",
+              tooltip="Displays a player's Mythic+ score on their unit tooltip, colored by rarity.",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.tooltipMythicScore ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipMythicScore = v
+              end },
+            { type="dropdown", text="Show Tooltips",
+              tooltip="Controls when game tooltips appear",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              values={ always="Always", outOfCombat="Out of Combat", outOfBossCombat="Out of Boss Combat", never="Never" },
+              order={ "always", "outOfCombat", "outOfBossCombat", "never" },
+              getValue=function() return (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always" end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipShowMode = v
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Player Titles in Tooltips",
+              tooltip="Shows a player's RP title on their unit tooltip.",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.tooltipPlayerTitles or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipPlayerTitles = v
+              end },
+            { type="toggle", text="Show Item Level",
+              tooltip="Displays a player's equipped item level on their unit tooltip.",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  return not EllesmereUIDB or EllesmereUIDB.tooltipItemLevel ~= false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipItemLevel = v
+              end }
+        );  y = y - h
+
+        -- Show Detailed Tooltips + Show Spell ID are independent of the EUI tooltip
+        -- skin (usable with default Blizzard tooltips), so they are NOT grayed by
+        -- "Reskin Tooltip" and live at the bottom of the section.
+        local sidRow
+        sidRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Detailed Tooltips",
+              tooltip="Shows full spell and ability descriptions in tooltips instead of just the name. Only enforced on login after you toggle this setting.",
+              getValue=function()
+                  return GetCVar("UberTooltips") == "1"
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.uberTooltipsManual = true
+                  EllesmereUIDB.uberTooltips = v
+                  SetCVar("UberTooltips", v and "1" or "0")
+              end },
+            -- Front-end duplicate of the toggle in Global Settings > Developer;
+            -- same EllesmereUIDB.showSpellID key read by the tooltip logic in
+            -- EllesmereUI.lua (no separate backend).
+            { type="toggle", text="Show Spell ID on Tooltip",
+              tooltip="Appends the spell or item ID to tooltips. The same setting as Global Settings > Developer.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.showSpellID or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.showSpellID = v
+                  EllesmereUI:RefreshPage()  -- update the Use Modifier cog disabled state
+              end }
+        );  y = y - h
+
+        -- "Use Modifier" cog on Show Spell ID (right region): the spell/item ID
+        -- lines only show while the chosen modifier is held. Disabled (blocked +
+        -- dimmed) when Show Spell ID is off, mirroring the cursor-position cog.
+        do
+            local rightRgn = sidRow._rightRegion
+            local function sidOff()
+                return not (EllesmereUIDB and EllesmereUIDB.showSpellID)
+            end
+            local _, sidModShow = EllesmereUI.BuildCogPopup({
+                title = "Spell ID",
+                rows = {
+                    { type="dropdown", label="Use Modifier",
+                      values={ none="None", shift="Shift", control="Control", alt="Alt" },
+                      order={ "none", "shift", "control", "alt" },
+                      get=function() return (EllesmereUIDB and EllesmereUIDB.spellIDModifier) or "none" end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.spellIDModifier = v
+                      end },
+                },
+            })
+            local sidModBtn = CreateFrame("Button", nil, rightRgn)
+            sidModBtn:SetSize(26, 26)
+            sidModBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = sidModBtn
+            sidModBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            sidModBtn:SetAlpha(sidOff() and 0.15 or 0.4)
+            local sidModTex = sidModBtn:CreateTexture(nil, "OVERLAY")
+            sidModTex:SetAllPoints()
+            sidModTex:SetTexture(EllesmereUI.COGS_ICON)
+            sidModBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            sidModBtn:SetScript("OnLeave", function(self) self:SetAlpha(sidOff() and 0.15 or 0.4) end)
+            sidModBtn:SetScript("OnClick", function(self) sidModShow(self) end)
+
+            -- Blocking overlay + disabled tooltip when Show Spell ID is off
+            local sidModBlock = CreateFrame("Frame", nil, sidModBtn)
+            sidModBlock:SetAllPoints()
+            sidModBlock:SetFrameLevel(sidModBtn:GetFrameLevel() + 10)
+            sidModBlock:EnableMouse(true)
+            sidModBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(sidModBtn, EllesmereUI.DisabledTooltip("Show Spell ID on Tooltip"))
+            end)
+            sidModBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateSidModState()
+                local off = sidOff()
+                sidModBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then sidModBlock:Show() else sidModBlock:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateSidModState)
+            UpdateSidModState()
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -229,12 +353,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Reskin Queue Popup",
               tooltip="Reskins the LFG/dungeon queue accept popup with the EUI dark style and adds an accept countdown timer bar.",
               getValue=function()
-                  if not EllesmereUIDB then return true end
-                  -- One-time seed from master toggle (written by IsQueueReskinOn at runtime)
-                  if EllesmereUIDB.reskinQueuePopup == nil then
-                      EllesmereUIDB.reskinQueuePopup = (EllesmereUIDB.customTooltips ~= false)
-                  end
-                  return EllesmereUIDB.reskinQueuePopup
+                  -- Independent, default on (not tied to any master reskin toggle).
+                  return not EllesmereUIDB or EllesmereUIDB.reskinQueuePopup ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
@@ -286,11 +406,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Reskin Pause Menu",
               tooltip="Reskins the ESC / Game Menu with the EUI dark style, matching fonts, and accent-colored title.",
               getValue=function()
-                  if not EllesmereUIDB then return true end
-                  if EllesmereUIDB.reskinGameMenu == nil then
-                      EllesmereUIDB.reskinGameMenu = (EllesmereUIDB.customTooltips ~= false) and (EllesmereUIDB.reskinQueuePopup ~= false)
-                  end
-                  return EllesmereUIDB.reskinGameMenu
+                  -- Independent, default on (not tied to any master reskin toggle).
+                  return not EllesmereUIDB or EllesmereUIDB.reskinGameMenu ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
@@ -308,11 +425,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Reskin Great Vault",
               tooltip="Reskins the Great Vault window with custom tile backgrounds, progress colors, and completion states.",
               getValue=function()
-                  if not EllesmereUIDB then return false end
-                  if EllesmereUIDB.reskinGreatVault == nil then
-                      return EllesmereUIDB.customTooltips ~= false
-                  end
-                  return EllesmereUIDB.reskinGreatVault
+                  -- Independent, default on (not tied to any master reskin toggle).
+                  return not EllesmereUIDB or EllesmereUIDB.reskinGreatVault ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
@@ -337,15 +451,8 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Reskin LFG Menu",
               tooltip="Reskins the Group Finder / Premade Groups window with the EUI dark style.",
               getValue=function()
-                  if not EllesmereUIDB then return false end
-                  -- Seed the default ONCE on first read: enabled only if both
-                  -- Reskin Blizzard Elements (customTooltips) and Reskin Queue
-                  -- Popup are enabled at that moment; stored thereafter so it
-                  -- stays fixed regardless of later changes to those toggles.
-                  if EllesmereUIDB.reskinLFGMenu == nil then
-                      EllesmereUIDB.reskinLFGMenu = (EllesmereUIDB.customTooltips ~= false) and (EllesmereUIDB.reskinQueuePopup ~= false)
-                  end
-                  return EllesmereUIDB.reskinLFGMenu
+                  -- Independent, default on (not tied to any master reskin toggle).
+                  return not EllesmereUIDB or EllesmereUIDB.reskinLFGMenu ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
@@ -1154,11 +1261,11 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if EllesmereUIDB then
                 EllesmereUIDB.customTooltips = nil
+                EllesmereUIDB.reskinPopupsMenus = nil
                 EllesmereUIDB.accentReskinElements = nil
                 EllesmereUIDB.tooltipPlayerTitles = nil
                 EllesmereUIDB.tooltipFontScale = nil
                 EllesmereUIDB.tooltipMythicScore = nil
-                EllesmereUIDB.calendarLockoutTooltip = nil
                 EllesmereUIDB.tooltipAnchorCursor = nil
                 EllesmereUIDB.tooltipCursorPosition = nil
                 EllesmereUIDB.tooltipCursorOffsetX = nil
@@ -1167,6 +1274,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.uberTooltipsManual = nil
                 EllesmereUIDB.reskinQueuePopup = nil
                 EllesmereUIDB.reskinGameMenu = nil
+                EllesmereUIDB.reskinGreatVault = nil
+                EllesmereUIDB.reskinLFGMenu = nil
                 EllesmereUIDB.showQueueTimer = nil
                 EllesmereUIDB.showMythicRating = nil
                 EllesmereUIDB.showPvpItemLevel = nil

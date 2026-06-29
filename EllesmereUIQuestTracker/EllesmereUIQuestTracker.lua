@@ -31,6 +31,10 @@ local QT_DEFAULTS = {
             visHideNoTarget      = false,
             visHideNoEnemy       = false,
 
+            -- Raid auto-hide mode: "always" hides the tracker the whole time
+            -- you are in a raid; "boss" (default) only hides it during boss encounters.
+            hideInRaidMode       = "boss",
+
             -- Skin toggles
             skinHeaders          = true,
             accentHeaders        = true,

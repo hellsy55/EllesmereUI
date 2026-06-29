@@ -37,15 +37,10 @@ local function GetFFD(frame)
 end
 
 -------------------------------------------------------------------------------
---  Enable gate. Default seeds ON only if the user already runs the matching
---  Blizzard-skin toggles, then is stored fixed thereafter.
+--  Enable gate. Independent toggle, default on (not tied to any master reskin).
 -------------------------------------------------------------------------------
 local function SkinEnabled()
-    if not EllesmereUIDB then return false end
-    if EllesmereUIDB.reskinLFGMenu == nil then
-        EllesmereUIDB.reskinLFGMenu = (EllesmereUIDB.customTooltips ~= false) and (EllesmereUIDB.reskinQueuePopup ~= false)
-    end
-    return EllesmereUIDB.reskinLFGMenu
+    return not EllesmereUIDB or EllesmereUIDB.reskinLFGMenu ~= false
 end
 
 -------------------------------------------------------------------------------

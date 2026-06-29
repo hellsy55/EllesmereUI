@@ -32,6 +32,15 @@ end
     local function _enabled()
         return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
     end
+    -- Popups + context menus reskin (the generic right-click menus and Blizzard
+    -- StaticPopups). Split out of the old customTooltips master, which now governs
+    -- ONLY the game tooltip. reskinPopupsMenus is seeded from customTooltips once
+    -- at login (see PLAYER_LOGIN) so existing users keep their state, then the two
+    -- are independent. NOTE: the specific BLIZZARD WINDOW RESKINS (queue popup,
+    -- game menu, group finder, great vault) are independent of BOTH masters.
+    local function _pmEnabled()
+        return not EllesmereUIDB or EllesmereUIDB.reskinPopupsMenus ~= false
+    end
 
     local function _ttSkin(tt, _, isEmbedded)
         if not tt or tt:IsForbidden() or not _enabled() then return end
@@ -46,12 +55,14 @@ end
         if not GetFFD(tt).bg then
             GetFFD(tt).bg = tt:CreateTexture(nil, "BACKGROUND", nil, -8)
             GetFFD(tt).bg:SetAllPoints()
-            local RS = EllesmereUI.RESKIN
-            GetFFD(tt).bg:SetColorTexture(RS.BG_R, RS.BG_G, RS.BG_B, RS.TT_ALPHA)
             if _PP and _PP.CreateBorder then
-                _PP.CreateBorder(tt, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
+                _PP.CreateBorder(tt, 1, 1, 1, EllesmereUI.RESKIN.BRD_ALPHA, 1, "OVERLAY", 7)
             end
         end
+        -- Unified, user-customizable background (shared with the EUI custom
+        -- tooltips via EllesmereUI.GetTooltipBg). Re-applied each skin call so a
+        -- settings change shows on the next tooltip. Border alpha stays fixed.
+        GetFFD(tt).bg:SetColorTexture(EllesmereUI.GetTooltipBg())
         GetFFD(tt).bg:Show()
     end
 
@@ -344,7 +355,9 @@ end
         _ttFonts(tt, nLinesBefore)
     end
 
-    local function _ttInit()
+    -- Visual reskin: the dark bg/border (via _ttHook -> _ttSkin), EUI fonts, and
+    -- the restyled tooltip status bar. Gated on "Reskin Tooltip" (customTooltips).
+    local function _ttInitVisual()
         for _, tt in ipairs({
             _GameTooltip, ShoppingTooltip1, ShoppingTooltip2,
             ItemRefTooltip, ItemRefShoppingTooltip1, ItemRefShoppingTooltip2,
@@ -374,6 +387,19 @@ end
             GameTooltipStatusBar:SetPoint("BOTTOMRIGHT", _GameTooltip, "BOTTOMRIGHT", -1, 1)
             GameTooltipStatusBar:SetHeight(3)
         end
+    end
+
+    -- Tooltip DATA additions: class-colored names, player-title control, M+ score,
+    -- item level (via _ttUnitColor) and accent spell/macro titles. Each has its own
+    -- toggle (tooltipPlayerTitles / tooltipMythicScore / tooltipItemLevel /
+    -- accentReskinElements), but the whole set is gated by the "Reskin Tooltip"
+    -- master (customTooltips) -- the PLAYER_LOGIN handler only calls this when
+    -- _enabled() -- so disabling the reskin grays out AND stops every tooltip
+    -- option together. Idempotent so the live re-apply path can never double-register.
+    local _ttDataInited = false
+    local function _ttInitData()
+        if _ttDataInited then return end
+        _ttDataInited = true
         -- Clear the recorded identity when the tooltip hides so a late inspect
         -- result can never append to a tooltip that has since closed or switched
         -- to non-unit content. HookScript (never SetScript) keeps the secure
@@ -398,11 +424,14 @@ end
         end
     end
 
+    -- Back-compat full init (data + visual), used by the live re-apply path.
+    local function _ttInit() _ttInitData(); _ttInitVisual() end
+
     -- Context menu skinning
     local _menuSkinned = {}
 
     local function _menuSkinFrame(frame)
-        if not frame or frame:IsForbidden() or not _enabled() then return end
+        if not frame or frame:IsForbidden() or not _pmEnabled() then return end
         for i = 1, _select("#", frame:GetRegions()) do
             local region = _select(i, frame:GetRegions())
             if region and region:IsObjectType("Texture") and not GetFFD(region).owned then
@@ -424,7 +453,7 @@ end
     end
 
     local function _menuOnOpen(manager, _, menuDescription)
-        if not _enabled() then return end
+        if not _pmEnabled() then return end
         -- Defer out of the secure context. The post-hook runs inside
         -- Blizzard's protected menu pipeline; touching Blizzard objects
         -- here propagates taint to action bar buttons. 
@@ -460,7 +489,7 @@ end
     -- Static popup skinning
     local function _popupSkin(popup)
         if not popup or popup:IsForbidden() then return end
-        if not _enabled() then return end
+        if not _pmEnabled() then return end
         -- Strip textures on the popup frame itself
         for i = 1, _select("#", popup:GetRegions()) do
             local r = _select(i, popup:GetRegions())
@@ -593,8 +622,19 @@ end
         f:RegisterEvent("PLAYER_LOGIN")
         f:SetScript("OnEvent", function(self)
             self:UnregisterAllEvents()
-            if not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false then
-                _ttInit()
+            -- "Reskin Tooltip" (customTooltips) is the master for ALL of EUI's
+            -- tooltip handling: the visual reskin AND the data additions (class
+            -- colors, player titles, M+ score, item level). When off, EUI leaves
+            -- tooltips alone, matching the grayed-out tooltip options. The generic
+            -- context menu / static popup reskins are independent (reskinPopupsMenus)
+            -- and the per-window reskins use their own keys -- all seeded from the
+            -- old master once by the blizzskin_reskin_master_split_v1 migration at
+            -- parent ADDON_LOADED.
+            if _enabled() then
+                _ttInitData()
+                _ttInitVisual()
+            end
+            if _pmEnabled() then
                 _menuInit()
                 _popupInit()
             end
@@ -611,15 +651,9 @@ end
         local TIMER_DURATION = 40
         local timerBar, timerText, timerEndTime
 
-        -- One-time default: inherit from master "Reskin Blizzard Elements"
-        -- toggle, then write the explicit value so future changes to the
-        -- master toggle don't silently affect this setting.
+        -- Independent toggle, default on (not tied to any master reskin setting).
         local function IsQueueReskinOn()
-            if not EllesmereUIDB then return true end
-            if EllesmereUIDB.reskinQueuePopup == nil then
-                EllesmereUIDB.reskinQueuePopup = (EllesmereUIDB.customTooltips ~= false)
-            end
-            return EllesmereUIDB.reskinQueuePopup
+            return not EllesmereUIDB or EllesmereUIDB.reskinQueuePopup ~= false
         end
 
         local function SkinQueuePopup()
@@ -1257,10 +1291,8 @@ do
     f:SetScript("OnEvent", function(self)
         self:UnregisterAllEvents()
         if not GameMenuFrame then return end
-        -- Defaults to matching reskinQueuePopup if never explicitly set.
-        local reskin = EllesmereUIDB and EllesmereUIDB.reskinGameMenu
-        if reskin == nil then reskin = (not EllesmereUIDB or (EllesmereUIDB.customTooltips ~= false and EllesmereUIDB.reskinQueuePopup ~= false)) end
-        if not reskin then return end
+        -- Independent toggle, default on (not tied to any master reskin setting).
+        if EllesmereUIDB and EllesmereUIDB.reskinGameMenu == false then return end
 
         local RS = EllesmereUI.RESKIN
         local PP = EllesmereUI.PP
@@ -1414,6 +1446,9 @@ do
 
     local function ApplyCursorAnchor(tooltip, parent)
         if tooltip ~= GameTooltip then return end
+        -- Gated by the "Reskin Tooltip" master (matches the grayed-out option), so
+        -- disabling the reskin restores the default tooltip position.
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
         if not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor) then return end
         if not parent or tooltip:IsForbidden() then return end
         local cf = EnsureCursorFrame()
@@ -1463,4 +1498,41 @@ do
         self:UnregisterAllEvents()
         EllesmereUI._applyTooltipCursorAnchor()
     end)
+end
+
+-------------------------------------------------------------------------------
+--  Show Tooltips (global visibility mode). The "Blizzard Tooltip" dropdown
+--  (EllesmereUIDB.tooltipShowMode, default "always") suppresses the game tooltip
+--  by combat state, applied to EVERY default-anchored tooltip via the same
+--  GameTooltip_SetDefaultAnchor post-hook the cursor anchor uses (units, world
+--  objects, action buttons). Deliberately no per-type logic -- kept light:
+--    always          -> never suppressed (default; the hook early-outs)
+--    outOfCombat     -> hidden while in combat lockdown
+--    outOfBossCombat -> hidden while a boss encounter is in progress
+--    never           -> hidden always
+--  IsEncounterInProgress() is queried inline (only for the outOfBossCombat case)
+--  so there is no ENCOUNTER event bookkeeping. Installed once at load; a no-op
+--  for the default mode, costing one table read per tooltip when unused.
+-------------------------------------------------------------------------------
+do
+    local function HideTooltipByMode(tooltip)
+        if tooltip ~= GameTooltip then return end
+        if tooltip.IsForbidden and tooltip:IsForbidden() then return end
+        -- Gated by the "Reskin Tooltip" master (matches the grayed-out "Show
+        -- Tooltips" option), so disabling the reskin never leaves tooltips stuck
+        -- suppressed at, e.g., "Never".
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
+        local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
+        if mode == "always" then return end
+        if mode == "never" then
+            tooltip:Hide()
+        elseif mode == "outOfCombat" then
+            if InCombatLockdown() then tooltip:Hide() end
+        elseif mode == "outOfBossCombat" then
+            if IsEncounterInProgress() then tooltip:Hide() end
+        end
+    end
+    if GameTooltip_SetDefaultAnchor then
+        hooksecurefunc("GameTooltip_SetDefaultAnchor", HideTooltipByMode)
+    end
 end

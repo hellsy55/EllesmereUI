@@ -849,6 +849,131 @@ function ns.WatchMaxStacksIfEnabled(frame)
 end
 
 -------------------------------------------------------------------------------
+--  Audio Effect on CD Ready -- per-spell (CD/utility bars only)
+--  Plays a sound the moment a spell becomes ready. Edge-detected with an arm flag
+--  (armed only while NOT ready, played + disarmed on the ready edge), so it never
+--  fires on login (already ready -> never armed), on a GCD ending (a GCD never
+--  makes a spell "not ready" here), or per render tick.
+--
+--  Charge spells fire ONLY at MAX charges: ready = GetSpellCharges().isActive ==
+--  false (recharge not running), the SAME clean at-max signal Max Stacks Glow uses
+--  -- NOT GetSpellCooldown().isActive, which goes false at the FIRST castable charge.
+--  The cooldown-widget hooks (SetDesaturated) do NOT fire when the last charge
+--  refills to max, so charge spells are ALSO driven by SPELL_UPDATE_CHARGES (the
+--  WatchCdReadySoundIfEnabled set, mirroring Max Stacks Glow). Non-charge spells
+--  ride the per-frame SetDesaturated edge alone (fires at CD end).
+-------------------------------------------------------------------------------
+ns._cdReadySoundWatch = ns._cdReadySoundWatch or setmetatable({}, { __mode = "k" })
+
+-- Is the spell READY right now? Charge spells: only at MAX charges (recharge not
+-- running). Non-charge: not on a real (non-GCD) cooldown. liveSid = resolved override.
+local function CdReadyIsReady(liveSid)
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    if ci ~= nil and (ci.maxCharges or 0) > 1 then
+        return not ci.isActive
+    end
+    local cd = C_Spell.GetSpellCooldown(liveSid)
+    return not (cd and cd.isActive and not cd.isOnGCD)
+end
+
+-- Shared evaluator (driven by SetDesaturated for non-charge spells and by
+-- SPELL_UPDATE_CHARGES for charge spells). Arms while not ready, plays + disarms on
+-- the ready edge. Deferred one frame and re-confirmed so a charge/GCD-tail race that
+-- momentarily reads ready can't false-fire. Self-gates zero-cost on the feature flag.
+local function EvalCdReadySound(frame, fd)
+    if not ns._cdmAnyCdReadySound then return end
+    if not fd then return end
+    if fd._isProcessingOverride then return end
+    local fc2 = _ecmeFC[frame]
+    local sid2 = fc2 and fc2.spellID
+    local bk2 = fc2 and fc2.barKey
+    if not sid2 or not bk2 then return end
+    if bk2 == ns.FOCUSKICK_BAR_KEY then return end
+    if bk2:sub(1, 7) == "__ghost" then return end
+    local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+    local key = ss2 and ss2.cdReadySoundKey
+    if not key or key == "none" then fd._cdReadyArmed = false; return end
+    local liveSid = sid2
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        liveSid = C_SpellBook.FindSpellOverrideByID(sid2) or sid2
+    end
+    if not CdReadyIsReady(liveSid) then
+        -- On cooldown (or a charge spell below max): arm.
+        fd._cdReadyArmed = true
+        fd._cdReadyArmedSid = sid2
+    elseif fd._cdReadyArmed then
+        if fd._cdReadyArmedSid ~= sid2 then
+            -- Spell on this frame changed since arming (spec/talent swap); stale arm.
+            fd._cdReadyArmed = false
+            return
+        end
+        -- Became ready. Confirm one frame later (let the API settle) before playing.
+        if not fd._cdReadyPending then
+            fd._cdReadyPending = CreateFrame("Frame")
+            fd._cdReadyPending:Hide()
+            fd._cdReadyPending:SetScript("OnUpdate", function(self)
+                self:Hide()
+                if not fd._cdReadyArmed then return end
+                local fcp = _ecmeFC[frame]
+                local sidp = fcp and fcp.spellID
+                local bkp = fcp and fcp.barKey
+                if not sidp or not bkp then return end
+                if fd._cdReadyArmedSid ~= sidp then fd._cdReadyArmed = false; return end
+                local ssp = ResolveSpellSettings(frame, sidp, ns.GetBarSpellData(bkp))
+                local kp = ssp and ssp.cdReadySoundKey
+                if not kp or kp == "none" then fd._cdReadyArmed = false; return end
+                local livep = sidp
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    livep = C_SpellBook.FindSpellOverrideByID(sidp) or sidp
+                end
+                if not CdReadyIsReady(livep) then return end  -- not ready (race) -> stay armed
+                fd._cdReadyArmed = false
+                local path = ns.FOCUSKICK_SOUND_PATHS and ns.FOCUSKICK_SOUND_PATHS[kp]
+                if path then PlaySoundFile(path, "Master") end
+            end)
+        end
+        fd._cdReadyPending:Show()
+    end
+end
+
+-- Register a CHARGE spell that has a CD-ready sound into the SPELL_UPDATE_CHARGES
+-- watch set -- the only edge that catches the last charge refilling to max (the
+-- per-frame SetDesaturated hook never fires there). Non-charge spells are handled
+-- entirely by that hook, so they are NOT added here. Mirrors WatchMaxStacksIfEnabled:
+-- one cheap charge-capability check, then a settings lookup only for charge spells.
+function ns.WatchCdReadySoundIfEnabled(frame)
+    if not frame then return end
+    local fd = hookFrameData[frame]
+    if not fd then return end
+    local fcw = _ecmeFC[frame]
+    local sidw = fcw and fcw.spellID
+    local bkw = fcw and fcw.barKey
+    if not (sidw and bkw) then return end
+    local liveSid = sidw
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then liveSid = C_SpellBook.FindSpellOverrideByID(sidw) or sidw end
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    local isCharge = ci ~= nil and (ci.maxCharges or 0) > 1
+    local ssw = isCharge and ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw)) or nil
+    if ssw and ssw.cdReadySoundKey and ssw.cdReadySoundKey ~= "none" then
+        ns._cdmAnyCdReadySound = true
+        ns._cdReadySoundWatch[frame] = fd
+        if not ns._cdReadySoundEventFrame then
+            local ef = CreateFrame("Frame")
+            ef:RegisterEvent("SPELL_UPDATE_CHARGES")
+            ef:SetScript("OnEvent", function()
+                for f, d in pairs(ns._cdReadySoundWatch) do
+                    EvalCdReadySound(f, d)
+                end
+            end)
+            ns._cdReadySoundEventFrame = ef
+        end
+        EvalCdReadySound(frame, fd)  -- prime the arm state (no play unless already armed)
+    elseif ns._cdReadySoundWatch[frame] then
+        ns._cdReadySoundWatch[frame] = nil
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Hide CD Text (Charges) -- per-spell (CD/utility bars only)
 --  When a CHARGE spell has at least one usable charge in hand, hide the recharge
 --  countdown numbers (the timer ticking toward the NEXT charge). The numbers come
@@ -1014,10 +1139,10 @@ local function DecorateFrame(frame, barData)
 
     HideBlizzardDecorations(frame)
 
-    -- Per-icon Audio Effect: attach the buff apply-edge sound hook here (one-time,
-    -- before the frame is ever active) so the very first activation isn't missed.
-    -- Buff-family frames only; EnsureBuffSoundHook self-guards on the presence of
-    -- TriggerAuraAppliedAlert, so injected-custom / non-aura frames are no-ops.
+    -- Per-icon Audio on Buff Gain/Loss: attach the buff gain+loss sound hooks here
+    -- (one-time, before the frame is ever active) so the very first activation isn't
+    -- missed. Buff-family frames only; EnsureBuffSoundHook self-guards on the presence
+    -- of TriggerAuraAppliedAlert, so injected-custom / non-aura frames are no-ops.
     if (barData and (barData.barType == "buffs" or barData.key == "buffs"))
        and ns._cdmAnyBuffSound and ns.EnsureBuffSoundHook then
         ns.EnsureBuffSoundHook(frame)
@@ -1234,8 +1359,37 @@ local function DecorateFrame(frame, barData)
                     -- Hide Active State: force black swipe, track active flag.
                     -- CD model override is handled by the SetDesaturation hook
                     -- which fires on every Blizzard cooldown tick.
+                    -- Suppress GCD for a hero-talent transform to a usable follow-up:
+                    -- while a castable proc is shown (override present, not on its own
+                    -- real CD) this icon has no real CD, so the hide-active black swipe
+                    -- has no geometry and is invisible -- UNTIL another ability pushes a
+                    -- GCD via SetCooldown, whose geometry the PERSISTENT black swipe
+                    -- colour then sweeps as a visible bar (SetCooldown changes geometry,
+                    -- not colour, so nothing re-hides it). Paint this swipe fully
+                    -- transparent for exactly this case so the GCD never shows. Gated to
+                    -- Suppress GCD ("ignore GCD") being on; normal hide-active spells and
+                    -- transforms whose proc is on its own real CD keep the black swipe.
+                    -- A charge proc mid-recharge is carved out (its swipe IS the recharge,
+                    -- never a GCD) -- same as the suppress-GCD block above.
+                    local hideActiveAlpha = barData.swipeAlpha or 0.7
+                    if bd2 and bd2.suppressGCD and sid2
+                       and C_SpellBook and C_SpellBook.FindSpellOverrideByID
+                       and C_Spell and C_Spell.GetSpellCooldown then
+                        local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
+                        if ovrID and ovrID > 0 and ovrID ~= sid2 then
+                            local chargeRecharging = false
+                            if C_Spell.GetSpellCharges then
+                                local ci = C_Spell.GetSpellCharges(ovrID) or C_Spell.GetSpellCharges(sid2)
+                                chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
+                            end
+                            local oc = C_Spell.GetSpellCooldown(ovrID)
+                            if not chargeRecharging and oc and not (oc.isActive and not oc.isOnGCD) then
+                                hideActiveAlpha = 0
+                            end
+                        end
+                    end
                     if not _gcdSuppressed then
-                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                        cd:SetSwipeColor(0, 0, 0, hideActiveAlpha)
                     end
                     if isActive then
                         fd._hideActiveOverriding = true
@@ -1556,7 +1710,25 @@ local function DecorateFrame(frame, barData)
                         if not durObj and C_Spell.GetSpellCooldownDuration then
                             durObj = C_Spell.GetSpellCooldownDuration(effID)
                             if not durObj and effID ~= sid2 then
-                                durObj = C_Spell.GetSpellCooldownDuration(sid2)
+                                -- Borrow the base spell's cooldown ONLY when the live
+                                -- override is itself on a real CD (a cosmetic/behaviour
+                                -- transform that shares the base cooldown -- the original
+                                -- reason for this fallback). A hero-talent transform to a
+                                -- CASTABLE follow-up (e.g. Bestial Wrath -> Wailing Arrow)
+                                -- reports no real CD of its own, so it must NOT inherit the
+                                -- base's remaining cooldown -- that painted the base CD
+                                -- swipe over a usable proc and read as "on cooldown".
+                                -- Leaving durObj nil takes the same no-swipe path as a proc
+                                -- without a real CD. isActive/isOnGCD are clean bools.
+                                -- Keep the original base-borrow whenever the override
+                                -- is on a real CD OR its cooldown is unknown (oc nil) --
+                                -- only a CONFIRMED-castable proc (oc present, not on a
+                                -- real CD) suppresses the borrow. Mirrors the desat guard
+                                -- below so the swipe and the saturation always agree.
+                                local oc = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(effID)
+                                if (not oc) or (oc.isActive and not oc.isOnGCD) then
+                                    durObj = C_Spell.GetSpellCooldownDuration(sid2)
+                                end
                             end
                         end
                         if durObj then
@@ -1581,6 +1753,25 @@ local function DecorateFrame(frame, barData)
                     local actualCD = frame.isOnActualCooldown
                     if (not issecretvalue or not issecretvalue(actualCD)) and actualCD == false then
                         onRealCD = false
+                    end
+                end
+                -- Hero-talent transform to a usable follow-up: while a live spell
+                -- override is showing (e.g. Bestial Wrath -> Wailing Arrow, Trueshot
+                -- -> Moonlight Chakram), the base cooldownID spell (sid2) is on its
+                -- real CD but the displayed proc is castable, so the base check above
+                -- desaturated it wrongly. Re-check the override's OWN cooldown and
+                -- stay saturated when the proc is free. Same shape as the charge guard
+                -- above: only ever CLEARS onRealCD, never sets it -- so every
+                -- non-transform icon, and every transform whose proc is itself on a
+                -- real CD (oc.isActive), is byte-identical. Clean bools only.
+                if onRealCD and sid2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID
+                   and C_Spell and C_Spell.GetSpellCooldown then
+                    local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
+                    if ovrID and ovrID > 0 and ovrID ~= sid2 then
+                        local oc = C_Spell.GetSpellCooldown(ovrID)
+                        if oc and not (oc.isActive and not oc.isOnGCD) then
+                            onRealCD = false
+                        end
                     end
                 end
                 fd.tex:SetDesaturated(onRealCD or false)
@@ -1748,6 +1939,22 @@ local function DecorateFrame(frame, barData)
             hooksecurefunc(fd.tex, "SetDesaturated", _maintainDesat)
             if fd.tex.SetDesaturation then
                 hooksecurefunc(fd.tex, "SetDesaturation", _maintainDesat)
+            end
+        end
+
+        -- Audio Effect on CD Ready (cd/utility per-icon): non-charge spells ride this
+        -- per-frame SetDesaturated edge (fires at CD end). Charge spells fire ONLY at
+        -- MAX charges, which SetDesaturated does NOT signal (the icon is already
+        -- saturated with a charge in hand); those are driven by SPELL_UPDATE_CHARGES
+        -- via WatchCdReadySoundIfEnabled instead, though this hook still arms them on
+        -- the 0-charge / partial edges. The single shared evaluator EvalCdReadySound
+        -- computes readiness (at-max for charge spells, cooldown for others), edge-
+        -- detects with an arm flag, and self-gates zero-cost on ns._cdmAnyCdReadySound.
+        if fd.tex and not fd._cdReadySoundHooked then
+            fd._cdReadySoundHooked = true
+            hooksecurefunc(fd.tex, "SetDesaturated", function() EvalCdReadySound(frame, fd) end)
+            if fd.tex.SetDesaturation then
+                hooksecurefunc(fd.tex, "SetDesaturation", function() EvalCdReadySound(frame, fd) end)
             end
         end
     end

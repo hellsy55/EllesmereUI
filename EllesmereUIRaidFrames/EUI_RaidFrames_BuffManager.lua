@@ -2733,12 +2733,13 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
     local mode = s.healthColorMode or "class"
     local fillTex = health:GetStatusBarTexture()
     if mode == "dark" then
-        health:SetStatusBarColor(0x11/255, 0x11/255, 0x11/255, 1)
-        if fillTex then fillTex:SetAlpha(0.9) end
+        local dfr, dfg, dfb, dfa = EllesmereUI.GetDarkModeFill()
+        health:SetStatusBarColor(dfr, dfg, dfb, 1)
+        if fillTex then fillTex:SetAlpha(dfa) end
         bg:ClearAllPoints()
         bg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, 0)
         bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
-        bg:SetColorTexture(0x4f/255, 0x4f/255, 0x4f/255, 1)
+        bg:SetColorTexture(EllesmereUI.GetDarkModeBg())
     elseif mode == "classic" then
         local pct = 0.85
         local r = pct < 0.5 and 1 or (1 - (pct - 0.5) * 2)
@@ -4005,12 +4006,13 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         local mode = s.healthColorMode or "class"
         local fillTex = health:GetStatusBarTexture()
         if mode == "dark" then
-            health:SetStatusBarColor(0x11/255, 0x11/255, 0x11/255, 1)
-            if fillTex then fillTex:SetAlpha(0.9) end
+            local dfr, dfg, dfb, dfa = EllesmereUI.GetDarkModeFill()
+            health:SetStatusBarColor(dfr, dfg, dfb, 1)
+            if fillTex then fillTex:SetAlpha(dfa) end
             bg:ClearAllPoints()
             bg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, 0)
             bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
-            bg:SetColorTexture(0x4f/255, 0x4f/255, 0x4f/255, 1)
+            bg:SetColorTexture(EllesmereUI.GetDarkModeBg())
         elseif mode == "classic" then
             local pct = 0.85
             local r = pct < 0.5 and 1 or (1 - (pct - 0.5) * 2)

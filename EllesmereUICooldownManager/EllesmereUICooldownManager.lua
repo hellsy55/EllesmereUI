@@ -405,9 +405,9 @@ local CDM_ITEM_PRESETS = {
     {
         key      = "invis_potion",
         name     = "Invisibility Potion",
-        icon     = 134764,
-        itemID   = 211756,
-        altItemIDs = { 241304, 241305 },
+        icon     = 7548917,
+        itemID   = 241302,
+        altItemIDs = { 241303 },
     },
     {
         key      = "healthstone",
@@ -575,6 +575,22 @@ function ns.GetSpecProfilesForProfile(profileName)
     return bucket.specProfiles
 end
 
+-- Cross-spec "broadcast" set for Tracking Bars: a lookup of bar identities (preset
+-- key or custom spellID) the user has pushed to every spec via "Add Bar to All
+-- Specs". Lives on the profile bucket OUTSIDE specProfiles, so it persists across
+-- spec switches/reloads and forks with the profile (same as specProfiles). Drives
+-- the Add/Remove toggle label on the Tracking Bars page.
+function ns.GetActiveTBBBroadcastSet()
+    local name = ns.GetActiveProfileName()
+    -- Ensure the bucket exists (with legacy seeding) via the canonical accessor.
+    ns.GetSpecProfilesForProfile(name)
+    local sa = SpellStore.Get()
+    local bucket = sa.profiles and sa.profiles[name]
+    if not bucket then return {} end
+    if not bucket.tbbBroadcast then bucket.tbbBroadcast = {} end
+    return bucket.tbbBroadcast
+end
+
 -- Active SPELL LAYOUT name. Layouts are a shared, account-wide library
 -- (spellAssignments.profiles[name] = the layout buckets) with a SINGLE
 -- account-wide active pointer (spellAssignments.activeLayout). Spell layouts are
@@ -724,8 +740,8 @@ function ns.RescanMaxStacksGlowFlag()
     end
 end
 
--- Audio Effect gate: set ns._cdmAnyBuffSound once if any saved buff icon (any
--- spec) has an Audio Effect sound chosen. DecorateFrame / RefreshCDMIconAppearance
+-- Audio on Buff Gain/Loss gate: set ns._cdmAnyBuffSound once if any saved buff
+-- icon (any spec) has a gain OR loss sound chosen. DecorateFrame / RefreshCDMIconAppearance
 -- then skip attaching the apply-edge sound hook entirely for anyone who never uses
 -- the feature -- 0 cost when off. Same scanned-once + runtime-enable contract as
 -- RescanMaxStacksGlowFlag (the option's setValue flips the flag live).
@@ -741,8 +757,37 @@ function ns.RescanBuffSoundFlag()
                 local ssAll = bs and bs.spellSettings
                 if ssAll then
                     for _, ss in pairs(ssAll) do
-                        if ss and ss.buffActiveSoundKey and ss.buffActiveSoundKey ~= "none" then
+                        if ss and ((ss.buffActiveSoundKey and ss.buffActiveSoundKey ~= "none")
+                            or (ss.buffLostSoundKey and ss.buffLostSoundKey ~= "none")) then
                             ns._cdmAnyBuffSound = true
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Audio Effect on CD Ready gate: set ns._cdmAnyCdReadySound once if any saved
+-- cd/utility icon (any spec) has a CD-ready sound chosen. The per-frame
+-- SetDesaturated edge hook then no-ops entirely for anyone who never uses it.
+-- Same monotonic, scanned-once contract as RescanBuffSoundFlag (runtime enables
+-- are handled by the option's setValue).
+function ns.RescanCdReadySoundFlag()
+    if ns._cdmAnyCdReadySound or ns._cdReadySoundFlagScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._cdReadySoundFlagScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                local ssAll = bs and bs.spellSettings
+                if ssAll then
+                    for _, ss in pairs(ssAll) do
+                        if ss and ss.cdReadySoundKey and ss.cdReadySoundKey ~= "none" then
+                            ns._cdmAnyCdReadySound = true
                             return
                         end
                     end
@@ -1162,6 +1207,13 @@ local function ProcessSpecChange(newSpecKey)
     if EllesmereUI and EllesmereUI.OnSpecSwitchComplete then
         EllesmereUI.OnSpecSwitchComplete()
     end
+
+    -- Refresh the CDM options pages now that _cachedSpecKey is swapped. The
+    -- options' own PLAYER_SPECIALIZATION_CHANGED watcher races this swap (that
+    -- event can fire before SPELLS_CHANGED), so driving the refresh from here
+    -- guarantees the page rebuilds against the new spec instead of leaving the
+    -- previous spec's selected bar on screen.
+    if ns.OnTBBSpecChanged then ns.OnTBBSpecChanged() end
 end
 ns.ProcessSpecChange = ProcessSpecChange
 
@@ -3940,9 +3992,16 @@ local function RefreshCDMIconAppearance(barKey)
         if ns._cdmAnyChargeHideCdText and not isBuffFamilyBar and ns.WatchChargeCdTextIfEnabled then
             ns.WatchChargeCdTextIfEnabled(icon)
         end
+        -- Same login/refresh coverage for "Audio Effect on CD Ready" on CHARGE spells:
+        -- they fire at max charges, which the SetDesaturated edge never signals, so
+        -- register them on the SPELL_UPDATE_CHARGES watcher here. Gated on the feature
+        -- flag; non-charge spells self-skip inside WatchCdReadySoundIfEnabled.
+        if ns._cdmAnyCdReadySound and not isBuffFamilyBar and ns.WatchCdReadySoundIfEnabled then
+            ns.WatchCdReadySoundIfEnabled(icon)
+        end
         if isBuffFamilyBar then
-            -- Per-icon Audio Effect: attach the apply-edge sound hook once, and only
-            -- when the feature is in use anywhere (gate = 0 cost otherwise).
+            -- Per-icon Audio on Buff Gain/Loss: attach the gain+loss sound hooks once,
+            -- and only when the feature is in use anywhere (gate = 0 cost otherwise).
             if ns._cdmAnyBuffSound and ns.EnsureBuffSoundHook then ns.EnsureBuffSoundHook(icon) end
             local fcb = _ecmeFC[icon]
             -- Resolve by the DISPLAYED spell first (GetCanonicalSpellIDForFrame --
@@ -4594,19 +4653,45 @@ local function EnsureFocusCastProxy()
 end
 ns.EnsureFocusCastProxy = EnsureFocusCastProxy
 
--- Per-icon "Audio Effect": play a sound when a buff becomes active. Blizzard's
--- buff cooldown-viewer item frames fire TriggerAuraAppliedAlert on the apply
--- edge, so we hooksecurefunc it (taint-safe post-hook, no polling) and play the
--- per-icon sound. The frame's GetSpellID is a SECRET value while the aura is
--- active, so we resolve the clean canonical id via GetCanonicalSpellIDForFrame
--- (the same id the options menu writes the setting under) -- never index a table
--- with the live secret id. Hooked-frame + throttle state live in a do-block,
--- off the Blizzard frame table per the no-custom-props rule. Reuses the
--- FocusKick sound table so the option list stays identical to Focus Cast Sound.
+-- Per-icon "Audio on Buff Gain / Loss": play a sound when a buff becomes active
+-- (gain) or drops (loss). Blizzard's buff cooldown-viewer item frames fire
+-- TriggerAuraAppliedAlert on the apply edge and TriggerAuraRemovedAlert on the
+-- drop edge, so we hooksecurefunc both (taint-safe post-hook, no polling) and
+-- play the matching per-icon sound. The frame's GetSpellID is a SECRET value
+-- while the aura is active, so we resolve the clean canonical id via
+-- GetCanonicalSpellIDForFrame (the same id the options menu writes the setting
+-- under) -- never index a table with the live secret id. Hooked-frame + throttle
+-- state live in a do-block, off the Blizzard frame table per the no-custom-props
+-- rule. Reuses the FocusKick sound table so the option list stays identical to
+-- Focus Cast Sound. The two edges use separate throttle tables so they never
+-- suppress each other.
 do
     local _soundHooked = setmetatable({}, { __mode = "k" })
-    local _soundThrottle = {}            -- [spellID] = last GetTime() (dedupe rapid re-applies)
+    local _soundThrottle = {}            -- [spellID] = last GetTime() (gain dedupe)
+    local _soundThrottleLost = {}        -- [spellID] = last GetTime() (loss dedupe)
     local SOUND_MIN_GAP = 0.3
+    -- Resolve the per-icon sound for one edge and play it (throttled). `field` is
+    -- the spell-setting key ("buffActiveSoundKey" gain / "buffLostSoundKey" loss);
+    -- `throttle` is the matching dedupe table. Identical resolution for both edges.
+    local function PlayBuffEdgeSound(f, field, throttle)
+        local fc = _ecmeFC[f]
+        local barKey = fc and fc.barKey
+        if not barKey then return end
+        local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
+        if not sd or not sd.spellSettings then return end
+        local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(f)
+        if not sid then return end
+        local ss = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd))
+            or sd.spellSettings[sid]
+        local key = ss and ss[field]
+        if not key or key == "none" then return end
+        local now = GetTime()
+        local last = throttle[sid]
+        if last and (now - last) < SOUND_MIN_GAP then return end
+        throttle[sid] = now
+        local path = FOCUSKICK_SOUND_PATHS[key]
+        if path then PlaySoundFile(path, "Master") end
+    end
     function ns.EnsureBuffSoundHook(frame)
         if not frame or _soundHooked[frame] then return end
         -- Own placeholder/custom frames (and anything that isn't a Blizzard buff
@@ -4617,24 +4702,14 @@ do
         end
         _soundHooked[frame] = true
         hooksecurefunc(frame, "TriggerAuraAppliedAlert", function(f)
-            local fc = _ecmeFC[f]
-            local barKey = fc and fc.barKey
-            if not barKey then return end
-            local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
-            if not sd or not sd.spellSettings then return end
-            local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(f)
-            if not sid then return end
-            local ss = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd))
-                or sd.spellSettings[sid]
-            local key = ss and ss.buffActiveSoundKey
-            if not key or key == "none" then return end
-            local now = GetTime()
-            local last = _soundThrottle[sid]
-            if last and (now - last) < SOUND_MIN_GAP then return end
-            _soundThrottle[sid] = now
-            local path = FOCUSKICK_SOUND_PATHS[key]
-            if path then PlaySoundFile(path, "Master") end
+            PlayBuffEdgeSound(f, "buffActiveSoundKey", _soundThrottle)
         end)
+        -- Loss edge: Blizzard fires TriggerAuraRemovedAlert when the buff drops.
+        if type(frame.TriggerAuraRemovedAlert) == "function" then
+            hooksecurefunc(frame, "TriggerAuraRemovedAlert", function(f)
+                PlayBuffEdgeSound(f, "buffLostSoundKey", _soundThrottleLost)
+            end)
+        end
     end
 end
 
@@ -5428,7 +5503,8 @@ BuildAllCDMBars = function()
     EnsureFocusKickBar()
     ns.RescanMaxStacksGlowFlag()  -- set the Max Stacks Glow gate (once) before refresh
     ns.RescanChargeCdTextFlag()   -- set the Hide CD Text (Charges) gate (once) before refresh
-    ns.RescanBuffSoundFlag()      -- set the Audio Effect gate (once) before refresh
+    ns.RescanBuffSoundFlag()      -- set the Audio on Buff Gain/Loss gate (once) before refresh
+    ns.RescanCdReadySoundFlag()   -- set the Audio Effect on CD Ready gate (once) before refresh
     ns.RescanCustomItemFlag()     -- set the custom-item buff-injection gate (once)
 
     local p = ECME.db.profile

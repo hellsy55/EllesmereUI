@@ -149,8 +149,9 @@ initFrame:SetScript("OnEvent", function(self)
         EVOKER      = { 0.20, 0.58, 0.50 },
     }
 
-    local DARK_FILL_R, DARK_FILL_G, DARK_FILL_B = 0x11/255, 0x11/255, 0x11/255
-    local DARK_BG_R, DARK_BG_G, DARK_BG_B = 0x4f/255, 0x4f/255, 0x4f/255
+    -- Dark Mode preview colours pull from the global per-profile palette
+    -- (EllesmereUI.GetDarkModeFill / GetDarkModeBg). Like the live bars, the
+    -- preview ignores the Dark Mode opacity sliders (background drawn at alpha 1).
 
     ---------------------------------------------------------------------------
     --  Preview pixel helpers (same technique as nameplates display preview)
@@ -233,7 +234,7 @@ initFrame:SetScript("OnEvent", function(self)
             local cc = CLASS_COLORS[cf]
             local pr, pg, pb
             if sp.darkTheme then
-                pr, pg, pb = DARK_FILL_R, DARK_FILL_G, DARK_FILL_B
+                pr, pg, pb = EllesmereUI.GetDarkModeFill()
             elseif sp.resourceColored then
                 -- Per-spec resource/power color; falls back to class color.
                 local gsr = _G._ERB_GetSecondaryResource
@@ -281,7 +282,8 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Background
                 if pc._barBg then
                     if sp.darkTheme then
-                        pc._barBg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+                        local _dbr, _dbg, _dbb = EllesmereUI.GetDarkModeBg()
+                        pc._barBg:SetColorTexture(_dbr, _dbg, _dbb, 1)
                     elseif sp.classColored then
                         pc._barBg:SetColorTexture(pr * 0.3, pg * 0.3, pb * 0.3, 0.5)
                     else
@@ -430,7 +432,8 @@ initFrame:SetScript("OnEvent", function(self)
                         pip:SetPoint("LEFT", pc, "LEFT", pipX[i], 0)
                     end
                     if sp.darkTheme then
-                        pip._bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+                        local _dbr, _dbg, _dbb = EllesmereUI.GetDarkModeBg()
+                        pip._bg:SetColorTexture(_dbr, _dbg, _dbb, 1)
                     elseif sp.classColored then
                         pip._bg:SetColorTexture(pr * 0.5, pg * 0.5, pb * 0.5, 0.5)
                     else
@@ -699,7 +702,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local bg = pip:CreateTexture(nil, "BACKGROUND")
                 bg:SetAllPoints()
                 if sp.darkTheme then
-                    bg:SetColorTexture(DARK_BG_R, DARK_BG_G, DARK_BG_B, 1)
+                    local _dbr, _dbg, _dbb = EllesmereUI.GetDarkModeBg()
+                    bg:SetColorTexture(_dbr, _dbg, _dbb, 1)
                 elseif sp.classColored then
                     local cc = CLASS_COLORS[classFile]
                     local cr, cg, cb = cc and cc[1] or 0.95, cc and cc[2] or 0.90, cc and cc[3] or 0.60
@@ -1858,28 +1862,25 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
-        -- Row 2: Dark Theme | Background Color
+        -- Row 2: Dark Mode Class Resource | Background Color
+        -- Dark mode applies ONLY to the class resource bar (secondary). It uses the
+        -- same flat dark fill/bg as Unit Frames / Raid Frames. secondary.darkTheme is
+        -- the single source of truth; health/primary are never darkened.
         _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Dark Theme",
+            { type = "toggle", text = "Dark Mode Class Resource",
               getValue = function()
                   local p = DB(); if not p then return false end
-                  return p.health.darkTheme
+                  return p.secondary.darkTheme
               end,
               setValue = function(v)
                   local p = DB(); if not p then return end
-                  p.health.darkTheme = v
-                  p.primary.darkTheme = v
                   p.secondary.darkTheme = v
-                  if v then
-                      p.health.customColored = false
-                      p.primary.customColored = false
-                  end
-                  RebuildHealth(); RebuildPower(); RebuildClass()
+                  RebuildClass()
                   EllesmereUI:RefreshPage()
               end },
             { type = "colorpicker", text = "Background", hasAlpha = true,
-              disabled = function() local p = DB(); return p and p.health.darkTheme end,
-              disabledTooltip = "Dark Theme", requireState = "disabled",
+              disabled = function() local p = DB(); return p and p.secondary.darkTheme end,
+              disabledTooltip = "Dark Mode Class Resource", requireState = "disabled",
               getValue = function()
                   local p = DB()
                   if not p then return 0x11/255, 0x11/255, 0x11/255, 0.75 end
@@ -1890,8 +1891,6 @@ initFrame:SetScript("OnEvent", function(self)
                   p.health.bgR, p.health.bgG, p.health.bgB, p.health.bgA = r, g, b, a
                   p.primary.bgR, p.primary.bgG, p.primary.bgB, p.primary.bgA = r, g, b, a
                   p.secondary.barBgR, p.secondary.barBgG, p.secondary.barBgB, p.secondary.barBgA = r, g, b, a
-                  if p.health.darkTheme then p.health.darkTheme = false end
-                  if p.primary.darkTheme then p.primary.darkTheme = false end
                   if p.secondary.darkTheme then p.secondary.darkTheme = false end
                   if not p.health.customColored then p.health.customColored = true end
                   if not p.primary.customColored then p.primary.customColored = true end
@@ -1933,9 +1932,11 @@ initFrame:SetScript("OnEvent", function(self)
               -- Mutually exclusive with "Expand Power Bar if No Resource": grey this
               -- while expand is on, but only when it is itself OFF (== "None") so a
               -- legacy profile that has both on can still turn this off (no deadlock).
+              -- NOTE: independent of "Show Class Resource" -- the shift setting is
+              -- exactly what's wanted while the resource bar is hidden, so toggling
+              -- it must NOT change this control's disabled state.
               disabled = function()
                   local p = DB(); if not p then return false end
-                  if not p.secondary.enabled then return true end
                   -- Expand only blocks shift when it is EFFECTIVELY on (power bar
                   -- enabled and not height-matched -- otherwise expand shows/acts off).
                   local heightMatched = EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power")
@@ -1943,11 +1944,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local shiftOff = (p.secondary.shiftElementsIfNoResource or "None") == "None"
                   return expandOn and shiftOff and true or false
               end,
-              disabledTooltip = function()
-                  local p = DB()
-                  if p and not p.secondary.enabled then return "Class Resource" end
-                  return "This option can't be used while Expand Power Bar if No Resource is enabled."
-              end,
+              disabledTooltip = "This option can't be used while Expand Power Bar if No Resource is enabled.",
               values = { None = "None", Up = "Up", Down = "Down" },
               order = { "None", "Up", "Down" },
               getValue = function() local p = DB(); return (p and p.secondary.shiftElementsIfNoResource) or "None" end,
@@ -1967,9 +1964,10 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = function()
                   local p = DB(); if not p then return false end
                   if not p.primary.enabled then return true end
-                  -- Shift only blocks expand when it is EFFECTIVELY on (class
-                  -- resource bar enabled and the dropdown set to Up/Down).
-                  local shiftOn = p.secondary.enabled and (p.secondary.shiftElementsIfNoResource or "None") ~= "None"
+                  -- Shift blocks expand when the dropdown is set to Up/Down. This is
+                  -- independent of "Show Class Resource" -- toggling the resource bar
+                  -- must NOT change this control's disabled state.
+                  local shiftOn = (p.secondary.shiftElementsIfNoResource or "None") ~= "None"
                   return shiftOn and not p.primary.expandIfNoResource and true or false
               end,
               disabledTooltip = function()
@@ -2660,8 +2658,12 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "multiSwatch", text = "Fill Color",
-              disabled = classOff,
-              disabledTooltip = "Class Resource",
+              disabled = function() local p = DB(); return p and (not p.secondary.enabled or p.secondary.darkTheme) end,
+              disabledTooltip = function()
+                  local p = DB()
+                  if p and p.secondary.darkTheme then return "This option requires Dark Mode Class Resource to be disabled" end
+                  return "Class Resource"
+              end,
               swatches = {
                 { tooltip = "Custom Colored",
                   hasAlpha = true,
@@ -4337,8 +4339,12 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "multiSwatch", text = "Fill Color",
-              disabled = powerOff,
-              disabledTooltip = powerDisTip,
+              disabled = function() local p = DB(); return p and (not p.primary.enabled or p.secondary.darkTheme) end,
+              disabledTooltip = function()
+                  local p = DB()
+                  if p and p.secondary.darkTheme then return "This option requires Dark Mode Class Resource to be disabled" end
+                  return powerDisTip
+              end,
               swatches = {
                 { tooltip = "Gradient End Color", hasAlpha = true,
                   disabled = function()
@@ -5071,8 +5077,12 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "multiSwatch", text = "Fill Color",
-              disabled = healthOff,
-              disabledTooltip = "Health Bar",
+              disabled = function() local p = DB(); return p and (not p.health.enabled or p.secondary.darkTheme) end,
+              disabledTooltip = function()
+                  local p = DB()
+                  if p and p.secondary.darkTheme then return "This option requires Dark Mode Class Resource to be disabled" end
+                  return "Health Bar"
+              end,
               swatches = {
                 { tooltip = "Gradient End Color", hasAlpha = true,
                   disabled = function()
@@ -5110,14 +5120,12 @@ initFrame:SetScript("OnEvent", function(self)
                       local p = DB(); if not p then return end
                       p.health.fillR, p.health.fillG, p.health.fillB, p.health.fillA = r, g, b, a
                       if not p.health.customColored then p.health.customColored = true end
-                      if p.health.darkTheme then p.health.darkTheme = false end
                       SmoothRefresh(); EllesmereUI:RefreshPage()
                   end,
                   onClick = function(self)
                       local p = DB(); if not p then return end
                       if not p.health.customColored then
                           p.health.customColored = true
-                          if p.health.darkTheme then p.health.darkTheme = false end
                           RebuildHealth(); EllesmereUI:RefreshPage()
                           return
                       end
@@ -5139,7 +5147,6 @@ initFrame:SetScript("OnEvent", function(self)
                   onClick = function()
                       local p = DB(); if not p then return end
                       p.health.customColored = false
-                      if p.health.darkTheme then p.health.darkTheme = false end
                       RebuildHealth(); EllesmereUI:RefreshPage()
                   end,
                   refreshAlpha = function()

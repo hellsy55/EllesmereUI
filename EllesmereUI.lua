@@ -282,7 +282,7 @@ local ADDON_ROSTER = {
     -- the per-module addons below. The Basics folder still exists as a shim
     -- addon purely so the v6.6 split-migration can read its enable state.
     { folder = "EllesmereUIQoL",               display = "Quality of Life",      search_name = "EllesmereUI Quality of Life"         },
-    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",    search_name = "EllesmereUI Blizz UI Enhanced"       },
+    { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",    search_name = "EllesmereUI Blizz UI Enhanced",      syncFolder = "EllesmereUIDragonRiding", syncDisplay = "Dragon Riding" },
     { folder = "EllesmereUIFriends",           display = "Friends List",         search_name = "EllesmereUI Friends List"            },
     { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",        search_name = "EllesmereUI Mythic+ Timer"           },
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",        search_name = "EllesmereUI Quest Tracker"           },
@@ -410,8 +410,11 @@ do
     local SYNC_EXEMPT = { EllesmereUIPartyMode = true }
     EllesmereUI._syncExempt = SYNC_EXEMPT
 
-    -- Modules that show a sync icon but have no per-profile data (always "synced")
-    local SYNC_GLOBAL_ONLY = { EllesmereUIBlizzardSkin = true }
+    -- Modules that show a sync icon but have no per-profile data (always "synced").
+    -- (BlizzardSkin used to live here; it now hosts Dragon Riding's per-profile DB,
+    -- so its sidebar sync icon routes to the EllesmereUIDragonRiding folder via the
+    -- roster entry's syncFolder -- see the sidebar sync-icon builder.)
+    local SYNC_GLOBAL_ONLY = {}
     EllesmereUI._syncGlobalOnly = SYNC_GLOBAL_ONLY
 
     -- Exclusion registry: keys that should NOT be copied during sync
@@ -797,6 +800,20 @@ EllesmereUI.RegisterSyncExclusions("EllesmereUIMythicTimer", {
     "standalonePos",
     "scale",
     "frameWidth",
+})
+
+-- Dragon Riding stores its HUD position in its own profile blob (unlockPos).
+-- Keep each profile's placement when syncing, matching every other module.
+EllesmereUI.RegisterSyncExclusions("EllesmereUIDragonRiding", {
+    "unlockPos",
+})
+
+-- Secondary Stats + FPS counter live in the QoL profile blob. Their on-screen
+-- positions stay per-profile on sync (still exported intact, just never
+-- overwritten by a mirror-group push), matching the convention above.
+EllesmereUI.RegisterSyncExclusions("EllesmereUIQoL", {
+    "secondaryStatsPos",
+    "fpsPos",
 })
 
 -------------------------------------------------------------------------------
@@ -1632,6 +1649,22 @@ EllesmereUI.RESKIN = {
     QT_ALPHA   = 0.97,   -- quest tracker right-click menu alpha
     BRD_ALPHA  = 0.18,   -- border alpha (white)
 }
+
+-- Unified tooltip background: drives BOTH the Blizzard tooltip reskin and the
+-- EUI custom widget tooltips. Color + opacity are user-customizable in Blizz UI
+-- Enhanced > Blizzard Tooltip (EllesmereUIDB.tooltipBgColor / tooltipBgOpacity);
+-- both default to the RESKIN palette so unset = current look. Returns r,g,b,a.
+-- (0 is a valid component/opacity -- relies on Lua treating 0 as truthy.)
+function EllesmereUI.GetTooltipBg()
+    local db = EllesmereUIDB
+    local c = db and db.tooltipBgColor
+    local R = EllesmereUI.RESKIN
+    local r = (c and c.r) or R.BG_R
+    local g = (c and c.g) or R.BG_G
+    local b = (c and c.b) or R.BG_B
+    local a = (db and db.tooltipBgOpacity) or R.TT_ALPHA
+    return r, g, b, a
+end
 -- Layout
 EllesmereUI.DUAL_ITEM_W  = DUAL_ITEM_W
 EllesmereUI.DUAL_GAP     = DUAL_GAP
@@ -2823,13 +2856,8 @@ EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS = {
 -- Get a class-resource color (custom override or default), keyed by resource.
 function EllesmereUI.GetClassResourceColor(key)
     if not key then return nil end
-    local db = EllesmereUI.GetCustomColorsDB()
-    if db.classResource and db.classResource[key] then
-        return db.classResource[key]
-    end
-    local def = EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS[key]
-    if def then return { r = def.r, g = def.g, b = def.b } end
-    return nil
+    if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
+    return EllesmereUI._colorCache.classResource[key]
 end
 
 -- Class -> primary power type name mapping
@@ -2909,6 +2937,123 @@ function EllesmereUI.IsColorEditingLocked()
     local activeName = pdb.activeProfile or "Default"
     local srcName = EllesmereUIDB.colorsPullFrom or (pdb.profileOrder and pdb.profileOrder[1])
     return srcName ~= nil and srcName ~= activeName
+end
+
+-------------------------------------------------------------------------------
+--  Dark Mode (per-profile)
+--  One shared palette feeds the Dark Mode look of Unit Frames, Raid Frames and
+--  Resource Bars, plus three "darken" amounts that blacken the class / power /
+--  class-resource colours globally (applied inside the colour getters below, so
+--  every consumer gets adjusted values with no per-module logic).
+--  Stored PER PROFILE at EllesmereUIDB.profiles[name].darkMode (sibling of
+--  customColors). Unlike custom colours, this is ALWAYS the active profile's own
+--  table (no "Apply to All Profiles" redirect) -- it is strictly per-profile.
+--  Defaults reproduce the previously-hardcoded look exactly: #111111 fill @ 90%,
+--  #4f4f4f background @ 100%, and zero darken (identity).
+-------------------------------------------------------------------------------
+EllesmereUI.DEFAULT_DARK_MODE = {
+    fillR = 0x11/255, fillG = 0x11/255, fillB = 0x11/255, fillA = 0.90,
+    bgR   = 0x4f/255, bgG   = 0x4f/255, bgB   = 0x4f/255, bgA   = 1.0,
+    classDarken = 0, powerDarken = 0, resourceDarken = 0,
+}
+
+-- The active profile's dark-mode table (lazily created, may be sparse -- callers
+-- fall back to DEFAULT_DARK_MODE per field). Never returns nil.
+function EllesmereUI.GetDarkModeDB()
+    if EllesmereUI.GetProfilesDB then
+        local pdb = EllesmereUI.GetProfilesDB()
+        if pdb and pdb.profiles then
+            local active = pdb.profiles[pdb.activeProfile or "Default"]
+            if active then
+                active.darkMode = active.darkMode or {}
+                return active.darkMode
+            end
+        end
+    end
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    EllesmereUIDB.darkMode = EllesmereUIDB.darkMode or {}
+    return EllesmereUIDB.darkMode
+end
+
+-- Dark Mode fill colour (r, g, b, a). Opacity is honoured by Unit Frames and
+-- Raid Frames; Resource Bars ignore the alpha and keep their own.
+function EllesmereUI.GetDarkModeFill()
+    local d = EllesmereUI.GetDarkModeDB()
+    local def = EllesmereUI.DEFAULT_DARK_MODE
+    return d.fillR or def.fillR, d.fillG or def.fillG, d.fillB or def.fillB, d.fillA or def.fillA
+end
+
+-- Dark Mode background colour (r, g, b, a). Same opacity rules as the fill.
+function EllesmereUI.GetDarkModeBg()
+    local d = EllesmereUI.GetDarkModeDB()
+    local def = EllesmereUI.DEFAULT_DARK_MODE
+    return d.bgR or def.bgR, d.bgG or def.bgG, d.bgB or def.bgB, d.bgA or def.bgA
+end
+
+-- Effective-colour cache. The class/power/resource getters run in hot render
+-- paths (nameplates, raid/unit frames, borders), so rather than resolve the
+-- palette + apply the darken multiplier on every call, we precompute the FINAL
+-- colours once and serve cached {r,g,b} tables. Rebuilt lazily on the first read
+-- after an invalidation; reads are then a single table lookup with zero
+-- allocation. Invalidation hangs off the universal "colours changed" chokepoint
+-- (ApplyColorsToOUF -- every swatch edit, reset, mode toggle and profile switch
+-- funnels through it) plus RefreshDarkMode. This is a READ-ONLY derived cache
+-- (it never writes the DB), so the worst failure mode is a cosmetically stale
+-- colour, never data loss.
+EllesmereUI._colorCache = { class = {}, power = {}, classResource = {}, resource = {} }
+EllesmereUI._colorCacheDirty = true
+EllesmereUI._COLOR_WHITE = { r = 1, g = 1, b = 1 }
+
+function EllesmereUI.InvalidateColorCache()
+    EllesmereUI._colorCacheDirty = true
+end
+
+-- Fill `out` with {r,g,b} per key: defaults overlaid by custom, then blackened by
+-- darkenPct (0-100). Sub-tables are recreated each rebuild (rare -- only on a
+-- colour/darken/profile change) so hot-path reads never allocate.
+function EllesmereUI._BuildColorPalette(out, defaults, custom, darkenPct)
+    wipe(out)
+    if defaults then
+        for k, def in pairs(defaults) do out[k] = { r = def.r, g = def.g, b = def.b } end
+    end
+    if custom then
+        for k, c in pairs(custom) do out[k] = { r = c.r, g = c.g, b = c.b } end
+    end
+    if darkenPct and darkenPct > 0 then
+        local f = 1 - darkenPct / 100
+        if f < 0 then f = 0 end
+        for _, col in pairs(out) do
+            col.r = col.r * f; col.g = col.g * f; col.b = col.b * f
+        end
+    end
+end
+
+function EllesmereUI._RebuildColorCache()
+    local cc = EllesmereUI.GetCustomColorsDB()
+    local dm = EllesmereUI.GetDarkModeDB()
+    local cache = EllesmereUI._colorCache
+    EllesmereUI._BuildColorPalette(cache.class,          EllesmereUI.CLASS_COLOR_MAP,               cc and cc.class,          dm and dm.classDarken)
+    EllesmereUI._BuildColorPalette(cache.power,          EllesmereUI.DEFAULT_POWER_COLORS,          cc and cc.power,          dm and dm.powerDarken)
+    EllesmereUI._BuildColorPalette(cache.classResource,  EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS, cc and cc.classResource,  dm and dm.resourceDarken)
+    EllesmereUI._BuildColorPalette(cache.resource,       EllesmereUI.DEFAULT_RESOURCE_COLORS,       cc and cc.resource,       dm and dm.resourceDarken)
+    EllesmereUI._colorCacheDirty = false
+end
+
+-- Modules register a callback that re-reads the dark palette and repaints their
+-- dark-mode frames. RefreshDarkMode() runs them all + re-pushes (possibly
+-- darkened) class/power colours through ApplyColorsToOUF.
+EllesmereUI._darkModeRefreshers = EllesmereUI._darkModeRefreshers or {}
+function EllesmereUI.RegisterDarkModeRefresh(fn)
+    if type(fn) == "function" then
+        EllesmereUI._darkModeRefreshers[#EllesmereUI._darkModeRefreshers + 1] = fn
+    end
+end
+function EllesmereUI.RefreshDarkMode()
+    -- Darken amounts feed the colour cache; drop it so refreshers + the OUF push
+    -- below resolve freshly darkened colours.
+    EllesmereUI.InvalidateColorCache()
+    for _, fn in ipairs(EllesmereUI._darkModeRefreshers) do pcall(fn) end
+    if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
 end
 
 -------------------------------------------------------------------------------
@@ -3310,37 +3455,25 @@ function EllesmereUI.BuildFontDropdownData()
     return values, order
 end
 
--- Get class color (custom or default)
+-- Get class color (custom or default), with Class Color Darken already baked in
+-- by the cache so every consumer (health bars, nameplates, raid frames, borders,
+-- etc.) gets the adjusted colour with no per-module logic. Unknown token -> white.
 function EllesmereUI.GetClassColor(classToken)
-    local db = EllesmereUI.GetCustomColorsDB()
-    if db.class and db.class[classToken] then
-        return db.class[classToken]
-    end
-    local def = CLASS_COLOR_MAP[classToken]
-    if def then return { r = def.r, g = def.g, b = def.b } end
-    return { r = 1, g = 1, b = 1 }
+    if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
+    return EllesmereUI._colorCache.class[classToken] or EllesmereUI._COLOR_WHITE
 end
 
--- Get power color (custom or default). Returns nil for unknown keys.
+-- Get power color (cached, darken baked in). Returns nil for unknown keys.
 function EllesmereUI.GetPowerColor(powerKey)
-    local db = EllesmereUI.GetCustomColorsDB()
-    if db.power and db.power[powerKey] then
-        return db.power[powerKey]
-    end
-    local def = EllesmereUI.DEFAULT_POWER_COLORS[powerKey]
-    if def then return { r = def.r, g = def.g, b = def.b } end
-    return nil
+    if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
+    return EllesmereUI._colorCache.power[powerKey]
 end
 
--- Get resource color (custom or default)
+-- Get resource color (cached, darken baked in). Returns nil for unknown keys.
+-- Shares Resource Color Darken with GetClassResourceColor.
 function EllesmereUI.GetResourceColor(classToken)
-    local db = EllesmereUI.GetCustomColorsDB()
-    if db.resource and db.resource[classToken] then
-        return db.resource[classToken]
-    end
-    local def = EllesmereUI.DEFAULT_RESOURCE_COLORS[classToken]
-    if def then return { r = def.r, g = def.g, b = def.b } end
-    return nil
+    if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
+    return EllesmereUI._colorCache.resource[classToken]
 end
 
 -- Reset colors for a specific class (class color + resource color + power stays)
@@ -3348,12 +3481,14 @@ function EllesmereUI.ResetClassColors(classToken)
     local db = EllesmereUI.GetCustomColorsDB()
     if db.class then db.class[classToken] = nil end
     if db.resource then db.resource[classToken] = nil end
+    EllesmereUI.InvalidateColorCache()
 end
 
 -- Reset a specific power color
 function EllesmereUI.ResetPowerColor(powerKey)
     local db = EllesmereUI.GetCustomColorsDB()
     if db.power then db.power[powerKey] = nil end
+    EllesmereUI.InvalidateColorCache()
 end
 
 -- Power key string -> Enum.PowerType mapping
@@ -3409,6 +3544,11 @@ end
 
 -- Apply custom class colors to oUF (call after settings change)
 function EllesmereUI.ApplyColorsToOUF()
+    -- This is the universal "colours changed" entry point (swatch edits, resets,
+    -- the global-mode toggle, Pull Colors From, and profile switches all call it),
+    -- so drop the effective-colour cache here. The GetClassColor/GetPowerColor
+    -- reads just below then rebuild it once from the new palette + darken.
+    EllesmereUI.InvalidateColorCache()
     -- 1. Update oUF color objects (unit frames)
     -- NOTE: We intentionally do NOT modify _G.RAID_CLASS_COLORS.
     -- Touching that Blizzard global causes taint in 12.0+.
@@ -6388,8 +6528,13 @@ local function CreateMainFrame()
             syncTex:SetTexture(EllesmereUI.SYNC_ICON)
             syncTex:SetVertexColor(1, 1, 1, 1)
             syncBtn._tex = syncTex
-            syncBtn._folder = info.folder
-            syncBtn._display = info.display
+            -- syncFolder/syncDisplay let a sidebar entry drive the sync of a
+            -- DIFFERENT profile folder than its own (Dragon Riding lives inside
+            -- the BlizzardSkin entry). The loaded check still uses info.folder
+            -- (the host addon); only the sync state/group target is redirected.
+            local syncFolder = info.syncFolder or info.folder
+            syncBtn._folder = syncFolder
+            syncBtn._display = info.syncDisplay or info.display
             local SYNC_ON_R, SYNC_ON_G, SYNC_ON_B = 0x32/255, 0xbc/255, 0x53/255
             local SYNC_HOVER_R = math.min(1, SYNC_ON_R * 1.25)
             local SYNC_HOVER_G = math.min(1, SYNC_ON_G * 1.25)
@@ -6415,7 +6560,7 @@ local function CreateMainFrame()
                 -- white otherwise -- including when a group exists that the
                 -- active profile is not part of
                 local activeProf = EllesmereUIDB and EllesmereUIDB.activeProfile or "Default"
-                local activeSynced = isGlobalOnly or EllesmereUI.IsProfileSynced(info.folder, activeProf)
+                local activeSynced = isGlobalOnly or EllesmereUI.IsProfileSynced(syncFolder, activeProf)
                 -- Check global hide settings
                 if EllesmereUIDB then
                     if EllesmereUIDB.hideSyncIcons then
@@ -8449,6 +8594,31 @@ function EllesmereUI:InvalidatePageCache()
     end
 end
 
+-- Invalidate cached pages for a SINGLE module (key prefix "Module::"). Used on
+-- spec change, where only the per-spec module's (CDM's) pages are stale. When the
+-- panel is OPEN, the currently-shown page's wrapper is preserved so the screen is
+-- not blanked -- the caller rebuilds it in place via RefreshPage(true). When the
+-- panel is CLOSED there is nothing on screen, so every cached page (including the
+-- last-active one) is dropped to force a fresh build on next open. Teardown
+-- matches RefreshPage: Hide + SetParent(nil) the wrapper, then drop the entry.
+function EllesmereUI:InvalidateModulePageCache(moduleName)
+    if not moduleName then return end
+    local prefix = moduleName .. "::"
+    local keepKey
+    if self.IsShown and self:IsShown() and activeModule and activePage then
+        keepKey = activeModule .. "::" .. activePage
+    end
+    for key, entry in pairs(_pageCache) do
+        if key:sub(1, #prefix) == prefix and key ~= keepKey then
+            if entry.wrapper then
+                entry.wrapper:Hide()
+                entry.wrapper:SetParent(nil)
+            end
+            _pageCache[key] = nil
+        end
+    end
+end
+
 function EllesmereUI:SelectPage(pageName)
     if not activeModule or not modules[activeModule] then return end
     if pageName == activePage then return end
@@ -9171,7 +9341,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.3.2"
+EllesmereUI.VERSION = "8.3.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -10018,8 +10188,9 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- so it only applies when that addon is enabled. Detect whether the
         -- skin is active so EUI's own buttons match the skinned menu style.
         local _blizzSkinLoaded = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUIBlizzardSkin")
-        local _reskinMenu = _blizzSkinLoaded and EllesmereUIDB and EllesmereUIDB.reskinGameMenu
-        if _reskinMenu == nil and _blizzSkinLoaded then _reskinMenu = (not EllesmereUIDB or (EllesmereUIDB.customTooltips ~= false and EllesmereUIDB.reskinQueuePopup ~= false)) end
+        -- "Reskin Pause Menu" is an independent toggle (default on); the migration
+        -- blizzskin_reskin_master_split_v1 seeds reskinGameMenu for existing users.
+        local _reskinMenu = _blizzSkinLoaded and (not EllesmereUIDB or EllesmereUIDB.reskinGameMenu ~= false)
 
         local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
         btn:SetSize(200, 35)
@@ -10217,6 +10388,18 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- every unit/currency tooltip in the game (major CPU savings).
         local _isSecret = issecretvalue  -- cache global once
 
+        -- The spell/item/icon ID lines can be gated behind a held modifier (the
+        -- "Use Modifier" cog: none | shift | control | alt, default none). "none"
+        -- shows them whenever Show Spell ID is on (the original behavior); the
+        -- others only surface the lines while that key is held.
+        local function IsSpellIDModifierHeld()
+            local mod = (EllesmereUIDB and EllesmereUIDB.spellIDModifier) or "none"
+            if mod == "none" then return true end
+            if mod == "control" then return IsControlKeyDown() end
+            if mod == "alt" then return IsAltKeyDown() end
+            return IsShiftKeyDown()
+        end
+
         -- Shared dedup check: only scan last 4 lines (we add at most 2)
         local function hasDupLine(tooltip, name, tag)
             local n = tooltip:NumLines()
@@ -10237,6 +10420,7 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         local function SpellIDTooltipHook(tooltip, data)
             if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
+            if not IsSpellIDModifierHeld() then return end
             if not data or not data.id then return end
             if _isSecret and _isSecret(data.id) then return end
             if not tooltip or not tooltip.GetName then return end
@@ -10254,6 +10438,7 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         local function ItemIDTooltipHook(tooltip, data)
             if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
+            if not IsSpellIDModifierHeld() then return end
             if not data or not data.id then return end
             if _isSecret and _isSecret(data.id) then return end
             if not tooltip or not tooltip.GetName then return end
@@ -10269,12 +10454,61 @@ initFrame:SetScript("OnEvent", function(self, event)
             tooltip:Show()
         end
 
+        -- Macros surface as their own tooltip type, so the Spell hook above never
+        -- fires for them. GetSpell() also returns nil on a macro tooltip. The
+        -- spell #showtooltip resolved to (honoring conditionals) is exposed as the
+        -- FIRST tooltip line's tooltipID, which we read from the tooltip data.
+        local function MacroSpellIDTooltipHook(tooltip, _data)
+            if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
+            if not IsSpellIDModifierHeld() then return end
+            if not tooltip or not tooltip.GetName or not tooltip.GetTooltipData then return end
+            local ok, info = pcall(tooltip.GetTooltipData, tooltip)
+            if not ok or type(info) ~= "table" or not info.lines then return end
+            local line = info.lines[1]
+            local spellID = line and line.tooltipID
+            if not spellID then return end  -- item-only macro / nothing castable
+            if _isSecret and _isSecret(spellID) then return end
+            local okN, name = pcall(tooltip.GetName, tooltip)
+            if not okN or not name then return end
+            if hasDupLine(tooltip, name, "SpellID") then return end
+            tooltip:AddDoubleLine("SpellID", tostring(spellID), 1, 1, 1, 1, 1, 1)
+            local iconID = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID)
+                or (GetSpellTexture and GetSpellTexture(spellID))
+            if iconID then
+                tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+            end
+            tooltip:Show()
+        end
+
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, SpellIDTooltipHook)
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.UnitAura, SpellIDTooltipHook)
         if Enum.TooltipDataType.PetAction then
             TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.PetAction, SpellIDTooltipHook)
         end
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ItemIDTooltipHook)
+        if Enum.TooltipDataType.Macro then
+            TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Macro, MacroSpellIDTooltipHook)
+        end
+
+        -- Live toggle: when the selected modifier is pressed/released while a
+        -- tooltip is hovered, re-process the shown GameTooltip so the ID lines
+        -- appear/disappear without re-hovering. RefreshData re-runs the post-calls
+        -- above (which then add or skip the lines per IsSpellIDModifierHeld). Only
+        -- fires when the feature is on and the relevant modifier actually changed.
+        local modWatcher = CreateFrame("Frame")
+        modWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+        modWatcher:SetScript("OnEvent", function(_, key)
+            if not (EllesmereUIDB and EllesmereUIDB.showSpellID) then return end
+            local mod = EllesmereUIDB.spellIDModifier or "none"
+            local relevant =
+                (mod == "shift"   and (key == "LSHIFT" or key == "RSHIFT")) or
+                (mod == "control" and (key == "LCTRL"  or key == "RCTRL"))  or
+                (mod == "alt"     and (key == "LALT"   or key == "RALT"))
+            if not relevant then return end
+            if GameTooltip and GameTooltip:IsShown() and GameTooltip.RefreshData then
+                GameTooltip:RefreshData()
+            end
+        end)
     end
 
     -- Consolidated Blizzard AddOns > Options panel (single entry for all Ellesmere addons)

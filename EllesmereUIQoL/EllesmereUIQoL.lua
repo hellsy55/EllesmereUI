@@ -4,6 +4,39 @@
 --  tab of Global Settings. No UI code here -- only gameplay behaviour.
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+--  Per-profile storage for QoL "extras" (Secondary Stats + FPS counter).
+--  These were account-wide on the EllesmereUIDB root; they now live in the QoL
+--  profile DB (folder EllesmereUIQoL) so they travel with profiles, export/
+--  import, and module sync. The migration in EllesmereUI_Migration.lua seeds
+--  every existing profile from the old account-wide values, so nobody loses
+--  their setup. Reads fall back to the frozen account-wide root for any profile
+--  that has no per-profile value yet (newly created profiles, sync gaps);
+--  writes always go per-profile. Mirrors the crosshair read/fallback pattern.
+--
+--  This shares EllesmereUIQoLDB with the Cursor / BattleRes / Bloodlust modules
+--  -- each NewDB call merges its own defaults into the SAME profile table, and
+--  the profile system repoints every handle on a profile swap.
+-------------------------------------------------------------------------------
+local _qolExtrasDB
+local function QoLExtrasProfile()
+    if not _qolExtrasDB and EllesmereUI and EllesmereUI.Lite and EllesmereUI.Lite.NewDB then
+        _qolExtrasDB = EllesmereUI.Lite.NewDB("EllesmereUIQoLDB", { profile = {} })
+    end
+    return _qolExtrasDB and _qolExtrasDB.profile
+end
+function EllesmereUI.QoLExtrasGet(k)
+    local p = QoLExtrasProfile()
+    if p and p[k] ~= nil then return p[k] end
+    return EllesmereUIDB and EllesmereUIDB[k]
+end
+function EllesmereUI.QoLExtrasSet(k, v)
+    local p = QoLExtrasProfile()
+    if p then p[k] = v; return end
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    EllesmereUIDB[k] = v
+end
+
 local qolFrame = CreateFrame("Frame")
 qolFrame:RegisterEvent("PLAYER_LOGIN")
 qolFrame:SetScript("OnEvent", function(self)
@@ -1038,7 +1071,7 @@ do
                 statsFrame._classHex = "ffffff"
             end
         end
-        local c = EllesmereUIDB and EllesmereUIDB.secondaryStatsColor
+        local c = EllesmereUI.QoLExtrasGet("secondaryStatsColor")
         local cr, cg, cb
         if c then
             cr, cg, cb = c.r, c.g, c.b
@@ -1060,8 +1093,8 @@ do
             format("|cff%sMastery:|r  |cffffffff%.2f%%|r", labelHex, mastery) .. "\n" ..
             format("|cff%sVers:|r  |cffffffff%.2f%%|r", labelHex, vers)
 
-        if EllesmereUIDB and EllesmereUIDB.showTertiaryStats then
-            local tc = EllesmereUIDB.tertiaryStatsColor
+        if EllesmereUI.QoLExtrasGet("showTertiaryStats") then
+            local tc = EllesmereUI.QoLExtrasGet("tertiaryStatsColor")
             local tr, tg, tb
             if tc then
                 tr, tg, tb = tc.r, tc.g, tc.b
@@ -1083,7 +1116,7 @@ do
     end
 
     local function ApplySecondaryStats()
-        local enabled = EllesmereUIDB and EllesmereUIDB.showSecondaryStats
+        local enabled = EllesmereUI.QoLExtrasGet("showSecondaryStats")
         if not enabled then
             if statsFrame then
                 statsFrame:Hide()
@@ -1105,7 +1138,7 @@ do
             if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
             statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag("extras"))
         end
-        local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+        local pos = EllesmereUI.QoLExtrasGet("secondaryStatsPos")
         local scale = 1.0
         if pos then
             if pos.point then
@@ -1170,7 +1203,7 @@ do
     local function CreateFPSCounter()
         if fpsFrame then return end
         local FONT = EllesmereUI.GetFontPath("extras")
-        local FONT_SIZE = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+        local FONT_SIZE = EllesmereUI.QoLExtrasGet("fpsTextSize") or 12
         local LABEL_SIZE = FONT_SIZE - 2
         fpsFrame = CreateFrame("Frame", "EUI_FPSCounter", UIParent)
         fpsFrame:SetSize(60, 20)
@@ -1214,8 +1247,7 @@ do
         fpsFrame._textLocal = fsLocalVal
 
         local function UpdateFPS(self)
-            local db = EllesmereUIDB or {}
-            local c = db.fpsColor
+            local c = EllesmereUI.QoLExtrasGet("fpsColor")
             local cr, cg, cb, ca = 1, 1, 1, 1
             if c then cr, cg, cb, ca = c.r or 1, c.g or 1, c.b or 1, c.a or 1 end
             fsFps:SetTextColor(cr, cg, cb, ca)
@@ -1229,9 +1261,10 @@ do
             local fps = floor(GetFramerate() + 0.5)
             fsFps:SetText(fps .. " fps")
 
-            local showWorld = db.fpsShowWorldMS
-            local showLocal = (db.fpsShowLocalMS == nil) and true or db.fpsShowLocalMS
-            local hideLabel = db.fpsHideLabel
+            local showWorld = EllesmereUI.QoLExtrasGet("fpsShowWorldMS")
+            local _localMS = EllesmereUI.QoLExtrasGet("fpsShowLocalMS")
+            local showLocal = (_localMS == nil) and true or _localMS
+            local hideLabel = EllesmereUI.QoLExtrasGet("fpsHideLabel")
             local _, _, latHome, latWorld = GetNetStats()
 
             fsFps:ClearAllPoints()
@@ -1306,10 +1339,10 @@ do
     end
 
     EllesmereUI._applyFPSCounter = function()
-        local shouldShow = EllesmereUIDB and EllesmereUIDB.showFPS
+        local shouldShow = EllesmereUI.QoLExtrasGet("showFPS")
         if shouldShow then
             CreateFPSCounter()
-            local sz = (EllesmereUIDB and EllesmereUIDB.fpsTextSize) or 12
+            local sz = EllesmereUI.QoLExtrasGet("fpsTextSize") or 12
             local lblSz = sz - 2
             local fp = EllesmereUI.GetFontPath("extras")
             local outF = EllesmereUI.GetFontOutlineFlag("extras")
@@ -1318,7 +1351,7 @@ do
             if fpsFrame._textLocal then fpsFrame._textLocal:SetFont(fp, sz, outF) end
             if fpsFrame._lblWorld then fpsFrame._lblWorld:SetFont(fp, lblSz, outF) end
             if fpsFrame._lblLocal then fpsFrame._lblLocal:SetFont(fp, lblSz, outF) end
-            local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
+            local pos = EllesmereUI.QoLExtrasGet("fpsPos")
             if pos and pos.point then
                 if pos.scale then pcall(function() fpsFrame:SetScale(pos.scale) end) end
                 fpsFrame:ClearAllPoints()
@@ -1349,23 +1382,22 @@ do
                 end,
                 noResize = true,
                 savePos = function(key, point, relPoint, x, y)
-                    if not EllesmereUIDB then EllesmereUIDB = {} end
                     if not point then return end
-                    EllesmereUIDB.fpsPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    EllesmereUI.QoLExtrasSet("fpsPos", { point = point, relPoint = relPoint, x = x, y = y })
                     if fpsFrame and not EllesmereUI._unlockActive then
                         fpsFrame:ClearAllPoints()
                         fpsFrame:SetPoint(point, UIParent, relPoint or point, x or 0, y or 0)
                     end
                 end,
                 loadPos = function()
-                    return EllesmereUIDB and EllesmereUIDB.fpsPos
+                    return EllesmereUI.QoLExtrasGet("fpsPos")
                 end,
                 clearPos = function()
-                    if EllesmereUIDB then EllesmereUIDB.fpsPos = nil end
+                    EllesmereUI.QoLExtrasSet("fpsPos", nil)
                 end,
                 applyPos = function()
                     if not fpsFrame then return end
-                    local pos = EllesmereUIDB and EllesmereUIDB.fpsPos
+                    local pos = EllesmereUI.QoLExtrasGet("fpsPos")
                     if pos and pos.point then
                         fpsFrame:ClearAllPoints()
                         fpsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
@@ -1394,11 +1426,10 @@ do
                 end,
                 noResize = true,
                 savePos = function(key, point, relPoint, x, y)
-                    if not EllesmereUIDB then EllesmereUIDB = {} end
                     if not point then return end
                     -- Scale lives in this same table; carry it over so a drag doesn't wipe it.
-                    local prev = EllesmereUIDB.secondaryStatsPos
-                    EllesmereUIDB.secondaryStatsPos = { point = point, relPoint = relPoint, x = x, y = y, scale = prev and prev.scale }
+                    local prev = EllesmereUI.QoLExtrasGet("secondaryStatsPos")
+                    EllesmereUI.QoLExtrasSet("secondaryStatsPos", { point = point, relPoint = relPoint, x = x, y = y, scale = prev and prev.scale })
                     if not EllesmereUI._unlockActive then
                         local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
                         if f then
@@ -1408,15 +1439,15 @@ do
                     end
                 end,
                 loadPos = function()
-                    return EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+                    return EllesmereUI.QoLExtrasGet("secondaryStatsPos")
                 end,
                 clearPos = function()
-                    if EllesmereUIDB then EllesmereUIDB.secondaryStatsPos = nil end
+                    EllesmereUI.QoLExtrasSet("secondaryStatsPos", nil)
                 end,
                 applyPos = function()
                     local f = EllesmereUI._getSecondaryStatsFrame and EllesmereUI._getSecondaryStatsFrame()
                     if not f then return end
-                    local pos = EllesmereUIDB and EllesmereUIDB.secondaryStatsPos
+                    local pos = EllesmereUI.QoLExtrasGet("secondaryStatsPos")
                     if pos and pos.point then
                         f:ClearAllPoints()
                         f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
@@ -1429,13 +1460,12 @@ do
     local fpsBind = CreateFrame("Button", "EUI_FPSBindBtn", UIParent)
     fpsBind:Hide()
     fpsBind:SetScript("OnClick", function()
-        if not EllesmereUIDB then EllesmereUIDB = {} end
-        EllesmereUIDB.showFPS = not EllesmereUIDB.showFPS
+        EllesmereUI.QoLExtrasSet("showFPS", not EllesmereUI.QoLExtrasGet("showFPS"))
         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
     end)
 
     C_Timer.After(1, function()
-        if EllesmereUIDB and EllesmereUIDB.showFPS then
+        if EllesmereUI.QoLExtrasGet("showFPS") then
             EllesmereUI._applyFPSCounter()
         end
         local function ApplyFPSBind()
@@ -2144,26 +2174,29 @@ do
         return fingerprint
     end
 
-    local hiddenByUs = {}
+    local hiddenByUs = setmetatable({}, { __mode = "k" })
     local function HideButton(btn)
         btn:SetAlpha(0)
         btn:EnableMouse(false)
         hiddenByUs[btn] = true
     end
 
+    -- Hoisted out of the pcall so we reuse one function instead of allocating a
+    -- closure on every call (this runs on each panel open + each HelpTip show).
+    local function DoHideOpenTips()
+        for tip in HelpTip.framePool:EnumerateActive() do
+            if tip:IsShown() then
+                local info = tip.info
+                if info and info.cvarBitfield and info.bitfieldFlag then
+                    SetCVarBitfield(info.cvarBitfield, info.bitfieldFlag, true)
+                end
+                tip:Hide()
+            end
+        end
+    end
     local function HideOpenTips()
         if not (HelpTip and HelpTip.framePool and HelpTip.framePool.EnumerateActive) then return end
-        pcall(function()
-            for tip in HelpTip.framePool:EnumerateActive() do
-                if tip:IsShown() then
-                    local info = tip.info
-                    if info and info.cvarBitfield and info.bitfieldFlag then
-                        SetCVarBitfield(info.cvarBitfield, info.bitfieldFlag, true)
-                    end
-                    tip:Hide()
-                end
-            end
-        end)
+        pcall(DoHideOpenTips)
     end
 
     local HideButtonsUnder
@@ -2250,6 +2283,7 @@ do
         else
             if weSetCVar then
                 pcall(SetCVar, "hideHelptips", "0")
+                pcall(SetCVar, "showTutorials", "1")
                 weSetCVar = false
             end
             RestoreButtons()
