@@ -2306,3 +2306,262 @@ do
     end)
 end
 
+-------------------------------------------------------------------------------
+--  Group Death Announcer
+--  Shows a large center-screen "<name> DIED!" alert when a party or raid
+--  member dies. Midnight removed the combat log, so deaths are detected by
+--  polling group units for an alive -> dead transition (feign death and the
+--  player's own death are excluded). Fully gated: no ticker runs while the
+--  option is off or while solo.
+-------------------------------------------------------------------------------
+do
+    local POLL_INTERVAL = 0.35
+    local alertOverlay
+    local ticker
+    local watcher
+    local installed = false
+    local deadState = {}   -- [guid] = true while dead/ghost, false while alive
+
+    local DEFAULT_TEXT_SIZE = 34
+
+    -- Applies the configured font size and saved position (or the default
+    -- center-top placement) to the overlay.
+    local function ApplyOverlaySettings()
+        if not alertOverlay then return end
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras"))
+            or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
+        local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("extras"))
+            or "OUTLINE"
+        local size = (EllesmereUIDB and EllesmereUIDB.groupDeathTextSize) or DEFAULT_TEXT_SIZE
+        alertOverlay._text:SetFont(fontPath, size, outline)
+        -- Keep the frame (and therefore the unlock-mode mover) compact and sized
+        -- to roughly the alert text rather than a fixed wide box.
+        alertOverlay:SetSize(size * 7, size + 14)
+
+        alertOverlay:ClearAllPoints()
+        local pos = EllesmereUIDB and EllesmereUIDB.groupDeathAlertPos
+        if pos and pos.point then
+            alertOverlay:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        else
+            alertOverlay:SetPoint("CENTER", UIParent, "CENTER", 0, 180)
+        end
+    end
+
+    local function CreateAlertOverlay()
+        if alertOverlay then return end
+
+        alertOverlay = CreateFrame("Frame", nil, UIParent)
+        alertOverlay:SetSize(240, 50)
+        alertOverlay:SetFrameStrata("HIGH")
+        alertOverlay:SetFrameLevel(60)
+        alertOverlay:EnableMouse(false)
+        alertOverlay:SetMouseClickEnabled(false)
+
+        local fs = alertOverlay:CreateFontString(nil, "OVERLAY")
+        fs:SetPoint("CENTER")
+        alertOverlay._text = fs
+        ApplyOverlaySettings()
+
+        -- Quick fade-in, brief hold, fade-out; hide when finished.
+        local ag = alertOverlay:CreateAnimationGroup()
+        local fadeIn = ag:CreateAnimation("Alpha")
+        fadeIn:SetFromAlpha(0); fadeIn:SetToAlpha(1); fadeIn:SetDuration(0.15); fadeIn:SetOrder(1)
+        local hold = ag:CreateAnimation("Alpha")
+        hold:SetFromAlpha(1); hold:SetToAlpha(1); hold:SetDuration(1.6); hold:SetOrder(2)
+        local fadeOut = ag:CreateAnimation("Alpha")
+        fadeOut:SetFromAlpha(1); fadeOut:SetToAlpha(0); fadeOut:SetDuration(0.6); fadeOut:SetOrder(3)
+        ag:SetScript("OnFinished", function() alertOverlay:Hide() end)
+        alertOverlay._ag = ag
+
+        alertOverlay:SetScript("OnHide", function() ag:Stop() end)
+        alertOverlay:Hide()
+    end
+
+    local function ShowAlert(name, classToken)
+        if not name then return end
+        CreateAlertOverlay()
+        ApplyOverlaySettings()
+
+        local colored = name
+        local c = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+        if c then
+            colored = "|c" .. (c.colorStr or "ffffffff") .. name .. "|r"
+        end
+        local skull = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:0|t"
+        alertOverlay._text:SetText(skull .. " " .. colored .. " |cffff2020DIED!|r")
+
+        alertOverlay._ag:Stop()
+        alertOverlay:SetAlpha(1)
+        alertOverlay:Show()
+        alertOverlay._ag:Play()
+    end
+
+    -- Plays the death alert sound (on by default). "Master" channel so it is
+    -- audible even if the SFX slider is low. We use the raw sound id (847 =
+    -- igQuestFailed) because that kit isn't present in the SOUNDKIT table, so
+    -- SOUNDKIT.IG_QUEST_FAILED is nil and PlaySound(nil) would raise an error.
+    local DEATH_SOUND_ID = (SOUNDKIT and SOUNDKIT.IG_QUEST_FAILED) or 847
+    local function PlayDeathSound()
+        if EllesmereUIDB and EllesmereUIDB.groupDeathSound == false then return end
+        if not DEATH_SOUND_ID then return end
+        PlaySound(DEATH_SOUND_ID, "Master")
+    end
+
+    local function ForEachGroupUnit(fn)
+        if IsInRaid() then
+            for i = 1, GetNumGroupMembers() do
+                local u = "raid" .. i
+                if UnitExists(u) and not UnitIsUnit(u, "player") then fn(u) end
+            end
+        elseif IsInGroup() then
+            for i = 1, 4 do
+                local u = "party" .. i
+                if UnitExists(u) then fn(u) end
+            end
+        end
+    end
+
+    local function Poll()
+        if not (EllesmereUIDB and EllesmereUIDB.announceGroupDeaths) then return end
+        local seen = {}
+        ForEachGroupUnit(function(u)
+            local guid = UnitGUID(u)
+            if not guid then return end
+            seen[guid] = true
+            if not UnitIsConnected(u) then return end
+            local dead = (UnitIsDeadOrGhost(u) and not UnitIsFeignDeath(u)) and true or false
+            -- prev == false means we previously saw this unit alive; a nil prev
+            -- (first sighting / just (re)joined) primes the state silently so we
+            -- never announce someone who was already dead when we started.
+            if deadState[guid] == false and dead then
+                local _, classToken = UnitClass(u)
+                ShowAlert(UnitName(u), classToken)
+                PlayDeathSound()
+            end
+            deadState[guid] = dead
+        end)
+        for guid in pairs(deadState) do
+            if not seen[guid] then deadState[guid] = nil end
+        end
+    end
+
+    local function StartTicker()
+        if ticker then return end
+        wipe(deadState)
+        Poll()  -- prime alive/dead state without announcing
+        ticker = C_Timer.NewTicker(POLL_INTERVAL, Poll)
+    end
+
+    local function StopTicker()
+        if ticker then ticker:Cancel(); ticker = nil end
+        wipe(deadState)
+        if alertOverlay then alertOverlay:Hide() end
+    end
+
+    local function UpdateActive()
+        if EllesmereUIDB and EllesmereUIDB.announceGroupDeaths and IsInGroup() then
+            StartTicker()
+        else
+            StopTicker()
+        end
+    end
+
+    local function ApplyAnnounceGroupDeaths()
+        local on = EllesmereUIDB and EllesmereUIDB.announceGroupDeaths
+        if on and not installed then
+            watcher:RegisterEvent("GROUP_ROSTER_UPDATE")
+            watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+            installed = true
+        elseif not on and installed then
+            watcher:UnregisterAllEvents()
+            installed = false
+        end
+        UpdateActive()
+    end
+    EllesmereUI._applyAnnounceGroupDeaths = ApplyAnnounceGroupDeaths
+
+    -- Fires a sample alert (with sound) so the look/sound can be checked without
+    -- a real death. Uses your own name/class purely as preview text.
+    EllesmereUI._announceGroupDeathsPreview = function()
+        local _, classToken = UnitClass("player")
+        ShowAlert(UnitName("player"), classToken)
+        PlayDeathSound()
+    end
+
+    -- Visual-only preview (used by the Text Size slider so dragging it doesn't
+    -- repeatedly fire the sound).
+    EllesmereUI._groupDeathShowVisual = function()
+        local _, classToken = UnitClass("player")
+        ShowAlert(UnitName("player"), classToken)
+    end
+
+    EllesmereUI._groupDeathPlaySound = PlayDeathSound
+
+    -- Re-apply font size / position (called from the Text Size slider and from
+    -- unlock mode when the saved position changes).
+    EllesmereUI._applyGroupDeathAlert = function()
+        CreateAlertOverlay()
+        ApplyOverlaySettings()
+    end
+
+    -- Register the alert with Unlock Mode so its position can be dragged.
+    C_Timer.After(2, function()
+        if not (EllesmereUI and EllesmereUI.RegisterUnlockElements) then return end
+        local MK = EllesmereUI.MakeUnlockElement
+        if not MK then return end
+        EllesmereUI:RegisterUnlockElements({
+            MK({
+                key      = "EUI_GroupDeathAlert",
+                label    = "Group Death Alert",
+                group    = "Quality of Life",
+                order    = 720,
+                noResize = true,
+                isHidden = function()
+                    return not (EllesmereUIDB and EllesmereUIDB.announceGroupDeaths)
+                end,
+                getFrame = function()
+                    CreateAlertOverlay()
+                    return alertOverlay
+                end,
+                getSize = function()
+                    local size = (EllesmereUIDB and EllesmereUIDB.groupDeathTextSize) or DEFAULT_TEXT_SIZE
+                    return size * 7, size + 14
+                end,
+                savePos = function(_, point, relPoint, x, y)
+                    if not point then return end
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    EllesmereUIDB.groupDeathAlertPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    if alertOverlay and not EllesmereUI._unlockActive then
+                        ApplyOverlaySettings()
+                    end
+                end,
+                loadPos = function()
+                    local pos = EllesmereUIDB and EllesmereUIDB.groupDeathAlertPos
+                    if pos and pos.point then return pos end
+                    return { point = "CENTER", relPoint = "CENTER", x = 0, y = 180 }
+                end,
+                clearPos = function()
+                    if EllesmereUIDB then EllesmereUIDB.groupDeathAlertPos = nil end
+                    if alertOverlay then ApplyOverlaySettings() end
+                end,
+                applyPos = function()
+                    CreateAlertOverlay()
+                    ApplyOverlaySettings()
+                end,
+            }),
+        })
+    end)
+
+    watcher = CreateFrame("Frame")
+    watcher:SetScript("OnEvent", function() UpdateActive() end)
+
+    local boot = CreateFrame("Frame")
+    boot:RegisterEvent("PLAYER_LOGIN")
+    boot:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if EllesmereUIDB and EllesmereUIDB.announceGroupDeaths then
+            ApplyAnnounceGroupDeaths()
+        end
+    end)
+end
+
