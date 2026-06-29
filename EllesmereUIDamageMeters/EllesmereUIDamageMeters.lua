@@ -390,20 +390,12 @@ ns._DM_TYPE_NAMES = DM_TYPE_NAMES
 local _combatEndTime = 0       -- GetTime() at combat end; control-flow sentinel (ticker teardown / freeze-once)
 local _needsFinalRefresh = false
 local _curViewFrozenDur = 0    -- final Current-session duration, pinned when combat ends
--- Feign-death GUID cache. Same goal as Details' parser:dead UnitIsFeignDeath
--- check, but COMBAT_LOG_EVENT_UNFILTERED is protected in Midnight (12.0+), so
--- we tag the GUID at Feign Death cast (spell 5384) via UNIT_SPELLCAST_SUCCEEDED
--- instead. The Deaths source list filters out cached GUIDs at render time,
--- catching cases where Blizzard's C_DamageMeter assigns a valid deathRecapID
--- to a feign (which the deathRecapID > 0 filter alone misses).
--- Tags are cleared on two signals:
---   * per-segment in PLAYER_REGEN_DISABLED / ENCOUNTER_START -- stale tags
---     from a previous combat would otherwise mis-filter a real death in the next;
---   * per-tick by CleanupFeignCache() the moment the unit's HP hits 0 -- the
---     unambiguous "really dead" signal. Feign preserves the hunter's actual HP
---     (> 0), so HP == 0 is reached only by real death. (UnitIsFeignDeath alone
---     is unreliable in Midnight -- it can stay true through a feign-then-die
---     transition and prevent the cache from clearing, hiding the real death.)
+-- This handles cases where C_DamageMeter gives a feign a valid deathRecapID,
+-- which the deathRecapID > 0 filter would otherwise treat as a real death.
+--
+-- Entries are cleared at combat / encounter start to avoid stale tags, and when
+-- the unit reaches 0 HP, which confirms a real death. UnitIsFeignDeath can remain
+-- true through a feign-then-die transition, so it cannot be used to clear safely.
 local _feignDeathGUIDs = {}
 
 -- Single source of truth for the "Current" session timer (window AND standalone
@@ -470,12 +462,11 @@ local function IsGroupInCombat()
     return false
 end
 
--- Clear feign-cached GUIDs whose unit is now really dead. Without this, a
--- hunter who feigned and then died for real -- without ever casting another
--- spell in between (e.g. AoE finished them off while still feigning) -- would
--- stay flagged forever, and the Deaths filter would hide their real death.
--- Called from the Deaths filter in RefreshUI, immediately before consulting
--- the cache, so it always reflects the current group state at filter time.
+-- Clear feign-cached GUIDs once their unit is confirmed dead.
+-- This prevents a hunter who feigned and then died before another spellcast
+-- from staying cached and being hidden by the Deaths filter.
+-- Called by the Deaths filter in RefreshUI before checking the cache, so the
+-- filter uses the current group state.
 local function CleanupFeignCache()
     if not next(_feignDeathGUIDs) then return end
     -- Build GUID -> unit map for the current group so the cache iteration
@@ -3172,10 +3163,10 @@ local function CreateDMWindow(winIdx)
             local isDeaths = (W.curDMType == Enum.DamageMeterType.Deaths)
             local isCount = (W.curDMType == Enum.DamageMeterType.Interrupts or W.curDMType == Enum.DamageMeterType.Dispels)
             -- Deaths: reverse to chronological (API returns most recent first)
-            -- Filter out feign deaths: (a) deathRecapID <= 0 (no valid recap, the
-            -- common case) AND (b) GUIDs we caught feigning via spell 5384 that
-            -- are not yet known to have transitioned to real-dead. CleanupFeignCache
-            -- runs first so a hunter who died while still feigning gets surfaced.
+            -- Filter feign deaths. CleanupFeignCache runs first so real deaths after
+            -- Feign Death are no longer hidden by the cached spell 5384 GUID.
+
+
             if isDeaths then
                 CleanupFeignCache()
                 local rev = {}
@@ -4489,10 +4480,8 @@ combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 combatFrame:RegisterEvent("UNIT_FLAGS")
 combatFrame:RegisterEvent("ENCOUNTER_START")
 combatFrame:RegisterEvent("ENCOUNTER_END")
--- UNIT_SPELLCAST_SUCCEEDED is used to detect Feign Death (spell 5384) so we can
--- filter the casting hunter's death out of the Deaths display. COMBAT_LOG_EVENT_
--- UNFILTERED would be more accurate (Details' approach) but it's protected in
--- Midnight (12.0+) and throws ADDON_ACTION_FORBIDDEN on RegisterEvent.
+-- Detect Feign Death via UNIT_SPELLCAST_SUCCEEDED (Blizzard does not fire UNIT_AURA for FD,
+--and the combat log is not reliable for this purpose). This is a high-frequency event, so we gate it with a tight integer compare.
 combatFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 combatFrame:SetScript("OnEvent", function(_, event, ...)
     -- UNIT_SPELLCAST_SUCCEEDED is the highest-frequency event in this handler;
@@ -4510,11 +4499,9 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
                 _feignDeathGUIDs[guid] = true
             end
         end
-        -- Note: do NOT untag on non-FD casts. While a hunter is alive after a
-        -- feign, Blizzard's session may still hold the feign entry with a valid
-        -- deathRecapID -- untagging here would expose it as a fake death. Real
-        -- deaths are surfaced by CleanupFeignCache() instead, which clears the
-        -- tag the instant UnitIsDeadOrGhost is true AND UnitIsFeignDeath is false.
+-- Do not clear on non-FD casts. A live hunter can still have a feign entry with
+-- a valid deathRecapID; CleanupFeignCache clears it once they are truly dead.
+
         return
     end
     if event == "UNIT_FLAGS" then
