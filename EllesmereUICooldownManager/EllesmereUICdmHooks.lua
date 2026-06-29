@@ -2047,11 +2047,26 @@ local function GetOrCreateTrinketFrame(slotID)
         local itemID = GetInventoryItemID("player", self._trinketSlot)
         if itemID then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
-            -- Use SetItemByID rather than SetInventoryItem: on an equipped item the
-            -- latter triggers Blizzard's item-comparison (shopping tooltip) anchoring,
-            -- which misbehaves under the cursor anchor. SetItemByID shows the same
-            -- trinket tooltip and matches the item-preset (potion/healthstone) frames.
-            GameTooltip:SetItemByID(itemID)
+            -- Prefer the equipped item's link so the tooltip reflects the actual
+            -- upgrade/bonus IDs (real item level + stats) rather than the base item.
+            -- SetItemByID is only a fallback if no link is available.
+            local link = GetInventoryItemLink("player", self._trinketSlot)
+            if link then
+                -- Suppress the equipped-item comparison (shopping) tooltips: this is
+                -- our own already-equipped trinket, so a side-by-side compare is just
+                -- noise. Temporarily disable auto-compare while the tooltip is built,
+                -- then restore the user's setting.
+                local prevCompare = GetCVar("alwaysCompareItems")
+                if prevCompare and prevCompare ~= "0" then
+                    SetCVar("alwaysCompareItems", "0")
+                end
+                GameTooltip:SetHyperlink(link)
+                if prevCompare and prevCompare ~= "0" then
+                    SetCVar("alwaysCompareItems", prevCompare)
+                end
+            else
+                GameTooltip:SetItemByID(itemID)
+            end
             -- Re-assert the cursor anchor after content is set (see helper notes):
             -- the item content-setter can drop the tip's cursor anchor, so without
             -- this it never appears while "Anchor to Cursor" is on. No-op otherwise.
@@ -2059,6 +2074,11 @@ local function GetOrCreateTrinketFrame(slotID)
                 EllesmereUI._repointTooltipAtCursor(GameTooltip)
             end
             GameTooltip:Show()
+            -- Belt-and-suspenders: hide any comparison tooltips that still slipped
+            -- through (e.g. when the compare modifier key is held down).
+            if GameTooltip_HideShoppingTooltips then
+                GameTooltip_HideShoppingTooltips(GameTooltip)
+            end
         end
     end)
     f:SetScript("OnLeave", GameTooltip_Hide)
