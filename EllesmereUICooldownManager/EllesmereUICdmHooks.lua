@@ -2039,10 +2039,46 @@ local function GetOrCreateTrinketFrame(slotID)
         local ffc = _ecmeFC[self]
         local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
         if not bd2 or not bd2.showTooltip then return end
+        -- Honor the global "Show Tooltips" visibility mode (Blizzard Skin); a
+        -- custom frame's explicit content population would otherwise re-show the
+        -- tip after the global suppression hook hid it.
+        if EllesmereUI and EllesmereUI._tooltipSuppressedByMode
+           and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
         local itemID = GetInventoryItemID("player", self._trinketSlot)
         if itemID then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
-            GameTooltip:SetInventoryItem("player", self._trinketSlot)
+            -- Prefer the equipped item's link so the tooltip reflects the actual
+            -- upgrade/bonus IDs (real item level + stats) rather than the base item.
+            -- SetItemByID is only a fallback if no link is available.
+            local link = GetInventoryItemLink("player", self._trinketSlot)
+            if link then
+                -- Suppress the equipped-item comparison (shopping) tooltips: this is
+                -- our own already-equipped trinket, so a side-by-side compare is just
+                -- noise. Temporarily disable auto-compare while the tooltip is built,
+                -- then restore the user's setting.
+                local prevCompare = GetCVar("alwaysCompareItems")
+                if prevCompare and prevCompare ~= "0" then
+                    SetCVar("alwaysCompareItems", "0")
+                end
+                GameTooltip:SetHyperlink(link)
+                if prevCompare and prevCompare ~= "0" then
+                    SetCVar("alwaysCompareItems", prevCompare)
+                end
+            else
+                GameTooltip:SetItemByID(itemID)
+            end
+            -- Re-assert the cursor anchor after content is set (see helper notes):
+            -- the item content-setter can drop the tip's cursor anchor, so without
+            -- this it never appears while "Anchor to Cursor" is on. No-op otherwise.
+            if EllesmereUI and EllesmereUI._repointTooltipAtCursor then
+                EllesmereUI._repointTooltipAtCursor(GameTooltip)
+            end
+            GameTooltip:Show()
+            -- Belt-and-suspenders: hide any comparison tooltips that still slipped
+            -- through (e.g. when the compare modifier key is held down).
+            if GameTooltip_HideShoppingTooltips then
+                GameTooltip_HideShoppingTooltips(GameTooltip)
+            end
         end
     end)
     f:SetScript("OnLeave", GameTooltip_Hide)
@@ -2253,8 +2289,14 @@ local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID)
             local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
             if not bd2 or not bd2.showTooltip then return end
             if not self._phSpellID then return end
+            -- Honor the global "Show Tooltips" visibility mode (Blizzard Skin).
+            if EllesmereUI and EllesmereUI._tooltipSuppressedByMode
+               and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
             GameTooltip:SetSpellByID(self._phSpellID)
+            if EllesmereUI and EllesmereUI._repointTooltipAtCursor then
+                EllesmereUI._repointTooltipAtCursor(GameTooltip)
+            end
             GameTooltip:Show()
         end)
         f:SetScript("OnLeave", GameTooltip_Hide)
@@ -2354,8 +2396,16 @@ local function GetOrCreateItemPresetFrame(barKey, itemID)
         local ffc = _ecmeFC[self]
         local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
         if not bd2 or not bd2.showTooltip then return end
+        -- Honor the global "Show Tooltips" visibility mode (Blizzard Skin).
+        if EllesmereUI and EllesmereUI._tooltipSuppressedByMode
+           and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
         GameTooltip_SetDefaultAnchor(GameTooltip, self)
         GameTooltip:SetItemByID(self._presetItemID)
+        -- Re-assert the cursor anchor after content is set (item setters can drop
+        -- it under "Anchor to Cursor", leaving the tip invisible). No-op otherwise.
+        if EllesmereUI and EllesmereUI._repointTooltipAtCursor then
+            EllesmereUI._repointTooltipAtCursor(GameTooltip)
+        end
         GameTooltip:Show()
     end)
     f:SetScript("OnLeave", GameTooltip_Hide)
@@ -3553,9 +3603,18 @@ local function CollectAndReanchor()
                                             local spid = ffc and ffc.spellID
                                             local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
                                             if not bd2 or not bd2.showTooltip then return end
+                                            -- Honor the global "Show Tooltips" mode (Blizzard Skin).
+                                            if EllesmereUI and EllesmereUI._tooltipSuppressedByMode
+                                               and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
                                             if spid and spid > 0 then
                                                 GameTooltip_SetDefaultAnchor(GameTooltip, self)
                                                 GameTooltip:SetSpellByID(spid)
+                                                if EllesmereUI and EllesmereUI._repointTooltipAtCursor then
+                                                    EllesmereUI._repointTooltipAtCursor(GameTooltip)
+                                                end
+                                                -- Explicit Show(): needed when "Anchor to Cursor"
+                                                -- re-owns the tooltip to ANCHOR_NONE (see trinket).
+                                                GameTooltip:Show()
                                             end
                                         end)
                                         f:SetScript("OnLeave", GameTooltip_Hide)
