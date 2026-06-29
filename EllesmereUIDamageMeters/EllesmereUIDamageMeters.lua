@@ -462,11 +462,8 @@ local function IsGroupInCombat()
     return false
 end
 
--- Clear feign-cached GUIDs once their unit is confirmed dead.
--- This prevents a hunter who feigned and then died before another spellcast
--- from staying cached and being hidden by the Deaths filter.
--- Called by the Deaths filter in RefreshUI before checking the cache, so the
--- filter uses the current group state.
+-- Clear cached feign GUIDs before filtering so real deaths after Feign Death
+-- are not hidden by stale cache entries
 local function CleanupFeignCache()
     if not next(_feignDeathGUIDs) then return end
     -- Build GUID -> unit map for the current group so the cache iteration
@@ -482,11 +479,9 @@ local function CleanupFeignCache()
     elseif IsInGroup() then
         for i = 1, GetNumGroupMembers() - 1 do note(_partyUnits[i]) end
     end
-    -- A hunter who really died transitions to UnitHealth == 0 (HP hits 0 the
-    -- instant they die for real). Feign preserves the hunter's actual HP, so
-    -- HP > 0 throughout feign -- HP == 0 is therefore the precise signal we
-    -- need. UnitIsFeignDeath alone is unreliable in Midnight (it can linger
-    -- true after a feign-then-die transition, hiding the real death).
+-- HP == 0 confirms a real death. Feign Death keeps the hunter's actual HP,
+-- and UnitIsFeignDeath can linger in Midnight after a feign-then-die transition.
+
     for guid in pairs(_feignDeathGUIDs) do
         local unit = present[guid]
         if not unit then
@@ -3177,7 +3172,7 @@ local function CreateDMWindow(winIdx)
                     -- _feignDeathGUIDs[secret] throws ("cannot be indexed with
                     -- secret keys"), so only consult the cache when the GUID is
                     -- a plain string. Secret-GUID rows fall back to the
-                    -- deathRecapID-only filter -- same behavior as pre-patch.
+                    -- deathRecapID-only filter.
                     local sgOk = sg and (not issecretvalue or not issecretvalue(sg))
                     if not (issecretvalue and issecretvalue(rid)) and rid and rid > 0
                        and not (sgOk and _feignDeathGUIDs[sg]) then
