@@ -199,6 +199,16 @@ local function FormatTime(seconds, withMilliseconds)
     return format("%02d:%02d", m, s)
 end
 
+-- Like FormatTime, but once the run is over time the remaining clock keeps
+-- counting into the negative (e.g. "-01:04") instead of sitting frozen at
+-- "00:00", so it's obvious by how much you're over.
+local function FormatRemaining(remaining)
+    if remaining and remaining < 0 then
+        return "-" .. FormatTime(-remaining)
+    end
+    return FormatTime(remaining)
+end
+
 local function RoundToInt(value)
     if not value then return 0 end
     return floor(value + 0.5)
@@ -1241,7 +1251,7 @@ local function RenderStandalone()
         local mode = p.timerDisplayMode or "REMAINING_TOTAL"
         local elaStr = FormatTime(elapsed)
         local maxStr = FormatTime(maxTime)
-        local remStr = FormatTime(timeLeft)
+        local remStr = FormatRemaining(maxTime - elapsed)
         if mode == "REMAINING_TOTAL" then
             timerText = elaStr .. " / " .. maxStr
         elseif mode == "ELAPSED" then
@@ -1316,7 +1326,7 @@ local function RenderStandalone()
                 -- the key. Inherits the main timer's color so it reddens on
                 -- depletion just like the big clock.
                 f._threshRemFS:SetTextColor(tR, tG, tB)
-                f._threshRemFS:SetText(FormatTime(timeLeft))
+                f._threshRemFS:SetText(FormatRemaining(maxTime - elapsed))
             end
 
             if not showRem then
@@ -1711,7 +1721,11 @@ local function RenderStandalone()
             else
                 f._barTimerFS:SetTextColor(tR, tG, tB)
             end
-            SetTextDiff(f._barTimerFS, timerText)
+            -- Include the optional detail "(remaining / total)" so ELAPSED_DETAIL
+            -- (and any detail mode) reads the same in-bar as it does above the bar.
+            local barText = timerText
+            if timerDetailText then barText = barText .. timerDetailText end
+            SetTextDiff(f._barTimerFS, barText)
             f._barTimerFS:ClearAllPoints()
             if p.timerInBarLeftText then
                 f._barTimerFS:SetPoint("LEFT", f._barBg, "LEFT", 5, 0)
