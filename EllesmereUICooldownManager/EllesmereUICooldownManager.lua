@@ -415,7 +415,6 @@ local CDM_ITEM_PRESETS = {
         icon     = 538745,
         itemID   = 5512,
         spellID  = 6262,
-        altItemIDs = { 224464 },
         combatLockout = true,
     },
     {
@@ -423,7 +422,6 @@ local CDM_ITEM_PRESETS = {
         name     = "Demonic Healthstone",
         itemID   = 224464,
         spellID  = 452930,
-        altItemIDs = { 5512 },
         combatLockout = true,
     },
 }
