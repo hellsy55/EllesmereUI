@@ -1451,6 +1451,15 @@ do
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
         if not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor) then return end
         if not parent or tooltip:IsForbidden() then return end
+        -- Respect the "Show Tooltips" suppression. This post-hook runs after
+        -- HideTooltipByMode in the GameTooltip_SetDefaultAnchor chain, so without
+        -- this check the re-anchor below would undo its Hide() every frame and the
+        -- tooltip would stay visible (e.g. "Out of Combat" leaking tips in combat).
+        if EllesmereUI._tooltipSuppressedByMode and EllesmereUI._tooltipSuppressedByMode(tooltip) then
+            if cursorFrame then cursorFrame:Hide() end
+            tooltip:Hide()
+            return
+        end
         local cf = EnsureCursorFrame()
         cf:Show()
         local point = POINT_FOR_POS[EllesmereUIDB.tooltipCursorPosition or "top"] or "BOTTOM"
@@ -1515,21 +1524,31 @@ end
 --  for the default mode, costing one table read per tooltip when unused.
 -------------------------------------------------------------------------------
 do
-    local function HideTooltipByMode(tooltip)
-        if tooltip ~= GameTooltip then return end
-        if tooltip.IsForbidden and tooltip:IsForbidden() then return end
+    -- Shared decision: should GameTooltip be suppressed right now given the
+    -- user's "Show Tooltips" mode + combat state? Exposed on EllesmereUI so the
+    -- cursor-anchor hook can honor it too (otherwise the cursor re-anchor would
+    -- re-show a tooltip this hook just hid).
+    function EllesmereUI._tooltipSuppressedByMode(tooltip)
+        if tooltip ~= GameTooltip then return false end
+        if tooltip.IsForbidden and tooltip:IsForbidden() then return false end
         -- Gated by the "Reskin Tooltip" master (matches the grayed-out "Show
         -- Tooltips" option), so disabling the reskin never leaves tooltips stuck
         -- suppressed at, e.g., "Never".
-        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return false end
         local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
-        if mode == "always" then return end
         if mode == "never" then
-            tooltip:Hide()
+            return true
         elseif mode == "outOfCombat" then
-            if InCombatLockdown() then tooltip:Hide() end
+            return InCombatLockdown()
         elseif mode == "outOfBossCombat" then
-            if IsEncounterInProgress() then tooltip:Hide() end
+            return IsEncounterInProgress()
+        end
+        return false
+    end
+
+    local function HideTooltipByMode(tooltip)
+        if EllesmereUI._tooltipSuppressedByMode(tooltip) then
+            tooltip:Hide()
         end
     end
     if GameTooltip_SetDefaultAnchor then
