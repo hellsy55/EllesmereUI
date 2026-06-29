@@ -10903,6 +10903,115 @@ EAB_UpdateQuickKeybindButtons = function(show)
     end
 end
 
+_quickKeybindState.macroButtons = setmetatable({}, { __mode = "k" })
+
+_quickKeybindState.UpdateMacroButtonCommand = function(button)
+    if not button or not MacroFrame or not MacroFrame.GetMacroDataIndex or not GetMacroInfo then return end
+
+    local index
+    if (button == MacroFrameSelectedMacroButton or button == MacroFrame.SelectedMacroButton)
+        and MacroFrame.GetSelectedIndex then
+        local selected = MacroFrame:GetSelectedIndex()
+        if selected then index = MacroFrame:GetMacroDataIndex(selected) end
+    elseif button.GetElementData then
+        local data = button:GetElementData()
+        if data then index = MacroFrame:GetMacroDataIndex(data) end
+    end
+
+    local name = index and GetMacroInfo(index)
+    button.commandName = name and ("MACRO " .. name) or nil
+end
+
+_quickKeybindState.RefreshMacroButton = function(button, show)
+    if not button then return end
+    _quickKeybindState.UpdateMacroButtonCommand(button)
+    if show == nil then
+        show = _quickKeybindState.open
+    end
+    EAB_SetQuickKeybindEffects(button, show and button:IsShown())
+end
+
+_quickKeybindState.InitMacroButton = function(button)
+    if not button or EFD(button).qkbMacroHooked or not QuickKeybindButtonTemplateMixin then return end
+
+    Mixin(button, QuickKeybindButtonTemplateMixin)
+    if button.EnableMouseWheel then
+        button:EnableMouseWheel(true)
+    end
+
+    if not button.QuickKeybindHighlightTexture then
+        local tex = button:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints(button)
+        tex:SetBlendMode("ADD")
+        tex:SetAlpha(0.5)
+        tex:Hide()
+        button.QuickKeybindHighlightTexture = tex
+    end
+
+    button:HookScript("OnShow", function(self)
+        self:QuickKeybindButtonOnShow()
+        _quickKeybindState.RefreshMacroButton(self)
+    end)
+    button:HookScript("OnHide", function(self)
+        self:QuickKeybindButtonOnHide()
+        _quickKeybindState.RefreshMacroButton(self, false)
+    end)
+    button:HookScript("OnClick", function(self, mouseButton, down)
+        _quickKeybindState.UpdateMacroButtonCommand(self)
+        self:QuickKeybindButtonOnClick(mouseButton, down)
+    end)
+    button:HookScript("OnMouseUp", function(self, mouseButton)
+        if KeybindFrames_InQuickKeybindMode and KeybindFrames_InQuickKeybindMode()
+            and QuickKeybindFrame and mouseButton ~= "LeftButton" and mouseButton ~= "RightButton" then
+            _quickKeybindState.UpdateMacroButtonCommand(self)
+            QuickKeybindFrame:OnKeyDown(mouseButton)
+            self:QuickKeybindButtonSetTooltip()
+        end
+    end)
+    button:HookScript("OnEnter", function(self)
+        _quickKeybindState.UpdateMacroButtonCommand(self)
+        self:QuickKeybindButtonOnEnter()
+        _quickKeybindState.RefreshMacroButton(self)
+    end)
+    button:HookScript("OnLeave", function(self)
+        self:QuickKeybindButtonOnLeave()
+        _quickKeybindState.RefreshMacroButton(self)
+    end)
+
+    local fd = EFD(button)
+    fd.qkbMacroHooked = true
+    _quickKeybindState.macroButtons[button] = true
+    _quickKeybindState.RefreshMacroButton(button)
+end
+
+_quickKeybindState.UpdateMacroButtons = function(show)
+    for button in pairs(_quickKeybindState.macroButtons) do
+        _quickKeybindState.RefreshMacroButton(button)
+    end
+end
+
+_quickKeybindState.InitMacroFrame = function()
+    if _quickKeybindState.macroFrameHooked or not MacroFrame or not QuickKeybindButtonTemplateMixin then return end
+
+    _quickKeybindState.InitMacroButton(MacroFrameSelectedMacroButton or MacroFrame.SelectedMacroButton)
+
+    local scrollBox = MacroFrame.MacroSelector and MacroFrame.MacroSelector.ScrollBox
+    if not scrollBox or not scrollBox.ForEachFrame then return end
+
+    _quickKeybindState.macroScrollUpdate = function(frame)
+        if not frame or not frame.GetView or not frame:GetView() then return end
+        frame:ForEachFrame(_quickKeybindState.InitMacroButton)
+        _quickKeybindState.UpdateMacroButtons(_quickKeybindState.open)
+    end
+    C_Timer_After(0, function()
+        _quickKeybindState.macroScrollUpdate(scrollBox)
+    end)
+    hooksecurefunc(scrollBox, "Update", _quickKeybindState.macroScrollUpdate)
+
+    _quickKeybindState.macroFrameHooked = true
+    _quickKeybindState.UpdateMacroButtons(_quickKeybindState.open)
+end
+
 local function EAB_UpdateQuickKeybindVisibility(show)
     if InCombatLockdown() then return end
 
@@ -11151,7 +11260,9 @@ _quickKeybindState.Open = function()
     _quickKeybindState.closePending = false
     _quickKeybindState.open = true
     _quickKeybindState.InitButtons()
+    _quickKeybindState.InitMacroFrame()
     EAB_UpdateQuickKeybindButtons(true)
+    _quickKeybindState.UpdateMacroButtons(true)
     EAB_UpdateQuickKeybindVisibility(true)
     _quickKeybindState.ShowDim()
 end
@@ -11166,6 +11277,7 @@ local function EAB_QuickKeybindClose()
         _quickKeybindState.open = false
         _quickKeybindState.closePending = true
         EAB_UpdateQuickKeybindButtons(false)
+        _quickKeybindState.UpdateMacroButtons(false)
         -- Mouseover fading is alpha-only and already operates during combat,
         -- so restore that presentation immediately even though secure
         -- visibility drivers still have to wait until combat ends.
@@ -11175,13 +11287,15 @@ local function EAB_QuickKeybindClose()
     end
     _quickKeybindState.open = false
     EAB_UpdateQuickKeybindButtons(false)
+    _quickKeybindState.UpdateMacroButtons(false)
     _quickKeybindState.FinishClose()
 end
 
 -- Defer hook until QuickKeybindFrame exists (it loads after PLAYER_LOGIN).
 _qkbHookFrame = CreateFrame("Frame")
 _qkbHookFrame:RegisterEvent("PLAYER_LOGIN")
-_qkbHookFrame:SetScript("OnEvent", function(self, event)
+_qkbHookFrame:RegisterEvent("ADDON_LOADED")
+_qkbHookFrame:SetScript("OnEvent", function(self, event, addonName)
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         C_Timer_After(1, function()
@@ -11213,8 +11327,17 @@ _qkbHookFrame:SetScript("OnEvent", function(self, event)
                 end
                 qfd.quickKeybindOnShow = _quickKeybindState.Open
                 qfd.quickKeybindOnHide = EAB_QuickKeybindClose
+                _quickKeybindState.InitMacroFrame()
+                if _quickKeybindState.macroFrameHooked then
+                    self:UnregisterEvent("ADDON_LOADED")
+                end
             end
         end)
+    elseif event == "ADDON_LOADED" and (addonName == "Blizzard_MacroUI" or addonName == "Blizzard_QuickKeybind") then
+        _quickKeybindState.InitMacroFrame()
+        if _quickKeybindState.macroFrameHooked then
+            self:UnregisterEvent("ADDON_LOADED")
+        end
     elseif event == "PLAYER_REGEN_ENABLED" then
         self:UnregisterEvent("PLAYER_REGEN_ENABLED")
         if _quickKeybindState.closePending then
