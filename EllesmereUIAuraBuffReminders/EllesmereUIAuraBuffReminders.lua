@@ -2678,6 +2678,31 @@ local function Refresh()
                     missing[#missing+1] = e
                 end
             end
+            -- Pet on Passive: warn when an active pet is set to Passive stance.
+            -- Combat-safe: pet command state is not part of the secret system.
+            -- Skip while mounted: the pet is forced to Passive automatically.
+            if not suppress and co.enabled.pet_passive ~= false
+               and UnitExists("pet") and not UnitIsDead("pet")
+               and not IsMounted() then
+                local passiveActive, passiveTex, passiveIsToken
+                for i = 1, (NUM_PET_ACTION_SLOTS or 10) do
+                    local nm, tx, tok, active = GetPetActionInfo(i)
+                    if nm == "PET_MODE_PASSIVE" then
+                        if not isSecret(active) then passiveActive = (active == true) end
+                        passiveTex, passiveIsToken = tx, tok
+                        break
+                    end
+                end
+                if passiveActive then
+                    local e = AcquireEntry()
+                    e.mode = "texture"
+                    e.texture = (passiveIsToken and _G[passiveTex]) or passiveTex or petIcon
+                    e.label = PET_MODE_PASSIVE or "Passive"
+                    e.cat = "consumable"; e.scale = co.scale or 1.0
+                    e.dismissKey = "consumable:pet_passive"
+                    missing[#missing+1] = e
+                end
+            end
         end
     end
 

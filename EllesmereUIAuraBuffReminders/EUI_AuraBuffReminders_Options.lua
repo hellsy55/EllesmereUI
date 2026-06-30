@@ -1206,6 +1206,14 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) local c = CDB(); if c and c.enabled then c.enabled.wrong_pet = v; RefreshAll(); RebuildPreviewHeader() end end }
         );  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Passive Pet Reminder",
+              tooltip="Show a reminder when your active pet is set to Passive stance. Only applies to pet classes (Hunter, Warlock, Death Knight, Mage).",
+              getValue=function() local c = CDB(); return c and c.enabled and c.enabled.pet_passive ~= false end,
+              setValue=function(v) local c = CDB(); if c and c.enabled then c.enabled.pet_passive = v; RefreshAll(); RebuildPreviewHeader() end end },
+            { type="spacer" }
+        );  y = y - h
+
         _eabrClickMappings.pet = { section = petHdr, target = petFirstRow }
 
         _, h = W:Spacer(parent, y, 10);  y = y - h
