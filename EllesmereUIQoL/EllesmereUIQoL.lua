@@ -2396,15 +2396,44 @@ do
         alertOverlay._ag:Play()
     end
 
-    -- Plays the death alert sound (on by default). "Master" channel so it is
-    -- audible even if the SFX slider is low. We use the raw sound id (847 =
-    -- igQuestFailed) because that kit isn't present in the SOUNDKIT table, so
-    -- SOUNDKIT.IG_QUEST_FAILED is nil and PlaySound(nil) would raise an error.
-    local DEATH_SOUND_ID = (SOUNDKIT and SOUNDKIT.IG_QUEST_FAILED) or 847
+    -- Configurable death alert sound (default "none"). The cog dropdown lists the
+    -- bundled EllesmereUI sounds plus any SharedMedia sounds, mirroring Chat's
+    -- "Whisper Sound". Played on the "Master" channel so it stays audible even
+    -- when the SFX slider is low. Tables are exposed on EllesmereUI so the options
+    -- file can build the same dropdown.
+    local _SOUNDS_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
+    local GROUP_DEATH_SOUND_PATHS = {
+        ["none"]     = nil,
+        ["airhorn"]  = _SOUNDS_DIR .. "AirHorn.ogg",
+        ["banana"]   = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
+        ["bikehorn"] = _SOUNDS_DIR .. "BikeHorn.ogg",
+        ["boxing"]   = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
+        ["water"]    = _SOUNDS_DIR .. "WaterDrop.ogg",
+    }
+    local GROUP_DEATH_SOUND_NAMES = {
+        ["none"]     = "None",
+        ["airhorn"]  = "Air Horn",
+        ["banana"]   = "Banana Peel Slip",
+        ["bikehorn"] = "Bike Horn",
+        ["boxing"]   = "Boxing Arena",
+        ["water"]    = "Water Drop",
+    }
+    local GROUP_DEATH_SOUND_ORDER = {
+        "none", "airhorn", "banana", "bikehorn", "boxing", "water",
+    }
+    if EllesmereUI.AppendSharedMediaSounds then
+        EllesmereUI.AppendSharedMediaSounds(
+            GROUP_DEATH_SOUND_PATHS, GROUP_DEATH_SOUND_NAMES, GROUP_DEATH_SOUND_ORDER)
+    end
+    EllesmereUI._groupDeathSoundPaths = GROUP_DEATH_SOUND_PATHS
+    EllesmereUI._groupDeathSoundNames = GROUP_DEATH_SOUND_NAMES
+    EllesmereUI._groupDeathSoundOrder = GROUP_DEATH_SOUND_ORDER
+
     local function PlayDeathSound()
-        if EllesmereUIDB and EllesmereUIDB.groupDeathSound == false then return end
-        if not DEATH_SOUND_ID then return end
-        PlaySound(DEATH_SOUND_ID, "Master")
+        local key = EllesmereUIDB and EllesmereUIDB.groupDeathSoundKey
+        if not key or key == "none" then return end
+        local path = GROUP_DEATH_SOUND_PATHS[key]
+        if path then PlaySoundFile(path, "Master") end
     end
 
     local function ForEachGroupUnit(fn)

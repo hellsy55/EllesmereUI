@@ -2185,6 +2185,29 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "ab_queuestatus_reset_visibility_v1",
+    scope       = "profile",
+    description = "Reset stale QueueStatus (LFG eye) visibility/mouseover settings to neutral. EUI used to control the eye's visibility but now only controls its position; old saved values (e.g. barVisibility 'mouseover' with mouseoverAlpha 0) could leave the eye permanently invisible with no UI left to restore it.",
+    body = function(ctx)
+        local ab = ctx.profile.addons and ctx.profile.addons.EllesmereUIActionBars
+        local qs = ab and ab.bars and ab.bars.QueueStatus
+        if type(qs) ~= "table" then return end
+        -- Neutral defaults (matches the EXTRA_BARS defaults): always-visible, no
+        -- mouseover fade, no combat/housing/instance hiding.
+        qs.barVisibility      = "always"
+        qs.alwaysHidden       = false
+        qs.mouseoverEnabled   = false
+        qs.mouseoverAlpha     = 1
+        qs._savedBarAlpha     = nil
+        qs.combatHideEnabled  = false
+        qs.combatShowEnabled  = false
+        qs.housingHideEnabled = false
+        qs.visHideHousing     = false
+        qs.visOnlyInstances   = false
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "uf_per_unit_portrait_style_v1",
     scope       = "profile",
     description = "Copy global portraitStyle into player/target/focus per-unit tables.",

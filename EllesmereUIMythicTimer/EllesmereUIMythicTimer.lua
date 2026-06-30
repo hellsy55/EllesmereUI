@@ -150,7 +150,9 @@ local DB_DEFAULTS = {
         showPreview       = false,
         enemyForcesPos    = "BOTTOM",
         enemyForcesPctPos = "LABEL",
-        enemyForcesTextSize = 12,
+        -- enemyForcesTextSize: intentionally unset so it falls back to objectivesSize
+        -- (see RenderEnemyForces). Writing a default here would override a user's
+        -- customized objectivesSize. Written only when the slider is changed.
         enemyForcesTextOffsetX = 0,
         enemyForcesTextOffsetY = 0,
         deathsInTitle     = false,
@@ -159,7 +161,9 @@ local DB_DEFAULTS = {
         showTimerBar      = true,
         showTimerBreakdown = false,
         titleAffixPosition = "ABOVE_TIMER",
-        titleAffixDeathGap = 11,
+        -- titleAffixDeathGap: intentionally unset so it falls back to ROW_GAP + 5
+        -- (which tracks the user's rowGap). A hardcoded default would break the
+        -- title/affix spacing for anyone who customized rowGap.
         titleAffixSandwichGap = 6,
         titleAffixTimerGap = 6,
         titleAffixBarGap = 6,
@@ -169,9 +173,9 @@ local DB_DEFAULTS = {
         titleSize         = 16,
         affixSize         = 12,
         thresholdSize     = 12,
-        thresholdPlusThreeSize = 12,
-        thresholdPlusTwoSize = 12,
-        thresholdPlusOneSize = 12,
+        -- thresholdPlus*Size: intentionally unset so each falls back to thresholdSize
+        -- (see RenderThresholdText). Hardcoding 12 here would override a user's
+        -- customized thresholdSize. Written per-row only when its slider is changed.
         tickAlpha         = 1,
         timerBarStyle     = "TICKS",
         timerBarSegmentGap = 2,
@@ -1509,10 +1513,18 @@ local function RenderStandalone()
                 SetFS(f._threshRemFS, plusOneSize)
                 ApplyShadow(f._threshRemFS)
                 -- Same single MM:SS as the timer's text, showing time left in
-                -- the key. Inherits the main timer's color so it reddens on
-                -- depletion just like the big clock.
-                f._threshRemFS:SetTextColor(GetTimerSegmentTextColor(p, 3))
-                f._threshRemFS:SetText(FormatTime(timeLeft))
+                -- the key. In the default TICKS style it inherits the main timer
+                -- color so it reddens on depletion just like the big clock (legacy
+                -- behavior); the new SEGMENTS style colors it to match segment 3,
+                -- and the per-row "white" toggle still forces white.
+                if p.timerBarStyle == "SEGMENTS" then
+                    f._threshRemFS:SetTextColor(GetTimerSegmentTextColor(p, 3))
+                elseif p.thresholdPlusOneTextWhite == true then
+                    f._threshRemFS:SetTextColor(1, 1, 1)
+                else
+                    f._threshRemFS:SetTextColor(tR, tG, tB)
+                end
+                f._threshRemFS:SetText(FormatRemaining(maxTime - elapsed))
             end
 
             if not showRem then
@@ -1953,18 +1965,23 @@ local function RenderStandalone()
             f._seg3:Hide()
             f._seg2:Hide()
 
-            local gap = p.timerBarSegmentGap or 2
-            if gap < 0 then gap = 0 end
-            local x3 = barW * (plusThreeT / maxTime)
-            local x2 = barW * (plusTwoT / maxTime)
+            -- Physical-pixel-perfect gaps, the same way ticks are: snap the gap
+            -- WIDTH to a whole number of physical pixels, snap each boundary
+            -- center, then derive the far gap edge as nearEdge + gapW so every
+            -- gap is exactly gapW physical pixels wide (no independent-snap drift).
+            local gapW = _snap(max(0, p.timerBarSegmentGap or 2))
+            local b3 = _snap(barW * (plusThreeT / maxTime))
+            local b2 = _snap(barW * (plusTwoT / maxTime))
+            local g3L = _snap(b3 - gapW / 2); local g3R = g3L + gapW
+            local g2L = _snap(b2 - gapW / 2); local g2R = g2L + gapW
             local segs = {
-                { x1 = 0,              x2 = x3 - gap / 2, t1 = 0,          t2 = plusThreeT },
-                { x1 = x3 + gap / 2,   x2 = x2 - gap / 2, t1 = plusThreeT, t2 = plusTwoT },
-                { x1 = x2 + gap / 2,   x2 = barW,         t1 = plusTwoT,   t2 = maxTime },
+                { x1 = 0,    x2 = g3L,  t1 = 0,          t2 = plusThreeT },
+                { x1 = g3R,  x2 = g2L,  t1 = plusThreeT, t2 = plusTwoT },
+                { x1 = g2R,  x2 = barW, t1 = plusTwoT,   t2 = maxTime },
             }
             for i, seg in ipairs(segs) do
-                local x1 = _snap(max(0, min(barW, seg.x1)))
-                local x2v = _snap(max(0, min(barW, seg.x2)))
+                local x1 = max(0, min(barW, seg.x1))
+                local x2v = max(0, min(barW, seg.x2))
                 local w = x2v - x1
                 if w < 1 then w = 1 end
 

@@ -3078,6 +3078,8 @@ EllesmereUI.FONT_FILES = {
     ["Russo One"]           = "Russo One.ttf",
     ["Ubuntu"]              = "Ubuntu.ttf",
     ["Homespun"]            = "Homespun.ttf",
+    ["KMT Kimberley"]       = "KMT Kimberley.otf",
+    ["KMT Ninja Naruto"]    = "KMT Ninja Naruto.ttf",
     ["Friz Quadrata"]       = nil,  -- Blizzard font
     ["Arial"]               = nil,  -- Blizzard font
     ["Morpheus"]            = nil,  -- Blizzard font
@@ -3096,6 +3098,7 @@ EllesmereUI.FONT_ORDER = {
     "Arial Narrow", "Changa", "Cinzel Decorative", "Exo",
     "Fira Sans Bold", "Fira Sans Light", "Future X Black",
     "Gotham Narrow Ultra", "Gotham Narrow", "Russo One", "Ubuntu", "Homespun",
+    "KMT Kimberley", "KMT Ninja Naruto",
     "Friz Quadrata", "Arial", "Morpheus", "Skurri",
 }
 -- Display name overrides for the font dropdown (key = FONT_ORDER name)
@@ -9341,7 +9344,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.3.3"
+EllesmereUI.VERSION = "8.3.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

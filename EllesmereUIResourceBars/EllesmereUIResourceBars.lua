@@ -4571,6 +4571,8 @@ local BAR_TEXTURES = {
     ["gradient-tb"]   = BAR_TEX_BASE .. "gradient-tb.tga",
     ["matte"]         = BAR_TEX_BASE .. "matte.tga",
     ["sheer"]         = BAR_TEX_BASE .. "sheer.tga",
+    ["kringel-diamonds"] = BAR_TEX_BASE .. "kringel-diamonds.tga",
+    ["kringel-window"]   = BAR_TEX_BASE .. "kringel-window.tga",
 }
 local BAR_TEXTURE_ORDER = {
     "none", "melli", "atrocity",
@@ -4579,6 +4581,7 @@ local BAR_TEXTURE_ORDER = {
     "divide", "glass",
     "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
     "matte", "sheer",
+    "kringel-diamonds", "kringel-window",
 }
 local BAR_TEXTURE_NAMES = {
     ["none"]        = "None",
@@ -4598,6 +4601,8 @@ local BAR_TEXTURE_NAMES = {
     ["gradient-tb"] = "Gradient Down",
     ["matte"]       = "Matte",
     ["sheer"]       = "Sheer",
+    ["kringel-diamonds"] = "Kringel Diamonds",
+    ["kringel-window"]   = "Kringel Window",
 }
 _G._ERB_BarTextures     = BAR_TEXTURES
 _G._ERB_BarTextureOrder = BAR_TEXTURE_ORDER

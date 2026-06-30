@@ -333,8 +333,9 @@ end
 -- Bloodlust/Heroism is the exception below: it is debuff-driven (see the TBB
 -- tick special-case for popularKey == "bloodlust") rather than cooldown-
 -- detected, because the lust buff is cast by others and is secret. It starts a
--- 40s bar off the player's Sated/Exhaustion debuff edge. Time Spiral / warlock
--- pets stay out (no usable detection).
+-- 40s bar off the player's Sated/Exhaustion debuff edge. Time Spiral is likewise
+-- event-driven (glow-armed, see the TBB tick special-case for popularKey ==
+-- "timespiral"); warlock pets stay out (no usable detection).
 local BUFF_BAR_PRESETS = {
     {
         -- Faction label: Horde = Bloodlust (2825), Alliance = Heroism (32182).
@@ -347,6 +348,19 @@ local BUFF_BAR_PRESETS = {
         duration = 40,
         tbbOnly  = true,  -- not a cooldown-usable preset (kept out of the CD/utility picker)
         customAuraToo = true,  -- but allowed on Custom Auras (icon) bars; debuff-driven 40s window
+    },
+    {
+        -- Time Spiral "Free Move" proc: glow-driven, self-timed 10s window (see
+        -- the TBB tick special-case for popularKey == "timespiral"). Like
+        -- Bloodlust it is event-armed (a spell-activation glow on the player's
+        -- class movement ability), not cooldown-detected.
+        key      = "timespiral",
+        name     = "Time Spiral",
+        icon     = 4622479,
+        spellIDs = { 374968 },
+        duration = 10,
+        tbbOnly  = true,       -- not a cooldown-usable preset (kept out of the CD/utility picker)
+        customAuraToo = true,  -- but allowed on Custom Auras (icon) bars; glow-driven 10s window
     },
     {
         key      = "lights_potential",
@@ -5979,6 +5993,12 @@ function ns.RepopulateFromBlizzard()
         if id < 0 then return true end
         if sd.customSpellIDs and sd.customSpellIDs[id] then return true end
         if _myRacialsSet and _myRacialsSet[id] then return true end
+        -- A positive id carrying a stored duration is one of OUR injected
+        -- preset/custom buffs (Bloodlust/Heroism, potions, Time Spiral, custom
+        -- buff IDs). Blizzard-tracked buffs are never written into assignedSpells
+        -- with a duration, so this can only be a user-added entry -- preserve it.
+        -- Presets predate the customSpellIDs flag, so the flag alone is not enough.
+        if sd.spellDurations and (sd.spellDurations[id] or 0) > 0 then return true end
         return false
     end
 

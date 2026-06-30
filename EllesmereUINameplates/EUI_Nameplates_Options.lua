@@ -497,12 +497,18 @@ initFrame:SetScript("OnEvent", function(self)
             local gf = CreateFrame("Frame", nil, pf)
             gf:SetFrameLevel(pf:GetFrameLevel() + 1)
             previewGlow.frame = gf
+            -- Collected so Update() can re-tint the preview glow with the target
+            -- Glow Color/Opacity alongside the live nameplates.
+            previewGlow.texs = {}
+            local gc0 = ns.GetTargetGlowColor()
+            local ga0 = ns.GetTargetGlowAlpha()
             local function Mk(coords)
                 local t = gf:CreateTexture(nil, "BACKGROUND")
                 t:SetTexture(GLOW_TEX)
-                t:SetVertexColor(0.4117, 0.6667, 1.0, 1.0)
+                t:SetVertexColor(gc0.r, gc0.g, gc0.b, ga0)
                 t:SetBlendMode("ADD")
                 t:SetTexCoord(unpack(coords))
+                previewGlow.texs[#previewGlow.texs + 1] = t
                 return t
             end
             local tl = Mk({0,GM,0,GM}); PP.Size(tl,GC,GC); tl:SetPoint("TOPLEFT")
@@ -529,6 +535,8 @@ initFrame:SetScript("OnEvent", function(self)
         previewGlow.getBorderOn       = ns.GetTargetGlowBorderColor
         previewGlow.getHighlight      = ns.GetTargetGlowHighlight
         previewGlow.getBorderCol      = ns.GetTargetBorderColor
+        previewGlow.getGlowCol        = ns.GetTargetGlowColor
+        previewGlow.getGlowAlpha      = ns.GetTargetGlowAlpha
         previewGlow.getHighlightCol   = ns.GetTargetHighlightColor
         previewGlow.getHighlightAlpha = ns.GetTargetHighlightAlpha
 
@@ -1954,8 +1962,11 @@ initFrame:SetScript("OnEvent", function(self)
             local glowEUI       = previewGlow.getEUI()
             local glowBorder    = previewGlow.getBorderOn()
             local glowHighlight = previewGlow.getHighlight()
-            -- EllesmereUI: background glow
+            -- EllesmereUI: background glow, tinted + faded with the Glow Color/Opacity
             if showTargetGlowPreview and glowEUI then
+                local gc = previewGlow.getGlowCol()
+                local ga = previewGlow.getGlowAlpha()
+                for _, t in ipairs(previewGlow.texs) do t:SetVertexColor(gc.r, gc.g, gc.b, ga) end
                 pgf:Show()
             else
                 pgf:Hide()
@@ -5469,7 +5480,7 @@ initFrame:SetScript("OnEvent", function(self)
             end,
         }
         targetGlowRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Target Glow Style",
+            { type="dropdown", text="Target Effect",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
               setValue=function() end },
@@ -5493,11 +5504,12 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
               end });  y = y - h
 
-        -- Target Glow Style: multi-select checkbox dropdown (EllesmereUI / Border
+        -- Target Effect: multi-select checkbox dropdown (EllesmereUI / Border
         -- Color / Highlight), replacing the placeholder control above. The toggles
         -- are independent; the data model live-converts from the legacy
         -- targetGlowStyle string (see ns.GetTargetGlow* in the core file).
         local refreshTargetBorderSwatch  -- fwd decl; assigned when the swatch builds
+        local refreshTargetGlowSwatch    -- fwd decl; assigned when the glow swatch builds
         local refreshTargetHighlightCog  -- fwd decl; assigned when the cog builds
         do
             local leftRgn = targetGlowRow._leftRegion
@@ -5523,6 +5535,7 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, plate in pairs(plates) do plate:ApplyTarget() end
                     UpdatePreview()
                     if refreshTargetBorderSwatch then refreshTargetBorderSwatch() end
+                    if refreshTargetGlowSwatch then refreshTargetGlowSwatch() end
                     if refreshTargetHighlightCog then refreshTargetHighlightCog() end
                 end)
             PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
@@ -5530,8 +5543,9 @@ initFrame:SetScript("OnEvent", function(self)
             leftRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
 
-            -- Inline Border Color swatch: edits targetBorderColor (default white).
-            -- Dimmed + non-interactive unless the Border Color toggle is checked.
+            -- Inline Border Color swatch: edits targetBorderColor (default white),
+            -- which tints the custom border. Dimmed + non-interactive unless the
+            -- Border Color toggle is checked.
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
                 function() local c = ns.GetTargetBorderColor(); return c.r, c.g, c.b end,
                 function(r, g, b)
@@ -5554,23 +5568,54 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(refreshTargetBorderSwatch)
             refreshTargetBorderSwatch()
 
-            -- Inline cog: Target Highlight color + opacity. Gated on the
-            -- Highlight toggle (the highlight only renders when it is enabled).
+            -- Inline Glow Color swatch: edits targetGlowColor (default the
+            -- signature blue), which tints the EUI background glow. Dimmed +
+            -- non-interactive unless the EUI Glow toggle is checked.
+            local glowSwatch, updateGlowSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                function() local c = ns.GetTargetGlowColor(); return c.r, c.g, c.b end,
+                function(r, g, b)
+                    DB().targetGlowColor = { r = r, g = g, b = b }
+                    for _, plate in pairs(plates) do plate:ApplyTarget() end
+                    UpdatePreview()
+                end, nil, 20)
+            PP.Point(glowSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            leftRgn._lastInline = glowSwatch
+            glowSwatch:SetScript("OnEnter", function() if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(glowSwatch, "Glow Color") end end)
+            glowSwatch:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
+            refreshTargetGlowSwatch = function()
+                local off = not ns.GetTargetGlowEllesmereUI()
+                glowSwatch:SetAlpha(off and 0.15 or 1)
+                glowSwatch:EnableMouse(not off)
+                updateGlowSwatch()
+            end
+            EllesmereUI.RegisterWidgetRefresh(refreshTargetGlowSwatch)
+            refreshTargetGlowSwatch()
+
+            -- Inline cog: "More Effects" -- Highlight color/opacity + Glow
+            -- opacity. Enabled when either the Highlight OR EUI Glow toggle is on
+            -- (so Glow Opacity is reachable whenever the glow is active).
             do
                 local _, highlightCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Target Highlight",
+                    title = "More Effects",
                     rows = {
-                        { type="colorpicker", label="Color", hasAlpha=false,
+                        { type="colorpicker", label="Highlight Color", hasAlpha=false,
                           get=function() local c = ns.GetTargetHighlightColor(); return c.r, c.g, c.b end,
                           set=function(r, g, b)
                             DB().targetHighlightColor = { r = r, g = g, b = b }
                             for _, plate in pairs(plates) do plate:ApplyTarget() end
                             UpdatePreview()
                           end },
-                        { type="slider", label="Opacity", min=0, max=100, step=1,
+                        { type="slider", label="Highlight Opacity", min=0, max=100, step=1,
                           get=function() return math.floor((ns.GetTargetHighlightAlpha() * 100) + 0.5) end,
                           set=function(v)
                             DB().targetHighlightAlpha = v / 100
+                            for _, plate in pairs(plates) do plate:ApplyTarget() end
+                            UpdatePreview()
+                          end },
+                        { type="slider", label="Glow Opacity", min=0, max=100, step=1,
+                          get=function() return math.floor((ns.GetTargetGlowAlpha() * 100) + 0.5) end,
+                          set=function(v)
+                            DB().targetGlowAlpha = v / 100
                             for _, plate in pairs(plates) do plate:ApplyTarget() end
                             UpdatePreview()
                           end },
@@ -5583,7 +5628,7 @@ initFrame:SetScript("OnEvent", function(self)
                 highlightCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
                 local highlightCogTex = highlightCogBtn:CreateTexture(nil, "OVERLAY")
                 highlightCogTex:SetAllPoints(); highlightCogTex:SetTexture(EllesmereUI.COGS_ICON)
-                local function highlightCogOff() return not ns.GetTargetGlowHighlight() end
+                local function highlightCogOff() return not (ns.GetTargetGlowHighlight() or ns.GetTargetGlowEllesmereUI()) end
                 highlightCogBtn:SetScript("OnEnter", function(s) if not highlightCogOff() then s:SetAlpha(0.7) end end)
                 highlightCogBtn:SetScript("OnLeave", function(s) if not highlightCogOff() then s:SetAlpha(0.4) end end)
                 highlightCogBtn:SetScript("OnClick", function(s) if not highlightCogOff() then highlightCogShow(s) end end)
@@ -7714,12 +7759,6 @@ initFrame:SetScript("OnEvent", function(self)
                     DB().enemyInCombat = { r = r, g = g, b = b }
                     RefreshAllPlates()
                   end },
-                { tooltip = "Neutral",
-                  getValue = function() return DBColor("neutral") end,
-                  setValue = function(r, g, b)
-                    DB().neutral = { r = r, g = g, b = b }
-                    RefreshAllPlates()
-                  end },
                 { tooltip = "Spell Casters",
                   getValue = function() return DBColor("caster") end,
                   setValue = function(r, g, b)
@@ -7775,8 +7814,29 @@ initFrame:SetScript("OnEvent", function(self)
             swatch:EnableMouse(not off)
         end
 
-        -- Darken Enemies Out of Combat | (empty)
+        -- Neutral & Mini Enemies | Darken Enemies Out of Combat
         _, h = W:DualRow(parent, y,
+            { type="multiSwatch", text="Neutral & Mini Enemies",
+              swatches = {
+                { tooltip = "Neutral",
+                  getValue = function() return DBColor("neutral") end,
+                  setValue = function(r, g, b)
+                    DB().neutral = { r = r, g = g, b = b }
+                    RefreshAllPlates()
+                  end },
+                { tooltip = "Mini Enemies (dungeons only)",
+                  -- Until explicitly set, views the user's "Enemies" color so the
+                  -- swatch starts matching enemyInCombat (see GetReactionColor).
+                  getValue = function()
+                    local db = DB()
+                    local c = (db and db.miniEnemy) or (db and db.enemyInCombat) or defaults.enemyInCombat
+                    return c.r, c.g, c.b
+                  end,
+                  setValue = function(r, g, b)
+                    DB().miniEnemy = { r = r, g = g, b = b }
+                    RefreshAllPlates()
+                  end },
+              } },
             { type="toggle", text="Darken Enemies Out of Combat",
               getValue=function()
                 local db = DB()
@@ -7789,8 +7849,7 @@ initFrame:SetScript("OnEvent", function(self)
                     plate:UpdateHealthColor()
                 end
               end,
-              tooltip="Dims enemy nameplate colours while the enemy is out of combat. Turn off to keep enemies at full colour whether or not they are fighting." },
-            { type="label", text="" });  y = y - h
+              tooltip="Dims enemy nameplate colours while the enemy is out of combat. Turn off to keep enemies at full colour whether or not they are fighting." });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 

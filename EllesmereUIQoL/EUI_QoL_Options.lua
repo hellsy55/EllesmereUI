@@ -371,6 +371,34 @@ initFrame:SetScript("OnEvent", function(self)
                 return not (EllesmereUIDB and EllesmereUIDB.announceGroupDeaths)
             end
 
+            -- Sound dropdown values (mirrors Chat's "Whisper Sound"): shallow-copy
+            -- the runtime name table and attach _menuOpts so each row gets a
+            -- click-to-preview speaker icon.
+            local gdSoundPaths = EllesmereUI._groupDeathSoundPaths or {}
+            local gdSoundNames = EllesmereUI._groupDeathSoundNames or { none = "None" }
+            local gdSoundOrder = EllesmereUI._groupDeathSoundOrder or { "none" }
+            local gdSoundValues = {}
+            for k, v in pairs(gdSoundNames) do gdSoundValues[k] = v end
+            gdSoundValues._menuOpts = {
+                itemHeight = 26,
+                maxTextWidthPct = 0.8,
+                searchable = true,
+                iconAtlas = function(key)
+                    if key == "none" then return nil end
+                    if not gdSoundPaths[key] then return nil end
+                    return "common-icon-sound"
+                end,
+                iconPressedAtlas = function(key)
+                    if key == "none" then return nil end
+                    return "common-icon-sound-pressed"
+                end,
+                iconOnClick = function(key)
+                    local path = gdSoundPaths[key]
+                    if path then PlaySoundFile(path, "Master") end
+                end,
+                iconTooltip = function() return "Preview Sound" end,
+            }
+
             local _, deathCogShow = EllesmereUI.BuildCogPopup({
                 title = "Group Death Alert Settings",
                 rows = {
@@ -385,14 +413,17 @@ initFrame:SetScript("OnEvent", function(self)
                         if EllesmereUI._applyGroupDeathAlert then EllesmereUI._applyGroupDeathAlert() end
                         if EllesmereUI._groupDeathShowVisual then EllesmereUI._groupDeathShowVisual() end
                       end },
-                    { type="toggle", label="Play Sound",
+                    { type="dropdown", label="Sound",
+                      values=gdSoundValues, order=gdSoundOrder,
                       get=function()
-                        return not (EllesmereUIDB and EllesmereUIDB.groupDeathSound == false)
+                        return (EllesmereUIDB and EllesmereUIDB.groupDeathSoundKey) or "none"
                       end,
                       set=function(v)
                         if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.groupDeathSound = v
-                        if v and EllesmereUI._groupDeathPlaySound then EllesmereUI._groupDeathPlaySound() end
+                        EllesmereUIDB.groupDeathSoundKey = v
+                        if v ~= "none" and EllesmereUI._groupDeathPlaySound then
+                            EllesmereUI._groupDeathPlaySound()
+                        end
                       end },
                 },
             })
@@ -1727,7 +1758,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.announceGroupDeaths = false
                 EllesmereUIDB.groupDeathTextSize = nil
                 EllesmereUIDB.groupDeathAlertPos = nil
-                EllesmereUIDB.groupDeathSound = nil
+                EllesmereUIDB.groupDeathSound = nil      -- legacy boolean (pre-dropdown)
+                EllesmereUIDB.groupDeathSoundKey = nil
             end
             EllesmereUIDB.autoLogging = nil
             if _G._EUI_ResetUpgradeCalc then _G._EUI_ResetUpgradeCalc() end

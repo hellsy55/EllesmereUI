@@ -1045,9 +1045,11 @@ local function InitHealthBarTextures()
     healthBarTextures["gradient-tb"]      = TEX_BASE .. "gradient-tb.tga"
     healthBarTextures["matte"]            = TEX_BASE .. "matte.tga"
     healthBarTextures["sheer"]            = TEX_BASE .. "sheer.tga"
+    healthBarTextures["kringel-diamonds"] = TEX_BASE .. "kringel-diamonds.tga"
+    healthBarTextures["kringel-window"]   = TEX_BASE .. "kringel-window.tga"
 
     healthBarTextureNames["none"]             = "None"
-    healthBarTextureNames["melli"]            = "Melli"
+    healthBarTextureNames["melli"]            = "Melli (ElvUI)"
     healthBarTextureNames["atrocity"]         = "Atrocity"
     healthBarTextureNames["beautiful"]        = "Beautiful"
     healthBarTextureNames["plating"]          = "Plating"
@@ -1063,6 +1065,8 @@ local function InitHealthBarTextures()
     healthBarTextureNames["gradient-tb"]      = "Gradient Down"
     healthBarTextureNames["matte"]            = "Matte"
     healthBarTextureNames["sheer"]            = "Sheer"
+    healthBarTextureNames["kringel-diamonds"] = "Kringel Diamonds"
+    healthBarTextureNames["kringel-window"]   = "Kringel Window"
 
     healthBarTextureOrder[1]  = "none"
     healthBarTextureOrder[2]  = "melli"
@@ -1081,6 +1085,8 @@ local function InitHealthBarTextures()
     healthBarTextureOrder[15] = "gradient-tb"
     healthBarTextureOrder[16] = "matte"
     healthBarTextureOrder[17] = "sheer"
+    healthBarTextureOrder[18] = "kringel-diamonds"
+    healthBarTextureOrder[19] = "kringel-window"
 
     -- Append SharedMedia textures after built-ins
     if EllesmereUI.AppendSharedMediaTextures then

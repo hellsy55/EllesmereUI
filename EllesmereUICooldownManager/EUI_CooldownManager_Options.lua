@@ -6371,9 +6371,69 @@ initFrame:SetScript("OnEvent", function(self)
                             })
                         end)
 
+                        -- Audio on Buff Gain / Loss sound list + speaker-preview
+                        -- decorator. Defined once here so the Blizzard-tracked-buff
+                        -- rows AND the self-timed preset/custom gain row share the same
+                        -- list + preview (entries mirror the Focus Cast Sound dropdown
+                        -- via the shared ns.FOCUSKICK_SOUND_* tables).
+                        local AUDIO_ITEMS = {}
+                        for _, key in ipairs(ns.FOCUSKICK_SOUND_ORDER or { "none" }) do
+                            if type(key) == "string" and key:sub(1, 3) == "---" then
+                                -- Separator inserted by AppendSharedMediaSounds between
+                                -- the built-in sounds and the appended LibSharedMedia
+                                -- sounds. Render as a divider line, not a sound entry.
+                                AUDIO_ITEMS[#AUDIO_ITEMS + 1] = { divider = true }
+                            else
+                                AUDIO_ITEMS[#AUDIO_ITEMS + 1] = {
+                                    val   = key,
+                                    label = (ns.FOCUSKICK_SOUND_NAMES and ns.FOCUSKICK_SOUND_NAMES[key]) or key,
+                                }
+                            end
+                        end
+                        -- Speaker-preview decorator: plays a row's focused sound without
+                        -- selecting it (mirrors the dropdown's preview icon).
+                        local function AddSoundPreview(si, item)
+                            if item.val and item.val ~= "none" then
+                                local play = CreateFrame("Button", nil, si)
+                                play:SetSize(16, 16)
+                                play:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                play:SetFrameLevel(si:GetFrameLevel() + 2)
+                                play:SetNormalAtlas("common-icon-sound")
+                                play:SetPushedAtlas("common-icon-sound-pressed")
+                                play:SetScript("OnClick", function()
+                                    local paths = ns.FOCUSKICK_SOUND_PATHS
+                                    local path = paths and paths[item.val]
+                                    if path then PlaySoundFile(path, "Master") end
+                                end)
+                                play:SetScript("OnEnter", function()
+                                    EllesmereUI.ShowWidgetTooltip(play, "Preview Sound")
+                                end)
+                                play:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                            end
+                        end
+                        -- "Audio on Buff Gain": stored per-icon as ss.buffActiveSoundKey
+                        -- ("none"/nil = silent). Blizzard-tracked buffs fire it via the
+                        -- apply-edge hook (EnsureBuffSoundHook -> TriggerAuraAppliedAlert);
+                        -- self-timed preset/custom buffs fire it from the cast-timer gain
+                        -- edge in UpdateCustomBuffBars (CdmHooks) off the SAME stored key.
+                        local function AddBuffGainRow()
+                            MakeSubnavRow("Audio on Buff Gain", AUDIO_ITEMS,
+                                function() return ss.buffActiveSoundKey or "none" end,
+                                function(v)
+                                    EnsureSS()
+                                    ss.buffActiveSoundKey = (v ~= "none" and v) or nil
+                                    -- Flip the 0-cost gate live so the edge hook / cast
+                                    -- timer starts playing on the next activation.
+                                    if ss.buffActiveSoundKey then ns._cdmAnyBuffSound = true end
+                                end,
+                                function() return ss.buffActiveSoundKey == nil end,
+                                AddSoundPreview,
+                                { searchable = true })
+                        end
+
                         -- Always Show Buffs + Desaturate Inactive apply only to
-                        -- Blizzard-tracked buffs (inactive placeholders); they are
-                        -- omitted entirely for injected custom/preset buffs.
+                        -- Blizzard-tracked buffs (inactive placeholders); injected
+                        -- custom/preset buffs skip them and get only the gain row.
                         if not isInjectedCustom then
                             -- Always Show Buffs: per-icon tri-state override of the bar
                             -- toggle. Default = inherit bar; Show = force the inactive
@@ -6420,61 +6480,11 @@ initFrame:SetScript("OnEvent", function(self)
                                 function(v) EnsureSS(); ss.desatInactive = v end,
                                 function() return ss.desatInactive == nil end)
 
-                            -- Audio on Buff Gain / Loss: play a sound when this buff
-                            -- becomes active (gain) or drops (loss). Both rows share the
-                            -- same sound list + speaker preview as the Focus Cast Sound
-                            -- dropdown (shared ns.FOCUSKICK_SOUND_* tables). Stored per-icon
-                            -- as ss.buffActiveSoundKey / ss.buffLostSoundKey ("none"/nil =
-                            -- silent); the edge hooks (EnsureBuffSoundHook -> Blizzard's
-                            -- TriggerAuraAppliedAlert / TriggerAuraRemovedAlert) fire live.
-                            local AUDIO_ITEMS = {}
-                            for _, key in ipairs(ns.FOCUSKICK_SOUND_ORDER or { "none" }) do
-                                if type(key) == "string" and key:sub(1, 3) == "---" then
-                                    -- Separator inserted by AppendSharedMediaSounds between
-                                    -- the built-in sounds and the appended LibSharedMedia
-                                    -- sounds. Render as a divider line, not a sound entry.
-                                    AUDIO_ITEMS[#AUDIO_ITEMS + 1] = { divider = true }
-                                else
-                                    AUDIO_ITEMS[#AUDIO_ITEMS + 1] = {
-                                        val   = key,
-                                        label = (ns.FOCUSKICK_SOUND_NAMES and ns.FOCUSKICK_SOUND_NAMES[key]) or key,
-                                    }
-                                end
-                            end
-                            -- Shared speaker-preview decorator: plays a row's focused sound
-                            -- without selecting it (mirrors the dropdown's preview icon).
-                            -- Used by both the Gain and Loss rows so they stay identical.
-                            local function AddSoundPreview(si, item)
-                                if item.val and item.val ~= "none" then
-                                    local play = CreateFrame("Button", nil, si)
-                                    play:SetSize(16, 16)
-                                    play:SetPoint("RIGHT", si, "RIGHT", -8, 0)
-                                    play:SetFrameLevel(si:GetFrameLevel() + 2)
-                                    play:SetNormalAtlas("common-icon-sound")
-                                    play:SetPushedAtlas("common-icon-sound-pressed")
-                                    play:SetScript("OnClick", function()
-                                        local paths = ns.FOCUSKICK_SOUND_PATHS
-                                        local path = paths and paths[item.val]
-                                        if path then PlaySoundFile(path, "Master") end
-                                    end)
-                                    play:SetScript("OnEnter", function()
-                                        EllesmereUI.ShowWidgetTooltip(play, "Preview Sound")
-                                    end)
-                                    play:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                                end
-                            end
-                            MakeSubnavRow("Audio on Buff Gain", AUDIO_ITEMS,
-                                function() return ss.buffActiveSoundKey or "none" end,
-                                function(v)
-                                    EnsureSS()
-                                    ss.buffActiveSoundKey = (v ~= "none" and v) or nil
-                                    -- Flip the 0-cost gate live so the edge hook starts
-                                    -- attaching on the next refresh.
-                                    if ss.buffActiveSoundKey then ns._cdmAnyBuffSound = true end
-                                end,
-                                function() return ss.buffActiveSoundKey == nil end,
-                                AddSoundPreview,
-                                { searchable = true })
+                            AddBuffGainRow()
+
+                            -- Audio on Buff Loss: Blizzard-tracked buffs fire a real drop
+                            -- edge (TriggerAuraRemovedAlert), so the loss sound is offered
+                            -- here only. Stored per-icon as ss.buffLostSoundKey.
                             MakeSubnavRow("Audio on Buff Loss", AUDIO_ITEMS,
                                 function() return ss.buffLostSoundKey or "none" end,
                                 function(v)
@@ -6487,6 +6497,14 @@ initFrame:SetScript("OnEvent", function(self)
                                 function() return ss.buffLostSoundKey == nil end,
                                 AddSoundPreview,
                                 { searchable = true })
+                        else
+                            -- Self-timed preset/custom buffs (Bloodlust/Heroism, Light's
+                            -- Potential, potions, and user-added custom buff IDs with a
+                            -- duration) are shown on a cast/edge for a fixed window. The
+                            -- real aura is secret/other-cast, so only the GAIN edge is
+                            -- knowable -- offer the gain sound only. It is fired from the
+                            -- cast timer in UpdateCustomBuffBars (CdmHooks).
+                            AddBuffGainRow()
                         end
                     else
                     local isCustomInjected = spellID < 0
@@ -10389,7 +10407,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local subFs = EllesmereUI.MakeFont(popup, 11, nil, 1, 1, 1, 0.45)
                 subFs:SetPoint("TOP", titleFs, "BOTTOM", 0, -4)
                 subFs:SetWidth(DDW); subFs:SetJustifyH("CENTER")
-                subFs:SetText("Choose the spec to copy racials, pots & trinkets from")
+                subFs:SetText("Choose the spec to copy trinkets, pots, racials & buff presets from")
                 local search = CreateFrame("EditBox", nil, popup)
                 PP.Size(search, DDW, 26)
                 search:SetPoint("TOP", subFs, "BOTTOM", 0, -10)
@@ -10494,7 +10512,8 @@ initFrame:SetScript("OnEvent", function(self)
             C_Timer.After(0.05, function() P.search:SetFocus() end)
         end
 
-        -- Sync Racials, Pots & Trinkets across specs (per profile). First-time
+        -- Sync Generic CDs/Buffs across specs (per profile): trinkets, pots,
+        -- racials and buff-bar presets (Bloodlust, etc.). First-time
         -- setup picks a SOURCE spec (searchable dropdown, default current spec),
         -- then a spec picker with the source locked ON (auto-checked, can't be
         -- deselected).
@@ -10511,7 +10530,7 @@ initFrame:SetScript("OnEvent", function(self)
                     s.checked = (s.key == sourceKey)
                 end
                 EllesmereUI:ShowCDMSpecPickerPopup({
-                    title       = "Sync Racials, Pots & Trinkets",
+                    title       = "Sync Generic CDs/Buffs",
                     subtitle    = "Choose which specs sync with " .. srcName .. " (the source is always included)",
                     confirmText = "Sync",
                     specs       = specs,
@@ -10536,7 +10555,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Edit an existing sync: open the spec picker directly (no source step),
         -- with the currently-synced specs pre-checked. Unchecking a spec drops it
-        -- from the sync (its racials/pots/trinkets are left exactly as they are);
+        -- from the sync (its trinkets/pots/racials/buff presets are left as-is);
         -- checking a new spec folds it in. Falling to one-or-zero specs clears it.
         local function EditRPTSync()
             -- Pre-check EVERY synced spec, not just the current class's. A sync
@@ -10553,8 +10572,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
             EllesmereUI:ShowCDMSpecPickerPopup({
-                title       = "Sync Racials, Pots & Trinkets",
-                subtitle    = "Uncheck a spec to remove it from the sync. Removed specs keep their current racials, pots & trinkets.",
+                title       = "Sync Generic CDs/Buffs",
+                subtitle    = "Uncheck a spec to remove it from the sync. Removed specs keep their current trinkets, pots, racials & buff presets.",
                 confirmText = "Save",
                 specs       = specs,
                 onConfirm   = function(selectedSpecs)
@@ -10582,15 +10601,16 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Action buttons: repopulate + open Blizzard CDM + sync racials/pots/trinkets.
+        -- Action buttons: repopulate + open Blizzard CDM + sync generic CDs/buffs
+        -- (trinkets, pots, racials & buff presets across specs).
         -- The third button keeps the same label whether or not a sync exists;
         -- DoRPTSync routes to setup vs edit based on ns.HasRPTSync().
         _, h = W:WideTripleButton(parent,
-            "Repopulate from Blizzard CDM", "Open Blizzard CDM", "Sync Racials, Pots & Trinkets", y,
+            "Repopulate from Blizzard CDM", "Open Blizzard CDM", "Sync Generic CDs/Buffs", y,
             function()
                 EllesmereUI:ShowConfirmPopup({
                     title = "Repopulate Bars",
-                    message = "This will reset all default bar spell assignments for the current spec to match Blizzard's CDM layout. Custom bars are not affected. Continue?",
+                    message = "This will reset all default bar spell assignments for the current spec to match Blizzard's CDM layout. Spells you added yourself (presets, custom IDs and racials) are kept. Continue?",
                     confirmText = "Repopulate",
                     cancelText = "Cancel",
                     onConfirm = function()

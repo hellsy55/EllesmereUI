@@ -164,6 +164,9 @@ local defaults = {
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
     boss = { r = 0.518, g = 0.243, b = 0.984 },
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
+    -- "Mini Enemies" (non-elite trash, dungeons only) has NO static default: when
+    -- unset it views the user's enemyInCombat color, so it starts identical to
+    -- "Enemies" and the user customizes from there (see GetReactionColor).
     darkenEnemiesOOC = true,
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
@@ -276,11 +279,16 @@ local defaults = {
     ccTextSize = 12,
     ccTextColor = { r = 1, g = 1, b = 1 },
     targetGlowStyle = "ellesmereui",
-    -- Customizable target "Border Color" glow color (default white). The three
-    -- multi-toggle keys (targetGlowEllesmereUI / targetGlowBorderColor /
-    -- targetGlowHighlight) are intentionally NOT defaulted here: they stay nil
-    -- so the getters can live-convert from the legacy targetGlowStyle string.
+    -- Target "Border Color" tint (default white), applied to the custom border
+    -- when the Border Color toggle is on. The three multi-toggle keys
+    -- (targetGlowEllesmereUI / targetGlowBorderColor / targetGlowHighlight) are
+    -- intentionally NOT defaulted here: they stay nil so the getters can
+    -- live-convert from the legacy targetGlowStyle string.
     targetBorderColor = { r = 1, g = 1, b = 1 },
+    -- Target "Glow Color" + opacity for the EUI background glow (default = the
+    -- signature blue at full opacity).
+    targetGlowColor = { r = 0.4117, g = 0.6667, b = 1.0 },
+    targetGlowAlpha = 1.0,
     -- Target Highlight wash color/opacity (defaults match the formerly
     -- hardcoded white at 30%, so existing users are unaffected).
     targetHighlightColor = { r = 1, g = 1, b = 1 },
@@ -511,6 +519,8 @@ do
         ["gradient-tb"]   = TB .. "gradient-tb.tga",
         ["matte"]         = TB .. "matte.tga",
         ["sheer"]         = TB .. "sheer.tga",
+        ["kringel-diamonds"] = TB .. "kringel-diamonds.tga",
+        ["kringel-window"]   = TB .. "kringel-window.tga",
     }
     ns.healthBarTextureOrder = {
         "none", "melli", "atrocity",
@@ -520,6 +530,7 @@ do
         "divide", "glass",
         "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
         "matte", "sheer",
+        "kringel-diamonds", "kringel-window",
     }
     ns.healthBarTextureNames = {
         ["none"]        = "None",
@@ -539,6 +550,8 @@ do
         ["gradient-tb"] = "Gradient Down",
         ["matte"]       = "Matte",
         ["sheer"]       = "Sheer",
+        ["kringel-diamonds"] = "Kringel Diamonds",
+        ["kringel-window"]   = "Kringel Window",
     }
 end
 
@@ -1189,6 +1202,14 @@ function ns.GetTargetGlowHighlight()
 end
 function ns.GetTargetBorderColor()
     return (p and p.targetBorderColor) or defaults.targetBorderColor
+end
+function ns.GetTargetGlowColor()
+    return (p and p.targetGlowColor) or defaults.targetGlowColor
+end
+function ns.GetTargetGlowAlpha()
+    local a = p and p.targetGlowAlpha
+    if a == nil then return defaults.targetGlowAlpha end
+    return a
 end
 function ns.GetTargetHighlightColor()
     return (p and p.targetHighlightColor) or defaults.targetHighlightColor
@@ -1877,11 +1898,18 @@ local function EnsureGlow(plate)
     plate.glowFrame:SetFrameLevel(1)
     plate.glowFrame:SetPoint("TOPLEFT", plate.health, "TOPLEFT", -GLOW_EXTEND, GLOW_EXTEND)
     plate.glowFrame:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", GLOW_EXTEND, -GLOW_EXTEND)
+    -- Glow tint + opacity come from the target "Glow Color" setting (default =
+    -- signature blue at full opacity). Textures are collected so ApplyTarget can
+    -- recolor them live.
+    plate.glowTextures = {}
+    local gc = ns.GetTargetGlowColor()
+    local ga = ns.GetTargetGlowAlpha()
     local function MkTex()
         local t = plate.glowFrame:CreateTexture(nil, "BACKGROUND")
         t:SetTexture(GLOW_TEX)
-        t:SetVertexColor(0.4117, 0.6667, 1.0, 1.0)
+        t:SetVertexColor(gc.r, gc.g, gc.b, ga)
         t:SetBlendMode("ADD")
+        plate.glowTextures[#plate.glowTextures + 1] = t
         return t
     end
     plate.glowTL = MkTex(); plate.glowTL:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowTL:SetPoint("TOPLEFT"); plate.glowTL:SetTexCoord(0, GLOW_MARGIN, 0, GLOW_MARGIN)
@@ -3875,6 +3903,10 @@ local function RefreshThreatCache()
     -- Zone: party/raid instances and delves (difficultyID 204) are threat-relevant
     local _, instanceType, difficultyID = GetInstanceInfo()
     difficultyID = tonumber(difficultyID) or 0
+    -- Dungeon-only flag for the "Mini Enemies" trash color (5-man dungeons are
+    -- instanceType "party"; excludes raids/delves/open world). Cached here so the
+    -- per-plate color path costs one field read, not a GetInstanceInfo call.
+    ns._inDungeon = (instanceType == "party")
     if difficultyID == 0
     or (C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap()) then
         _inThreatContent = false
@@ -4227,6 +4259,17 @@ local function GetReactionColor(unit)
     -- tank-has-aggro / dps-no-aggro color takes precedence over the boss color).
     if _isBossUnit then
         local c = _C("boss")
+        return MaybeDarken(c.r, c.g, c.b, inCombat)
+    end
+    -- 10c. Mini Enemies: non-elite trash (normal/minus), DUNGEONS ONLY. Gives
+    -- 5-man trash its own color; outside dungeons these fall through to the enemy
+    -- color below. Elites are handled at step 7, so same-level elites still use
+    -- the enemy color. Sits below the threat colors so aggro state still wins.
+    if ns._inDungeon
+       and (classification == "normal" or classification == "minus" or classification == "trivial") then
+        -- Views the user's "Enemies" color (enemyInCombat) until they explicitly
+        -- set a Mini Enemies color, so trash starts identical to before.
+        local c = (p and p.miniEnemy) or _C("enemyInCombat")
         return MaybeDarken(c.r, c.g, c.b, inCombat)
     end
     -- 11. Fallback: enemy in combat / out of combat
@@ -4929,6 +4972,10 @@ function NameplateFrame:SetUnit(unit, nameplate)
     self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()
+    -- Recycled/fresh plate: forget any prior eased scale so the first
+    -- ApplyScale snaps to the right size instead of growing in from a stale one.
+    self._curScale = nil
+    ns._scaleAnim[self] = nil
     if ns._hitboxOverlayShown or self.hitboxOverlay then ns._ApplyHitboxOverlay(self) end
     -- Apply static appearance only when stale (settings changed or fresh
     -- pool plate). Cache-hit re-spawns skip this entirely.
@@ -5137,6 +5184,8 @@ function NameplateFrame:ClearUnit()
     end
     self:Hide()
     self:SetScale(1)
+    self._curScale = nil
+    ns._scaleAnim[self] = nil
     self:SetParent(UIParent)
     self:ClearAllPoints()
     -- Detach stacking bounds from the old nameplate so it doesn't
@@ -5690,9 +5739,15 @@ function NameplateFrame:ApplyTarget()
     if not self.unit then return end
     local isTarget = UnitIsUnit(self.unit, "target")
     self._isTarget = isTarget  -- cached for hot-path hash line check
-    -- EllesmereUI: background glow around the plate
+    -- EllesmereUI: background glow around the plate, tinted + faded with the
+    -- target Glow Color/Opacity (re-applied on show so live edits update).
     if isTarget and ns.GetTargetGlowEllesmereUI() then
         EnsureGlow(self)
+        if self.glowTextures then
+            local gc = ns.GetTargetGlowColor()
+            local ga = ns.GetTargetGlowAlpha()
+            for _, t in ipairs(self.glowTextures) do t:SetVertexColor(gc.r, gc.g, gc.b, ga) end
+        end
         self.glow:Show()
     elseif self.glow then
         self.glow:Hide()
@@ -6708,6 +6763,37 @@ function NameplateFrame:UpdateCast()
         self:UpdateKickTick(self._kickProtected, self._kickIsChannel, self._kickIsEmpowered)
     end
 end
+-- Smooth scale transitions. A single shared OnUpdate eases every plate whose
+-- displayed scale (_curScale) differs from its destination (_destScale). The
+-- driver hides itself the instant no plate is animating, so it costs nothing at
+-- idle; and because target/cast scale both default to 100, dest stays at 1 and
+-- ApplyScale snaps (never enrolls) until the user actually sets a scale.
+ns._scaleAnim = {}  -- [plate] = true while its scale is easing
+do
+    local SPEED = 11     -- exponential approach rate (higher = snappier)
+    local SNAP  = 0.004  -- within this of dest -> finish and drop from set
+    local anim  = ns._scaleAnim
+    local driver = CreateFrame("Frame")
+    driver:Hide()
+    driver:SetScript("OnUpdate", function(_, elapsed)
+        -- Frame-rate independent ease: same settle time at any FPS.
+        local t = 1 - math.exp(-SPEED * elapsed)
+        for plate in pairs(anim) do
+            local cur  = plate._curScale or 1
+            local dest = plate._destScale or 1
+            local nv = cur + (dest - cur) * t
+            if nv - dest < SNAP and dest - nv < SNAP then
+                nv = dest
+                anim[plate] = nil
+            end
+            plate._curScale = nv
+            plate:SetScale(nv)
+            if plate.isCasting and ns.RefreshCastOverlay then ns.RefreshCastOverlay(plate) end
+        end
+        if not next(anim) then driver:Hide() end
+    end)
+    ns._ScaleDriverShow = function() driver:Show() end
+end
 function NameplateFrame:ApplyScale()
     local base = 1
     if self.unit and UnitIsUnit(self.unit, "target") then
@@ -6715,10 +6801,19 @@ function NameplateFrame:ApplyScale()
         if ts ~= 1 then base = ts end
     end
     local cs = GetCastScale() / 100
-    if self.isCasting and cs ~= 1 then
-        self:SetScale(base * cs)
+    local dest = base
+    if self.isCasting and cs ~= 1 then dest = base * cs end
+    self._destScale = dest
+    local cur = self._curScale
+    if cur == nil or (dest - cur < 0.004 and cur - dest < 0.004) then
+        -- Fresh/recycled plate, or already at the destination: snap instantly.
+        self._curScale = dest
+        ns._scaleAnim[self] = nil
+        self:SetScale(dest)
     else
-        self:SetScale(base)
+        -- Ease toward the new destination via the shared OnUpdate driver.
+        ns._scaleAnim[self] = true
+        ns._ScaleDriverShow()
     end
     -- Lifted cast bar renders outside this plate's scale chain; keep its
     -- container pinned to the plate's effective scale.

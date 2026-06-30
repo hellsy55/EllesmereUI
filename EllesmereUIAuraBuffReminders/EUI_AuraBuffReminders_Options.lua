@@ -755,6 +755,22 @@ initFrame:SetScript("OnEvent", function(self)
 
         parent._showRowDivider = true
 
+        -- Click-action info label at the top of the page (below the preview area)
+        do
+            local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("auraBuff")) or "Fonts\\FRIZQT__.TTF"
+            local infoFrame = CreateFrame("Frame", nil, parent)
+            infoFrame:SetSize(parent:GetWidth(), 20)
+            infoFrame:SetPoint("TOP", parent, "TOP", 0, y - 15)
+            infoFrame._isSpacer = true
+            local line1 = infoFrame:CreateFontString(nil, "OVERLAY")
+            line1:SetFont(fontPath, 15, "")
+            line1:SetTextColor(1, 1, 1, 0.75)
+            line1:SetPoint("TOP", infoFrame, "TOP", 0, 0)
+            line1:SetJustifyH("CENTER")
+            line1:SetText(EllesmereUI.L("Left Click to apply buffs (out of combat), Middle Click to hide until next load screen"))
+            y = y - 32
+        end
+
         -----------------------------------------------------------------------
         --  CORE section
         -----------------------------------------------------------------------

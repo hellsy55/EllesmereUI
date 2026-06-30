@@ -2052,18 +2052,7 @@ local function GetOrCreateTrinketFrame(slotID)
             -- SetItemByID is only a fallback if no link is available.
             local link = GetInventoryItemLink("player", self._trinketSlot)
             if link then
-                -- Suppress the equipped-item comparison (shopping) tooltips: this is
-                -- our own already-equipped trinket, so a side-by-side compare is just
-                -- noise. Temporarily disable auto-compare while the tooltip is built,
-                -- then restore the user's setting.
-                local prevCompare = GetCVar("alwaysCompareItems")
-                if prevCompare and prevCompare ~= "0" then
-                    SetCVar("alwaysCompareItems", "0")
-                end
                 GameTooltip:SetHyperlink(link)
-                if prevCompare and prevCompare ~= "0" then
-                    SetCVar("alwaysCompareItems", prevCompare)
-                end
             else
                 GameTooltip:SetItemByID(itemID)
             end
@@ -2074,8 +2063,11 @@ local function GetOrCreateTrinketFrame(slotID)
                 EllesmereUI._repointTooltipAtCursor(GameTooltip)
             end
             GameTooltip:Show()
-            -- Belt-and-suspenders: hide any comparison tooltips that still slipped
-            -- through (e.g. when the compare modifier key is held down).
+            -- This is our own already-equipped trinket, so the side-by-side
+            -- comparison (shopping) tooltips are just noise -- hide them after the
+            -- tip is shown. Done here rather than by toggling the alwaysCompareItems
+            -- CVar: mutating a user setting on every combat-time hover is wasteful
+            -- and leaks the "off" state if anything errors mid-build.
             if GameTooltip_HideShoppingTooltips then
                 GameTooltip_HideShoppingTooltips(GameTooltip)
             end
@@ -2685,6 +2677,55 @@ function ns.AnyCustomAuraLust()
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
                     if LUST_PRESET_SPELLS[sid] then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- Time Spiral "Free Move" preset: same emulated-cast trick as Bloodlust. The
+-- glow-armed rising edge (CdmBuffBars _ensureTimeSpiralListener) calls this to
+-- mark spell 374968 as "just cast" so the existing self-timed-icon path renders
+-- a 10s Custom Auras (icon) display. A no-op for any bar not tracking it.
+function ns.SignalTimeSpiralCast()
+    _pendingCastIDs[374968] = true
+    QueueCustomBuffUpdate()
+end
+
+-- Called from the Time Spiral glow-HIDE edge (proc consumed): expire any active
+-- 374968 Custom Auras (icon) window now so the icon disappears with the glow
+-- instead of riding out the full 10s. Clears every "barKey:374968" timer (the
+-- suffix uniquely identifies the spell on any bar), then queues a refresh:
+-- custom_buff bars hide their own-frame on the update, buff bars drop the
+-- injected frame on the reanchor.
+function ns.SignalTimeSpiralEnd()
+    local suffix = ":374968"
+    local n = #suffix
+    local any = false
+    for k in pairs(_customAuraTimers) do
+        if type(k) == "string" and k:sub(-n) == suffix then
+            _customAuraTimers[k] = nil
+            any = true
+        end
+    end
+    if any then
+        QueueCustomBuffUpdate()
+        if ns.QueueReanchor then ns.QueueReanchor() end
+    end
+end
+
+-- True if any enabled Custom Auras (custom_buff) / buff bar tracks Time Spiral,
+-- so the shared glow listener stays armed even with no Tracking Bar present.
+function ns.AnyCustomAuraTimeSpiral()
+    local p = ECME and ECME.db and ECME.db.profile
+    if not (p and p.cdmBars and p.cdmBars.bars) then return false end
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and (bd.barType == "custom_buff" or bd.barType == "buffs") then
+            local sd = ns.GetBarSpellData and ns.GetBarSpellData(bd.key)
+            if sd and sd.assignedSpells then
+                for _, sid in ipairs(sd.assignedSpells) do
+                    if sid == 374968 then return true end
                 end
             end
         end
@@ -4053,6 +4094,32 @@ ns.CollectAndReanchor = CollectAndReanchor
 --  CollectAndReanchor can read the same live timers.)
 -------------------------------------------------------------------------------
 
+-- Per-icon "Audio on Buff Gain" for self-timed preset/custom buffs (potions,
+-- Bloodlust/Heroism, Light's Potential, user-added custom buff IDs). These never
+-- fire Blizzard's TriggerAuraAppliedAlert -- they appear on a cast/edge for a
+-- fixed window -- so the regular-buff apply-edge hook can't reach them. We play
+-- the SAME stored key (ss.buffActiveSoundKey) here, off the cast edge that
+-- (re)starts the icon's timer. No loss sound: the real aura is secret/other-cast,
+-- so only the gain edge is knowable. The id comes straight from the bar's
+-- assignedSpells (clean, never secret), so the lookup is a direct spellSettings
+-- hit -- no GetCanonicalSpellIDForFrame dance. Gated 0-cost on ns._cdmAnyBuffSound
+-- (the same flag RescanBuffSoundFlag sets from these very spellSettings) and
+-- throttled so a refresh-cast a few frames apart can't double-fire.
+local _presetGainSoundAt = {}
+local PRESET_GAIN_SOUND_GAP = 0.3
+local function PlayPresetBuffGainSound(sd, sid, now)
+    if not ns._cdmAnyBuffSound then return end
+    local ss = sd and sd.spellSettings and sd.spellSettings[sid]
+    local key = ss and ss.buffActiveSoundKey
+    if not key or key == "none" then return end
+    local last = _presetGainSoundAt[sid]
+    if last and (now - last) < PRESET_GAIN_SOUND_GAP then return end
+    _presetGainSoundAt[sid] = now
+    local paths = ns.FOCUSKICK_SOUND_PATHS
+    local path = paths and paths[key]
+    if path then PlaySoundFile(path, "Master") end
+end
+
 local function UpdateCustomBuffBars()
     -- if CooldownViewerSettings and CooldownViewerSettings:IsShown() then return end
     local p = ECME.db and ECME.db.profile
@@ -4086,6 +4153,7 @@ local function UpdateCustomBuffBars()
                                     duration = duration,
                                 }
                                 timer = _customAuraTimers[timerKey]
+                                PlayPresetBuffGainSound(sd, sid, now)
                             end
 
                             local isActive = timer and duration > 0
@@ -4180,6 +4248,7 @@ local function UpdateCustomBuffBars()
                             start = now, duration = durs[sid],
                         }
                         needBuffReanchor = true
+                        PlayPresetBuffGainSound(sd, sid, now)
                     end
                 end
             end
@@ -4754,9 +4823,22 @@ function ns.SetupViewerHooks()
                 wipe(ac)
                 for vi = 1, 4 do
                     local vf = _G[VIEWER_NAMES[vi]]
+                    -- BuffIcon (3) / BuffBar (4) viewers SHOW a frame only while its
+                    -- buff/effect is active; the cooldown viewers (1,2) always show
+                    -- their icons, so "shown" is meaningless there. So in the buff
+                    -- viewers a shown, non-placeholder frame counts as active even
+                    -- without aura props -- this catches totems and pet-summon
+                    -- "buffs" (e.g. Mindbender) that Blizzard never gives an
+                    -- auraInstanceID. Mirrors the buff-bar glow logic in BuffTicker.
+                    local isBuffViewer = (vi >= 3)
                     if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
                         for frame in vf.itemFramePool:EnumerateActive() do
-                            if frame.wasSetFromAura == true or frame.auraInstanceID ~= nil then
+                            local active = frame.wasSetFromAura == true or frame.auraInstanceID ~= nil
+                            if not active and isBuffViewer and frame:IsShown()
+                               and not frame._isPlaceholderFrame then
+                                active = true
+                            end
+                            if active then
                                 local sid, baseSID = ResolveFrameSpellID(frame)
                                 if sid and sid > 0 then
                                     ac[sid] = true
