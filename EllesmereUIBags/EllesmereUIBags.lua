@@ -2085,6 +2085,16 @@ local function GetOrCreateSlot(idx)
     btn.KeystoneDungeonText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     btn.KeystoneDungeonText:SetText("")
 
+    -- Bind Type text (bottom-left)
+    if not btn.BindTypeText then
+        btn.BindTypeText = textOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
+        btn.BindTypeText:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1, 2)
+        btn.BindTypeText:SetTextColor(1, 1, 1, 1)
+    end
+    local bindTypeFontSize = BP().bagBindTypeFontSize or 11
+    btn.BindTypeText:SetFont(fontPath, bindTypeFontSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
+    btn.BindTypeText:SetText("")
+
     itemSlots[idx] = btn
     return btn
 end
@@ -2217,11 +2227,13 @@ local function RefreshTextSizes()
     local fontPath = GetFont()
     local countSize = BP().bagCountFontSize or 11
     local ilvlSize = BP().itemlevelFontSize or 12
+    local bindTypeSize = BP().bagBindTypeFontSize or 11
     for _, btn in pairs(itemSlots) do
         if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, fontPath, countSize, "bags") end
         if btn.ItemLevelText then btn.ItemLevelText:SetFont(fontPath, ilvlSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
         if btn.KeystoneText then btn.KeystoneText:SetFont(fontPath, countSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
         if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
+        if btn.BindTypeText then btn.BindTypeText:SetFont(fontPath, bindTypeSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
     end
     for _, btn in pairs(reagentSlots) do
         if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, fontPath, countSize, "bags") end
@@ -2281,6 +2293,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         if btn.ItemLevelText then btn.ItemLevelText:SetText("") end
         if btn.KeystoneText then btn.KeystoneText:SetText("") end
         if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetText("") end
+        if btn.BindTypeText then btn.BindTypeText:SetText("") end
         if btn.ProfessionQualityOverlay then btn.ProfessionQualityOverlay:Hide() end
         if btn.IconBorder then btn.IconBorder:Hide() end
         if btn.NormalTexture then btn.NormalTexture:SetAlpha(0) end
@@ -2293,12 +2306,12 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         btn:SetItemButtonTexture(data.info.iconFileID)
         btn:SetItemButtonCount(data._mergedCount or data.info.stackCount)
         btn._isMerged = data._mergedCount and true or nil
-        
+
         -- Desature: 1) locked items 2) junk items if option is active
         local quality = data.info.quality or 1
         local isJunk = BP().bagDesaturateJunkItems and quality == 0
         SetItemButtonDesaturated(btn, data.info.isLocked or isJunk)
-        
+
         local filtered = data.info.isFiltered
         btn:SetAlpha(filtered and 0.2 or 1)
         if btn._textOverlay then btn._textOverlay:SetAlpha(filtered and 0.2 or 1) end
@@ -2350,6 +2363,36 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
             else
                 btn.KeystoneText:SetText("")
                 if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetText("") end
+            end
+        end
+
+        -- Bind Type : BoE / WuE bottom-left (gear only)
+        if btn.BindTypeText then
+            if data._isGear then
+                local showBindType = BP().bagDisplayBindType ~= false
+                if showBindType then
+                    local r, g, b = 1, 1, 1
+
+                    if data._isWuE then
+                        local c = ITEM_QUALITY_COLORS[7] -- Heirloom color (no quality enum for WuE)
+                        if c then r, g, b = c.r, c.g, c.b end
+
+                        btn.BindTypeText:SetText(EllesmereUI.L("WuE"))
+                        btn.BindTypeText:SetTextColor(r, g, b)
+                    elseif data._giBindType == Enum.ItemBind.OnEquip then
+                        local c = ITEM_QUALITY_COLORS[quality]
+                        if c then r, g, b = c.r, c.g, c.b end
+
+                        btn.BindTypeText:SetText(EllesmereUI.L("BoE"))
+                        btn.BindTypeText:SetTextColor(r, g, b)
+                    else
+                        btn.BindTypeText:SetText("")
+                    end
+                else
+                    btn.BindTypeText:SetText("")
+                end
+            else
+                btn.BindTypeText:SetText("")
             end
         end
 
@@ -4756,9 +4799,10 @@ function EUI_Bags:RefreshInventory()
                 d.bag = bag; d.slot = slot; d.info = info; d.itemLink = itemLink
                 -- Pre-cache per-item data for RenderButton (zero API calls at render time)
                 if itemLink then
-                    local _, _, q, ilvl = GetItemInfo(itemLink)
+                    local _, _, q, ilvl, _, _, _, _, _, _, _, _, _, bindType = GetItemInfo(itemLink)
                     d._giQuality = q
                     d._giIlvl = ilvl
+                    d._giBindType = bindType
                     -- Track rank + cooldown: only for types that need them
                     local isGear = IsGearItem(itemLink)
                     d._isGear = isGear
@@ -4774,6 +4818,7 @@ function EUI_Bags:RefreshInventory()
                         local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
                         if loc and C_Item.DoesItemExist(loc) then
                             d._isWarbound = C_Bank.IsItemAllowedInBankType(Enum.BankType.Account, loc)
+                            d._isWuE = C_Item.IsBoundToAccountUntilEquip(loc)
                         end
                     end
                     -- Keystone data (rare, fast string match gates the API calls)
