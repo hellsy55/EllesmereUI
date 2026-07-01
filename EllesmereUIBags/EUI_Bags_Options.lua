@@ -38,6 +38,7 @@ local BAGS_DEFAULTS = {
         enableGoldTracking    = true,
         detachReagentBag      = false,
         enhancedBags          = true,
+        bagDesaturateJunkItems = false,
     },
 }
 local db = EllesmereUI.Lite.NewDB("EllesmereUIBagsDB", BAGS_DEFAULTS)
@@ -626,6 +627,18 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagHideRandomize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
+            ); y = y - h
+
+            -- Desaturate Junk Items
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Desaturate Junk Items",
+                  tooltip="Display junk items in a greyed-out style.",
+                  getValue=function() return db.profile.bagDesaturateJunkItems == true end,
+                  setValue=function(v)
+                      db.profile.bagDesaturateJunkItems = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                { type="label", text="" }
             ); y = y - h
 
             _, h = W:Spacer(parent, y, 20); y = y - h
