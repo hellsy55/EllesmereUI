@@ -231,6 +231,10 @@ local defaults = {
     classPowerBgColor = { r = 0.082, g = 0.082, b = 0.082, a = 1.0 },
     classPowerEmptyColor = { r = 0.2, g = 0.2, b = 0.2, a = 1.0 },
     classPowerGap = 2,
+    classPowerShape = "rectangle",  -- rectangle | square | circle | diamond | hexagon | shield
+    classPowerBorder = false,
+    classPowerBorderColor = { r = 0, g = 0, b = 0, a = 1.0 },
+    classPowerBorderSize = 1,
     healthBarWidth = 6,
     nameplateOverlapV = 1.10,
     stackSpacingScale = 100,
@@ -1237,26 +1241,23 @@ local function GetShowClassPower()
     return defaults.showClassPower
 end
 ns.GetShowClassPower = GetShowClassPower
-local function GetClassPowerPos()
+-- These getters live on ns (not file locals) to keep the main chunk under Lua's
+-- 200-local limit; callers in this file use ns.GetClassPower*().
+ns.GetClassPowerPos = function()
     return (p and p.classPowerPos) or defaults.classPowerPos
 end
-ns.GetClassPowerPos = GetClassPowerPos
-local function GetClassPowerYOffset()
+ns.GetClassPowerYOffset = function()
     return (p and p.classPowerYOffset) or defaults.classPowerYOffset
 end
-ns.GetClassPowerYOffset = GetClassPowerYOffset
-local function GetClassPowerXOffset()
+ns.GetClassPowerXOffset = function()
     return (p and p.classPowerXOffset) or defaults.classPowerXOffset
 end
-ns.GetClassPowerXOffset = GetClassPowerXOffset
-local function GetClassPowerScale()
+ns.GetClassPowerScale = function()
     return (p and p.classPowerScale) or defaults.classPowerScale
 end
-ns.GetClassPowerScale = GetClassPowerScale
-local function GetClassPowerGap()
+ns.GetClassPowerGap = function()
     return (p and p.classPowerGap) or defaults.classPowerGap
 end
-ns.GetClassPowerGap = GetClassPowerGap
 local function GetClassPowerClassColors()
     if p and p.classPowerClassColors ~= nil then return p.classPowerClassColors end
     return defaults.classPowerClassColors
@@ -1267,16 +1268,29 @@ local function GetClassPowerCustomColor()
     return c
 end
 ns.GetClassPowerCustomColor = GetClassPowerCustomColor
-local function GetClassPowerBgColor()
+ns.GetClassPowerBgColor = function()
     local c = (p and p.classPowerBgColor) or defaults.classPowerBgColor
     return c
 end
-ns.GetClassPowerBgColor = GetClassPowerBgColor
-local function GetClassPowerEmptyColor()
+ns.GetClassPowerEmptyColor = function()
     local c = (p and p.classPowerEmptyColor) or defaults.classPowerEmptyColor
     return c
 end
-ns.GetClassPowerEmptyColor = GetClassPowerEmptyColor
+-- Defined on ns (not as file locals) to stay under Lua's 200 main-chunk local limit.
+function ns.GetClassPowerShape()
+    return (p and p.classPowerShape) or defaults.classPowerShape
+end
+function ns.GetClassPowerBorder()
+    local v = p and p.classPowerBorder
+    if v == nil then return defaults.classPowerBorder end
+    return v
+end
+function ns.GetClassPowerBorderColor()
+    return (p and p.classPowerBorderColor) or defaults.classPowerBorderColor
+end
+function ns.GetClassPowerBorderSize()
+    return (p and p.classPowerBorderSize) or defaults.classPowerBorderSize
+end
 local function IsBorderEnabled()
     local v = p and p.showBorder
     if v == nil then return defaults.showBorder end
@@ -3411,6 +3425,61 @@ local classPowerMax = 0  -- max pips for the resource
 local classPowerFormReq  -- required GetShapeshiftFormID() value, or nil if no form check needed
 local CP_PIP_W, CP_PIP_H, CP_PIP_GAP = 8, 3, 2  -- pip geometry
 
+-- Optional pip shapes. Rectangle (default) and square are plain boxes (no mask);
+-- the rest are carved from a square fill by a portrait-set mask, with a matching
+-- border texture. Reuses the same shape art the Cooldown Manager uses.
+-- Packed onto ns (not file locals) to stay under Lua's 200 main-chunk local limit.
+ns.CP_SHAPE = {
+    WHITE = "Interface\\Buttons\\WHITE8X8",
+    MASKS = {
+        circle  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",
+        diamond = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\diamond_mask.tga",
+        hexagon = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\hexagon_mask.tga",
+        shield  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\shield_mask.tga",
+    },
+    BORDERS = {
+        circle  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_border.tga",
+        diamond = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\diamond_border.tga",
+        hexagon = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\hexagon_border.tga",
+        shield  = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\shield_border.tga",
+    },
+    -- Shapes drawn on a 1:1 (square) footprint instead of the wide pip rectangle.
+    SQUARE = { square = true, circle = true, diamond = true, hexagon = true, shield = true },
+}
+
+-- Resource-icon shapes: real Blizzard atlas art instead of a tinted shape.
+-- Each draws a class's resource art (rune, holy power, soul shard, combo
+-- points, chi, arcane charges, essence). All on ns (no main-chunk locals).
+ns.CP_ICON_SHAPE = { rune = true, holypower = true, shard = true,
+                     combo = true, chi = true, arcane = true, essence = true }
+-- Single-atlas resources have no distinct empty art, so dim their empty pips.
+ns.CP_ICON_DIM_EMPTY = { arcane = true }
+ns.CP_RUNE_SPEC = { [250] = "Blood", [251] = "Frost", [252] = "Unholy" }
+-- Icon kind for a shape ("rune", "holypower", "essence", etc.), or nil if geometric.
+function ns.GetPipIconKind(shape)
+    return ns.CP_ICON_SHAPE[shape] and shape or nil
+end
+-- Atlas for a pip of the given icon kind, filled (active) or empty (background).
+function ns.GetPipIconAtlas(kind, filled, index)
+    if kind == "shard" then
+        return filled and "Warlock-ReadyShard" or "Warlock-EmptyShard"
+    elseif kind == "rune" then
+        if not filled then return "DK-Rune-CD" end
+        local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
+        local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
+        return "DK-" .. (ns.CP_RUNE_SPEC[specID or 0] or "Blood") .. "-Rune-Ready"
+    elseif kind == "combo" then
+        return filled and "uf-roguecp-icon-red" or "uf-roguecp-bg"
+    elseif kind == "chi" then
+        return filled and "uf-chi-icon" or "uf-chi-bg"
+    elseif kind == "arcane" then
+        return "Mage-ArcaneCharge"  -- one atlas for both states; empty is dimmed by the caller
+    elseif kind == "essence" then
+        return filled and "UF-Essence-Icon-Active" or "UF-Essence-BG"
+    end
+    return nil
+end
+
 -- Resolve class/power color from EUI global system.
 -- For bar-type power keys (_BAR suffix), returns power color.
 -- For class resources, returns resource color > class color.
@@ -3455,6 +3524,80 @@ local CLASS_POWER_MAP = {
                     [252] = { Enum.PowerType.Runes, 6 } },
 }
 
+-- Apply the configured shape + optional border to one pip (and its bg).
+-- rectangle/square: plain box, no mask; border (if on) is a single solid box
+-- behind the pip. Other shapes: carve fill+bg with a mask and frame with the
+-- matching border texture. Idempotent; safe to call every refresh. bSize is in
+-- pip-local (already pixel-snapped) units.
+function ns.ApplyPipShape(plate, pip, shape, borderOn, bc, bSize)
+    local bg = pip._bg
+    -- Icon shapes draw real atlas art (set in the render): drop mask, borders,
+    -- and the dark bg so the art stands alone.
+    if ns.CP_ICON_SHAPE[shape] then
+        if pip._shapeMask then
+            pcall(pip.RemoveMaskTexture, pip, pip._shapeMask)
+            if bg then pcall(bg.RemoveMaskTexture, bg, pip._shapeMask) end
+            pip._shapeMask:Hide()
+        end
+        if pip._border then pip._border:Hide() end
+        if pip._borderBox then pip._borderBox:Hide() end
+        if bg then bg:Hide() end
+        return
+    end
+    local maskPath = ns.CP_SHAPE.MASKS[shape]
+    if maskPath then
+        if not pip._shapeMask then pip._shapeMask = plate:CreateMaskTexture() end
+        local m = pip._shapeMask
+        m:SetTexture(maskPath, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        m:ClearAllPoints()
+        m:SetAllPoints(pip)
+        m:Show()
+        pcall(pip.RemoveMaskTexture, pip, m); pip:AddMaskTexture(m)
+        if bg then pcall(bg.RemoveMaskTexture, bg, m); bg:AddMaskTexture(m) end
+    elseif pip._shapeMask then
+        pcall(pip.RemoveMaskTexture, pip, pip._shapeMask)
+        if bg then pcall(bg.RemoveMaskTexture, bg, pip._shapeMask) end
+        pip._shapeMask:Hide()
+    end
+
+    local borderPath = ns.CP_SHAPE.BORDERS[shape]
+    if borderOn and borderPath then
+        -- Masked shapes: matching outline texture, sized to the pip.
+        if not pip._border then pip._border = plate:CreateTexture(nil, "OVERLAY", nil, 4) end
+        local b = pip._border
+        b:SetTexture(borderPath)
+        b:SetVertexColor(bc.r, bc.g, bc.b, bc.a or 1)
+        b:ClearAllPoints()
+        b:SetAllPoints(pip)
+        b:Show()
+        if pip._borderBox then pip._borderBox:Hide() end
+    elseif borderOn then
+        -- Boxy shapes (rectangle/square): one solid box behind the pip, poking
+        -- out bSize on every side as a uniform outline. A single texture rounds
+        -- as one piece (no per-edge shimmer), staying crisp like the fill.
+        if pip._border then pip._border:Hide() end
+        if not pip._borderBox then
+            pip._borderBox = plate:CreateTexture(nil, "OVERLAY", nil, 1)
+            pip._borderBox:SetTexture(ns.CP_SHAPE.WHITE)
+        end
+        local box = pip._borderBox
+        box:SetVertexColor(bc.r, bc.g, bc.b, bc.a or 1)
+        box:ClearAllPoints()
+        box:SetPoint("TOPLEFT", pip, "TOPLEFT", -bSize, bSize)
+        box:SetPoint("BOTTOMRIGHT", pip, "BOTTOMRIGHT", bSize, -bSize)
+        box:Show()
+    else
+        if pip._border then pip._border:Hide() end
+        if pip._borderBox then pip._borderBox:Hide() end
+    end
+end
+
+-- Hide a pip's shape decorations (textured border + solid border box).
+function ns.HidePipDecor(pip)
+    if pip._border then pip._border:Hide() end
+    if pip._borderBox then pip._borderBox:Hide() end
+end
+
 -- Lazy-create pip textures on a plate (done once, then reused via show/hide)
 local function EnsureClassPowerPips(plate)
     if plate._cpPips then return end
@@ -3462,10 +3605,12 @@ local function EnsureClassPowerPips(plate)
     local maxPossible = 10  -- safe upper bound (Maelstrom Weapon = 10)
     for i = 1, maxPossible do
         local bg = plate:CreateTexture(nil, "OVERLAY", nil, 2)
-        bg:SetColorTexture(0.082, 0.082, 0.082, 1)
+        bg:SetTexture(ns.CP_SHAPE.WHITE)
+        bg:SetVertexColor(0.082, 0.082, 0.082, 1)
         bg:Hide()
         local pip = plate:CreateTexture(nil, "OVERLAY", nil, 3)
-        pip:SetColorTexture(1, 1, 1, 1)
+        pip:SetTexture(ns.CP_SHAPE.WHITE)
+        pip:SetVertexColor(1, 1, 1, 1)
         PP.Size(pip, CP_PIP_W, CP_PIP_H)
         pip:Hide()
         pip._bg = bg
@@ -3501,11 +3646,11 @@ local function UpdateClassPowerOnPlate(plate)
         return
     end
 
-    local cpScale = GetClassPowerScale()
-    local cpYOff = GetClassPowerYOffset()
-    local cpXOff = GetClassPowerXOffset()
-    local cpPos = GetClassPowerPos()
-    local bgCol = GetClassPowerBgColor()
+    local cpScale = ns.GetClassPowerScale()
+    local cpYOff = ns.GetClassPowerYOffset()
+    local cpXOff = ns.GetClassPowerXOffset()
+    local cpPos = ns.GetClassPowerPos()
+    local bgCol = ns.GetClassPowerBgColor()
 
     -- Determine anchor: top or bottom of health bar, with cast bar avoidance
     local anchorPoint, anchorRelPoint, anchorFrame, yDir
@@ -3742,11 +3887,22 @@ local function UpdateClassPowerOnPlate(plate)
     -- scale is what determines screen pixels). PP.Scale snaps to UIParent's
     -- pixel grid, which is wrong here because nameplates have their own
     -- scale stack (nameplate scale * cast/target scale).
+    local cpShape     = ns.GetClassPowerShape()
+    local cpBorderOn  = ns.GetClassPowerBorder()
+    local cpBorderCol = ns.GetClassPowerBorderColor()
+    -- isSecret (DH Vengeance partial fill) keeps a plain rectangle: its StatusBar
+    -- overlay can't follow a shape mask cleanly.
+    if isSecret then cpShape = "rectangle" end
+    -- Icon shapes (rune/holypower/shard) draw real Blizzard art.
+    local iconKind = ns.GetPipIconKind(cpShape)
+    local squareShape = ns.CP_SHAPE.SQUARE[cpShape] or (iconKind ~= nil)
     local plateES = plate:GetEffectiveScale()
     local onePx = (plateES and plateES > 0) and (PP.perfect / plateES) or PP.mult or 1
     local pipWPx   = math.floor((CP_PIP_W * cpScale) / onePx + 0.5)
-    local pipHPx   = math.floor((CP_PIP_H * cpScale) / onePx + 0.5)
-    local pipGapPx = math.floor((GetClassPowerGap() * cpScale) / onePx + 0.5)
+    -- Non-rectangle shapes render on a square footprint (1:1).
+    local pipHPx   = squareShape and pipWPx or math.floor((CP_PIP_H * cpScale) / onePx + 0.5)
+    local pipGapPx = math.floor((ns.GetClassPowerGap() * cpScale) / onePx + 0.5)
+    local borderPx = cpBorderOn and (ns.GetClassPowerBorderSize() * onePx) or 0
     local scaledW   = pipWPx   * onePx
     local scaledH   = pipHPx   * onePx
     local scaledGap = pipGapPx * onePx
@@ -3762,7 +3918,7 @@ local function UpdateClassPowerOnPlate(plate)
         cpColor = { cc.r, cc.g, cc.b }
     end
 
-    local emptyCol = GetClassPowerEmptyColor()
+    local emptyCol = ns.GetClassPowerEmptyColor()
 
     local leftAnchor = (anchorPoint == "BOTTOM") and "BOTTOMLEFT" or "TOPLEFT"
 
@@ -3782,9 +3938,16 @@ local function UpdateClassPowerOnPlate(plate)
             if bg then
                 bg:ClearAllPoints()
                 bg:SetAllPoints(pip)
-                bg:SetColorTexture(bgCol.r, bgCol.g, bgCol.b, bgCol.a)
+                -- Reset from any prior icon socket; holy power re-sets these below.
+                bg:SetTexture(ns.CP_SHAPE.WHITE)
+                bg:SetTexCoord(0, 1, 0, 1)
+                bg:SetDesaturated(false)
+                bg:SetVertexColor(bgCol.r, bgCol.g, bgCol.b, bgCol.a)
                 bg:Show()
             end
+
+            -- Shape mask + optional border (size/anchor are final by now)
+            ns.ApplyPipShape(plate, pip, cpShape, cpBorderOn, cpBorderCol, borderPx)
 
             if isSecret then
                 if not pip._secretBar then
@@ -3800,21 +3963,58 @@ local function UpdateClassPowerOnPlate(plate)
                 sb:SetValue(cur)
                 sb:SetStatusBarColor(cpColor[1], cpColor[2], cpColor[3], 1)
                 sb:Show()
-                pip:SetColorTexture(emptyCol.r, emptyCol.g, emptyCol.b, emptyCol.a)
+                pip:SetTexture(ns.CP_SHAPE.WHITE)
+                pip:SetTexCoord(0, 1, 0, 1)
+                pip:SetVertexColor(emptyCol.r, emptyCol.g, emptyCol.b, emptyCol.a)
                 pip:Show()
             else
                 if pip._secretBar then pip._secretBar:Hide() end
-                if i <= cur then
-                    pip:SetColorTexture(cpColor[1], cpColor[2], cpColor[3], 1)
+                if iconKind == "holypower" then
+                    -- Desaturated socket as the (alpha-controlled) background, lit
+                    -- rune on top when filled. Point 5 reuses point 4 mirrored.
+                    local n = (i - 1) % 5 + 1
+                    local flip = (n == 5)
+                    local idx = flip and 4 or n
+                    if bg then
+                        bg:SetAtlas("nameplates-holypower" .. idx .. "-off")
+                        bg:SetDesaturated(true)
+                        if flip then bg:SetTexCoord(1, 0, 0, 1) end
+                        bg:SetVertexColor(1, 1, 1, bgCol.a)
+                        bg:Show()
+                    end
+                    if i <= cur then
+                        pip:SetAtlas("nameplates-holypower" .. idx .. "-on")
+                        if flip then pip:SetTexCoord(1, 0, 0, 1) end
+                        pip:SetVertexColor(1, 1, 1, 1)
+                        pip:Show()
+                    else
+                        pip:Hide()
+                    end
+                elseif iconKind then
+                    -- Real resource art: the atlas defines the look, no tint.
+                    pip:SetAtlas(ns.GetPipIconAtlas(iconKind, i <= cur, i))
+                    if (i > cur) and ns.CP_ICON_DIM_EMPTY[iconKind] then
+                        pip:SetVertexColor(0.35, 0.35, 0.35, 1)  -- dim single-atlas empties
+                    else
+                        pip:SetVertexColor(1, 1, 1, 1)
+                    end
+                    pip:Show()
                 else
-                    pip:SetColorTexture(emptyCol.r, emptyCol.g, emptyCol.b, emptyCol.a)
+                    pip:SetTexture(ns.CP_SHAPE.WHITE)
+                    pip:SetTexCoord(0, 1, 0, 1)
+                    if i <= cur then
+                        pip:SetVertexColor(cpColor[1], cpColor[2], cpColor[3], 1)
+                    else
+                        pip:SetVertexColor(emptyCol.r, emptyCol.g, emptyCol.b, emptyCol.a)
+                    end
+                    pip:Show()
                 end
-                pip:Show()
             end
         else
             pip:Hide()
             if pip._bg then pip._bg:Hide() end
             if pip._secretBar then pip._secretBar:Hide() end
+            ns.HidePipDecor(pip)
         end
     end
 end
@@ -3826,6 +4026,7 @@ local function HideClassPowerOnPlate(plate)
         plate._cpPips[i]:Hide()
         if plate._cpPips[i]._bg then plate._cpPips[i]._bg:Hide() end
         if plate._cpPips[i]._secretBar then plate._cpPips[i]._secretBar:Hide() end
+        ns.HidePipDecor(plate._cpPips[i])
     end
     if plate._cpBar then plate._cpBar:Hide() end
 end
@@ -3834,11 +4035,13 @@ end
 -- the class power pips (when pips are on top and visible on this plate).
 GetClassPowerTopPush = function(plate)
     if not GetShowClassPower() or not classPowerType then return 0 end
-    if GetClassPowerPos() ~= "top" then return 0 end
+    if ns.GetClassPowerPos() ~= "top" then return 0 end
     if not plate or not plate.unit or not UnitIsUnit(plate.unit, "target") then return 0 end
-    local cpScale = GetClassPowerScale()
-    local cpYOff = GetClassPowerYOffset()
-    return CP_PIP_H * cpScale + cpYOff
+    local cpScale = ns.GetClassPowerScale()
+    local cpYOff = ns.GetClassPowerYOffset()
+    -- Square-footprint shapes are taller than the flat rectangle pip.
+    local h = ns.CP_SHAPE.SQUARE[ns.GetClassPowerShape()] and CP_PIP_W or CP_PIP_H
+    return h * cpScale + cpYOff
 end
 
 -- Find the target plate and update pips
@@ -8187,6 +8390,7 @@ do
         "showBorder", "borderSize", "borderColor", "castBorderSize", "castBorderColor", "targetGlowStyle", "showTargetArrows",
         "showClassPower", "classPowerPos", "classPowerYOffset", "classPowerXOffset", "classPowerScale",
         "classPowerClassColors", "classPowerCustomColor", "classPowerGap",
+        "classPowerShape", "classPowerBorder", "classPowerBorderColor", "classPowerBorderSize",
         "textSlotTop", "textSlotRight", "textSlotLeft", "textSlotCenter",
         "nameYOffset",
         "healthBarHeight", "healthBarWidth", "castBarHeight",

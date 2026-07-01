@@ -718,14 +718,18 @@ initFrame:SetScript("OnEvent", function(self)
                                 [251] = { Enum.PowerType.Runes, 6 },
                                 [252] = { Enum.PowerType.Runes, 6 } },
             },
+            WHITE = "Interface\\Buttons\\WHITE8X8",
+            SQUARE_SHAPE = { square = true, circle = true, diamond = true, hexagon = true, shield = true },
         }
         CP.pips = {}
         for i = 1, CP.MAX_POSSIBLE do
             local bg = pf:CreateTexture(nil, "OVERLAY", nil, 2)
-            bg:SetColorTexture(0.082, 0.082, 0.082, 1)
+            bg:SetTexture(CP.WHITE)
+            bg:SetVertexColor(0.082, 0.082, 0.082, 1)
             bg:Hide()
             local pip = pf:CreateTexture(nil, "OVERLAY", nil, 3)
-            pip:SetColorTexture(1, 1, 1, 1)
+            pip:SetTexture(CP.WHITE)
+            pip:SetVertexColor(1, 1, 1, 1)
             pip:SetSize(CP.PIP_W, CP.PIP_H)
             pip:Hide()
             pip._bg = bg
@@ -1871,6 +1875,7 @@ initFrame:SetScript("OnEvent", function(self)
                     for i = 1, CP.MAX_POSSIBLE do
                         CP.pips[i]:Hide()
                         if CP.pips[i]._bg then CP.pips[i]._bg:Hide() end
+                        ns.HidePipDecor(CP.pips[i])
                     end
                     local cpScale = DBVal("classPowerScale") or defaults.classPowerScale
                     local cpYOff  = DBVal("classPowerYOffset") or defaults.classPowerYOffset
@@ -1910,6 +1915,7 @@ initFrame:SetScript("OnEvent", function(self)
                     for i = 1, CP.MAX_POSSIBLE do
                         CP.pips[i]:Hide()
                         if CP.pips[i]._bg then CP.pips[i]._bg:Hide() end
+                        ns.HidePipDecor(CP.pips[i])
                     end
                     CP.bar:Hide()
                 else
@@ -1919,8 +1925,14 @@ initFrame:SetScript("OnEvent", function(self)
                     local cpXOff  = DBVal("classPowerXOffset") or defaults.classPowerXOffset
                     local cpPos   = DBVal("classPowerPos") or defaults.classPowerPos
                     local cpGap   = DBVal("classPowerGap") or defaults.classPowerGap
+                    local cpShape     = DBVal("classPowerShape") or defaults.classPowerShape
+                    local cpBorderOn  = DBVal("classPowerBorder") == true
+                    local cpBorderCol = (DB() and DB().classPowerBorderColor) or defaults.classPowerBorderColor
+                    local cpBorderPx  = cpBorderOn and Snap(DBVal("classPowerBorderSize") or defaults.classPowerBorderSize) or 0
+                    local cpIconKind  = ns.GetPipIconKind(cpShape)
+                    local cpSquare    = CP.SQUARE_SHAPE[cpShape] or (cpIconKind ~= nil)
                     local scaledW   = Snap(CP.PIP_W * cpScale)
-                    local scaledH   = Snap(CP.PIP_H * cpScale)
+                    local scaledH   = cpSquare and scaledW or Snap(CP.PIP_H * cpScale)
                     local scaledGap = Snap(cpGap * cpScale)
                     local totalPipW = cpMax * scaledW + (cpMax - 1) * scaledGap
 
@@ -1966,20 +1978,60 @@ initFrame:SetScript("OnEvent", function(self)
                             if bg then
                                 bg:ClearAllPoints()
                                 bg:SetAllPoints(pip)
-                                bg:SetColorTexture(cpBgCol.r, cpBgCol.g, cpBgCol.b, cpBgCol.a)
+                                bg:SetTexture(CP.WHITE)
+                                bg:SetTexCoord(0, 1, 0, 1)
+                                bg:SetDesaturated(false)
+                                bg:SetVertexColor(cpBgCol.r, cpBgCol.g, cpBgCol.b, cpBgCol.a)
                                 bg:Show()
                             end
 
-                            if i <= cpCur then
-                                pip:SetColorTexture(cpColor[1], cpColor[2], cpColor[3], 1)
+                            ns.ApplyPipShape(pf, pip, cpShape, cpBorderOn, cpBorderCol, cpBorderPx)
+
+                            if cpIconKind == "holypower" then
+                                local n = (i - 1) % 5 + 1
+                                local flip = (n == 5)
+                                local idx = flip and 4 or n
+                                if bg then
+                                    bg:SetAtlas("nameplates-holypower" .. idx .. "-off")
+                                    bg:SetDesaturated(true)
+                                    if flip then bg:SetTexCoord(1, 0, 0, 1) end
+                                    bg:SetVertexColor(1, 1, 1, cpBgCol.a)
+                                    bg:Show()
+                                end
+                                if i <= cpCur then
+                                    pip:SetAtlas("nameplates-holypower" .. idx .. "-on")
+                                    if flip then pip:SetTexCoord(1, 0, 0, 1) end
+                                    pip:SetVertexColor(1, 1, 1, 1)
+                                    UnsnapTex(pip)
+                                    pip:Show()
+                                else
+                                    pip:Hide()
+                                end
+                            elseif cpIconKind then
+                                pip:SetAtlas(ns.GetPipIconAtlas(cpIconKind, i <= cpCur, i))
+                                if (i > cpCur) and ns.CP_ICON_DIM_EMPTY[cpIconKind] then
+                                    pip:SetVertexColor(0.35, 0.35, 0.35, 1)
+                                else
+                                    pip:SetVertexColor(1, 1, 1, 1)
+                                end
+                                UnsnapTex(pip)
+                                pip:Show()
                             else
-                                pip:SetColorTexture(cpEmptyCol.r, cpEmptyCol.g, cpEmptyCol.b, cpEmptyCol.a)
+                                pip:SetTexture(CP.WHITE)
+                                pip:SetTexCoord(0, 1, 0, 1)
+                                if i <= cpCur then
+                                    pip:SetVertexColor(cpColor[1], cpColor[2], cpColor[3], 1)
+                                else
+                                    pip:SetVertexColor(cpEmptyCol.r, cpEmptyCol.g, cpEmptyCol.b, cpEmptyCol.a)
+                                end
+                                UnsnapTex(pip)
+                                pip:Show()
                             end
-                            UnsnapTex(pip)
-                            pip:Show()
                         else
                             pip:Hide()
                             if pip._bg then pip._bg:Hide() end
+                            if pip._border then pip._border:Hide() end
+                            if pip._borderBox then pip._borderBox:Hide() end
                         end
                     end
                     -- Extra height only when pips are below the cast bar
@@ -1991,6 +2043,7 @@ initFrame:SetScript("OnEvent", function(self)
                 for i = 1, CP.MAX_POSSIBLE do
                     CP.pips[i]:Hide()
                     if CP.pips[i]._bg then CP.pips[i]._bg:Hide() end
+                    ns.HidePipDecor(CP.pips[i])
                 end
                 CP.bar:Hide()
             end
@@ -6390,7 +6443,7 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().classPowerPos = v
                 ns.RefreshClassPower(); UpdatePreview()
               end, order={ "top", "bottom" } },
-            { type="slider", text="Size", min=0.5, max=3.0, step=0.1,
+            { type="slider", text="Size", min=0.5, max=4.0, step=0.1,
               disabled=classPowerDisabled,
               disabledTooltip="Show Class Resource",
               getValue=function() return DBVal("classPowerScale") or defaults.classPowerScale end,
@@ -6459,6 +6512,81 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().classPowerBgColor = { r=r, g=g, b=b, a=a }
                 ns.RefreshClassPower(); UpdatePreview()
               end });  y = y - h
+
+        -- Row 4: Shape | Border (inline color swatch + thickness cog on Border)
+        local classResourceRow4
+        classResourceRow4, h = W:DualRow(parent, y,
+            { type="dropdown", text="Shape",
+              disabled=classPowerDisabled,
+              disabledTooltip="Show Class Resource",
+              values={ rectangle="Rectangle", square="Square", circle="Circle",
+                       diamond="Diamond", hexagon="Hexagon", shield="Shield",
+                       rune="Rune", holypower="Holy Power", shard="Soul Shard",
+                       combo="Combo Points", chi="Chi", arcane="Arcane Charges",
+                       essence="Essence" },
+              order={ "rectangle", "square", "circle", "diamond", "hexagon", "shield",
+                      "rune", "holypower", "shard", "combo", "chi", "arcane", "essence" },
+              getValue=function() return DBVal("classPowerShape") or defaults.classPowerShape end,
+              setValue=function(v)
+                DB().classPowerShape = v
+                ns.RefreshClassPower(); UpdatePreview()
+              end },
+            { type="toggle", text="Border",
+              disabled=classPowerDisabled,
+              disabledTooltip="Show Class Resource",
+              getValue=function() return DBVal("classPowerBorder") == true end,
+              setValue=function(v)
+                DB().classPowerBorder = v
+                ns.RefreshClassPower(); UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
+
+        -- Inline border color swatch + thickness cog on the Border toggle
+        do
+            local rgn = classResourceRow4._rightRegion
+            local function borderOff()
+                return classPowerDisabled() or DBVal("classPowerBorder") ~= true
+            end
+            local colorGet = function()
+                local c = (DB() and DB().classPowerBorderColor) or defaults.classPowerBorderColor
+                return c.r, c.g, c.b
+            end
+            local colorSet = function(r, g, b)
+                DB().classPowerBorderColor = { r = r, g = g, b = b, a = 1 }
+                ns.RefreshClassPower(); UpdatePreview()
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, colorGet, colorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rgn._control, "LEFT", -12, 0)
+            rgn._lastInline = swatch
+            EllesmereUI.RegisterWidgetRefresh(function()
+                updateSwatch()
+                swatch:SetAlpha(borderOff() and 0.3 or 1)
+            end)
+
+            local _, showCog = EllesmereUI.BuildCogPopup({
+                title = "Border Settings",
+                rows = {
+                    { type="slider", label="Thickness", min=1, max=4, step=1,
+                      get=function() return DBVal("classPowerBorderSize") or defaults.classPowerBorderSize end,
+                      set=function(v) DB().classPowerBorderSize = v; ns.RefreshClassPower(); UpdatePreview() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -9, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            cogBtn:SetScript("OnEnter", function(self) if not borderOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) if not borderOff() then showCog(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                cogBtn:SetAlpha(borderOff() and 0.15 or 0.4)
+            end)
+        end
 
         -- Invisible frame spanning the entire CLASS RESOURCE section for glow targeting
         local classResourceSection = CreateFrame("Frame", nil, parent)
