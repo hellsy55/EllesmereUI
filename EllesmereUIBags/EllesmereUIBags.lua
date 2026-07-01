@@ -2293,7 +2293,12 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         btn:SetItemButtonTexture(data.info.iconFileID)
         btn:SetItemButtonCount(data._mergedCount or data.info.stackCount)
         btn._isMerged = data._mergedCount and true or nil
-        SetItemButtonDesaturated(btn, data.info.isLocked)
+        
+        -- Desature: 1) locked items 2) junk items if option is active
+        local quality = data.info.quality or 1
+        local isJunk = BP().bagDesaturateJunkItems and quality == 0
+        SetItemButtonDesaturated(btn, data.info.isLocked or isJunk)
+        
         local filtered = data.info.isFiltered
         btn:SetAlpha(filtered and 0.2 or 1)
         if btn._textOverlay then btn._textOverlay:SetAlpha(filtered and 0.2 or 1) end
@@ -2350,7 +2355,6 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
 
         -- Profession quality overlay: let Blizzard decide via SetItemButtonQuality
         -- (handles all item types, not just ones we think are "profession")
-        local quality = data.info.quality or 1
         if data.itemLink then
             btn:SetItemButtonQuality(quality, data.itemLink, false, false)
         end
