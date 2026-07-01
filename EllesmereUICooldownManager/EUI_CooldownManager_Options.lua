@@ -11661,6 +11661,23 @@ initFrame:SetScript("OnEvent", function(self)
             if notTwo then cogBtn:SetAlpha(0.15); block:Show() else cogBtn:SetAlpha(0.4); block:Hide() end
         end
 
+        -- Anchor First Row: pin the first row/column in place so extra rows grow
+        -- away from it instead of the bar re-centering on its growth axis.
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Anchor First Row",
+              tooltip="Keep the first row fixed when the bar spills onto extra rows, instead of re-centering.",
+              disabled=function() return (BD().numRows or 1) < 2 end,
+              disabledTooltip="This option requires more than 1 row",
+              getValue=function() return BD().anchorFirstRow == true end,
+              setValue=function(v)
+                  BD().anchorFirstRow = v or nil
+                  -- Recapture the corner from the bar's current spot BEFORE
+                  -- rebuilding, so the new anchor pins where the bar sits now.
+                  if ns.RecaptureBarAnchor then ns.RecaptureBarAnchor(BD().key) end
+                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+              end },
+            { type="label", text="" }); y = y - h
+
         -- Hide Buffs When Inactive (global setting, applies to all buff bars)
         if ns.IsBarBuffFamily(barData) then
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
