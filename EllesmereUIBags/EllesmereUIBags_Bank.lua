@@ -1117,6 +1117,16 @@ local function GetOrCreateBankSlot(idx)
     btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     btn.ItemLevelText:SetText("")
 
+    -- Bind Type text (bottom-left)
+    if not btn.BindTypeText then
+        btn.BindTypeText = textOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
+        btn.BindTypeText:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 1, 2)
+        btn.BindTypeText:SetTextColor(1, 1, 1, 1)
+    end
+    local bindTypeFontSize = BP().bagBindTypeFontSize or 11
+    btn.BindTypeText:SetFont(BANK_FONT, bindTypeFontSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
+    btn.BindTypeText:SetText("")
+
     -- Empty bg
     btn._emptyBg = btn:CreateTexture(nil, "BACKGROUND", nil, 1)
     btn._emptyBg:SetAllPoints()
@@ -1172,9 +1182,11 @@ end
 local function RefreshBankTextSizes()
     local countSize = BP().bagCountFontSize or 11
     local ilvlSize = BP().itemlevelFontSize or 12
+    local bindTypeSize = BP().bagBindTypeFontSize or 11
     for _, btn in pairs(_bankSlots) do
         if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, BANK_FONT, countSize, "bags") end
         if btn.ItemLevelText then btn.ItemLevelText:SetFont(BANK_FONT, ilvlSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
+        if btn.BindTypeText then btn.BindTypeText:SetFont(BANK_FONT, bindTypeSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
     end
 end
 EUI_Bank.RefreshTextSizes = RefreshBankTextSizes
@@ -1452,6 +1464,7 @@ function EUI_Bank:RefreshBank()
             SetInsetBorderColor(btn, 0, 0, 0, 0.3)
             if btn.Cooldown then btn.Cooldown:Clear() end
             if btn.ItemLevelText then btn.ItemLevelText:SetText("") end
+            if btn.BindTypeText then btn.BindTypeText:SetText("") end
             if btn.IconBorder then btn.IconBorder:Hide() end
             if btn.NormalTexture then btn.NormalTexture:SetAlpha(0) end
         else
@@ -1518,6 +1531,43 @@ function EUI_Bank:RefreshBank()
             local c = ITEM_QUALITY_COLORS[quality]
             if c then SetInsetBorderColor(btn, c.r, c.g, c.b, 1)
             else SetInsetBorderColor(btn, 0.25, 0.25, 0.25, 1) end
+
+            -- Bind Type : BoE / WuE bottom-left (gear only)
+            if btn.BindTypeText then
+                if itemLink and IsGearItem(itemLink) then
+                    local showBindType = BP().bagDisplayBindType ~= false
+                    if showBindType then
+                        local r, g, b = 1, 1, 1
+                        local bindType = select(14, C_Item.GetItemInfo(itemLink))
+                        local loc = ItemLocation:CreateFromBagAndSlot(bagID, slot)
+                        local isWuE = false
+                        if loc and C_Item.DoesItemExist(loc) then
+                            isWuE = C_Item.IsBoundToAccountUntilEquip(loc)
+                        end
+
+                        if isWuE then
+                            local c = ITEM_QUALITY_COLORS[7] -- Heirloom color (no quality enum for WuE)
+                            if c then r, g, b = c.r, c.g, c.b end
+
+                            btn.BindTypeText:SetText(EllesmereUI.L("WuE"))
+                            btn.BindTypeText:SetTextColor(r, g, b)
+                        elseif bindType == Enum.ItemBind.OnEquip then
+                            local c = ITEM_QUALITY_COLORS[quality]
+                            if c then r, g, b = c.r, c.g, c.b end
+
+                            btn.BindTypeText:SetText(EllesmereUI.L("BoE"))
+                            btn.BindTypeText:SetTextColor(r, g, b)
+                        else
+                            btn.BindTypeText:SetText("")
+                        end
+                    else
+                        btn.BindTypeText:SetText("")
+                    end
+                else
+                    btn.BindTypeText:SetText("")
+                end
+            end
+
             -- Item level (gear only)
             if btn.ItemLevelText then
                 if itemLink and IsGearItem(itemLink) then
