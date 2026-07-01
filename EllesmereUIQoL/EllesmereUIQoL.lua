@@ -2452,9 +2452,29 @@ do
         end
     end
 
+    -- Minimum gap between death sounds. On a group wipe many members die within
+    -- the same poll (and across consecutive polls), which would otherwise fire
+    -- the sound once per corpse and turn into a spammy overlapping mess. The
+    -- cooldown collapses a burst of deaths into a single sound. It is only
+    -- applied in larger groups (raids, > 5 players); in a party of 5 or fewer
+    -- deaths are sparse enough that no throttling is needed.
+    local SOUND_COOLDOWN = 3.0
+    local COOLDOWN_MIN_GROUP = 5
+    local lastSoundTime = 0
+
+    local function TryPlayDeathSound()
+        if GetNumGroupMembers() > COOLDOWN_MIN_GROUP then
+            local now = GetTime()
+            if now - lastSoundTime < SOUND_COOLDOWN then return end
+            lastSoundTime = now
+        end
+        PlayDeathSound()
+    end
+
     local function Poll()
         if not (EllesmereUIDB and EllesmereUIDB.announceGroupDeaths) then return end
         local seen = {}
+        local newlyDeadName, newlyDeadClass, newlyDeadCount
         ForEachGroupUnit(function(u)
             local guid = UnitGUID(u)
             if not guid then return end
@@ -2466,13 +2486,21 @@ do
             -- never announce someone who was already dead when we started.
             if deadState[guid] == false and dead then
                 local _, classToken = UnitClass(u)
-                ShowAlert(UnitName(u), classToken)
-                PlayDeathSound()
+                newlyDeadName = UnitName(u)
+                newlyDeadClass = classToken
+                newlyDeadCount = (newlyDeadCount or 0) + 1
             end
             deadState[guid] = dead
         end)
         for guid in pairs(deadState) do
             if not seen[guid] then deadState[guid] = nil end
+        end
+        -- Show a single alert per poll (the overlay is one frame, so multiple
+        -- ShowAlert calls would just clobber each other anyway) and play at most
+        -- one sound, throttled by the cooldown, no matter how many died.
+        if newlyDeadCount then
+            ShowAlert(newlyDeadName, newlyDeadClass)
+            TryPlayDeathSound()
         end
     end
 
