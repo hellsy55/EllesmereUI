@@ -629,9 +629,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Grey Out Junk Items
+            -- Desaturate Junk Items
             _, h = W:DualRow(parent, y,
-                { type="toggle", text="Grey Out Junk Items",
+                { type="toggle", text="Desaturate Junk Items",
                   tooltip="Display junk items in a greyed-out style.",
                   getValue=function() return db.profile.bagDesaturateJunkItems == true end,
                   setValue=function(v)
