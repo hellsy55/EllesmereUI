@@ -628,6 +628,18 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
+            -- Grey Out Junk Items
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Grey Out Junk Items",
+                  tooltip="Display junk items in a greyed-out style.",
+                  getValue=function() return db.profile.bagGreyOutJunk == true end,
+                  setValue=function(v)
+                      db.profile.bagGreyOutJunk = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                { type="label", text="" }
+            ); y = y - h
+
             _, h = W:Spacer(parent, y, 20); y = y - h
             return math.abs(y)
             end) -- end pcall
