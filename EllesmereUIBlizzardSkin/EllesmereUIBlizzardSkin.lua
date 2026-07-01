@@ -1606,3 +1606,36 @@ do
         hooksecurefunc("GameTooltip_SetDefaultAnchor", HideTooltipByMode)
     end
 end
+
+-------------------------------------------------------------------------------
+--  Hide Unit Health Strip. GameTooltipStatusBar is Blizzard's health bar at the
+--  bottom of unit tooltips. We suppress it with a single SetAlpha(0) -- fully
+--  taint-safe: only the one top-level bar is touched, it is never Shown/Hidden
+--  or given custom keys, and observation is via hooksecurefunc (never SetScript).
+--  The hook fires only when Blizzard shows the bar (unit tooltips), covering
+--  every anchor path (default, cursor, unit-frame), and early-outs when the
+--  feature is off -- so it costs one table read when disabled and one SetAlpha
+--  when enabled. Default ENABLED (nil / true = hidden). Independent of the
+--  reskin: works on default Blizzard tooltips too.
+-------------------------------------------------------------------------------
+do
+    local function _healthStripHidden()
+        -- Default enabled: hidden unless the user explicitly turned it off.
+        return not (EllesmereUIDB and EllesmereUIDB.tooltipHideHealthStrip == false)
+    end
+
+    -- Live apply for the options toggle (immediate hide/restore) and login seed.
+    EllesmereUI._applyTooltipHealthStrip = function()
+        if not GameTooltipStatusBar then return end
+        GameTooltipStatusBar:SetAlpha(_healthStripHidden() and 0 or 1)
+    end
+
+    if GameTooltipStatusBar then
+        -- Re-assert alpha 0 each time Blizzard shows the bar so it can never
+        -- flash back into view. SetAlpha does not call Show, so no recursion.
+        hooksecurefunc(GameTooltipStatusBar, "Show", function(bar)
+            if _healthStripHidden() then bar:SetAlpha(0) end
+        end)
+        EllesmereUI._applyTooltipHealthStrip()
+    end
+end

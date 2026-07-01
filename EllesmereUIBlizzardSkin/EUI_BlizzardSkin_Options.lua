@@ -359,7 +359,18 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipBorderSize = v
               end },
-            { type="label", text="" }
+            -- Independent of the reskin (a plain SetAlpha on Blizzard's status
+            -- bar), so it is NOT gated by "Reskin Tooltip" -- like Show Spell ID.
+            { type="toggle", text="Hide Unit Health Strip",
+              tooltip="Hides the health bar Blizzard shows at the bottom of unit tooltips.",
+              getValue=function()
+                  return not (EllesmereUIDB and EllesmereUIDB.tooltipHideHealthStrip == false)
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipHideHealthStrip = v
+                  if EllesmereUI._applyTooltipHealthStrip then EllesmereUI._applyTooltipHealthStrip() end
+              end }
         );  y = y - h
         -- Inline colour + opacity swatch on the Border slider (left region).
         do
@@ -1321,6 +1332,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.tooltipCursorOffsetY = nil
                 EllesmereUIDB.uberTooltips = nil
                 EllesmereUIDB.uberTooltipsManual = nil
+                EllesmereUIDB.tooltipHideHealthStrip = nil
                 EllesmereUIDB.reskinQueuePopup = nil
                 EllesmereUIDB.reskinGameMenu = nil
                 EllesmereUIDB.reskinGreatVault = nil
@@ -1335,6 +1347,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.friendsFramePos = nil
             end
             if EllesmereUI._applyTooltipCursorAnchor then EllesmereUI._applyTooltipCursorAnchor() end
+            if EllesmereUI._applyTooltipHealthStrip then EllesmereUI._applyTooltipHealthStrip() end
         end,
     })
 

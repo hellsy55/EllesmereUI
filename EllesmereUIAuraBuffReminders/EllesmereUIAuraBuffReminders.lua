@@ -2356,7 +2356,13 @@ local specialsActive = inInstance or co.showSpecialsNonInstanced
                     e.mode = "macro"
                     e.macro = "/use item:" .. bestItemID .. "\n/use " .. si.slot
                     e.texture = GetItemIcon(bestItemID) or 134400
-                    e.label = EllesmereUI.L(ShortLabel(si.slot == 16 and "Main Hand" or "Off Hand"))
+                    -- Localize the full slot name first, then shorten. ShortLabel
+                    -- truncates on whitespace, so English becomes "Main"/"Off" while
+                    -- a space-less localized name (e.g. zhTW) stays intact. Wrapping
+                    -- L() around the already-truncated word instead would look up
+                    -- "Main"/"Off", which have no reminder key and collide with the
+                    -- generic "Off" (disabled) translation.
+                    e.label = ShortLabel(EllesmereUI.L(si.slot == 16 and "Main Hand" or "Off Hand"))
                     e.tooltipItem = bestItemID
                     e.desaturated = not r.hasBags
                     e.cat = "consumable"; e.scale = co.scale or 1.0

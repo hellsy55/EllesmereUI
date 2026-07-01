@@ -3192,6 +3192,63 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
+            -- Row: Alpha when on CD | CD Swipe Opacity (+ inline colour swatch)
+            local cdEffectsRow
+            cdEffectsRow, h = W:DualRow(parent, y,
+                { type="slider", text="Alpha when on CD", min=0, max=100, step=5,
+                  tooltip="Dims action button icons to this opacity while on cooldown (100 = off), using the same detection as Desaturate on Cooldown.",
+                  getValue=function() return EAB.db.profile.alphaWhenOnCD or 100 end,
+                  setValue=function(v)
+                      EAB.db.profile.alphaWhenOnCD = v
+                      if EAB.ApplyCDAlphaAll then EAB:ApplyCDAlphaAll() end
+                  end },
+                { type="slider", text="CD Swipe Opacity", min=0, max=100, step=5,
+                  tooltip="Opacity of the cooldown swipe (the dark radial sweep); use the swatch to set its colour.",
+                  getValue=function() return EAB.db.profile.cdSwipeAlpha or 80 end,
+                  setValue=function(v)
+                      EAB.db.profile.cdSwipeAlpha = v
+                      if EAB.ApplyCooldownSwipeColor then EAB:ApplyCooldownSwipeColor() end
+                  end });  y = y - h
+            -- Inline colour swatch for CD Swipe Opacity (right region). Alpha lives on
+            -- the slider, so the swatch is colour-only (hasAlpha = false).
+            do
+                local rgn = cdEffectsRow._rightRegion
+                local ctrl = rgn._control
+                local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, cdEffectsRow:GetFrameLevel() + 5,
+                    function()
+                        local c = EAB.db.profile.cdSwipeColor or {}
+                        return c.r or 0, c.g or 0, c.b or 0
+                    end,
+                    function(r, g, b)
+                        EAB.db.profile.cdSwipeColor = { r = r, g = g, b = b }
+                        if EAB.ApplyCooldownSwipeColor then EAB:ApplyCooldownSwipeColor() end
+                    end,
+                    false, 20)
+                PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                -- Auto-disable the swatch at 0 opacity (an invisible swipe has no
+                -- visible colour), matching the canonical inline-swatch pattern.
+                local function SwipeDisabled()
+                    return (EAB.db.profile.cdSwipeAlpha or 80) == 0
+                end
+                local block = CreateFrame("Frame", nil, swatch)
+                block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10); block:EnableMouse(true)
+                block:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("Set CD Swipe Opacity above 0"))
+                end)
+                block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    updateSwatch()
+                    local off = SwipeDisabled()
+                    swatch:SetAlpha(off and 0.3 or 1)
+                    block:SetShown(off)
+                end)
+                local off0 = SwipeDisabled()
+                swatch:SetAlpha(off0 and 0.3 or 1)
+                block:SetShown(off0)
+            end
+
             -------------------------------------------------------------------
             --  PAGING (MainBar + Bars 2-8 only, not Stance/Pet/Micro/Bag)
             -------------------------------------------------------------------

@@ -624,7 +624,7 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     if PP and PP.CreateBorder then
         local cr, cg, cb = ns.GetBorderColor()
         local sz = (FP() and FP().borderSize) or ns.defaults.borderSize
-        PP.CreateBorder(plate.health, cr, cg, cb, 1, sz, "OVERLAY", 7)
+        PP.CreateBorder(plate.health, cr, cg, cb, 1, sz, "OVERLAY", 7, true)  -- scaleGuard: NP frame
         if not ns.IsBorderEnabled() then PP.HideBorder(plate.health) end
     end
 

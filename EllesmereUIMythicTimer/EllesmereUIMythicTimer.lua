@@ -132,6 +132,7 @@ local DB_DEFAULTS = {
     profile = {
         enabled           = true,
         showTitle         = true,
+        showDungeonName   = true,
         showAffixes       = true,
         showPlusTwoTimer  = true,
         showPlusThreeTimer = true,
@@ -928,6 +929,25 @@ local function SetFS(fs, size, flags)
     fs:SetFont(p, size, flags)
     if not fs:GetFont() then fs:SetFont(FALLBACK_FONT, size, flags) end
 end
+-- Per-user font override for the TIMER clock text only (profile.timerFont, a
+-- dropdown key: "__global"/nil = follow the module font). SharedMedia keys
+-- resolve via EllesmereUI.ResolveFontName, matching the Quest Tracker font
+-- picker; anything else falls back to the module font (SFont).
+local function TimerFont()
+    local key = db and db.profile and db.profile.timerFont
+    if key and key ~= "__global" and EllesmereUI and EllesmereUI.ResolveFontName then
+        local path = EllesmereUI.ResolveFontName(key)
+        if path and path ~= "" then return path end
+    end
+    return SFont()
+end
+local function SetTimerFS(fs, size, flags)
+    if not fs then return end
+    local p = TimerFont()
+    flags = flags or SOutline()
+    fs:SetFont(p, size, flags)
+    if not fs:GetFont() then fs:SetFont(FALLBACK_FONT, size, flags) end
+end
 local function ApplyShadow(fs)
     if not fs then return end
     local useShadow = EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow("mythicTimer")
@@ -1265,9 +1285,16 @@ local function RenderStandalone()
             tR, tG, tB = 1, 1, 1
         end
         if p.showTitle ~= false then
-            local titleText = format("|cff%02x%02x%02x+%d  %s|r",
-                floor(tR * 255), floor(tG * 255), floor(tB * 255),
-                run.level, run.mapName or "Mythic+")
+            local titleText
+            if p.showDungeonName == false then
+                -- Show only the key level number, not the dungeon name.
+                titleText = format("|cff%02x%02x%02x+%d|r",
+                    floor(tR * 255), floor(tG * 255), floor(tB * 255), run.level)
+            else
+                titleText = format("|cff%02x%02x%02x+%d  %s|r",
+                    floor(tR * 255), floor(tG * 255), floor(tB * 255),
+                    run.level, run.mapName or "Mythic+")
+            end
             f._titleFS:SetJustifyH(titleAlign)
             f._titleFS:SetTextColor(1, 1, 1)
             local titleMax = p.titleSize or 13
@@ -1783,7 +1810,7 @@ local function RenderStandalone()
     -- Timer text (with optional inline detail rendered as one combined block)
     if not p.timerInBar then
         local timerAlign = _ra(p.timerAlign or "CENTER")
-        SetFS(f._timerFS, p.timerTextSize or 20)
+        SetTimerFS(f._timerFS, p.timerTextSize or 20)
         ApplyShadow(f._timerFS)
         f._timerFS:SetTextColor(tR, tG, tB)
         SetTextDiff(f._timerFS, timerText)
@@ -1825,7 +1852,7 @@ local function RenderStandalone()
         if timerDetailText then
             local _mode = (not run.completed) and (p.timerDisplayMode or "REMAINING_TOTAL") or nil
             local detailSize = (_mode == "REMAINING_TOTAL") and 20 or 12
-            SetFS(f._timerDetailFS, detailSize)
+            SetTimerFS(f._timerDetailFS, detailSize)
             ApplyShadow(f._timerDetailFS)
             f._timerDetailFS:SetTextColor(1, 1, 1)
             f._timerDetailFS:SetText(timerDetailText)
@@ -2039,7 +2066,7 @@ local function RenderStandalone()
                 f._barTimerFS = f:CreateFontString(nil, "OVERLAY")
                 f._barTimerFS:SetWordWrap(false)
             end
-            SetFS(f._barTimerFS, 12)
+            SetTimerFS(f._barTimerFS, 12)
             ApplyShadow(f._barTimerFS)
             local btc = p.timerBarTextColor
             if btc then

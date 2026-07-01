@@ -353,6 +353,14 @@ local defaults = {
         -- timer). Off = Blizzard default (recharge number only at 0 charges).
         showChargeRechargeNumbers = true,
         desaturateOnCooldown = false,
+        -- Alpha when on CD: 100 = disabled (zero cost). Below 100 dims the icon to
+        -- that opacity while on a real cooldown, using the same detection as
+        -- Desaturate on Cooldown.
+        alphaWhenOnCD = 100,
+        -- Cooldown swipe (radial sweep) colour + opacity. Defaults mirror the
+        -- Blizzard look (black, 80%) so applying them is a no-op until customized.
+        cdSwipeColor = { r = 0, g = 0, b = 0 },
+        cdSwipeAlpha = 80,
         procGlowType = 1,
         procGlowColor = { r = 1, g = 0.776, b = 0.376 },
         procGlowUseClassColor = false,
@@ -2494,7 +2502,13 @@ do
                                     --    or trinket cooldown is longer and desaturates).
                                     --  * plain spells keep the original isOnGCD gate so they
                                     --    desaturate for the whole cooldown, not just past the GCD.
-                                    if EAB.db.profile.desaturateOnCooldown then
+                                    -- Desaturate and/or lower alpha on a real cooldown.
+                                    -- Both read the same secret-safe val; the alpha gate
+                                    -- is value ~= 100 so it stays fully 0-cost at 100.
+                                    local desatOn = EAB.db.profile.desaturateOnCooldown
+                                    local cdAlpha = EAB.db.profile.alphaWhenOnCD or 100
+                                    local alphaOn = cdAlpha ~= 100
+                                    if desatOn or alphaOn then
                                         local icon = btn.icon
                                         if icon then
                                             local val = 0
@@ -2509,7 +2523,27 @@ do
                                                     if desatCurveAny then val = durObj:EvaluateRemainingDuration(desatCurveAny, 0) end
                                                 end
                                             end
-                                            icon:SetDesaturation(val or 0)
+                                            if desatOn then icon:SetDesaturation(val or 0) end
+                                            if alphaOn then
+                                                -- val is a SECRET number, so never compare it (that
+                                                -- taints, unlike SetDesaturation which accepts secrets).
+                                                -- Feed the duration's IsZero() boolean into the
+                                                -- secret-safe SetAlphaFromBoolean instead. Same real-CD
+                                                -- gating as desat: GCD excluded for plain spells.
+                                                if icon.SetAlphaFromBoolean and cdInfo and cdInfo.isActive
+                                                   and durObj and durObj.IsZero then
+                                                    local realCd = (chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1)
+                                                        or (GetActionInfo(action) == "item")
+                                                        or (not cdInfo.isOnGCD)
+                                                    if realCd then
+                                                        icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
+                                                    else
+                                                        icon:SetAlpha(1)
+                                                    end
+                                                else
+                                                    icon:SetAlpha(1)
+                                                end
+                                            end
                                         end
                                     end
                                     -- Update count text (charges, item stacks, etc.)
@@ -4564,6 +4598,74 @@ function EAB:ApplyCooldownFonts()
     EAB_VTABLE.CooldownFonts.HookAll()
     for _, info in ipairs(BAR_CONFIG) do
         self:ApplyCooldownFontsForBar(info.key)
+    end
+end
+
+-- Re-apply "Alpha when on CD" across every action button. Used on setting change
+-- (immediate feedback + a clean restore to full alpha when set back to 100) and on
+-- the main apply. Reuses the exact same secret-safe curve detection as the live
+-- ACTIONBAR_UPDATE_COOLDOWN handler.
+function EAB:ApplyCDAlphaAll()
+    local pdb = self.db and self.db.profile
+    local cdAlpha = (pdb and pdb.alphaWhenOnCD) or 100
+    local on = cdAlpha ~= 100
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local btns = barButtons[info.key]
+            if btns then
+                for _, btn in ipairs(btns) do
+                    local icon = btn and btn.icon
+                    if icon then
+                        local applied = false
+                        if on then
+                            local action = btn:GetAttribute("action")
+                            if action and HasAction(action) and icon.SetAlphaFromBoolean then
+                                local cdInfo = C_ActionBar.GetActionCooldown(action)
+                                if cdInfo and cdInfo.isActive then
+                                    local durObj = C_ActionBar.GetActionCooldownDuration(action)
+                                    if durObj and durObj.IsZero then
+                                        -- Secret-safe: never compare the remaining duration; feed
+                                        -- IsZero() into SetAlphaFromBoolean. Same real-CD gating as
+                                        -- the live handler (GCD excluded for plain spells).
+                                        local chargeInfo = C_ActionBar.GetActionCharges(action)
+                                        local realCd = (chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1)
+                                            or (GetActionInfo(action) == "item")
+                                            or (not cdInfo.isOnGCD)
+                                        if realCd then
+                                            icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
+                                            applied = true
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        if not applied then icon:SetAlpha(1) end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Apply the custom cooldown-swipe colour + opacity to every button's cooldown.
+-- Cheap and idempotent (SetSwipeColor persists on the frame), so it runs on the
+-- main apply and on setting change. Defaults mirror the Blizzard look, so a
+-- default profile is visually unchanged.
+function EAB:ApplyCooldownSwipeColor()
+    local pdb = self.db and self.db.profile
+    if not pdb then return end
+    local c = pdb.cdSwipeColor or { r = 0, g = 0, b = 0 }
+    local a = (pdb.cdSwipeAlpha or 80) / 100
+    for _, info in ipairs(BAR_CONFIG) do
+        local btns = barButtons[info.key]
+        if btns then
+            for _, btn in ipairs(btns) do
+                local cd = btn and btn.cooldown
+                if cd and cd.SetSwipeColor then
+                    pcall(cd.SetSwipeColor, cd, c.r or 0, c.g or 0, c.b or 0, a)
+                end
+            end
+        end
     end
 end
 
@@ -7624,6 +7726,12 @@ local function ApplyAll()
     EAB:HookPushedFlash()
     EAB:ApplyHighlightTextures()
     EAB:ApplyCooldownFonts()
+    EAB:ApplyCooldownSwipeColor()
+    -- Gated so it's zero-touch at the default (100); the live handler + setValue
+    -- own the rest.
+    if EAB.db and EAB.db.profile and EAB.db.profile.alphaWhenOnCD ~= 100 then
+        EAB:ApplyCDAlphaAll()
+    end
     EAB:ApplyCooldownEdge()
     EAB:ApplyMiscTextures()
     EAB:ApplyCheckedTextures()

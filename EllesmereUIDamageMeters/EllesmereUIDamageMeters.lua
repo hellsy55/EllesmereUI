@@ -116,7 +116,7 @@ end
 local BAR_POOL_SIZE     = 40
 local RANK_STRINGS      = {}
 for i = 1, 40 do RANK_STRINGS[i] = i .. "." end
-local MIN_W, MIN_H      = 150, 80
+local MIN_W, MIN_H      = 150, 50
 local TICK_COMBAT       = 1
 local PEAK_BUDGET       = 1.5
 local BAR_TEX           = "Interface\\Buttons\\WHITE8X8"
