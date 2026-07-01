@@ -1534,7 +1534,7 @@ function EUI_Bank:RefreshBank()
 
             -- Bind Type : BoE / WuE bottom-left (gear only)
             if btn.BindTypeText then
-                if itemLink and IsGearItem(itemLink) then
+                if itemLink and IsGearItem(itemLink) and not info.isBound then
                     local showBindType = BP().bagDisplayBindType ~= false
                     if showBindType then
                         local r, g, b = 1, 1, 1
