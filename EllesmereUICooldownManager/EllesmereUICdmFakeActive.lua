@@ -501,6 +501,14 @@ ApplyCdState = function(frame, fc, cas, eff, onCD)
         fc._cdStateHidden = hide or false
         return
     end
+    if eff == "lowerAlphaOnCD" then
+        -- Identical to hiddenOnCD but with a customizable opacity instead of 0.
+        -- Reuse the _cdStateHidden flag as "cd-state owns this alpha" so a relayout
+        -- keeps the lowered value instead of flashing back to full opacity.
+        frame:SetAlpha(onCD and ((cas and cas.cdStateLowerAlpha) or 0.5) or FrameBaseAlpha(fc))
+        fc._cdStateHidden = onCD or false
+        return
+    end
     -- Glow modes: glow while the ability is READY (off cooldown). Not a hide.
     fc._cdStateHidden = false
     local glow = fd and fd.glowOverlay

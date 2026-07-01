@@ -783,6 +783,31 @@ function ns.RescanBuffSoundFlag()
     end
 end
 
+-- Resolve the configured buff gain/loss sound key for a spell id in the CURRENT
+-- spec by SEARCHING the saved bar spellSettings -- independent of any per-frame
+-- decoration state (_ecmeFC). The first buff gain after login fires its aura alert
+-- BEFORE DecorateFrame populates that state, so the sound path must resolve purely
+-- from the id (GetCanonicalSpellIDForFrame reads cooldownInfo, so it works while the
+-- aura is active). O(bars): spellSettings is keyed by id, so each bar is one index.
+-- Mirrors Ayije, which matches alert-time id candidates against its buff registry
+-- rather than any frame-decoration state.
+function ns.FindBuffSoundKey(sid, field)
+    if not sid then return nil end
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not specKey or specKey == "0" then return nil end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    local prof = sp and sp[specKey]
+    local barSpells = prof and prof.barSpells
+    if not barSpells then return nil end
+    for _, bs in pairs(barSpells) do
+        local ssAll = bs and bs.spellSettings
+        local ss = ssAll and ssAll[sid]
+        local key = ss and ss[field]
+        if key and key ~= "none" then return key end
+    end
+    return nil
+end
+
 -- Audio Effect on CD Ready gate: set ns._cdmAnyCdReadySound once if any saved
 -- cd/utility icon (any spec) has a CD-ready sound chosen. The per-frame
 -- SetDesaturated edge hook then no-ops entirely for anyone who never uses it.
@@ -873,8 +898,11 @@ end
 -- so the cooldown keeps its default swipe direction at 0 cost. Monotonic,
 -- scanned-once contract identical to the flags above (the options toggle flips
 -- the flag live on enable).
+-- Also gates hideCDSwipe (Hide CD Swipe): both are monotonic per-spell swipe
+-- flags, scanned together in one pass so neither costs anything until used.
 function ns.RescanReverseSwipeFlag()
-    if ns._cdmAnyReverseSwipe or ns._reverseSwipeFlagScanned then return end
+    if ns._reverseSwipeFlagScanned then return end
+    if ns._cdmAnyReverseSwipe and ns._cdmAnyHideCDSwipe then return end
     local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
     if not sp then return end
     ns._reverseSwipeFlagScanned = true
@@ -886,9 +914,9 @@ function ns.RescanReverseSwipeFlag()
                 local ssAll = bs and bs.spellSettings
                 if ssAll then
                     for _, ss in pairs(ssAll) do
-                        if ss and ss.reverseSwipe then
-                            ns._cdmAnyReverseSwipe = true
-                            return
+                        if ss then
+                            if ss.reverseSwipe then ns._cdmAnyReverseSwipe = true end
+                            if ss.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
                         end
                     end
                 end
@@ -899,9 +927,9 @@ function ns.RescanReverseSwipeFlag()
     local cas = ns.GetCustomActiveStates and ns.GetCustomActiveStates()
     if cas then
         for _, e in pairs(cas) do
-            if e and e.reverseSwipe then
-                ns._cdmAnyReverseSwipe = true
-                return
+            if e then
+                if e.reverseSwipe then ns._cdmAnyReverseSwipe = true end
+                if e.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
             end
         end
     end
@@ -4070,10 +4098,10 @@ local function RefreshCDMIconAppearance(barKey)
         if ns._cdmAnyChargeHideCdText and not isBuffFamilyBar and ns.WatchChargeCdTextIfEnabled then
             ns.WatchChargeCdTextIfEnabled(icon)
         end
-        -- Same login/refresh coverage for "Audio Effect on CD Ready" on CHARGE spells:
-        -- they fire at max charges, which the SetDesaturated edge never signals, so
-        -- register them on the SPELL_UPDATE_CHARGES watcher here. Gated on the feature
-        -- flag; non-charge spells self-skip inside WatchCdReadySoundIfEnabled.
+        -- Login/refresh coverage for "Audio Effect on CD Ready": register every
+        -- cd/utility icon with the sound onto the event-driven watcher
+        -- (SPELL_UPDATE_COOLDOWN + SPELL_UPDATE_CHARGES). Both charge and non-charge
+        -- spells are handled there; icons without the sound self-skip inside.
         if ns._cdmAnyCdReadySound and not isBuffFamilyBar and ns.WatchCdReadySoundIfEnabled then
             ns.WatchCdReadySoundIfEnabled(icon)
         end
@@ -4175,6 +4203,36 @@ local function RefreshCDMIconAppearance(barKey)
                     if rev then rfReverse = not rfBuff end
                 end
                 cd:SetReverse(rfReverse)
+            end
+            -- Per-spell Hide CD Swipe: removes the cooldown swipe entirely for
+            -- cd/utility spells (non-charge -- charge spells use "Hide Swipe (Charges)").
+            -- Gated by the session flag, so zero cost unless someone enables it. Applied
+            -- here for immediate feedback; the SetDrawSwipe hook keeps it off against
+            -- Blizzard's re-pushes. Re-asserts (not hide) each pass so toggling off
+            -- restores the default swipe -- matching the hook's non-charge force-true.
+            if ns._cdmAnyHideCDSwipe and cd.SetDrawSwipe then
+                local isCharge = type(icon.HasVisualDataSource_Charges) == "function"
+                    and icon:HasVisualDataSource_Charges()
+                if not isCharge then
+                    local hsFc = _ecmeFC[icon]
+                    local hsSid = hsFc and hsFc.spellID
+                    local hideSw
+                    if hsSid then
+                        if ns.ResolveSpellSettings then
+                            local hsSs = ns.ResolveSpellSettings(icon, hsSid, ns.GetBarSpellData(barKey))
+                            hideSw = hsSs and hsSs.hideCDSwipe
+                        end
+                        if not hideSw and ns.GetCustomActiveState then
+                            local casKey = (ns.ResolveCustomActiveKey and ns.ResolveCustomActiveKey(hsSid)) or hsSid
+                            local casH = ns.GetCustomActiveState(casKey)
+                            hideSw = casH and casH.hideCDSwipe
+                        end
+                    end
+                    local fd = ns._hookFrameData and ns._hookFrameData[icon]
+                    if fd then fd._isProcessingOverride = true end
+                    cd:SetDrawSwipe(not hideSw)
+                    if fd then fd._isProcessingOverride = false end
+                end
             end
             -- Per-spell "Hide CD Text (Charges)" can additionally hide the recharge
             -- numbers while a charge is in hand; the font block below still styles
@@ -4409,6 +4467,12 @@ local function RefreshCDMIconAppearance(barKey)
                     local hide = (cse == "hiddenOnCD") == onCD
                     icon:SetAlpha(hide and 0 or (barData.barOpacity or 1))
                     if fc then fc._cdStateHidden = hide or false end
+                elseif cse == "lowerAlphaOnCD" then
+                    -- Identical to hiddenOnCD but with a customizable opacity instead
+                    -- of 0. Reuse the _cdStateHidden flag as "cd-state owns this alpha"
+                    -- so the opacity appliers leave the lowered value alone.
+                    icon:SetAlpha(onCD and (csSs.cdStateLowerAlpha or 0.5) or (barData.barOpacity or 1))
+                    if fc then fc._cdStateHidden = onCD or false end
                 else
                     -- Clear stale hidden state when switching to a glow effect
                     if fc and fc._cdStateHidden then
@@ -4806,16 +4870,27 @@ do
     -- the spell-setting key ("buffActiveSoundKey" gain / "buffLostSoundKey" loss);
     -- `throttle` is the matching dedupe table. Identical resolution for both edges.
     local function PlayBuffEdgeSound(f, field, throttle)
-        local fc = _ecmeFC[f]
-        local barKey = fc and fc.barKey
-        if not barKey then return end
-        local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
-        if not sd or not sd.spellSettings then return end
+        -- Loading screen / login settle: buffs re-apply and viewer frames re-show
+        -- across a zone/login, firing phantom apply/remove alerts. Drop them.
+        if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then return end
         local sid = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(f)
         if not sid then return end
-        local ss = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd))
-            or sd.spellSettings[sid]
-        local key = ss and ss[field]
+        -- Preferred: the frame's decorated context (fast; ResolveSpellSettings also
+        -- handles variant/override spells). Falls back to an id-only lookup for the
+        -- FIRST gain after login, whose alert fires before DecorateFrame populates
+        -- _ecmeFC -- keying off that context dropped the very first cue.
+        local key
+        local fc = _ecmeFC[f]
+        local barKey = fc and fc.barKey
+        if barKey then
+            local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
+            if sd and sd.spellSettings then
+                local ss = (ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd))
+                    or sd.spellSettings[sid]
+                key = ss and ss[field]
+            end
+        end
+        if not key then key = ns.FindBuffSoundKey and ns.FindBuffSoundKey(sid, field) end
         if not key or key == "none" then return end
         local now = GetTime()
         local last = throttle[sid]
@@ -6076,18 +6151,42 @@ function ns.ReseedAssignedSpellsFromLiveIcons()
                 for _, existing in ipairs(sd.assignedSpells) do
                     seen[existing] = true
                 end
+                -- Insert each missing spell right after its left neighbour in the
+                -- live icon order (which CollectAndReanchor has already placed in
+                -- Blizzard-layout order), instead of appending at the end. This keeps
+                -- the seeded list matching what the player sees so re-talenting a
+                -- cooldown restores it to its Blizzard-CDM slot rather than the tail.
+                local insertAfterSid = nil
                 for _, icon in ipairs(icons) do
                     local fc = ns._ecmeFC and ns._ecmeFC[icon]
                     local sid = fc and fc.spellID
-                    if type(sid) == "number" and sid > 0 and not seen[sid] then
-                        -- Never materialize a hidden (ghosted) spell, or a spell a
-                        -- DIFFERENT bar already owns (variant-aware).
-                        local owner = ownerOf and ns.ResolveVariantValue
-                                      and ns.ResolveVariantValue(ownerOf, sid)
-                        local ghosted = ghostList and FindVar and FindVar(ghostList, sid)
-                        if not ghosted and not (owner and owner ~= barData.key) then
-                            sd.assignedSpells[#sd.assignedSpells + 1] = sid
-                            seen[sid] = true
+                    if type(sid) == "number" and sid ~= 0 then
+                        if seen[sid] then
+                            -- Already has a slot (Blizzard spell OR a custom trinket/
+                            -- item marker): advance the cursor so the next NEW spell
+                            -- lands after it, matching the on-screen order.
+                            insertAfterSid = sid
+                        elseif sid > 0 then
+                            -- Never materialize a hidden (ghosted) spell, or a spell a
+                            -- DIFFERENT bar already owns (variant-aware).
+                            local owner = ownerOf and ns.ResolveVariantValue
+                                          and ns.ResolveVariantValue(ownerOf, sid)
+                            local ghosted = ghostList and FindVar and FindVar(ghostList, sid)
+                            if not ghosted and not (owner and owner ~= barData.key) then
+                                local pos
+                                if insertAfterSid then
+                                    for i = 1, #sd.assignedSpells do
+                                        if sd.assignedSpells[i] == insertAfterSid then pos = i; break end
+                                    end
+                                end
+                                if pos then
+                                    table.insert(sd.assignedSpells, pos + 1, sid)
+                                else
+                                    table.insert(sd.assignedSpells, 1, sid)
+                                end
+                                seen[sid] = true
+                                insertAfterSid = sid
+                            end
                         end
                     end
                 end

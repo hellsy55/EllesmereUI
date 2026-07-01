@@ -4456,6 +4456,14 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
+            -- Walk the live icons in on-screen order (CollectAndReanchor already
+            -- placed a spillover cooldown at its Blizzard-layout position). A new
+            -- spell is inserted right after its left neighbour -- the previous live
+            -- icon that already has a slot -- so it takes its true Blizzard-CDM
+            -- position instead of being appended at the very end (which piled
+            -- talent-swap spells after the trinket/racial slots and never survived
+            -- a /reload cleanly).
+            local insertAfterSid = nil
             for _, icon in ipairs(liveIcons) do
                 -- Resolve the live icon's DISPLAYED spell the same way the picker
                 -- does (canonical = GetSpellID-first, with the active-frame cache),
@@ -4466,13 +4474,32 @@ initFrame:SetScript("OnEvent", function(self)
                 -- custom frames (no GetSpellID/cooldownInfo to resolve).
                 local _sid = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
                              or (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID)
-                if _sid and _sid > 0 then
-                    _sid = NormalizeToBase(_sid)
-                    if not seen[_sid] and not (removed and removed[_sid])
+                if _sid and _sid ~= 0 then
+                    if _sid > 0 then _sid = NormalizeToBase(_sid) end
+                    if seen[_sid] then
+                        -- Already has a slot (Blizzard spell OR a custom trinket/item
+                        -- marker): advance the cursor so the next NEW spell lands after
+                        -- it, matching the on-screen order across custom entries too.
+                        insertAfterSid = _sid
+                    elseif _sid > 0
+                       and not (removed and removed[_sid])
                        and not (ghostList and FindVar and FindVar(ghostList, _sid))
                        and not (claimedElsewhere and ns.ResolveVariantValue and ns.ResolveVariantValue(claimedElsewhere, _sid)) then
-                        sd.assignedSpells[#sd.assignedSpells + 1] = _sid
+                        local pos
+                        if insertAfterSid then
+                            for i = 1, #sd.assignedSpells do
+                                if sd.assignedSpells[i] == insertAfterSid then pos = i; break end
+                            end
+                        end
+                        if pos then
+                            table.insert(sd.assignedSpells, pos + 1, _sid)
+                        else
+                            -- No anchored predecessor yet: this new spell is the
+                            -- left-most live icon, so it belongs at the front.
+                            table.insert(sd.assignedSpells, 1, _sid)
+                        end
                         seen[_sid] = true
+                        insertAfterSid = _sid
                     end
                 end
             end
@@ -4561,9 +4588,24 @@ initFrame:SetScript("OnEvent", function(self)
                            and not (cdurs and cdurs[id])
                            and not (sdurs and sdurs[id])
                            and not (groups and groups[id]) then
-                            -- Plain Blizzard cooldown: keep only if still displayed.
-                            keep = (displayed[id] or displayed[NormalizeToBase(id)]
-                                    or displayed[ResolveToLive(id)]) and true or false
+                            -- Plain Blizzard cooldown. Keep it if still displayed OR if
+                            -- the player no longer HAS the spell (talented out): a
+                            -- talented-out cooldown must hold its rank in the ordered
+                            -- list so it returns to the SAME slot when re-talented,
+                            -- instead of being deleted here and re-appended at a
+                            -- Blizzard-layout position later (the "jumps to a random
+                            -- spot after a talent swap" bug). Only a spell the player
+                            -- still OWNS but removed from Blizzard's CDM tracking
+                            -- (known-but-not-displayed) is genuinely user-cleared -> drop.
+                            local shown = displayed[id] or displayed[NormalizeToBase(id)]
+                                          or displayed[ResolveToLive(id)]
+                            -- IsPlayerSpell is guarded (nil in some contexts): if it is
+                            -- unavailable, `have` is falsy so we KEEP (never drop) --
+                            -- the safe failure is a lingering phantom, never lost rank.
+                            local have = IsPlayerSpell and (IsPlayerSpell(id)
+                                         or IsPlayerSpell(NormalizeToBase(id))
+                                         or IsPlayerSpell(ResolveToLive(id)))
+                            keep = (shown or not have) and true or false
                         end
                         if keep then
                             sd.assignedSpells[writeIdx] = id
@@ -5355,6 +5397,105 @@ initFrame:SetScript("OnEvent", function(self)
         popup._durBox:HighlightText()
     end
 
+    -- Numeric popup for the "Lower Alpha (On CD)" cooldown-state effect: the user
+    -- enters an opacity percent (1-100) that the icon uses while on cooldown.
+    -- Mirrors ShowDurationPopup's look; onConfirm receives the integer percent.
+    local function ShowAlphaPopup(currentPct, onConfirm)
+        local popupName = "EUI_CDM_AlphaPopup"
+        local popup = _G[popupName]
+        if not popup then
+            local dimmer = CreateFrame("Frame", popupName .. "Dimmer", UIParent)
+            dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+            dimmer:SetAllPoints(UIParent)
+            dimmer:EnableMouse(true)
+            dimmer:Hide()
+            local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
+            dimTex:SetAllPoints(); dimTex:SetColorTexture(0, 0, 0, 0.25)
+            dimmer:SetScript("OnMouseDown", function(self) self:Hide() end)
+
+            popup = CreateFrame("Frame", popupName, dimmer)
+            popup:SetSize(300, 150)
+            popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+            popup:SetFrameStrata("FULLSCREEN_DIALOG")
+            popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+            popup:EnableMouse(true)
+            local popBg = popup:CreateTexture(nil, "BACKGROUND")
+            popBg:SetAllPoints(); popBg:SetColorTexture(0.06, 0.08, 0.10, 1)
+            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, EllesmereUI.PP)
+            popup._dimmer = dimmer
+
+            local title = popup:CreateFontString(nil, "OVERLAY")
+            title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
+            title:SetPoint("TOP", popup, "TOP", 0, -18)
+            title:SetTextColor(1, 1, 1, 1)
+            title:SetText(EllesmereUI.L("Lower Alpha"))
+
+            local hint = popup:CreateFontString(nil, "OVERLAY")
+            hint:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            hint:SetPoint("TOP", title, "BOTTOM", 0, -6)
+            hint:SetTextColor(0.7, 0.7, 0.7, 0.85)
+            hint:SetText(EllesmereUI.L("Icon opacity while on cooldown (1-100%)"))
+
+            local box = CreateFrame("EditBox", nil, popup)
+            box:SetSize(180, 28)
+            box:SetPoint("TOP", hint, "BOTTOM", 0, -12)
+            box:SetAutoFocus(true)
+            box:SetNumeric(true)
+            box:SetMaxLetters(3)
+            box:SetFont(FONT_PATH, 13, GetCDMOptOutline())
+            box:SetTextColor(1, 1, 1, 0.9)
+            box:SetJustifyH("CENTER")
+            local boxBg = box:CreateTexture(nil, "BACKGROUND")
+            boxBg:SetAllPoints(); boxBg:SetColorTexture(0.04, 0.06, 0.08, 1)
+            EllesmereUI.MakeBorder(box, 1, 1, 1, 0.12, EllesmereUI.PP)
+            popup._box = box
+
+            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            local okBtn = CreateFrame("Button", nil, popup)
+            okBtn:SetSize(80, 28)
+            okBtn:SetPoint("BOTTOMRIGHT", popup, "BOTTOM", -4, 16)
+            local okBg = okBtn:CreateTexture(nil, "BACKGROUND")
+            okBg:SetAllPoints(); okBg:SetColorTexture(ar, ag, ab, 0.15)
+            EllesmereUI.MakeBorder(okBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
+            local okLbl = okBtn:CreateFontString(nil, "OVERLAY")
+            okLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            okLbl:SetPoint("CENTER"); okLbl:SetText(EllesmereUI.L("Save"))
+            okLbl:SetTextColor(ar, ag, ab, 0.9)
+            okBtn:SetScript("OnEnter", function() okLbl:SetTextColor(1, 1, 1, 1) end)
+            okBtn:SetScript("OnLeave", function() okLbl:SetTextColor(ar, ag, ab, 0.9) end)
+
+            local cancelBtn = CreateFrame("Button", nil, popup)
+            cancelBtn:SetSize(80, 28)
+            cancelBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", 4, 16)
+            local cBg = cancelBtn:CreateTexture(nil, "BACKGROUND")
+            cBg:SetAllPoints(); cBg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+            EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
+            local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
+            cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            cLbl:SetPoint("CENTER"); cLbl:SetText(EllesmereUI.L("Cancel"))
+            cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
+            cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
+            cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
+            cancelBtn:SetScript("OnClick", function() dimmer:Hide() end)
+
+            local function Commit()
+                local v = tonumber(box:GetText())
+                if v and v >= 1 and v <= 100 then
+                    dimmer:Hide()
+                    if popup._onConfirm then popup._onConfirm(math.floor(v)) end
+                end
+            end
+            okBtn:SetScript("OnClick", Commit)
+            box:SetScript("OnEnterPressed", Commit)
+            box:SetScript("OnEscapePressed", function() dimmer:Hide() end)
+        end
+        popup._onConfirm = onConfirm
+        popup._box:SetText(currentPct and tostring(currentPct) or "")
+        popup._dimmer:Show()
+        popup._box:SetFocus()
+        popup._box:HighlightText()
+    end
+
     local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSelect, removeOnly)
         -- Toggle: if the picker is already open for this same icon, close it
         if _spellPickerMenu and _spellPickerMenu:IsShown() and _spellPickerMenu._anchorFrame == anchorFrame then
@@ -5401,7 +5542,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local menuW = 210
         local ITEM_H = 26
-        local MAX_H = 300  -- tall enough for the per-buff settings rows incl. the second Audio row (Gain + Loss)
+        local MAX_H = 340  -- tall enough for the CD/utility per-spell rows (Remove Spell + 9 settings + dividers + Sync All Bar Buttons); this menu has no scroll, so anything over MAX_H gets clipped
 
         local menu = CreateFrame("Frame", nil, UIParent)
         menu:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -5673,6 +5814,18 @@ initFrame:SetScript("OnEvent", function(self)
                         { charge = "chargeHideSwipe", label = "Hide Swipe (Charges)" },
                         { charge = "hideRechargeEdge", label = "Hide Recharge Edge" },
                         { charge = "chargeHideCdText", label = "Hide Duration (Charges > 0)" },
+                        -- Same logic as Hidden (On CD) but with a customizable opacity
+                        -- instead of a hard 0. Click prompts for the percent; the label
+                        -- shows it (e.g. "50% Lower Alpha (On CD)") while it is selected.
+                        { val = "lowerAlphaOnCD",  label = "Lower Alpha (On CD)",
+                          dynamicLabel = function()
+                              local base = EllesmereUI.L("Lower Alpha (On CD)")
+                              if ss and ss.cdStateEffect == "lowerAlphaOnCD" then
+                                  local pct = math.floor(((ss.cdStateLowerAlpha or 0.5) * 100) + 0.5)
+                                  return pct .. "% " .. base
+                              end
+                              return base
+                          end },
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -5683,6 +5836,14 @@ initFrame:SetScript("OnEvent", function(self)
                     local REVERSE_SWIPE_ITEMS = {
                         { val = nil,  label = "Off" },
                         { val = true, label = "Reverse Swipe" },
+                    }
+                    -- Cooldown Swipe (cd/utility spells + presets): a 3-way single-select
+                    -- over two independent keys -- reverseSwipe and hideCDSwipe. "Off"
+                    -- clears both; the getVal/setVal below map the selection to the keys.
+                    local CD_SWIPE_ITEMS = {
+                        { val = nil,       label = "Off" },
+                        { val = "reverse", label = "Reverse Swipe" },
+                        { val = "hide",    label = "Hide CD Swipe" },
                     }
 
                     -- Track open subnavs on the menu frame so OnUpdate can see them
@@ -5785,7 +5946,14 @@ initFrame:SetScript("OnEvent", function(self)
                                 sLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
                                 sLbl:SetPoint("LEFT", 10, 0)
                                 sLbl:SetJustifyH("LEFT")
-                                sLbl:SetText(EllesmereUI.L(item.label))
+                                -- item.dynamicLabel (optional) returns a fully-composed,
+                                -- already-localized caption computed at render time (e.g.
+                                -- "50% Lower Alpha (On CD)"); plain items localize item.label.
+                                if item.dynamicLabel then
+                                    sLbl:SetText(item.dynamicLabel())
+                                else
+                                    sLbl:SetText(EllesmereUI.L(item.label))
+                                end
 
                                 -- Highlight selected item. Charge entries are
                                 -- independent toggles (item.charge names the ss
@@ -5925,6 +6093,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.activeGlowB = ss.activeGlowB
                                                 os.maxStacksGlow = ss.maxStacksGlow
                                                 os.cdStateEffect = ss.cdStateEffect
+                                                os.cdStateLowerAlpha = ss.cdStateLowerAlpha
                                                 os.chargeHideSwipe = ss.chargeHideSwipe
                                                 os.hideRechargeEdge = ss.hideRechargeEdge
                                                 os.chargeHideCdText = ss.chargeHideCdText
@@ -5934,6 +6103,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 os.glowColorB = ss.glowColorB
                                                 os.desatNotActive = ss.desatNotActive
                                                 os.reverseSwipe = ss.reverseSwipe
+                                                os.hideCDSwipe = ss.hideCDSwipe
                                             end
                                         end
                                     end
@@ -6593,6 +6763,16 @@ initFrame:SetScript("OnEvent", function(self)
                         }
                         local CD_STATE_ITEMS = {
                             { val = nil,               label = "None" },
+                            -- Same logic as Hidden (On CD) with a customizable opacity.
+                            { val = "lowerAlphaOnCD",  label = "Lower Alpha (On CD)",
+                              dynamicLabel = function()
+                                  local base = EllesmereUI.L("Lower Alpha (On CD)")
+                                  if cas and cas.cdStateEffect == "lowerAlphaOnCD" then
+                                      local pct = math.floor(((cas.cdStateLowerAlpha or 0.5) * 100) + 0.5)
+                                      return pct .. "% " .. base
+                                  end
+                                  return base
+                              end },
                             { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                             { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                             { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -6633,20 +6813,44 @@ initFrame:SetScript("OnEvent", function(self)
                                 EnsureCAS().cdStateEffect = v
                                 if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                             end,
-                            function() return not (cas and cas.cdStateEffect) end)
+                            function() return not (cas and cas.cdStateEffect) end,
+                            function(si, item, sub)
+                                -- Lower Alpha (On CD): prompt for the opacity percent,
+                                -- then select the effect (mirrors the setVal above).
+                                if item.val == "lowerAlphaOnCD" then
+                                    si:SetScript("OnClick", function()
+                                        local cur = math.floor((((cas and cas.cdStateLowerAlpha) or 0.5) * 100) + 0.5)
+                                        -- Close the per-spell dropdown so only the popup shows.
+                                        menu:Hide()
+                                        ShowAlphaPopup(cur, function(pct)
+                                            local c = EnsureCAS()
+                                            c.cdStateLowerAlpha = pct / 100
+                                            c.cdStateEffect = "lowerAlphaOnCD"
+                                            if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                                        end)
+                                    end)
+                                end
+                            end)
 
-                        -- Reverse Swipe (preset / custom): reverses this icon's
-                        -- cooldown swipe direction. Default off. Stored in the
-                        -- profile customActiveStates so it travels with the spell.
-                        MakeSubnavRow("Reverse Swipe", REVERSE_SWIPE_ITEMS,
-                            function() return (cas and cas.reverseSwipe) and true or nil end,
+                        -- Cooldown Swipe (preset / custom): Reverse Swipe flips this
+                        -- icon's swipe direction; Hide CD Swipe removes it. Default off.
+                        -- Stored in the profile customActiveStates so it travels with the spell.
+                        MakeSubnavRow("Cooldown Swipe", CD_SWIPE_ITEMS,
+                            function()
+                                if cas and cas.hideCDSwipe then return "hide" end
+                                if cas and cas.reverseSwipe then return "reverse" end
+                                return nil
+                            end,
                             function(v)
-                                EnsureCAS().reverseSwipe = v or nil
-                                if v then ns._cdmAnyReverseSwipe = true end
+                                local c = EnsureCAS()
+                                c.reverseSwipe = (v == "reverse") or nil
+                                c.hideCDSwipe = (v == "hide") or nil
+                                if c.reverseSwipe then ns._cdmAnyReverseSwipe = true end
+                                if c.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
                                 if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                                 if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                             end,
-                            function() return not (cas and cas.reverseSwipe) end)
+                            function() return not (cas and (cas.reverseSwipe or cas.hideCDSwipe)) end)
 
                         if not hasActive then
                             MakeActionRow("Add Active State", function()
@@ -7031,7 +7235,23 @@ initFrame:SetScript("OnEvent", function(self)
                             if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                         end,
                         function() return ss.cdStateEffect == nil and not ss.chargeHideSwipe and not ss.hideRechargeEdge and not ss.chargeHideCdText end,
-                        function(si, item)
+                        function(si, item, sub)
+                            -- Lower Alpha (On CD): clicking prompts for the opacity
+                            -- percent, then selects the effect (mirrors the setVal above).
+                            if item.val == "lowerAlphaOnCD" then
+                                si:SetScript("OnClick", function()
+                                    local cur = math.floor(((ss.cdStateLowerAlpha or 0.5) * 100) + 0.5)
+                                    -- Close the per-spell dropdown so only the popup shows.
+                                    menu:Hide()
+                                    ShowAlphaPopup(cur, function(pct)
+                                        EnsureSS()
+                                        ss.cdStateLowerAlpha = pct / 100
+                                        ss.cdStateEffect = "lowerAlphaOnCD"
+                                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                    end)
+                                end)
+                                return
+                            end
                             local isGlow = (item.val == "pixelGlowReady" or item.val == "buttonGlowReady")
                             if isGlow and ss.procGlow and ss.procGlow > 0 then
                                 si:SetAlpha(0.35)
@@ -7054,17 +7274,25 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
-                    -- 4a. Reverse Swipe (per-spell): reverses the cooldown swipe
-                    -- direction. Default off; runtime apply + zero-cost gate live in
-                    -- RefreshCDMIconAppearance / RescanReverseSwipeFlag.
-                    MakeSubnavRow("Reverse Swipe", REVERSE_SWIPE_ITEMS,
-                        function() return ss.reverseSwipe and true or nil end,
+                    -- 4a. Cooldown Swipe (per-spell): Reverse Swipe flips the swipe
+                    -- direction; Hide CD Swipe removes it. Default off. Runtime apply +
+                    -- zero-cost gates live in RefreshCDMIconAppearance /
+                    -- RescanReverseSwipeFlag and the SetDrawSwipe hook.
+                    MakeSubnavRow("Cooldown Swipe", CD_SWIPE_ITEMS,
+                        function()
+                            if ss.hideCDSwipe then return "hide" end
+                            if ss.reverseSwipe then return "reverse" end
+                            return nil
+                        end,
                         function(v)
-                            EnsureSS(); ss.reverseSwipe = v or nil
-                            if v then ns._cdmAnyReverseSwipe = true end
+                            EnsureSS()
+                            ss.reverseSwipe = (v == "reverse") or nil
+                            ss.hideCDSwipe = (v == "hide") or nil
+                            if ss.reverseSwipe then ns._cdmAnyReverseSwipe = true end
+                            if ss.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
                             if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                         end,
-                        function() return ss.reverseSwipe == nil end)
+                        function() return ss.reverseSwipe == nil and ss.hideCDSwipe == nil end)
 
                     -- 4b. Audio Effect on CD Ready (cd/utility per-icon): play a sound
                     -- the moment the spell's real cooldown finishes. Same sound list +
@@ -7245,8 +7473,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local syncHl = syncRow:CreateTexture(nil, "ARTWORK")
                     syncHl:SetAllPoints(); syncHl:SetColorTexture(1, 1, 1, 0); syncHl:SetAlpha(0)
 
-                    -- Sync state stored per-bar (not per-spell). Default on.
-                    if sd._syncIconSettings == nil then sd._syncIconSettings = true end
+                    -- Sync state stored per-bar (not per-spell). Default off.
+                    if sd._syncIconSettings == nil then sd._syncIconSettings = false end
                     local function UpdateSyncLabel()
                         local acR, acG, acB = EllesmereUI.GetAccentColor()
                         if sd._syncIconSettings then
@@ -7304,6 +7532,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.activeGlowB = ss.activeGlowB
                                     os.maxStacksGlow = ss.maxStacksGlow
                                     os.cdStateEffect = ss.cdStateEffect
+                                    os.cdStateLowerAlpha = ss.cdStateLowerAlpha
                                     os.cdReadySoundKey = ss.cdReadySoundKey
                                     os.chargeHideSwipe = ss.chargeHideSwipe
                                     os.hideRechargeEdge = ss.hideRechargeEdge
@@ -7313,6 +7542,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     os.glowColorG = ss.glowColorG
                                     os.glowColorB = ss.glowColorB
                                     os.reverseSwipe = ss.reverseSwipe
+                                    os.hideCDSwipe = ss.hideCDSwipe
                                 end
                             end
                             if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end

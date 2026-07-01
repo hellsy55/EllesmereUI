@@ -952,15 +952,66 @@ end
 --  fires on login (already ready -> never armed), on a GCD ending (a GCD never
 --  makes a spell "not ready" here), or per render tick.
 --
---  Charge spells fire ONLY at MAX charges: ready = GetSpellCharges().isActive ==
---  false (recharge not running), the SAME clean at-max signal Max Stacks Glow uses
---  -- NOT GetSpellCooldown().isActive, which goes false at the FIRST castable charge.
---  The cooldown-widget hooks (SetDesaturated) do NOT fire when the last charge
---  refills to max, so charge spells are ALSO driven by SPELL_UPDATE_CHARGES (the
---  WatchCdReadySoundIfEnabled set, mirroring Max Stacks Glow). Non-charge spells
---  ride the per-frame SetDesaturated edge alone (fires at CD end).
+--  Driven ENTIRELY by the authoritative cooldown/charge events
+--  (SPELL_UPDATE_COOLDOWN + SPELL_UPDATE_CHARGES) via the WatchCdReadySoundIfEnabled
+--  set -- NOT by the SetDesaturated visual hook. That hook fires at moments unrelated
+--  to the real cooldown (rage/range/GCD repaint) where C_Spell.GetSpellCooldown can
+--  report a transient isActive=true / isOnGCD=false GCD race; sampling there
+--  false-armed non-charge spells that were never on cooldown (Odyn's Fury etc.),
+--  firing at random while another button was spammed. Reading isActive+isOnGCD AT the
+--  event (the moment state actually settled) is consistent -- this is exactly how
+--  Ayije drives its ready glow. Charge readiness = GetSpellCharges().isActive == false
+--  (at max, the clean signal Max Stacks Glow uses); non-charge readiness =
+--  not (GetSpellCooldown().isActive and not isOnGCD). No duration/magnitude math
+--  (those values are secret in protected instances) -- only the clean bool flags.
 -------------------------------------------------------------------------------
 ns._cdReadySoundWatch = ns._cdReadySoundWatch or setmetatable({}, { __mode = "k" })
+
+-- Loading-screen / login-settle gate, shared by every CDM notification sound
+-- (CD-ready, buff gain/loss, preset buff gain). Zone changes, flights, and login
+-- re-render the CDM icons and re-fire aura/charge alerts while the cooldown,
+-- charge, and aura APIs briefly report transient states across the boundary --
+-- which false-fires the edges on spells/buffs that were mid-cooldown or still
+-- present (heard as random sounds when just zoning/flying). Mirrors Ayije, which
+-- gates every notification sound behind loginFinished + loadingScreenActive.
+-- Cheap: one boolean + one timestamp compare, consulted only on a sound edge
+-- (never per tick). Edges that land while suppressed are dropped silently.
+do
+    local loadingActive = true   -- suppressed until the first PLAYER_ENTERING_WORLD
+    local settleUntil = 0
+    local SETTLE_SECONDS = 2      -- brief window after a load for re-renders to settle
+
+    function ns._cdmSoundSuppressed()
+        return loadingActive or GetTime() < settleUntil
+    end
+
+    local gate = CreateFrame("Frame")
+    gate:RegisterEvent("LOADING_SCREEN_ENABLED")
+    gate:RegisterEvent("LOADING_SCREEN_DISABLED")
+    gate:RegisterEvent("PLAYER_ENTERING_WORLD")
+    gate:SetScript("OnEvent", function(_, event)
+        if event == "LOADING_SCREEN_ENABLED" then
+            loadingActive = true
+        else
+            -- World is up (LOADING_SCREEN_DISABLED / PLAYER_ENTERING_WORLD): clear
+            -- the load flag and start a short settle so the post-load icon
+            -- re-render can't false-fire the edge.
+            loadingActive = false
+            settleUntil = GetTime() + SETTLE_SECONDS
+        end
+    end)
+end
+
+-- Diagnostic: /cdmreadydbg toggles a one-line print at each CD-ready sound FIRE
+-- (live spellID, name, base id, bar, charge state) so a "fires while spamming"
+-- report can be traced to the exact spell and reason. Off by default; the print
+-- is gated on the flag so it is zero cost unless toggled on.
+ns._cdReadySoundDebug = false
+SLASH_CDMREADYDBG1 = "/cdmreadydbg"
+SlashCmdList.CDMREADYDBG = function()
+    ns._cdReadySoundDebug = not ns._cdReadySoundDebug
+    print("|cff0cd29f[CDReady]|r debug " .. (ns._cdReadySoundDebug and "ON" or "OFF"))
+end
 
 -- Is the spell READY right now? Charge spells: only at MAX charges (recharge not
 -- running). Non-charge: not on a real (non-GCD) cooldown. liveSid = resolved override.
@@ -973,10 +1024,10 @@ local function CdReadyIsReady(liveSid)
     return not (cd and cd.isActive and not cd.isOnGCD)
 end
 
--- Shared evaluator (driven by SetDesaturated for non-charge spells and by
--- SPELL_UPDATE_CHARGES for charge spells). Arms while not ready, plays + disarms on
--- the ready edge. Deferred one frame and re-confirmed so a charge/GCD-tail race that
--- momentarily reads ready can't false-fire. Self-gates zero-cost on the feature flag.
+-- Shared evaluator (driven by SPELL_UPDATE_COOLDOWN + SPELL_UPDATE_CHARGES via the
+-- WatchCdReadySoundIfEnabled set). Arms while not ready, plays + disarms on the ready
+-- edge. Deferred one frame and re-confirmed so a charge/GCD-tail race that momentarily
+-- reads ready can't false-fire. Self-gates zero-cost on the feature flag.
 local function EvalCdReadySound(frame, fd)
     if not ns._cdmAnyCdReadySound then return end
     if not fd then return end
@@ -1004,6 +1055,13 @@ local function EvalCdReadySound(frame, fd)
             fd._cdReadyArmed = false
             return
         end
+        if ns._cdmSoundSuppressed() then
+            -- Loading screen / login settle: this ready edge is almost always a
+            -- zone-transition artifact, not a real cooldown finishing. Drop it
+            -- silently so it fires neither now nor when the window ends.
+            fd._cdReadyArmed = false
+            return
+        end
         -- Became ready. Confirm one frame later (let the API settle) before playing.
         if not fd._cdReadyPending then
             fd._cdReadyPending = CreateFrame("Frame")
@@ -1024,7 +1082,17 @@ local function EvalCdReadySound(frame, fd)
                     livep = C_SpellBook.FindSpellOverrideByID(sidp) or sidp
                 end
                 if not CdReadyIsReady(livep) then return end  -- not ready (race) -> stay armed
+                if ns._cdmSoundSuppressed() then fd._cdReadyArmed = false; return end  -- a load began mid-defer
                 fd._cdReadyArmed = false
+                if ns._cdReadySoundDebug then
+                    local nm = (C_Spell.GetSpellName and C_Spell.GetSpellName(livep)) or "?"
+                    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(livep)
+                    print(string.format(
+                        "|cff0cd29f[CDReady]|r FIRE live=%s '%s' base=%s bar=%s maxCharges=%s chargeRecharging=%s",
+                        tostring(livep), tostring(nm), tostring(sidp), tostring(bkp),
+                        ci and tostring(ci.maxCharges) or "-",
+                        ci and tostring(ci.isActive) or "-"))
+                end
                 local path = ns.FOCUSKICK_SOUND_PATHS and ns.FOCUSKICK_SOUND_PATHS[kp]
                 if path then PlaySoundFile(path, "Master") end
             end)
@@ -1033,11 +1101,12 @@ local function EvalCdReadySound(frame, fd)
     end
 end
 
--- Register a CHARGE spell that has a CD-ready sound into the SPELL_UPDATE_CHARGES
--- watch set -- the only edge that catches the last charge refilling to max (the
--- per-frame SetDesaturated hook never fires there). Non-charge spells are handled
--- entirely by that hook, so they are NOT added here. Mirrors WatchMaxStacksIfEnabled:
--- one cheap charge-capability check, then a settings lookup only for charge spells.
+-- Register a spell that has a CD-ready sound into the event-driven watch set. The
+-- set is evaluated on SPELL_UPDATE_COOLDOWN (non-charge CD end) and
+-- SPELL_UPDATE_CHARGES (charge refill to max) -- the authoritative moments the state
+-- actually settles, so isActive/isOnGCD read consistently (no GCD race). BOTH charge
+-- and non-charge spells are watched here; there is no SetDesaturated driver anymore.
+-- Called from DecorateFrame for every cd/utility icon.
 function ns.WatchCdReadySoundIfEnabled(frame)
     if not frame then return end
     local fd = hookFrameData[frame]
@@ -1046,16 +1115,13 @@ function ns.WatchCdReadySoundIfEnabled(frame)
     local sidw = fcw and fcw.spellID
     local bkw = fcw and fcw.barKey
     if not (sidw and bkw) then return end
-    local liveSid = sidw
-    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then liveSid = C_SpellBook.FindSpellOverrideByID(sidw) or sidw end
-    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
-    local isCharge = ci ~= nil and (ci.maxCharges or 0) > 1
-    local ssw = isCharge and ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw)) or nil
+    local ssw = ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw))
     if ssw and ssw.cdReadySoundKey and ssw.cdReadySoundKey ~= "none" then
         ns._cdmAnyCdReadySound = true
         ns._cdReadySoundWatch[frame] = fd
         if not ns._cdReadySoundEventFrame then
             local ef = CreateFrame("Frame")
+            ef:RegisterEvent("SPELL_UPDATE_COOLDOWN")
             ef:RegisterEvent("SPELL_UPDATE_CHARGES")
             ef:SetScript("OnEvent", function()
                 for f, d in pairs(ns._cdReadySoundWatch) do
@@ -1452,6 +1518,7 @@ local function DecorateFrame(frame, barData)
                 if ss2 and ss2.maxStacksGlow and ss2.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
                 if ss2 and ss2.chargeHideCdText then ns._cdmAnyChargeHideCdText = true end
                 if ss2 and ss2.reverseSwipe then ns._cdmAnyReverseSwipe = true end
+                if ss2 and ss2.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
                     -- Hide Active State: force black swipe, track active flag.
@@ -1589,6 +1656,31 @@ local function DecorateFrame(frame, barData)
                 local handled = ApplyCdmChargeStyle(frame, cd)
                 fd._isProcessingOverride = false
                 if handled then return end
+                -- Per-spell Hide CD Swipe (non-charge): keep the swipe suppressed even
+                -- when Blizzard re-pushes the cooldown. Gated so it costs nothing until
+                -- someone enables it. Resolved from our own flags (secret-safe) in both
+                -- stores -- per-bar spellSettings and preset customActiveStates.
+                if ns._cdmAnyHideCDSwipe then
+                    local ssH = ns._ResolveCdmSS(frame)
+                    local hideSw = ssH and ssH.hideCDSwipe
+                    if not hideSw and ns.GetCustomActiveState then
+                        local fcH = _ecmeFC[frame]
+                        local sidH = fcH and fcH.spellID
+                        if sidH then
+                            local casKey = (ns.ResolveCustomActiveKey and ns.ResolveCustomActiveKey(sidH)) or sidH
+                            local casH = ns.GetCustomActiveState(casKey)
+                            hideSw = casH and casH.hideCDSwipe
+                        end
+                    end
+                    if hideSw then
+                        if show then
+                            fd._isProcessingOverride = true
+                            cd:SetDrawSwipe(false)
+                            fd._isProcessingOverride = false
+                        end
+                        return
+                    end
+                end
                 if show then return end
                 fd._isProcessingOverride = true
                 cd:SetDrawSwipe(true)
@@ -1930,7 +2022,8 @@ local function DecorateFrame(frame, barData)
                     return
                 end
                 -- Clear stale hidden state when switching to a non-hidden effect
-                if cse ~= "hiddenOnCD" and cse ~= "hiddenReady" then
+                -- (lowerAlphaOnCD is alpha-owning like the hidden modes, so exclude it).
+                if cse ~= "hiddenOnCD" and cse ~= "hiddenReady" and cse ~= "lowerAlphaOnCD" then
                     if fc2 and fc2._cdStateHidden then
                         fc2._cdStateHidden = false
                         local bd2 = barDataByKey and barDataByKey[bk2]
@@ -1943,12 +2036,14 @@ local function DecorateFrame(frame, barData)
                 -- disagree with Blizzard's own evaluation (charge spells
                 -- report isActive while charges remain, GCD tail races).
                 -- Deferring lets the API settle before we query it.
-                if cse == "hiddenOnCD" or cse == "hiddenReady" then
+                if cse == "hiddenOnCD" or cse == "hiddenReady" or cse == "lowerAlphaOnCD" then
                     if not fd._cdStatePending then
                         fd._cdStatePending = CreateFrame("Frame")
                         fd._cdStatePending:Hide()
                     end
                     fd._cdStatePending.cse = cse
+                    -- Captured at arm time (a setting, not volatile); only lowerAlphaOnCD reads it.
+                    fd._cdStatePending.lowAlpha = (ss2 and ss2.cdStateLowerAlpha) or 0.5
                     fd._cdStatePending:SetScript("OnUpdate", function(self)
                         self:Hide()
                         local fc3 = _ecmeFC[frame]
@@ -1962,15 +2057,24 @@ local function DecorateFrame(frame, barData)
                         local cseInfo = C_Spell.GetSpellCooldown(liveSid)
                         local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                         local myCse = self.cse
-                        local hide
-                        if myCse == "hiddenOnCD" then
-                            hide = onCD
-                        else
-                            hide = not onCD
-                        end
                         local bd3 = barDataByKey and barDataByKey[bk3]
-                        frame:SetAlpha(hide and 0 or (bd3 and bd3.barOpacity or 1))
-                        if fc3 then fc3._cdStateHidden = hide or false end
+                        local baseA = bd3 and bd3.barOpacity or 1
+                        if myCse == "lowerAlphaOnCD" then
+                            -- Lowered (not hidden): reuse _cdStateHidden as the
+                            -- "cd-state owns this alpha" flag so the opacity appliers
+                            -- leave the lowered value in place, exactly like hiddenOnCD.
+                            frame:SetAlpha(onCD and (self.lowAlpha or 0.5) or baseA)
+                            if fc3 then fc3._cdStateHidden = onCD or false end
+                        else
+                            local hide
+                            if myCse == "hiddenOnCD" then
+                                hide = onCD
+                            else
+                                hide = not onCD
+                            end
+                            frame:SetAlpha(hide and 0 or baseA)
+                            if fc3 then fc3._cdStateHidden = hide or false end
+                        end
                     end)
                     fd._cdStatePending:Show()
                     return
@@ -2089,21 +2193,12 @@ local function DecorateFrame(frame, barData)
             end
         end
 
-        -- Audio Effect on CD Ready (cd/utility per-icon): non-charge spells ride this
-        -- per-frame SetDesaturated edge (fires at CD end). Charge spells fire ONLY at
-        -- MAX charges, which SetDesaturated does NOT signal (the icon is already
-        -- saturated with a charge in hand); those are driven by SPELL_UPDATE_CHARGES
-        -- via WatchCdReadySoundIfEnabled instead, though this hook still arms them on
-        -- the 0-charge / partial edges. The single shared evaluator EvalCdReadySound
-        -- computes readiness (at-max for charge spells, cooldown for others), edge-
-        -- detects with an arm flag, and self-gates zero-cost on ns._cdmAnyCdReadySound.
-        if fd.tex and not fd._cdReadySoundHooked then
-            fd._cdReadySoundHooked = true
-            hooksecurefunc(fd.tex, "SetDesaturated", function() EvalCdReadySound(frame, fd) end)
-            if fd.tex.SetDesaturation then
-                hooksecurefunc(fd.tex, "SetDesaturation", function() EvalCdReadySound(frame, fd) end)
-            end
-        end
+        -- Audio Effect on CD Ready (cd/utility per-icon) is driven purely by the
+        -- authoritative SPELL_UPDATE_COOLDOWN / SPELL_UPDATE_CHARGES events via
+        -- WatchCdReadySoundIfEnabled (called from DecorateFrame) -- deliberately NOT
+        -- off a SetDesaturated visual hook. That hook fires at repaint moments
+        -- unrelated to the real cooldown and sampled a transient GCD race
+        -- (isActive=true / isOnGCD=false) that false-fired the sound.
     end
 
     hookFrameData[frame] = fd
@@ -3997,7 +4092,16 @@ local function CollectAndReanchor()
                     end
                 end
 
-                -- Assign sort keys from spellOrder (transform-aware)
+                -- Assign sort keys from spellOrder (transform-aware). A frame whose
+                -- spell is in assignedSpells gets its integer slot index. A frame
+                -- that is NOT (spillover -- e.g. a cooldown a talent swap just added
+                -- that the user has never ordered) is marked here and positioned in
+                -- the second pass below by Blizzard's native layoutIndex, ADJACENT to
+                -- the assigned Blizzard spells around it, instead of being dumped at
+                -- the end of the bar. This keeps a re-talented cooldown in its
+                -- Blizzard CDM position rather than piling new spells after a
+                -- trinket/racial slot.
+                local hasSpill = false
                 for _, frame in ipairs(frames) do
                     local fc = _ecmeFC[frame]
                     local sid = fc and fc.spellID
@@ -4014,7 +4118,129 @@ local function CollectAndReanchor()
                         local base = C_Spell.GetBaseSpell(sid)
                         if base and base > 0 and base ~= sid then key = spellOrder[base] end
                     end
-                    if fc then fc.sortOrder = key or 99999 end
+                    -- The 4 probes above all key off fc.spellID = cooldownInfo.spellID
+                    -- (the base) and only bridge base<->override. For some hero-talent
+                    -- slots that base is an UNRELATED spell to the DISPLAYED/castable
+                    -- form the picker actually stored (documented: a Wither slot whose
+                    -- cooldownInfo base is Immolate). Match the frame's displayed
+                    -- identity too -- the same GetCanonicalSpellIDForFrame id the add
+                    -- path wrote -- so a placed cooldown finds its saved rank on return
+                    -- instead of being mistaken for a brand-new spillover.
+                    if not key and fc and fc.resolvedSid then
+                        key = spellOrder[fc.resolvedSid]
+                    end
+                    if not key and ns.GetCanonicalSpellIDForFrame then
+                        local canon = ns.GetCanonicalSpellIDForFrame(frame)
+                        if canon and canon > 0 then key = spellOrder[canon] end
+                    end
+                    if not key and fc and fc.linkedSpellIDs then
+                        for _, lid in ipairs(fc.linkedSpellIDs) do
+                            if lid and lid > 0 and spellOrder[lid] then key = spellOrder[lid]; break end
+                        end
+                    end
+                    if fc then
+                        if key then
+                            fc.sortOrder = key
+                        else
+                            fc.sortOrder = false  -- spillover marker, resolved below
+                            hasSpill = true
+                        end
+                    end
+                end
+
+                -- Second pass (only when a spillover exists -- steady state skips
+                -- this entirely). Give each spillover a fractional key that lands it
+                -- between its neighbours by Blizzard layoutIndex.
+                --
+                -- Anchors are the present, assigned frames. A real viewer frame
+                -- (cooldownID set) anchors at its OWN layoutIndex. A preset we inject
+                -- (trinket/pot/racial -- cooldownID nil, no real layoutIndex) anchors
+                -- at an INTERPOLATED layoutIndex derived from its nearest present
+                -- Blizzard neighbour in slot order. Without the preset anchors the
+                -- sort can't see them, so a re-talented cooldown the user parked to
+                -- the LEFT of a preset could hop to its RIGHT (and vice versa). With
+                -- them, the spillover lands on the correct side of the preset.
+                if hasSpill then
+                    -- Blizzard viewer anchors: real layoutIndex, keyed by slot index.
+                    local blizzKeys, blizzLIs
+                    for _, frame in ipairs(frames) do
+                        local fc = _ecmeFC[frame]
+                        local k = fc and fc.sortOrder
+                        if type(k) == "number" and frame.cooldownID ~= nil then
+                            blizzKeys = blizzKeys or {}; blizzLIs = blizzLIs or {}
+                            blizzKeys[#blizzKeys + 1] = k
+                            blizzLIs[#blizzKeys] = frame.layoutIndex or 0
+                        end
+                    end
+                    -- Full anchor set = Blizzard anchors + preset anchors (interpolated
+                    -- layoutIndex). minAnchorIdx (over ALL anchors) is where a spillover
+                    -- that sorts before everything lands. Skipped entirely when the bar
+                    -- has no present Blizzard spell to interpolate against (no anchors ->
+                    -- spillovers fall to the tail by layoutIndex, as before).
+                    local anchorKeys, anchorLIs, minAnchorIdx
+                    if blizzKeys then
+                        anchorKeys, anchorLIs = {}, {}
+                        for i = 1, #blizzKeys do
+                            anchorKeys[i] = blizzKeys[i]; anchorLIs[i] = blizzLIs[i]
+                            if not minAnchorIdx or blizzKeys[i] < minAnchorIdx then
+                                minAnchorIdx = blizzKeys[i]
+                            end
+                        end
+                        for _, frame in ipairs(frames) do
+                            local fc = _ecmeFC[frame]
+                            local k = fc and fc.sortOrder
+                            if type(k) == "number" and frame.cooldownID == nil then
+                                -- Nearest present Blizzard anchor on each side (slot order).
+                                local leftLI, leftSlot, rightLI, rightSlot
+                                for i = 1, #blizzKeys do
+                                    local bslot = blizzKeys[i]
+                                    if bslot < k then
+                                        if not leftSlot or bslot > leftSlot then leftSlot = bslot; leftLI = blizzLIs[i] end
+                                    elseif bslot > k then
+                                        if not rightSlot or bslot < rightSlot then rightSlot = bslot; rightLI = blizzLIs[i] end
+                                    end
+                                end
+                                -- Ride just after the left neighbour (or just before the
+                                -- right when there is none). 0.001*distance keeps it
+                                -- inside the neighbour's integer-layoutIndex gap and
+                                -- monotonic for multiple presets in the same gap.
+                                local effLI
+                                if leftLI then
+                                    effLI = leftLI + 0.001 * (k - leftSlot)
+                                elseif rightLI then
+                                    effLI = rightLI - 0.001 * (rightSlot - k)
+                                end
+                                if effLI then
+                                    anchorKeys[#anchorKeys + 1] = k
+                                    anchorLIs[#anchorKeys] = effLI
+                                    if not minAnchorIdx or k < minAnchorIdx then minAnchorIdx = k end
+                                end
+                            end
+                        end
+                    end
+                    for _, frame in ipairs(frames) do
+                        local fc = _ecmeFC[frame]
+                        if fc and fc.sortOrder == false then
+                            if anchorKeys and frame.cooldownID ~= nil then
+                                local L = frame.layoutIndex or 0
+                                local predIdx, predLI
+                                for i = 1, #anchorKeys do
+                                    local li = anchorLIs[i]
+                                    if li < L and (not predLI or li > predLI) then
+                                        predLI = li; predIdx = anchorKeys[i]
+                                    end
+                                end
+                                -- Insert after the predecessor slot (or before the first
+                                -- anchor when below all). (L+1)/1e6 < 1 keeps the
+                                -- spillover strictly between its neighbouring integer
+                                -- slots and never ties its predecessor.
+                                local baseIdx = predIdx or ((minAnchorIdx or 1) - 1)
+                                fc.sortOrder = baseIdx + ((L + 1) / 1e6)
+                            else
+                                fc.sortOrder = 99999
+                            end
+                        end
+                    end
                 end
 
                 -- Sort by user-defined order
@@ -4426,6 +4652,9 @@ local _presetGainSoundAt = {}
 local PRESET_GAIN_SOUND_GAP = 0.3
 local function PlayPresetBuffGainSound(sd, sid, now)
     if not ns._cdmAnyBuffSound then return end
+    -- Loading screen / login settle: cast/edge timers restart across a zone/login,
+    -- which would false-fire the gain sound. Drop while suppressed.
+    if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then return end
     local ss = sd and sd.spellSettings and sd.spellSettings[sid]
     local key = ss and ss.buffActiveSoundKey
     if not key or key == "none" then return end
@@ -4734,7 +4963,15 @@ function ns.SetupViewerHooks()
 
     local function InstallBuffFrameHooks(viewer)
         if not viewer or not viewer.itemFramePool then return end
+        -- Attach the buff gain/loss sound hook here -- at pool-acquire time, BEFORE
+        -- Blizzard finishes setting the frame up and fires its first
+        -- TriggerAuraAppliedAlert. Installing it lazily in DecorateFrame ran one step
+        -- too late on a frame's FIRST activation, so the very first "buff gained" cue
+        -- was missed (loss + later gains worked because the hook then persisted).
+        -- EnsureBuffSoundHook self-guards (hooks once), gated 0-cost on the feature.
+        local ensureSound = ns._cdmAnyBuffSound and ns.EnsureBuffSoundHook
         for frame in viewer.itemFramePool:EnumerateActive() do
+            if ensureSound then ns.EnsureBuffSoundHook(frame) end
             if not _activeStateHooked[frame] then
                 _activeStateHooked[frame] = true
                 -- Hook OnActiveStateChanged: Blizzard calls this when a buff

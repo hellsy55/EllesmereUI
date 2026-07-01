@@ -85,6 +85,10 @@ local defaults = {
         -- When decimals are on, boss frames show two decimals (240.55k / 77.30%)
         -- instead of one. Default on. Inline cog on "Show Decimal on Health Text".
         showDecimalBoss2 = true,
+        -- When decimals are on, "Only Show for % Health" keeps the decimal on the
+        -- health PERCENT (77.3%) but leaves health VALUES whole (240k). Default
+        -- off. Inline cog on "Show Decimal on Health Text".
+        showDecimalPercentOnly = false,
         -- Player Threat (Non-Tank): additive "Shadow" border on the PLAYER frame
         -- when the player is pulling/has aggro, in instanced content only. Global,
         -- default off (zero cost until enabled). Colors mirror the nameplate
@@ -1449,13 +1453,20 @@ ns._decimalAbbrevConfig2 = { breakpointData = {
 function ns.ApplyTextDecimalGlobals()
     if db and db.profile and db.profile.showDecimalOnText then
         _G._EUI_TextDecimals = true
+        -- "Only Show for % Health": keep the decimal on the health PERCENT but
+        -- leave health/absorb VALUES whole. Achieved by withholding the abbreviate
+        -- configs (values fall back to the plain whole-number AbbreviateNumbers)
+        -- while _EUI_TextDecimals stays true for the percent tags.
+        local percentOnly = db.profile.showDecimalPercentOnly
         _G._EUI_AbbrevDecimalCfg = ns._decimalAbbrevConfig
+        if percentOnly then _G._EUI_AbbrevDecimalCfg = nil end
         -- Boss frames get a second decimal place (default on). Tags fall back
         -- to the 1-decimal path for every non-boss unit when the flag is set,
         -- and ignore it entirely when nil.
         if db.profile.showDecimalBoss2 ~= false then
             _G._EUI_BossExtraDecimal = true
             _G._EUI_AbbrevDecimalCfg2 = ns._decimalAbbrevConfig2
+            if percentOnly then _G._EUI_AbbrevDecimalCfg2 = nil end
         else
             _G._EUI_BossExtraDecimal = false
             _G._EUI_AbbrevDecimalCfg2 = nil
@@ -5489,11 +5500,20 @@ local function CreateTargetAuras(frame, unit)
             PP.CreateBorder(button.Border, 0, 0, 0, 1)
         end
 
-        -- Keep the cooldown (and its built-in countdown text) above the icon
-        -- border so the duration number isn't hidden behind it. oUF's stack-count
-        -- frame sits one level above the cooldown, so it stays on top too.
+        -- Keep the duration and stack text above the icon border. The PP border
+        -- textures live on a container ONE level above button.Border, so lifting
+        -- the cooldown to button.Border+1 would only tie the container's level and
+        -- let it draw over the duration number. Go TWO levels above button.Border
+        -- so the cooldown (its built-in countdown/duration text) clears the border
+        -- container, then re-park oUF's stack-count frame one level above that so
+        -- the stack number stays on top too (its creation-time level was relative
+        -- to the cooldown's OLD level, so it no longer tracks after this bump).
         if button.Cooldown and button.Border then
-            button.Cooldown:SetFrameLevel(button.Border:GetFrameLevel() + 1)
+            button.Cooldown:SetFrameLevel(button.Border:GetFrameLevel() + 2)
+            local countFrame = button.Count and button.Count:GetParent()
+            if countFrame then
+                countFrame:SetFrameLevel(button.Cooldown:GetFrameLevel() + 1)
+            end
         end
     end
 
@@ -5533,6 +5553,13 @@ local function CreateTargetAuras(frame, unit)
     end
 
     local buffs = CreateFrame("Frame", nil, frame)
+    -- Boss frames: lift auras above the unified border so it renders BEHIND the
+    -- buffs/debuffs instead of over their flush edge. The border FRAME is at
+    -- frame+10, but its solid PP border textures live on a sub-container at
+    -- frame+11, so the auras must clear frame+11 (not merely the border frame).
+    -- frame+13 also clears the class-icon holder (frame+12) and stays below the
+    -- portrait (frame+15) and health-text (frame+20) overlays.
+    if unitIsBoss then buffs:SetFrameLevel(frame:GetFrameLevel() + 13) end
     local buffGrowthEff = simpleBuffOn and "auto" or (settings and settings.buffGrowth)
     local bfp, bia, bgx, bgy, box, boy = ResolveBuffLayout(
         simpleBuffOn and simpleBuffMode or (settings and settings.buffAnchor),
@@ -5614,6 +5641,11 @@ local function CreateTargetAuras(frame, unit)
     end
     do
         local debuffs = CreateFrame("Frame", nil, frame)
+        -- Boss frames: lift auras above the unified border so it renders BEHIND
+        -- them. The border FRAME is frame+10 but its solid PP border textures sit
+        -- on a sub-container at frame+11, so clear frame+11 (frame+13 also clears
+        -- the class-icon holder at frame+12). See the Buffs container above.
+        if unitIsBoss then debuffs:SetFrameLevel(frame:GetFrameLevel() + 13) end
         local effectiveAnc = (dAnc ~= "none") and dAnc or "bottomleft"
         local effectiveGrowth = simpleOn and "auto" or (settings and settings.debuffGrowth or "auto")
         local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(effectiveAnc, effectiveGrowth)
@@ -11520,7 +11552,11 @@ function SetupOptionsPanel()
         local iconGap = PP.FromPixels(ns.GetBossDebuffSpacing(settings, simple))
         local holder = CreateFrame("Frame", nil, frame)
         holder:SetSize(iconSize * count + iconGap * (count - 1), iconSize)
-        holder:SetFrameLevel(frame:GetFrameLevel() + 5)
+        -- Above the unified border so it sits BEHIND the preview debuffs, matching
+        -- the live boss aura layering. The border FRAME is frame+10 but its solid
+        -- PP border textures live on a sub-container at frame+11, so clear that
+        -- (frame+13 also clears the class-icon holder at frame+12).
+        holder:SetFrameLevel(frame:GetFrameLevel() + 13)
         holder:ClearAllPoints()
         -- The boss cast bar lives as a sibling parented to the frame but
         -- anchored BELOW frame bottom, so frame:GetHeight() excludes it.
@@ -11596,7 +11632,9 @@ function SetupOptionsPanel()
             -- FontString instead.
             local cd = CreateFrame("Cooldown", nil, iconFrame, "CooldownFrameTemplate")
             cd:SetAllPoints(iconFrame)
-            cd:SetFrameLevel(iconFrame:GetFrameLevel() + 1)
+            -- Swipe sits above the border (border at +1, PP container at +2) so
+            -- the layering matches the live boss aura buttons.
+            cd:SetFrameLevel(iconFrame:GetFrameLevel() + 3)
             cd:SetDrawEdge(false)
             cd:SetDrawBling(false)
             cd:SetReverse(false)
@@ -11605,10 +11643,11 @@ function SetupOptionsPanel()
             cd:SetHideCountdownNumbers(true)
             local frac = FAKE_DEBUFF_FRACS[idx] or 0.6
             cd:SetCooldown(now - 3600 * (1 - frac), 3600)
-            -- Text host above the swipe so duration/stack never sit under it.
+            -- Text host above the swipe AND the border container so the
+            -- duration/stack text renders over the icon border, not under it.
             local textHost = CreateFrame("Frame", nil, iconFrame)
             textHost:SetAllPoints(iconFrame)
-            textHost:SetFrameLevel(cd:GetFrameLevel() + 1)
+            textHost:SetFrameLevel(iconFrame:GetFrameLevel() + 4)
             local durText = textHost:CreateFontString(nil, "OVERLAY")
             durText:SetDrawLayer("OVERLAY", 7)
             EllesmereUI.ApplyIconTextFont(durText, fontPath, cdSize, "unitFrames")
@@ -11624,9 +11663,11 @@ function SetupOptionsPanel()
                 ns.ApplyStackAnchor(stack, iconFrame, stackPos, stackOffX, stackOffY)
                 stack:SetText(FAKE_DEBUFF_STACKS[idx])
             end
+            -- Border just above the icon; its PP container renders at border+1
+            -- (iconFrame+2), below the swipe and text host so both stay on top.
             local border = CreateFrame("Frame", nil, iconFrame)
             border:SetAllPoints(icon)
-            border:SetFrameLevel(textHost:GetFrameLevel() + 1)
+            border:SetFrameLevel(iconFrame:GetFrameLevel() + 1)
             if PP and PP.CreateBorder then PP.CreateBorder(border, 0, 0, 0, 1) end
         end
         frame._previewDebuffs = holder
@@ -11682,7 +11723,11 @@ function SetupOptionsPanel()
         local iconGap = PP.FromPixels(ns.GetBossBuffSpacing(settings, simple))
         local holder = CreateFrame("Frame", nil, frame)
         holder:SetSize(iconSize * count + iconGap * (count - 1), iconSize)
-        holder:SetFrameLevel(frame:GetFrameLevel() + 5)
+        -- Above the unified border so it sits BEHIND the preview buffs, matching
+        -- the live boss aura layering. The border FRAME is frame+10 but its solid
+        -- PP border textures live on a sub-container at frame+11, so clear that
+        -- (frame+13 also clears the class-icon holder at frame+12).
+        holder:SetFrameLevel(frame:GetFrameLevel() + 13)
         holder:ClearAllPoints()
         local castBg = frame.Castbar and frame.Castbar:GetParent()
         local castbarH = (settings.showCastbar ~= false and castBg)

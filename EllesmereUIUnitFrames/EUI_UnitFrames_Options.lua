@@ -1943,7 +1943,10 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Size(bf, buffSize, buffSize)
                 bf:SetBackdrop(SOLID_BACKDROP)
                 bf:SetBackdropColor(0, 0, 0, 1)
-                bf:SetFrameLevel(pf:GetFrameLevel() + 3)
+                -- Above the preview border so it renders BEHIND the buff icons.
+                -- The border frame is barArea+5 and its solid PP border textures
+                -- sit on a sub-container at barArea+6, so clear barArea+6.
+                bf:SetFrameLevel(barArea:GetFrameLevel() + 7)
                 PP.Point(bf, "BOTTOMLEFT", pf, "TOPLEFT", (i - 1) * (buffSize + buffGap), buffGap)
                 local tex = bf:CreateTexture(nil, "ARTWORK")
                 PP.Point(tex, "TOPLEFT", bf, "TOPLEFT", 1, -1)
@@ -1972,8 +1975,13 @@ initFrame:SetScript("OnEvent", function(self)
                 local df = CreateFrame("Frame", nil, pf, "BackdropTemplate")
                 PP.Size(df, debuffSize, debuffSize)
                 df:SetBackdrop(SOLID_BACKDROP)
-                df:SetBackdropColor(0.55, 0, 0, 1)
-                df:SetFrameLevel(pf:GetFrameLevel() + 3)
+                -- Black 1px edge (backdrop fill showing through the icon's 1px
+                -- inset) to match the buff icons and the live frames' black border.
+                df:SetBackdropColor(0, 0, 0, 1)
+                -- Above the preview border so it renders BEHIND the debuff icons.
+                -- Border frame is barArea+5, its solid PP container barArea+6, so
+                -- clear barArea+6; df's cd (+1) and text host (+2) ride up too.
+                df:SetFrameLevel(barArea:GetFrameLevel() + 7)
                 PP.Point(df, "TOPLEFT", pf, "BOTTOMLEFT", (i - 1) * (debuffSize + debuffGap), -debuffGap)
                 local tex = df:CreateTexture(nil, "ARTWORK")
                 PP.Point(tex, "TOPLEFT", df, "TOPLEFT", 1, -1)
@@ -4480,6 +4488,13 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Health Text Decimals",
                 rows = {
+                    { type="toggle", label="Only Show for % Health",
+                      get=function() return db.profile.showDecimalPercentOnly == true end,
+                      set=function(v)
+                          db.profile.showDecimalPercentOnly = v
+                          if ns.ApplyTextDecimalGlobals then ns.ApplyTextDecimalGlobals() end
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
                     { type="toggle", label="Show 2 for Boss",
                       get=function() return db.profile.showDecimalBoss2 ~= false end,
                       set=function(v)

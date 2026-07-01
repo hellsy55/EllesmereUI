@@ -933,6 +933,32 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "uf_power_border_size_zero_v1",
+    scope       = "profile",
+    description = "Zero out Unit Frames per-unit powerBorderSize. The detached power bar border size only became functional this build; older non-zero values were set while the control did nothing, so clear them so each UI stays visually identical. Users can re-enable a border afterward.",
+    body = function(ctx)
+        -- Self-gating: once a unit's powerBorderSize is 0 (or absent) it is
+        -- skipped, so the body is naturally idempotent on top of the runner's
+        -- per-profile flag. Runs once per profile ever; any border the user
+        -- sets AFTER the flag is stamped is never touched.
+        --
+        -- Scoped STRICTLY to EllesmereUIUnitFrames. The RaidFrames addon has its
+        -- own, unrelated powerBorderSize (its power border already worked) which
+        -- lives at ctx.profile.addons.EllesmereUIRaidFrames and must NOT be
+        -- zeroed here.
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if type(uf) ~= "table" then return end
+        local UNIT_KEYS = { "player", "target", "focus", "targettarget", "focustarget", "pet", "boss" }
+        for _, unitKey in ipairs(UNIT_KEYS) do
+            local u = uf[unitKey]
+            if type(u) == "table" and type(u.powerBorderSize) == "number" and u.powerBorderSize ~= 0 then
+                u.powerBorderSize = 0
+            end
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "basics_minimap_round_to_circle",
     scope       = "profile",
     description = "Rename minimap.shape value 'round' to 'circle'.",

@@ -333,6 +333,85 @@ initFrame:SetScript("OnEvent", function(self)
             return swatch
         end
 
+        -- Attach the accent + custom colour pair (same behaviour as
+        -- _MakeAccentSwatches) as two INLINE swatches on a DualRow region, chaining
+        -- off rgn._lastInline. Click the accent swatch to follow the theme accent;
+        -- click the custom swatch to switch to a custom colour (opens the picker).
+        -- The inactive swatch dims to 0.3; both are blocked + dimmed with the
+        -- requirement tooltip while isDisabled() is true (mirrors _AttachInlineSwatch).
+        local function _AttachInlineAccentSwatches(rgn, useAccentKey, colorKey, defR, defG, defB, isDisabled, disabledTip)
+            local PP = EllesmereUI.PP
+
+            -- Accent swatch (nearest the control): live theme accent.
+            local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
+                rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local ar, ag, ab = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return ar, ag, ab, 1
+                end,
+                function() end, false, 18)
+            accentSwatch:SetScript("OnClick", function()
+                Set(useAccentKey, true); Refresh(); EllesmereUI:RefreshPage()
+            end)
+            PP.Point(accentSwatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
+            rgn._lastInline = accentSwatch
+
+            -- Custom-colour swatch (to the left of accent): the stored custom colour.
+            local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
+                rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local c = Cfg(colorKey)
+                    if c then return c.r or defR, c.g or defG, c.b or defB, 1 end
+                    return defR, defG, defB, 1
+                end,
+                function(r, g, b)
+                    Set(colorKey, { r = r, g = g, b = b }); Refresh()
+                end, false, 18)
+            -- Preserve BuildColorSwatch's picker click, but while accent mode is on a
+            -- click just switches back to custom mode (accent turns off) instead.
+            local openPicker = customSwatch:GetScript("OnClick")
+            customSwatch:SetScript("OnClick", function(self)
+                if Cfg(useAccentKey) ~= false then
+                    Set(useAccentKey, false); Refresh(); EllesmereUI:RefreshPage()
+                    return
+                end
+                if openPicker then openPicker(self) end
+            end)
+            PP.Point(customSwatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
+            rgn._lastInline = customSwatch
+
+            -- Per-swatch hover tooltip (colour name when enabled) + disabled block.
+            local function AddBlock(sw, enterTip)
+                sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, enterTip) end)
+                sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local block = CreateFrame("Frame", nil, sw)
+                block:SetAllPoints(); block:SetFrameLevel(sw:GetFrameLevel() + 10); block:EnableMouse(true)
+                block:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip(disabledTip or "the module"))
+                end)
+                block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                sw._block = block
+            end
+            AddBlock(accentSwatch, "Accent Color")
+            AddBlock(customSwatch, "Custom Color")
+
+            local function UpdateState()
+                if updateAccent then updateAccent() end
+                if updateCustom then updateCustom() end
+                local disabled = isDisabled and isDisabled()
+                local useAccent = Cfg(useAccentKey) ~= false
+                if disabled then
+                    accentSwatch:SetAlpha(0.15); accentSwatch._block:Show()
+                    customSwatch:SetAlpha(0.15); customSwatch._block:Show()
+                else
+                    accentSwatch:SetAlpha(useAccent and 1 or 0.3); accentSwatch._block:Hide()
+                    customSwatch:SetAlpha(useAccent and 0.3 or 1); customSwatch._block:Hide()
+                end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateState)
+            UpdateState()
+        end
+
         local timerDisplayValues = {
             REMAINING       = "11:37",
             REMAINING_TOTAL = "11:37 / 33:00",
@@ -352,15 +431,21 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="the module",
               getValue=function() return Cfg("showTitle") ~= false end,
               setValue=function(v) Set("showTitle", v); Refresh() end },
-            { type="multiSwatch", text="Title Color",
+            { type="slider", text="Title Size", min=8, max=24, step=1, trackWidth=130,
               disabled=function() return Cfg("enabled") == false or Cfg("showTitle") == false end,
               disabledTooltip="Show Title",
-              swatches = _MakeAccentSwatches("titleUseAccent", "titleColor", 1, 1, 1) })
-        _AttachPopupButton(row._leftRegion, EllesmereUI.RESIZE_ICON, "Title Size", {
-            { type="slider", label="Size", min=8, max=24, step=1,
-              get=function() return Cfg("titleSize") or 16 end,
-              set=function(v) Set("titleSize", v); Refresh() end },
+              getValue=function() return Cfg("titleSize") or 16 end,
+              setValue=function(v) Set("titleSize", v); Refresh() end })
+        -- Regular-cog settings popup on Show Title: Show Dungeon Name (default on;
+        -- when off the title shows only the +key level, not the dungeon name).
+        _AttachPopupButton(row._leftRegion, EllesmereUI.COGS_ICON, "Title", {
+            { type="toggle", label="Show Dungeon Name",
+              get=function() return Cfg("showDungeonName") ~= false end,
+              set=function(v) Set("showDungeonName", v); Refresh() end },
         }, function() return Cfg("enabled") == false or Cfg("showTitle") == false end)
+        -- Inline accent + custom colour swatches on the Title Size slider.
+        _AttachInlineAccentSwatches(row._rightRegion, "titleUseAccent", "titleColor", 1, 1, 1,
+            function() return Cfg("enabled") == false or Cfg("showTitle") == false end, "Show Title")
         y = y - h
 
         row, h = W:DualRow(parent, y,
@@ -465,6 +550,7 @@ initFrame:SetScript("OnEvent", function(self)
         }, function() return Cfg("enabled") == false or Cfg("showTimerBar") == false end)
         y = y - h
 
+        local timerFontValues, timerFontOrder = EllesmereUI.BuildFontDropdownData()
         row, h = W:DualRow(parent, y,
             { type="dropdown", text="Bar Texture",
               disabled=function() return Cfg("enabled") == false or Cfg("showTimerBar") == false end,
@@ -473,7 +559,13 @@ initFrame:SetScript("OnEvent", function(self)
               order=texOrder,
               getValue=function() return Cfg("barTexture") or "none" end,
               setValue=function(v) Set("barTexture", v); Refresh() end },
-            { type="label", text="" })
+            { type="dropdown", text="Timer Font",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="the module",
+              values=timerFontValues,
+              order=timerFontOrder,
+              getValue=function() return Cfg("timerFont") or "__global" end,
+              setValue=function(v) Set("timerFont", v); Refresh() end })
         -- Inline cog on Bar Texture: the bar's background texture
         _AttachPopupButton(row._leftRegion, EllesmereUI.COGS_ICON, "Bar Texture", {
             { type="dropdown", label="Background Texture",
