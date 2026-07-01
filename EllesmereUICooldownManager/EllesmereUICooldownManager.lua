@@ -2592,32 +2592,102 @@ end
 -------------------------------------------------------------------------------
 --  CDM Bar Position Helpers
 -------------------------------------------------------------------------------
-local function ApplyBarPositionCentered(frame, pos, barKey)
-    if not pos or not pos.point then return end
-    local px, py = pos.x or 0, pos.y or 0
-    local anchor = pos.point
 
-    -- Runtime conversion: if a non-CENTER-grow bar still has a CENTER position
-    -- (legacy data, Blizzard import, or dev migration gap), convert to edge
-    -- format for SetPoint so the bar grows from the correct edge.
-    -- No persistence: positions are only saved by unlock mode's Save & Exit.
-    if anchor == "CENTER" and barKey then
-        local bd = barDataByKey[barKey]
-        local grow = bd and bd.growDirection or "CENTER"
-        if grow ~= "CENTER" then
-            local fw = frame:GetWidth() or 0
-            local fh = frame:GetHeight() or 0
-            if grow == "RIGHT" and fw > 0 then
-                anchor = "LEFT"; px = px - fw / 2
-            elseif grow == "LEFT" and fw > 0 then
-                anchor = "RIGHT"; px = px + fw / 2
-            elseif grow == "DOWN" and fh > 0 then
-                anchor = "TOP"; py = py + fh / 2
-            elseif grow == "UP" and fh > 0 then
-                anchor = "BOTTOM"; py = py - fh / 2
-            end
+-- Resolve the frame anchor point for a bar from its growth direction and the
+-- optional "anchor first row" pin.
+--
+-- Without anchorFirstRow this returns the single growth edge (legacy behavior:
+-- RIGHT -> LEFT, DOWN -> TOP, ...) so the fixed edge stays put as the bar
+-- resizes along its growth axis. The perpendicular axis is left unpinned, i.e.
+-- centered -- which is why a horizontal bar re-centers vertically when it grows
+-- a second row.
+--
+-- With anchorFirstRow set, the leading edge on the PERPENDICULAR axis is pinned
+-- too, yielding a corner/edge anchor (e.g. TOPLEFT). Icons lay out from the
+-- frame's TOPLEFT, so the first row sits at the top (horizontal bars) or the
+-- first column at the left (vertical bars); pinning that edge makes extra rows
+-- grow away from the first row instead of re-centering the whole bar.
+-- Defined as ns.* fields (not file-scope locals) to stay under Lua 5.1's
+-- 200-local main-chunk ceiling.
+function ns.ResolveGrowAnchorPoint(barData)
+    local grow = (barData and barData.growDirection) or "CENTER"
+    local horiz, vert  -- "LEFT"/"RIGHT" and "TOP"/"BOTTOM" components
+    if grow == "RIGHT" then
+        horiz = "LEFT"
+    elseif grow == "LEFT" then
+        horiz = "RIGHT"
+    elseif grow == "DOWN" then
+        vert = "TOP"
+    elseif grow == "UP" then
+        vert = "BOTTOM"
+    end
+    if barData and barData.anchorFirstRow then
+        if barData.verticalOrientation then
+            -- Vertical bar: rows stack along the width axis -> pin LEFT.
+            horiz = horiz or "LEFT"
+        else
+            -- Horizontal bar: rows stack along the height axis -> pin TOP.
+            vert = vert or "TOP"
         end
     end
+    local pt = (vert or "") .. (horiz or "")
+    if pt == "" then
+        return "CENTER"
+    end
+    return pt
+end
+
+-- Convert a frame CENTER coord to the coord for anchor point `pt`. An axis with
+-- no LEFT/RIGHT (or TOP/BOTTOM) component keeps the center; a zero-extent frame
+-- yields a zero offset, so this is safe for empty bars.
+function ns.CenterToAnchorCoord(pt, x, y, fw, fh)
+    local sx, sy = x, y
+    if pt:find("LEFT", 1, true) then
+        sx = x - fw / 2
+    elseif pt:find("RIGHT", 1, true) then
+        sx = x + fw / 2
+    end
+    if pt:find("TOP", 1, true) then
+        sy = y + fh / 2
+    elseif pt:find("BOTTOM", 1, true) then
+        sy = y - fh / 2
+    end
+    return sx, sy
+end
+
+-- Inverse of CenterToAnchorCoord: recover the frame CENTER coord from a stored
+-- anchor-point coord. Round-trips losslessly for edges, corners, and CENTER.
+function ns.AnchorCoordToCenter(pt, sx, sy, fw, fh)
+    local x, y = sx, sy
+    if pt:find("LEFT", 1, true) then
+        x = sx + fw / 2
+    elseif pt:find("RIGHT", 1, true) then
+        x = sx - fw / 2
+    end
+    if pt:find("TOP", 1, true) then
+        y = sy - fh / 2
+    elseif pt:find("BOTTOM", 1, true) then
+        y = sy + fh / 2
+    end
+    return x, y
+end
+
+local function ApplyBarPositionCentered(frame, pos, barKey)
+    if not pos or not pos.point then return end
+    local fw = frame:GetWidth() or 0
+    local fh = frame:GetHeight() or 0
+
+    -- Re-derive the anchor from the bar's CURRENT growth + first-row settings.
+    -- Recover the frame center from the stored anchor coord, then re-project it
+    -- onto the resolved anchor point. This keeps the growth edge fixed across
+    -- size changes (edge preservation), transparently upgrades legacy CENTER /
+    -- edge positions (Blizzard import, dev migration gap), and lets the "anchor
+    -- first row" toggle take effect without re-dragging -- all as a lossless
+    -- coordinate round-trip. No persistence: positions are only saved by unlock
+    -- mode's Save & Exit.
+    local cx, cy = ns.AnchorCoordToCenter(pos.point, pos.x or 0, pos.y or 0, fw, fh)
+    local anchor = barKey and ns.ResolveGrowAnchorPoint(barDataByKey[barKey]) or "CENTER"
+    local px, py = ns.CenterToAnchorCoord(anchor, cx, cy, fw, fh)
 
     -- Snap to physical pixel grid. For CENTER anchor, use SnapCenterForDim
     -- to preserve the +0.5 offset that odd-pixel-dim frames need so their
@@ -2627,8 +2697,6 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
     if PPa then
         local es = frame:GetEffectiveScale()
         if anchor == "CENTER" and PPa.SnapCenterForDim then
-            local fw = frame:GetWidth() or 0
-            local fh = frame:GetHeight() or 0
             px = PPa.SnapCenterForDim(px, fw, es)
             py = PPa.SnapCenterForDim(py, fh, es)
         elseif PPa.SnapForES then
@@ -2650,52 +2718,36 @@ local function SaveCDMBarPosition(barKey, frame)
     local uiW, uiH = UIParent:GetSize()
     local ratio = fScale / uiScale
 
-    -- Determine anchor point from grow direction so the bar's fixed edge
-    -- stays put when icon count changes (spec swaps, combat buff churn).
+    -- Determine anchor point from grow direction (and the "anchor first row"
+    -- pin) so the bar's fixed edge/corner stays put when icon count changes
+    -- (spec swaps, combat buff churn, a row spilling in/out).
     local bd = barDataByKey[barKey]
-    local grow = bd and bd.growDirection or "CENTER"
-    local pt
-    if grow == "RIGHT" then pt = "LEFT"
-    elseif grow == "LEFT"  then pt = "RIGHT"
-    elseif grow == "DOWN"  then pt = "TOP"
-    elseif grow == "UP"    then pt = "BOTTOM"
-    elseif grow == "CENTER" then pt = "CENTER"
-    else                        pt = "CENTER"
-    end
+    local pt = ns.ResolveGrowAnchorPoint(bd)
 
+    -- Read each axis from the matching frame edge (corner points pin both).
+    local cx, cy = frame:GetCenter()
+    if not cx or not cy then return end
     local ax, ay
-    if pt == "LEFT" then
+    if pt:find("LEFT", 1, true) then
         local lx = frame:GetLeft()
         if not lx then return end
-        local cy = select(2, frame:GetCenter())
-        if not cy then return end
         ax = lx * ratio
-        ay = cy * ratio
-    elseif pt == "RIGHT" then
+    elseif pt:find("RIGHT", 1, true) then
         local rx = frame:GetRight()
         if not rx then return end
-        local cy = select(2, frame:GetCenter())
-        if not cy then return end
         ax = rx * ratio
-        ay = cy * ratio
-    elseif pt == "TOP" then
-        local cx = frame:GetCenter()
-        if not cx then return end
+    else
+        ax = cx * ratio
+    end
+    if pt:find("TOP", 1, true) then
         local ty = frame:GetTop()
         if not ty then return end
-        ax = cx * ratio
         ay = ty * ratio
-    elseif pt == "BOTTOM" then
-        local cx = frame:GetCenter()
-        if not cx then return end
+    elseif pt:find("BOTTOM", 1, true) then
         local by = frame:GetBottom()
         if not by then return end
-        ax = cx * ratio
         ay = by * ratio
-    elseif pt == "CENTER" then
-        local cx, cy = frame:GetCenter()
-        if not cx or not cy then return end
-        ax = cx * ratio
+    else
         ay = cy * ratio
     end
 
@@ -2705,6 +2757,20 @@ local function SaveCDMBarPosition(barKey, frame)
         x = (ax - uiW / 2) / scale,
         y = (ay - uiH / 2) / scale,
     }
+end
+
+-- Re-persist a bar's saved position in its CURRENT anchor format from live
+-- geometry. Needed when the "anchor first row" toggle flips: a stored center /
+-- single-edge position can't pin the first-row edge across row changes -- only
+-- a stored corner can -- so we recapture the corner from where the bar sits
+-- right now. Guarded to free-standing bars (snapped bars are owned by the unlock
+-- anchor system, which reads unlockAnchors, not cdmBarPositions).
+function ns.RecaptureBarAnchor(barKey)
+    local frame = cdmBarFrames[barKey]
+    if not frame then return end
+    if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("CDM_" .. barKey) then return end
+    if not frame:GetLeft() then return end
+    SaveCDMBarPosition(barKey, frame)
 end
 
 -------------------------------------------------------------------------------
@@ -6371,21 +6437,20 @@ RegisterCDMUnlockElements = function()
                     local bd2 = barDataByKey[key]
                     local grow = bd2 and bd2.growDirection
                     local frame = cdmBarFrames[key]
-                    if grow and grow ~= "CENTER" and frame then
+                    -- Store at the growth edge (and, when "anchor first row" is
+                    -- on, the first-row corner) so SetSize grows naturally from
+                    -- the fixed edge/corner. Unlock mode always provides CENTER
+                    -- coords; convert to the resolved anchor. Skip a conversion
+                    -- on any axis with no extent yet (empty bar).
+                    local resolved = ns.ResolveGrowAnchorPoint(bd2)
+                    if resolved ~= "CENTER" and frame then
                         local fw = frame:GetWidth() or 0
                         local fh = frame:GetHeight() or 0
-                        if grow == "RIGHT" and fw > 0 then
-                            storePoint = "LEFT"
-                            storeX = x - fw / 2
-                        elseif grow == "LEFT" and fw > 0 then
-                            storePoint = "RIGHT"
-                            storeX = x + fw / 2
-                        elseif grow == "DOWN" and fh > 0 then
-                            storePoint = "TOP"
-                            storeY = y + fh / 2
-                        elseif grow == "UP" and fh > 0 then
-                            storePoint = "BOTTOM"
-                            storeY = y - fh / 2
+                        local needW = resolved:find("LEFT", 1, true) or resolved:find("RIGHT", 1, true)
+                        local needH = resolved:find("TOP", 1, true) or resolved:find("BOTTOM", 1, true)
+                        if (not needW or fw > 0) and (not needH or fh > 0) then
+                            storePoint = resolved
+                            storeX, storeY = ns.CenterToAnchorCoord(resolved, x, y, fw, fh)
                         end
                     end
                     -- Phase 2 follow baseline: capture the anchor target's center
@@ -6418,24 +6483,15 @@ RegisterCDMUnlockElements = function()
                 loadPos = function()
                     local pos = ECME.db.profile.cdmBarPositions[key]
                     if not pos or not pos.point then return pos end
-                    -- Convert edge-stored positions back to CENTER for the
+                    -- Convert edge/corner-stored positions back to CENTER for the
                     -- unlock mode system (it always works with CENTER coords).
                     local pt = pos.point
-                    if pt == "LEFT" or pt == "RIGHT" or pt == "TOP" or pt == "BOTTOM" then
+                    if pt ~= "CENTER" and pt ~= "" then
                         local frame = cdmBarFrames[key]
                         if frame then
                             local fw = frame:GetWidth() or 0
                             local fh = frame:GetHeight() or 0
-                            local cx, cy = pos.x or 0, pos.y or 0
-                            if pt == "LEFT" then
-                                cx = cx + fw / 2
-                            elseif pt == "RIGHT" then
-                                cx = cx - fw / 2
-                            elseif pt == "TOP" then
-                                cy = cy - fh / 2
-                            elseif pt == "BOTTOM" then
-                                cy = cy + fh / 2
-                            end
+                            local cx, cy = ns.AnchorCoordToCenter(pt, pos.x or 0, pos.y or 0, fw, fh)
                             return { point = "CENTER", relPoint = pos.relPoint, x = cx, y = cy }
                         end
                     end
