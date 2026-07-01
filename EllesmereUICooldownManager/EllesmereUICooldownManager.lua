@@ -4240,6 +4240,7 @@ local function RefreshCDMIconAppearance(barKey)
             local showCD = barData.showCooldownText
             if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
             cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+			cd:SetHideCountdownNumbers(not showCD)
             -- Per-spell Reverse Swipe: flips this icon's swipe direction away from
             -- the bar default (buffs fill up, cooldowns deplete). Entire block is
             -- gated by the session flag, so it is ZERO cost / ZERO behavior change
@@ -4475,9 +4476,22 @@ local function RefreshCDMIconAppearance(barKey)
                     end
                     local cseInfo = C_Spell.GetSpellCooldown(glowLive)
                     if cseInfo and (not cseInfo.isActive or cseInfo.isOnGCD) then
-                        local gr, gg, gb = ResolveGlowColor(ss)
-                        StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
-                        ifd._cdStateGlowOn = true
+                        -- Not on cooldown is not the same as "ready": resource-gated
+                        -- spells (e.g. Void Ray, which has no cooldown at all outside
+                        -- Void Metamorphosis) must also pass IsSpellUsable + a live
+                        -- resource check, same as the CD Ready Glow logic in
+                        -- EllesmereUICdmHooks.lua. This rebuild path runs independently
+                        -- of those event listeners, so it needs its own copy of the gate.
+                        local isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(glowLive)
+                        if isUsable == true and ns.HasEnoughResources
+                           and (not ns._cdGlowPowerConfirmed or not ns.HasEnoughResources(glowLive)) then
+                            isUsable = false
+                        end
+                        if isUsable == true then
+                            local gr, gg, gb = ResolveGlowColor(ss)
+                            StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
+                            ifd._cdStateGlowOn = true
+                        end
                     end
                 end
             end
@@ -4534,9 +4548,20 @@ local function RefreshCDMIconAppearance(barKey)
                     if not ifd or not ifd._cdStateGlowOn then
                         if (cse == "pixelGlowReady" or cse == "buttonGlowReady")
                            and not onCD and glowOv then
-                            local gr, gg, gb = ResolveGlowColor(csSs)
-                            StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
-                            if ifd then ifd._cdStateGlowOn = true end
+                            -- Same gate as above: not-on-cooldown is not "ready" for
+                            -- resource-gated spells. Mirrors EllesmereUICdmHooks.lua's
+                            -- CD Ready Glow check since this rebuild path runs outside
+                            -- those event listeners.
+                            local isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(csLive)
+                            if isUsable == true and ns.HasEnoughResources
+                               and (not ns._cdGlowPowerConfirmed or not ns.HasEnoughResources(csLive)) then
+                                isUsable = false
+                            end
+                            if isUsable == true then
+                                local gr, gg, gb = ResolveGlowColor(csSs)
+                                StartNativeGlow(glowOv, cse == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
+                                if ifd then ifd._cdStateGlowOn = true end
+                            end  
                         end
                     end
                 end
@@ -6082,6 +6107,11 @@ function ns.FullCDMRebuild(reason)
 
     -- 7. Glows
     if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+	    -- Re-evaluate CD ready glow resource state now that all frames are fully
+    -- decorated. The SetDesaturated hook may have started glows before
+    -- IsSpellUsable was checked (e.g. on login/reload). This runs once, after
+    -- CollectAndReanchor has finished, so fd.glowOverlay is guaranteed to exist.
+    if ns.QueueCDGlowResourceCheck then ns.QueueCDGlowResourceCheck() end																		 																	 
 end
 
 function ns.GetRebuildGen()
