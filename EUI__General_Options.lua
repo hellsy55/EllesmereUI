@@ -3427,7 +3427,7 @@ initFrame:SetScript("OnEvent", function(self)
             for _, it in ipairs(items) do
                 local key = it.key
                 resourceItems[#resourceItems + 1] = {
-                    label = it.label,
+                    label = EllesmereUI.L(it.label),
                     getColor = function()
                         return EllesmereUI.GetClassResourceColor(key)
                             or { r = 1, g = 1, b = 1 }
