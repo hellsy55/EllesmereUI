@@ -9020,6 +9020,19 @@ function EllesmereUI:RefreshPage(force)
     end
 end
 
+-- Public: snap the settings scroll back to the top
+-- (e.g. in resource bars clicking on a simple section
+-- to the Advanced page)
+function EllesmereUI:ScrollToTop()
+    if scrollFrame and scrollFrame.SetVerticalScroll then
+        scrollTarget = 0
+        isSmoothing = false
+        if smoothFrame then smoothFrame:Hide() end
+        scrollFrame:SetVerticalScroll(0)
+        UpdateScrollThumb()
+    end
+end
+
 function EllesmereUI:GetActiveModule()
     return activeModule
 end
@@ -9425,6 +9438,9 @@ function EllesmereUI:Toggle()
 end
 function EllesmereUI:IsShown() return mainFrame and mainFrame:IsShown() end
 function EllesmereUI:GetScrollFrame() return scrollFrame end
+-- The main settings window frame. Used e.g. to scope popup click-catchers to the
+-- panel instead of UIParent, so an open popup doesn't block world mouse/mouselook.
+function EllesmereUI:GetMainFrame() return mainFrame end
 function EllesmereUI:GetActivePage() return activePage end
 
 --- Apply a user-defined panel scale on top of the pixel-perfect base scale.
@@ -11200,4 +11216,3 @@ do
     EllesmereUI._SWIFTMEND_SPELL = 18562
     EllesmereUI._SWIFTMEND_ICON  = 134914
 end
-

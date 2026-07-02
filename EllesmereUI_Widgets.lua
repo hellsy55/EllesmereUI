@@ -6113,6 +6113,52 @@ local function BuildInlineToggle(opts)
     return toggle
 end
 
+-------------------------------------------------------------------------------
+--  Talent helpers
+-------------------------------------------------------------------------------
+-- Enumerate every choosable talent in the active loadout (class + spec trees),
+-- returning a name-sorted list of { spellID, name }. Returns {} when traits
+-- aren't available yet. Only the active loadout is enumerable by the API.
+local function GetLoadoutTalents()
+    local talents = {}
+    local configID = C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID()
+    if not configID then return talents end
+    local configInfo = C_Traits and C_Traits.GetConfigInfo and C_Traits.GetConfigInfo(configID)
+    if not configInfo or not configInfo.treeIDs then return talents end
+
+    local seenSpells = {}
+    for _, treeID in ipairs(configInfo.treeIDs) do
+        local nodes = C_Traits.GetTreeNodes(treeID)
+        if nodes then
+            for _, nodeID in ipairs(nodes) do
+                local nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
+                if nodeInfo and nodeInfo.ID and nodeInfo.ID > 0
+                    and nodeInfo.entryIDs and #nodeInfo.entryIDs > 0
+                    and not nodeInfo.subTreeID then
+                    for _, entryID in ipairs(nodeInfo.entryIDs) do
+                        local entryInfo = C_Traits.GetEntryInfo(configID, entryID)
+                        if entryInfo and entryInfo.definitionID then
+                            local defInfo = C_Traits.GetDefinitionInfo(entryInfo.definitionID)
+                            if defInfo and defInfo.spellID and not seenSpells[defInfo.spellID] then
+                                local spellName = C_Spell.GetSpellName(defInfo.spellID)
+                                if spellName and spellName ~= "" then
+                                    seenSpells[defInfo.spellID] = true
+                                    talents[#talents + 1] = { spellID = defInfo.spellID, name = spellName }
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(talents, function(a, b) return a.name < b.name end)
+    return talents
+end
+
+EllesmereUI.GetLoadoutTalents   = GetLoadoutTalents
+
 EllesmereUI.BuildSliderCore     = BuildSliderCore
 EllesmereUI.BuildDropdownControl = BuildDropdownControl
 EllesmereUI.BuildColorSwatch    = BuildColorSwatch
