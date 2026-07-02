@@ -190,6 +190,9 @@ local DM_DEFAULTS = {
             iconStyle       = "spec",
             iconColorUseAccent = false,
             iconColor       = { r = 1, g = 1, b = 1 },
+            iconBorderTexture = "solid",
+            iconBorderSize    = 0,
+            iconBorderR = 0, iconBorderG = 0, iconBorderB = 0, iconBorderA = 1,
             showClassColor  = true,
             showPinnedSelf  = false,
             showHoverTooltip = true,
@@ -244,6 +247,50 @@ do
         return t
     end
     EllesmereUI.RegisterBorderDefaults("damagemeters", {
+        ["glow"] = {
+            defaultSize = 1,
+            sizes = AllSizes(0, 0, 0, 0),
+        },
+        ["blizz"] = {
+            defaultSize = 3,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 2, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 3, offsetY = 2, shiftX = 1, shiftY = 0 },
+                [3] = { offsetX = 4, offsetY = 2, shiftX = 1, shiftY = 0 },
+                [4] = { offsetX = 4, offsetY = 2, shiftX = 1, shiftY = 0 },
+            },
+        },
+        ["dialog"] = {
+            defaultSize = 1,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 3, offsetY = 3, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 3, offsetY = 5, shiftX = 0, shiftY = 0 },
+                [3] = { offsetX = 3, offsetY = 5, shiftX = 0, shiftY = 0 },
+                [4] = { offsetX = 5, offsetY = 10, shiftX = 0, shiftY = 0 },
+            },
+        },
+        ["sm:Blizzard Achievement Wood"] = {
+            defaultSize = 1,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 1, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 1, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [3] = { offsetX = 1, offsetY = 6, shiftX = 0, shiftY = 0 },
+                [4] = { offsetX = 1, offsetY = 8, shiftX = 0, shiftY = 0 },
+            },
+        },
+    })
+end
+
+do
+    local function AllSizes(ox, oy, sx, sy)
+        local t = {}
+        for k = 0, 4 do t[k] = { offsetX = ox, offsetY = oy, shiftX = sx, shiftY = sy } end
+        return t
+    end
+    EllesmereUI.RegisterBorderDefaults("damagemeters_icon", {
         ["glow"] = {
             defaultSize = 1,
             sizes = AllSizes(0, 0, 0, 0),
@@ -1939,6 +1986,27 @@ local function CreateDMWindow(winIdx)
                 c.borderTextureShiftX, c.borderTextureShiftY, "damagemeters", sz)
         end
         bar.ApplyBorder()
+        function bar.ApplyIconBorder()
+            local c = DB()
+            local sz = c.iconBorderSize or 0
+            local showIcon = (c.iconStyle or "spec") ~= "none"
+            if sz <= 0 or not showIcon then
+                if bar._iconBorderFrame then bar._iconBorderFrame:Hide() end
+                return
+            end
+            if not bar._iconBorderFrame then
+                bar._iconBorderFrame = CreateFrame("Frame", nil, bar.row)
+                bar._iconBorderFrame:SetFrameLevel(bar.row:GetFrameLevel() + 6)
+                bar._iconBorderFrame:SetAllPoints(bar.classIcon) -- folgt Icon-Größe/Position automatisch
+            end
+            bar._iconBorderFrame:Show()
+            local tex = c.iconBorderTexture or "solid"
+            EllesmereUI.ApplyBorderStyle(bar._iconBorderFrame, sz,
+                c.iconBorderR or 0, c.iconBorderG or 0, c.iconBorderB or 0, c.iconBorderA or 1,
+                tex, c.iconBorderTextureOffset, c.iconBorderTextureOffsetY,
+                c.iconBorderTextureShiftX, c.iconBorderTextureShiftY, "damagemeters_icon", sz)
+        end
+        bar.ApplyIconBorder()
         -- Per-bar track background (behind the fill). Default alpha 0 = invisible.
         bar._bg = bar.row:CreateTexture(nil, "BACKGROUND", nil, -8)
         bar._bg:SetAllPoints(bar.row)
@@ -4208,6 +4276,19 @@ ns.ApplyIconColor = function()
     else local c = cfg.iconColor; r = c and c.r or 1; g = c and c.g or 1; b = c and c.b or 1 end
     for _, w in ipairs(_windows) do
         for _, icon in ipairs(w.hdrIcons) do icon:SetVertexColor(r, g, b, ICON_ALPHA) end
+    end
+end
+
+ns.ApplyIconBorder = function()
+    for _, w in ipairs(_windows) do
+        if w.rowPool then
+            for _, bar in ipairs(w.rowPool) do
+                if bar.ApplyIconBorder then bar.ApplyIconBorder() end
+            end
+        end
+        if w.stickyPlayer and w.stickyPlayer.ApplyIconBorder then
+            w.stickyPlayer.ApplyIconBorder()
+        end
     end
 end
 
