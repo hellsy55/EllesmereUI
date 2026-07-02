@@ -13,4 +13,5 @@
 EllesmereUIResourceBars.lua
 
 # Options
+EUI_ResourceBars_Advanced.lua
 EUI_ResourceBars_Options.lua
