@@ -1088,10 +1088,10 @@ do
         local vers = (issecretvalue(versRating) or issecretvalue(versBase)) and versRating or (versRating + versBase)
 
         local txt =
-            format("|cff%sCrit:|r  |cffffffff%.2f%%|r", labelHex, crit) .. "\n" ..
-            format("|cff%sHaste:|r  |cffffffff%.2f%%|r", labelHex, haste) .. "\n" ..
-            format("|cff%sMastery:|r  |cffffffff%.2f%%|r", labelHex, mastery) .. "\n" ..
-            format("|cff%sVers:|r  |cffffffff%.2f%%|r", labelHex, vers)
+            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Crit"), crit) .. "\n" ..
+            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Haste"), haste) .. "\n" ..
+            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Mastery"), mastery) .. "\n" ..
+            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Vers"), vers)
 
         if EllesmereUI.QoLExtrasGet("showTertiaryStats") then
             local tc = EllesmereUI.QoLExtrasGet("tertiaryStatsColor")
@@ -1107,9 +1107,9 @@ do
             local avoidance = GetAvoidance()
             local speed = GetSpeed()
             txt = txt .. "\n" ..
-                format("|cff%sLeech:|r  |cffffffff%.2f%%|r", tertHex, leech) .. "\n" ..
-                format("|cff%sAvoidance:|r  |cffffffff%.2f%%|r", tertHex, avoidance) .. "\n" ..
-                format("|cff%sSpeed:|r  |cffffffff%.2f%%|r", tertHex, speed)
+                format("|cff%s%s:|r  |cffffffff%.2f%%|r", tertHex, EllesmereUI.L("Leech"), leech) .. "\n" ..
+                format("|cff%s%s:|r  |cffffffff%.2f%%|r", tertHex, EllesmereUI.L("Avoidance"), avoidance) .. "\n" ..
+                format("|cff%s%s:|r  |cffffffff%.2f%%|r", tertHex, EllesmereUI.L("Speed"), speed)
         end
 
         statsText:SetText(txt)
