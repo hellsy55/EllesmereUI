@@ -187,6 +187,7 @@ local DM_DEFAULTS = {
             barHeight       = 18,
             barSpacing      = 2,
             numberFormat    = 2,
+            forceEnglishUnits = false, -- force K/M/B units, ignoring CJK locale's 萬/億 (opt-in; default keeps localized units)
             iconStyle       = "spec",
             iconColorUseAccent = false,
             iconColor       = { r = 1, g = 1, b = 1 },
@@ -948,27 +949,43 @@ local CJK = ({
     zhTW = { thousand = "千", wan = "萬", yi = "億" },
     koKR = { thousand = "천", wan = "만", yi = "억" },
 })[GetLocale()]
-do
-    local opts
-    if CJK then
-        opts = {
+-- Choose the abbreviation breakpoint table. CJK clients normally group by
+-- 萬/억; when the user opts into forceEnglish we fall through to K/M/B even on
+-- a CJK locale. Non-CJK clients always get K/M/B (forceEnglish is a no-op).
+local function BuildAbbrevOpts(forceEnglish)
+    if CJK and not forceEnglish then
+        return {
             { breakpoint = 100000000, abbreviation = CJK.yi,       significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
             { breakpoint = 10000,     abbreviation = CJK.wan,      significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
             { breakpoint = 1000,      abbreviation = CJK.thousand, significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
             { breakpoint = 1,         abbreviation = "",           significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
         }
     else
-        opts = {
+        return {
             { breakpoint = 1000000000, abbreviation = "B", significandDivisor = 10000000, fractionDivisor = 100, abbreviationIsGlobal = false },
             { breakpoint = 1000000,    abbreviation = "M", significandDivisor = 10000,    fractionDivisor = 100, abbreviationIsGlobal = false },
             { breakpoint = 1000,       abbreviation = "K", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
             { breakpoint = 1,          abbreviation = "",  significandDivisor = 1,         fractionDivisor = 1,   abbreviationIsGlobal = false },
         }
     end
+end
+
+-- Rebuild _abbreviateCfg from the current saved setting. Runs once at load
+-- (DB not yet ready -> reads false -> identical to the previous behavior), once
+-- after the DB is created, and again whenever the options toggle flips. Cheap:
+-- just rebuilds one config object, never touches per-bar/per-refresh work.
+local function RebuildAbbrevCfg()
+    local forceEnglish = false
+    if ns.EDM and ns.EDM.DB then
+        local db = ns.EDM.DB()
+        if db and db.forceEnglishUnits then forceEnglish = true end
+    end
     if CreateAbbreviateConfig then
-        _abbreviateCfg = { config = CreateAbbreviateConfig(opts) }
+        _abbreviateCfg = { config = CreateAbbreviateConfig(BuildAbbrevOpts(forceEnglish)) }
     end
 end
+RebuildAbbrevCfg()
+ns.RebuildNumberFormat = RebuildAbbrevCfg
 
 local function AbbrevNumber(n)
     if n == nil then return "0" end
@@ -4810,6 +4827,9 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     EnsureDB()
+    -- DB is now available; rebuild number format so a saved forceEnglishUnits
+    -- preference is applied at login (load-time build ran before the DB existed).
+    if ns.RebuildNumberFormat then ns.RebuildNumberFormat() end
     -- Disable Blizzard's built-in damage meter UI; C_DamageMeter API still works
     SetCVarSafe("damageMeterEnabled", 0)
     AppendDMSharedMedia()
