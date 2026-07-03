@@ -317,6 +317,28 @@ end
                 GameTooltipStatusBar:SetStatusBarColor(cc.r, cc.g, cc.b)
             end
         end
+        -- Add guild rank next to guild name : Name-Realm [Rank]
+        if unit and db and db.tooltipShowGuildRank ~= false then
+            local guildName, guildRankName = GetGuildInfo(unit)
+            if guildName and guildRankName and not (_isSecret and _isSecret(guildRankName)) then
+                -- Find the line once then cache it
+                if not _guildL then
+                    for i = 2, nLinesBefore do
+                        local line = _G["GameTooltipTextLeft" .. i]
+                        if line then
+                            local text = line:GetText()
+                            if text and string.find(text, guildName, 1, true) then
+                                _guildL = line
+                                break
+                            end
+                        end
+                    end
+                end
+                if _guildL then
+                    _guildL:SetText(_guildL:GetText() .. " [" .. guildRankName .. "]")
+                end
+            end
+        end
         -- M+ Score (append-only, deduped against any equivalent foreign line).
         if unit and db and db.tooltipMythicScore ~= false
             and C_PlayerInfo and C_PlayerInfo.GetPlayerMythicPlusRatingSummary then
