@@ -2305,7 +2305,7 @@ local function SkinCharacterSheet()
                                     if parryFromStr and parryFromStr > 0 then
                                         GameTooltip:AddLine(" ")
                                         GameTooltip:AddLine(string.format(L("Increases parry chance by %.2f%%."), parryFromStr), 1, 1, 1, true)
-                                        GameTooltip:AddLine(L("|cff959595(Before diminishing returns)|r"), 1, 1, 1, true)
+                                        GameTooltip:AddLine(L("|cff888888(Before diminishing returns)|r"), 1, 1, 1, true)
                                     end
                                 end
                             elseif stat.name == "Agility" then
@@ -2315,7 +2315,7 @@ local function SkinCharacterSheet()
                                     if dodgeChanceStr and dodgeChanceStr > 0 then
                                         GameTooltip:AddLine(" ")
                                         GameTooltip:AddLine(string.format(L("Increases dodge chance by %.2f%%."), dodgeChanceStr), 1, 1, 1, true)
-                                        GameTooltip:AddLine(L("|cff959595(Before diminishing returns)|r"), 1, 1, 1, true)
+                                        GameTooltip:AddLine(L("|cff888888(Before diminishing returns)|r"), 1, 1, 1, true)
                                     end
                                 end
                             end
@@ -2338,7 +2338,7 @@ local function SkinCharacterSheet()
                             if armorReduction > 0 then
                                 GameTooltip:AddLine(" ")
                                 GameTooltip:AddLine(string.format(L("Physical damage reduction: %.2f%%"), armorReduction), 1, 1, 1, true)
-                                GameTooltip:AddLine(L("|cff959595(Against an evenly matched enemy)|r"), 1, 1, 1, true)
+                                GameTooltip:AddLine(L("|cff888888(Against an evenly matched enemy)|r"), 1, 1, 1, true)
                             end
 
                             -- Reduction against target
@@ -2359,7 +2359,7 @@ local function SkinCharacterSheet()
                             if armorReduction > 0 then
                                 GameTooltip:AddLine(" ")
                                 GameTooltip:AddLine(string.format(L("Physical damage reduction: %.2f%%"), armorReduction), 1, 1, 1, true)
-                                GameTooltip:AddLine(L("|cff959595(Against an evenly matched enemy)|r"), 1, 1, 1, true)
+                                GameTooltip:AddLine(L("|cff888888(Against an evenly matched enemy)|r"), 1, 1, 1, true)
                             end
 
                             -- Reduction against target
