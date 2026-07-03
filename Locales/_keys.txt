@@ -32,6 +32,7 @@
 *Please enter a profile name
 + Add New Bar
 A profile named \
+Abilities
 Activate Party Mode
 Active Profile
 Active State Duration
