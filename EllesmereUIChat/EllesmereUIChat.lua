@@ -50,6 +50,7 @@ local CHAT_DEFAULTS = {
             extendBgBehindTabs = false,
             forceOnScreen = false,
             showFriends = true,
+            showDurability = true,
             showCopy = true,
             showPortals = true,
             showVoice = false,
@@ -426,6 +427,7 @@ function ECHAT.ApplySidebarIcons()
     -- (and free-move is off). Matches the offset applied at icon creation time.
     local iconTopShift = (cfg.extendBgBehindTabs and not cfg.freeMoveIcons) and TAB_STRIP_H or 0
     local showFriends = cfg.showFriends ~= false
+    local showDurability = cfg.showDurability ~= false
     local showCopy = cfg.showCopy ~= false
     local showPortals = cfg.showPortals ~= false
     local showVoice = cfg.showVoice ~= false
@@ -440,6 +442,21 @@ function ECHAT.ApplySidebarIcons()
         end
     end
     if CFD(cf1).friendsCount then CFD(cf1).friendsCount:SetShown(showFriends) end
+
+    -- Durability + percent (re-anchor with custom spacing)
+    if CFD(cf1).durabilityBtn then
+        CFD(cf1).durabilityBtn:SetShown(showDurability)
+        if showDurability then
+            CFD(cf1).durabilityBtn:ClearAllPoints()
+            local prevAnchor = showFriends and CFD(cf1).friendsCount or sb
+            if prevAnchor == sb then
+                CFD(cf1).durabilityBtn:SetPoint("TOP", sb, "TOP", 0, -ICON_GAP + iconTopShift)
+            else
+                CFD(cf1).durabilityBtn:SetPoint("TOP", prevAnchor, "BOTTOM", 0, -ICON_GAP)
+            end
+        end
+    end
+    if CFD(cf1).durabilityPct then CFD(cf1).durabilityPct:SetShown(showDurability) end
 
     -- Build ordered list of visible top-group buttons, sorted by check order
     local iconOrder = cfg.sidebarIconOrder or {}
@@ -467,7 +484,12 @@ function ECHAT.ApplySidebarIcons()
     if CFD(cf1).settingsBtn then CFD(cf1).settingsBtn:Hide() end
 
     -- Re-anchor visible buttons in chain (sorted by order)
-    local anchor = showFriends and CFD(cf1).friendsCount or nil
+    local anchor = nil
+    if showDurability then
+        anchor = CFD(cf1).durabilityPct
+    elseif showFriends then
+        anchor = CFD(cf1).friendsCount
+    end
     for _, entry in ipairs(topBtns) do
         entry.btn:ClearAllPoints()
         if anchor then
@@ -492,12 +514,13 @@ end
 -- reload. The options panel uses this to fire a reload prompt only when adding a
 -- brand-new icon (scrollBtn is always created, so it never needs one).
 local SIDEBAR_ICON_REFS = {
-    showFriends  = "friendsBtn",
-    showCopy     = "copyBtn",
-    showPortals  = "portalBtn",
-    showVoice    = "voiceBtn",
-    showSettings = "settingsBtn",
-    showScroll   = "scrollBtn",
+    showFriends    = "friendsBtn",
+    showDurability = "durabilityBtn",
+    showCopy       = "copyBtn",
+    showPortals    = "portalBtn",
+    showVoice      = "voiceBtn",
+    showSettings   = "settingsBtn",
+    showScroll     = "scrollBtn",
 }
 
 function ECHAT.SidebarIconExists(key)
@@ -611,11 +634,13 @@ function ECHAT.ApplyIconColor()
     local ICON_HOVER_ALPHA = 0.9
     local d = CFD(cf1)
     local ICON_LABELS = {
-        friendsBtn = "Friends", copyBtn = "Copy Chat", portalBtn = "M+ Portals",
-        voiceBtn = "Voice/Channels", settingsBtn = "Settings", scrollBtn = "Scroll to Bottom",
+        friendsBtn = "Friends", durabilityBtn = "Durability", copyBtn = "Copy Chat",
+        portalBtn = "M+ Portals", voiceBtn = "Voice/Channels", settingsBtn = "Settings",
+        scrollBtn = "Scroll to Bottom",
     }
     local fc = d.friendsCount
-    for _, key in ipairs({ "friendsBtn", "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
+    local dp = d.durabilityPct
+    for _, key in ipairs({ "friendsBtn", "durabilityBtn", "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
         local btn = CFD(cf1)[key]
         if btn and btn._icon then
             btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
@@ -632,6 +657,20 @@ function ECHAT.ApplyIconColor()
                 btn:SetScript("OnLeave", function()
                     btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
                     fc:SetTextColor(r, g, b, 0.5)
+                    if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+                end)
+            elseif key == "durabilityBtn" and dp then
+                dp:SetTextColor(r, g, b, 0.5)
+                btn:SetScript("OnEnter", function(self)
+                    btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA)
+                    dp:SetTextColor(r, g, b, 0.9)
+                    if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                        EUI.ShowWidgetTooltip(self, label)
+                    end
+                end)
+                btn:SetScript("OnLeave", function()
+                    btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
+                    dp:SetTextColor(r, g, b, 0.5)
                     if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
                 end)
             else
@@ -698,6 +737,15 @@ function ECHAT.ApplySidebarIconScale()
     if CFD(cf1).friendsCount then
         CFD(cf1).friendsCount:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
         CFD(cf1).friendsCount._freeMoveH = max(7, BASE_FONT * scale)
+    end
+
+    if CFD(cf1).durabilityBtn then
+        CFD(cf1).durabilityBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
+        CFD(cf1).durabilityBtn._freeMoveH = BASE_FRIEND * scale
+    end
+    if CFD(cf1).durabilityPct then
+        CFD(cf1).durabilityPct:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
+        CFD(cf1).durabilityPct._freeMoveH = max(7, BASE_FONT * scale)
     end
 end
 
@@ -852,12 +900,13 @@ function ECHAT.ApplyIconFreeMove()
     if not cfg.freeMoveIcons then return end
 
     local btns = {
-        { ref = "friendsBtn", key = "friends" },
-        { ref = "copyBtn",    key = "copy" },
-        { ref = "portalBtn",  key = "portals" },
-        { ref = "voiceBtn",   key = "voice" },
-        { ref = "settingsBtn", key = "settings" },
-        { ref = "scrollBtn",  key = "scroll" },
+        { ref = "friendsBtn",    key = "friends" },
+        { ref = "durabilityBtn", key = "durability" },
+        { ref = "copyBtn",       key = "copy" },
+        { ref = "portalBtn",     key = "portals" },
+        { ref = "voiceBtn",      key = "voice" },
+        { ref = "settingsBtn",   key = "settings" },
+        { ref = "scrollBtn",     key = "scroll" },
     }
 
     -- PHASE 1 -- capture every icon's natural anchor (GetPoint anchor data +
@@ -2268,12 +2317,13 @@ local function SkinChatFrame(cf)
 
         -- Read visibility + ordering config at creation time
         local icfg = ECHAT.DB()
-        local showFriends  = icfg.showFriends ~= false
-        local showCopy     = icfg.showCopy ~= false
-        local showPortals  = icfg.showPortals ~= false
-        local showVoice    = icfg.showVoice ~= false
-        local showSettings = icfg.showSettings ~= false
-        local iconOrder    = icfg.sidebarIconOrder or {}
+        local showFriends    = icfg.showFriends ~= false
+        local showDurability = icfg.showDurability ~= false
+        local showCopy       = icfg.showCopy ~= false
+        local showPortals    = icfg.showPortals ~= false
+        local showVoice      = icfg.showVoice ~= false
+        local showSettings   = icfg.showSettings ~= false
+        local iconOrder      = icfg.sidebarIconOrder or {}
 
         -- When the background is extended behind the tabs, the sidebar panel
         -- grows upward by the tab-strip height. Shift the (chain-anchored) icons
@@ -2284,7 +2334,7 @@ local function SkinChatFrame(cf)
 
         -- Friends + count (always first when enabled)
         local anchor = nil
-        local friendsBtn, friendsCount, copyBtn, portalBtn, voiceBtn, settingsBtn
+        local friendsBtn, friendsCount, durabilityBtn, durabilityPct, copyBtn, portalBtn, voiceBtn, settingsBtn
 
         if showFriends then
             friendsBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_friends.png", nil, "TOP", -ICON_SPACING + iconTopShift)
@@ -2322,6 +2372,55 @@ local function SkinChatFrame(cf)
 
             CFD(cf).friendsCount = friendsCount
             anchor = friendsCount
+        end
+
+        if showDurability then
+            durabilityBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_durability.png")
+            durabilityBtn:SetSize(26, 26)
+
+            if anchor then
+                durabilityBtn:SetPoint("TOP", anchor, "BOTTOM", 0, -ICON_SPACING)
+            else
+                durabilityBtn:SetPoint("TOP", sidebar, "TOP", 0, -ICON_SPACING + iconTopShift)
+            end
+
+            durabilityPct = sidebar:CreateFontString(nil, "OVERLAY")
+            durabilityPct:SetFont(GetFont(), 9, "")
+            durabilityPct:SetTextColor(1, 1, 1, 0.5)
+            durabilityPct:SetPoint("TOP", durabilityBtn, "BOTTOM", 0, 0)
+            durabilityPct:SetText("100%")
+
+            durabilityBtn:HookScript("OnEnter", function(self)
+                durabilityPct:SetTextColor(1, 1, 1, 0.9)
+                if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                    EUI.ShowWidgetTooltip(self, "Equipment Durability")
+                end
+            end)
+            durabilityBtn:HookScript("OnLeave", function()
+                durabilityPct:SetTextColor(1, 1, 1, 0.5)
+                if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+            end)
+
+            local function UpdateDurability()
+                local cur, maxDur = 0, 0
+                for i = 1, 18 do
+                    local v1, v2 = GetInventoryItemDurability(i)
+                    if v1 and v2 and v2 > 0 then
+                        cur = cur + v1
+                        maxDur = maxDur + v2
+                    end
+                end
+                local pct = maxDur > 0 and math.floor((cur / maxDur) * 100) or 100
+                durabilityPct:SetText(pct .. "%")
+            end
+
+            local durEvents = CreateFrame("Frame")
+            durEvents:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+            durEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+            durEvents:SetScript("OnEvent", UpdateDurability)
+
+            CFD(cf).durabilityPct = durabilityPct
+            anchor = durabilityPct
         end
 
         -- Middle group: ordered by sidebarIconOrder config
@@ -2455,6 +2554,7 @@ local function SkinChatFrame(cf)
 
         local sbd = CFD(cf)
         sbd.friendsBtn = friendsBtn
+        sbd.durabilityBtn = durabilityBtn
         sbd.copyBtn = copyBtn
         sbd.portalBtn = portalBtn
         sbd.voiceBtn = voiceBtn
@@ -3183,6 +3283,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _sbd = CFD(_cf1)
             if _sbd.scrollBtn then _sbd.scrollBtn:SetShown(_cfg.showScroll ~= false) end
             if _sbd.friendsBtn then _sbd.friendsBtn:SetShown(_cfg.showFriends ~= false) end
+            if _sbd.durabilityBtn then _sbd.durabilityBtn:SetShown(_cfg.showDurability ~= false) end
             if _sbd.copyBtn then _sbd.copyBtn:SetShown(_cfg.showCopy ~= false) end
             if _sbd.portalBtn then _sbd.portalBtn:SetShown(_cfg.showPortals ~= false) end
             if _sbd.voiceBtn then _sbd.voiceBtn:SetShown(_cfg.showVoice ~= false) end
@@ -3214,6 +3315,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local _sbd = CFD(_cf1)
                 if _sbd.scrollBtn then _sbd.scrollBtn:SetShown(_cfg.showScroll ~= false) end
                 if _sbd.friendsBtn then _sbd.friendsBtn:SetShown(_cfg.showFriends ~= false) end
+                if _sbd.durabilityBtn then _sbd.durabilityBtn:SetShown(_cfg.showDurability ~= false) end
                 if _sbd.copyBtn then _sbd.copyBtn:SetShown(_cfg.showCopy ~= false) end
                 if _sbd.portalBtn then _sbd.portalBtn:SetShown(_cfg.showPortals ~= false) end
                 if _sbd.voiceBtn then _sbd.voiceBtn:SetShown(_cfg.showVoice ~= false) end
