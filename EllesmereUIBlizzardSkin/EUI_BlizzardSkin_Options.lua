@@ -360,11 +360,11 @@ initFrame:SetScript("OnEvent", function(self)
                 end },
             { type="toggle", text="Show Guild Rank",
                 disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
-                getValue=function() return not (EllesmereUIDB and EllesmereUIDB.tooltipShowGuildRank == false) end,
+                getValue=function() return EllesmereUIDB and EllesmereUIDB.tooltipShowGuildRank or false end,
                 setValue=function(v)
                     if not EllesmereUIDB then EllesmereUIDB = {} end
                     EllesmereUIDB.tooltipShowGuildRank = v
-                end },
+                end }
         ); y = y - h
 
 
@@ -1410,6 +1410,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.uberTooltips = nil
                 EllesmereUIDB.uberTooltipsManual = nil
                 EllesmereUIDB.tooltipHideHealthStrip = nil
+                EllesmereUIDB.showItemMaxStack= nil
+                EllesmereUIDB.stooltipShowGuildRank = nil
                 EllesmereUIDB.reskinQueuePopup = nil
                 EllesmereUIDB.reskinGameMenu = nil
                 EllesmereUIDB.reskinGreatVault = nil
