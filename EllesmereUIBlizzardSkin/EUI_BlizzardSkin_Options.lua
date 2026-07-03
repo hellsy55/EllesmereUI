@@ -1411,7 +1411,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.uberTooltipsManual = nil
                 EllesmereUIDB.tooltipHideHealthStrip = nil
                 EllesmereUIDB.showItemMaxStack= nil
-                EllesmereUIDB.stooltipShowGuildRank = nil
+                EllesmereUIDB.tooltipShowGuildRank = nil
                 EllesmereUIDB.reskinQueuePopup = nil
                 EllesmereUIDB.reskinGameMenu = nil
                 EllesmereUIDB.reskinGreatVault = nil
