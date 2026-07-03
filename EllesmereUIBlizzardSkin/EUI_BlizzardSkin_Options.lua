@@ -343,6 +343,77 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateSidModState()
         end
 
+        -- Show Max Stack for Items is independent of the EUI tooltip
+        -- skin (usable with default Blizzard tooltips), so it is NOT grayed by
+        -- "Reskin Tooltip" and live at the bottom of the section.
+        local iStackRow
+        iStackRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Max Stack for Items",
+                tooltip="Appends an item's max stack count on tooltip.",
+                getValue=function()
+                    return EllesmereUIDB and EllesmereUIDB.showItemMaxStacks or false
+                end,
+                setValue=function(v)
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    EllesmereUIDB.showItemMaxStacks = v
+                    EllesmereUI:RefreshPage()  -- update the Use Modifier cog disabled state
+                end },
+            { type="label", text="" }
+        ); y = y - h
+
+
+        -- "Use Modifier" cog on Show Max Item Stack (left region): the Max Stacks
+        -- line only shows while the chosen modifier is held. Disabled (blocked +
+        -- dimmed) when Show Max Item Stack is off, mirroring the cursor-position cog.
+        do
+            local leftRgn = iStackRow._leftRegion
+            local function iStacksOff()
+            return not (EllesmereUIDB and EllesmereUIDB.showItemMaxStacks)
+            end
+            local _, iStacksModShow = EllesmereUI.BuildCogPopup({
+                title = "Item Stacks",
+                rows = {
+                    { type="dropdown", label="Use Modifier",
+                        values={ none="None", shift="Shift", control="Control", alt="Alt" },
+                        order={ "none", "shift", "control", "alt" },
+                        get=function() return (EllesmereUIDB and EllesmereUIDB.itemStackModifier) or "none" end,
+                        set=function(v)
+                            if not EllesmereUIDB then EllesmereUIDB = {} end
+                                EllesmereUIDB.itemStackModifier = v
+                        end },
+                },
+            })
+            local iStacksModBtn = CreateFrame("Button", nil, leftRgn)
+            iStacksModBtn:SetSize(26, 26)
+            iStacksModBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            leftRgn._lastInline = iStacksModBtn
+            iStacksModBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            iStacksModBtn:SetAlpha(iStacksOff() and 0.15 or 0.4)
+            local iStacksModTex = iStacksModBtn:CreateTexture(nil, "OVERLAY")
+            iStacksModTex:SetAllPoints()
+            iStacksModTex:SetTexture(EllesmereUI.COGS_ICON)
+            iStacksModBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            iStacksModBtn:SetScript("OnLeave", function(self) self:SetAlpha(iStacksOff() and 0.15 or 0.4) end)
+            iStacksModBtn:SetScript("OnClick", function(self) iStacksModShow(self) end)
+
+            -- Blocking overlay + disabled tooltip when Show Max Item Stack is off
+            local iStacksModBlock = CreateFrame("Frame", nil, iStacksModBtn)
+            iStacksModBlock:SetAllPoints()
+            iStacksModBlock:SetFrameLevel(iStacksModBtn:GetFrameLevel() + 10)
+            iStacksModBlock:EnableMouse(true)
+            iStacksModBlock:SetScript("OnEnter", function()
+            EllesmereUI.ShowWidgetTooltip(iStacksModBtn, EllesmereUI.DisabledTooltip("Show Item Max Stacks on Tooltip"))
+            end)
+            iStacksModBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateIStacksModState()
+                local off = iStacksOff()
+                iStacksModBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then iStacksModBlock:Show() else iStacksModBlock:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateIStacksModState)
+            UpdateIStacksModState()
+        end
+
         -- Border: size slider with an inline colour + opacity swatch. Part of the
         -- tooltip reskin, so it grays with "Reskin Tooltip". Defaults to the
         -- historical hardcoded look (white @ 18% alpha, 1px) -- unset = unchanged.

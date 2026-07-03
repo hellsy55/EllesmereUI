@@ -10521,7 +10521,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = EllesmereUI.ResolveActiveAccent()
     end
 
-    -- Spell ID / Item ID + Icon ID on Tooltip (developer option)
+    -- Spell ID / Item ID + Icon ID / Max Item Stack on Tooltip (developer option)
     if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
         -- Register per-type callbacks instead of AllTypes to avoid firing on
         -- every unit/currency tooltip in the game (major CPU savings).
@@ -10539,10 +10539,22 @@ initFrame:SetScript("OnEvent", function(self, event)
             return IsShiftKeyDown()
         end
 
-        -- Shared dedup check: only scan last 4 lines (we add at most 2)
+        -- The Max Item Stack lines can be gated behind a held modifier (the
+        -- "Use Modifier" cog: none | shift | control | alt, default none). "none"
+        -- shows them whenever Show Max Stack for items is on (the original
+        -- behavior); the others only surface the lines while that key is held.
+        local function IsItemStackModifierHeld()
+        local mod = (EllesmereUIDB and EllesmereUIDB.itemStackModifier) or "none"
+        if mod == "none" then return true end
+            if mod == "control" then return IsControlKeyDown() end
+                if mod == "alt" then return IsAltKeyDown() end
+                    return IsShiftKeyDown()
+                    end
+
+        -- Shared dedup check: only scan last 5 lines (we add at most 3)
         local function hasDupLine(tooltip, name, tag)
             local n = tooltip:NumLines()
-            local start = n - 3
+            local start = n - 4
             if start < 1 then start = 1 end
             for i = n, start, -1 do
                 local fs = _G[name .. "TextLeft" .. i]
@@ -10593,6 +10605,30 @@ initFrame:SetScript("OnEvent", function(self, event)
             tooltip:Show()
         end
 
+
+        local function ItemIdMaxStackHook(tooltip, data)
+            if not (EllesmereUIDB and EllesmereUIDB.showItemMaxStacks) then return end
+            if not IsItemStackModifierHeld() then return end
+            if not data or not data.id then return end
+            if _isSecret and _isSecret(data.id) then return end
+            if not tooltip or not tooltip.GetName then return end
+            local ok, name = pcall(tooltip.GetName, tooltip)
+            if not ok or not name then return end
+            if hasDupLine(tooltip, name, "Max Stack") then return end
+
+            local itemID = data.id
+            if itemID then
+                -- Retrieve the 8th value from GetItemInfo, which is the native Max Stack Size
+                local _, _, _, _, _, _, _, maxStack = C_Item.GetItemInfo(itemID)
+
+            -- Only print if the item is actually stackable (greater than 1)
+            if maxStack and maxStack > 1 then
+                tooltip:AddDoubleLine("Max Stack", tostring(maxStack), 1, 1, 1, 1, 1, 1)
+                end
+            end
+            tooltip:Show()
+        end
+
         -- Macros surface as their own tooltip type, so the Spell hook above never
         -- fires for them. GetSpell() also returns nil on a macro tooltip. The
         -- spell #showtooltip resolved to (honoring conditionals) is exposed as the
@@ -10628,6 +10664,7 @@ initFrame:SetScript("OnEvent", function(self, event)
         if Enum.TooltipDataType.Macro then
             TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Macro, MacroSpellIDTooltipHook)
         end
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ItemIdMaxStackHook)
 
         -- Live toggle: when the selected modifier is pressed/released while a
         -- tooltip is hovered, re-process the shown GameTooltip so the ID lines
