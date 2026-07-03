@@ -28,6 +28,7 @@ end
     local _GameTooltip = GameTooltip
     local _RAID_CC = RAID_CLASS_COLORS
     local _nameL1 = nil  -- cached ref to GameTooltipTextLeft1
+    local _guildL = nil -- cached ref to GameTooltipTextLeftX where X is the line for the guild name
 
     local function _enabled()
         return not EllesmereUIDB or EllesmereUIDB.customTooltips ~= false
