@@ -76,6 +76,7 @@ initFrame:SetScript("OnEvent", function(self)
         local function Refresh() if ns.RefreshMeter then ns.RefreshMeter() end end
         local function ApplyHdr() if ns.ApplyHeader then ns.ApplyHeader() end end
         local function ApplyBrd() if ns.ApplyBorder then ns.ApplyBorder() end end
+        local function ApplyIconBrd() if ns.ApplyIconBorder then ns.ApplyIconBorder() end end
 
         -- ── DISPLAY ─────────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
@@ -610,7 +611,11 @@ initFrame:SetScript("OnEvent", function(self)
               values = _G._EDM_IconStyleValues or {},
               order  = _G._EDM_IconStyleOrder or {},
               getValue = function() return Cfg("iconStyle") or "spec" end,
-              setValue = function(v) Set("iconStyle", v); Refresh() end })
+              setValue = function(v) 
+                Set("iconStyle", v)
+                if ns.ApplyIconBorder then ns.ApplyIconBorder() end
+                Refresh()  
+              end })
         y = y - h
 
         -- Border Style (+ cog) | Border Size (+ inline swatch)
@@ -728,6 +733,117 @@ initFrame:SetScript("OnEvent", function(self)
                 function(r, g, b, a)
                     Set("borderR", r); Set("borderG", g); Set("borderB", b); Set("borderA", a)
                     ApplyBrd()
+                end,
+                true, 20)
+            PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
+        end
+
+        local ibsRow
+        ibsRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Icon Border Style",
+            values=texValues, order=texOrder,
+            getValue=function() return Cfg("iconBorderTexture") or "solid" end,
+            setValue=function(v)
+                Set("iconBorderTexture", v)
+                Set("iconBorderTextureOffset", nil); Set("iconBorderTextureOffsetY", nil)
+                Set("iconBorderTextureShiftX", nil); Set("iconBorderTextureShiftY", nil)
+                if v ~= "solid" then
+                    Set("iconBorderR", 1); Set("iconBorderG", 1); Set("iconBorderB", 1); Set("iconBorderA", 1)
+                else
+                    Set("iconBorderR", 0); Set("iconBorderG", 0); Set("iconBorderB", 0); Set("iconBorderA", 1)
+                end
+                local defSz = EllesmereUI.GetBorderDefaultSize("damagemeters_icon", v)
+                if defSz then Set("iconBorderSize", defSz) end
+                ApplyIconBrd(); EllesmereUI:RefreshPage()
+            end },
+            { type="slider", text="Icon Border Size",
+            min=0, max=4, step=1,
+            getValue=function() return Cfg("iconBorderSize") or 0 end,
+            setValue=function(v) Set("iconBorderSize", v); ApplyIconBrd() end })
+        y = y - h
+        -- Inline cog for border offset (left region)
+        do
+            local rgn = ibsRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Border Offset",
+                rows = {
+                    { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = Cfg("iconBorderTextureOffset")
+                          if v then return v end
+                          local tex = Cfg("iconBorderTexture") or "solid"
+                          local sz = Cfg("iconBorderSize") or 1
+                          local dox = EllesmereUI.GetBorderDefaults("damagemeters_icon", tex, sz)
+                          return dox
+                      end,
+                      set = function(v) Set("iconBorderTextureOffset", v); ApplyIconBrd() end },
+                    { type = "slider", label = "Offset Y", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = Cfg("iconBorderTextureOffsetY")
+                          if v then return v end
+                          local tex = Cfg("iconBorderTexture") or "solid"
+                          local sz = Cfg("iconBorderSize") or 1
+                          local _, doy = EllesmereUI.GetBorderDefaults("damagemeters_icon", tex, sz)
+                          return doy
+                      end,
+                      set = function(v) Set("iconBorderTextureOffsetY", v); ApplyIconBrd() end },
+                    { type = "slider", label = "Shift X", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = Cfg("iconBorderTextureShiftX")
+                          if v then return v end
+                          local tex = Cfg("iconBorderTexture") or "solid"
+                          local sz = Cfg("iconBorderSize") or 1
+                          local _, _, dsx = EllesmereUI.GetBorderDefaults("damagemeters_icon", tex, sz)
+                          return dsx
+                      end,
+                      set = function(v) Set("iconBorderTextureShiftX", v == 0 and nil or v); ApplyIconBrd() end },
+                    { type = "slider", label = "Shift Y", min = -10, max = 10, step = 1,
+                      get = function()
+                          local v = Cfg("iconBorderTextureShiftY")
+                          if v then return v end
+                          local tex = Cfg("iconBorderTexture") or "solid"
+                          local sz = Cfg("iconBorderSize") or 1
+                          local _, _, _, dsy = EllesmereUI.GetBorderDefaults("damagemeters_icon", tex, sz)
+                          return dsy
+                      end,
+                      set = function(v) Set("iconBorderTextureShiftY", v == 0 and nil or v); ApplyIconBrd() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            local ctrl = rgn._control
+            if ctrl then
+                cogBtn:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+            end
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            local function UpdateCogVis()
+                local tex = Cfg("iconBorderTexture") or "solid"
+                if tex == "solid" then cogBtn:Hide() else cogBtn:Show() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
+            UpdateCogVis()
+        end
+        -- Inline color swatch on Border Size (right region)
+        do
+            local rgn = ibsRow._rightRegion
+            local ctrl = rgn._control
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, ibsRow:GetFrameLevel() + 3,
+                function()
+                    return Cfg("iconBorderR") or 0, Cfg("iconBorderG") or 0, Cfg("iconBorderB") or 0, Cfg("iconBorderA") or 1
+                end,
+                function(r, g, b, a)
+                    Set("iconBorderR", r); Set("iconBorderG", g); Set("iconBorderB", b); Set("iconBorderA", a)
+                    ApplyIconBrd()
                 end,
                 true, 20)
             PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
