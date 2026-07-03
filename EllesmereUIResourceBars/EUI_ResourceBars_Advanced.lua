@@ -105,22 +105,33 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
         local ROW_H = 30
         local DDW   = 220
 
+		local currentCharSpecs = {}
+		for _, sp in ipairs(GetPlayerSpecs()) do
+			currentCharSpecs[sp.specID] = true
+		end
+
         -- Dropdown values: the created specs (or a single "none" placeholder).
-        local vals, order = {}, {}
-        if #created == 0 then
-            vals[0] = EllesmereUI.L("No specs added")
-            order[#order + 1] = 0
-        else
-            for _, e in ipairs(created) do
-                vals[e.specID] = SpecName(e.specID)
-                order[#order + 1] = e.specID
-            end
-        end
+		local vals, order = {}, {}
+		local matched = false
+		for _, e in ipairs(created) do
+			if currentCharSpecs[e.specID] then
+				vals[e.specID] = SpecName(e.specID)
+				order[#order + 1] = e.specID
+				matched = true
+			end
+		end
+
+		if not matched then
+			vals[0] = EllesmereUI.L("No specs added")
+			order[#order + 1] = 0
+		end
 
         local dd = EllesmereUI.BuildDropdownControl(
             parent, DDW, parent:GetFrameLevel() + 5,
             vals, order,
-            function() return GetSelectedSpecID() or order[1] end,
+            function()
+				if matched then return GetSelectedSpecID() else return "Create a spec" end
+			end,
             function(key)
                 if key and key ~= 0 then
                     SetSelectedSpecID(key)
