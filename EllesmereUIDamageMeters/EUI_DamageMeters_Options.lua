@@ -1000,6 +1000,19 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Force English Number Units (K/M/B) | (spacer)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Force English Units (K/M/B)",
+              tooltip = "Always use K/M/B instead of localized units.",
+              getValue = function() return Cfg("forceEnglishUnits") or false end,
+              setValue = function(v)
+                  Set("forceEnglishUnits", v)
+                  if ns.RebuildNumberFormat then ns.RebuildNumberFormat() end
+                  Refresh()
+              end },
+            { type="spacer" })
+        y = y - h
+
         -- Left Text Size (+ inline custom/class swatches) | Right Text Size (+ inline custom/class swatches)
         local btRow
         btRow, h = W:DualRow(parent, y,
