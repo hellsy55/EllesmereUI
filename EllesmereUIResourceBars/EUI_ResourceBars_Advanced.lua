@@ -91,10 +91,24 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
 
     local created = GetAdvancedSpecs()
 
-    -- Resolve the selected spec: drop a stale selection, default to the first.
+    -- Only the CURRENT character's specs are configurable here (the dropdown and
+    -- the Add list are both current-char only). A shared profile can hold specs
+    -- from other characters, so gate the selection on the player's own specs --
+    -- otherwise `sel` would default to a foreign spec and wrongly enable the row.
+    local playerSpecSet = {}
+    for _, sp in ipairs(GetPlayerSpecs()) do playerSpecSet[sp.specID] = true end
+
+    -- Resolve the selected spec: drop a stale (removed) selection; ignore a
+    -- foreign selection for this render (without clearing it, so that character
+    -- keeps it); default to the first current-char spec, else none.
     local sel = GetSelectedSpecID()
     if sel and not FindAdvSpec(sel) then sel = nil; SetSelectedSpecID(nil) end
-    if not sel and #created > 0 then sel = created[1].specID; SetSelectedSpecID(sel) end
+    if sel and not playerSpecSet[sel] then sel = nil end
+    if not sel then
+        for _, e in ipairs(created) do
+            if playerSpecSet[e.specID] then sel = e.specID; SetSelectedSpecID(sel); break end
+        end
+    end
 
     _, h = W:SectionHeader(parent, "CONFIGURE SPEC", y);  y = y - h
 
@@ -110,7 +124,8 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
 			currentCharSpecs[sp.specID] = true
 		end
 
-        -- Dropdown values: the created specs (or a single "none" placeholder).
+        -- Dropdown values: the created specs. When none exist, the dropdown is
+        -- left empty and disabled (below) -- no clickable placeholder entry.
 		local vals, order = {}, {}
 		local matched = false
 		for _, e in ipairs(created) do
@@ -121,16 +136,11 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
 			end
 		end
 
-		if not matched then
-			vals[0] = EllesmereUI.L("No specs added")
-			order[#order + 1] = 0
-		end
-
         local dd = EllesmereUI.BuildDropdownControl(
             parent, DDW, parent:GetFrameLevel() + 5,
             vals, order,
             function()
-				if matched then return GetSelectedSpecID() else return "Create a spec" end
+				if matched then return GetSelectedSpecID() else return EllesmereUI.L("No specs added") end
 			end,
             function(key)
                 if key and key ~= 0 then
@@ -141,6 +151,12 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
         )
         dd:SetHeight(ROW_H)
         PP.Point(dd, "TOPLEFT", parent, "TOPLEFT", CPAD, y)
+        -- No specs yet: nothing to pick, so disable + grey the dropdown (the
+        -- "+ Add Spec" button is how you create one).
+        if not matched then
+            dd:SetEnabled(false)
+            dd:SetAlpha(0.5)
+        end
 
         -- Small themed button helper (square, hover-accented).
         local function MakeButton(label, width, anchorTo, onClick)
@@ -187,7 +203,8 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
         end)
 
         -- Remove: delete the selected spec's config -> that spec reverts to
-        -- Simple. Rebuild the live bar so it reverts immediately.
+        -- Simple. Rebuild the live bar so it reverts immediately. Only when a
+        -- spec is actually selected.
         if sel then
             MakeButton("Remove", 90, addBtn, function()
                 local _, idx = FindAdvSpec(sel)
@@ -196,25 +213,45 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
                 if _G._ERB_Apply then _G._ERB_Apply() end
                 EllesmereUI:RefreshPage(true)
             end)
+        end
 
-            -- Enabled toggle (right-aligned): off => this spec uses Simple
-            -- (overrides preserved). Default on.
-            local enLbl = EllesmereUI.MakeFont(parent, 12, nil, 1, 1, 1)
-            enLbl:SetAlpha(0.7)
-            local enToggle = EllesmereUI.BuildToggleControl(
-                parent, parent:GetFrameLevel() + 5,
-                function() local en = FindAdvSpec(GetSelectedSpecID()); return (not en) or en.enabled ~= false end,
-                function(v)
-                    local en = FindAdvSpec(GetSelectedSpecID()); if en then en.enabled = v end
-                    if _G._ERB_Apply then _G._ERB_Apply() end
-                    EllesmereUI:RefreshPage(true)
-                end,
-                { sizeRatio = 0.95 }
-            )
-            enToggle:ClearAllPoints()
-            PP.Point(enToggle, "RIGHT", parent, "TOPRIGHT", -CPAD, y - ROW_H / 2)
-            enLbl:SetPoint("RIGHT", enToggle, "LEFT", -8, 0)
-            enLbl:SetText(EllesmereUI.L("Enabled"))
+        -- Enabled toggle (right-aligned): off => this spec uses Simple (overrides
+        -- preserved). Always shown; disabled until a spec exists to configure.
+        local enLbl = EllesmereUI.MakeFont(parent, 12, nil, 1, 1, 1)
+        enLbl:SetAlpha(0.7)
+        local enToggle = EllesmereUI.BuildToggleControl(
+            parent, parent:GetFrameLevel() + 5,
+            function() local en = FindAdvSpec(GetSelectedSpecID()); return en ~= nil and en.enabled ~= false end,
+            function(v)
+                local en = FindAdvSpec(GetSelectedSpecID()); if not en then return end
+                en.enabled = v
+                if _G._ERB_Apply then _G._ERB_Apply() end
+                EllesmereUI:RefreshPage(true)
+            end,
+            { sizeRatio = 0.95 }
+        )
+        enToggle:ClearAllPoints()
+        PP.Point(enToggle, "RIGHT", parent, "TOPRIGHT", -CPAD, y - ROW_H / 2)
+        enLbl:SetPoint("RIGHT", enToggle, "LEFT", -8, 0)
+        enLbl:SetText(EllesmereUI.L("Enabled"))
+        -- No spec yet -> can't enable anything. Make the toggle fully inert
+        -- (clear its click handler + mouse) and grey it, with a hint on hover.
+        -- Note: SetEnabled(false) alone still let the knob animate on click
+        -- because BuildToggleControl's OnClick flips the visual before setValue.
+        if not sel then
+            enToggle:SetScript("OnClick", nil)
+            enToggle:EnableMouse(false)
+            enToggle:SetEnabled(false)
+            enToggle:SetAlpha(0.35)
+            enLbl:SetAlpha(0.3)
+            local enDis = CreateFrame("Frame", nil, parent)
+            enDis:SetAllPoints(enToggle)
+            enDis:SetFrameLevel(enToggle:GetFrameLevel() + 5)
+            enDis:EnableMouse(true)
+            enDis:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(enDis, EllesmereUI.L("Add a spec first to configure it"))
+            end)
+            enDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         end
 
         y = y - ROW_H - 18

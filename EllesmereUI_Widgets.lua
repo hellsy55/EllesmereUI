@@ -568,14 +568,27 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
     local searchResetScroll  -- assigned inside the scrolling branch; nil otherwise
     local mBgR, mBgG, mBgB, mBgA = DD_BG_R, DD_BG_G, DD_BG_B, DD_BG_HA
     local mBrR, mBrG, mBrB, mBrA = 1, 1, 1, DD_BRD_A
-    local menu = CreateFrame("Frame", nil, UIParent)
+    -- Parent to a caller-supplied frame (a scaled popup) when given, so the menu
+    -- INHERITS that frame's scale and layers within it -- no manual scale matching
+    -- (kills the giant-font / behind-render fiddliness of a nested dropdown).
+    -- Otherwise UIParent (default) so page dropdowns escape the scroll-frame clip.
+    local menu = CreateFrame("Frame", nil, (_menuOpts and _menuOpts.parent) or UIParent)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetFrameLevel(200)
     menu:SetClampedToScreen(true)
     menu:SetClipsChildren(true)
     menu:EnableMouse(true)
     menu:SetSize(menuW, 10)
-    menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
+    -- Anchor: default opens downward; opt-in side anchor (via _menuOpts.anchor)
+    -- opens to the left/right so the menu can't sit behind controls below it
+    -- (used by the threshold popup's talent dropdown). Clamped to screen below.
+    if _menuOpts and _menuOpts.anchor == "LEFT" then
+        menu:SetPoint("TOPRIGHT", ddBtn, "TOPLEFT", -4, 0)
+    elseif _menuOpts and _menuOpts.anchor == "RIGHT" then
+        menu:SetPoint("TOPLEFT", ddBtn, "TOPRIGHT", 4, 0)
+    else
+        menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
+    end
     menu:Hide()
     SolidTex(menu, "BACKGROUND", mBgR, mBgG, mBgB, mBgA):SetAllPoints()
     MakeBorder(menu, mBrR, mBrG, mBrB, mBrA, PP)
@@ -1204,10 +1217,21 @@ local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
     end)
     ddBtn:HookScript("OnHide", function() menu:Hide() end)
     menu:SetScript("OnShow", function(self)
-        -- Match the panel's effective scale since menu lives on UIParent
-        local btnScale = ddBtn:GetEffectiveScale()
-        local uiScale = UIParent:GetEffectiveScale()
-        self:SetScale(btnScale / uiScale)
+        if _menuOpts and _menuOpts.parent then
+            -- Parented to a scaled popup: scale is inherited from the parent, so
+            -- leave it at 1 -- nothing to match, nothing to go stale.
+            self:SetScale(1)
+        else
+            -- On UIParent: match the panel's effective scale. Walk GetScale() up to
+            -- UIParent (always current) rather than the button's GetEffectiveScale
+            -- ratio, which can be stale right after the popup is (re)built.
+            local s, f = 1, ddBtn
+            while f and f ~= UIParent do s = s * (f:GetScale() or 1); f = f:GetParent() end
+            self:SetScale(s)
+        end
+        -- Track the open menu globally so popups don't treat clicks on it (which
+        -- can extend outside the popup/panel) as an outside click that dismisses.
+        EllesmereUI._openDropdownMenu = self
         ApplyHover()
         refresh()
         self:SetScript("OnUpdate", function(m)
@@ -1243,6 +1267,7 @@ local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
     end)
     menu:SetScript("OnHide", function(self)
         self:SetScript("OnUpdate", nil)
+        if EllesmereUI._openDropdownMenu == self then EllesmereUI._openDropdownMenu = nil end
         if self._flyouts then for _, fo in ipairs(self._flyouts) do fo:Hide() end end
         if ddBtn:IsMouseOver() then
             ApplyHover()
@@ -4336,8 +4361,8 @@ local function BuildCogPopup(opts)
                 local sliderDis
                 if row.disabled then
                     sliderDis = CreateFrame("Frame", nil, pf)
-                    sliderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    sliderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    sliderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    sliderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     sliderDis:SetHeight(ROW_H)
                     sliderDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     sliderDis:EnableMouse(true)
@@ -4394,8 +4419,8 @@ local function BuildCogPopup(opts)
                 local toggleDis
                 if row.disabled then
                     toggleDis = CreateFrame("Frame", nil, pf)
-                    toggleDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    toggleDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    toggleDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    toggleDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     toggleDis:SetHeight(TOGGLE_ROW_H)
                     toggleDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     toggleDis:EnableMouse(true)
@@ -4452,8 +4477,8 @@ local function BuildCogPopup(opts)
                 local ddDis
                 if row.disabled then
                     ddDis = CreateFrame("Frame", nil, pf)
-                    ddDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    ddDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    ddDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    ddDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     ddDis:SetHeight(DROPDOWN_ROW_H)
                     ddDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     ddDis:EnableMouse(true)
@@ -4591,8 +4616,8 @@ local function BuildCogPopup(opts)
                 local inputDis
                 if row.disabled then
                     inputDis = CreateFrame("Frame", nil, pf)
-                    inputDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    inputDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    inputDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    inputDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     inputDis:SetHeight(ROW_H)
                     inputDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     inputDis:EnableMouse(true)
@@ -4839,8 +4864,8 @@ local function BuildCogPopup(opts)
                 local reorderDis
                 if row.disabled then
                     reorderDis = CreateFrame("Frame", nil, pf)
-                    reorderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    reorderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    reorderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    reorderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     reorderDis:SetHeight(DROPDOWN_ROW_H)
                     reorderDis:SetFrameLevel(pf:GetFrameLevel() + 12)
                     reorderDis:EnableMouse(true)
@@ -6157,7 +6182,43 @@ local function GetLoadoutTalents()
     return talents
 end
 
+local function BuildSpecItems()
+	local items = {}
+	items[#items + 1] = { key = 0, label = "All Specs", isAction = true, lockedFn = HasCRAllSpecs }
+
+	local classList = {}
+	for classID = 1, (GetNumClasses and GetNumClasses() or 13) do
+		local className, classFile = GetClassInfo(classID)
+		if className then
+			classList[#classList + 1] = { classID = classID, className = className }
+		end
+	end
+	table.sort(classList, function(a, b) return a.className < b.className end)
+
+	local healers, tanks, dps = {}, {}, {}
+	for _, cls in ipairs(classList) do
+		items[#items + 1] = { isHeader = true, label = cls.className }
+		local numSpecs = GetNumSpecializationsForClassID(cls.classID) or 0
+		for specIndex = 1, numSpecs do
+			local specID, specName, _, _, role = GetSpecializationInfoForClassID(cls.classID, specIndex)
+			if specID and specName then
+				local sid = specID
+				items[#items + 1] = { key = specID, label = specName, lockedFn = function() return IsCRSpecClaimed(sid) end }
+				if role == "HEALER" then healers[#healers + 1] = specID
+				elseif role == "TANK" then tanks[#tanks + 1] = specID
+				else dps[#dps + 1] = specID end
+			end
+		end
+	end
+	_crRoleCache[CR_ROLE_HEALERS] = healers
+	_crRoleCache[CR_ROLE_TANKS] = tanks
+	_crRoleCache[CR_ROLE_DPS] = dps
+	return items
+end
+
 EllesmereUI.GetLoadoutTalents   = GetLoadoutTalents
+---@type fun()
+EllesmereUI.BuildSpecItems   = BuildSpecItems
 
 EllesmereUI.BuildSliderCore     = BuildSliderCore
 EllesmereUI.BuildDropdownControl = BuildDropdownControl

@@ -1504,7 +1504,16 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                 EllesmereUI.SetActiveTheme(v)
-                EllesmereUI:RefreshPage()
+                -- The accent falls back to the theme color (ResolveProfileAccent) when
+                -- there's no custom/class override, so re-apply it live -- otherwise
+                -- theme-derived accent elements (sidebar highlights, threshold glow,
+                -- etc.) only pick up the new color on reload. A custom accent is
+                -- re-resolved to itself here, so independence is preserved.
+                if EllesmereUI.RefreshAccent then
+                    EllesmereUI.RefreshAccent()  -- ApplyAccentLive already refreshes the page
+                else
+                    EllesmereUI:RefreshPage()
+                end
               end }
         );  y = y - h
 
