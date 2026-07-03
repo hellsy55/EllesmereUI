@@ -39,6 +39,8 @@ local BAGS_DEFAULTS = {
         detachReagentBag      = false,
         enhancedBags          = true,
         bagDesaturateJunkItems = false,
+        bagDisplayBindType    = false,
+        bagBindTypeFontSize   = 11,
     },
 }
 local db = EllesmereUI.Lite.NewDB("EllesmereUIBagsDB", BAGS_DEFAULTS)
@@ -402,7 +404,6 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-
             -- Item Count Text Size | Item Level Text Size
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Item Count Text Size", min=8, max=16, step=1,
@@ -419,6 +420,26 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return db.profile.itemlevelFontSize or 12 end,
                   setValue=function(v)
                       db.profile.itemlevelFontSize = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
+                      local bank = _G.EUI_BankFrame
+                      if bank and bank.RefreshTextSizes then bank:RefreshTextSizes() end
+                  end }
+            ); y = y - h
+
+            -- Show BoE / WuE | BoE / WuE Text Size
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Show BoE / WuE",
+                  tooltip="Display Binds on Equipped / Warbound until Equipped on equipment items in the inventory.",
+                  getValue=function() return db.profile.bagDisplayBindType ~= false end,
+                  setValue=function(v)
+                      db.profile.bagDisplayBindType = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                { type="slider", text="BoE / WuE Text Size", min=8, max=16, step=1,
+                  tooltip="Font size for Binds on Equipped / Warbound until Equipped text on equipment items.",
+                  getValue=function() return db.profile.bagBindTypeFontSize or 11 end,
+                  setValue=function(v)
+                      db.profile.bagBindTypeFontSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
                       local bank = _G.EUI_BankFrame
                       if bank and bank.RefreshTextSizes then bank:RefreshTextSizes() end
