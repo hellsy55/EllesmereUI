@@ -358,7 +358,13 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUIDB.showItemMaxStacks = v
                     EllesmereUI:RefreshPage()  -- update the Use Modifier cog disabled state
                 end },
-            { type="label", text="" }
+            { type="toggle", text="Show Guild Rank",
+                disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+                getValue=function() return EllesmereUIDB and EllesmereUIDB.tooltipShowGuildRank or false end,
+                setValue=function(v)
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    EllesmereUIDB.tooltipShowGuildRank = v
+                end }
         ); y = y - h
 
 
@@ -1404,6 +1410,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.uberTooltips = nil
                 EllesmereUIDB.uberTooltipsManual = nil
                 EllesmereUIDB.tooltipHideHealthStrip = nil
+                EllesmereUIDB.showItemMaxStack= nil
+                EllesmereUIDB.tooltipShowGuildRank = nil
                 EllesmereUIDB.reskinQueuePopup = nil
                 EllesmereUIDB.reskinGameMenu = nil
                 EllesmereUIDB.reskinGreatVault = nil
