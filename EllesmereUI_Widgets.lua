@@ -1188,7 +1188,7 @@ end
 
 -- Wire OnEnter/OnLeave/OnClick/OnShow/OnHide for a dropdown button + menu.
 -- s = { bg_r..a, bg_hr..ha, brd_r..a, brd_hr..ha, txt_r..a, txt_hr..ha } (24 values)
-local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
+local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s, keepClickHandler)
     local function ApplyNormal()
         ddLbl:SetTextColor(s[17], s[18], s[19], s[20])
         brd:SetColor(s[9], s[10], s[11], s[12])
@@ -1211,13 +1211,24 @@ local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
             if ddBtn._ttText then HideWidgetTooltip() end
         end
     end)
-    ddBtn:SetScript("OnClick", function()
-        if ddBtn._ttText then HideWidgetTooltip() end
-        if menu:IsShown() then menu:Hide() else menu:Show() end
-    end)
-    ddBtn:HookScript("OnHide", function() menu:Hide() end)
+    -- keepClickHandler: the caller owns OnClick/OnHide (the lazy-menu path in
+    -- BuildDropdownControl). Overwriting OnClick here would (a) pin this menu
+    -- instance forever, so _invalidateMenu could never trigger a rebuild --
+    -- clicks would Show() the orphaned old menu (SetParent(nil) resets its
+    -- strata, so it renders behind everything) -- and (b) wipe any HookScripts
+    -- callers attached to OnClick, since SetScript discards existing hooks.
+    if not keepClickHandler then
+        ddBtn:SetScript("OnClick", function()
+            if ddBtn._ttText then HideWidgetTooltip() end
+            if menu:IsShown() then menu:Hide() else menu:Show() end
+        end)
+        ddBtn:HookScript("OnHide", function() menu:Hide() end)
+    end
     menu:SetScript("OnShow", function(self)
-        if _menuOpts and _menuOpts.parent then
+        -- Custom-parented menus (BuildDropdownMenu parents to _menuOpts.parent
+        -- or UIParent) inherit their popup's scale; detect via GetParent() --
+        -- _menuOpts itself is out of scope here.
+        if menu:GetParent() ~= UIParent then
             -- Parented to a scaled popup: scale is inherited from the parent, so
             -- leave it at 1 -- nothing to match, nothing to go stale.
             self:SetScale(1)
@@ -2081,7 +2092,10 @@ local function BuildDropdownControl(parent, ddW, fLevel, values, order, getValue
         menu, _, refresh = BuildDropdownMenu(ddBtn, ddW, order, values, getValue, setValue, ddLbl, "regular", disabledValuesFn)
         ddBtn._ddMenu = menu
         ddBtn._ddRefresh = refresh
-        WireDropdownScripts(ddBtn, ddLbl, ddBg, ddBrd, menu, refresh, RD_DD_COLOURS)
+        -- keepClickHandler=true: our lazy OnClick below must survive so that
+        -- after _invalidateMenu() the next click re-runs EnsureMenu (rebuild)
+        -- instead of showing the orphaned old menu.
+        WireDropdownScripts(ddBtn, ddLbl, ddBg, ddBrd, menu, refresh, RD_DD_COLOURS, true)
     end
     -- Public hook: invalidate the cached menu so the next click rebuilds
     -- from the current contents of `order` / `values`. Use this when the
@@ -5109,7 +5123,7 @@ end
 -------------------------------------------------------------------------------
 local function BuildSegmentedControl(cfg)
     local ACCENT   = ELLESMERE_GREEN
-    local SEG_H    = 28
+    local SEG_H    = cfg.height or 28
     local FONT_SZ  = 13
     local SEG_PAD  = 22
     local PILL_BG  = { 0.125, 0.125, 0.137 }  -- #202023
@@ -5142,9 +5156,13 @@ local function BuildSegmentedControl(cfg)
         end
     end
 
-    local capW = SEG_H
-    segWidths[cfg.keys[1]] = math.floor(segWidths[cfg.keys[1]] - capW)
-    segWidths[cfg.keys[numKeys]] = math.floor(segWidths[cfg.keys[numKeys]] - capW)
+    -- Square mode option
+    local SQUARE = cfg.square and true or false
+    local capW = SQUARE and 0 or SEG_H
+    if not SQUARE then
+        segWidths[cfg.keys[1]] = math.floor(segWidths[cfg.keys[1]] - capW)
+        segWidths[cfg.keys[numKeys]] = math.floor(segWidths[cfg.keys[numKeys]] - capW)
+    end
     pillW = 0
     for _, key in ipairs(cfg.keys) do pillW = pillW + segWidths[key] end
     -- Account for 1px overlap between adjacent segments
@@ -5371,6 +5389,13 @@ local function BuildSegmentedControl(cfg)
     capRightBtn:ClearAllPoints()
     capRightBtn:SetPoint("LEFT", lastBtn, "RIGHT", 0, 0)
 
+    if SQUARE then
+        -- No rounded caps: hide the textures and their click zones outright.
+        capLeftFill:Hide();  capLeftBdr:Hide();  capLeftAccent:Hide()
+        capRightFill:Hide(); capRightBdr:Hide(); capRightAccent:Hide()
+        capLeftBtn:Hide();   capRightBtn:Hide()
+    end
+
     -------------------------------------------------------------------
     -- RefreshAll
     -------------------------------------------------------------------
@@ -5415,14 +5440,15 @@ local function BuildSegmentedControl(cfg)
             seg.segLeft:SetColorTexture(br, bg2, bb, ba)
             seg.segRight:SetColorTexture(br, bg2, bb, ba)
 
-            -- All 4 borders visible, except: first segment hides left,
-            -- last segment hides right (the pill caps handle those edges).
+            -- All 4 borders visible, except (pill mode only): first segment hides
+            -- its left, last hides its right -- the rounded caps draw those edges.
+            -- In square mode those outer edges are the box border, so keep them.
             seg.segTop:Show()
             seg.segBot:Show()
             local isFirst = (idx == 1)
             local isLast  = (idx == #segments)
-            if isFirst then seg.segLeft:Hide() else seg.segLeft:Show() end
-            if isLast  then seg.segRight:Hide() else seg.segRight:Show() end
+            if isFirst and not SQUARE then seg.segLeft:Hide() else seg.segLeft:Show() end
+            if isLast  and not SQUARE then seg.segRight:Hide() else seg.segRight:Show() end
 
             -- Background: disabled = 50% opacity, hover = lighten by 4%, normal = PILL_BGA
             if disabled then
@@ -5445,6 +5471,9 @@ local function BuildSegmentedControl(cfg)
                 end
             end
         end
+
+        -- Square mode has no caps; the segment borders above are the whole box.
+        if SQUARE then return end
 
         -- Cap borders & fills: match adjacent segment's state (checked/disabled/hover)
         local firstKey = cfg.keys[1]

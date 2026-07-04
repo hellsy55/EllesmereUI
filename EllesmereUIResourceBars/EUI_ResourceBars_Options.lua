@@ -976,7 +976,7 @@ initFrame:SetScript("OnEvent", function(self)
     local _bandGetBarData, _bandRefreshFn, _bandCountBased
     local _bandDefR, _bandDefG, _bandDefB, _bandDefA = 1, 0.2, 0.2, 1
     local _bandModeRow, _bandModeToggle, _bandModeSnap, _bandModeHint, _bandAddBtn, _bandTitleFS
-    local _bandReverseRow, _bandReverseToggle, _bandReverseSnap
+    local _bandReverseRow, _bandReverseSeg, _bandReverseSegRefresh
     local BAND_POPUP_W = 300
     local BAND_ROW_H = 26
     local BAND_PAD = 14
@@ -1025,8 +1025,13 @@ initFrame:SetScript("OnEvent", function(self)
         clickCatcher:SetAllPoints((EllesmereUI.GetMainFrame and EllesmereUI:GetMainFrame()) or UIParent)
         clickCatcher:SetScript("OnClick", function() bandPopup:Hide() end)
         clickCatcher:Hide()
+        -- Close on entering combat
+        bandPopup:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_REGEN_DISABLED" then self:Hide() end
+        end)
         bandPopup:SetScript("OnShow", function(self)
             clickCatcher:Show()
+            self:RegisterEvent("PLAYER_REGEN_DISABLED")
             self:SetScript("OnUpdate", function(p)
                 if IsMouseButtonDown("LeftButton") then
                     local mf = EllesmereUI._mainFrame
@@ -1037,6 +1042,7 @@ initFrame:SetScript("OnEvent", function(self)
         end)
         bandPopup:SetScript("OnHide", function(self)
             clickCatcher:Hide()
+            self:UnregisterEvent("PLAYER_REGEN_DISABLED")
             self:SetScript("OnUpdate", nil)
         end)
 
@@ -1078,26 +1084,28 @@ initFrame:SetScript("OnEvent", function(self)
         _bandModeHint = EllesmereUI.MakeFont(bandPopup, 10, nil, 1, 1, 1)
         _bandModeHint:SetAlpha(0.4)
 
-        -- Row: direction. The label reflects the CURRENT mode -- "Color up to (<=)"
-        -- when off, "Color from (>=)" when on -- and is updated in RefreshBandEditor.
-        _bandReverseRow = HeaderRow("Color up to (<=)")
-        _bandReverseToggle, _, _bandReverseSnap = EllesmereUI.BuildToggleControl(
-            _bandReverseRow, _bandReverseRow:GetFrameLevel() + 2,
-            function()
+        -- Row: direction -- a segmented switch (always one of two values)
+        _bandReverseRow = HeaderRow("Direction")
+        _bandReverseSeg, _, _bandReverseSegRefresh = EllesmereUI.BuildSegmentedControl({
+            parent    = _bandReverseRow,
+            keys      = { "upto", "from" },
+            labels    = { upto = "Up to", from = "From" },
+            autoWidth = true,
+            square    = true,
+            height    = 22,
+            getChecked = function(key)
                 local ent = CurrentBandEntry()
-                return ent and ent.bandReverse or false
+                local reverse = ent and ent.bandReverse and true or false
+                if key == "from" then return reverse else return not reverse end
             end,
-            function(v)
+            onToggle = function(key)
                 local ent = CurrentBandEntry(); if not ent then return end
-                ent.bandReverse = v
+                ent.bandReverse = (key == "from")
                 if _bandRefreshFn then _bandRefreshFn() end
                 RefreshBandEditor()
             end,
-            { sizeRatio = 0.95 }
-        )
-        _bandReverseToggle:SetPoint("RIGHT", _bandReverseRow, "RIGHT", 0, 0)
-        -- _bandReverseToggle:HookScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, BAND_HELP_TIP) end)
-        -- _bandReverseToggle:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+        })
+        _bandReverseSeg:SetPoint("RIGHT", _bandReverseRow, "RIGHT", 0, 0)
 
         -- Add Band button (matches the "Add Threshold" empty-state button style)
         _bandAddBtn = CreateFrame("Button", nil, bandPopup)
@@ -1172,7 +1180,7 @@ initFrame:SetScript("OnEvent", function(self)
             if not band then return end
             local val = tonumber(self:GetText())
             if val then
-                local hi = _bandCountBased and 99 or (ent.bandMode == "value" and 1000000 or 100)
+                local hi = _bandCountBased and 100 or (ent.bandMode == "value" and 1000000 or 100)
                 val = math.max(1, math.min(hi, math.floor(val + 0.5)))
                 band.to = val
                 SortBands(ent.bands)
@@ -1253,6 +1261,10 @@ initFrame:SetScript("OnEvent", function(self)
             curY = curY - 18 - BAND_GAP
         else
             _bandModeHint:Hide()
+            -- Label reflects the current mode (percent vs absolute amount).
+            _bandModeRow._lbl:SetText(ent.bandMode == "percent"
+                and EllesmereUI.L("Values as percent")
+                or EllesmereUI.L("Values as amount"))
             _bandModeSnap()
             placeRow(_bandModeRow)
         end
@@ -1260,9 +1272,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Band rows. Header reflects direction: "From" (>=) when reverse, else "Up to".
         local reverse = ent.bandReverse and true or false
 
-        -- Reverse row -- label reflects the current direction.
-        _bandReverseRow._lbl:SetText(reverse and EllesmereUI.L("Color from (>=)") or EllesmereUI.L("Color up to (<=)"))
-        _bandReverseSnap()
+        -- Direction row
+        if _bandReverseSegRefresh then _bandReverseSegRefresh() end
         placeRow(_bandReverseRow)
         local rowLabel = reverse and EllesmereUI.L("From") or EllesmereUI.L("Up to")
         local n = #ent.bands
@@ -1902,12 +1913,12 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Threshold row
                     local threshLbl2 = EllesmereUI.MakeFont(ef, 13, nil, 1, 1, 1)
                     threshLbl2:SetAlpha(0.6)
-                    threshLbl2:SetPoint("TOPLEFT", ef, "TOPLEFT", 8, threshY)
+                    threshLbl2:SetPoint("LEFT", ef, "TOPLEFT", 8, threshY - 11)
                     threshLbl2:SetText(cfg.thresholdLabel or EllesmereUI.L("Threshold"))
                     ef._threshLbl = threshLbl2
 
                     local threshInput = CreateFrame("EditBox", nil, ef)
-                    threshInput:SetSize(50, 22)
+                    threshInput:SetSize(40, 22)
                     threshInput:SetPoint("LEFT", threshLbl2, "RIGHT", 8, 0)
                     threshInput:SetFrameLevel(ef:GetFrameLevel() + 3)
                     threshInput:SetAutoFocus(false)
@@ -2004,7 +2015,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Multi-band: per-entry toggle + "Bands" editor button (right side)
                     local bandsBtn = CreateFrame("Button", nil, ef)
                     bandsBtn:SetSize(58, 22)
-                    bandsBtn:SetPoint("TOPRIGHT", ef, "TOPRIGHT", 10, threshY)
+                    bandsBtn:SetPoint("RIGHT", ef, "TOPRIGHT", -8, threshY - 11)
                     bandsBtn:SetFrameLevel(ef:GetFrameLevel() + 4)
                     local bbBg = bandsBtn:CreateTexture(nil, "BACKGROUND")
                     bbBg:SetAllPoints()
@@ -2172,27 +2183,24 @@ initFrame:SetScript("OnEvent", function(self)
                 local entEnabled = entry.thresholdEnabled
                 if entEnabled == nil then entEnabled = true end
                 local multiOn = entry.multiBandEnabled and true or false
-                -- Multi-band toggle: dim + disable when the whole threshold is off,
-                -- so it doesn't look active while doing nothing.
+                -- Single threshold + multi-band are independent: multi can be toggled
+                -- even with single off (single on only => single; both on => multi
+                -- wins; single off + multi on => multi; both off => none).
                 if ef._multiToggle then
-                    ef._multiToggle:SetAlpha(entEnabled and 1 or 0.35)
-                    ef._multiToggle:SetEnabled(entEnabled)
+                    ef._multiToggle:SetAlpha(1)
+                    ef._multiToggle:SetEnabled(true)
                 end
-                -- "Bands" button usable only when threshold on AND multi selected.
                 if ef._bandsBtn then
-                    local bandsUsable = entEnabled and multiOn
-                    ef._bandsBtn:SetAlpha(bandsUsable and 1 or 0.35)
-                    ef._bandsBtn:SetEnabled(bandsUsable)
+                    ef._bandsBtn:SetAlpha(multiOn and 1 or 0.35)
+                    ef._bandsBtn:SetEnabled(multiOn)
                 end
                 if ef._cogBtn then ef._cogBtn:SetShown(not multiOn) end
 
-                -- The disabled overlay greys + tooltips the single-threshold controls
-                -- for either reason: the entry is off, or multi-band has replaced them.
-                if not entEnabled then
-                    ef._threshDisTip = nil
-                    ef._threshDis:Show()
-                elseif multiOn then
+                if multiOn then
                     ef._threshDisTip = "MULTI"
+                    ef._threshDis:Show()
+                elseif not entEnabled then
+                    ef._threshDisTip = nil
                     ef._threshDis:Show()
                 else
                     ef._threshDis:Hide()
@@ -4899,7 +4907,11 @@ initFrame:SetScript("OnEvent", function(self)
 				local EG             = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
 				local CLASS_COLORS_L = CLASS_COLORS
 
-				local thrPageBotY    = advSingle and (args.botY) or (args.botY - ROW_H)
+				-- Bottom = the section's actual final Y (args.botY), so the overlay
+				-- covers exactly the built section height
+				-- Simple mode appends an "Anchor to Cursor" row after this section
+				-- Extend the overlay one row down in simple mode
+				local thrPageBotY    = args.botY - ((ctx and ctx.advanced) and 0 or ROW_H)
 				thrPage = CreateFrame("Frame", nil, parent)
 				-- Anchor via PP (pixel-perfect scaled) so it lines up with the section
 				-- header/rows, which are placed the same way. Raw SetPoint here drifts
@@ -5297,7 +5309,7 @@ initFrame:SetScript("OnEvent", function(self)
 				talentRow._talentValues = { _menuOpts = { searchable = true, parent = thrPage } }
 				talentRow._talentOrder = {}
 				local talentDD = EllesmereUI.BuildDropdownControl(
-					talentRow, 170, DLVL + 5,
+					talentRow, 170, talentRow:GetFrameLevel() + 2,
 					talentRow._talentValues, talentRow._talentOrder,
 					function()
 						local ent = CurEntry(); if not ent then return 0 end
@@ -5345,6 +5357,9 @@ initFrame:SetScript("OnEvent", function(self)
 				talentDD:HookScript("OnClick", function()
 					local m = talentDD._ddMenu
 					if m then m:SetFrameStrata("TOOLTIP") end
+				end)
+				talentDD:HookScript("OnHide", function()
+					talentDD._invalidateMenu()
 				end)
 				-- Blocker: greys the picker for a spec whose class the player isn't
 				-- (its talents aren't in the player's loadout). Toggled in RefreshDetail.
@@ -5536,12 +5551,42 @@ initFrame:SetScript("OnEvent", function(self)
 						if threshOptRow._isBar then ent.thresholdReverse = v
 						else ent.thresholdPartialOnly = v end
 						RefreshClass()
+						if RefreshDetail then RefreshDetail() end
 					end,
 					{ sizeRatio = 0.95 }
 				)
 				threshOptToggle:SetPoint("RIGHT", threshOptRow, "RIGHT", 0, 0)
 				threshOptRow._toggle = threshOptToggle
 				threshOptRow._snap = threshOptSnap
+
+				----------------------------------------------------------------
+				-- Row: single-threshold percent vs value (bar-type class resource
+				-- only).
+				----------------------------------------------------------------
+				local threshModeRow = DRow("Threshold as", ROWH)
+				local threshModeSeg, _, threshModeSnap = EllesmereUI.BuildSegmentedControl({
+					parent    = threshModeRow,
+					keys      = { "percent", "value" },
+					labels    = { percent = "Percent", value = "Value" },
+					autoWidth = true,
+					square    = true,
+					height    = 22,
+					getChecked = function(key)
+						local ent = CurEntry()
+						local mode = ent and (ent.thresholdMode or "percent") or "percent"
+						return mode == key
+					end,
+					isDisabled = function() return threshModeRow._disabled and true or false end,
+					onToggle = function(key)
+						local ent = CurEntry(); if not ent then return end
+						ent.thresholdMode = key
+						RefreshClass()
+						if RefreshDetail then RefreshDetail() end
+					end,
+				})
+				threshModeSeg:SetPoint("RIGHT", threshModeRow, "RIGHT", 0, 0)
+				threshModeRow._seg = threshModeSeg
+				threshModeRow._snap = threshModeSnap
 
 				----------------------------------------------------------------
 				-- Row: Multi-band (toggle + Bands editor button)
@@ -5596,6 +5641,23 @@ initFrame:SetScript("OnEvent", function(self)
 				multiToggle:HookScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, BAND_HELP_TIP) end)
 				multiToggle:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
+				-- Disabled overlay: covers the toggle + Bands button when multi-band
+				-- can't apply (Enhance 5-bar style). Blocks clicks and shows why.
+				local multiDis = CreateFrame("Frame", nil, multiRow)
+				multiDis:SetPoint("TOPLEFT", multiToggle, "TOPLEFT", -3, 3)
+				multiDis:SetPoint("BOTTOMRIGHT", bandsBtn, "BOTTOMRIGHT", 3, -3)
+				multiDis:SetFrameLevel(multiRow:GetFrameLevel() + 8)
+				multiDis:EnableMouse(true)
+				local multiDisTex = multiDis:CreateTexture(nil, "OVERLAY")
+				multiDisTex:SetAllPoints()
+				multiDisTex:SetColorTexture(0.06, 0.08, 0.10, 0.7)
+				multiDis:SetScript("OnEnter", function()
+					EllesmereUI.ShowWidgetTooltip(multiDis, EllesmereUI.L("Unavailable with Enhancement 5-bar style."))
+				end)
+				multiDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+				multiDis:Hide()
+				multiRow._dis = multiDis
+
 				----------------------------------------------------------------
 				-- RefreshDetail: repaint the pane for the selected entry.
 				----------------------------------------------------------------
@@ -5609,13 +5671,15 @@ initFrame:SetScript("OnEvent", function(self)
 					dPlaceholder:Hide()
 
 					local isBar = ns.IsEntryBarType(ent)
-					local isGuardian
+					local isGuardian, isIgnorePain
 					if advSingle then
 						isGuardian = (ctx.specID == 104)
+						isIgnorePain = (ctx.specID == 73)
 					else
 						if ent.specIDs then
 							for _, s in ipairs(ent.specIDs) do
-								if s == 104 then isGuardian = true; break end
+								if s == 104 then isGuardian = true end
+								if s == 73 then isIgnorePain = true end
 							end
 						end
 					end
@@ -5662,8 +5726,10 @@ initFrame:SetScript("OnEvent", function(self)
 					hashRow._hint:SetText(isBar and EllesmereUI.L("(Ex: 25,50,75)") or EllesmereUI.L("(Ex: 2,4)"))
 					hashRow._input:SetText(ent.hashValues or "")
 
-					-- Threshold input bounds (Enhance five-bar minimum)
-					local threshMax = isBar and 100 or 10
+					-- Threshold input bounds (Enhance five-bar minimum). Bar-type can
+					-- read the threshold as % (max 100) or an absolute value (higher cap).
+					local threshIsValue = isBar and ent.thresholdMode == "value"
+					local threshMax = isBar and (threshIsValue and 1000 or 100) or 10
 					local entryIsEnhance = false
 					local pp = DB()
 					if pp and pp.secondary.enhanceFiveBar == true then
@@ -5688,13 +5754,17 @@ initFrame:SetScript("OnEvent", function(self)
 						threshInput:SetScript("OnEnter", nil)
 						threshInput:SetScript("OnLeave", nil)
 					end
-					threshRow._lbl:SetText(EllesmereUI.L("Threshold") .. (isBar and " %" or ""))
+					threshRow._lbl:SetText(EllesmereUI.L("Threshold") .. ((isBar and not threshIsValue) and " %" or ""))
 
 					-- single-threshold option label per type
 					threshOptRow._isBar = isBar
-					threshOptRow._lbl:SetText(isBar
-						and EllesmereUI.L("Threshold color below value")
-						or EllesmereUI.L("Only color at/above threshold"))
+					if isBar then
+						threshOptRow._lbl:SetText(ent.thresholdReverse
+							and EllesmereUI.L("Threshold color below value")
+							or EllesmereUI.L("Threshold color above value"))
+					else
+						threshOptRow._lbl:SetText(EllesmereUI.L("Only color at/above threshold"))
+					end
 
 					-- Talent gating only makes sense on your own class (talents come
 					-- from your loadout) -- block the picker for other classes' specs.
@@ -5712,21 +5782,27 @@ initFrame:SetScript("OnEvent", function(self)
 					-- Snap the toggles / swatches to the entry
 					if talentDD._refreshLabel then talentDD._refreshLabel() end
 					hashRow._swatchSnap()
-					threshEnableSnap(); threshSwatchSnap(); threshOptSnap(); multiSnap()
+					threshEnableSnap(); threshSwatchSnap(); threshOptSnap(); threshModeSnap(); multiSnap()
 
-					-- Enable/disable + greying state
+					-- Enable/disable + greying state. Single threshold and multi-band are independent toggles
 					local entEnabled = ent.thresholdEnabled
 					if entEnabled == nil then entEnabled = true end
-					local multiOn = ent.multiBandEnabled and true or false
-					multiToggle:SetAlpha(entEnabled and 1 or 0.35)
-					multiToggle:SetEnabled(entEnabled)
-					local bandsUsable = entEnabled and multiOn
-					bandsBtn:SetAlpha(bandsUsable and 1 or 0.35)
-					bandsBtn:SetEnabled(bandsUsable)
-					if not entEnabled then
-						threshRow._disTip = nil; threshDis:Show()
-					elseif multiOn then
+					local multiOn = (ent.multiBandEnabled and not entryIsEnhance) and true or false
+					if entryIsEnhance then
+						multiToggle:SetAlpha(0.35); multiToggle:SetEnabled(false)
+						bandsBtn:SetAlpha(0.35); bandsBtn:SetEnabled(false)
+						if multiRow._lbl then multiRow._lbl:SetAlpha(0.3) end
+						multiRow._dis:Show()
+					else
+						multiToggle:SetAlpha(1); multiToggle:SetEnabled(true)
+						bandsBtn:SetAlpha(multiOn and 1 or 0.35); bandsBtn:SetEnabled(multiOn)
+						if multiRow._lbl then multiRow._lbl:SetAlpha(0.6) end
+						multiRow._dis:Hide()
+					end
+					if multiOn then
 						threshRow._disTip = "MULTI"; threshDis:Show()
+					elseif not entEnabled then
+						threshRow._disTip = nil; threshDis:Show()
 					else
 						threshDis:Hide()
 					end
@@ -5737,6 +5813,9 @@ initFrame:SetScript("OnEvent", function(self)
 					threshOptToggle:SetAlpha(optUsable and 1 or 0.35)
 					threshOptToggle:SetEnabled(optUsable)
 					if threshOptRow._lbl then threshOptRow._lbl:SetAlpha(optUsable and 0.6 or 0.3) end
+					threshModeRow._disabled = not optUsable
+					threshModeSnap()
+					if threshModeRow._lbl then threshModeRow._lbl:SetAlpha(optUsable and 0.6 or 0.3) end
 
 					-- Layout pass: place visible rows top-to-bottom.
 					for _, rf in ipairs(_allRows) do rf:Hide() end
@@ -5749,15 +5828,17 @@ initFrame:SetScript("OnEvent", function(self)
 						yy = yy - (rf._rawH or ROWH) - ROWGAP
 					end
 					if allowTalent then place(talentRow) end
-					if not isGuardian then place(hashRow) end
+					if not isGuardian and not isIgnorePain then place(hashRow) end
 					place(threshRow)
+					if isBar then place(threshModeRow) end
 					place(threshOptRow)
 					place(multiRow)
 				end
 				thrPage:Hide();
             end -- BuildPopup
 
-			BuildFrame({ topY = _advTop, botY = y })
+			-- BuildFrame is not called here. It's built lazily on first open
+			-- (ToggleFrame)
 
             ---------------------------------------------------------------
             --  Build/Refresh dynamic entry frames
@@ -6100,7 +6181,8 @@ initFrame:SetScript("OnEvent", function(self)
                     sf:SetVerticalScroll(target)
                 end
             end
-			RefreshSpecEntries()
+			-- (No immediate populate: the frame is built + populated lazily on the
+			-- first ToggleFrame open, which also calls RefreshSpecEntries.)
 
             ---------------------------------------------------------------
             --  Show/Hide popup

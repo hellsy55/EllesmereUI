@@ -641,7 +641,7 @@ local function ResolveThresholdSpecEntry(sp)
     local specID = specIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(specIdx)
     if not specID then return nil end
 
-    local specTalent, specPlain, allPlain -- [TODO] confirm
+    local specTalent, specPlain, allTalent, allPlain
     for _, entry in ipairs(entries) do
         if entry.specIDs then
             local matchSpec, matchAll = false, false
@@ -655,9 +655,8 @@ local function ResolveThresholdSpecEntry(sp)
                     local active = (IsPlayerSpell and IsPlayerSpell(gate))
                         or (IsSpellKnown and IsSpellKnown(gate))
                     if active then
-                        if matchSpec then specTalent = specTalent or entry end
-                        -- else allTalent = allTalent or entry end
-						-- [TODO] remove if working
+                        if matchSpec then specTalent = specTalent or entry
+                        else allTalent = allTalent or entry end
                     end
                     -- gated but inactive: skip
                 else
@@ -668,7 +667,7 @@ local function ResolveThresholdSpecEntry(sp)
         end
     end
 
-    return specTalent or specPlain or allPlain
+    return specTalent or specPlain or allTalent or allPlain
 end
 
 -- Expose for options panel
@@ -2284,7 +2283,9 @@ end
 -- hashIsPercent: if true, the tick numbers are read as 0-100 percentages of the
 --   bar (frac = v/100) instead of absolute resource values (frac = v/maxVal).
 --   Bar-type only; pip resources always use counts. Default false (legacy).
-local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, hashR, hashG, hashB, hashA, hashIsPercent)
+-- maxRenderVal (optional): suppress any tick whose RESOURCE-VALUE position exceeds
+-- it (e.g. Devourer in Void Meta caps at 39 so nothing renders at the 40 edge).
+local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, hashR, hashG, hashB, hashA, hashIsPercent, maxRenderVal)
     local vals = ParseTickValues(tickStr)
 
     for i = 1, #tickCache do tickCache[i]:Hide() end
@@ -2328,6 +2329,11 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
         else
             inRange = (v <= maxVal)
             frac = v / maxVal
+        end
+        -- Optional value-position cap (e.g. Devourer in Void Meta: nothing > 39).
+        if maxRenderVal and inRange then
+            local valPos = hashIsPercent and (frac * maxVal) or v
+            if valPos > maxRenderVal then inRange = false end
         end
         if inRange then
             local t = tickCache[i]
@@ -2915,6 +2921,11 @@ local function BuildBars()
                 -- per-cast hash lines are drawn live in UpdateIronfurBar.
                 for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
                 EnsureIronfurOverlay(secondaryBar)
+            elseif cachedSecondary.power == "IGNOREPAIN_BAR" then
+                -- Prot Ignore Pain: no static threshold hash lines (the absorb value
+                -- is secret, so value-positioned hashes are meaningless; the moving
+                -- duration hash line is drawn separately via IP.UpdateHash).
+                for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
             else
                 -- Resolve hash lines from thresholdSpecs entry (falls back to legacy tickValues)
                 local _buildTsEntry = ResolveThresholdSpecEntry(sp)
@@ -2925,7 +2936,11 @@ local function BuildBars()
                 local _buildHB = _buildTsEntry and _buildTsEntry.hashColorB or 1
                 local _buildHA = _buildTsEntry and _buildTsEntry.hashColorA or 0.7
                 local _buildHPct = _buildTsEntry and _buildTsEntry.hashMode == "percent"
-                ApplyResourceBarTicks(secondaryBar, maxPts, _buildTickStr, secondaryBarTicks, _buildHW, _buildHR, _buildHG, _buildHB, _buildHA, _buildHPct)
+                -- Devourer in Void Meta (1217607): cap the bar at 40, so hide any
+                -- hash above 39 (nothing at/beyond the meta edge).
+                local _buildHashCap = (cachedSecondary.power == "SOUL_FRAGMENTS_DEVOURER"
+                    and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1217607)) and 39 or nil
+                ApplyResourceBarTicks(secondaryBar, maxPts, _buildTickStr, secondaryBarTicks, _buildHW, _buildHR, _buildHG, _buildHB, _buildHA, _buildHPct, _buildHashCap)
             end
             secondaryBar:Show()
         elseif cachedSecondary.type == "runes" then
@@ -3225,9 +3240,10 @@ local function UpdateHealthBar()
     -- Resolve per-spec threshold entry for health bar
     local _hpTsEntry = ResolveThresholdSpecEntry(hp)
     local _hpTsEnabled = _hpTsEntry and (_hpTsEntry.thresholdEnabled ~= false) or false
+    local _hpBandOn, _hpBands, _hpBandMode, _hpBandRev = ResolveBandConfig(hp, _hpTsEntry)
     if not _hpTsEnabled then _hpTsEntry = nil end
     local ft = healthBar:GetStatusBarTexture()
-    if _hpTsEntry and ft and UnitHealthPercent then
+    if (_hpTsEntry or _hpBandOn) and ft and UnitHealthPercent then
         local curve
         local baseR, baseG, baseB
         if hp.customColored then
@@ -3236,7 +3252,7 @@ local function UpdateHealthBar()
             local cc = CLASS_COLORS[cachedClass]
             if cc then baseR, baseG, baseB = cc[1], cc[2], cc[3] else baseR, baseG, baseB = 0.15, 0.75, 0.30 end
         end
-        local _bandOn, _bands, _bandMode, _bandRev = ResolveBandConfig(hp, _hpTsEntry)
+        local _bandOn, _bands, _bandMode, _bandRev = _hpBandOn, _hpBands, _hpBandMode, _hpBandRev
         if _bandOn then
             local stops = BuildBandStops(_bands, _bandMode, mx)
             curve = stops and GetBarBandCurve(stops, baseR, baseG, baseB, _bandRev) or nil
@@ -3361,9 +3377,10 @@ local function UpdatePrimaryBar()
     -- Resolve per-spec threshold entry for power bar
     local _ppTsEntry = ResolveThresholdSpecEntry(pp)
     local _ppTsEnabled = _ppTsEntry and (_ppTsEntry.thresholdEnabled ~= false) or false
+    local _ppBandOn, _ppBands, _ppBandMode, _ppBandRev = ResolveBandConfig(pp, _ppTsEntry)
     if not _ppTsEnabled then _ppTsEntry = nil end
     local ft = primaryBar:GetStatusBarTexture()
-    if _ppTsEntry and ft and UnitPowerPercent then
+    if (_ppTsEntry or _ppBandOn) and ft and UnitPowerPercent then
         local curve
         local baseR, baseG, baseB
         if pp.customColored then
@@ -3372,7 +3389,7 @@ local function UpdatePrimaryBar()
             local pc = POWER_COLORS[cachedPrimary]
             if pc then baseR, baseG, baseB = pc[1], pc[2], pc[3] else baseR, baseG, baseB = 1, 1, 1 end
         end
-        local _bandOn, _bands, _bandMode, _bandRev = ResolveBandConfig(pp, _ppTsEntry)
+        local _bandOn, _bands, _bandMode, _bandRev = _ppBandOn, _ppBands, _ppBandMode, _ppBandRev
         if _bandOn then
             local stops = BuildBandStops(_bands, _bandMode, mx)
             curve = stops and GetBarBandCurve(stops, baseR, baseG, baseB, _bandRev) or nil
@@ -3550,7 +3567,21 @@ local function UpdateIronfurBar()
         r, g, b, a = sp.fillR, sp.fillG, sp.fillB, sp.fillA or 1
     end
     local tsEntry = ResolveThresholdSpecEntry(sp)
-    if tsEntry and tsEntry.thresholdEnabled ~= false then
+    -- Ironfur colors by active stack count (not the bar's duration fraction), so
+    -- both the single threshold and multi-band are matched against `count`. Multi
+    -- takes priority when enabled with bands; otherwise fall back to the single
+    -- stack-count threshold. Bands here are count boundaries (the editor treats
+    -- this entry as count-based), so pick the active band via FindCountBand.
+    local bandOn, bands, _bandMode, bandRev = ResolveBandConfig(sp, tsEntry)
+    if bandOn then
+        local band = FindCountBand(bands, count, bandRev)
+        if band then
+            r = band.r or r
+            g = band.g or g
+            b = band.b or b
+            a = band.a or a
+        end
+    elseif tsEntry and tsEntry.thresholdEnabled ~= false then
         local threshCount = tsEntry.thresholdCount or sp.thresholdCount or 3
         if count >= threshCount then
             r = tsEntry.thresholdR or sp.thresholdR or r
@@ -3768,10 +3799,12 @@ local function UpdateSecondaryResource()
     end
 
     local sp = _G._ERB_ResolveSecondaryCfg()
+	if not sp then return end
     -- Resolve per-spec threshold entry once per update
     local _tsEntry = ResolveThresholdSpecEntry(sp)
     -- Per-entry thresholdEnabled (defaults to true for migrated entries without the field)
     local _tsEnabled = _tsEntry and (_tsEntry.thresholdEnabled ~= false) or false
+    local _tsBandOn, _tsBands, _tsBandMode, _tsBandReverse = ResolveBandConfig(sp, _tsEntry)
     if not _tsEnabled then _tsEntry = nil end
     local _tsThreshCount = _tsEntry and _tsEntry.thresholdCount or sp.thresholdCount
     -- Enhance Five Bar needs a threshold of at least 7 (the bar is 5 pips + overflow).
@@ -3800,8 +3833,6 @@ local function UpdateSecondaryResource()
     local _tsG = _tsEntry and _tsEntry.thresholdG or sp.thresholdG
     local _tsB = _tsEntry and _tsEntry.thresholdB or sp.thresholdB
     local _tsA = _tsEntry and _tsEntry.thresholdA or sp.thresholdA
-    -- Multi-band threshold.
-    local _tsBandOn, _tsBands, _, _tsBandReverse = ResolveBandConfig(sp, _tsEntry)
     local r, g, b, a = 1, 1, 1, 1
 
     -- Color: dark theme > class colored > custom fill color
@@ -4105,7 +4136,7 @@ local function UpdateSecondaryResource()
             -- Reapply hash line positions when max changes or on first valid layout
             -- (bar width may be 0 at BuildBars time before layout settles)
             local barW = secondaryBar:GetWidth()
-            if barW > 0 and (maxChanged or not secondaryBar._hashApplied) then
+            if barW > 0 and (maxChanged or not secondaryBar._hashApplied) and powerType ~= "IGNOREPAIN_BAR" then
                 secondaryBar._hashApplied = true
                 local _rtTsEntry = ResolveThresholdSpecEntry(sp)
                 local _rtTickStr = (_rtTsEntry and _rtTsEntry.hashValues ~= "") and _rtTsEntry.hashValues or sp.tickValues
@@ -4115,7 +4146,10 @@ local function UpdateSecondaryResource()
                 local _rtHB = _rtTsEntry and _rtTsEntry.hashColorB or 1
                 local _rtHA = _rtTsEntry and _rtTsEntry.hashColorA or 0.7
                 local _rtHPct = _rtTsEntry and _rtTsEntry.hashMode == "percent"
-                ApplyResourceBarTicks(secondaryBar, maxC, _rtTickStr, secondaryBarTicks, _rtHW, _rtHR, _rtHG, _rtHB, _rtHA, _rtHPct)
+                -- Devourer in Void Meta: hide any hash above 39.
+                local _rtHashCap = (powerType == "SOUL_FRAGMENTS_DEVOURER"
+                    and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID(1217607)) and 39 or nil
+                ApplyResourceBarTicks(secondaryBar, maxC, _rtTickStr, secondaryBarTicks, _rtHW, _rtHR, _rtHG, _rtHB, _rtHA, _rtHPct, _rtHashCap)
             end
             -- Apply fill color (dark theme / class colored / custom).
             -- Brewmaster stagger uses threshold colors unless darkTheme is active.
@@ -4124,12 +4158,18 @@ local function UpdateSecondaryResource()
             if powerType ~= "BREWMASTER_STAGGER" or sp.darkTheme then
                 local ft = secondaryBar:GetStatusBarTexture()
                 if ft then
+                    -- Hide the Ignore Pain band/threshold overlays by default; the
+                    -- IP branch below re-shows exactly the layers it needs. Any other
+                    -- path (or IP with no threshold) thus leaves them hidden.
+                    if secondaryBar._ipBandBars then
+                        for _i = 1, #secondaryBar._ipBandBars do secondaryBar._ipBandBars[_i]:Hide() end
+                    end
                     local pType = (powerType == "MAELSTROM_BAR") and PT.MAELSTROM
                                or (powerType == "INSANITY_BAR") and PT.INSANITY
                                or (powerType == "FOCUS_BAR") and PT.FOCUS
                                or (powerType == "LUNAR_POWER_BAR") and PT.LUNAR_POWER
                                or nil
-                    if _tsEntry and pType and UnitPowerPercent then
+                    if (_tsEntry or _tsBandOn) and pType and UnitPowerPercent then
                         -- Use ColorCurve + UnitPowerPercent: WoW evaluates the secret
                         -- value against the curve on the C side, returns a Color object.
                         -- Default: threshold color above the value, fill below it
@@ -4138,7 +4178,11 @@ local function UpdateSecondaryResource()
                         -- for spender resources like Hunter Focus where you
                         -- want to warn when low.
                         local curve
-                        local _bandOn, _bands, _bandMode, _bandRev = ResolveBandConfig(sp, _tsEntry)
+                        local _bandOn, _bands, _bandMode, _bandRev = _tsBandOn, _tsBands, _tsBandMode, _tsBandReverse
+                        local _tsThreshPct = _tsThreshCount or 30
+                        if _tsEntry and _tsEntry.thresholdMode == "value" and maxC and maxC > 0 then
+                            _tsThreshPct = math.min(100, (_tsThreshCount or 30) / maxC * 100)
+                        end
                         if _bandOn then
                             local stops = BuildBandStops(_bands, _bandMode, maxC)
                             curve = stops and GetBarBandCurve(stops, r, g, b, _bandRev) or nil
@@ -4146,12 +4190,12 @@ local function UpdateSecondaryResource()
                             curve = GetBarThresholdCurve(
                                 r, g, b,                                -- fill color (above)
                                 _tsR or 1, _tsG or 0.2, _tsB or 0.2,   -- threshold color (below)
-                                _tsThreshCount or 30)
+                                _tsThreshPct)
                         else
                             curve = GetBarThresholdCurve(
                                 _tsR or 1, _tsG or 0.2, _tsB or 0.2,   -- threshold color (above)
                                 r, g, b,                                -- fill color (below)
-                                _tsThreshCount or 30)
+                                _tsThreshPct)
                         end
                         if curve then
                             local ok, colorResult = pcall(UnitPowerPercent, "player", pType, false, curve)
@@ -4169,6 +4213,78 @@ local function UpdateSecondaryResource()
                             ft:SetVertexColor(_tsR or 1, _tsG or 0.2, _tsB or 0.2, _tsA or 1)
                         else
                             ft:SetVertexColor(r, g, b, a)
+                        end
+                    elseif powerType == "IGNOREPAIN_BAR" and (_tsEntry or _tsBandOn) and maxC and maxC > 0 then
+                        -- Ignore Pain is a bar but not a real power type, its
+						-- absorb value is secret in combat. Use the secret-safe
+						--  StatusBar-overlay technique (same as Vengeance pips)
+                        -- the bar's fill texture is the "cell",
+                        -- and each overlay repaints the whole visible fill
+                        local function _ipBound(to)
+                            return (_tsBandMode == "value") and (to or 0) or (maxC * (to or 0) / 100)
+                        end
+                        local layers = {}
+                        if _tsBandOn and _tsBands and #_tsBands > 0 then
+                            if _tsBandReverse then
+                                -- "From"
+                                layers[1] = { step = 0, r = r, g = g, b = b, a = a }
+                                for k = 1, #_tsBands do
+                                    local bd = _tsBands[k]
+                                    layers[#layers + 1] = { step = _ipBound(bd.to), r = bd.r or 1, g = bd.g or 1, b = bd.b or 1, a = bd.a or a }
+                                end
+                            else
+                                -- "Up to"
+                                local b1 = _tsBands[1]
+                                layers[1] = { step = 0, r = b1.r or 1, g = b1.g or 1, b = b1.b or 1, a = b1.a or a }
+                                for k = 1, #_tsBands - 1 do
+                                    local nb = _tsBands[k + 1]
+                                    layers[#layers + 1] = { step = _ipBound(_tsBands[k].to), r = nb.r or 1, g = nb.g or 1, b = nb.b or 1, a = nb.a or a }
+                                end
+                                layers[#layers + 1] = { step = _ipBound(_tsBands[#_tsBands].to), r = r, g = g, b = b, a = a }
+                            end
+                        elseif _tsEntry and _tsEntry.thresholdEnabled ~= false and _tsThreshCount then
+                            local tv = (_tsEntry.thresholdMode == "value") and _tsThreshCount or (maxC * _tsThreshCount / 100)
+                            if _tsReverse then
+                                -- threshold color below the value, base fill at/above.
+                                layers[1] = { step = 0, r = _tsR or 1, g = _tsG or 0.2, b = _tsB or 0.2, a = _tsA or 1 }
+                                layers[2] = { step = tv, r = r, g = g, b = b, a = a }
+                            else
+                                -- base fill below, threshold color at/above.
+                                layers[1] = { step = 0, r = r, g = g, b = b, a = a }
+                                layers[2] = { step = tv, r = _tsR or 1, g = _tsG or 0.2, b = _tsB or 0.2, a = _tsA or 1 }
+                            end
+                        else
+                            layers[1] = { step = 0, r = r, g = g, b = b, a = a }
+                        end
+                        -- Base layer paints the bar's own fill.
+                        ft:SetVertexColor(layers[1].r, layers[1].g, layers[1].b, layers[1].a)
+                        local bars = secondaryBar._ipBandBars
+                        if not bars then bars = {}; secondaryBar._ipBandBars = bars end
+                        local host = secondaryBar._sb or secondaryBar
+                        local texKey = ERB.db and ERB.db.profile and ERB.db.profile.general and ERB.db.profile.general.barTexture or "none"
+                        local texPath = EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, texKey, "Interface\\Buttons\\WHITE8x8")
+                        local shown = 0
+                        for li = 2, #layers do
+                            local L = layers[li]
+                            if L.step and L.step > 0 then
+                                shown = shown + 1
+                                local ob = bars[shown]
+                                if not ob then
+                                    ob = CreateFrame("StatusBar", nil, host)
+                                    bars[shown] = ob
+                                end
+                                ob:ClearAllPoints()
+                                ob:SetPoint("TOPLEFT", ft, "TOPLEFT", 0, 0)
+                                ob:SetPoint("BOTTOMRIGHT", ft, "BOTTOMRIGHT", 1, 0)
+                                ob:SetStatusBarTexture(texPath)
+                                local _obt = ob:GetStatusBarTexture()
+                                if _obt then _obt:SetSnapToPixelGrid(false); _obt:SetTexelSnappingBias(0) end
+                                ob:SetFrameLevel(host:GetFrameLevel() + shown)
+                                ob:SetMinMaxValues(L.step * 0.999, L.step)
+                                ob:SetValue(cur)
+                                ob:SetStatusBarColor(L.r, L.g, L.b, L.a)
+                                ob:Show()
+                            end
                         end
                     else
                         ft:SetVertexColor(r, g, b, a)
@@ -4743,6 +4859,11 @@ local function OnUpdate(self, dt)
                 cur = Lerp(cur, tgt, min(1, dt * SMOOTH_SPEED))
                 healthBar._smoothCurrent = cur
                 healthBar:SetValue(cur)
+            elseif cur ~= tgt then
+                -- Snap to the exact target so the bar reaches 100% at max instead of
+                -- settling short
+                healthBar._smoothCurrent = tgt
+                healthBar:SetValue(tgt)
             end
         end
         -- Poll threshold color at ~20fps so it reacts without waiting for UNIT_HEALTH.
@@ -4753,8 +4874,10 @@ local function OnUpdate(self, dt)
             local hp = _G._ERB_ResolveHealthCfg()
             local _hpPollEntry = hp and ResolveThresholdSpecEntry(hp) or nil
             local _hpPollEnabled = _hpPollEntry and (_hpPollEntry.thresholdEnabled ~= false) or false
+            local _hpPollBandOn, _hpPollBands, _hpPollBandMode, _hpPollBandRev
+            if hp then _hpPollBandOn, _hpPollBands, _hpPollBandMode, _hpPollBandRev = ResolveBandConfig(hp, _hpPollEntry) end
             if not _hpPollEnabled then _hpPollEntry = nil end
-            if _hpPollEntry and UnitHealthPercent then
+            if (_hpPollEntry or _hpPollBandOn) and UnitHealthPercent then
                 local ft = healthBar:GetStatusBarTexture()
                 if ft then
                     local curve
@@ -4766,7 +4889,7 @@ local function OnUpdate(self, dt)
                         if cc then baseR, baseG, baseB = cc[1], cc[2], cc[3]
                         else baseR, baseG, baseB = 0.15, 0.75, 0.30 end
                     end
-                    local _bandOn, _bands, _bandMode, _bandRev = ResolveBandConfig(hp, _hpPollEntry)
+                    local _bandOn, _bands, _bandMode, _bandRev = _hpPollBandOn, _hpPollBands, _hpPollBandMode, _hpPollBandRev
                     if _bandOn then
                         local maxHP = UnitHealthMax and UnitHealthMax("player") or nil
                         if maxHP and issecretvalue and issecretvalue(maxHP) then maxHP = nil end
@@ -4824,6 +4947,9 @@ local function OnUpdate(self, dt)
                     cur = Lerp(cur, tgt, min(1, dt * SMOOTH_SPEED))
                     primaryBar._smoothCurrent = cur
                     primaryBar:SetValue(cur)
+                elseif cur ~= tgt then
+                    primaryBar._smoothCurrent = tgt
+                    primaryBar:SetValue(tgt)
                 end
             end
         end
@@ -4845,6 +4971,13 @@ local function OnUpdate(self, dt)
                 cur = Lerp(cur, tgt, min(1, dt * SMOOTH_SPEED))
                 secondaryBar._smoothCurrent = cur
                 secondaryBar:SetValue(cur)
+            elseif cur ~= tgt then
+                -- Snap to the exact target once within the lerp threshold, so the bar
+                -- reaches 100% at max instead of settling ~0.5 short (a visible gap on
+                -- small-max bars like Devourer soul fragments). Guarded so it fires
+                -- once, not every frame.
+                secondaryBar._smoothCurrent = tgt
+                secondaryBar:SetValue(tgt)
             end
         end
     end

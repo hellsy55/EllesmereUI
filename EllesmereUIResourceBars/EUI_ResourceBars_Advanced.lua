@@ -207,11 +207,19 @@ function ns.ERB_BuildAdvancedPage(parent, yOffset)
         -- spec is actually selected.
         if sel then
             MakeButton("Remove", 90, addBtn, function()
-                local _, idx = FindAdvSpec(sel)
-                if idx then table.remove(GetAdvancedSpecs(), idx) end
-                SetSelectedSpecID(nil)
-                if _G._ERB_Apply then _G._ERB_Apply() end
-                EllesmereUI:RefreshPage(true)
+                EllesmereUI:ShowConfirmPopup({
+                    title       = EllesmereUI.L("Remove Advanced Spec"),
+                    message     = EllesmereUI.Lf("Remove advanced settings for \"%1$s\"? It will revert to Simple mode.", SpecName(sel)),
+                    confirmText = EllesmereUI.L("Remove"),
+                    cancelText  = EllesmereUI.L("Cancel"),
+                    onConfirm   = function()
+                        local _, idx = FindAdvSpec(sel)
+                        if idx then table.remove(GetAdvancedSpecs(), idx) end
+                        SetSelectedSpecID(nil)
+                        if _G._ERB_Apply then _G._ERB_Apply() end
+                        EllesmereUI:RefreshPage(true)
+                    end,
+                })
             end)
         end
 
