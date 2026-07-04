@@ -6296,7 +6296,18 @@ function EAB:UpdateHousingVisibility()
                 end
             end
             if s.visHideMounted then
-                if EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
+                -- Regular mounts are handled entirely by the secure "[mounted]
+                -- hide" clause in the state driver, which self-updates even in
+                -- combat -- so the bar reappears the instant the player is
+                -- dazed/knocked off a mount. Clobbering the driver with a
+                -- literal "hide" here would freeze it hidden until combat ends,
+                -- because this handler bails during InCombatLockdown and the
+                -- dismount event (PLAYER_MOUNT_DISPLAY_CHANGED) can no longer
+                -- re-evaluate a dead constant string. Only druid travel/flight
+                -- forms need this non-secure fallback, since [mounted] does not
+                -- match shapeshift forms.
+                if not (IsMounted and IsMounted())
+                    and EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
                     return true
                 end
             end
