@@ -716,6 +716,7 @@ function ECHAT.ApplySidebarIconScale()
     if not sb then return end
 
     local BASE_FRIEND = 26
+    local BASE_DURABILITY = 26
     local BASE_ICON = 22
     local BASE_FONT = 9
 
@@ -740,8 +741,8 @@ function ECHAT.ApplySidebarIconScale()
     end
 
     if CFD(cf1).durabilityBtn then
-        CFD(cf1).durabilityBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
-        CFD(cf1).durabilityBtn._freeMoveH = BASE_FRIEND * scale
+        CFD(cf1).durabilityBtn:SetSize(BASE_DURABILITY * scale, BASE_DURABILITY * scale)
+        CFD(cf1).durabilityBtn._freeMoveH = BASE_DURABILITY * scale
     end
     if CFD(cf1).durabilityPct then
         CFD(cf1).durabilityPct:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
@@ -2402,16 +2403,15 @@ local function SkinChatFrame(cf)
             end)
 
             local function UpdateDurability()
-                local cur, maxDur = 0, 0
-                for i = 1, 18 do
-                    local v1, v2 = GetInventoryItemDurability(i)
-                    if v1 and v2 and v2 > 0 then
-                        cur = cur + v1
-                        maxDur = maxDur + v2
+                local lowest = 100
+                for slot = 1, 18 do
+                    local cur, mx = GetInventoryItemDurability(slot)
+                    if cur and mx and mx > 0 then
+                        local pct = (cur / mx) * 100
+                        if pct < lowest then lowest = pct end
                     end
                 end
-                local pct = maxDur > 0 and math.floor((cur / maxDur) * 100) or 100
-                durabilityPct:SetText(pct .. "%")
+                durabilityPct:SetText(lowest .. "%")
             end
 
             local durEvents = CreateFrame("Frame")
