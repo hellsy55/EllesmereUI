@@ -2874,6 +2874,13 @@ initFrame:SetScript("OnEvent", function(self)
                       local p = DB(); if not p then return end
                       p.secondary.showPercent = v; RefreshClass()
                   end },
+                { type = "toggle", label = "Only if Power Bar Hidden",
+                  tooltip = "Show the resource text only while the power bar is hidden - disabled, filtered off for this spec, a spec with no power, or hidden by \"Hide Power Bar if Resource\". Off = always show the text.",
+                  get = function() local p = DB(); return p and p.secondary.showTextOnlyIfNoPower end,
+                  set = function(v)
+                      local p = DB(); if not p then return end
+                      p.secondary.showTextOnlyIfNoPower = v; RebuildClass()
+                  end },
                 { type = "slider", label = "Size", min = 8, max = 24, step = 1,
                   get = function() local p = DB(); return p and p.secondary.textSize or 11 end,
                   set = function(v)
