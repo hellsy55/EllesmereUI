@@ -8569,17 +8569,6 @@ local function DoClose()
                 end
                 -- NOW show the panel — one clean Show, no prior cycling.
                 if EllesmereUI.Toggle then EllesmereUI:Toggle() end
-                -- The page above was set up while the panel was HIDDEN; some frames
-                -- built while hidden render blank once shown (e.g. the Advanced sync
-                -- overlay's texture + label disappear while it still blocks input).
-                -- Rebuild the restored page once, now that it's actually visible.
-                if EllesmereUI.RefreshPage then
-                    C_Timer.After(0, function()
-                        if EllesmereUI.IsShown and EllesmereUI:IsShown() then
-                            EllesmereUI:RefreshPage(true)
-                        end
-                    end)
-                end
             end
         end
     end

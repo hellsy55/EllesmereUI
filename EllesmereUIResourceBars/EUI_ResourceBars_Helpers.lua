@@ -44,6 +44,31 @@ ns._ERB_IsThresholdCardShadowed = function(entries, idx)
     return false
 end
 
+-- The unlock-mode open/close cycle leaves these overlays with an
+-- undefined rect, so the frame and its regions draw nothing even
+-- though it still exists. Capture the overlay's own anchors + height
+-- at build time, then on show re-assert them one frame later
+ns.ERB_OverlayHealOnShow = function(ov, obg, olbl, bgAlpha)
+	local txt = olbl:GetText() or ""
+	local pts = {}
+	for p = 1, ov:GetNumPoints() do pts[p] = { ov:GetPoint(p) } end
+	local ovH = ov:GetHeight()
+	ov:SetScript("OnShow", function()
+		C_Timer.After(0, function()
+			if not ov:IsVisible() then return end
+			if #pts > 0 then
+				ov:ClearAllPoints()
+				for p = 1, #pts do ov:SetPoint(unpack(pts[p])) end
+			end
+			if ovH and ovH > 0 then ov:SetHeight(ovH) end
+			obg:SetColorTexture(13 / 255, 17 / 255, 25 / 255, bgAlpha or 0.96)
+			obg:ClearAllPoints(); obg:SetAllPoints(ov)
+			olbl:ClearAllPoints(); olbl:SetPoint("CENTER")
+			olbl:SetText(""); olbl:SetText(txt)
+		end)
+	end)
+end
+
 -- Simple page: when the player's CURRENT spec overrides this section in
 -- Advanced, its Simple controls are being ignored right now. Cover them with
 -- a click-to-Advanced hint so edits here aren't silently lost. This is the
@@ -73,6 +98,7 @@ ns.ERB_SimpleOverrideOverlay = function(parent, topY, botY, sectionKey)
 	olbl:SetTextColor(1, 1, 1, 0.7)
 	olbl:SetText(EllesmereUI.L("Active spec uses Advanced settings")
 		.. "   —   " .. EllesmereUI.L("click to edit"))
+	ns.ERB_OverlayHealOnShow(ov, obg, olbl, 0.9)
 	ov:SetScript("OnEnter", function() olbl:SetTextColor(EGc.r, EGc.g, EGc.b, 1) end)
 	ov:SetScript("OnLeave", function() olbl:SetTextColor(1, 1, 1, 0.7) end)
 	ov:SetScript("OnClick", function()

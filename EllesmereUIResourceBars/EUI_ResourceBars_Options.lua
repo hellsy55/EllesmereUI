@@ -975,7 +975,7 @@ initFrame:SetScript("OnEvent", function(self)
     local _bandEntryIdx
     local _bandGetBarData, _bandRefreshFn, _bandCountBased
     local _bandDefR, _bandDefG, _bandDefB, _bandDefA = 1, 0.2, 0.2, 1
-    local _bandModeRow, _bandModeToggle, _bandModeSnap, _bandModeHint, _bandAddBtn, _bandTitleFS
+    local _bandModeRow, _bandModeSeg, _bandModeSegRefresh, _bandModeHint, _bandAddBtn, _bandTitleFS
     local _bandReverseRow, _bandReverseSeg, _bandReverseSegRefresh
     local BAND_POPUP_W = 300
     local BAND_ROW_H = 26
@@ -1064,23 +1064,29 @@ initFrame:SetScript("OnEvent", function(self)
             return rf
         end
 
-        -- Row: Values as percent (bar-type only; count-based shows a hint instead)
-        _bandModeRow = HeaderRow("Values as percent")
-        _bandModeToggle, _, _bandModeSnap = EllesmereUI.BuildToggleControl(
-            _bandModeRow, _bandModeRow:GetFrameLevel() + 2,
-            function()
+        -- Row: value units -- a segmented switch (Amount / Percent), bar-type only
+        -- (count-based shows a hint instead).
+        _bandModeRow = HeaderRow("Values as")
+        _bandModeSeg, _, _bandModeSegRefresh = EllesmereUI.BuildSegmentedControl({
+            parent    = _bandModeRow,
+            keys      = { "amount", "percent" },
+            labels    = { amount = "Amount", percent = "Percent" },
+            autoWidth = true,
+            square    = true,
+            height    = 22,
+            getChecked = function(key)
                 local ent = CurrentBandEntry()
-                return ent and ent.bandMode == "percent" or false
+                local isPercent = ent and ent.bandMode == "percent" or false
+                if key == "percent" then return isPercent else return not isPercent end
             end,
-            function(v)
+            onToggle = function(key)
                 local ent = CurrentBandEntry(); if not ent then return end
-                ent.bandMode = v and "percent" or "value"
+                ent.bandMode = (key == "percent") and "percent" or "value"
                 if _bandRefreshFn then _bandRefreshFn() end
                 RefreshBandEditor()
             end,
-            { sizeRatio = 0.95 }
-        )
-        _bandModeToggle:SetPoint("RIGHT", _bandModeRow, "RIGHT", 0, 0)
+        })
+        _bandModeSeg:SetPoint("RIGHT", _bandModeRow, "RIGHT", 0, 0)
         _bandModeHint = EllesmereUI.MakeFont(bandPopup, 10, nil, 1, 1, 1)
         _bandModeHint:SetAlpha(0.4)
 
@@ -1261,11 +1267,8 @@ initFrame:SetScript("OnEvent", function(self)
             curY = curY - 18 - BAND_GAP
         else
             _bandModeHint:Hide()
-            -- Label reflects the current mode (percent vs absolute amount).
-            _bandModeRow._lbl:SetText(ent.bandMode == "percent"
-                and EllesmereUI.L("Values as percent")
-                or EllesmereUI.L("Values as amount"))
-            _bandModeSnap()
+            -- Static descriptor; the segmented pill shows Amount vs Percent.
+            if _bandModeSegRefresh then _bandModeSegRefresh() end
             placeRow(_bandModeRow)
         end
 
@@ -3040,6 +3043,7 @@ initFrame:SetScript("OnEvent", function(self)
             ov:SetScript("OnEnter", function() olbl:SetTextColor(EGc.r, EGc.g, EGc.b, 1) end)
             ov:SetScript("OnLeave", function() olbl:SetTextColor(1, 1, 1, 0.56) end)
             ov:SetScript("OnClick", function() if ctx.onToggleSync then ctx.onToggleSync() end end)
+            ns.ERB_OverlayHealOnShow(ov, obg, olbl)
         end
 
         -- Simple page: if the current spec overrides Health in Advanced, cover
@@ -3794,6 +3798,7 @@ initFrame:SetScript("OnEvent", function(self)
             ov:SetScript("OnEnter", function() olbl:SetTextColor(EGc.r, EGc.g, EGc.b, 1) end)
             ov:SetScript("OnLeave", function() olbl:SetTextColor(1, 1, 1, 0.56) end)
             ov:SetScript("OnClick", function() if ctx.onToggleSync then ctx.onToggleSync() end end)
+            ns.ERB_OverlayHealOnShow(ov, obg, olbl)
         end
 
         -- Simple page: if the current spec overrides Power in Advanced, cover
@@ -4824,7 +4829,6 @@ initFrame:SetScript("OnEvent", function(self)
             local _tempSpecSel = {}  -- transient dropdown selection
             local _specDDRefresh     -- set after dropdown creation
             local _selectedIdx       -- selected threshold entry (drives the right pane)
-            local _activeIdx         -- resolver-active entry (drives the theme glow)
             local RefreshDetail      -- right-pane refresher (assigned in BuildFrame)
 
             -- Build the spec items list for the dropdown
@@ -4919,6 +4923,16 @@ initFrame:SetScript("OnEvent", function(self)
 				PP.Point(thrPage, "TOPLEFT", parent, "TOPLEFT", CPAD, args.topY)
 				PP.Point(thrPage, "TOPRIGHT", parent, "TOPRIGHT", -CPAD, args.topY)
 				PP.Point(thrPage, "BOTTOMLEFT", parent, "TOPLEFT", CPAD, thrPageBotY)
+				-- The unlock-mode cycle can leave this lazily-built frame with an
+				-- undefined rect.
+				-- Capture the resolved anchors so ToggleFrame can re-assert them
+				-- before every Show to force a rect recompute.
+				local _thrPts = {}
+				for p = 1, thrPage:GetNumPoints() do _thrPts[p] = { thrPage:GetPoint(p) } end
+				thrPage._reanchor = function()
+					thrPage:ClearAllPoints()
+					for p = 1, #_thrPts do thrPage:SetPoint(unpack(_thrPts[p])) end
+				end
 				thrPage:SetFrameLevel(parent:GetFrameLevel() + 50)
 				thrPage:EnableMouse(true)
 				local obg = thrPage:CreateTexture(nil, "BACKGROUND"); obg:SetAllPoints()
@@ -5558,6 +5572,29 @@ initFrame:SetScript("OnEvent", function(self)
 				threshOptToggle:SetPoint("RIGHT", threshOptRow, "RIGHT", 0, 0)
 				threshOptRow._toggle = threshOptToggle
 				threshOptRow._snap = threshOptSnap
+				local threshOptSeg, _, threshOptSegSnap = EllesmereUI.BuildSegmentedControl({
+					parent    = threshOptRow,
+					keys      = { "upto", "from" },
+					labels    = { upto = "Up to", from = "From" },
+					autoWidth = true,
+					square    = true,
+					height    = 22,
+					getChecked = function(key)
+						local ent = CurEntry()
+						local reverse = ent and ent.thresholdReverse and true or false
+						if key == "upto" then return reverse else return not reverse end
+					end,
+					isDisabled = function() return threshOptRow._segDisabled and true or false end,
+					onToggle = function(key)
+						local ent = CurEntry(); if not ent then return end
+						ent.thresholdReverse = (key == "upto")
+						RefreshClass()
+						if RefreshDetail then RefreshDetail() end
+					end,
+				})
+				threshOptSeg:SetPoint("RIGHT", threshOptRow, "RIGHT", 0, 0)
+				threshOptRow._seg = threshOptSeg
+				threshOptRow._segSnap = threshOptSegSnap
 
 				----------------------------------------------------------------
 				-- Row: single-threshold percent vs value (bar-type class resource
@@ -5756,14 +5793,16 @@ initFrame:SetScript("OnEvent", function(self)
 					end
 					threshRow._lbl:SetText(EllesmereUI.L("Threshold") .. ((isBar and not threshIsValue) and " %" or ""))
 
-					-- single-threshold option label per type
+					-- single-threshold option: bar-type = Up to/From pill; pip = toggle.
 					threshOptRow._isBar = isBar
 					if isBar then
-						threshOptRow._lbl:SetText(ent.thresholdReverse
-							and EllesmereUI.L("Threshold color below value")
-							or EllesmereUI.L("Threshold color above value"))
+						threshOptRow._lbl:SetText(EllesmereUI.L("Direction"))
+						threshOptToggle:Hide()
+						threshOptSeg:Show()
 					else
 						threshOptRow._lbl:SetText(EllesmereUI.L("Only color at/above threshold"))
+						threshOptSeg:Hide()
+						threshOptToggle:Show()
 					end
 
 					-- Talent gating only makes sense on your own class (talents come
@@ -5782,7 +5821,7 @@ initFrame:SetScript("OnEvent", function(self)
 					-- Snap the toggles / swatches to the entry
 					if talentDD._refreshLabel then talentDD._refreshLabel() end
 					hashRow._swatchSnap()
-					threshEnableSnap(); threshSwatchSnap(); threshOptSnap(); threshModeSnap(); multiSnap()
+					threshEnableSnap(); threshSwatchSnap(); threshOptSnap(); threshOptSegSnap(); threshModeSnap(); multiSnap()
 
 					-- Enable/disable + greying state. Single threshold and multi-band are independent toggles
 					local entEnabled = ent.thresholdEnabled
@@ -5812,6 +5851,8 @@ initFrame:SetScript("OnEvent", function(self)
 					local optUsable = entEnabled and not multiOn
 					threshOptToggle:SetAlpha(optUsable and 1 or 0.35)
 					threshOptToggle:SetEnabled(optUsable)
+					threshOptRow._segDisabled = not optUsable
+					threshOptSegSnap()
 					if threshOptRow._lbl then threshOptRow._lbl:SetAlpha(optUsable and 0.6 or 0.3) end
 					threshModeRow._disabled = not optUsable
 					threshModeSnap()
@@ -5850,8 +5891,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local entries = sp.thresholdSpecs
                 local PP = EllesmereUI.PanelPP or EllesmereUI.PP
 
-                -- Which entry the resolver actually picks in-game right now -- gets
-                -- the "active" glow, and seeds the default selection.
+                -- Which entry the resolver actually picks in-game right now. seeds
+                -- the default selection (opens with the active entry pre-selected).
                 local activeIdx
                 do
                     local resolved = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(sp)
@@ -5861,7 +5902,6 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                 end
-                _activeIdx = activeIdx  -- shared so the accent-recolor callback can reach it
 
                 -- Resolve/clamp the selection. Default to the active entry, else first.
                 if #entries == 0 then
@@ -5918,29 +5958,6 @@ initFrame:SetScript("OnEvent", function(self)
                         accent:SetColorTexture(EG.r, EG.g, EG.b, 1)
                         accent:Hide()
                         ef._accent = accent
-
-                        -- Active-entry glow: a soft themed inner halo + crisp border,
-                        -- shown on the entry the resolver currently picks in-game
-                        -- (distinct from the selection accent). Drawn INSIDE the frame
-                        -- so it isn't clipped by the scroll frame; buttons sit above it.
-                        local GLOWSZ = 5
-                        local function mkGlow(p1, p2, w, h)
-                            local t = ef:CreateTexture(nil, "OVERLAY")
-                            t:SetColorTexture(1, 1, 1, 1)
-                            t:SetPoint(p1, ef, p1, 0, 0)
-                            t:SetPoint(p2, ef, p2, 0, 0)
-                            if w then t:SetWidth(w) end
-                            if h then t:SetHeight(h) end
-                            t:Hide()
-                            return t
-                        end
-                        ef._glow = {
-                            top   = mkGlow("TOPLEFT",    "TOPRIGHT",    nil, GLOWSZ),
-                            bot   = mkGlow("BOTTOMLEFT",  "BOTTOMRIGHT", nil, GLOWSZ),
-                            left  = mkGlow("TOPLEFT",     "BOTTOMLEFT",  GLOWSZ, nil),
-                            right = mkGlow("TOPRIGHT",    "BOTTOMRIGHT", GLOWSZ, nil),
-                        }
-                        ef._glowEdge = EllesmereUI.MakeBorder(ef, EG.r, EG.g, EG.b, 0, PP)
 
                         -- delete button
                         local delBtn = CreateFrame("Button", nil, ef)
@@ -6089,24 +6106,6 @@ initFrame:SetScript("OnEvent", function(self)
                     PaintRow(ef)
                     ef:SetAlpha(ns._ERB_IsThresholdCardShadowed(entries, idx) and 0.45 or 1)
 
-                    -- Active glow (the entry the resolver picks in-game), theme-colored.
-                    local g = ef._glow
-                    if idx == activeIdx then
-                        local gr, gg, gb = EllesmereUI.GetAccentColor()
-                        local c0 = CreateColor(gr, gg, gb, 0)
-                        local c1 = CreateColor(gr, gg, gb, 0.5)
-                        -- Each strip fades from the edge (c1) inward (c0).
-                        g.top:SetGradient("VERTICAL", c0, c1)
-                        g.bot:SetGradient("VERTICAL", c1, c0)
-                        g.left:SetGradient("HORIZONTAL", c1, c0)
-                        g.right:SetGradient("HORIZONTAL", c0, c1)
-                        g.top:Show(); g.bot:Show(); g.left:Show(); g.right:Show()
-                        if ef._glowEdge and ef._glowEdge.SetColor then ef._glowEdge:SetColor(gr, gg, gb, 0.85) end
-                    else
-                        g.top:Hide(); g.bot:Hide(); g.left:Hide(); g.right:Hide()
-                        if ef._glowEdge and ef._glowEdge.SetColor then ef._glowEdge:SetColor(0, 0, 0, 0) end
-                    end
-
                     ef:Show()
                     curY = curY - ENTRY_H - ROW_GAP
                 end
@@ -6194,15 +6193,20 @@ initFrame:SetScript("OnEvent", function(self)
                 if not DB() then return end
                 if not thrPage then BuildFrame({topY = _advTop, botY = y}) end
 				if thrPage:IsShown() then
+					-- Unlock cycle fix to redraw correctly
+					if thrPage:GetLeft() ~= nil then
+						thrPage:Hide()
+						return
+					end
 					thrPage:Hide()
-                    return
-                end
+				end
                 wipe(_tempSpecSel)
                 if _specDDRefresh then _specDDRefresh() end
                 -- Re-pick the active entry (resolver) each open, then scroll to it.
                 _selectedIdx = nil
                 RefreshSpecEntries(true)
                 if RefreshDetail then RefreshDetail() end
+				if thrPage._reanchor then thrPage._reanchor() end
 				thrPage:Show()
             end
 
@@ -6228,9 +6232,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end)
 
-            -- Theme/accent change: the active glow + selection highlight use the
-            -- live accent. RegAccent fires on EVERY accent path (fade + instant),
-            -- unlike the widget-refresh list -- recolor in place (no layout rebuild).
+            -- Theme/accent change: the selection highlight uses the live accent.
             EllesmereUI.RegAccent({ type = "callback", fn = function(r, g, b)
                 if not (thrPage and thrPage:IsShown()) then return end
                 for i = 1, #_entryFrames do
@@ -6238,15 +6240,6 @@ initFrame:SetScript("OnEvent", function(self)
                     if f and f:IsShown() then
                         f._accent:SetColorTexture(r, g, b, 1)
                         if f._selected then f._bg:SetColorTexture(r, g, b, 0.10) end
-                        if f._glow and i == _activeIdx then
-                            local c0 = CreateColor(r, g, b, 0)
-                            local c1 = CreateColor(r, g, b, 0.5)
-                            f._glow.top:SetGradient("VERTICAL", c0, c1)
-                            f._glow.bot:SetGradient("VERTICAL", c1, c0)
-                            f._glow.left:SetGradient("HORIZONTAL", c1, c0)
-                            f._glow.right:SetGradient("HORIZONTAL", c0, c1)
-                            if f._glowEdge and f._glowEdge.SetColor then f._glowEdge:SetColor(r, g, b, 0.85) end
-                        end
                     end
                 end
             end })
@@ -6402,6 +6395,7 @@ initFrame:SetScript("OnEvent", function(self)
             ov:SetScript("OnEnter", function() olbl:SetTextColor(EGc.r, EGc.g, EGc.b, 1) end)
             ov:SetScript("OnLeave", function() olbl:SetTextColor(1, 1, 1, 0.56) end)
             ov:SetScript("OnClick", function() if ctx.onToggleSync then ctx.onToggleSync() end end)
+            ns.ERB_OverlayHealOnShow(ov, obg, olbl)
         end
 
         -- Simple page: if the current spec overrides the Class Resource in
