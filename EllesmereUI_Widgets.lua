@@ -568,14 +568,27 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
     local searchResetScroll  -- assigned inside the scrolling branch; nil otherwise
     local mBgR, mBgG, mBgB, mBgA = DD_BG_R, DD_BG_G, DD_BG_B, DD_BG_HA
     local mBrR, mBrG, mBrB, mBrA = 1, 1, 1, DD_BRD_A
-    local menu = CreateFrame("Frame", nil, UIParent)
+    -- Parent to a caller-supplied frame (a scaled popup) when given, so the menu
+    -- INHERITS that frame's scale and layers within it -- no manual scale matching
+    -- (fixes the giant-font / behind-render nested dropdown).
+    -- Otherwise UIParent (default) so page dropdowns escape the scroll-frame clip.
+    local menu = CreateFrame("Frame", nil, (_menuOpts and _menuOpts.parent) or UIParent)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetFrameLevel(200)
     menu:SetClampedToScreen(true)
     menu:SetClipsChildren(true)
     menu:EnableMouse(true)
     menu:SetSize(menuW, 10)
-    menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
+    -- Anchor: default opens downward; opt-in side anchor (via _menuOpts.anchor)
+    -- opens to the left/right so the menu can't sit behind controls below it
+    -- (used by the threshold popup's talent dropdown). Clamped to screen below.
+    if _menuOpts and _menuOpts.anchor == "LEFT" then
+        menu:SetPoint("TOPRIGHT", ddBtn, "TOPLEFT", -4, 0)
+    elseif _menuOpts and _menuOpts.anchor == "RIGHT" then
+        menu:SetPoint("TOPLEFT", ddBtn, "TOPRIGHT", 4, 0)
+    else
+        menu:SetPoint("TOPLEFT", ddBtn, "BOTTOMLEFT", 0, -2)
+    end
     menu:Hide()
     SolidTex(menu, "BACKGROUND", mBgR, mBgG, mBgB, mBgA):SetAllPoints()
     MakeBorder(menu, mBrR, mBrG, mBrB, mBrA, PP)
@@ -1129,11 +1142,14 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             if searchResetScroll then searchResetScroll() end
         end
         searchEdit:SetScript("OnTextChanged", function(self) ApplySearchFilter(self:GetText()) end)
-        menu:HookScript("OnShow", function()
+        -- Hook to focus dropdown search on open
+        local function FocusSearch()
             searchEdit:SetText("")
             ApplySearchFilter("")
             searchEdit:SetFocus()
-        end)
+        end
+        menu._focusSearch = FocusSearch
+        menu:HookScript("OnShow", FocusSearch)
         menu:HookScript("OnHide", function()
             searchEdit:SetText("")
             searchEdit:ClearFocus()
@@ -1175,7 +1191,7 @@ end
 
 -- Wire OnEnter/OnLeave/OnClick/OnShow/OnHide for a dropdown button + menu.
 -- s = { bg_r..a, bg_hr..ha, brd_r..a, brd_hr..ha, txt_r..a, txt_hr..ha } (24 values)
-local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
+local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s, keepClickHandler)
     local function ApplyNormal()
         ddLbl:SetTextColor(s[17], s[18], s[19], s[20])
         brd:SetColor(s[9], s[10], s[11], s[12])
@@ -1198,18 +1214,43 @@ local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
             if ddBtn._ttText then HideWidgetTooltip() end
         end
     end)
-    ddBtn:SetScript("OnClick", function()
-        if ddBtn._ttText then HideWidgetTooltip() end
-        if menu:IsShown() then menu:Hide() else menu:Show() end
-    end)
-    ddBtn:HookScript("OnHide", function() menu:Hide() end)
+    -- keepClickHandler: the caller owns OnClick/OnHide (the lazy-menu path in
+    -- BuildDropdownControl). Overwriting OnClick here would (a) pin this menu
+    -- instance forever, so _invalidateMenu could never trigger a rebuild --
+    -- clicks would Show() the orphaned old menu (SetParent(nil) resets its
+    -- strata, so it renders behind everything) -- and (b) wipe any HookScripts
+    -- callers attached to OnClick, since SetScript discards existing hooks.
+    if not keepClickHandler then
+        ddBtn:SetScript("OnClick", function()
+            if ddBtn._ttText then HideWidgetTooltip() end
+            if menu:IsShown() then menu:Hide() else menu:Show() end
+        end)
+        ddBtn:HookScript("OnHide", function() menu:Hide() end)
+    end
     menu:SetScript("OnShow", function(self)
-        -- Match the panel's effective scale since menu lives on UIParent
-        local btnScale = ddBtn:GetEffectiveScale()
-        local uiScale = UIParent:GetEffectiveScale()
-        self:SetScale(btnScale / uiScale)
+        -- Custom-parented menus (BuildDropdownMenu parents to _menuOpts.parent
+        -- or UIParent) inherit their popup's scale; detect via GetParent() --
+        -- _menuOpts itself is out of scope here.
+        if menu:GetParent() ~= UIParent then
+            -- Parented to a scaled popup: scale is inherited from the parent, so
+            -- leave it at 1 -- nothing to match, nothing to go stale.
+            self:SetScale(1)
+        else
+            -- On UIParent: match the panel's effective scale. Walk GetScale() up to
+            -- UIParent (always current) rather than the button's GetEffectiveScale
+            -- ratio, which can be stale right after the popup is (re)built.
+            local s, f = 1, ddBtn
+            while f and f ~= UIParent do s = s * (f:GetScale() or 1); f = f:GetParent() end
+            self:SetScale(s)
+        end
+        -- Track the open menu globally so popups don't treat clicks on it (which
+        -- can extend outside the popup/panel) as an outside click that dismisses.
+        EllesmereUI._openDropdownMenu = self
         ApplyHover()
         refresh()
+        -- Re-apply search auto-focus: this SetScript replaced the OnShow hook
+        -- BuildDropdownMenu used to focus the field, so drive it directly here.
+        if menu._focusSearch then menu._focusSearch() end
         self:SetScript("OnUpdate", function(m)
             local flyoverFlyout = false; if m._flyouts then for _, fo in ipairs(m._flyouts) do if fo:IsShown() and fo:IsMouseOver() then flyoverFlyout = true; break end end end
             if not m:IsMouseOver() and not ddBtn:IsMouseOver() and not flyoverFlyout and not m._ddThumbDragging and IsMouseButtonDown("LeftButton") then m:Hide(); return end
@@ -1243,6 +1284,7 @@ local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s)
     end)
     menu:SetScript("OnHide", function(self)
         self:SetScript("OnUpdate", nil)
+        if EllesmereUI._openDropdownMenu == self then EllesmereUI._openDropdownMenu = nil end
         if self._flyouts then for _, fo in ipairs(self._flyouts) do fo:Hide() end end
         if ddBtn:IsMouseOver() then
             ApplyHover()
@@ -2056,7 +2098,10 @@ local function BuildDropdownControl(parent, ddW, fLevel, values, order, getValue
         menu, _, refresh = BuildDropdownMenu(ddBtn, ddW, order, values, getValue, setValue, ddLbl, "regular", disabledValuesFn)
         ddBtn._ddMenu = menu
         ddBtn._ddRefresh = refresh
-        WireDropdownScripts(ddBtn, ddLbl, ddBg, ddBrd, menu, refresh, RD_DD_COLOURS)
+        -- keepClickHandler=true: our lazy OnClick below must survive so that
+        -- after _invalidateMenu() the next click re-runs EnsureMenu (rebuild)
+        -- instead of showing the orphaned old menu.
+        WireDropdownScripts(ddBtn, ddLbl, ddBg, ddBrd, menu, refresh, RD_DD_COLOURS, true)
     end
     -- Public hook: invalidate the cached menu so the next click rebuilds
     -- from the current contents of `order` / `values`. Use this when the
@@ -4336,8 +4381,8 @@ local function BuildCogPopup(opts)
                 local sliderDis
                 if row.disabled then
                     sliderDis = CreateFrame("Frame", nil, pf)
-                    sliderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    sliderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    sliderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    sliderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     sliderDis:SetHeight(ROW_H)
                     sliderDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     sliderDis:EnableMouse(true)
@@ -4394,8 +4439,8 @@ local function BuildCogPopup(opts)
                 local toggleDis
                 if row.disabled then
                     toggleDis = CreateFrame("Frame", nil, pf)
-                    toggleDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    toggleDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    toggleDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    toggleDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     toggleDis:SetHeight(TOGGLE_ROW_H)
                     toggleDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     toggleDis:EnableMouse(true)
@@ -4452,8 +4497,8 @@ local function BuildCogPopup(opts)
                 local ddDis
                 if row.disabled then
                     ddDis = CreateFrame("Frame", nil, pf)
-                    ddDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    ddDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    ddDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    ddDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     ddDis:SetHeight(DROPDOWN_ROW_H)
                     ddDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     ddDis:EnableMouse(true)
@@ -4591,8 +4636,8 @@ local function BuildCogPopup(opts)
                 local inputDis
                 if row.disabled then
                     inputDis = CreateFrame("Frame", nil, pf)
-                    inputDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    inputDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    inputDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    inputDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     inputDis:SetHeight(ROW_H)
                     inputDis:SetFrameLevel(pf:GetFrameLevel() + 10)
                     inputDis:EnableMouse(true)
@@ -4839,8 +4884,8 @@ local function BuildCogPopup(opts)
                 local reorderDis
                 if row.disabled then
                     reorderDis = CreateFrame("Frame", nil, pf)
-                    reorderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, curY)
-                    reorderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", 0, curY)
+                    reorderDis:SetPoint("TOPLEFT", pf, "TOPLEFT", 1, curY)
+                    reorderDis:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -1, curY)
                     reorderDis:SetHeight(DROPDOWN_ROW_H)
                     reorderDis:SetFrameLevel(pf:GetFrameLevel() + 12)
                     reorderDis:EnableMouse(true)
@@ -5084,7 +5129,7 @@ end
 -------------------------------------------------------------------------------
 local function BuildSegmentedControl(cfg)
     local ACCENT   = ELLESMERE_GREEN
-    local SEG_H    = 28
+    local SEG_H    = cfg.height or 28
     local FONT_SZ  = 13
     local SEG_PAD  = 22
     local PILL_BG  = { 0.125, 0.125, 0.137 }  -- #202023
@@ -5117,9 +5162,13 @@ local function BuildSegmentedControl(cfg)
         end
     end
 
-    local capW = SEG_H
-    segWidths[cfg.keys[1]] = math.floor(segWidths[cfg.keys[1]] - capW)
-    segWidths[cfg.keys[numKeys]] = math.floor(segWidths[cfg.keys[numKeys]] - capW)
+    -- Square mode option
+    local SQUARE = cfg.square and true or false
+    local capW = SQUARE and 0 or SEG_H
+    if not SQUARE then
+        segWidths[cfg.keys[1]] = math.floor(segWidths[cfg.keys[1]] - capW)
+        segWidths[cfg.keys[numKeys]] = math.floor(segWidths[cfg.keys[numKeys]] - capW)
+    end
     pillW = 0
     for _, key in ipairs(cfg.keys) do pillW = pillW + segWidths[key] end
     -- Account for 1px overlap between adjacent segments
@@ -5346,6 +5395,13 @@ local function BuildSegmentedControl(cfg)
     capRightBtn:ClearAllPoints()
     capRightBtn:SetPoint("LEFT", lastBtn, "RIGHT", 0, 0)
 
+    if SQUARE then
+        -- No rounded caps: hide the textures and their click zones outright.
+        capLeftFill:Hide();  capLeftBdr:Hide();  capLeftAccent:Hide()
+        capRightFill:Hide(); capRightBdr:Hide(); capRightAccent:Hide()
+        capLeftBtn:Hide();   capRightBtn:Hide()
+    end
+
     -------------------------------------------------------------------
     -- RefreshAll
     -------------------------------------------------------------------
@@ -5390,14 +5446,15 @@ local function BuildSegmentedControl(cfg)
             seg.segLeft:SetColorTexture(br, bg2, bb, ba)
             seg.segRight:SetColorTexture(br, bg2, bb, ba)
 
-            -- All 4 borders visible, except: first segment hides left,
-            -- last segment hides right (the pill caps handle those edges).
+            -- All 4 borders visible, except (pill mode only): first segment hides
+            -- its left, last hides its right -- the rounded caps draw those edges.
+            -- In square mode those outer edges are the box border, so keep them.
             seg.segTop:Show()
             seg.segBot:Show()
             local isFirst = (idx == 1)
             local isLast  = (idx == #segments)
-            if isFirst then seg.segLeft:Hide() else seg.segLeft:Show() end
-            if isLast  then seg.segRight:Hide() else seg.segRight:Show() end
+            if isFirst and not SQUARE then seg.segLeft:Hide() else seg.segLeft:Show() end
+            if isLast  and not SQUARE then seg.segRight:Hide() else seg.segRight:Show() end
 
             -- Background: disabled = 50% opacity, hover = lighten by 4%, normal = PILL_BGA
             if disabled then
@@ -5420,6 +5477,9 @@ local function BuildSegmentedControl(cfg)
                 end
             end
         end
+
+        -- Square mode has no caps; the segment borders above are the whole box.
+        if SQUARE then return end
 
         -- Cap borders & fills: match adjacent segment's state (checked/disabled/hover)
         local firstKey = cfg.keys[1]

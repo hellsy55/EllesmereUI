@@ -1504,7 +1504,12 @@ initFrame:SetScript("OnEvent", function(self)
               end,
               setValue=function(v)
                 EllesmereUI.SetActiveTheme(v)
-                EllesmereUI:RefreshPage()
+                -- Fix sidebar highlight accent not changing on theme change
+                if EllesmereUI.RefreshAccent then
+                    EllesmereUI.RefreshAccent()  -- ApplyAccentLive already refreshes the page
+                else
+                    EllesmereUI:RefreshPage()
+                end
               end }
         );  y = y - h
 
