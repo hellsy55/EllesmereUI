@@ -799,6 +799,7 @@ local DEFAULTS = {
             fillR       = 0.95, fillG = 0.90, fillB = 0.60, fillA = 1,
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
+            showTextOnlyIfNoPower = false,  -- only show the resource text while the power bar is hidden (see IsPowerBarHidden)
             showPercent = true,
             showMaxStacks = true,
             textSize    = 11,
@@ -1398,6 +1399,27 @@ local function IsSpecDisabled(barCfg)
     if not specIdx then return false end
     local specID = specIdx and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(specIdx)
     return specID and disabledSpecs[specID] or false
+end
+
+-------------------------------------------------------------------------------
+--  Is the power bar effectively hidden right now?
+--  True when the power bar leaves no visible slot: globally disabled, filtered
+--  off for the current spec via the spec picker, the spec has no primary power,
+--  or hidden by "Hide Power Bar if Resource". Mirrors the conditions
+--  ResolveShiftDirPower reacts to, plus the hidePowerIfResource toggle. Used to
+--  gate features that should appear only in the power bar's absence (e.g. the
+--  class resource "Resource Text" shown only when the power bar is hidden).
+-------------------------------------------------------------------------------
+local function IsPowerBarHidden()
+    local p = ERB and ERB.db and ERB.db.profile
+    if not p then return false end
+    local pp = p.primary
+    if not pp then return true end
+    if pp.enabled == false then return true end
+    if IsSpecDisabled(pp) then return true end
+    if not GetPrimaryPowerType() then return true end
+    if p.secondary and p.secondary.hidePowerIfResource and GetSecondaryResource() then return true end
+    return false
 end
 
 -------------------------------------------------------------------------------
@@ -2852,7 +2874,15 @@ local function BuildBars()
             secondaryFrame._countText:SetParent(secondaryFrame._countTextOverlay)
             secondaryFrame._countText:SetPoint("CENTER", secondaryFrame, "CENTER", sp.textXOffset, sp.textYOffset)
             SetRBFont(secondaryFrame._countText, GetRBFont(), sp.textSize)
-            secondaryFrame._countText:Show()
+            -- "Only if Power Bar Hidden": keep the fontstring created + updated
+            -- (so text-value writes never hit a nil), but hide it while the power
+            -- bar is visible. Re-evaluated on every build (spec / power changes
+            -- trigger a rebuild, same as the shift feature).
+            if sp.showTextOnlyIfNoPower and not IsPowerBarHidden() then
+                secondaryFrame._countText:Hide()
+            else
+                secondaryFrame._countText:Show()
+            end
         elseif secondaryFrame._countText then
             secondaryFrame._countText:Hide()
         end
