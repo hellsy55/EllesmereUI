@@ -335,7 +335,7 @@ end
                         end
                     end
                 end
-                if _guildL then
+                if _guildL and _guildL:GetText() then
                     _guildL:SetText(_guildL:GetText() .. " [" .. guildRankName .. "]")
                 end
             end
