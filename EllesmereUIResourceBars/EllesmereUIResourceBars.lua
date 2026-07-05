@@ -442,13 +442,13 @@ local function GetSecondaryResource()
     elseif classFile == "ROGUE" then
         local mx = UnitPowerMax("player", PT.COMBO)
         return { power = PT.COMBO, max = (not issecretvalue or not issecretvalue(mx)) and mx or 5, type = "points" }
-    elseif classFile == "DRUID" and spec == 3
+    elseif classFile == "DRUID" and spec == 3 and form == 5
            and ERB.db and ERB.db.profile and ERB.db.profile.secondary
            and ERB.db.profile.secondary.guardianIronfurBar then
-        -- Guardian Ironfur duration bar (moving hash lines). Checked BEFORE the
-        -- cat-form combo-points branch so entering Cat Form never swaps a
-        -- Guardian's bar to Feral combo points -- the Ironfur bar persists in
-        -- every form. max is a normalized fraction (0..1).
+        -- Guardian Ironfur duration bar (moving hash lines). Shown only in Bear
+        -- Form. Every other form falls through to the default
+        -- resource for that form (combo points in Cat Form, nothing in
+        -- caster/moonkin/travel). max is a normalized fraction (0..1).
         ironfurBaseDur = IronfurBaseDuration()
         return { power = "IRONFUR_BAR", max = 1, type = "bar" }
     elseif classFile == "DRUID" and form == 1 then
