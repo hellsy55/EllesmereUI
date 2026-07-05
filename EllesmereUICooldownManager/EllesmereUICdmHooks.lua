@@ -163,11 +163,8 @@ local function HasEnoughResources(spellID)
         if powerType then
             local cost = c.cost or 0
             if c.costPercent and c.costPercent > 0 then
-                -- UnitPowerMax/UnitPower can return a SECRET number while
-                -- execution is tainted in combat (Midnight secret values);
-                -- comparing one throws. Without a readable value we can't gate,
-                -- so treat the spell as castable (let the glow show) rather than
-                -- tainting -- consistent with the "default to enough" stance above.
+                -- Power can be a SECRET number in tainted combat; can't compare it,
+                -- so default to castable rather than throw.
                 local maxP = UnitPowerMax("player", powerType)
                 if issecretvalue and issecretvalue(maxP) then return true end
                 cost = math.max(cost, (c.costPercent / 100) * maxP)
@@ -175,9 +172,7 @@ local function HasEnoughResources(spellID)
             if cost > 0 then
                 local cur = UnitPower("player", powerType)
                 if issecretvalue and issecretvalue(cur) then return true end
-                if cur < cost then
-                    return false
-                end
+                if cur < cost then return false end
             end
         end
     end
@@ -4676,13 +4671,9 @@ local function PlayPresetBuffGainSound(sd, sid, now)
     local path = paths and paths[key]
     if path then PlaySoundFile(path, "Master") end
 end
--- Loss counterpart for self-timed preset/custom buffs. Fired from the displayed
--- window end (the icon's own countdown timer running out), since these buffs get
--- no real Blizzard aura-removed alert. Reads the SAME per-icon store as the
--- regular-buff loss hook (ss.buffLostSoundKey) so the option is identical; kept
--- on a separate throttle table from the gain edge so the two never suppress each
--- other. Approximate by design: a fixed-duration window won't catch early
--- cancels/dispels.
+-- Loss counterpart to PlayPresetBuffGainSound for self-timed preset/custom buffs
+-- (no real aura-removed alert): fired when the displayed timer runs out. Separate
+-- throttle table so gain/loss never suppress each other.
 local function PlayPresetBuffLossSound(sd, sid, now)
     if not ns._cdmAnyBuffSound then return end
     if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then return end
@@ -4733,10 +4724,7 @@ local function UpdateCustomBuffBars()
                                 PlayPresetBuffGainSound(sd, sid, now)
                             end
 
-                            -- Loss edge: a live timer that has now run past its
-                            -- duration is the displayed window end -> play the
-                            -- per-icon loss sound once, then drop the timer so it
-                            -- can't re-fire (also reads as inactive below).
+                            -- Loss edge: displayed timer ran out -> fire once, drop it.
                             if timer and (now - timer.start) >= timer.duration then
                                 PlayPresetBuffLossSound(sd, sid, now)
                                 _customAuraTimers[timerKey] = nil
@@ -4838,8 +4826,7 @@ local function UpdateCustomBuffBars()
                             needBuffReanchor = true
                             PlayPresetBuffGainSound(sd, sid, now)
                         else
-                            -- Loss edge: displayed window ran out -> play the loss
-                            -- sound once and drop the timer (reanchor removes the icon).
+                            -- Loss edge: displayed window ran out -> fire once, drop timer.
                             local t = _customAuraTimers[tkey]
                             if t and (now - t.start) >= t.duration then
                                 PlayPresetBuffLossSound(sd, sid, now)

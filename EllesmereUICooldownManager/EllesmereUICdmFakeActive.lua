@@ -86,14 +86,9 @@ local _cdStateRules = {}                                -- subset: cas.cdStateEf
 local _cdStateTicker
 local _hasUserRules = false                             -- any profile (user) rule armed
 
--- CD-ready sound arm state, persisted BY ABILITY KEY (not on the rule object).
--- FakeActive_Rearm wipes and recreates the rule objects on every CDM rebuild, so
--- an armed flag stored on the rule is lost whenever a rebuild lands -- and in a
--- Mythic+ / raid the CDM rebuilds far more often, so a rebuild reliably eats the
--- on-CD -> ready edge right when the trinket comes back up (works in the open
--- world, silent in a dungeon). Keying the armed state by the ability lets it
--- survive rebuilds so the ready edge always fires. Empty at login/reload, so a
--- preset already ready at login still never false-fires.
+-- CD-ready sound "armed" state, keyed by ability so it survives the rule-object
+-- churn of FakeActive_Rearm (rebuilds are frequent in M+ and would otherwise eat
+-- the ready edge). Empty at login, so an already-ready preset never false-fires.
 local _cdrArmedByKey = {}
 
 -- Forward declarations
@@ -469,14 +464,8 @@ end
 --  throttled poll -- but only while at least one preset actually uses it.
 -- ---------------------------------------------------------------------------
 -- Unified "is this preset on a real (non-GCD) cooldown right now?" read.
---
--- Trinket / item presets read the ITEM cooldown, which is the source of truth for
--- "when can I use this again" and stays readable even inside the restricted
--- instances we tested (Mythic+). We must NOT read the item's on-use SPELL here:
--- an on-use trinket's granted spell frequently has its own, shorter cooldown
--- (e.g. a 30s spell lockout on top of a 90s item cooldown), so the ready edge
--- would fire early. If a context ever hands back Secret Values we bail (returning
--- "not on cooldown") rather than compare them -- no error, no early/false fire.
+-- Trinkets/items read the ITEM cooldown (its on-use spell can have a shorter
+-- cooldown that would fire the ready edge early). Bail on nil / Secret Values.
 PresetOnCD = function(key)
     local now = GetTime()
     if key > 0 then
@@ -495,11 +484,9 @@ PresetOnCD = function(key)
         end
     end
     if start == nil or dur == nil then return false end
-    if issecretvalue and (issecretvalue(start) or issecretvalue(dur)) then return false end
-    -- enable is only meaningful (and only safe to compare) when not a Secret.
-    if enable ~= nil and not (issecretvalue and issecretvalue(enable)) and enable ~= 1 then
-        return false
-    end
+    if issecretvalue and (issecretvalue(start) or issecretvalue(dur)
+        or (enable ~= nil and issecretvalue(enable))) then return false end
+    if enable ~= nil and enable ~= 1 then return false end
     return (dur > 1.5 and now < start + dur) or false
 end
 
@@ -589,8 +576,7 @@ EvalCdStateNow = function()
         if eff or soundKey then
             local onCD = PresetOnCD(rule.spellID)
             local sid = rule.spellID
-            -- The sound only fires while the ability's icon is actually present on a
-            -- bar (an unequipped/absent trinket has no icon), so track that here too.
+            -- Sound only fires while the ability's icon is present on a bar.
             local hasIcon = false
             for _, list in pairs(icons) do
                 for i = 1, #list do
@@ -602,18 +588,11 @@ EvalCdStateNow = function()
                     end
                 end
             end
-            -- Audio Effect on CD Ready (preset/trinket): arm while on cooldown, play
-            -- once on the on-CD -> ready edge. Armed state is persisted BY ABILITY
-            -- KEY (not on the rule object) so it survives the CDM rebuilds that wipe
-            -- and recreate rules -- otherwise a rebuild landing at cooldown-end (very
-            -- frequent in M+/raid) silently eats the ready edge. Empty at login, so a
-            -- preset already ready at login never false-fires.
+            -- Audio Effect on CD Ready: arm while on cooldown, fire once on the ready
+            -- edge. A missing icon leaves the armed state untouched so a rebuild at
+            -- cooldown-end can't swallow the edge (armed state persists by key).
             if soundKey then
                 local akey = rule.srcKey or sid
-                -- Arm only while the icon is present AND on cooldown; fire once on
-                -- the on-CD -> ready edge. A missing icon (rebuild flicker, trinket
-                -- swapped out) leaves the persisted state untouched so a rebuild that
-                -- lands exactly at cooldown-end cannot swallow the ready edge.
                 if onCD then
                     if hasIcon then _cdrArmedByKey[akey] = true end
                 elseif hasIcon and _cdrArmedByKey[akey] then
@@ -623,7 +602,6 @@ EvalCdStateNow = function()
                         if path then PlaySoundFile(path, "Master") end
                     end
                 end
-                rule._cdrArmed = _cdrArmedByKey[akey]
             end
         end
     end
@@ -771,8 +749,7 @@ function ns.FakeActive_Rearm()
                         MapCast(rule)
                     end
                     if hasCd or hasSound then
-                        -- Both the cooldown-state effect and the CD-ready sound ride
-                        -- the same throttled cooldown poll (EvalCdStateNow).
+                        -- Both effects ride the same cooldown poll (EvalCdStateNow).
                         _cdStateRules[#_cdStateRules + 1] = rule
                     end
                 end
