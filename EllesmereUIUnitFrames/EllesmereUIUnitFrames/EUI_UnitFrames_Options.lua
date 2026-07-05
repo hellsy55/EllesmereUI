@@ -1131,7 +1131,7 @@ initFrame:SetScript("OnEvent", function(self)
         extraFS:SetWordWrap(false)
 
         -- Resolve preview text for a content key
-        local function PreviewTextForContent(content, s, prefix)
+        local function PreviewTextForContent(content, s)
             -- Mirror live "Show Decimal on Text": one decimal on abbreviated values
             -- and percents when the global flag is on; integer (current) otherwise.
             local function _pvAbbrev(v)
@@ -1141,34 +1141,23 @@ initFrame:SetScript("OnEvent", function(self)
             local function _pvPct(p01)
                 return _G._EUI_TextDecimals and string.format("%.1f", p01 * 100) or tostring(math.floor(p01 * 100))
             end
-            local function _pvName()
-                if unitKey == "player" then return UnitName("player") or "Player" end
-                return _previewCreatureNames[unitKey] or unitKey
-            end
-            local function _pvTargetSuffix()
+            if content == "name" then
+                if unitKey == "player" then
+                    return UnitName("player") or "Player"
+                else
+                    return _previewCreatureNames[unitKey] or unitKey
+                end
+            elseif content == "nametotarget" then
+                local nm = (unitKey == "player") and (UnitName("player") or "Player")
+                    or (_previewCreatureNames[unitKey] or unitKey)
+                -- Sample class-colored target name to illustrate the always-class-colored target.
                 local _, ct = UnitClass("player")
                 local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
                 local tgt = "Target"
                 if cc then
                     tgt = string.format("|cff%02x%02x%02x%s|r", math.floor(cc.r * 255 + 0.5), math.floor(cc.g * 255 + 0.5), math.floor(cc.b * 255 + 0.5), tgt)
                 end
-                return " > " .. tgt
-            end
-            local function _pvShortName(raw)
-                if not prefix then return raw end
-                local maxLen = s[prefix .. "ShortNameLength"] or 0
-                if maxLen <= 0 or #raw <= maxLen then return raw end
-                local useEllipsis = s[prefix .. "ShortNameEllipsis"] ~= false
-                if useEllipsis then
-                    return raw:sub(1, maxLen) .. "..."
-                else
-                    return raw:sub(1, maxLen)
-                end
-            end
-            if content == "name" then
-                return _pvShortName(_pvName())
-            elseif content == "nametotarget" then
-                return _pvShortName(_pvName()) .. _pvTargetSuffix()
+                return nm .. " > " .. tgt
             elseif content == "both" or content == "bothdash" or content == "curhpshort" or content == "perhp" or content == "perhpnosign" or content == "perhpnum" or content == "perhpnumdash" then
                 local maxHP = UnitHealthMax("player") or 1
                 local pct = _previewHealthPct or 0.70
@@ -1282,7 +1271,7 @@ initFrame:SetScript("OnEvent", function(self)
                     extraFS:SetJustifyH("LEFT")
                     PP.Point(extraFS, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
                 end
-                extraFS:SetText(PreviewTextForContent(ec, s, "extraText"))
+                extraFS:SetText(PreviewTextForContent(ec, s))
                 extraFS:Show()
                 PreviewClassColor(extraFS, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
             else
@@ -1295,7 +1284,7 @@ initFrame:SetScript("OnEvent", function(self)
             if cc ~= "none" then
                 centerFS:SetJustifyH("CENTER")
                 PP.Point(centerFS, "CENTER", textOverlay, "CENTER", cxo, cyo)
-                centerFS:SetText(PreviewTextForContent(cc, s, "centerText"))
+                centerFS:SetText(PreviewTextForContent(cc, s))
                 centerFS:Show()
                 PreviewClassColor(centerFS, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
             else
@@ -1317,7 +1306,7 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     leftFS:SetWidth(0)
                 end
-                leftFS:SetText(PreviewTextForContent(lc, s, "leftText"))
+                leftFS:SetText(PreviewTextForContent(lc, s))
                 leftFS:Show()
                 PreviewClassColor(leftFS, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
             else
@@ -1329,7 +1318,7 @@ initFrame:SetScript("OnEvent", function(self)
             if rc ~= "none" then
                 rightFS:SetJustifyH("RIGHT")
                 PP.Point(rightFS, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
-                rightFS:SetText(PreviewTextForContent(rc, s, "rightText"))
+                rightFS:SetText(PreviewTextForContent(rc, s))
                 rightFS:Show()
                 PreviewClassColor(rightFS, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
             else
@@ -1453,15 +1442,7 @@ initFrame:SetScript("OnEvent", function(self)
                 pvCastIconInWidth = settings.showCastIcon ~= false and settings.castbarIconInWidth ~= false
                 pvCastIconOnRight = settings.castbarIconRight == true
             end
-            -- Boss: castbarWidth > 0 overrides the frame-matched width (0 = match frame).
-            -- Display-clamped to the frame width + 120 so an extreme custom width
-            -- can't spill across the options panel (pf doesn't clip children);
-            -- the real frames + in-game boss preview show the true width.
-            local pvCbBaseW = totalW
-            if unitKey == "boss" and (settings.castbarWidth or 0) > 0 then
-                pvCbBaseW = math.min(math.max(settings.castbarWidth, 30), totalW + 120)
-            end
-            local pvBarW = pvCastIconInWidth and math.max(1, pvCbBaseW - pvCastIconW) or pvCbBaseW
+            local pvBarW = pvCastIconInWidth and math.max(1, totalW - pvCastIconW) or totalW
             castbar = CreateFrame("Frame", nil, pf)
             PP.Size(castbar, pvBarW, initCH)
             local cbAnchor = power or health
@@ -1674,7 +1655,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if lc ~= "none" then
                     btbLeftFS:SetJustifyH("LEFT")
                     PP.Point(btbLeftFS, "LEFT", btbTextOvr, "LEFT", 5 + (s.btbLeftX or 0), s.btbLeftY or 0)
-                    btbLeftFS:SetText(PreviewTextForContent(lc, s, "btbLeft"))
+                    btbLeftFS:SetText(PreviewTextForContent(lc, s))
                     btbLeftFS:Show()
                     PreviewClassColor(btbLeftFS, s.btbLeftClassColor, s.btbLeftColorR, s.btbLeftColorG, s.btbLeftColorB)
                     PreviewPowerColor(btbLeftFS, lc, s.btbLeftPowerColor)
@@ -1685,7 +1666,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if rc ~= "none" then
                     btbRightFS:SetJustifyH("RIGHT")
                     PP.Point(btbRightFS, "RIGHT", btbTextOvr, "RIGHT", -5 + (s.btbRightX or 0), s.btbRightY or 0)
-                    btbRightFS:SetText(PreviewTextForContent(rc, s, "btbRight"))
+                    btbRightFS:SetText(PreviewTextForContent(rc, s))
                     btbRightFS:Show()
                     PreviewClassColor(btbRightFS, s.btbRightClassColor, s.btbRightColorR, s.btbRightColorG, s.btbRightColorB)
                     PreviewPowerColor(btbRightFS, rc, s.btbRightPowerColor)
@@ -1696,7 +1677,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if cc ~= "none" then
                     btbCenterFS:SetJustifyH("CENTER")
                     PP.Point(btbCenterFS, "CENTER", btbTextOvr, "CENTER", s.btbCenterX or 0, s.btbCenterY or 0)
-                    btbCenterFS:SetText(PreviewTextForContent(cc, s, "btbCenter"))
+                    btbCenterFS:SetText(PreviewTextForContent(cc, s))
                     btbCenterFS:Show()
                     PreviewClassColor(btbCenterFS, s.btbCenterClassColor, s.btbCenterColorR, s.btbCenterColorG, s.btbCenterColorB)
                     PreviewPowerColor(btbCenterFS, cc, s.btbCenterPowerColor)
@@ -2597,13 +2578,7 @@ initFrame:SetScript("OnEvent", function(self)
                         ciOnRight = s.castbarIconRight == true
                     end
                     local ciIconW = ch
-                    -- Boss: castbarWidth > 0 overrides the frame-matched width (0 = match frame).
-                    -- Display-clamped (frame width + 120) -- see the creation-time note.
-                    local cbBaseW = tw
-                    if unitKey == "boss" and (s.castbarWidth or 0) > 0 then
-                        cbBaseW = math.min(math.max(s.castbarWidth, 30), tw + 120)
-                    end
-                    local ciBarW = ciInWidth and math.max(1, cbBaseW - ciIconW) or cbBaseW
+                    local ciBarW = ciInWidth and math.max(1, tw - ciIconW) or tw
                     castbar:SetSize(ciBarW, ch)
                     -- Anchoring is applied once below (the authoritative anchor
                     -- that accounts for bottom-text-bar / attached-power cases),
@@ -3458,14 +3433,10 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Re-snap castbar background width. Boss custom widths (castbarWidth
-            -- > 0) are intentionally wider/narrower than the frame and already
-            -- display-clamped at sizing time -- trimming here would silently
-            -- revert them to frame width.
+            -- Re-snap castbar background width
             if castbar then
-                local pvCbCustom = unitKey == "boss" and (s.castbarWidth or 0) > 0
                 local cbW = castbar:GetWidth()
-                if not pvCbCustom and cbW > snappedFrameW + 0.01 then
+                if cbW > snappedFrameW + 0.01 then
                     castbar:SetWidth(snappedFrameW)
                 end
             end
@@ -4664,6 +4635,17 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="label", text="" });  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Name Max Length",
+              tooltip="Maximum characters shown for unit-frame names. 0 = unlimited (default). Names longer than this are clipped. Secret/protected names are never clipped in Lua.",
+              min=0, max=20, step=1, trackWidth=120,
+              getValue=function() return db.profile.nameMaxLength or 0 end,
+              setValue=function(v)
+                  db.profile.nameMaxLength = v
+                  if ns.RefreshAllUnitNames then ns.RefreshAllUnitNames() end
+              end },
+            { type="label", text="0 = unlimited" });  y = y - h
+
         _, h = W:Spacer(parent, y, 20); y = y - h
 
         -------------------------------------------------------------------
@@ -5606,9 +5588,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.leftTextColorR, d.leftTextColorG, d.leftTextColorB = src.leftTextColorR, src.leftTextColorG, src.leftTextColorB
                         d.leftTextSize = src.leftTextSize
                         d.leftTextX, d.leftTextY = src.leftTextX, src.leftTextY
-                        d.leftTextShortNameLength = src.leftTextShortNameLength
-                        d.leftTextShortNameEllipsis = src.leftTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -5631,9 +5610,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.leftTextSize or 0) ~= (src.leftTextSize or 0) then return false end
                         if (d.leftTextX or 0) ~= (src.leftTextX or 0) then return false end
                         if (d.leftTextY or 0) ~= (src.leftTextY or 0) then return false end
-                        if (d.leftTextShortNameLength or 0) ~= (src.leftTextShortNameLength or 0) then return false end
-
-                        if (d.leftTextShortNameEllipsis == false) ~= (src.leftTextShortNameEllipsis == false) then return false end
                     end
                     return true
                 end,
@@ -5714,17 +5690,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("leftTextY", 0) end,
                       set=function(v) SSet("leftTextY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("leftTextShortNameLength", 0) end,
-                      set=function(v) SSet("leftTextShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("leftTextContent","name") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("leftTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("leftTextShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("leftTextContent","name") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local leftCogShow = leftCogShowRaw
             local leftCogBtn = MakeCogBtn(leftRgn, leftCogShow)
@@ -5757,9 +5723,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.rightTextColorR, d.rightTextColorG, d.rightTextColorB = src.rightTextColorR, src.rightTextColorG, src.rightTextColorB
                         d.rightTextSize = src.rightTextSize
                         d.rightTextX, d.rightTextY = src.rightTextX, src.rightTextY
-                        d.rightTextShortNameLength = src.rightTextShortNameLength
-                        d.rightTextShortNameEllipsis = src.rightTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -5782,9 +5745,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.rightTextSize or 0) ~= (src.rightTextSize or 0) then return false end
                         if (d.rightTextX or 0) ~= (src.rightTextX or 0) then return false end
                         if (d.rightTextY or 0) ~= (src.rightTextY or 0) then return false end
-                        if (d.rightTextShortNameLength or 0) ~= (src.rightTextShortNameLength or 0) then return false end
-
-                        if (d.rightTextShortNameEllipsis == false) ~= (src.rightTextShortNameEllipsis == false) then return false end
                     end
                     return true
                 end,
@@ -5863,17 +5823,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("rightTextY", 0) end,
                       set=function(v) SSet("rightTextY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("rightTextShortNameLength", 0) end,
-                      set=function(v) SSet("rightTextShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("rightTextContent","both") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("rightTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("rightTextShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("rightTextContent","both") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local rightCogShow = rightCogShowRaw
             local rightCogBtn = MakeCogBtn(rightRgn, rightCogShow)
@@ -5922,9 +5872,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.centerTextColorR, d.centerTextColorG, d.centerTextColorB = src.centerTextColorR, src.centerTextColorG, src.centerTextColorB
                         d.centerTextSize = src.centerTextSize
                         d.centerTextX, d.centerTextY = src.centerTextX, src.centerTextY
-                        d.centerTextShortNameLength = src.centerTextShortNameLength
-                        d.centerTextShortNameEllipsis = src.centerTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -5947,9 +5894,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.centerTextSize or 0) ~= (src.centerTextSize or 0) then return false end
                         if (d.centerTextX or 0) ~= (src.centerTextX or 0) then return false end
                         if (d.centerTextY or 0) ~= (src.centerTextY or 0) then return false end
-                        if (d.centerTextShortNameLength or 0) ~= (src.centerTextShortNameLength or 0) then return false end
-
-                        if (d.centerTextShortNameEllipsis == false) ~= (src.centerTextShortNameEllipsis == false) then return false end
                     end
                     return true
                 end,
@@ -6028,17 +5972,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("centerTextY", 0) end,
                       set=function(v) SSet("centerTextY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("centerTextShortNameLength", 0) end,
-                      set=function(v) SSet("centerTextShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("centerTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("centerTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("centerTextShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("centerTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local centerCogShow = centerCogShowRaw
             local centerCogBtn = MakeCogBtn(ctrRgn, centerCogShow)
@@ -6075,9 +6009,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.extraTextSize = src.extraTextSize
                         d.extraTextX, d.extraTextY = src.extraTextX, src.extraTextY
                         d.extraTextAlign = src.extraTextAlign
-                        d.extraTextShortNameLength = src.extraTextShortNameLength
-                        d.extraTextShortNameEllipsis = src.extraTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -6101,9 +6032,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.extraTextX or 0) ~= (src.extraTextX or 0) then return false end
                         if (d.extraTextY or 0) ~= (src.extraTextY or 0) then return false end
                         if (d.extraTextAlign or "left") ~= (src.extraTextAlign or "left") then return false end
-                        if (d.extraTextShortNameLength or 0) ~= (src.extraTextShortNameLength or 0) then return false end
-
-                        if (d.extraTextShortNameEllipsis == false) ~= (src.extraTextShortNameEllipsis == false) then return false end
                     end
                     return true
                 end,
@@ -6185,17 +6113,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-150, max=150, step=1,
                       get=function() return SVal("extraTextY", 0) end,
                       set=function(v) SSet("extraTextY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("extraTextShortNameLength", 0) end,
-                      set=function(v) SSet("extraTextShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("extraTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("extraTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("extraTextShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("extraTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local extraCogShow = extraCogShowRaw
             local extraCogBtn = MakeCogBtn(etrRgn, extraCogShow)
@@ -8257,17 +8175,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return SVal("btbLeftY", 0) end,
                       set=function(v) SSet("btbLeftY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("btbLeftShortNameLength", 0) end,
-                      set=function(v) SSet("btbLeftShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("btbLeftContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("btbLeftShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("btbLeftShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("btbLeftContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local btbLeftCogShow = btbLeftCogShowRaw
             local btbLCogBtn = MakeCogBtn(btbLRgn, btbLeftCogShow)
@@ -8381,17 +8289,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return SVal("btbRightY", 0) end,
                       set=function(v) SSet("btbRightY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("btbRightShortNameLength", 0) end,
-                      set=function(v) SSet("btbRightShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("btbRightContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("btbRightShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("btbRightShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("btbRightContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local btbRightCogShow = btbRightCogShowRaw
             local btbRCogBtn = MakeCogBtn(btbRRgn, btbRightCogShow)
@@ -8587,17 +8485,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return SVal("btbCenterY", 0) end,
                       set=function(v) SSet("btbCenterY", v); UpdatePreview() end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return SVal("btbCenterShortNameLength", 0) end,
-                      set=function(v) SSet("btbCenterShortNameLength", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("btbCenterContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return SVal("btbCenterShortNameEllipsis", true) ~= false end,
-                      set=function(v) SSet("btbCenterShortNameEllipsis", v); UpdatePreview() end,
-                      disabled=function() local c=SVal("btbCenterContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local btbCenterCogShow = btbCenterCogShowRaw
             local btbCCogBtn = MakeCogBtn(btbCRgn, btbCenterCogShow)
@@ -8808,14 +8696,6 @@ initFrame:SetScript("OnEvent", function(self)
             local emptySwatch = EllesmereUI.BuildColorSwatch(ccRgn, ccRgn:GetFrameLevel() + 5,
                 function()
                     local c = SGetSupported("classPowerEmptyColor")
-                    c = c or { r = 0.2, g = 0.2, b = 0.2, a = 1.0 }
-                    return c.r, c.g, c.b, c.a or 1
-                end,
-                function(r, g, b, a)
-                    UNIT_DB_MAP[selectedUnit]().classPowerEmptyColor = { r = r, g = g, b = b, a = a or 1 }
-                    if ns.frames and ns.frames._toggleClassPower then
-                        ns.frames._toggleClassPower()
-                    end
                     ReloadAndUpdate(); UpdatePreview()
                 end, true, 20)
             emptySwatch:SetPoint("RIGHT", ccRgn._lastInline or ccRgn._control, "LEFT", -6, 0)
@@ -9243,10 +9123,10 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                       get=function() return SValSupported("buffGrowth", "auto") end,
                       set=function(v) SSetSupported("buffGrowth", v) end },
-                    { type="slider", label="Max Count", min=1, max=40, step=1,
+                    { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return SValSupported("maxBuffs", 4) end,
                       set=function(v) SSetSupported("maxBuffs", v) end },
-                    { type="slider", label="Max Per Row", min=1, max=40, step=1,
+                    { type="slider", label="Max Per Row", min=1, max=20, step=1,
                       get=function() return SValSupported("buffMaxPerRow", nil) or SValSupported("maxBuffs", 4) end,
                       set=function(v) SSetSupported("buffMaxPerRow", v) end },
                     { type="toggle", label="Cropped Icons",
@@ -11386,17 +11266,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return MVal("leftTextY", 0) end,
                       set=function(v) MSet("leftTextY", v) end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return MVal("leftTextShortNameLength", 0) end,
-                      set=function(v) MSet("leftTextShortNameLength", v) end,
-                      disabled=function() local c=MVal("leftTextContent","name") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return MVal("leftTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) MSet("leftTextShortNameEllipsis", v) end,
-                      disabled=function() local c=MVal("leftTextContent","name") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
             local function UpdCog()
@@ -11472,17 +11342,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return MVal("rightTextY", 0) end,
                       set=function(v) MSet("rightTextY", v) end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return MVal("rightTextShortNameLength", 0) end,
-                      set=function(v) MSet("rightTextShortNameLength", v) end,
-                      disabled=function() local c=MVal("rightTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return MVal("rightTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) MSet("rightTextShortNameEllipsis", v) end,
-                      disabled=function() local c=MVal("rightTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
             local function UpdCog()
@@ -11570,17 +11430,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-30, max=30, step=1,
                       get=function() return MVal("centerTextY", 0) end,
                       set=function(v) MSet("centerTextY", v) end },
-                    { type="slider", label="Name Length", min=0, max=30, step=1,
-                      get=function() return MVal("centerTextShortNameLength", 0) end,
-                      set=function(v) MSet("centerTextShortNameLength", v) end,
-                      disabled=function() local c=MVal("centerTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                    { type="toggle", label="Show Ellipsis",
-                      get=function() return MVal("centerTextShortNameEllipsis", true) ~= false end,
-                      set=function(v) MSet("centerTextShortNameEllipsis", v) end,
-                      disabled=function() local c=MVal("centerTextContent","none") return c ~= "name" and c ~= "nametotarget" end,
-                      disabledTooltip="Only applies when Name or Name > Target is selected." },
-                                    },
+                },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
             local function UpdCog()
@@ -12833,16 +12683,13 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = sw
                 castFillSwatch = sw
             end
-            -- Inline cog on Show Cast Bar (left region): Offset X/Y nudge the whole
-            -- cast bar (positive = right/up). Updates the live frames + both
+            -- Inline cog on Show Cast Bar (left region): Offset Y nudges the whole
+            -- cast bar vertically (positive = up). Updates the live frames + both
             -- previews via ReloadAndUpdate + the boss preview refresh.
             do
                 local _, offCogShow = EllesmereUI.BuildCogPopup({
                     title = "Cast Bar Position",
                     rows = {
-                        { type="slider", label="Offset X", min=-500, max=500, step=1,
-                          get=function() return B.castbarOffsetX or 0 end,
-                          set=function(v) B.castbarOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                         { type="slider", label="Offset Y", min=-200, max=200, step=1,
                           get=function() return B.castbarOffsetY or 0 end,
                           set=function(v) B.castbarOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -12851,18 +12698,14 @@ initFrame:SetScript("OnEvent", function(self)
                 AddCastBlock(CCogBtn(castMainRow._leftRegion, offCogShow, EllesmereUI.DIRECTIONS_ICON))
             end
 
-            -- Row 2: Show Cast Icon (+ icon cog) | Cast Bar Width (right under Cast
-            -- Bar Height so the two dimensions sit stacked in the same column)
+            -- Row 2: Show Cast Icon (+ icon cog) | Bar Background (opacity slider + color swatch)
             growthRow, hh = Ww:DualRow(pp, yy,
                 { type="toggle", text="Show Cast Icon",
                   getValue=function() return B.showCastIcon ~= false end,
                   setValue=function(v) B.showCastIcon = v; ReloadAndUpdate() end },
-                { type="slider", text="Cast Bar Width", min=0, max=500, step=1,
-                  tooltip="Sets a custom width for the cast bar. Set to 0 to match the boss frame width.",
-                  getValue=function() return B.castbarWidth or 0 end,
-                  -- Custom widths floor at 30 (matches the unlock-mode resize
-                  -- minimum): below the cast icon size the bar layout inverts.
-                  setValue=function(v) if v > 0 and v < 30 then v = 30 end; B.castbarWidth = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end });  yy = yy - hh
+                { type="slider", text="Bar Background", min=0, max=100, step=1,
+                  getValue=function() return math.floor((B.castBgAlpha or 0.5) * 100 + 0.5) end,
+                  setValue=function(v) B.castBgAlpha = v / 100; ReloadAndUpdate() end });  yy = yy - hh
             -- Icon cog (left): "Make Icon Part of the Bar" / "Show Icon on Right".
             do
                 local _, cogShow = EllesmereUI.BuildCogPopup({
@@ -12880,20 +12723,9 @@ initFrame:SetScript("OnEvent", function(self)
                 })
                 CCogBtn(growthRow._leftRegion, cogShow)
             end
-            -- Row 3: Reverse Fill | Bar Background (opacity slider + color swatch).
-            -- Bar Background sits right below the size sliders (mirrors the main
-            -- frames' cast bar section, where it follows the Height row).
-            local reverseRow
-            reverseRow, hh = Ww:DualRow(pp, yy,
-                { type="toggle", text="Reverse Fill",
-                  getValue=function() return B.castReverseFill == true end,
-                  setValue=function(v) B.castReverseFill = v; ReloadAndUpdate() end },
-                { type="slider", text="Bar Background", min=0, max=100, step=1,
-                  getValue=function() return math.floor((B.castBgAlpha or 0.5) * 100 + 0.5) end,
-                  setValue=function(v) B.castBgAlpha = v / 100; ReloadAndUpdate() end });  yy = yy - hh
             -- Inline color swatch on Bar Background (right region).
             do
-                local rgn = reverseRow._rightRegion
+                local rgn = growthRow._rightRegion
                 local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local c = B.castBgColor
@@ -12907,7 +12739,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = sw
             end
 
-            -- Row 4: Spell Name (dropdown + swatch + Size/X/Y cog) | Duration (same)
+            -- Row 3: Spell Name (dropdown + swatch + Size/X/Y cog) | Duration (same)
             local castTextRow
             castTextRow, hh = Ww:DualRow(pp, yy,
                 { type="dropdown", text="Spell Name",
@@ -12989,6 +12821,14 @@ initFrame:SetScript("OnEvent", function(self)
                 CCogBtn(rgn, cogShow)
             end
 
+            -- Row 4: Reverse Fill | (blank)
+            local reverseRow
+            reverseRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Reverse Fill",
+                  getValue=function() return B.castReverseFill == true end,
+                  setValue=function(v) B.castReverseFill = v; ReloadAndUpdate() end },
+                { type="label", text="" });  yy = yy - hh
+
             -- Gate the whole section on the Show Cast Bar toggle: when off, grey +
             -- block the height slider, the icon row, the background row, the spell
             -- name / duration row, reverse fill, and the inline fill swatch.
@@ -12999,7 +12839,6 @@ initFrame:SetScript("OnEvent", function(self)
             AddCastBlock(castTextRow._leftRegion)
             AddCastBlock(castTextRow._rightRegion)
             AddCastBlock(reverseRow._leftRegion)
-            AddCastBlock(reverseRow._rightRegion)
             return yy
         end
 
