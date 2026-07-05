@@ -815,6 +815,20 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(cogState); cogState()
         end
 
+        -- Gear flyout item levels. Independent of the themed character sheet
+        -- (it enhances Blizzard's own equipment flyout), so it is not gated by
+        -- the section's disabled overlay.
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Gear Flyout Item Levels",
+              tooltip="Shows the item level on each item in the character sheet gear flyout (the popup of same-slot bag items that appears when hovering an equipped slot), coloured by quality.",
+              getValue=function() return EllesmereUIDB and EllesmereUIDB.flyoutItemLevels or false end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.flyoutItemLevels = v
+              end },
+            { type="spacer" }
+        );  y = y - h
+
         _, h = W:Spacer(parent, y, 10);  y = y - h
 
         ---------------------------------------------------------------------------
@@ -2157,6 +2171,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.lfgSavedRoles = nil
                 EllesmereUIDB.showMythicRating = nil
                 EllesmereUIDB.showPvpItemLevel = nil
+                EllesmereUIDB.flyoutItemLevels = nil
                 EllesmereUIDB.statCategoryColors = nil
                 EllesmereUIDB.statSectionsOrder = nil
                 EllesmereUIDB.charSheetCollapsedSections = nil

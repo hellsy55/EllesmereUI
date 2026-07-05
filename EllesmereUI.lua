@@ -1762,6 +1762,26 @@ do
             local color = map[info.trackString or ""] or W
             return text, color
         end
+
+        -- Resolve the item-level text color using the exact same precedence as
+        -- the character-sheet slot labels: custom override > upgrade-track hue >
+        -- item rarity > white. Shared by the character sheet, inspect sheet and
+        -- the equipment-flyout item levels so they always stay in sync.
+        function EllesmereUI.GetItemLevelColor(itemLink, itemQuality)
+            if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor
+                and EllesmereUIDB.charSheetItemLevelColor then
+                return EllesmereUIDB.charSheetItemLevelColor
+            end
+            local upgradeText, upgradeColor = EllesmereUI.GetUpgradeTrack(itemLink)
+            if upgradeText and upgradeText ~= "" and upgradeColor then
+                return upgradeColor
+            end
+            if (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and itemQuality then
+                local r, g, b = GetItemQualityColor(itemQuality)
+                return { r = r, g = g, b = b }
+            end
+            return { r = 1, g = 1, b = 1 }
+        end
     end
 end
 

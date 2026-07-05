@@ -2929,3 +2929,132 @@ do
     end)
 end
 
+-------------------------------------------------------------------------------
+--  Equipment Flyout item levels
+--  Blizzard's character-sheet gear flyout (hover a gear slot -> the popup of
+--  same-slot items from your bags/equipped) only shows item icons. When this is
+--  enabled we overlay each flyout button with the item level of the item it
+--  represents, coloured by item quality, so you can compare upgrades at a
+--  glance without reading every tooltip.
+--
+--  We hook EquipmentFlyout_DisplayButton (called once per button whenever the
+--  flyout is populated) and read live from EllesmereUIDB, so toggling the
+--  option takes effect on the next flyout without a reload.
+--  Toggle: EllesmereUIDB.flyoutItemLevels (Quality of Life -> UI).
+-------------------------------------------------------------------------------
+do
+    local function FlyoutEnabled()
+        return EllesmereUIDB and EllesmereUIDB.flyoutItemLevels
+    end
+
+    -- Compute item level + quality + link from a decoded bag/slot pair. Prefers
+    -- the ItemLocation API (exact per-item level, no caching) and falls back to
+    -- the item link when the location can't be built.
+    local function LevelFromSlot(isBags, bag, slot)
+        if isBags then
+            if ItemLocation then
+                local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
+                if loc and loc:IsValid() and C_Item.DoesItemExist(loc) then
+                    return C_Item.GetCurrentItemLevel(loc), C_Item.GetItemQuality(loc), C_Item.GetItemLink(loc)
+                end
+            end
+            local link = C_Container and C_Container.GetContainerItemLink(bag, slot)
+            if link then
+                return C_Item.GetDetailedItemLevelInfo(link), select(3, C_Item.GetItemInfo(link)), link
+            end
+            return
+        end
+        -- Equipped / bank inventory slot.
+        local link = GetInventoryItemLink("player", slot)
+        if link then
+            local quality = GetInventoryItemQuality and GetInventoryItemQuality("player", slot)
+            return C_Item.GetDetailedItemLevelInfo(link), quality or select(3, C_Item.GetItemInfo(link)), link
+        end
+    end
+
+    -- Return item level + quality + link for a flyout button. Handles all three
+    -- flyout shapes across game versions:
+    --   * modern flyouts that store an ItemLocation object on the button,
+    --   * current retail packed location decoded via EquipmentManager_GetLocationData,
+    --   * older clients decoded via EquipmentManager_UnpackLocation.
+    local function ButtonItemInfo(button)
+        if button.GetItemLocation then
+            local ok, loc = pcall(button.GetItemLocation, button)
+            if ok and loc and loc.IsValid and loc:IsValid() and C_Item.DoesItemExist(loc) then
+                return C_Item.GetCurrentItemLevel(loc), C_Item.GetItemQuality(loc), C_Item.GetItemLink(loc)
+            end
+        end
+
+        local location = button.location
+        if not location or type(location) ~= "number" then return end
+        if EQUIPMENTFLYOUT_FIRST_SPECIAL_LOCATION
+            and location >= EQUIPMENTFLYOUT_FIRST_SPECIAL_LOCATION then
+            return
+        end
+
+        if EquipmentManager_GetLocationData then
+            local ld = EquipmentManager_GetLocationData(location)
+            if not ld or ld.slot == nil then return end
+            return LevelFromSlot(ld.isBags, ld.bag, ld.slot)
+        elseif EquipmentManager_UnpackLocation then
+            local _, _, bags, voidStorage, slot, bag = EquipmentManager_UnpackLocation(location)
+            if voidStorage then return end
+            return LevelFromSlot(bags, bag, slot)
+        end
+    end
+
+    -- Lazily attach (and return) the item-level FontString on a flyout button.
+    local function EnsureText(button)
+        if not button.EUIFlyoutILvl then
+            local font = EllesmereUI._font
+                or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+            local flag = (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG"))
+                or "OUTLINE, SLUG"
+            local fs = button:CreateFontString(nil, "OVERLAY", nil, 7)
+            fs:SetFont(font, 12, flag)
+            fs:SetPoint("TOP", button, "TOP", 0, -2)
+            fs:SetJustifyH("CENTER")
+            button.EUIFlyoutILvl = fs
+        end
+        return button.EUIFlyoutILvl
+    end
+
+    local function InstallHook()
+        if not EquipmentFlyout_DisplayButton then return end
+        hooksecurefunc("EquipmentFlyout_DisplayButton", function(button)
+            local fs = button.EUIFlyoutILvl
+            if not FlyoutEnabled() then
+                if fs then fs:SetText("") end
+                return
+            end
+
+            local ilvl, quality, link = ButtonItemInfo(button)
+            fs = EnsureText(button)
+            if ilvl and ilvl > 0 then
+                fs:SetText(ilvl)
+                -- Match the character sheet: custom color > upgrade track > rarity.
+                local c
+                if EllesmereUI.GetItemLevelColor then
+                    c = EllesmereUI.GetItemLevelColor(link, quality)
+                elseif quality and ITEM_QUALITY_COLORS then
+                    c = ITEM_QUALITY_COLORS[quality]
+                end
+                if c then
+                    fs:SetTextColor(c.r, c.g, c.b, 1)
+                else
+                    fs:SetTextColor(1, 1, 1, 1)
+                end
+            else
+                fs:SetText("")
+            end
+        end)
+    end
+
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        InstallHook()
+    end)
+end
+
