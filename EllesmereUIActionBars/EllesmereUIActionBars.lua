@@ -2266,15 +2266,43 @@ end
 --  Bar Setup creates frames and buttons for each bar
 -------------------------------------------------------------------------------
 local function SetupBar(info, skipProtected)
+    local function ApplyShapeHitRects(btn, shape)
+        if not btn then return end
+
+        local w, h = btn:GetSize()
+        if not w or w == 0 then w = 45 end
+        if not h or h == 0 then h = 45 end
+
+        local insetX, insetY = 0, 0
+
+        if shape == "diamond" or shape == "circle" then
+            insetX = math.floor(w * 0.146)
+            insetY = math.floor(h * 0.146)
+        elseif shape == "hexagon" then
+            insetX = math.floor(w * 0.12)
+            insetY = math.floor(h * 0.12)
+        elseif shape == "shield" then
+            insetX = math.floor(w * 0.10)
+            insetY = math.floor(h * 0.15)
+        else
+            insetX, insetY = 0, 0
+        end
+
+        btn:SetHitRectInsets(insetX, insetX, insetY, insetY)
+    end
+
     local key = info.key
     local frame = CreateBarFrame(info)
     local buttons = {}
+    local buttonShape = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[key] and EAB.db.profile.bars[key].buttonShape or "none"
 
     if info.isStance then
         -- Stance bar: reuse StanceButton1-N
         for i = 1, info.count do
             local btn = _G["StanceButton" .. i]
             if btn then
+                ApplyShapeHitRects(btn, buttonShape)
+
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "stance")
@@ -2288,6 +2316,8 @@ local function SetupBar(info, skipProtected)
         for i = 1, info.count do
             local btn = _G["PetActionButton" .. i]
             if btn then
+                ApplyShapeHitRects(btn, buttonShape)
+
                 if not skipProtected then
                     btn:SetAttributeNoHandler("statehidden", nil)
                     ReRegisterButtonEvents(btn, "pet")
@@ -2315,9 +2345,10 @@ local function SetupBar(info, skipProtected)
         for i = 1, info.count do
             local slot = slotOffset + i
             local btn
-
                 btn = GetOrCreateButton(slot, frame, info, i, skipProtected)
                 if btn then
+                    ApplyShapeHitRects(btn, buttonShape)
+
                     if not skipProtected then
                         -- All our buttons use explicit action attributes.
                         -- CalculateAction sees the non-zero action attr and
