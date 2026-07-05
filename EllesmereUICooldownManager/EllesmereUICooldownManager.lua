@@ -3812,6 +3812,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData, ssb)
     local tex = fd and fd.tex or icon._tex
     local cd = fd and fd.cooldown or icon._cooldown
     local bg = fd and fd.bg or icon._bg
+
     local zoom = barData.iconZoom or 0.08
     local borderSz = barData.borderSize or 1
     local brdR = barData.borderR or 0
@@ -4330,7 +4331,7 @@ local function RefreshCDMIconAppearance(barKey)
                 end
             end
         end
-        -- Update border (PP or textured via ApplyBorderStyle)
+        -- Update border (PP or textured via ApplyBorderStyle).
         local bdrTgt = (fd and fd.borderFrame) or icon
         if fd and fd.borderFrame or EllesmereUI.PP.GetBorders(icon) then
             local textureKey = barData.borderTexture or "solid"

@@ -6607,6 +6607,25 @@ initFrame:SetScript("OnEvent", function(self)
                                 AddSoundPreview,
                                 { searchable = true })
                         end
+                        -- "Audio on Buff Loss": stored per-icon as ss.buffLostSoundKey.
+                        -- Blizzard-tracked buffs fire it on the real drop edge
+                        -- (TriggerAuraRemovedAlert); self-timed preset/custom buffs have
+                        -- no such alert, so it fires when the displayed timer runs out
+                        -- (UpdateCustomBuffBars in CdmHooks), off the SAME stored key.
+                        local function AddBuffLossRow()
+                            MakeSubnavRow("Audio on Buff Loss", AUDIO_ITEMS,
+                                function() return ss.buffLostSoundKey or "none" end,
+                                function(v)
+                                    EnsureSS()
+                                    ss.buffLostSoundKey = (v ~= "none" and v) or nil
+                                    -- Same 0-cost gate covers both edges; the hook reads
+                                    -- each key independently.
+                                    if ss.buffLostSoundKey then ns._cdmAnyBuffSound = true end
+                                end,
+                                function() return ss.buffLostSoundKey == nil end,
+                                AddSoundPreview,
+                                { searchable = true })
+                        end
 
                         -- Always Show Buffs + Desaturate Inactive apply only to
                         -- Blizzard-tracked buffs (inactive placeholders); injected
@@ -6658,30 +6677,18 @@ initFrame:SetScript("OnEvent", function(self)
                                 function() return ss.desatInactive == nil end)
 
                             AddBuffGainRow()
-
-                            -- Audio on Buff Loss: Blizzard-tracked buffs fire a real drop
-                            -- edge (TriggerAuraRemovedAlert), so the loss sound is offered
-                            -- here only. Stored per-icon as ss.buffLostSoundKey.
-                            MakeSubnavRow("Audio on Buff Loss", AUDIO_ITEMS,
-                                function() return ss.buffLostSoundKey or "none" end,
-                                function(v)
-                                    EnsureSS()
-                                    ss.buffLostSoundKey = (v ~= "none" and v) or nil
-                                    -- Same 0-cost gate covers both edges; the hook reads
-                                    -- each key independently.
-                                    if ss.buffLostSoundKey then ns._cdmAnyBuffSound = true end
-                                end,
-                                function() return ss.buffLostSoundKey == nil end,
-                                AddSoundPreview,
-                                { searchable = true })
+                            -- Blizzard-tracked buffs fire a real drop edge
+                            -- (TriggerAuraRemovedAlert), so the loss sound is exact here.
+                            AddBuffLossRow()
                         else
                             -- Self-timed preset/custom buffs (Bloodlust/Heroism, Light's
                             -- Potential, potions, and user-added custom buff IDs with a
                             -- duration) are shown on a cast/edge for a fixed window. The
-                            -- real aura is secret/other-cast, so only the GAIN edge is
-                            -- knowable -- offer the gain sound only. It is fired from the
-                            -- cast timer in UpdateCustomBuffBars (CdmHooks).
+                            -- real aura is secret/other-cast, so both edges are driven off
+                            -- the displayed timer in UpdateCustomBuffBars (CdmHooks): gain
+                            -- on the cast, loss when the shown countdown runs out.
                             AddBuffGainRow()
+                            AddBuffLossRow()
                         end
 
                         -- Reverse Swipe (buffs / custom buffs / buff presets):
@@ -6851,6 +6858,56 @@ initFrame:SetScript("OnEvent", function(self)
                                 if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                             end,
                             function() return not (cas and (cas.reverseSwipe or cas.hideCDSwipe)) end)
+
+                        -- Audio Effect on CD Ready (preset / trinket / racial / custom):
+                        -- play a sound the moment the ability comes off cooldown. Presets
+                        -- have no Blizzard SetDesaturated edge, so this rides the FakeActive
+                        -- cooldown-state poll (PresetOnCD) which already handles trinket
+                        -- SLOTS via GetInventoryItemCooldown. Stored per-item/spell in the
+                        -- profile customActiveStates (cas.cdReadySoundKey), so it travels
+                        -- with the item across bars/specs like the other preset settings.
+                        local PRESET_CDR_ITEMS = {}
+                        for _, key in ipairs(ns.FOCUSKICK_SOUND_ORDER or { "none" }) do
+                            if type(key) == "string" and key:sub(1, 3) == "---" then
+                                PRESET_CDR_ITEMS[#PRESET_CDR_ITEMS + 1] = { divider = true }
+                            else
+                                PRESET_CDR_ITEMS[#PRESET_CDR_ITEMS + 1] = {
+                                    val   = key,
+                                    label = (ns.FOCUSKICK_SOUND_NAMES and ns.FOCUSKICK_SOUND_NAMES[key]) or key,
+                                }
+                            end
+                        end
+                        local function AddPresetCdrPreview(si, item)
+                            if item.val and item.val ~= "none" then
+                                local play = CreateFrame("Button", nil, si)
+                                play:SetSize(16, 16)
+                                play:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                play:SetFrameLevel(si:GetFrameLevel() + 2)
+                                play:SetNormalAtlas("common-icon-sound")
+                                play:SetPushedAtlas("common-icon-sound-pressed")
+                                play:SetScript("OnClick", function()
+                                    local paths = ns.FOCUSKICK_SOUND_PATHS
+                                    local path = paths and paths[item.val]
+                                    if path then PlaySoundFile(path, "Master") end
+                                end)
+                                play:SetScript("OnEnter", function()
+                                    EllesmereUI.ShowWidgetTooltip(play, "Preview Sound")
+                                end)
+                                play:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                            end
+                        end
+                        MakeSubnavRow("Audio Effect on CD Ready", PRESET_CDR_ITEMS,
+                            function() return (cas and cas.cdReadySoundKey) or "none" end,
+                            function(v)
+                                local e = EnsureCAS()
+                                e.cdReadySoundKey = (v ~= "none" and v) or nil
+                                -- Re-arm so the FakeActive poll starts watching this
+                                -- preset's cooldown edge (or stops if cleared).
+                                if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                            end,
+                            function() return not (cas and cas.cdReadySoundKey) end,
+                            AddPresetCdrPreview,
+                            { searchable = true })
 
                         if not hasActive then
                             MakeActionRow("Add Active State", function()

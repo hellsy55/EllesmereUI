@@ -86,6 +86,16 @@ local _cdStateRules = {}                                -- subset: cas.cdStateEf
 local _cdStateTicker
 local _hasUserRules = false                             -- any profile (user) rule armed
 
+-- CD-ready sound arm state, persisted BY ABILITY KEY (not on the rule object).
+-- FakeActive_Rearm wipes and recreates the rule objects on every CDM rebuild, so
+-- an armed flag stored on the rule is lost whenever a rebuild lands -- and in a
+-- Mythic+ / raid the CDM rebuilds far more often, so a rebuild reliably eats the
+-- on-CD -> ready edge right when the trinket comes back up (works in the open
+-- world, silent in a dungeon). Keying the armed state by the ability lets it
+-- survive rebuilds so the ready edge always fires. Empty at login/reload, so a
+-- preset already ready at login still never false-fires.
+local _cdrArmedByKey = {}
+
 -- Forward declarations
 local GetOverlay, ResolveSwipeColor, IconTexture, ApplyToFrame, ApplyRule, RaiseOverlayBorders, RestoreOverlayBorders
 local EnsureTicker, OpenWindow, CloseWindow, CloseAll, CastWindow
@@ -459,24 +469,38 @@ end
 --  throttled poll -- but only while at least one preset actually uses it.
 -- ---------------------------------------------------------------------------
 -- Unified "is this preset on a real (non-GCD) cooldown right now?" read.
+--
+-- Trinket / item presets read the ITEM cooldown, which is the source of truth for
+-- "when can I use this again" and stays readable even inside the restricted
+-- instances we tested (Mythic+). We must NOT read the item's on-use SPELL here:
+-- an on-use trinket's granted spell frequently has its own, shorter cooldown
+-- (e.g. a 30s spell lockout on top of a 90s item cooldown), so the ready edge
+-- would fire early. If a context ever hands back Secret Values we bail (returning
+-- "not on cooldown") rather than compare them -- no error, no early/false fire.
 PresetOnCD = function(key)
     local now = GetTime()
     if key > 0 then
         local ci = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(key)
         return (ci and ci.isActive and not ci.isOnGCD) or false
     end
+
     local start, dur, enable
     if key == -13 or key == -14 then
         if GetInventoryItemCooldown then start, dur, enable = GetInventoryItemCooldown("player", -key) end
-        if enable ~= nil and enable ~= 1 then return false end
     else
         local itemID = -key
         if C_Container and C_Container.GetItemCooldown then start, dur = C_Container.GetItemCooldown(itemID) end
-        if not (start and dur and dur > 1.5) and C_Item and C_Item.GetItemCooldown then
+        if (start == nil or dur == nil) and C_Item and C_Item.GetItemCooldown then
             start, dur = C_Item.GetItemCooldown(itemID)
         end
     end
-    return (start and dur and dur > 1.5 and now < start + dur) or false
+    if start == nil or dur == nil then return false end
+    if issecretvalue and (issecretvalue(start) or issecretvalue(dur)) then return false end
+    -- enable is only meaningful (and only safe to compare) when not a Secret.
+    if enable ~= nil and not (issecretvalue and issecretvalue(enable)) and enable ~= 1 then
+        return false
+    end
+    return (dur > 1.5 and now < start + dur) or false
 end
 
 -- Normal (shown) alpha for a frame, from its bar's opacity.
@@ -558,18 +582,48 @@ EvalCdStateNow = function()
     if not icons or not FCt then return end
     for r = 1, #_cdStateRules do
         local rule = _cdStateRules[r]
-        local eff = rule.cas and rule.cas.cdStateEffect
-        if eff then
+        local cas = rule.cas
+        local eff = cas and cas.cdStateEffect
+        local soundKey = cas and cas.cdReadySoundKey
+        if soundKey == "none" then soundKey = nil end
+        if eff or soundKey then
             local onCD = PresetOnCD(rule.spellID)
             local sid = rule.spellID
+            -- The sound only fires while the ability's icon is actually present on a
+            -- bar (an unequipped/absent trinket has no icon), so track that here too.
+            local hasIcon = false
             for _, list in pairs(icons) do
                 for i = 1, #list do
                     local f = list[i]
                     local fc = f and FCt[f]
                     if fc and fc.spellID == sid then
-                        ApplyCdState(f, fc, rule.cas, eff, onCD)
+                        hasIcon = true
+                        if eff then ApplyCdState(f, fc, cas, eff, onCD) end
                     end
                 end
+            end
+            -- Audio Effect on CD Ready (preset/trinket): arm while on cooldown, play
+            -- once on the on-CD -> ready edge. Armed state is persisted BY ABILITY
+            -- KEY (not on the rule object) so it survives the CDM rebuilds that wipe
+            -- and recreate rules -- otherwise a rebuild landing at cooldown-end (very
+            -- frequent in M+/raid) silently eats the ready edge. Empty at login, so a
+            -- preset already ready at login never false-fires.
+            if soundKey then
+                local akey = rule.srcKey or sid
+                -- Arm only while the icon is present AND on cooldown; fire once on
+                -- the on-CD -> ready edge. A missing icon (rebuild flicker, trinket
+                -- swapped out) leaves the persisted state untouched so a rebuild that
+                -- lands exactly at cooldown-end cannot swallow the ready edge.
+                if onCD then
+                    if hasIcon then _cdrArmedByKey[akey] = true end
+                elseif hasIcon and _cdrArmedByKey[akey] then
+                    _cdrArmedByKey[akey] = nil
+                    if not (ns._cdmSoundSuppressed and ns._cdmSoundSuppressed()) then
+                        local path = ns.FOCUSKICK_SOUND_PATHS and ns.FOCUSKICK_SOUND_PATHS[soundKey]
+                        if path then PlaySoundFile(path, "Master") end
+                    end
+                end
+                rule._cdrArmed = _cdrArmedByKey[akey]
             end
         end
     end
@@ -695,7 +749,8 @@ function ns.FakeActive_Rearm()
             if type(cas) == "table" and key ~= -13 and key ~= -14 then
                 local hasDur = (cas.duration or 0) > 0
                 local hasCd  = cas.cdStateEffect ~= nil
-                if hasDur or hasCd then
+                local hasSound = cas.cdReadySoundKey ~= nil and cas.cdReadySoundKey ~= "none"
+                if hasDur or hasCd or hasSound then
                     -- Settings are keyed by spell / item. A trinket's settings are
                     -- keyed by item, but its ICON is a slot (-13/-14) -- so route the
                     -- rule to whichever slot currently holds that item. (Cast +
@@ -707,7 +762,7 @@ function ns.FakeActive_Rearm()
                         if GetInventoryItemID("player", 13) == itemID then matchKey = -13
                         elseif GetInventoryItemID("player", 14) == itemID then matchKey = -14 end
                     end
-                    local rule = { spellID = matchKey, cas = cas, user = true }
+                    local rule = { spellID = matchKey, srcKey = key, cas = cas, user = true }
                     _rules[#_rules + 1] = rule
                     _hasUserRules = true
                     if hasDur then
@@ -715,7 +770,9 @@ function ns.FakeActive_Rearm()
                         rule.duration = cas.duration
                         MapCast(rule)
                     end
-                    if hasCd then
+                    if hasCd or hasSound then
+                        -- Both the cooldown-state effect and the CD-ready sound ride
+                        -- the same throttled cooldown poll (EvalCdStateNow).
                         _cdStateRules[#_cdStateRules + 1] = rule
                     end
                 end
