@@ -1217,6 +1217,8 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+
+            return visRow
         end
 
         -------------------------------------------------------------------
@@ -1333,12 +1335,13 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local function BuildDataBarSection(barKey, sectionTitle, visLabel)
+            local visRow, sizeRow
             _, h = W:SectionHeader(parent, sectionTitle, y);  y = y - h
-            BuildVisRow(barKey, visLabel, _blizzDis, BLIZZ_DIS_TIP)
+            visRow = BuildVisRow(barKey, visLabel, _blizzDis, BLIZZ_DIS_TIP)
 
             local wDis, wTip, wRaw = EllesmereUI.MatchGuard(barKey, "Width", _blizzDis, BLIZZ_DIS_TIP)
             local hDis, hTip, hRaw = EllesmereUI.MatchGuard(barKey, "Height", _blizzDis, BLIZZ_DIS_TIP)
-            _, h = W:DualRow(parent, y,
+            sizeRow, h = W:DualRow(parent, y,
                 { type="slider", text="Width", min=50, max=600, step=1,
                   disabled=wDis, disabledTooltip=wTip, rawTooltip=wRaw,
                   getValue=function() return EAB.db.profile.bars[barKey].width or 400 end,
@@ -1418,9 +1421,43 @@ initFrame:SetScript("OnEvent", function(self)
                       S().barTexture = v
                       if ns.ApplyDataBarLayout then ns.ApplyDataBarLayout(barKey) end
                   end });  y = y - h
+
+            return visRow, sizeRow
         end
 
-        BuildDataBarSection("XPBar",  "EXPERIENCE BAR", "XP Bar Visibility")
+        local xpBarRow = BuildDataBarSection("XPBar",  "EXPERIENCE BAR", "XP Bar Visibility")
+        do
+            local rgn = xpBarRow._leftRegion
+            local _, xpCogShow = EllesmereUI.BuildCogPopup({
+                title = "XP Bar Visibility",
+                rows = {
+                    { type="toggle", label="Show Raw Values",
+                        get=function() return EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["XPBar"] and EAB.db.profile.bars["XPBar"].showRawValues end,
+                        set=function(v)
+                            EAB.db.profile.bars["XPBar"].showRawValues = v
+                        end },
+                    { type="toggle", label="Show Level",
+                        get=function() return EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["XPBar"] and EAB.db.profile.bars["XPBar"].showLevel end,
+                        set=function(v)
+                            EAB.db.profile.bars["XPBar"].showLevel = v
+                        end },
+                },
+            })
+            local xpCtrl = rgn._control
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", xpCtrl or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) xpCogShow(self) end)
+        end
+
         _, h = W:Spacer(parent, y, 12);  y = y - h
         BuildDataBarSection("RepBar", "REPUTATION BAR", "Rep Bar Visibility")
         _, h = W:Spacer(parent, y, 12);  y = y - h
