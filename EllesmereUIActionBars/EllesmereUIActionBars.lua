@@ -9700,6 +9700,7 @@ local function UpdateXPBar()
     local maxXP = UnitXPMax("player")
     if maxXP <= 0 then maxXP = 1 end
     local restedXP = GetXPExhaustion() or 0
+    local level = UnitLevel("player")
 
     bar:SetMinMaxValues(0, maxXP)
     bar:SetValue(currentXP)
@@ -9717,13 +9718,35 @@ local function UpdateXPBar()
         restedBar:Hide()
     end
 
-    local pct = (currentXP / maxXP) * 100
-    if restedXP > 0 then
-        local restedPct = (restedXP / maxXP) * 100
-        text:SetText(format("%.1f%% (Rested: %.1f%%)", pct, restedPct))
-    else
-        text:SetText(format("%.1f%%", pct))
+    local config = (EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars and EAB.db.profile.bars["XPBar"]) or {}
+    local showLevel = config.showLevel
+    local showRawValues = config.showRawValues
+
+    local strLevel = ""
+    local strXP = ""
+    local strRested = ""
+
+    if showLevel then
+        strLevel = format("%s %d - ", LEVEL, level)
     end
+
+    if showRawValues then
+        strXP = format("%s / %s", AbbreviateLargeNumbers(currentXP), AbbreviateLargeNumbers(maxXP))
+    else
+        local pct = (currentXP / maxXP) * 100
+        strXP = format("%.1f%%", pct)
+    end
+
+    if restedXP > 0 then
+        if showRawValues then
+            strRested = format(" (Rested: %s)", AbbreviateLargeNumbers(restedXP))
+        else
+            local restedPct = (restedXP / maxXP) * 100
+            strRested = format(" (Rested: %.1f%%)", restedPct)
+        end
+    end
+
+    text:SetText(strLevel .. strXP .. strRested)
 
     EAB_VTABLE.ExtraBars.FinishManagedDataBarUpdate("XPBar", frame, s)
 end
