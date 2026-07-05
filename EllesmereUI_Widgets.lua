@@ -1142,11 +1142,14 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             if searchResetScroll then searchResetScroll() end
         end
         searchEdit:SetScript("OnTextChanged", function(self) ApplySearchFilter(self:GetText()) end)
-        menu:HookScript("OnShow", function()
+        -- Hook to focus dropdown search on open
+        local function FocusSearch()
             searchEdit:SetText("")
             ApplySearchFilter("")
             searchEdit:SetFocus()
-        end)
+        end
+        menu._focusSearch = FocusSearch
+        menu:HookScript("OnShow", FocusSearch)
         menu:HookScript("OnHide", function()
             searchEdit:SetText("")
             searchEdit:ClearFocus()
@@ -1245,6 +1248,9 @@ local function WireDropdownScripts(ddBtn, ddLbl, bg, brd, menu, refresh, s, keep
         EllesmereUI._openDropdownMenu = self
         ApplyHover()
         refresh()
+        -- Re-apply search auto-focus: this SetScript replaced the OnShow hook
+        -- BuildDropdownMenu used to focus the field, so drive it directly here.
+        if menu._focusSearch then menu._focusSearch() end
         self:SetScript("OnUpdate", function(m)
             local flyoverFlyout = false; if m._flyouts then for _, fo in ipairs(m._flyouts) do if fo:IsShown() and fo:IsMouseOver() then flyoverFlyout = true; break end end end
             if not m:IsMouseOver() and not ddBtn:IsMouseOver() and not flyoverFlyout and not m._ddThumbDragging and IsMouseButtonDown("LeftButton") then m:Hide(); return end

@@ -1365,6 +1365,26 @@ initFrame:SetScript("OnEvent", function(self)
         local defB = cfg.defaultB or 0.2
         local defA = cfg.defaultA or 1
 
+        -- Druid "form specific": Advanced mode only.
+		-- Allows threshold for each resource type based on form
+        local _playerClassFile = select(2, UnitClass("player"))
+        local hasFormToggle = cfg.formCapable and cfg.singleSpec and _playerClassFile == "DRUID"
+        local FORM_LABEL = { mana = "Caster (Mana)", rage = "Bear (Rage)", energy = "Cat (Energy)" }
+        local function DefaultFormEntries()
+            return {
+                { formKey = "mana",   thresholdEnabled = true, thresholdPct = 30, thresholdPartialOnly = true,
+                  thresholdR = defR, thresholdG = defG, thresholdB = defB, thresholdA = defA },
+                { formKey = "rage",   thresholdEnabled = true, thresholdPct = 30, thresholdPartialOnly = false,
+                  thresholdR = defR, thresholdG = defG, thresholdB = defB, thresholdA = defA },
+                { formKey = "energy", thresholdEnabled = true, thresholdPct = 30, thresholdPartialOnly = true,
+                  thresholdR = defR, thresholdG = defG, thresholdB = defB, thresholdA = defA },
+            }
+        end
+        local function IsFormMode()
+            local bd = cfg.getBarData()
+            return (bd and bd.thresholdFormMode) and true or false
+        end
+
         -- Settings Button
         local BTN_W, BTN_H = 140, 30
         local settingsBtn = CreateFrame("Button", nil, parentRgn)
@@ -1491,6 +1511,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local RefreshPopupEntries_L
+        local SetFormMode, LayoutHeaderForMode
 
         local function BuildPopup_L()
             popup = CreateFrame("Frame", nil, UIParent)
@@ -1540,6 +1561,35 @@ initFrame:SetScript("OnEvent", function(self)
             titleFS:SetText(cfg.popupTitle or EllesmereUI.L("Threshold Settings"))
             curY = curY - 25
 
+            -- Mode switch (druid power bar): Single per-spec vs three per-form
+            -- entries. Sits between the title and the spec chrome.
+            if hasFormToggle then
+                local pillRow = CreateFrame("Frame", nil, popup)
+                pillRow:SetSize(POPUP_W, 26)
+                pillRow:SetPoint("TOP", popup, "TOP", 0, curY)
+                pillRow:SetFrameLevel(popup:GetFrameLevel() + 6)
+                local modeSeg, _, modeSegRefresh = EllesmereUI.BuildSegmentedControl({
+                    parent    = pillRow,
+                    keys      = { "single", "form" },
+                    labels    = { single = "Single", form = "Form specific" },
+                    autoWidth = true,
+                    square    = true,
+                    height    = 22,
+                    getChecked = function(key)
+                        if key == "form" then return IsFormMode() else return not IsFormMode() end
+                    end,
+                    onToggle = function(key)
+                        if SetFormMode then SetFormMode(key == "form") end
+                    end,
+                })
+                modeSeg:SetPoint("CENTER", pillRow, "CENTER", 0, 0)
+                popup._modeSeg = modeSeg
+                popup._modeSegRefresh = modeSegRefresh
+                curY = curY - 30
+            end
+            -- Header bottom when the spec chrome is hidden (form mode).
+            popup._afterPillY = curY
+
             -- Spec dropdown + Add button -- skipped in singleSpec mode (Advanced
             -- per-spec: the spec is implied, one config only).
             if not cfg.singleSpec then
@@ -1550,6 +1600,7 @@ initFrame:SetScript("OnEvent", function(self)
             ddRow:SetSize(rowW, 30)
             ddRow:SetPoint("TOP", popup, "TOP", 0, curY)
             ddRow:SetFrameLevel(popup:GetFrameLevel() + 5)
+            popup._ddRow = ddRow
 
             local specItems = BuildSpecItems_L()
             local specDDHost = CreateFrame("Frame", nil, ddRow)
@@ -1689,6 +1740,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             curY = curY - 36
             end -- not singleSpec
+            popup._afterDDY = curY
 
             -- Scrollable entry container
             local POPUP_MAX_H = 375
@@ -1743,13 +1795,65 @@ initFrame:SetScript("OnEvent", function(self)
 
             popup._scrollFrame = scrollFrame
             popup._scrollChild = scrollChild
+            popup._scrollBar = scrollBar
             popup._headerH = headerH
             popup._maxH = POPUP_MAX_H
+
+            -- Re-anchor the scroll region for the current mode. In form mode the
+            -- spec chrome is hidden, so the list starts higher (right below the
+            -- mode pill). Data swap is handled separately by SetFormMode.
+            LayoutHeaderForMode = function(on)
+                if not hasFormToggle then return end
+                local topY = on and popup._afterPillY or popup._afterDDY
+                if popup._ddRow then popup._ddRow:SetShown(not on) end
+                scrollFrame:ClearAllPoints()
+                scrollFrame:SetPoint("TOPLEFT", popup, "TOPLEFT", 0, topY)
+                scrollFrame:SetPoint("TOPRIGHT", popup, "TOPRIGHT", 0, topY)
+                scrollBar:ClearAllPoints()
+                scrollBar:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -3, topY)
+                scrollBar:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -3, 4)
+                popup._headerH = math.abs(topY)
+            end
+
+            -- Swap the live thresholdSpecs between the single per-spec list and the
+            -- three per-form entries, stashing the inactive set so switching back
+            -- restores the user's config.
+            SetFormMode = function(on)
+                local bd = cfg.getBarData(); if not bd then return end
+                on = on and true or false
+                if (bd.thresholdFormMode and true or false) ~= on then
+                    if on then
+                        bd._singleSpecsBackup = bd.thresholdSpecs
+                        bd.thresholdSpecs = bd._formSpecsBackup or DefaultFormEntries()
+                        bd._formSpecsBackup = nil
+                        bd.thresholdFormMode = true
+                    else
+                        bd._formSpecsBackup = bd.thresholdSpecs
+                        bd.thresholdSpecs = bd._singleSpecsBackup or {}
+                        bd._singleSpecsBackup = nil
+                        bd.thresholdFormMode = nil
+                    end
+                end
+                LayoutHeaderForMode(on)
+                if popup._modeSegRefresh then popup._modeSegRefresh() end
+                RefreshPopupEntries_L()
+                if popup._scrollFrame then popup._scrollFrame:SetVerticalScroll(0) end
+                cfg.refreshFn()
+                if cfg.rebuildFn then cfg.rebuildFn() end
+            end
+
+            -- Apply the initial layout for whatever mode was persisted.
+            if hasFormToggle then LayoutHeaderForMode(IsFormMode()) end
         end -- BuildPopup_L
 
         RefreshPopupEntries_L = function()
             if not popup then return end
             local bd = cfg.getBarData(); if not bd then return end
+            local formMode = (bd.thresholdFormMode and hasFormToggle) and true or false
+            -- Form mode: guarantee the three per-form entries exist.
+            if formMode and (not bd.thresholdSpecs or #bd.thresholdSpecs == 0) then
+                bd.thresholdSpecs = DefaultFormEntries()
+            end
             if not bd.thresholdSpecs then bd.thresholdSpecs = {} end
             local entries = bd.thresholdSpecs
 
@@ -1762,7 +1866,8 @@ initFrame:SetScript("OnEvent", function(self)
             local scrollChild = popup._scrollChild
             local curY = 0
             local ENTRY_W = POPUP_W - POPUP_PAD * 2
-            local ENTRY_H = cfg.singleSpec and 40 or (cfg.showHash and 89 or 60)
+            local ENTRY_H = (cfg.singleSpec and not formMode) and 40 or (cfg.showHash and 89 or 60)
+            local effThreshY = (cfg.singleSpec and not formMode) and -8 or (cfg.showHash and -61 or -33)
 
             for i = 1, #_entryFrames do
                 if _entryFrames[i] then _entryFrames[i]:Hide() end
@@ -2068,7 +2173,24 @@ initFrame:SetScript("OnEvent", function(self)
                 ef:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", POPUP_PAD, curY)
                 ef._entryIdx = idx
 
-                if cfg.singleSpec then
+                if ef._threshLbl then
+                    ef._threshLbl:ClearAllPoints()
+                    ef._threshLbl:SetPoint("LEFT", ef, "TOPLEFT", 8, effThreshY - 11)
+                end
+                if ef._bandsBtn then
+                    ef._bandsBtn:ClearAllPoints()
+                    ef._bandsBtn:SetPoint("RIGHT", ef, "TOPRIGHT", -8, effThreshY - 11)
+                end
+
+                if formMode then
+                    -- Form mode: fixed per-form entries -- form name label, no delete.
+                    ef._specLbl:Show()
+                    ef._delBtn:Hide()
+                    ef._specLbl:SetText(EllesmereUI.L(FORM_LABEL[entry.formKey] or "Unknown"))
+                    local cc = CLASS_COLORS_L["DRUID"]
+                    if cc then ef._specLbl:SetTextColor(cc[1], cc[2], cc[3], 1)
+                    else ef._specLbl:SetTextColor(1, 1, 1, 1) end
+                elseif cfg.singleSpec then
                     -- Advanced: spec is implied -- no spec label, no delete.
                     ef._specLbl:Hide()
                     ef._delBtn:Hide()
@@ -2180,7 +2302,8 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Dim only duplicates the resolver can never reach
                 -- per-spec or inactive-talent cards stay fully visible.
-                ef:SetAlpha(ns._ERB_IsThresholdCardShadowed(entries, idx) and 0.45 or 1)
+                -- Form entries are each unique (one per form) -- never dimmed.
+                ef:SetAlpha((not formMode) and ns._ERB_IsThresholdCardShadowed(entries, idx) and 0.45 or 1)
 
                 ef:Show()
                 curY = curY - ENTRY_H - ROW_GAP
@@ -2200,6 +2323,10 @@ initFrame:SetScript("OnEvent", function(self)
             if popup:IsShown() then popup:Hide(); return end
             wipe(_tempSpecSel)
             if _specDDRefresh then _specDDRefresh() end
+            if hasFormToggle then
+                if LayoutHeaderForMode then LayoutHeaderForMode(IsFormMode()) end
+                if popup._modeSegRefresh then popup._modeSegRefresh() end
+            end
             RefreshPopupEntries_L()
             if popup._scrollFrame then popup._scrollFrame:SetVerticalScroll(0) end
             popup:ClearAllPoints()
@@ -3670,8 +3797,9 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateCogDisP2()
         end
         -- Threshold Settings popup. Advanced => singleSpec on the per-spec override
-        -- (normalize cfg().thresholdSpecs to one implied-spec entry).
-        if ctx.advanced and ctx.specID then
+        -- (normalize cfg().thresholdSpecs to one implied-spec entry). Form-specific
+        -- mode holds three per-form entries and manages its own list, so skip it.
+        if ctx.advanced and ctx.specID and not (cfg() and cfg().thresholdFormMode) then
             local c = cfg()
             local ts = c and c.thresholdSpecs
             local normalized = ts and #ts == 1 and ts[1].specIDs and #ts[1].specIDs == 1 and ts[1].specIDs[1] == 0
@@ -3723,6 +3851,7 @@ initFrame:SetScript("OnEvent", function(self)
             threshMin = 1, threshMax = 99,
             popupTitle = "Power Bar Threshold",
             defaultR = 1.0, defaultG = 0.2, defaultB = 0.2, defaultA = 1,
+            formCapable = true,
         })
 
         -- Synced overlay: cover the fully-built content so size is constant.
@@ -3754,9 +3883,10 @@ initFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Shared, context-aware CLASS RESOURCE (secondary) section builder.
-    --  ctx.cfg() -> secondary table. Guardian/Prot special rows, the Hide-Power
-    --  cog and the per-spec enable picker are Simple-only. Threshold (bespoke
-    --  popup) is appended in a later chunk.
+    --  ctx.cfg() -> secondary table. The Guardian/Prot special-bar rows show in
+    --  both modes for the relevant spec (global storage). The Hide-Power cog and
+    --  the per-spec enable picker are Simple-only. Threshold (bespoke popup) is
+    --  appended in a later chunk.
     ---------------------------------------------------------------------------
     function ns.ERB_BuildClassResourceSection(parent, y, ctx)
         local W = EllesmereUI.Widgets
@@ -3789,10 +3919,14 @@ initFrame:SetScript("OnEvent", function(self)
             _advTop = y
         end
 
-        -- Guardian Ironfur + Prot Ignore Pain special bars -- Simple only (global
-        -- special bars; left global at runtime, not part of per-spec config).
-        if not ctx.advanced then
+        -- Guardian Ironfur + Prot Ignore Pain special bars. These stay global at
+        -- runtime (stored on DB().secondary, not per-spec), but the row is shown in
+        -- both Simple and Advanced for the relevant spec -- like the Enhance 5-bar
+        -- toggle. In Advanced gate on the configured spec; in Simple gate on the
+        -- active spec.
+        do
             local function _IsGuardianDruid()
+                if ctx.advanced then return ctx.specID == 104 end
                 local _, cf = UnitClass("player")
                 if cf ~= "DRUID" then return false end
                 local s = GetSpecialization()
@@ -3822,6 +3956,7 @@ initFrame:SetScript("OnEvent", function(self)
                 );  y = y - hh
             end
             local function _IsProtWarrior()
+                if ctx.advanced then return ctx.specID == 73 end
                 local _, cf = UnitClass("player")
                 if cf ~= "WARRIOR" then return false end
                 local s = GetSpecialization()

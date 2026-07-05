@@ -631,9 +631,24 @@ end
 --   3. All Specs (specID 0) + talent gate active
 --   4. All Specs, no talent gate
 -- Entries carrying a talent gate that is not active are skipped.
+-- Druid "form specific" power-bar threshold mode: entries are keyed by the
+-- form's power type (advanced mode only). Maps the resolved primary power type
+-- to the entry's formKey.
+local FORM_THRESHOLD_KEY = { [PT.MANA] = "mana", [PT.RAGE] = "rage", [PT.ENERGY] = "energy" }
+
 local function ResolveThresholdSpecEntry(sp)
     local entries = sp.thresholdSpecs
     if not entries or #entries == 0 then return nil end
+
+    -- Form-specific mode (druid power bar): pick the entry matching the current
+    if sp.thresholdFormMode then
+        local key = FORM_THRESHOLD_KEY[GetPrimaryPowerType()]
+        if not key then return nil end
+        for _, entry in ipairs(entries) do
+            if entry.formKey == key then return entry end
+        end
+        return nil
+    end
 
     local specIdx = GetSpecialization()
     if not specIdx then return nil end
@@ -4725,7 +4740,16 @@ local function UpdateSecondaryResource()
                 nextPip._rechargeBar = sb
             end
             nextPip._rechargeBar:SetValue(frac)
-            nextPip._rechargeBar:SetStatusBarColor(r * 0.75, g * 0.75, b * 0.75, a)
+            --  Partial generator (Evoker/Lock): Color the filling pip the same way the full pips are colored: when the
+            -- threshold/band applies to this pip's slot (index cur+1) use that color,
+            -- otherwise the base color. Kept dimmed (*0.75) so it still reads as
+            -- "recharging" rather than a completed pip.
+            local fr, fg, fb = r, g, b
+            local fi = cur + 1
+            if useThresh and not (not _tsBandOn and _tsPartialOnly and fi < _tsThreshCount) then
+                fr, fg, fb = tr, tg, tb
+            end
+            nextPip._rechargeBar:SetStatusBarColor(fr * 0.75, fg * 0.75, fb * 0.75, a)
             nextPip._rechargeBar:Show()
         end
 
