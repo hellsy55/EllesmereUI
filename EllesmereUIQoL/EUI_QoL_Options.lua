@@ -1673,7 +1673,9 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        _, h = W:DualRow(parent, y,
+        -- Auto Unwrap Collections | Auto Open Containers
+        local autoOpenContainerRow
+        autoOpenContainerRow, h = W:DualRow(parent, y,
             { type="toggle", text="Auto Unwrap Collections",
               tooltip="Automatically dismisses the 'new mount/pet/toy' fanfare notification when you receive one, so you don't have to click through the collections journal.",
               getValue=function()
@@ -1695,8 +1697,61 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.autoOpenContainers = v
+                  EllesmereUI:RefreshPage()
               end }
         );  y = y - h
+
+        -- Cog on Auto Open Containers (right region)
+        do
+            local rightRgn = autoOpenContainerRow._rightRegion
+            local function autoOpenContainerOff()
+                return not (EllesmereUIDB and EllesmereUIDB.autoOpenContainers == true)
+            end
+
+            local _, autoOpenContainerCogShow = EllesmereUI.BuildCogPopup({
+                title = "Auto Open Containers Settings",
+                rows = {
+                    { type="toggle", label="Exclude Warbound Containers",
+                      get=function()
+                          if not EllesmereUIDB then return true end
+                          return EllesmereUIDB.autoOpenContainersExcludeWarbound ~= false
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.autoOpenContainersExcludeWarbound = v
+                      end },
+                },
+            })
+
+            local autoOpenContainerCogBtn = CreateFrame("Button", nil, rightRgn)
+            autoOpenContainerCogBtn:SetSize(26, 26)
+            autoOpenContainerCogBtn:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -9, 0)
+            rightRgn._lastInline = autoOpenContainerCogBtn
+            autoOpenContainerCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            autoOpenContainerCogBtn:SetAlpha(autoOpenContainerOff() and 0.15 or 0.4)
+            local autoOpenContainerCogTex = autoOpenContainerCogBtn:CreateTexture(nil, "OVERLAY")
+            autoOpenContainerCogTex:SetAllPoints()
+            autoOpenContainerCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            autoOpenContainerCogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            autoOpenContainerCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(autoOpenContainerOff() and 0.15 or 0.4) end)
+            autoOpenContainerCogBtn:SetScript("OnClick", function(self) autoOpenContainerCogShow(self) end)
+
+            local autoOpenContainerCogBlock = CreateFrame("Frame", nil, autoOpenContainerCogBtn)
+            autoOpenContainerCogBlock:SetAllPoints()
+            autoOpenContainerCogBlock:SetFrameLevel(autoOpenContainerCogBtn:GetFrameLevel() + 10)
+            autoOpenContainerCogBlock:EnableMouse(true)
+            autoOpenContainerCogBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(autoOpenContainerCogBtn, EllesmereUI.DisabledTooltip("Auto Open Containers"))
+            end)
+            autoOpenContainerCogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = autoOpenContainerOff()
+                autoOpenContainerCogBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then autoOpenContainerCogBlock:Show() else autoOpenContainerCogBlock:Hide() end
+            end)
+            if autoOpenContainerOff() then autoOpenContainerCogBlock:Show() else autoOpenContainerCogBlock:Hide() end
+        end
 
         return math.abs(y)
     end
@@ -1746,6 +1801,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.trainAllButton = false
                 EllesmereUIDB.autoUnwrapCollections = false
                 EllesmereUIDB.autoOpenContainers = false
+                EllesmereUIDB.autoOpenContainersExcludeWarbound = true
                 EllesmereUIDB.autoRepairGuild = false
                 EllesmereUIDB.shifterEnabled = false
                 EllesmereUIDB.shifterPositions = nil

@@ -212,18 +212,28 @@ qolFrame:SetScript("OnEvent", function(self)
                                 if InCombatLockdown() then wipe(_pendingOpens); return end
                                 local item = _pendingOpens[idx]
                                 local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                                if info and info.itemID and _openableCache[info.itemID] and not _failedItems[info.itemID] then
-                                    local prevID = info.itemID
-                                    local prevCount = info.stackCount or 1
-                                    C_Container.UseContainerItem(item.bag, item.slot)
-                                    C_Timer.After(0.5, function()
-                                        local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                                        if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
-                                            _failedItems[prevID] = true
+                                if info and info.itemID then
+                                    if EllesmereUIDB and EllesmereUIDB.autoOpenContainersExcludeWarbound then
+                                        local loc = ItemLocation:CreateFromBagAndSlot(item.bag, item.slot)
+                                        local isWarbound = C_Bank.IsItemAllowedInBankType(Enum.BankType.Account, loc)
+                                        if isWarbound then
+                                            OpenNext(idx + 1)
+                                            return
                                         end
-                                        OpenNext(idx + 1)
-                                    end)
-                                    return
+                                    end
+                                    if _openableCache[info.itemID] and not _failedItems[info.itemID] then
+                                        local prevID = info.itemID
+                                        local prevCount = info.stackCount or 1
+                                        C_Container.UseContainerItem(item.bag, item.slot)
+                                        C_Timer.After(0.5, function()
+                                            local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
+                                            if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
+                                                _failedItems[prevID] = true
+                                            end
+                                            OpenNext(idx + 1)
+                                        end)
+                                        return
+                                    end
                                 end
                                 C_Timer.After(0.5, function() OpenNext(idx + 1) end)
                             end
@@ -283,18 +293,28 @@ qolFrame:SetScript("OnEvent", function(self)
                 if InCombatLockdown() then return end
                 local item = toOpen[idx]
                 local info2 = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                if info2 and info2.itemID and _openableCache[info2.itemID] and not _failedItems[info2.itemID] then
-                    local prevID = info2.itemID
-                    local prevCount = info2.stackCount or 1
-                    C_Container.UseContainerItem(item.bag, item.slot)
-                    C_Timer.After(0.5, function()
-                        local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                        if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
-                            _failedItems[prevID] = true
+                if info2 and info2.itemID then
+                    if EllesmereUIDB and EllesmereUIDB.autoOpenContainersExcludeWarbound then
+                        local loc = ItemLocation:CreateFromBagAndSlot(item.bag, item.slot)
+                        local isWarbound = C_Bank.IsItemAllowedInBankType(Enum.BankType.Account, loc)
+                        if isWarbound then
+                            OpenNext(idx + 1)
+                            return
                         end
-                        OpenNext(idx + 1)
-                    end)
-                    return
+                    end
+                    if _openableCache[info2.itemID] and not _failedItems[info2.itemID] then
+                        local prevID = info2.itemID
+                        local prevCount = info2.stackCount or 1
+                        C_Container.UseContainerItem(item.bag, item.slot)
+                        C_Timer.After(0.5, function()
+                            local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
+                            if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
+                                _failedItems[prevID] = true
+                            end
+                            OpenNext(idx + 1)
+                        end)
+                        return
+                    end
                 end
                 C_Timer.After(0.5, function() OpenNext(idx + 1) end)
             end
