@@ -163,11 +163,16 @@ local function HasEnoughResources(spellID)
         if powerType then
             local cost = c.cost or 0
             if c.costPercent and c.costPercent > 0 then
+                -- Power can be a SECRET number in tainted combat; can't compare it,
+                -- so default to castable rather than throw.
                 local maxP = UnitPowerMax("player", powerType)
+                if issecretvalue and issecretvalue(maxP) then return true end
                 cost = math.max(cost, (c.costPercent / 100) * maxP)
             end
-            if cost > 0 and UnitPower("player", powerType) < cost then
-                return false
+            if cost > 0 then
+                local cur = UnitPower("player", powerType)
+                if issecretvalue and issecretvalue(cur) then return true end
+                if cur < cost then return false end
             end
         end
     end
@@ -4649,6 +4654,7 @@ ns.CollectAndReanchor = CollectAndReanchor
 -- (the same flag RescanBuffSoundFlag sets from these very spellSettings) and
 -- throttled so a refresh-cast a few frames apart can't double-fire.
 local _presetGainSoundAt = {}
+local _presetLossSoundAt = {}
 local PRESET_GAIN_SOUND_GAP = 0.3
 local function PlayPresetBuffGainSound(sd, sid, now)
     if not ns._cdmAnyBuffSound then return end
@@ -4661,6 +4667,22 @@ local function PlayPresetBuffGainSound(sd, sid, now)
     local last = _presetGainSoundAt[sid]
     if last and (now - last) < PRESET_GAIN_SOUND_GAP then return end
     _presetGainSoundAt[sid] = now
+    local paths = ns.FOCUSKICK_SOUND_PATHS
+    local path = paths and paths[key]
+    if path then PlaySoundFile(path, "Master") end
+end
+-- Loss counterpart to PlayPresetBuffGainSound for self-timed preset/custom buffs
+-- (no real aura-removed alert): fired when the displayed timer runs out. Separate
+-- throttle table so gain/loss never suppress each other.
+local function PlayPresetBuffLossSound(sd, sid, now)
+    if not ns._cdmAnyBuffSound then return end
+    if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then return end
+    local ss = sd and sd.spellSettings and sd.spellSettings[sid]
+    local key = ss and ss.buffLostSoundKey
+    if not key or key == "none" then return end
+    local last = _presetLossSoundAt[sid]
+    if last and (now - last) < PRESET_GAIN_SOUND_GAP then return end
+    _presetLossSoundAt[sid] = now
     local paths = ns.FOCUSKICK_SOUND_PATHS
     local path = paths and paths[key]
     if path then PlaySoundFile(path, "Master") end
@@ -4702,6 +4724,13 @@ local function UpdateCustomBuffBars()
                                 PlayPresetBuffGainSound(sd, sid, now)
                             end
 
+                            -- Loss edge: displayed timer ran out -> fire once, drop it.
+                            if timer and (now - timer.start) >= timer.duration then
+                                PlayPresetBuffLossSound(sd, sid, now)
+                                _customAuraTimers[timerKey] = nil
+                                timer = nil
+                            end
+
                             local isActive = timer and duration > 0
                                 and (now - timer.start) < timer.duration
 
@@ -4731,7 +4760,7 @@ local function UpdateCustomBuffBars()
                                     local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
                                     if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
                                 end
-                                if isActive then
+                                if isActive and timer then
                                     f._cooldown:SetCooldown(timer.start, timer.duration)
                                 else
                                     f._cooldown:Clear()
@@ -4788,13 +4817,23 @@ local function UpdateCustomBuffBars()
             local durs = sd and sd.spellDurations
             if spellList and durs then
                 for _, sid in ipairs(spellList) do
-                    if type(sid) == "number" and sid > 0
-                       and (durs[sid] or 0) > 0 and _pendingCastIDs[sid] then
-                        _customAuraTimers[barData.key .. ":" .. sid] = {
-                            start = now, duration = durs[sid],
-                        }
-                        needBuffReanchor = true
-                        PlayPresetBuffGainSound(sd, sid, now)
+                    if type(sid) == "number" and sid > 0 and (durs[sid] or 0) > 0 then
+                        local tkey = barData.key .. ":" .. sid
+                        if _pendingCastIDs[sid] then
+                            _customAuraTimers[tkey] = {
+                                start = now, duration = durs[sid],
+                            }
+                            needBuffReanchor = true
+                            PlayPresetBuffGainSound(sd, sid, now)
+                        else
+                            -- Loss edge: displayed window ran out -> fire once, drop timer.
+                            local t = _customAuraTimers[tkey]
+                            if t and (now - t.start) >= t.duration then
+                                PlayPresetBuffLossSound(sd, sid, now)
+                                _customAuraTimers[tkey] = nil
+                                needBuffReanchor = true
+                            end
+                        end
                     end
                 end
             end

@@ -86,6 +86,11 @@ local _cdStateRules = {}                                -- subset: cas.cdStateEf
 local _cdStateTicker
 local _hasUserRules = false                             -- any profile (user) rule armed
 
+-- CD-ready sound "armed" state, keyed by ability so it survives the rule-object
+-- churn of FakeActive_Rearm (rebuilds are frequent in M+ and would otherwise eat
+-- the ready edge). Empty at login, so an already-ready preset never false-fires.
+local _cdrArmedByKey = {}
+
 -- Forward declarations
 local GetOverlay, ResolveSwipeColor, IconTexture, ApplyToFrame, ApplyRule, RaiseOverlayBorders, RestoreOverlayBorders
 local EnsureTicker, OpenWindow, CloseWindow, CloseAll, CastWindow
@@ -459,24 +464,30 @@ end
 --  throttled poll -- but only while at least one preset actually uses it.
 -- ---------------------------------------------------------------------------
 -- Unified "is this preset on a real (non-GCD) cooldown right now?" read.
+-- Trinkets/items read the ITEM cooldown (its on-use spell can have a shorter
+-- cooldown that would fire the ready edge early). Bail on nil / Secret Values.
 PresetOnCD = function(key)
     local now = GetTime()
     if key > 0 then
         local ci = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(key)
         return (ci and ci.isActive and not ci.isOnGCD) or false
     end
+
     local start, dur, enable
     if key == -13 or key == -14 then
         if GetInventoryItemCooldown then start, dur, enable = GetInventoryItemCooldown("player", -key) end
-        if enable ~= nil and enable ~= 1 then return false end
     else
         local itemID = -key
         if C_Container and C_Container.GetItemCooldown then start, dur = C_Container.GetItemCooldown(itemID) end
-        if not (start and dur and dur > 1.5) and C_Item and C_Item.GetItemCooldown then
+        if (start == nil or dur == nil) and C_Item and C_Item.GetItemCooldown then
             start, dur = C_Item.GetItemCooldown(itemID)
         end
     end
-    return (start and dur and dur > 1.5 and now < start + dur) or false
+    if start == nil or dur == nil then return false end
+    if issecretvalue and (issecretvalue(start) or issecretvalue(dur)
+        or (enable ~= nil and issecretvalue(enable))) then return false end
+    if enable ~= nil and enable ~= 1 then return false end
+    return (dur > 1.5 and now < start + dur) or false
 end
 
 -- Normal (shown) alpha for a frame, from its bar's opacity.
@@ -558,16 +569,37 @@ EvalCdStateNow = function()
     if not icons or not FCt then return end
     for r = 1, #_cdStateRules do
         local rule = _cdStateRules[r]
-        local eff = rule.cas and rule.cas.cdStateEffect
-        if eff then
+        local cas = rule.cas
+        local eff = cas and cas.cdStateEffect
+        local soundKey = cas and cas.cdReadySoundKey
+        if soundKey == "none" then soundKey = nil end
+        if eff or soundKey then
             local onCD = PresetOnCD(rule.spellID)
             local sid = rule.spellID
+            -- Sound only fires while the ability's icon is present on a bar.
+            local hasIcon = false
             for _, list in pairs(icons) do
                 for i = 1, #list do
                     local f = list[i]
                     local fc = f and FCt[f]
                     if fc and fc.spellID == sid then
-                        ApplyCdState(f, fc, rule.cas, eff, onCD)
+                        hasIcon = true
+                        if eff then ApplyCdState(f, fc, cas, eff, onCD) end
+                    end
+                end
+            end
+            -- Audio Effect on CD Ready: arm while on cooldown, fire once on the ready
+            -- edge. A missing icon leaves the armed state untouched so a rebuild at
+            -- cooldown-end can't swallow the edge (armed state persists by key).
+            if soundKey then
+                local akey = rule.srcKey or sid
+                if onCD then
+                    if hasIcon then _cdrArmedByKey[akey] = true end
+                elseif hasIcon and _cdrArmedByKey[akey] then
+                    _cdrArmedByKey[akey] = nil
+                    if not (ns._cdmSoundSuppressed and ns._cdmSoundSuppressed()) then
+                        local path = ns.FOCUSKICK_SOUND_PATHS and ns.FOCUSKICK_SOUND_PATHS[soundKey]
+                        if path then PlaySoundFile(path, "Master") end
                     end
                 end
             end
@@ -695,7 +727,8 @@ function ns.FakeActive_Rearm()
             if type(cas) == "table" and key ~= -13 and key ~= -14 then
                 local hasDur = (cas.duration or 0) > 0
                 local hasCd  = cas.cdStateEffect ~= nil
-                if hasDur or hasCd then
+                local hasSound = cas.cdReadySoundKey ~= nil and cas.cdReadySoundKey ~= "none"
+                if hasDur or hasCd or hasSound then
                     -- Settings are keyed by spell / item. A trinket's settings are
                     -- keyed by item, but its ICON is a slot (-13/-14) -- so route the
                     -- rule to whichever slot currently holds that item. (Cast +
@@ -707,7 +740,7 @@ function ns.FakeActive_Rearm()
                         if GetInventoryItemID("player", 13) == itemID then matchKey = -13
                         elseif GetInventoryItemID("player", 14) == itemID then matchKey = -14 end
                     end
-                    local rule = { spellID = matchKey, cas = cas, user = true }
+                    local rule = { spellID = matchKey, srcKey = key, cas = cas, user = true }
                     _rules[#_rules + 1] = rule
                     _hasUserRules = true
                     if hasDur then
@@ -715,7 +748,8 @@ function ns.FakeActive_Rearm()
                         rule.duration = cas.duration
                         MapCast(rule)
                     end
-                    if hasCd then
+                    if hasCd or hasSound then
+                        -- Both effects ride the same cooldown poll (EvalCdStateNow).
                         _cdStateRules[#_cdStateRules + 1] = rule
                     end
                 end
