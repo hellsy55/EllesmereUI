@@ -484,6 +484,51 @@ local _curViewFrozenDur = 0    -- final Current-session duration, pinned when co
 -- true through a feign-then-die transition, so it cannot be used to clear safely.
 local _feignDeathGUIDs = {}
 
+-- Apply a segment selection (a specific sessionID, or a session type like
+-- Current/Overall when sessionID is nil) to one window. Windows with the
+-- per-window "Sync Segment Selection" option form a sync group: selecting in
+-- any synced window applies to every synced window; unsynced windows stay
+-- fully independent. Lives on ns (not a local) so referencing it inside
+-- CreateDMWindow doesn't add an upvalue — the window factory sits at Lua 5.1's
+-- 60-upvalue ceiling and ns is already captured.
+function ns.ApplySegmentSelection(W, sessionType, sessionID)
+    local targets = { W }
+    if WinDB(W.idx).syncSegments then
+        targets = {}
+        for _, w in ipairs(_windows) do
+            if WinDB(w.idx).syncSegments then targets[#targets + 1] = w end
+        end
+    end
+    for _, w in ipairs(targets) do
+        if sessionID then
+            w.curSessionID = sessionID
+        else
+            w.curSession = sessionType
+            WinDB(w.idx).curSession = sessionType
+            w.curSessionID = nil
+        end
+        if w.CloseSource then w.CloseSource() end
+        w.Refresh()
+    end
+end
+
+-- Combat started: snap windows pinned to a historical segment back to Current
+-- (opt-in per window via the settings menu's "Auto Current on Combat" toggle).
+-- Windows on Overall are left alone -- that is a deliberate mode with its own
+-- switcher (Auto Swap Current/Overall). Lives on ns for the same upvalue
+-- reason as above.
+function ns.AutoCurrentOnCombat()
+    for _, w in ipairs(_windows) do
+        if w.curSessionID and WinDB(w.idx).autoCurrentOnCombat then
+            w.curSessionID = nil
+            w.curSession = Enum.DamageMeterSessionType.Current
+            WinDB(w.idx).curSession = Enum.DamageMeterSessionType.Current
+            if w.CloseSource then w.CloseSource() end
+            w.Refresh()
+        end
+    end
+end
+
 -- Single source of truth for the "Current" session timer (window AND standalone
 -- both read this). While combat is live it returns the live session duration
 -- straight from the API -- the SAME session the bars render -- so when the server
@@ -2366,6 +2411,16 @@ local function CreateDMWindow(winIdx)
               isActive = wdb.autoSwapMythic, onClick = function()
                 wdb.autoSwapMythic = not wdb.autoSwapMythic
             end },
+            { text = L("Auto Current on Combat"),
+              tooltip = L("Entering combat switches this window back to Current if viewing a past segment"),
+              isActive = wdb.autoCurrentOnCombat, onClick = function()
+                wdb.autoCurrentOnCombat = not wdb.autoCurrentOnCombat
+            end },
+            { text = L("Sync Segment Selection"),
+              tooltip = L("Selecting a segment switches all synced windows to it"),
+              isActive = wdb.syncSegments, onClick = function()
+                wdb.syncSegments = not wdb.syncSegments
+            end },
             { text = L("Default on M+ Start"),
               tooltip = L("Set your window to this Meter Type on dungeon start"),
               children = mStartChildren },
@@ -2390,7 +2445,7 @@ local function CreateDMWindow(winIdx)
                     items[#items + 1] = {
                         text = segName, timerText = segTime, compact = true,
                         isActive = (W.curSessionID == s.sessionID),
-                        onClick = function() W.curSessionID = s.sessionID; W.CloseSource(); W.Refresh() end,
+                        onClick = function() ns.ApplySegmentSelection(W, nil, s.sessionID) end,
                     }
                 end
             end
@@ -2401,7 +2456,7 @@ local function CreateDMWindow(winIdx)
             items[#items + 1] = {
                 text = L(SESSION_TYPE_NAMES[sType] or "Unknown"),
                 isActive = (not W.curSessionID and sType == W.curSession),
-                onClick = function() W.curSession = sType; wdb.curSession = sType; W.curSessionID = nil; W.CloseSource(); W.Refresh() end,
+                onClick = function() ns.ApplySegmentSelection(W, sType, nil) end,
             }
         end
         ShowEDMMenu(items, W.segmentBtn)
@@ -4680,6 +4735,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         _regenTimestamp = 0
         _needsFinalRefresh = false
         if not _sharedTicker then StartSharedTicker() end
+        ns.AutoCurrentOnCombat()
         for _, w in ipairs(_windows) do
             w._barCacheKey = nil
             w._barSources = nil
@@ -4731,6 +4787,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         _ttLastGUID = nil
         if _targetsCache then wipe(_targetsCache) end
         StartSharedTicker()
+        ns.AutoCurrentOnCombat()
         ns.ProfEnd("Combat:REGEN_DISABLED", t0)
     else
         local t0 = ns.ProfBegin("Combat:REGEN_ENABLED")
