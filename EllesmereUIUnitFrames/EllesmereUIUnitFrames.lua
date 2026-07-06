@@ -788,6 +788,9 @@ local defaults = {
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             bgClassColored = false,
             castbarHeight = 14,
+            castbarWidth = 0,
+            castbarOffsetX = 0,
+            castbarOffsetY = 0,
             showCastbar = true,
             showCastIcon = true,
             castbarIconInWidth = true,
@@ -2834,9 +2837,12 @@ local function UpdateBordersForScale(frame, unit)
         if castbarBg then
             -- Trim castbar bg width to match frame width, but only if the
             -- user hasn't set a custom width (castbarWidth > 0 means custom).
+            -- Use the settings already resolved from this function's unit
+            -- parameter, NOT frame.unit: boss preview swaps frame.unit to
+            -- "player", which has no castbarWidth and made this trim eat the
+            -- boss castbar's custom width while previewing.
             local cbW = castbarBg:GetWidth()
-            local cbSettings = GetSettingsForUnit(frame._unit or frame.unit)
-            local hasCustomW = cbSettings and (cbSettings.castbarWidth or 0) > 0
+            local hasCustomW = (settings.castbarWidth or 0) > 0
             if not hasCustomW and cbW > snappedFrameW + 0.01 then
                 PP.Width(castbarBg, snappedFrameW)
             end
@@ -4620,7 +4626,10 @@ local function CreateCastBar(frame, unit, settings)
         cbWidth = db.profile.player.playerCastbarWidth or 181
         cbHeight = db.profile.player.playerCastbarHeight or 14
     else
-        cbWidth = settings.castbarWidth or 181
+        -- castbarWidth 0 = auto (boss frames: match frame width; the boss
+        -- update pass re-sizes to the live frame width right after creation).
+        local cbw = settings.castbarWidth or 0
+        cbWidth = cbw > 0 and cbw or 181
         cbHeight = settings.castbarHeight or 14
     end
     PP.Size(castbarBg, cbWidth, cbHeight)
@@ -4946,7 +4955,19 @@ local function SetupShowOnCastBar(frame, unit)
 
     castbar.PostCastStart = function(self, ...)
         local bg = self:GetParent()
-        if bg then bg:Show() end
+        if bg then
+            -- Boss: re-assert the configured width (castbarWidth > 0 = custom,
+            -- 0 = match frame width) at cast start, so a live cast always shows
+            -- the right width even if no settings pass ran since the frame
+            -- was resized or another path touched the bg.
+            if unit and unit:match("^boss") then
+                local s = db and db.profile and GetSettingsForUnit(unit)
+                local cw = (s and s.castbarWidth) or 0
+                if cw > 0 and cw < 30 then cw = 30 end
+                if s then PP.Width(bg, cw > 0 and cw or frame:GetWidth()) end
+            end
+            bg:Show()
+        end
         self:Show()
         if self._iconFrame then
             local s = db and db.profile and GetSettingsForUnit(unit)
@@ -9522,7 +9543,12 @@ local function ReloadFrames()
                             if not frame:IsElementEnabled("Castbar") then
                                 frame:EnableElement("Castbar")
                             end
-                            PP.Size(castbarBg, totalWidth, settings.castbarHeight or 14)
+                            -- castbarWidth > 0 = user-set custom width; 0 = match frame width.
+                            -- Custom widths floor at 30: below the cast icon size the
+                            -- icon-in-width inset inverts the bar's anchor rect.
+                            local bCbW = settings.castbarWidth or 0
+                            if bCbW > 0 and bCbW < 30 then bCbW = 30 end
+                            PP.Size(castbarBg, bCbW > 0 and bCbW or totalWidth, settings.castbarHeight or 14)
                             LayoutCastbarIcon(frame.Castbar, CastIconInWidth("boss1", settings), nil, CastIconOnRight("boss1", settings))
                             if frame.Castbar._iconFrame then
                                 local cbH = settings.castbarHeight or 14
@@ -9540,8 +9566,8 @@ local function ReloadFrames()
                             -- bar's bottom: the health/power bars live in the half-pixel-inset
                             -- bar clip, which left a ~1px gap below the frame. The cast bar is
                             -- full frame width, so frame bottom-center keeps it centered + flush.
-                            -- castbarOffsetY nudges the whole cast bar vertically (positive = up).
-                            castbarBg:SetPoint("TOP", frame, "BOTTOM", 0, settings.castbarOffsetY or 0)
+                            -- castbarOffsetX/Y nudge the whole cast bar (positive = right/up).
+                            castbarBg:SetPoint("TOP", frame, "BOTTOM", settings.castbarOffsetX or 0, settings.castbarOffsetY or 0)
                             if settings.castbarHideWhenInactive and not frame.Castbar:IsShown() then
                                 castbarBg:Hide()
                             else
