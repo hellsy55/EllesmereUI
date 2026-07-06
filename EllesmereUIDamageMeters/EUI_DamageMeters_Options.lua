@@ -545,7 +545,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = EllesmereUI.GetClassColor("PALADIN")
+                        local cc = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,
@@ -1539,7 +1539,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = EllesmereUI.GetClassColor(select(2, UnitClass("player")))
+                        local cc = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,
