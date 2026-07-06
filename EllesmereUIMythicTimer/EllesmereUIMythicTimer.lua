@@ -131,6 +131,9 @@ end
 local DB_DEFAULTS = {
     profile = {
         enabled           = true,
+        borderTexture     = "solid",
+        borderSize        = 0,
+        borderR = 0, borderG = 0, borderB = 0, borderA = 1,
         showTitle         = true,
         showDungeonName   = true,
         -- Show the key level (e.g. "+21") with a divider to the left of the timer
@@ -231,6 +234,51 @@ local DB_DEFAULTS = {
         enemyBarColor     = { r = 0.35, g = 0.55, b = 0.8 },
     },
 }
+
+-- Per-addon border texture defaults (same as resourcebars/cdm)
+do
+    local function AllSizes(ox, oy, sx, sy)
+        local t = {}
+        for k = 0, 4 do t[k] = { offsetX = ox, offsetY = oy, shiftX = sx, shiftY = sy } end
+        return t
+    end
+    EllesmereUI.RegisterBorderDefaults("MythicPlus", {
+        ["glow"] = {
+            defaultSize = 1,
+            sizes = AllSizes(0, 0, 0, 0),
+        },
+        ["blizz"] = {
+            defaultSize = 3,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 2, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 3, offsetY = 2, shiftX = 1, shiftY = 0 },
+                [3] = { offsetX = 4, offsetY = 2, shiftX = 1, shiftY = 0 },
+                [4] = { offsetX = 4, offsetY = 2, shiftX = 1, shiftY = 0 },
+            },
+        },
+        ["dialog"] = {
+            defaultSize = 1,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 3, offsetY = 3, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 3, offsetY = 5, shiftX = 0, shiftY = 0 },
+                [3] = { offsetX = 3, offsetY = 5, shiftX = 0, shiftY = 0 },
+                [4] = { offsetX = 5, offsetY = 10, shiftX = 0, shiftY = 0 },
+            },
+        },
+        ["sm:Blizzard Achievement Wood"] = {
+            defaultSize = 1,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 1, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 1, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [3] = { offsetX = 1, offsetY = 6, shiftX = 0, shiftY = 0 },
+                [4] = { offsetX = 1, offsetY = 8, shiftX = 0, shiftY = 0 },
+            },
+        },
+    })
+end
 
 -- State
 local db
@@ -904,6 +952,98 @@ end
 local standaloneFrame
 local standaloneCreated = false
 
+-- WICHTIG: Diese Funktion darf erst HIER (nach "local standaloneFrame" und
+-- "local db") definiert werden. Stand sie weiter oben im File (vor den
+-- lokalen Deklarationen), hätte sie in Lua auf die gleichnamigen GLOBALEN
+-- Variablen zugegriffen (die nie gesetzt werden) statt auf die lokalen –
+-- die Funktion wäre dadurch immer sofort mit "return" abgebrochen.
+--
+-- Verwendet jetzt das echte Border-System aus EllesmereUI.lua
+-- (EllesmereUI.ApplyBorderStyle), statt einer selbstgebauten Lösung:
+--   - "solid"            -> PP 4-Streifen-System (wie überall sonst im Addon)
+--   - alle anderen Keys  -> texturierte BackdropTemplate-Border (Glow,
+--                            Blizzard, Lightspark, SharedMedia, ...)
+-- ApplyBorderStyle braucht ein Frame, das WIR besitzen ("borderFrame").
+-- Die Bars ("_barBg", "_enemyBarBg", Segmente in "_timerSegBgs") sind aber
+-- nur Texturen -- deshalb legen wir pro Bar ein schlankes Trägerframe an,
+-- das per SetAllPoints exakt über der jeweiligen Textur sitzt, und reichen
+-- DIESES Frame an ApplyBorderStyle weiter.
+local function ApplyBorderTo(parent, anchor, key, p, size, texKey, r, g, b, a)
+    if not parent or not anchor then
+        return
+    end
+
+    local bf = parent[key]
+    if not bf then
+        bf = CreateFrame("Frame", nil, parent)
+        bf:EnableMouse(false)
+        bf:SetFrameLevel(parent:GetFrameLevel() + 10)
+        -- Zwingt jeden Rand (auch texturierte Styles mit auswärtigem
+        -- offsetX/offsetY, z.B. Glow/Blizzard) strikt auf die Fläche
+        -- von "bf" (== die jeweilige Bar/das jeweilige Segment). Ohne das
+        -- ragen texturierte Border-Styles über die Segmentgrenzen hinaus
+        -- und überlappen sich in den Gaps zwischen den Segmenten.
+        bf:SetClipsChildren(true)
+        parent[key] = bf
+    end
+
+    bf:ClearAllPoints()
+    bf:SetAllPoints(anchor)
+
+    if size <= 0 or not anchor:IsShown() then
+        bf:Hide()
+        EllesmereUI.ApplyBorderStyle(bf, 0, r, g, b, a, texKey)
+        return
+    end
+
+    bf:Show()
+    EllesmereUI.ApplyBorderStyle(
+        bf, size, r, g, b, a, texKey,
+        p.borderTextureOffset, p.borderTextureOffsetY,
+        p.borderTextureShiftX, p.borderTextureShiftY,
+        "MythicPlus", size
+    )
+end
+
+ns.ApplyBorder = function()
+    if not standaloneFrame or not db or not db.profile then
+        return
+    end
+
+    local f = standaloneFrame
+    local p = db.profile
+    local size = p.borderSize or 0
+    local texKey = p.borderTexture or "solid"
+    local r, g, b, a = p.borderR or 0, p.borderG or 0, p.borderB or 0, p.borderA or 1
+
+    -- Haupt-Timerbar
+    -- Im SEGMENTS-Modus ist "_barBg" nur noch eine unsichtbare (Alpha 0),
+    -- aber weiterhin :IsShown()-aktive Textur, die über die GESAMTE Bar-
+    -- breite reicht (inkl. der Zwischenräume zwischen den Segmenten). Würden
+    -- wir hier trotzdem einen Border draufsetzen, bekämen auch die Gaps
+    -- oben/unten eine Border-Linie (links/rechts wird das vom jeweils
+    -- angrenzenden Segment-Border verdeckt, oben/unten aber nicht). Deshalb
+    -- im SEGMENTS-Modus die Haupt-Border hier deaktivieren -- die einzelnen
+    -- Segment-Borders weiter unten übernehmen die komplette Umrandung.
+    local isSegmented = (p.timerBarStyle == "SEGMENTS")
+    if isSegmented then
+        ApplyBorderTo(f, f._barBg, "_emtBarBorderFrame", p, 0, texKey, r, g, b, a)
+    else
+        ApplyBorderTo(f, f._barBg, "_emtBarBorderFrame", p, size, texKey, r, g, b, a)
+    end
+
+    -- Forces-Bar
+    ApplyBorderTo(f, f._enemyBarBg, "_emtEnemyBorderFrame", p, size, texKey, r, g, b, a)
+
+    -- Segment-Bars (SEGMENTS-Modus des Timer-Balkens)
+    if f._timerSegBgs then
+        for i, seg in ipairs(f._timerSegBgs) do
+            local segSize = isSegmented and size or 0
+            ApplyBorderTo(f, seg, "_emtSegBorderFrame" .. i, p, segSize, texKey, r, g, b, a)
+        end
+    end
+end
+
 -- Font helpers
 local FALLBACK_FONT = "Fonts/FRIZQT__.TTF"
 local FONT_OPTIONS = {
@@ -1083,6 +1223,19 @@ local function CreateStandaloneFrame()
     f:SetBackdropColor(0.05, 0.04, 0.08, 0.85)
     f:SetBackdropBorderColor(0.15, 0.15, 0.15, 0.6)
 
+    -- Eigene Ebene für Text, der ÜBER den Bars sitzt (Timer-/Forces-/
+    -- Threshold-Text). ns.ApplyBorder() legt für jede Bar/jedes Segment ein
+    -- Border-Wrapper-Frame an, das zwingend über "f" liegt (siehe
+    -- EllesmereUI.MakeBorder / ApplyBorderStyle: das Border-Container-Frame
+    -- bekommt immer FrameLevel = übergebenes Frame + 1). Ohne diese Ebene
+    -- würde der Border also IMMER über dem Text liegen, egal welchen
+    -- Draw-Layer der Text nutzt (Frame-Level schlägt Draw-Layer bei
+    -- unterschiedlichen Frames). Muss VOR den Fontstrings unten erzeugt
+    -- werden, damit diese direkt hierauf umgehängt werden können.
+    f._emtTextLayer = CreateFrame("Frame", nil, f)
+    f._emtTextLayer:SetFrameLevel(f:GetFrameLevel() + 30)
+    f._emtTextLayer:EnableMouse(false)
+
     f._accent = f:CreateTexture(nil, "BORDER")
     f._accent:SetWidth(2)
     f._accent:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, -1)
@@ -1113,10 +1266,13 @@ local function CreateStandaloneFrame()
     f._seg3 = f:CreateTexture(nil, "OVERLAY")
     f._seg2 = f:CreateTexture(nil, "OVERLAY")
     f._threshFS = f:CreateFontString(nil, "OVERLAY")
+    f._threshFS:SetParent(f._emtTextLayer)
     f._threshFS:SetWordWrap(false)
     f._threshFS2 = f:CreateFontString(nil, "OVERLAY")
+    f._threshFS2:SetParent(f._emtTextLayer)
     f._threshFS2:SetWordWrap(false)
     f._threshRemFS = f:CreateFontString(nil, "OVERLAY")
+    f._threshRemFS:SetParent(f._emtTextLayer)
     f._threshRemFS:SetWordWrap(false)
     f._deathFS = f:CreateFontString(nil, "OVERLAY")
     f._deathFS:SetWordWrap(false)
@@ -1226,6 +1382,7 @@ local function CreateStandaloneFrame()
         deathTT:Hide()
     end)
     f._enemyFS = f:CreateFontString(nil, "OVERLAY")
+    f._enemyFS:SetParent(f._emtTextLayer)
     f._enemyFS:SetWordWrap(false)
     f._enemyBarBg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
     f._enemyBarFill = f:CreateTexture(nil, "ARTWORK")
@@ -1817,6 +1974,7 @@ local function RenderStandalone()
 
             if not f._enemyBarText then
                 f._enemyBarText = f:CreateFontString(nil, "OVERLAY")
+                f._enemyBarText:SetParent(f._emtTextLayer)
                 f._enemyBarText:SetWordWrap(false)
             end
             if pctPos == "BAR" then
@@ -2200,6 +2358,7 @@ local function RenderStandalone()
         if p.timerInBar then
             if not f._barTimerFS then
                 f._barTimerFS = f:CreateFontString(nil, "OVERLAY")
+                f._barTimerFS:SetParent(f._emtTextLayer)
                 f._barTimerFS:SetWordWrap(false)
             end
             SetTimerFS(f._barTimerFS, 12)
@@ -2392,6 +2551,7 @@ local function RenderStandalone()
         f._previewFS:Hide()
     end
 
+    ns.ApplyBorder()
     f:Show()
 end
 
