@@ -484,13 +484,9 @@ local _curViewFrozenDur = 0    -- final Current-session duration, pinned when co
 -- true through a feign-then-die transition, so it cannot be used to clear safely.
 local _feignDeathGUIDs = {}
 
--- Apply a segment selection (a specific sessionID, or a session type like
--- Current/Overall when sessionID is nil) to one window. Windows with the
--- per-window "Sync Segment Selection" option form a sync group: selecting in
--- any synced window applies to every synced window; unsynced windows stay
--- fully independent. Lives on ns (not a local) so referencing it inside
--- CreateDMWindow doesn't add an upvalue — the window factory sits at Lua 5.1's
--- 60-upvalue ceiling and ns is already captured.
+-- Switch a window to a segment (sessionID) or session type (Current/Overall).
+-- Windows with syncSegments enabled switch together as a group.
+-- On ns instead of local: CreateDMWindow is at Lua 5.1's 60-upvalue limit.
 function ns.ApplySegmentSelection(W, sessionType, sessionID)
     local targets = { W }
     if WinDB(W.idx).syncSegments then
@@ -512,11 +508,8 @@ function ns.ApplySegmentSelection(W, sessionType, sessionID)
     end
 end
 
--- Combat started: snap windows pinned to a historical segment back to Current
--- (opt-in per window via the settings menu's "Auto Current on Combat" toggle).
--- Windows on Overall are left alone -- that is a deliberate mode with its own
--- switcher (Auto Swap Current/Overall). Lives on ns for the same upvalue
--- reason as above.
+-- Combat start: switch windows viewing a past segment back to Current
+-- (per-window autoCurrentOnCombat option). Overall windows are not touched.
 function ns.AutoCurrentOnCombat()
     for _, w in ipairs(_windows) do
         if w.curSessionID and WinDB(w.idx).autoCurrentOnCombat then
