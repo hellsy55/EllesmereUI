@@ -107,6 +107,11 @@ local function AbbrevDungeon(mapID)
             abbr = abbr .. (firstChar or "")
         end
     end
+    -- Locale-specific abbreviation override (e.g. koKR keystone cuts): a locale
+    -- file may register EllesmereUI._dungeonAbbrevOverride as plain data, applied
+    -- here at the single render source rather than via a global text hook.
+    local ov = EllesmereUI and EllesmereUI._dungeonAbbrevOverride
+    if ov and ov[abbr] then abbr = ov[abbr] end
     _dungeonAbbrCache[mapID] = abbr
     return abbr
 end

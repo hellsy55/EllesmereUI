@@ -845,6 +845,23 @@ local function ApplyCdmChargeStyle(frame, cd)
     return true
 end
 
+-- Immediately re-assert the charge style (Hide Recharge Edge + Hide Swipe) on one
+-- icon, instead of waiting for Blizzard's next cooldown re-push to fire the
+-- reactive SetDrawEdge / SetDrawSwipe hooks. Called from RefreshCDMIconAppearance
+-- so toggling Hide Recharge Edge / Hide Swipe -- per-icon OR via Apply to Bar --
+-- updates a CURRENTLY recharging charge spell right away rather than only on its
+-- next recharge (the "it didn't apply to every icon" report). No-op for non-charge
+-- frames (ApplyCdmChargeStyle self-skips) and reentry-guarded so the sibling hooks
+-- do not recurse.
+function ns.ReapplyChargeStyle(frame)
+    local fd = frame and hookFrameData[frame]
+    local cd = fd and fd.cooldown
+    if not cd or fd._isProcessingOverride then return end
+    fd._isProcessingOverride = true
+    ApplyCdmChargeStyle(frame, cd)
+    fd._isProcessingOverride = false
+end
+
 -- Max Stacks Glow (per-spell): glow a charge spell when it is at max charges.
 -- 1:1 with Active State Glow but on its own overlay (so the two never fight) and
 -- driven by charge state instead of the active swipe. ss2.maxStacksGlow is the
@@ -2316,6 +2333,13 @@ local function GetOrCreateTrinketFrame(slotID)
     cd:EnableMouse(false)
     if cd.SetMouseClickEnabled then cd:SetMouseClickEnabled(false) end
     if cd.SetMouseMotionEnabled then cd:SetMouseMotionEnabled(false) end
+    -- On-use trinket cooldowns fire no event at natural expiry, so the CD-driven
+    -- re-saturate (UpdateTrinketCooldown) would not run at the ready edge while
+    -- the CD-ready glow lit up immediately -- same lag as the item preset frames.
+    -- Re-run the trinket CD check at the expiry edge to clear the desaturation.
+    cd:SetScript("OnCooldownDone", function()
+        if ns.UpdateTrinketCooldown then ns.UpdateTrinketCooldown(slotID) end
+    end)
     f.Cooldown = cd
     f._cooldown = cd
 
@@ -2435,6 +2459,7 @@ local function UpdateTrinketCooldown(slotID)
         return false
     end
 end
+ns.UpdateTrinketCooldown = UpdateTrinketCooldown
 
 local _trinketEventFrame = CreateFrame("Frame")
 _trinketEventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
@@ -2836,6 +2861,17 @@ local function GetOrCreateItemPresetFrame(barKey, itemID)
     cd:EnableMouse(false)
     if cd.SetMouseClickEnabled then cd:SetMouseClickEnabled(false) end
     if cd.SetMouseMotionEnabled then cd:SetMouseMotionEnabled(false) end
+    -- Item cooldowns fire no event when they naturally expire, so the
+    -- desaturation pass (ProcessPresetCooldowns) would not re-run at the ready
+    -- edge and the icon would stay greyed until some unrelated event marked the
+    -- processor dirty. The CD-ready glow polls readiness continuously and lights
+    -- up the instant the CD ends, so without this the pot glows while still
+    -- desaturated. Poke the processor at the expiry edge so the next tick
+    -- re-evaluates count/CD/lockout (a plain re-saturate would be wrong when the
+    -- last charge was just used -- total==0 must keep it greyed).
+    cd:SetScript("OnCooldownDone", function()
+        if ns._MarkPresetCdDirty then ns._MarkPresetCdDirty() end
+    end)
     f.Cooldown = cd; f._cooldown = cd
     f._isItemPresetFrame = true
     f._presetItemID = itemID; f._presetData = preset
@@ -2942,6 +2978,50 @@ local function ProcessPresetCooldowns()
                             f._lastVertexDim = nil
                         end
                     end
+                    -- "Show Charges" (opt-in, CD/utility custom spells only):
+                    -- Blizzard reports no charge frame for a manually-added spell,
+                    -- so on request show its count -- the display charge count when
+                    -- the spell actually has charges, else the cast/usable count.
+                    -- Gated by ns._cdmAnyCustomForceCount + a lazy fontstring, so it
+                    -- costs nothing unless a custom spell opts in. Rides this same
+                    -- 10Hz-when-dirty pass -- no extra OnUpdate.
+                    if ns._cdmAnyCustomForceCount and f._isCustomSpellFrame then
+                        local fcF = _ecmeFC[f]
+                        local bkF = fcF and fcF.barKey
+                        local sdF = bkF and ns.GetBarSpellData and ns.GetBarSpellData(bkF)
+                        local forceCount = sdF and sdF.customSpellForceCount and sdF.customSpellForceCount[sid]
+                        if forceCount then
+                            if not f._castCountText then
+                                local ccf = f:CreateFontString(nil, "OVERLAY")
+                                EllesmereUI.ApplyIconTextFont(ccf, GetCDMFont(), 11, "cdm")
+                                ccf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 2)
+                                f._castCountText = ccf
+                            end
+                            local chargeInfo = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
+                            local n = (chargeInfo and C_Spell.GetSpellDisplayCount and C_Spell.GetSpellDisplayCount(sid))
+                                or (C_Spell.GetSpellCastCount and C_Spell.GetSpellCastCount(sid))
+                            -- The count is a SECRET value in Midnight (cannot be read or
+                            -- compared -- issecretvalue was making the old code bail), so
+                            -- render it Blizzard's way: TruncateWhenZero turns it into a
+                            -- display-safe string and drops it at zero, without reading
+                            -- the value. pcall because it can throw; failure -> hide.
+                            local ok, str
+                            if C_StringUtil and C_StringUtil.TruncateWhenZero then
+                                ok, str = pcall(C_StringUtil.TruncateWhenZero, n)
+                            end
+                            if ok and str then
+                                f._castCountText:SetText(str)
+                                if not f._castCountText:IsShown() then f._castCountText:Show() end
+                            elseif f._castCountText:IsShown() then
+                                f._castCountText:SetText("")
+                                f._castCountText:Hide()
+                            end
+                        elseif f._castCountText and f._castCountText:IsShown() then
+                            f._castCountText:SetText("")
+                            f._castCountText:Hide()
+                            f._lastCastCount = nil
+                        end
+                    end
                 end
             elseif f._isItemPresetFrame and f._presetItemID and now >= _encounterResetUntil then
                 local itemID = f._presetItemID
@@ -3012,6 +3092,53 @@ ns._isPresetCdDirty = function() return _presetCdDirty end
 -- no game event (bag/cooldown/combat) follows -- e.g. an in-panel sync/import --
 -- ProcessPresetCooldowns would never run and an unowned item would stay saturated.
 ns._MarkPresetCdDirty = function() _presetCdDirty = true end
+
+-- TEMP DEBUG: /cdmcc -- dumps why the "Show Charges" custom-spell count is / is
+-- not displaying. Remove once diagnosed.
+SLASH_EUICDMCC1 = "/cdmcc"
+SlashCmdList["EUICDMCC"] = function()
+    local function p(...) print("|cff66ccff[EUICC]|r", ...) end
+    local function safe(v)
+        if issecretvalue and issecretvalue(v) then return "<secret>" end
+        return tostring(v)
+    end
+    p("gate _cdmAnyCustomForceCount =", tostring(ns._cdmAnyCustomForceCount),
+      "| dirty =", tostring(_presetCdDirty))
+    p("APIs: GetSpellCharges=", tostring(C_Spell and C_Spell.GetSpellCharges ~= nil),
+      "GetSpellDisplayCount=", tostring(C_Spell and C_Spell.GetSpellDisplayCount ~= nil),
+      "GetSpellCastCount=", tostring(C_Spell and C_Spell.GetSpellCastCount ~= nil))
+    local count = 0
+    for fkey, f in pairs(_presetFrames) do
+        if f._isCustomSpellFrame and not f._isCustomBuffFrame then
+            count = count + 1
+            local sid = f._cachedPresetSID
+            if not sid then local m = fkey:match(":(%d+)$"); sid = m and tonumber(m) end
+            local fc = _ecmeFC[f]
+            local bk = fc and fc.barKey
+            local sd = bk and ns.GetBarSpellData and ns.GetBarSpellData(bk)
+            local flag = sd and sd.customSpellForceCount and sd.customSpellForceCount[sid]
+            local ci = sid and C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
+            local disp = sid and C_Spell.GetSpellDisplayCount and C_Spell.GetSpellDisplayCount(sid)
+            local cast = sid and C_Spell.GetSpellCastCount and C_Spell.GetSpellCastCount(sid)
+            p(string.format("[%s] %s | bk=%s shown=%s flag=%s",
+                tostring(sid), tostring(sid and C_Spell.GetSpellName(sid)),
+                tostring(bk), tostring(f:IsShown()), tostring(flag)))
+            local nEff = (ci and disp) or cast
+            local tok, tstr
+            if C_StringUtil and C_StringUtil.TruncateWhenZero then
+                tok, tstr = pcall(C_StringUtil.TruncateWhenZero, nEff)
+            end
+            p(string.format("   forceCountTbl=%s charges=%s displayCount=%s castCount=%s",
+                tostring(sd and sd.customSpellForceCount ~= nil),
+                tostring(ci ~= nil), safe(disp), safe(cast)))
+            p(string.format("   TruncateWhenZero: ok=%s -> %s | text=%s textShown=%s",
+                tostring(tok), safe(tstr),
+                tostring(f._castCountText ~= nil),
+                tostring(f._castCountText and f._castCountText:IsShown())))
+        end
+    end
+    if count == 0 then p("NO custom spell frames present (add one to a CD/utility bar first)") end
+end
 
 -- "Hide Items if Missing": detect when a tracked consumable's bag presence
 -- flips (acquired or fully used up) for any bar that opted in, and queue a
@@ -5846,17 +5973,30 @@ do
         end
     end)
 
-    local function AnyBarEnabled()
-        if not barDataByKey then return false end
+    -- Cached enable-flag so OnPress can gate in O(1) instead of looping every
+    -- bar on each key press (the ActionButtonDown hook fires for all users).
+    -- Recomputed only when the bar list is rebuilt (RefreshCdmPressMirrorFlag,
+    -- called from the CDM bar-rebuild pass) or when the toggle changes.
+    local _anyPressMirror = false
+    local function RefreshCdmPressMirrorFlag()
+        _anyPressMirror = false
+        if not barDataByKey then return end
         for _, bd in pairs(barDataByKey) do
-            if bd and bd.pressMirror then return true end
+            -- Buff-family bars never mirror presses (auto-tracked auras, not
+            -- keybind-pressed), so ignore a stale/imported pressMirror on them.
+            if bd and bd.pressMirror and not ns.IsBarBuffFamily(bd) then _anyPressMirror = true; return end
         end
-        return false
     end
+    ns.RefreshCdmPressMirrorFlag = RefreshCdmPressMirrorFlag
+    RefreshCdmPressMirrorFlag()
 
     local function SlotSpellID(slot)
         if not slot then return nil end
         if HasAction and not HasAction(slot) then return nil end
+        -- NOTE (Midnight): GetActionInfo is documented as usable only in the
+        -- secure restricted environment. This runs from an insecure post-hook,
+        -- so a future build could hand back nil/secret here and silently no-op
+        -- the press mirror. Revisit via a secure route if that ever regresses.
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
             return id
@@ -5872,7 +6012,7 @@ do
     end
 
     local function OnPress(btn, bindCmd)
-        if not btn or not AnyBarEnabled() then return end
+        if not btn or not _anyPressMirror then return end
         local slot = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
         local sid = SlotSpellID(slot)
         if not sid then return end
@@ -5882,7 +6022,7 @@ do
         if cdmBarIcons then
             for barKey, list in pairs(cdmBarIcons) do
                 local bd = barDataByKey and barDataByKey[barKey]
-                if bd and bd.pressMirror then
+                if bd and bd.pressMirror and not ns.IsBarBuffFamily(bd) then
                     for i = 1, #list do
                         local icon = list[i]
                         if icon and icon:IsShown() then
@@ -5920,6 +6060,7 @@ do
             for i = 1, #ovs do ovs[i]:Hide() end
         end
         wipe(_held); _heldN = 0; _poll:Hide()
+        RefreshCdmPressMirrorFlag()
     end
 
     ---------------------------------------------------------------------------

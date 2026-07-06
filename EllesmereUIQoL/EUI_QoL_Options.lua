@@ -1752,9 +1752,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if ctrl and ctrl._refreshLabel then ctrl._refreshLabel() end
             end
 
-            local _, chCogShow = EllesmereUI.BuildCogPopup({
-                title = "Crosshair Options",
-                rows = {
+            local chCogRows = {
                     { type="slider", label="H Length", min=1, max=100, step=1,
                       get=function() return cget("crosshairHLength") or 40 end,
                       set=function(v) dbset("crosshairHLength", v) end },
@@ -1786,7 +1784,23 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-200, max=200, step=1,
                       get=function() return cget("crosshairYOffset") or 0 end,
                       set=function(v) dbset("crosshairYOffset", v) end },
-                },
+            }
+            -- Holy Paladin uses a 40yd out-of-range cutoff by default; let
+            -- paladins opt into a melee (5yd) cutoff. Shown only for Paladins.
+            if select(2, UnitClass("player")) == "PALADIN" then
+                chCogRows[#chCogRows + 1] = {
+                    type="toggle", label="Show Melee Range for Hpal",
+                    get=function() return cget("crosshairHpalMelee") == true end,
+                    set=function(v)
+                        cset("crosshairHpalMelee", v)
+                        if EllesmereUI._RefreshCrosshairCutoffRange then EllesmereUI._RefreshCrosshairCutoffRange() end
+                        applyCH()
+                    end,
+                }
+            end
+            local _, chCogShow = EllesmereUI.BuildCogPopup({
+                title = "Crosshair Options",
+                rows = chCogRows,
             })
 
             local chCogBtn = CreateFrame("Button", nil, leftRgn)

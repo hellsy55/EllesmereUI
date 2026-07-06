@@ -1170,6 +1170,27 @@ function ns.RescanCustomItemFlag()
     end
 end
 
+-- "Show Charges" (custom CD/utility spells) gate. Same monotonic, scanned-once
+-- contract as the flags above (the Add Custom Spell popup flips it live). Zero
+-- cost in ProcessPresetCooldowns unless a custom spell has opted in.
+function ns.RescanCustomForceCountFlag()
+    if ns._cdmAnyCustomForceCount or ns._customForceCountScanned then return end
+    local sp = SpellStore and SpellStore.GetSpecProfiles and SpellStore.GetSpecProfiles()
+    if not sp then return end
+    ns._customForceCountScanned = true
+    for _, prof in pairs(sp) do
+        local barSpells = prof and prof.barSpells
+        if barSpells then
+            for _, bs in pairs(barSpells) do
+                if bs and type(bs.customSpellForceCount) == "table" and next(bs.customSpellForceCount) then
+                    ns._cdmAnyCustomForceCount = true
+                    return
+                end
+            end
+        end
+    end
+end
+
 -- Reverse Swipe gate: set ns._cdmAnyReverseSwipe once if any saved spell (any
 -- spec) has the per-spell reverseSwipe toggle on. The reverse-apply in
 -- RefreshCDMIconAppearance is skipped entirely for anyone who never enables it,
@@ -4723,6 +4744,14 @@ local function RefreshCDMIconAppearance(barKey)
         if ns._cdmAnyChargeHideCdText and not isBuffFamilyBar and ns.WatchChargeCdTextIfEnabled then
             ns.WatchChargeCdTextIfEnabled(icon)
         end
+        -- Immediately re-assert Hide Recharge Edge / Hide Swipe on charge icons so a
+        -- toggle (per-icon or via Apply to Bar) updates a currently-recharging spell
+        -- right away instead of waiting for its next recharge to fire the reactive
+        -- SetDrawEdge/SetDrawSwipe hooks. Gated + self-skips non-charge frames = 0 cost
+        -- unless charge style is actually in use.
+        if ns._cdmAnyChargeStyle and not isBuffFamilyBar and ns.ReapplyChargeStyle then
+            ns.ReapplyChargeStyle(icon)
+        end
         -- Login/refresh coverage for "Audio Effect on CD Ready": register every
         -- cd/utility icon with the sound onto the event-driven watcher
         -- (SPELL_UPDATE_COOLDOWN + SPELL_UPDATE_CHARGES). Both charge and non-charge
@@ -4755,6 +4784,11 @@ local function RefreshCDMIconAppearance(barKey)
             -- it without a per-tick lookup. Only restart the live glow when the
             -- effective value actually changed (no flicker on no-op rebuilds).
             local nT = ssb and ssb.buffGlow           -- nil = inherit, number = override (0 = None)
+            -- A false-block (per-spell "Off", or Exclude this spec / bar apply of an
+            -- Off value) is render-equivalent to nil: treat it as inherit, never as a
+            -- value. Without this fd._bgT would be `false` and the BuffTicker's
+            -- `effGlowType > 0` compares a boolean with a number and errors.
+            if nT == false then nT = nil end
             local nColor = ssb and ssb.buffGlowColor  -- nil / "class" / "custom"
             local nR, nG, nB
             if nColor == "custom" and ssb then
@@ -6327,6 +6361,7 @@ BuildAllCDMBars = function()
     ns.RescanBuffSoundFlag()      -- set the Audio on Buff Gain/Loss gate (once) before refresh
     ns.RescanCdReadySoundFlag()   -- set the Audio Effect on CD Ready gate (once) before refresh
     ns.RescanCustomItemFlag()     -- set the custom-item buff-injection gate (once)
+    ns.RescanCustomForceCountFlag() -- set the "Show Charges" custom-spell gate (once)
     ns.RescanReverseSwipeFlag()   -- set the Reverse Swipe gate (once) before refresh
 
     local p = ECME.db.profile
@@ -6389,6 +6424,10 @@ BuildAllCDMBars = function()
             ApplyCDMTooltipState(barData.key)
         end
     end
+    -- Resync the key-press-mirror fast enable-flag with the rebuilt bar list, so
+    -- OnPress O(1)-gates instead of looping every bar per press (covers profile
+    -- and spec swaps, not just the options toggle).
+    if ns.RefreshCdmPressMirrorFlag then ns.RefreshCdmPressMirrorFlag() end
     -- When hooks are active, queue a reanchor to repopulate default bars.
     -- The queued CollectAndReanchor will lift _cdmRebuilding when it
     -- finishes; if no reanchor is queued (hooks not yet installed) we
