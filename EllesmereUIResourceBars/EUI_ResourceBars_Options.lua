@@ -2516,7 +2516,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
-              min = 50, max = 500, step = 1,
+              min = 50, max = 800, step = 1,
               disabled = hwDis, disabledTooltip = hwTip, rawTooltip = hwRaw,
               getValue = function() local c = cfg(); return c and c.width or 220 end,
               setValue = function(v)
@@ -3277,7 +3277,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
-              min = 50, max = 500, step = 1,
+              min = 50, max = 800, step = 1,
               disabled = pwDis, disabledTooltip = pwTip, rawTooltip = pwRaw,
               getValue = function() local c = cfg(); return c and c.width or 220 end,
               setValue = function(v)
@@ -4145,7 +4145,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
-              min = 10, max = 500, step = 1,
+              min = 10, max = 800, step = 1,
               disabled = cwDis, disabledTooltip = cwTip, rawTooltip = cwRaw,
               getValue = function() local c = cfg(); return c and c.pipWidth or 214 end,
               setValue = function(v)
@@ -7587,7 +7587,7 @@ initFrame:SetScript("OnEvent", function(self)
                   p.castBar.height = v; RefreshCast()
               end },
             { type = "slider", text = "Width",
-              min = 50, max = 500, step = 1,
+              min = 50, max = 800, step = 1,
               disabled = cbwDis, disabledTooltip = cbwTip, rawTooltip = cbwRaw,
               getValue = function() local p = DB(); return p and p.castBar.width or 220 end,
               setValue = function(v)
