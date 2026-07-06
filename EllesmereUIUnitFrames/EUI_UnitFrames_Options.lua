@@ -1442,7 +1442,15 @@ initFrame:SetScript("OnEvent", function(self)
                 pvCastIconInWidth = settings.showCastIcon ~= false and settings.castbarIconInWidth ~= false
                 pvCastIconOnRight = settings.castbarIconRight == true
             end
-            local pvBarW = pvCastIconInWidth and math.max(1, totalW - pvCastIconW) or totalW
+            -- Boss: castbarWidth > 0 overrides the frame-matched width (0 = match frame).
+            -- Display-clamped to the frame width + 120 so an extreme custom width
+            -- can't spill across the options panel (pf doesn't clip children);
+            -- the real frames + in-game boss preview show the true width.
+            local pvCbBaseW = totalW
+            if unitKey == "boss" and (settings.castbarWidth or 0) > 0 then
+                pvCbBaseW = math.min(math.max(settings.castbarWidth, 30), totalW + 120)
+            end
+            local pvBarW = pvCastIconInWidth and math.max(1, pvCbBaseW - pvCastIconW) or pvCbBaseW
             castbar = CreateFrame("Frame", nil, pf)
             PP.Size(castbar, pvBarW, initCH)
             local cbAnchor = power or health
@@ -2578,7 +2586,13 @@ initFrame:SetScript("OnEvent", function(self)
                         ciOnRight = s.castbarIconRight == true
                     end
                     local ciIconW = ch
-                    local ciBarW = ciInWidth and math.max(1, tw - ciIconW) or tw
+                    -- Boss: castbarWidth > 0 overrides the frame-matched width (0 = match frame).
+                    -- Display-clamped (frame width + 120) -- see the creation-time note.
+                    local cbBaseW = tw
+                    if unitKey == "boss" and (s.castbarWidth or 0) > 0 then
+                        cbBaseW = math.min(math.max(s.castbarWidth, 30), tw + 120)
+                    end
+                    local ciBarW = ciInWidth and math.max(1, cbBaseW - ciIconW) or cbBaseW
                     castbar:SetSize(ciBarW, ch)
                     -- Anchoring is applied once below (the authoritative anchor
                     -- that accounts for bottom-text-bar / attached-power cases),
@@ -3433,10 +3447,14 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Re-snap castbar background width
+            -- Re-snap castbar background width. Boss custom widths (castbarWidth
+            -- > 0) are intentionally wider/narrower than the frame and already
+            -- display-clamped at sizing time -- trimming here would silently
+            -- revert them to frame width.
             if castbar then
+                local pvCbCustom = unitKey == "boss" and (s.castbarWidth or 0) > 0
                 local cbW = castbar:GetWidth()
-                if cbW > snappedFrameW + 0.01 then
+                if not pvCbCustom and cbW > snappedFrameW + 0.01 then
                     castbar:SetWidth(snappedFrameW)
                 end
             end
@@ -12680,13 +12698,16 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = sw
                 castFillSwatch = sw
             end
-            -- Inline cog on Show Cast Bar (left region): Offset Y nudges the whole
-            -- cast bar vertically (positive = up). Updates the live frames + both
+            -- Inline cog on Show Cast Bar (left region): Offset X/Y nudge the whole
+            -- cast bar (positive = right/up). Updates the live frames + both
             -- previews via ReloadAndUpdate + the boss preview refresh.
             do
                 local _, offCogShow = EllesmereUI.BuildCogPopup({
                     title = "Cast Bar Position",
                     rows = {
+                        { type="slider", label="Offset X", min=-500, max=500, step=1,
+                          get=function() return B.castbarOffsetX or 0 end,
+                          set=function(v) B.castbarOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                         { type="slider", label="Offset Y", min=-200, max=200, step=1,
                           get=function() return B.castbarOffsetY or 0 end,
                           set=function(v) B.castbarOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -12695,14 +12716,18 @@ initFrame:SetScript("OnEvent", function(self)
                 AddCastBlock(CCogBtn(castMainRow._leftRegion, offCogShow, EllesmereUI.DIRECTIONS_ICON))
             end
 
-            -- Row 2: Show Cast Icon (+ icon cog) | Bar Background (opacity slider + color swatch)
+            -- Row 2: Show Cast Icon (+ icon cog) | Cast Bar Width (right under Cast
+            -- Bar Height so the two dimensions sit stacked in the same column)
             growthRow, hh = Ww:DualRow(pp, yy,
                 { type="toggle", text="Show Cast Icon",
                   getValue=function() return B.showCastIcon ~= false end,
                   setValue=function(v) B.showCastIcon = v; ReloadAndUpdate() end },
-                { type="slider", text="Bar Background", min=0, max=100, step=1,
-                  getValue=function() return math.floor((B.castBgAlpha or 0.5) * 100 + 0.5) end,
-                  setValue=function(v) B.castBgAlpha = v / 100; ReloadAndUpdate() end });  yy = yy - hh
+                { type="slider", text="Cast Bar Width", min=0, max=500, step=1,
+                  tooltip="Sets a custom width for the cast bar. Set to 0 to match the boss frame width.",
+                  getValue=function() return B.castbarWidth or 0 end,
+                  -- Custom widths floor at 30 (matches the unlock-mode resize
+                  -- minimum): below the cast icon size the bar layout inverts.
+                  setValue=function(v) if v > 0 and v < 30 then v = 30 end; B.castbarWidth = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end });  yy = yy - hh
             -- Icon cog (left): "Make Icon Part of the Bar" / "Show Icon on Right".
             do
                 local _, cogShow = EllesmereUI.BuildCogPopup({
@@ -12720,9 +12745,20 @@ initFrame:SetScript("OnEvent", function(self)
                 })
                 CCogBtn(growthRow._leftRegion, cogShow)
             end
+            -- Row 3: Reverse Fill | Bar Background (opacity slider + color swatch).
+            -- Bar Background sits right below the size sliders (mirrors the main
+            -- frames' cast bar section, where it follows the Height row).
+            local reverseRow
+            reverseRow, hh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Reverse Fill",
+                  getValue=function() return B.castReverseFill == true end,
+                  setValue=function(v) B.castReverseFill = v; ReloadAndUpdate() end },
+                { type="slider", text="Bar Background", min=0, max=100, step=1,
+                  getValue=function() return math.floor((B.castBgAlpha or 0.5) * 100 + 0.5) end,
+                  setValue=function(v) B.castBgAlpha = v / 100; ReloadAndUpdate() end });  yy = yy - hh
             -- Inline color swatch on Bar Background (right region).
             do
-                local rgn = growthRow._rightRegion
+                local rgn = reverseRow._rightRegion
                 local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local c = B.castBgColor
@@ -12736,7 +12772,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = sw
             end
 
-            -- Row 3: Spell Name (dropdown + swatch + Size/X/Y cog) | Duration (same)
+            -- Row 4: Spell Name (dropdown + swatch + Size/X/Y cog) | Duration (same)
             local castTextRow
             castTextRow, hh = Ww:DualRow(pp, yy,
                 { type="dropdown", text="Spell Name",
@@ -12818,14 +12854,6 @@ initFrame:SetScript("OnEvent", function(self)
                 CCogBtn(rgn, cogShow)
             end
 
-            -- Row 4: Reverse Fill | (blank)
-            local reverseRow
-            reverseRow, hh = Ww:DualRow(pp, yy,
-                { type="toggle", text="Reverse Fill",
-                  getValue=function() return B.castReverseFill == true end,
-                  setValue=function(v) B.castReverseFill = v; ReloadAndUpdate() end },
-                { type="label", text="" });  yy = yy - hh
-
             -- Gate the whole section on the Show Cast Bar toggle: when off, grey +
             -- block the height slider, the icon row, the background row, the spell
             -- name / duration row, reverse fill, and the inline fill swatch.
@@ -12836,6 +12864,7 @@ initFrame:SetScript("OnEvent", function(self)
             AddCastBlock(castTextRow._leftRegion)
             AddCastBlock(castTextRow._rightRegion)
             AddCastBlock(reverseRow._leftRegion)
+            AddCastBlock(reverseRow._rightRegion)
             return yy
         end
 
