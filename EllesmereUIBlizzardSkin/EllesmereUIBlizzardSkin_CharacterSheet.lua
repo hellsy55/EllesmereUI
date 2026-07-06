@@ -477,6 +477,11 @@ local function PreSkinCharacterSheet()
         refresh:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
         refresh:RegisterEvent("PLAYER_ENTERING_WORLD")
         refresh:SetScript("OnEvent", function(_, event, unit)
+            -- SetUnit("player") forces a full 3D model reload. UPDATE_SHAPESHIFT_FORM
+            -- alone fires constantly in combat (form/stance/aura swaps), so only pay
+            -- the reload while the sheet is actually visible. The OnShow hook below
+            -- re-binds the model on open, so a change made while closed still lands.
+            if not (frame and frame:IsShown()) then return end
             if event == "UNIT_MODEL_CHANGED" and unit and unit ~= "player" then return end
             _refreshPlayerModel()
         end)

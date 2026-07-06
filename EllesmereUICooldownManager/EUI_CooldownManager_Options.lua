@@ -4454,13 +4454,13 @@ initFrame:SetScript("OnEvent", function(self)
                           local bd = SelectedTBB(); if not bd then return end
                           bd.stacksSize = v; RefreshTBB()
                       end },
-                    { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                    { type = "slider", label = "X Offset", min = -250, max = 250, step = 1,
                       get = function() local bd = SelectedTBB(); return bd and bd.stacksX or 0 end,
                       set = function(v)
                           local bd = SelectedTBB(); if not bd then return end
                           bd.stacksX = v; RefreshTBB()
                       end },
-                    { type = "slider", label = "Y Offset", min = -100, max = 100, step = 1,
+                    { type = "slider", label = "Y Offset", min = -250, max = 250, step = 1,
                       get = function() local bd = SelectedTBB(); return bd and bd.stacksY or 0 end,
                       set = function(v)
                           local bd = SelectedTBB(); if not bd then return end

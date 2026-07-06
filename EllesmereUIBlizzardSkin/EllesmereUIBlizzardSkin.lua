@@ -51,6 +51,7 @@ local WINDOW_ENABLE_KEYS = {
     craftorders     = "reskinCraftOrders",
     trainer         = "reskinTrainer",
     gossip          = "reskinGossip",
+    quest           = "reskinQuest",
     inspectrecipe   = "reskinInspectRecipe",
     delves          = "reskinDelves",
 }

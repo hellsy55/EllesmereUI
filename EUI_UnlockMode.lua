@@ -2329,6 +2329,23 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
             -- Standard CENTER positioning for all other elements
             local bCenterX = centerX * acRatio
             local bCenterY = centerY * acRatio
+            -- Snap the center to the physical pixel grid FIRST (dim-aware for
+            -- odd-pixel frames), so the idempotent skip check below compares
+            -- curX/curY (which the previous apply already snapped) against the
+            -- value we will actually SetPoint. Snapping AFTER the check was a bug:
+            -- a bar whose snap offset exceeds the 0.5px tolerance never matched
+            -- (curX = snapped, bCenter = un-snapped), so it re-SetPoint the same
+            -- snapped value, rescheduled, and drove the anchor cascade every frame
+            -- for a bar that is actually sitting still. Config-specific -- only
+            -- odd-dimension frames at certain positions/scales snap far enough to
+            -- trip it (e.g. a custom CDM bar anchored to the player frame).
+            local PPa = EllesmereUI and EllesmereUI.PP
+            if PPa and PPa.SnapCenterForDim then
+                local childW = childBar:GetWidth() or 0
+                local childH = childBar:GetHeight() or 0
+                bCenterX = PPa.SnapCenterForDim(bCenterX, childW, cS)
+                bCenterY = PPa.SnapCenterForDim(bCenterY, childH, cS)
+            end
             -- Idempotent guard: if the bar is already at this exact position
             -- (within sub-physical-pixel tolerance), skip the SetPoint. This
             -- eliminates visible flicker when multiple cascade passes compute
@@ -2345,15 +2362,6 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
                 end
             end
             if not skip then
-                -- Snap center to physical pixel grid (dim-aware for odd-pixel frames).
-                -- Use child's own coordinate-space dimensions, not UIParent-space cW/cH.
-                local PPa = EllesmereUI and EllesmereUI.PP
-                if PPa and PPa.SnapCenterForDim then
-                    local childW = childBar:GetWidth() or 0
-                    local childH = childBar:GetHeight() or 0
-                    bCenterX = PPa.SnapCenterForDim(bCenterX, childW, cS)
-                    bCenterY = PPa.SnapCenterForDim(bCenterY, childH, cS)
-                end
                 pcall(function()
                     childBar:ClearAllPoints()
                     childBar:SetPoint("CENTER", UIParent, "CENTER", bCenterX, bCenterY)

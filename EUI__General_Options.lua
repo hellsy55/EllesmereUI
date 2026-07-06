@@ -262,16 +262,37 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     local shown = math.min(#patches, MAX_PATCHES)
     for pi = 1, shown do
         local patch = patches[pi]
-        -- Version header: large title + a full-width neutral divider (not accent).
-        local ver = MakeFont(parent, 20, nil, 1, 1, 1, 0.95)
-        PP.Point(ver, "TOPLEFT", parent, "TOPLEFT", PAD, y)
-        ver:SetText("EllesmereUI " .. (patch.version or ""))
-        local uline = parent:CreateTexture(nil, "ARTWORK")
-        uline:SetColorTexture(1, 1, 1, 0.12)
-        PP.Size(uline, totalW, 1)
-        PP.Point(uline, "TOPLEFT", parent, "TOPLEFT", PAD, y - 32)
-        if PP.DisablePixelSnap then PP.DisablePixelSnap(uline) end
-        y = y - 48
+        -- A "mini" patch is a bugfix-only release: it carries just a `fixes`
+        -- tier and renders in a lighter, more compact style so a small patch
+        -- does not take up as much room as a full feature release.
+        local isMini = patch.mini
+        -- Version header. Full patches: large 20px title + neutral divider.
+        -- Mini patches: compact 15px title with a green "MINI PATCH" tag and a
+        -- tighter divider.
+        if isMini then
+            local ver = MakeFont(parent, 15, nil, 1, 1, 1, 0.9)
+            PP.Point(ver, "TOPLEFT", parent, "TOPLEFT", PAD, y)
+            ver:SetText("EllesmereUI " .. (patch.version or ""))
+            local tag = MakeFont(parent, 10, nil, EG.r, EG.g, EG.b, 0.85)
+            PP.Point(tag, "LEFT", ver, "RIGHT", 10, -1)
+            tag:SetText("MINI PATCH")
+            local uline = parent:CreateTexture(nil, "ARTWORK")
+            uline:SetColorTexture(1, 1, 1, 0.10)
+            PP.Size(uline, totalW, 1)
+            PP.Point(uline, "TOPLEFT", parent, "TOPLEFT", PAD, y - 24)
+            if PP.DisablePixelSnap then PP.DisablePixelSnap(uline) end
+            y = y - 34
+        else
+            local ver = MakeFont(parent, 20, nil, 1, 1, 1, 0.95)
+            PP.Point(ver, "TOPLEFT", parent, "TOPLEFT", PAD, y)
+            ver:SetText("EllesmereUI " .. (patch.version or ""))
+            local uline = parent:CreateTexture(nil, "ARTWORK")
+            uline:SetColorTexture(1, 1, 1, 0.12)
+            PP.Size(uline, totalW, 1)
+            PP.Point(uline, "TOPLEFT", parent, "TOPLEFT", PAD, y - 32)
+            if PP.DisablePixelSnap then PP.DisablePixelSnap(uline) end
+            y = y - 48
+        end
 
         -- Tier 1: hero cards, two per row. Heroes render in AUTHORED order (the
         -- order they appear in the patch's `heroes` table) -- NOT module-sorted
@@ -304,11 +325,15 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
             y = y - 6
         end
 
-        -- Tier 3: bug-fix lines.
+        -- Tier 3: bug-fix lines. Full patches label them under a "BUG FIXES"
+        -- header; a mini patch is entirely fixes, so the lines render directly
+        -- beneath the compact header with no redundant section label.
         local fixes = SortByModule(patch.fixes or {})
         if #fixes > 0 then
-            local _, sh = W:SectionHeader(parent, "BUG FIXES", y); y = y - sh
-            y = y - 10  -- extra spacing below the divider
+            if not isMini then
+                local _, sh = W:SectionHeader(parent, "BUG FIXES", y); y = y - sh
+                y = y - 10  -- extra spacing below the divider
+            end
             for _, fx in ipairs(fixes) do
                 local fh = MakeFixLine(y, ((fx.module and EllesmereUI.L(fx.module) .. ": ") or "") .. (EllesmereUI.L(fx.text) or "")); y = y - fh
             end
@@ -328,6 +353,24 @@ end
 --  EllesmereUI:NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "8.3.8",
+        mini = true,
+        -- Mini-patch fixes render as plain bullets: no `module` field means no
+        -- "Module: " prefix, and SortByModule keeps this authored order.
+        fixes = {
+            { text = "The NPC quest window is now skinned" },
+            { text = "Fixed the black quest and greeting text in the NPC dialog window" },
+            { text = "Added options to show your character level and raw XP values on the XP bar" },
+            { text = "Health, power, class resource, and cast bars can now be widened up to 800px" },
+            { text = "Fixed the Ironfur bar ignoring advanced-mode colours and showing stale stacks after leaving and re-entering Bear Form" },
+            { text = "Tracked Buff Bar stack count offset sliders now reach up to 250 in either direction" },
+            { text = "The Group Death alert text is now always outlined so it stays readable" },
+            { text = "The character sheet no longer reloads your 3D model during combat while it's closed" },
+            { text = "Fixed certain anchored bars re-positioning every frame instead of sitting still, fixing a performance issue introduced in 8.3.7" },
+            { text = "Performance optimizations for Blizzard skins" },
+        },
+    },
     {
         version = "8.3.7",
         heroes = {
@@ -1208,78 +1251,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "CDM", text = "With Suppress GCD on, a charge spell's recharge swipe no longer disappears while another ability is on cooldown." },
             { module = "Character Sheet", text = "Fixed the oversized X on equipment set delete buttons." },
             { module = "Mythic+ Timer", text = "Fixed a startup error caused by some saved best-time split data." },
-        },
-    },
-    {
-        version = "8.2.8",
-        heroes = {
-            {
-                module = "Profiles",
-                title = "Shadow Lily Preset",
-                desc  = "A new built-in profile preset: the damage dealer cut of Midnight Lily, a focused low-clutter layout that keeps your rotation and cooldowns front and center.",
-                nav   = { module = "_EUIProfiles", page = "Profiles" },
-            },
-            {
-                module = "General",
-                title = "Class Resource Colors",
-                desc  = "Pick a custom color for each class resource such as combo points, runes, soul shards, and holy power, and color the class resource bar by your spec's resource with the new Class Resource Color fill mode.",
-                nav   = { module = "_EUIGlobal", page = "Fonts & Colors", section = "CLASS RESOURCE COLORS", highlight = "" },
-            },
-        },
-        features = {
-            {
-                module = "Resource Bars",
-                title = "Per-Spec Class Resource Bar",
-                desc  = "The class resource bar gains a spec picker to choose which specs show it, matching the power and health bars.",
-                nav   = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "CLASS RESOURCE BAR", highlight = "Show Class Resource" },
-            },
-            {
-                module = "Nameplates",
-                title = "Separate Cast Bar Texture",
-                desc  = "Choose a texture for the nameplate cast bar separately from the health bar.",
-                nav   = { module = "EllesmereUINameplates", page = "Display", section = "STYLE", highlight = "Cast Bar Texture" },
-            },
-            {
-                module = "Nameplates",
-                title = "More Absorb Shield Textures",
-                desc  = "Absorb shields gain several more stripe textures plus a tint color and an opacity setting that applies to every style.",
-                nav   = { module = "EllesmereUINameplates", page = "Display", section = "STYLE", highlight = "Absorb Style" },
-            },
-            {
-                module = "Unit Frames",
-                title = "Custom Uninterruptible Cast Color",
-                desc  = "Choose the color shown over uninterruptible casts on the target and focus cast bars, instead of the fixed grey.",
-                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "CAST BAR", highlight = "Show Cast Bar",
-                    preSelect = function()
-                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end
-                        EllesmereUI._pendingUnitSelect = "target"
-                    end },
-            },
-            {
-                module = "CDM",
-                title = "Hide Recharge Edge",
-                desc  = "Charge cooldowns gain a per-spell Hide Recharge Edge option that removes the bright sweeping edge shown while a charge is recharging.",
-                nav   = { module = "EllesmereUICooldownManager", page = "Tracking Bars" },
-            },
-            {
-                module = "Raid Frames",
-                title = "Resize the Dispel Icon",
-                desc  = "The dispel type icon gains an Icon Size slider in its cog menu so you can make it larger or smaller.",
-                nav   = { module = "EllesmereUIRaidFrames", page = "Frames", section = "DISPELS", highlight = "Dispel Icon Position" },
-            },
-        },
-        fixes = {
-            { module = "Resource Bars", text = "You can now color the gaps between class resource pips and set the color and opacity of the empty slot overlay." },
-            { module = "Nameplates", text = "Health bars can now be up to 50 pixels tall and cast bars up to 40 pixels tall." },
-            { module = "Nameplates", text = "The interrupt flash now clears the instant a target dies, so the cast bar no longer looks squished by the death animation." },
-            { module = "CDM", text = "The spell picker now ends with a Missing Spells? shortcut that opens Blizzard's Cooldown Manager so you can add spells that are not listed." },
-            { module = "CDM", text = "With Hide Active State on, a charge cooldown's recharge swipe and edge now stay visible instead of disappearing while a charge is in hand or when you press another ability." },
-            { module = "CDM", text = "Switching specialization no longer briefly flashes placeholder icons across your tracked buff bars." },
-            { module = "CDM", text = "Grouped tracking bars now stay anchored together when you enter combat instead of a member detaching from the group." },
-            { module = "Unit Frames", text = "Power-colored bars and power text now show the correct color on target, focus, and boss frames instead of white or a default color." },
-            { module = "Action Bars", text = "Abilities with multiple charges now show the recharge countdown number while charging when cooldown numbers are on, and you can toggle cooldown numbers from the Action Bars options." },
-            { module = "Chat", text = "Fixed a taint issue with the chat box that could cause Lua errors, most often when receiving a whisper during combat." },
-            { module = "General", text = "Custom class, power, and resource colors no longer reset to default after switching specs or profiles." },
         },
     },
 }

@@ -1490,6 +1490,16 @@ initFrame:SetScript("OnEvent", function(self)
             end,
         },
         {
+            key   = "quest",
+            title = "Quest",
+            desc  = "The NPC quest window: quest detail, progress, and reward panels plus the multi-quest greeting list.",
+            reloadMsg = "Changing the Quest reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinQuest = v
+            end,
+        },
+        {
             key   = "inspectrecipe",
             title = "Inspect Recipe",
             desc  = "The recipe preview window shown from a linked recipe or an inspected crafter.",
@@ -2151,6 +2161,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinCraftOrders = nil
                 EllesmereUIDB.reskinTrainer = nil
                 EllesmereUIDB.reskinGossip = nil
+                EllesmereUIDB.reskinQuest = nil
                 EllesmereUIDB.reskinInspectRecipe = nil
                 EllesmereUIDB.reskinDelves = nil
                 EllesmereUIDB.lfgRememberRoles = nil

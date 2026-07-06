@@ -3989,9 +3989,28 @@ end
 -- Vengeance: C_Spell.GetSpellCastCount(228477) -- returns a SECRET value
 -- in 12.0+.  The caller must handle it via StatusBar or similar.
 -- Devourer (hero spec 1480): aura 1225789/1227702 -- WHITELISTED, safe to read.
-function EllesmereUI.GetSoulFragments()
+-- Cached player spec ID. GetSoulFragments is polled EVERY FRAME by the soul
+-- fragment resource bar, unit frame, and nameplate readouts, and
+-- GetSpecialization + GetSpecializationInfo allocate fresh strings (spec
+-- name/description) on every call -- ~1.9 kb of garbage per call, the dominant
+-- source of the parent addon's runtime memory churn. Spec only changes on a
+-- spec swap, so cache the id and refresh on the spec-change events instead.
+EllesmereUI._RefreshSpecID = function()
     local spec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization()
-    local specID = spec and C_SpecializationInfo.GetSpecializationInfo(spec)
+    EllesmereUI._specID = (spec and C_SpecializationInfo.GetSpecializationInfo(spec)) or 0
+end
+EllesmereUI._specWatcher = EllesmereUI._specWatcher or CreateFrame("Frame")
+EllesmereUI._specWatcher:RegisterEvent("PLAYER_LOGIN")
+EllesmereUI._specWatcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+EllesmereUI._specWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+EllesmereUI._specWatcher:SetScript("OnEvent", EllesmereUI._RefreshSpecID)
+
+function EllesmereUI.GetSoulFragments()
+    local specID = EllesmereUI._specID
+    if not specID then           -- pre-login / not resolved yet: resolve once
+        EllesmereUI._RefreshSpecID()
+        specID = EllesmereUI._specID
+    end
     if specID == 581 then -- Vengeance
         local cur = C_Spell and C_Spell.GetSpellCastCount and C_Spell.GetSpellCastCount(228477) or 0
         return cur, 6
@@ -9516,7 +9535,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.3.7"
+EllesmereUI.VERSION = "8.3.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

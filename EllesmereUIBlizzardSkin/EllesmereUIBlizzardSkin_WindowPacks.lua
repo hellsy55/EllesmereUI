@@ -6913,9 +6913,7 @@ local function TrimMicroTex(tex, box)
     tex:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -MICRO_INSET, MICRO_INSET)
 end
 
-local function SkinMicroButton(btn)
-    if not btn or btn:IsForbidden() then return end
-    pcall(function()
+local function SkinMicroButtonInner(btn)
         for _, k in ipairs(MICRO_DECO) do
             local r = btn[k]
             if r and r.SetAlpha then r:SetAlpha(0) end
@@ -6944,7 +6942,13 @@ local function SkinMicroButton(btn)
         if btn.GetPushedTexture then TrimMicroTex(btn:GetPushedTexture(), d.box) end
         if btn.GetDisabledTexture then TrimMicroTex(btn:GetDisabledTexture(), d.box) end
         if btn.Portrait then TrimMicroTex(btn.Portrait, d.box) end
-    end)
+end
+
+-- Named wrapper so the hot UpdateMicroButtons path never allocates a fresh
+-- closure per call (13 buttons x every fire = real GC churn otherwise).
+local function SkinMicroButton(btn)
+    if not btn or btn:IsForbidden() then return end
+    pcall(SkinMicroButtonInner, btn)
 end
 
 local _microHook = false
@@ -6953,10 +6957,15 @@ local function Skin_MicroMenu()
     for _, name in ipairs(MICRO_BUTTONS) do SkinMicroButton(_G[name]) end
     if not _microHook and _G.UpdateMicroButtons then
         _microHook = true
-        hooksecurefunc("UpdateMicroButtons", function()
+        -- UpdateMicroButtons is a global Blizzard function fired on many routine
+        -- out-of-combat events, and often several times within a single frame.
+        -- Debounce collapses each burst into ONE repaint per frame instead of
+        -- re-trimming all 13 buttons on every fire.
+        local repaint = WSkin.Debounce(function()
             if InCombatLockdown() then return end
             for _, name in ipairs(MICRO_BUTTONS) do SkinMicroButton(_G[name]) end
         end)
+        hooksecurefunc("UpdateMicroButtons", repaint)
     end
 end
 
@@ -7694,11 +7703,35 @@ WSkin.RegisterWindow({
 --  Gossip (GossipFrame) -- NPC dialog window. Base UI, always loaded.
 -------------------------------------------------------------------------------
 -- One gossip / quest option: white text for readability on the dark bg.
+-- Gossip quest/option titles bake a |cff000000 black (or |cff414141 dark grey)
+-- color code INTO the string, so a plain SetTextColor cannot lighten them --
+-- the embedded run wins. Rewrite just those two tones to readable light ones in
+-- place, leaving every other color (links, quest difficulty) untouched.
+-- Idempotent: once rewritten the source codes are gone, so re-runs are no-ops.
+local GOSSIP_TEXT_RECOLOR = { ["000000"] = "ffffff", ["414141"] = "b0b8bc" }
+local function RecolorGossipText(fs)
+    if not fs or not fs.GetText then return end
+    local txt = fs:GetText()
+    if not txt or txt == "" or not txt:find("|cff", 1, true) then return end
+    local new, n = txt:gsub("|c[fF][fF](%x%x%x%x%x%x)", function(hex)
+        local repl = GOSSIP_TEXT_RECOLOR[hex:lower()]
+        if repl then return "|cff" .. repl end
+    end)
+    if n > 0 and new ~= txt then fs:SetText(new) end
+end
+
 local function SkinGossipOption(btn)
     if not btn or btn:IsForbidden() then return end
-    if btn.GreetingText then WSkin.Font(btn.GreetingText); WSkin.White(btn.GreetingText) end
+    if btn.GreetingText then WSkin.Font(btn.GreetingText); WSkin.White(btn.GreetingText); RecolorGossipText(btn.GreetingText) end
     local fs = btn.GetFontString and btn:GetFontString()
-    if fs then WSkin.Font(fs); WSkin.White(fs) end
+    if fs then WSkin.Font(fs); WSkin.White(fs); RecolorGossipText(fs) end
+    -- The NPC greeting body text is a FontString nested inside the element (not
+    -- the named GreetingText field or the button label), so it slips past both
+    -- checks above and renders black on the dark panel. Whiten every FontString
+    -- in the row subtree and rewrite embedded link colors, same as the other
+    -- dark panels. The debounced ScrollBox.Update hook re-runs this per refresh,
+    -- which re-asserts white after Blizzard recolors on each update.
+    WhitenTextIn(btn)
 end
 
 local _gossipHooked = false
@@ -7777,6 +7810,208 @@ end
 WSkin.RegisterWindow({
     key = "gossip",
     apply = Skin_Gossip,
+})
+
+-------------------------------------------------------------------------------
+--  Quest (QuestFrame) -- the NPC quest dialog: detail / progress / reward /
+--  greeting panels. Base UI, always loaded. Skinned to match the gossip
+--  window: dark shell, faded parchment, yellow headers + white body text,
+--  flat action buttons. Helpers are nested to keep the file's chunk-local
+--  count clear of the Lua 5.1 cap.
+-------------------------------------------------------------------------------
+local _questHooked = false
+local function Skin_Quest()
+    local f = _G.QuestFrame
+    if not f then return end
+    WSkin.Shell("quest", f)
+    WSkin.RemovePortrait(f)
+    WSkin.CommonChrome(f, "QuestFrame")   -- close button + centered title
+    if f.NineSlice then WSkin.FadeNineSlice(f.NineSlice) end
+    if f.Inset then WSkin.Inset(f.Inset) end
+
+    -- Title bar / NPC name.
+    local title = (f.TitleContainer and f.TitleContainer.TitleText) or _G.QuestFrameTitleText
+    if title then WSkin.Font(title); WSkin.White(title) end
+    if _G.QuestFrameNpcNameText then
+        WSkin.Font(_G.QuestFrameNpcNameText); WSkin.White(_G.QuestFrameNpcNameText)
+    end
+
+    -- Panels + scroll frames: fade every parchment texture (FadeRegions only
+    -- alphas Textures, never FontStrings, so body text is untouched), register
+    -- for restrip so Blizzard repaints get re-faded, slim the scrollbars.
+    for _, pn in ipairs({ "QuestFrameDetailPanel", "QuestFrameProgressPanel",
+                          "QuestFrameRewardPanel", "QuestFrameGreetingPanel" }) do
+        local p = _G[pn]
+        if p then
+            WSkin.FadeRegions(p)
+            WSkin.Register(p, true)
+            if p.NineSlice then WSkin.FadeNineSlice(p.NineSlice) end
+        end
+    end
+    for _, sn in ipairs({ "QuestDetailScrollFrame", "QuestProgressScrollFrame",
+                          "QuestRewardScrollFrame", "QuestGreetingScrollFrame",
+                          "QuestDetailScrollChildFrame", "QuestRewardScrollChildFrame" }) do
+        local s = _G[sn]
+        if s then
+            WSkin.FadeRegions(s)
+            WSkin.Register(s, true)
+            if s.ScrollBar then WSkin.ScrollBar(s.ScrollBar) end
+        end
+    end
+    -- Lift the whole quest scroll viewport up 40px and grow it 30px taller.
+    -- CalReseat preserves every anchor point (no width collapse) and is
+    -- idempotent; the height bump is FFD-guarded separately because SetHeight
+    -- is cumulative and the skin re-runs on every show.
+    for _, sn in ipairs({ "QuestDetailScrollFrame", "QuestProgressScrollFrame",
+                          "QuestRewardScrollFrame", "QuestGreetingScrollFrame" }) do
+        local s = _G[sn]
+        if s then
+            CalReseat(s, 40)
+            local d = GetFFD(s)
+            if not d.heightBumped and s.GetHeight and s.SetHeight then
+                local h = s:GetHeight()
+                if h and h > 0 then
+                    d.heightBumped = true
+                    s:SetHeight(h + 30)
+                end
+            end
+        end
+    end
+
+    -- Action buttons: flat block + white label (color-only, keeps Blizz font).
+    for _, bn in ipairs({ "QuestFrameAcceptButton", "QuestFrameDeclineButton",
+                          "QuestFrameCompleteButton", "QuestFrameGoodbyeButton",
+                          "QuestFrameCompleteQuestButton", "QuestFrameCancelButton",
+                          "QuestFrameGreetingGoodbyeButton" }) do
+        local b = _G[bn]
+        if b then WSkin.Button(b); WSkin.WhiteButtonLabel(b) end
+    end
+
+    -- Shared QuestInfo body/header coloring (detail + reward panels). The
+    -- QuestInfo* frames are global and reparent between the NPC window and the
+    -- map, so only recolor when displayed into THIS window (the world-map pack
+    -- owns the map case); the colors match either way (both are dark).
+    local function StyleQuestNPCText()
+        for _, n in ipairs({ "QuestInfoTitleHeader", "QuestInfoDescriptionHeader",
+                             "QuestInfoObjectivesHeader" }) do
+            local fs = _G[n]
+            if fs and fs.SetTextColor then fs:SetTextColor(1, 0.82, 0) end
+        end
+        local rw = _G.QuestInfoRewardsFrame
+        if rw and rw.Header and rw.Header.SetTextColor then rw.Header:SetTextColor(1, 0.82, 0) end
+        for _, n in ipairs({ "QuestInfoDescriptionText", "QuestInfoObjectivesText",
+                             "QuestInfoGroupSize", "QuestInfoRewardText", "QuestInfoQuestType" }) do
+            local fs = _G[n]
+            if fs and fs.SetTextColor then fs:SetTextColor(1, 1, 1) end
+        end
+        if rw then
+            for _, k in ipairs({ "ItemChooseText", "ItemReceiveText",
+                                 "PlayerTitleText", "SpellLearnText" }) do
+                local fs = rw[k]
+                if fs and fs.SetTextColor then fs:SetTextColor(1, 1, 1) end
+            end
+            if rw.XPFrame and rw.XPFrame.ReceiveText and rw.XPFrame.ReceiveText.SetTextColor then
+                rw.XPFrame.ReceiveText:SetTextColor(1, 1, 1)
+            end
+            -- Reward item tiles: drop the parchment name plate, white the name.
+            if rw.RewardButtons then
+                for _, btn in ipairs(rw.RewardButtons) do
+                    if btn.NameFrame and btn.NameFrame.SetAlpha then btn.NameFrame:SetAlpha(0) end
+                    if btn.Name and btn.Name.SetTextColor then btn.Name:SetTextColor(1, 1, 1) end
+                end
+            end
+        end
+        local of = _G.QuestInfoObjectivesFrame
+        if of and of.Objectives then
+            for _, obj in ipairs(of.Objectives) do
+                if obj and obj.SetTextColor then obj:SetTextColor(1, 1, 1) end
+            end
+        end
+    end
+
+    -- One greeting-panel quest title button: keep the icon, white the text.
+    -- Available quests bake a |cff000000 black color code into the string that
+    -- a plain SetTextColor cannot override, so rewrite it to white in place.
+    local function SkinQuestGreetingButton(btn)
+        if not btn or btn:IsForbidden() then return end
+        if btn.Icon and btn.Icon.SetDrawLayer then btn.Icon:SetDrawLayer("ARTWORK") end
+        local fs = btn.GetFontString and btn:GetFontString()
+        if fs then
+            WSkin.Font(fs); WSkin.White(fs)
+            local txt = fs.GetText and fs:GetText()
+            if txt and txt:find("|cff000000", 1, true) then
+                fs:SetText((txt:gsub("|cff000000", "|cffffffff")))
+            end
+        end
+    end
+    local function SkinQuestGreetingButtons()
+        local gp = _G.QuestFrameGreetingPanel
+        if not gp or not gp.titleButtonPool then return end
+        for btn in gp.titleButtonPool:EnumerateActive() do
+            SkinQuestGreetingButton(btn)
+        end
+    end
+
+    -- Greeting panel body: white greeting paragraph + section labels, faded
+    -- divider, readable quest title buttons.
+    if _G.QuestGreetingText then WSkin.Font(_G.QuestGreetingText); WSkin.White(_G.QuestGreetingText) end
+    for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
+        local fs = _G[n]
+        if fs then WSkin.Font(fs); WSkin.White(fs) end
+    end
+    if _G.QuestGreetingFrameHorizontalBreak and _G.QuestGreetingFrameHorizontalBreak.SetAlpha then
+        _G.QuestGreetingFrameHorizontalBreak:SetAlpha(0)
+    end
+    SkinQuestGreetingButtons()
+
+    -- Progress panel static text.
+    if _G.QuestProgressTitleText then
+        WSkin.Font(_G.QuestProgressTitleText); _G.QuestProgressTitleText:SetTextColor(1, 0.82, 0)
+    end
+    if _G.QuestProgressText then WSkin.Font(_G.QuestProgressText); WSkin.White(_G.QuestProgressText) end
+
+    if not _questHooked then
+        _questHooked = true
+        WSkin.HookShow(f, WSkin.Debounce(function()
+            if f:IsVisible() then Skin_Quest() end
+        end))
+        -- Greeting rows repopulate on QUEST_GREETING / QUEST_LOG_UPDATE.
+        local gp = _G.QuestFrameGreetingPanel
+        if gp then gp:HookScript("OnShow", WSkin.Debounce(SkinQuestGreetingButtons)) end
+        if type(_G.QuestFrameGreetingPanel_OnShow) == "function" then
+            hooksecurefunc("QuestFrameGreetingPanel_OnShow", SkinQuestGreetingButtons)
+        end
+        -- Body text: Blizzard re-colors it on each display, so re-assert in the
+        -- hook (and once more next frame -- objectives are colored after this).
+        if type(_G.QuestInfo_Display) == "function" then
+            hooksecurefunc("QuestInfo_Display", function(_, parentFrame)
+                if not parentFrame then return end
+                local p, isQuest = parentFrame, false
+                for _i = 1, 8 do
+                    if p == f then isQuest = true break end
+                    p = p.GetParent and p:GetParent()
+                    if not p then break end
+                end
+                if not isQuest then return end
+                StyleQuestNPCText()
+                if C_Timer then C_Timer.After(0, StyleQuestNPCText) end
+            end)
+        end
+        if type(_G.QuestFrameProgressItems_Update) == "function" then
+            hooksecurefunc("QuestFrameProgressItems_Update", function()
+                local ri = _G.QuestProgressRequiredItemsText
+                if ri and ri.SetTextColor then ri:SetTextColor(1, 0.82, 0) end
+                local rm = _G.QuestProgressRequiredMoneyText
+                if rm and rm.SetTextColor then rm:SetTextColor(1, 1, 1) end
+            end)
+        end
+    end
+    StyleQuestNPCText()
+end
+
+WSkin.RegisterWindow({
+    key = "quest",
+    apply = Skin_Quest,
 })
 
 -------------------------------------------------------------------------------

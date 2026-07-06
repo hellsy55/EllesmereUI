@@ -3286,11 +3286,23 @@ local function BuildBars()
         local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
         local active = sp ~= nil and (sp.shiftElementsIfNoResource == "Up"
             or sp.shiftElementsIfNoResource == "Down")
-        if (active or ERB._shiftWasActive)
-           and not EllesmereUI._unlockActive
-           and EllesmereUI.PropagateAnchorChain then
-            ERB._shiftWasActive = active
-            EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+        -- Only re-cascade on an actual shift-state CHANGE (resource present<->
+        -- absent, or the feature toggled off). Firing it on EVERY BuildBars while
+        -- the setting is merely enabled drove a full anchor cascade on every
+        -- rebuild -- on a profile with a busy anchor chain that re-walks the whole
+        -- chain and is a large CPU drain. The present<->absent transition is the
+        -- only moment the frame size stays the same, so it is the only moment the
+        -- normal SetPoint/OnSizeChanged hooks miss and this explicit cascade is
+        -- actually needed. dir: 0 = present (no shift), +/-1 = absent (shifted).
+        if not EllesmereUI._unlockActive and EllesmereUI.PropagateAnchorChain then
+            local dir = 0
+            if active and EllesmereUI._GetAnchorTargetShiftDir then
+                dir = EllesmereUI._GetAnchorTargetShiftDir("ERB_ClassResource") or 0
+            end
+            if dir ~= (ERB._lastShiftDir or 0) then
+                ERB._lastShiftDir = dir
+                EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+            end
         end
     end
 
@@ -3303,11 +3315,18 @@ local function BuildBars()
         local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
         local active = pp ~= nil and (pp.shiftElementsIfNoPower == "Up"
             or pp.shiftElementsIfNoPower == "Down")
-        if (active or ERB._shiftWasActivePower)
-           and not EllesmereUI._unlockActive
-           and EllesmereUI.PropagateAnchorChain then
-            ERB._shiftWasActivePower = active
-            EllesmereUI.PropagateAnchorChain("ERB_Power")
+        -- Same transition-only guard as the class-resource block above: only
+        -- cascade when the power present<->absent shift state actually changes,
+        -- not on every BuildBars call while the setting is enabled.
+        if not EllesmereUI._unlockActive and EllesmereUI.PropagateAnchorChain then
+            local dir = 0
+            if active and EllesmereUI._GetAnchorTargetShiftDir then
+                dir = EllesmereUI._GetAnchorTargetShiftDir("ERB_Power") or 0
+            end
+            if dir ~= (ERB._lastShiftDirPower or 0) then
+                ERB._lastShiftDirPower = dir
+                EllesmereUI.PropagateAnchorChain("ERB_Power")
+            end
         end
     end
 end
