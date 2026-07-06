@@ -6660,7 +6660,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if v == nil then v = defaults.classPowerClassColors end
                       return v and 0.3 or 1
                   end },
-                { tooltip = "Dynamic Colored",
+                { tooltip = "Class Color",
                   disabled = classPowerDisabled,
                   disabledTooltip = "Show Class Resource",
                   getValue = function()
@@ -6812,9 +6812,14 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(swatch, "RIGHT", rgn._control, "LEFT", -12, 0)
             rgn._lastInline = swatch
             EllesmereUI.RegisterWidgetRefresh(function()
+                local off = borderOff()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
                 updateSwatch()
-                swatch:SetAlpha(borderOff() and 0.3 or 1)
             end)
+            local off = borderOff()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
 
             local _, showCog = EllesmereUI.BuildCogPopup({
                 title = "Border Settings",
@@ -6829,12 +6834,12 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -9, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
+            cogBtn:SetAlpha(borderOff() and 0.15 or 0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
             cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
             cogBtn:SetScript("OnEnter", function(self) if not borderOff() then self:SetAlpha(0.7) end end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(borderOff() and 0.15 or 0.4) end)
             cogBtn:SetScript("OnClick", function(self) if not borderOff() then showCog(self) end end)
             EllesmereUI.RegisterWidgetRefresh(function()
                 cogBtn:SetAlpha(borderOff() and 0.15 or 0.4)
@@ -7129,6 +7134,8 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
                 EllesmereUI:RefreshPage()
             end)
+            ccSwatch:SetScript("OnEnter", function() if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(ccSwatch, "Class Color") end end)
+            ccSwatch:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
 
             -- Custom color swatch (to the left of class swatch)
             local stColorGet = function() return DBColor("castTargetColor") end
@@ -7139,6 +7146,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local stSwatch, stUpdate = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, stColorGet, stColorSet, nil, 20)
             PP.Point(stSwatch, "RIGHT", ccSwatch, "LEFT", -9, 0)
+            stSwatch._eabOrigClick = stSwatch:GetScript("OnClick")
             stSwatch:SetScript("OnClick", function(self)
                 local db = DB()
                 local cc = db and db.castTargetClassColor
@@ -7152,6 +7160,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if self._eabOrigClick then self._eabOrigClick(self) end
             end)
+            stSwatch:SetScript("OnEnter", function() if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(stSwatch, "Custom Color") end end)
+            stSwatch:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
 
             EllesmereUI.RegisterWidgetRefresh(function()
                 local db = DB()
