@@ -3606,7 +3606,7 @@ end
 -- to the longest-remaining fraction.
 local function UpdateIronfurBar()
     if not (secondaryBar and secondaryBar:IsShown()) then return end
-    local sp = ERB.db.profile.secondary
+    local sp = _G._ERB_ResolveSecondaryCfg() or ERB.db.profile.secondary
     local now = GetTime()
 
     -- Prune expired casts
@@ -7082,6 +7082,12 @@ local function OnEvent(self, event, ...)
     elseif event == "UPDATE_SHAPESHIFT_FORM" then
         cachedPrimary = GetPrimaryPowerType()
         cachedSecondary = GetSecondaryResource()
+        -- Leaving Bear form drops all Ironfur in-game, so clear tracker
+        -- Otherwise shifting out and rapidly back in shows the stale stacks.
+        if not (cachedSecondary and cachedSecondary.power == "IRONFUR_BAR") then
+            wipe(ironfurTicks)
+            ironfurGoEUntil = 0
+        end
         BuildBars()
         UpdatePrimaryBar()
         UpdateSecondaryResource()
