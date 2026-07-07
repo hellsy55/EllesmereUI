@@ -2561,8 +2561,8 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
 
-        -- Ready Check / Summon icon position + size (the two indicators share a
-        -- single texture, so one set of controls drives both).
+        -- Ready Check / Summon / Rez icon position + size (the three indicators
+        -- share a single texture, so one set of controls drives all of them).
         local readyCheckPositionValues = {
             topleft     = "Top Left",
             top         = "Top",
@@ -2577,7 +2577,7 @@ initFrame:SetScript("OnEvent", function(self)
         local readyCheckPositionOrder = { "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
         local rcRow
         rcRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Ready Check & Summon", values=readyCheckPositionValues, order=readyCheckPositionOrder,
+            { type="dropdown", text="Ready Check / Summon / Rez", values=readyCheckPositionValues, order=readyCheckPositionOrder,
               getValue=function() return SVal("readyCheckPosition", "center") end,
               setValue=function(v) SSet("readyCheckPosition", v) end },
             { type="slider", text="Icon Size", min=8, max=40, step=1,
@@ -2587,7 +2587,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = rcRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Ready Check / Summon",
+                title = "Ready Check / Summon / Rez",
                 rows = {
                     { type="toggle", label="Show Ready Check",
                       get=function() return SVal("showReadyCheck", true) end,
@@ -2595,6 +2595,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Show Incoming Summon",
                       get=function() return SVal("showSummonPending", true) end,
                       set=function(v) SSet("showSummonPending", v) end },
+                    { type="toggle", label="Show Incoming Resurrection",
+                      get=function() return SVal("showIncomingRez", true) end,
+                      set=function(v) SSet("showIncomingRez", v) end },
                     { type="slider", label="Offset X", min=-50, max=50, step=1,
                       get=function() return SVal("readyCheckOffsetX", 0) end,
                       set=function(v) SSet("readyCheckOffsetX", v) end },
