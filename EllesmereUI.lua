@@ -4027,8 +4027,37 @@ do
     local BROAD    = 1261049  -- Broad Strokes: Colossus Smash activates Sweep
     local FERVOR   = 202316   -- Fervor of Battle: Cleave/WW on 3+ targets Slams
 
+    -- Cached IsSpellKnown flags. GetSweepingStrikes is polled every 0.1 s by
+    -- the resource bar, unit frame and nameplate readouts, and
+    -- HandleSweepingStrikes runs on every player cast for every class;
+    -- C_SpellBook.IsSpellKnown is a C call and talents cannot change in
+    -- combat, so resolve once per login/spec/talent event instead (same
+    -- rationale as the cached spec ID above GetSoulFragments). Non-warriors
+    -- never register the watcher: the flags stay false and both entry
+    -- points early-out on a plain upvalue read.
+    local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
+    do
+        local _, cls = UnitClass("player")
+        if cls == "WARRIOR" then
+            local function RefreshKnown()
+                local sb = C_SpellBook
+                sweepKnown    = (sb and sb.IsSpellKnown(SWEEP)) or false
+                improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
+                broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
+                fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
+            end
+            local watcher = CreateFrame("Frame")
+            watcher:RegisterEvent("PLAYER_LOGIN")
+            watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+            watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+            watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+            watcher:RegisterEvent("PLAYER_TALENT_UPDATE")
+            watcher:SetScript("OnEvent", RefreshKnown)
+        end
+    end
+
     local function MaxStacks()
-        return C_SpellBook.IsSpellKnown(IMPROVED) and IMPROVED_MAX or BASE_MAX
+        return improvedKnown and IMPROVED_MAX or BASE_MAX
     end
 
     -- Broad Strokes generators (only count with the talent known)
@@ -4073,13 +4102,15 @@ do
     -- the Whirlwind tracker above). `need` = how many enemies must be in
     -- reach (2 for a sweep partner, 3 for a Fervor of Battle trigger).
     -- NOTE: relies on enemy nameplates showing for off-target enemies.
-    local function EnemiesInReach(need)
-        local function InReach(u)
-            if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
-                return false
-            end
-            return CheckInteractDistance(u, 2) or false
+    -- InReach is block-scoped (no upvalues from the call) so EnemiesInReach
+    -- allocates nothing -- it runs on every tracked spender cast in combat.
+    local function InReach(u)
+        if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
+            return false
         end
+        return CheckInteractDistance(u, 2) or false
+    end
+    local function EnemiesInReach(need)
         local count, targetPlated = 0, false
         for i = 1, 40 do
             local u = "nameplate" .. i
@@ -4109,7 +4140,7 @@ do
             return
         end
         if event ~= "UNIT_SPELLCAST_SUCCEEDED" or unit ~= "player" then return end
-        if not (C_SpellBook and C_SpellBook.IsSpellKnown(SWEEP)) then return end
+        if not sweepKnown then return end
 
         if castGUID and seenGUID[castGUID] then return end
         if castGUID then
@@ -4120,11 +4151,10 @@ do
         end
 
         if spellID == SWEEP
-           or (CS_GENERATORS[spellID] and C_SpellBook.IsSpellKnown(BROAD)) then
+           or (CS_GENERATORS[spellID] and broadKnown) then
             stacks = MaxStacks()
             expiresAt = GetTime() + DURATION
-        elseif FOB_TRIGGERS[spellID] and stacks > 0
-               and C_SpellBook.IsSpellKnown(FERVOR) then
+        elseif FOB_TRIGGERS[spellID] and stacks > 0 and fervorKnown then
             -- Fervor of Battle: Cleave/Whirlwind hitting 3+ targets also
             -- Slams the primary target; that Slam sweeps and consumes a
             -- charge. The trigger itself is not a player cast event, so it
@@ -4147,9 +4177,7 @@ do
     end
 
     function EllesmereUI.GetSweepingStrikes()
-        if not (C_SpellBook and C_SpellBook.IsSpellKnown(SWEEP)) then
-            return 0, 0
-        end
+        if not sweepKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
         end
