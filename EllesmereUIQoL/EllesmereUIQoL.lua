@@ -922,11 +922,7 @@ qolFrame:SetScript("OnEvent", function(self)
             return false
         end
 
-        -- Resetting instances fires one "X has been reset" system message per
-        -- dungeon, so a single /reset with multiple saved instances would
-        -- announce several times. We debounce with pending flags so only one
-        -- message of each type is sent per reset batch.
-        local resetAnnouncePending = false
+        local resetAnnouncePending = false -- one announce per /reset batch (multi-dungeon reset = multiple system msgs)
         local resetFailPending = false
 
         local resetAnnounceFrame = CreateFrame("Frame")
