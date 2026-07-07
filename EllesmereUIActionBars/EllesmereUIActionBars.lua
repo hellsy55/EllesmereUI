@@ -9088,15 +9088,53 @@ function EAB:FinishSetup()
         end
     end
     self:RegisterEvent("PLAYER_TARGET_CHANGED", function()
-        ImmediateSoftTargetCheck()
-        self:UpdateHousingVisibility()
+        -- Defer: UnitExists("target") is not always updated at the exact
+        -- moment PLAYER_TARGET_CHANGED fires, so an immediate check can
+        -- wrongly see no hard target and keep the bar hidden. Run next frame.
+        C_Timer.After(0, function()
+            ImmediateSoftTargetCheck()
+            self:UpdateHousingVisibility()
+        end)
     end)
     self:RegisterEvent("PLAYER_SOFT_INTERACT_CHANGED", function()
         ImmediateSoftTargetCheck()
+        self:UpdateHousingVisibility()
+    end)
+    local function RegisterIfValid(event, fn)
+        if C_EventUtils and C_EventUtils.IsEventValid and C_EventUtils.IsEventValid(event) then
+            self:RegisterEvent(event, fn)
+        end
+    end
+    RegisterIfValid("PLAYER_SOFT_ENEMY_CHANGED", function()
+        ImmediateSoftTargetCheck()
+        self:UpdateHousingVisibility()
+    end)
+    RegisterIfValid("PLAYER_SOFT_FRIEND_CHANGED", function()
+        ImmediateSoftTargetCheck()
+        self:UpdateHousingVisibility()
     end)
     self:RegisterEvent("GROUP_ROSTER_UPDATE", function()
         self:UpdateHousingVisibility()
     end)
+    -- Polling fallback: some soft-target transitions (notably Action Targeting
+    -- walking into range) do not reliably fire the dedicated soft-target events
+    -- on every client/patch. Check the soft-target unit tokens every 0.1s and
+    -- sync visibility only when the state actually changes. This is cheap because
+    -- the heavy work is skipped when state is unchanged.
+    local lastSoftState
+    local function PollSoftTargetState()
+        if InCombatLockdown() then return end
+        local state = (UnitExists("softinteract") and "I" or "")
+            .. (UnitExists("softenemy") and "E" or "")
+            .. (UnitExists("softfriend") and "F" or "")
+            .. (UnitExists("target") and "T" or "")
+        if state ~= lastSoftState then
+            lastSoftState = state
+            ImmediateSoftTargetCheck()
+            self:UpdateHousingVisibility()
+        end
+    end
+    C_Timer.NewTicker(0.1, PollSoftTargetState)
     -- Combat exit: synchronously restore all visHideNoTarget bar state drivers.
     -- During combat, ImmediateSoftTargetCheck and UpdateHousingVisibility are
     -- blocked by InCombatLockdown. If a bar's driver was overridden to "hide"
