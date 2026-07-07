@@ -5847,7 +5847,21 @@ function EAB:ApplyCombatVisibility()
     self:ApplyExtraBarVisibility()
 end
 
+-- True when at least one bar uses "Hide when No Target". The soft-target poll is
+-- gated on this so it costs nothing for users who don't use the feature. Cheap
+-- (early-exits on the first match); recomputed on every visibility refresh below
+-- and once at setup, so it can never desync from the bar settings.
+function EAB:_RefreshSoftTargetGate()
+    local any = false
+    for _, info in ipairs(ALL_BARS) do
+        local s = self.db.profile.bars[info.key]
+        if s and s.visHideNoTarget then any = true; break end
+    end
+    self._anyHideNoTarget = any
+end
+
 function EAB:RefreshRuntimeVisibility()
+    self:_RefreshSoftTargetGate()
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
@@ -9119,17 +9133,23 @@ function EAB:FinishSetup()
     -- Polling fallback: some soft-target transitions (notably Action Targeting
     -- walking into range) do not reliably fire the dedicated soft-target events
     -- on every client/patch. Check the soft-target unit tokens every 0.1s and
-    -- sync visibility only when the state actually changes. This is cheap because
-    -- the heavy work is skipped when state is unchanged.
-    local lastSoftState
+    -- sync visibility only when the state actually changes.
+    --
+    -- Gated on _anyHideNoTarget: for users with no "Hide when No Target" bar this
+    -- is a single flag check that then returns, so the machinery costs nothing.
+    -- The state token is four cached booleans (no per-tick string allocation) and
+    -- the refresh only runs when a soft-target token actually flips.
+    self:_RefreshSoftTargetGate()
+    local lastI, lastE, lastF, lastT
     local function PollSoftTargetState()
         if InCombatLockdown() then return end
-        local state = (UnitExists("softinteract") and "I" or "")
-            .. (UnitExists("softenemy") and "E" or "")
-            .. (UnitExists("softfriend") and "F" or "")
-            .. (UnitExists("target") and "T" or "")
-        if state ~= lastSoftState then
-            lastSoftState = state
+        if not self._anyHideNoTarget then return end
+        local i  = UnitExists("softinteract") and true or false
+        local e  = UnitExists("softenemy") and true or false
+        local fr = UnitExists("softfriend") and true or false
+        local t  = UnitExists("target") and true or false
+        if i ~= lastI or e ~= lastE or fr ~= lastF or t ~= lastT then
+            lastI, lastE, lastF, lastT = i, e, fr, t
             ImmediateSoftTargetCheck()
             self:UpdateHousingVisibility()
         end

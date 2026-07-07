@@ -10,6 +10,15 @@ local ERF = EllesmereUI.Lite.NewAddon(ADDON_NAME)
 ns.ERF = ERF
 _G.EllesmereUIRaidFrames = ERF
 
+-- Cache the parent-addon table on ns so hot, event-driven paths (UNIT_AURA,
+-- PLAYER_REGEN_DISABLED) can read it as an upvalue field instead of a true
+-- global. Reading the global EllesmereUI from an event frame that is still in a
+-- secure execution context is what raised the benign "tainted while reading
+-- global EllesmereUI" self-taint in the taint log; an upvalue/table-field read
+-- does not trigger that. Stored on ns (not a new file-scope local) so the
+-- main-chunk 200-local cap is untouched.
+ns.EllesmereUI = EllesmereUI
+
 -- The addon name external nickname providers (TimelineReminders, NSRT) key us by.
 -- Full suite = the brand "EllesmereUI" (the parent addon they registered support
 -- for). Standalone build = our own renamed folder name (ADDON_NAME, e.g.
@@ -1331,6 +1340,7 @@ end
 -- the inline fallbacks only allocate if the DB key is missing. On ns (not a
 -- local) to stay under the main-chunk 200-local cap.
 function ns._ApplyHealthBg(d, health, s, unit)
+    local EllesmereUI = ns.EllesmereUI  -- upvalue read, not a global read (see taint note at top)
     local bg = d.bg
     if UnitIsDeadOrGhost(unit) then
         if bg then
@@ -1365,6 +1375,7 @@ function ns._ApplyHealthBg(d, health, s, unit)
 end
 
 local function GetHealthColor(unit, s)
+    local EllesmereUI = ns.EllesmereUI  -- upvalue read, not a global read (see taint note at top)
     s = s or db.profile
     local mode = s.healthColorMode or "class"
 
@@ -1525,6 +1536,7 @@ function ns.GetBgColor(unit, s)
 end
 
 local function GetNameColor(unit, s)
+    local EllesmereUI = ns.EllesmereUI  -- upvalue read, not a global read (see taint note at top)
     s = s or db.profile
     local mode = s.nameColorMode or "class"
     if mode == "accent" then
@@ -3939,6 +3951,7 @@ end
 --  Update all visual elements for a single button
 -------------------------------------------------------------------------------
 local function UpdateButton(button)
+    local EllesmereUI = ns.EllesmereUI  -- upvalue read, not a global read (see taint note at top)
     local unit = button:GetAttribute("unit")
     if not unit or not UnitExists(unit) then
         button:SetAlpha(0)
@@ -4592,6 +4605,7 @@ end
 
 -- Render the cached debuff list to icon frames
 local function RenderDebuffs(d, s, unit)
+    local EllesmereUI = ns.EllesmereUI  -- upvalue read, not a global read (see taint note at top)
     local debuffCache = d.debuffCache
     local cap = s.debuffCap or 3
     local shown = 0
@@ -8068,6 +8082,46 @@ end
 ns.ReloadFrames = ReloadFrames
 ns.PixelSnap = PixelSnap
 ns._allButtons = allButtons
+
+-- Global Dark Mode master: Raid Frames store Dark Mode as a fill-colour MODE
+-- (healthColorMode == "dark"), not a boolean, so enabling remembers the prior
+-- mode and disabling restores it -- the master must not silently clobber a
+-- user's Classic/Custom fill choice. A party colour override (party_healthColorMode,
+-- only present when the party colour section is decoupled) is flipped the same
+-- way when it exists. db is set at PLAYER_LOGIN; the closures read it lazily.
+if EllesmereUI.RegisterDarkModeToggle then
+    EllesmereUI.RegisterDarkModeToggle({
+        id = "raidFrames",
+        isOn = function()
+            return (db and db.profile and db.profile.healthColorMode == "dark") or false
+        end,
+        setOn = function(on)
+            if not (db and db.profile) then return end
+            local p = db.profile
+            if on then
+                if p.healthColorMode ~= "dark" then
+                    p._darkPrevHealthColorMode = p.healthColorMode or "class"
+                    p.healthColorMode = "dark"
+                end
+                if rawget(p, "party_healthColorMode") ~= nil and p.party_healthColorMode ~= "dark" then
+                    p._darkPrevPartyHealthColorMode = p.party_healthColorMode
+                    p.party_healthColorMode = "dark"
+                end
+            else
+                if p.healthColorMode == "dark" then
+                    p.healthColorMode = p._darkPrevHealthColorMode or "class"
+                end
+                p._darkPrevHealthColorMode = nil
+                if rawget(p, "party_healthColorMode") == "dark" then
+                    p.party_healthColorMode = p._darkPrevPartyHealthColorMode or "class"
+                end
+                p._darkPrevPartyHealthColorMode = nil
+            end
+            if ns.ReloadFrames then ns.ReloadFrames() end
+            if ns.ReloadPartyFrames then ns.ReloadPartyFrames() end
+        end,
+    })
+end
 
 -- Lightweight resize: only changes button/health/power dimensions + layout.
 -- No texture, border, font, or anchor changes. Safe for slider hot path.

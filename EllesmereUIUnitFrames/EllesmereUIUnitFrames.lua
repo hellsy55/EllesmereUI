@@ -837,9 +837,11 @@ local defaults = {
             buffShowCooldownText = false,
             buffCooldownTextSize = 10,
             buffCooldownTextColor = {r=1, g=1, b=1},
+            buffStackTextColor = {r=1, g=1, b=1},
             debuffShowCooldownText = false,
             debuffCooldownTextSize = 10,
             debuffCooldownTextColor = {r=1, g=1, b=1},
+            debuffStackTextColor = {r=1, g=1, b=1},
             simpleDebuffShowCooldownText = false,
             simpleDebuffCooldownTextSize = 14,
             simpleDebuffs = "left",  -- "none"/"left"/"right": simple display forces that-side anchor + frame-height-matched debuff size (legacy boolean true=left / false=none honored at read time)
@@ -945,23 +947,16 @@ end
 
 local SOLID_BACKDROP = { bgFile = "Interface\\Buttons\\WHITE8X8" }
 
--- Locale system font override: for CJK/Cyrillic clients, bypass all custom
--- fonts and use the WoW built-in font that supports the locale's glyphs.
-local LOCALE_FONT_OVERRIDE = EllesmereUI and EllesmereUI.LOCALE_FONT_FALLBACK
-
-local cachedFontPath = LOCALE_FONT_OVERRIDE or (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames"))
+-- Font resolution routes through the shared EllesmereUI.GetFontPath("unitFrames"),
+-- which already handles glyph-restricted locales (CJK/Cyrillic): it keeps a
+-- user-installed SharedMedia font that can render the locale's glyphs and only
+-- falls back to the system glyph font otherwise. Unit frames must NOT re-decide
+-- the locale fallback locally, or a locale client could never use a custom font
+-- here even when every other module honors it.
+local cachedFontPath = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames"))
     or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
 local cachedFontPaths = {}  -- per-unit font cache
 local function ResolveFontPath(unitKey)
-    -- Locale override takes absolute priority -- no custom font can render CJK/Cyrillic
-    if LOCALE_FONT_OVERRIDE then
-        cachedFontPath = LOCALE_FONT_OVERRIDE
-        for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "targettarget", "focustarget"}) do
-            cachedFontPaths[uKey] = LOCALE_FONT_OVERRIDE
-        end
-        return
-    end
-    -- Global font system
     local gPath = EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")
         or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
     cachedFontPath = gPath
@@ -1393,6 +1388,23 @@ if EllesmereUI.RegisterDarkModeRefresh then
             ns._ReapplyBossPreviewColor()
         end
     end)
+end
+
+-- Global Dark Mode master: expose Unit Frames' darkTheme flag so the parent
+-- addon's master toggle can flip it alongside the other modules. setOn mirrors
+-- the individual Dark Mode toggle (write the flag + reload the frames).
+if EllesmereUI.RegisterDarkModeToggle then
+    EllesmereUI.RegisterDarkModeToggle({
+        id = "unitFrames",
+        isOn = function()
+            return (db and db.profile and db.profile.darkTheme) or false
+        end,
+        setOn = function(on)
+            if not (db and db.profile) then return end
+            db.profile.darkTheme = on
+            if ns.ReloadFrames then ns.ReloadFrames() end
+        end,
+    })
 end
 
 -- Smart power text: percent for healers/prot pally/arcane mage, numeric for everyone else.

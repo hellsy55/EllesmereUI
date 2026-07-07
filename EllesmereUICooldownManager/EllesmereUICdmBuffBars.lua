@@ -1678,9 +1678,19 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
             bar._nameText:SetPoint("LEFT", sb, "LEFT", 5 + nX, nY)
             bar._nameText:SetJustifyH("LEFT")
         end
-        -- Clamp to the FILL width (the icon's square is not text space)
+        -- Text width + wrap mode (the icon's square is not text space). Wrap on:
+        -- legacy behaviour, wraps to 2 lines within the text area. Off (default):
+        -- a single line truncated with an ellipsis at 85% of the fill width.
         local fillW = hasIcon and (w - iSize) or w
-        bar._nameText:SetWidth(fillW - 12 - (cfg.showTimer and 50 or 0))
+        if cfg.nameWrap then
+            bar._nameText:SetWordWrap(true)
+            bar._nameText:SetMaxLines(2)
+            bar._nameText:SetWidth(fillW - 12 - (cfg.showTimer and 50 or 0))
+        else
+            bar._nameText:SetWordWrap(false)
+            bar._nameText:SetMaxLines(1)
+            bar._nameText:SetWidth(fillW * 0.85)
+        end
     else
         bar._nameText:Hide()
     end
@@ -2048,35 +2058,76 @@ end
 --- entries sorted by layoutIndex then spellID. This is the source of truth
 --- for the TBB spell picker -- TBB IS our display of these bars, so the
 --- picker must enumerate THIS pool and not the Tracked Buffs icon viewer.
-function ns.GetTrackedBarSpells()
+function ns.GetTrackedBarSpells(includeUntalented)
     local result = {}
-    local viewer = _G["BuffBarCooldownViewer"]
-    if not viewer or not viewer.itemFramePool then return result end
     local GetCanonical = ns.GetCanonicalSpellIDForFrame
-
     local seen = {}
-    for frame in viewer.itemFramePool:EnumerateActive() do
-        if frame:IsShown() or frame.cooldownInfo then
-            local sid = GetCanonical and GetCanonical(frame)
-            if sid and sid > 0 and not seen[sid] then
-                seen[sid] = true
-                local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
-                -- Append subtext (e.g. "Solar", "Lunar") to disambiguate
-                -- spells that share a base name like Eclipse.
-                if name and C_Spell.GetSpellSubtext then
-                    local sub = C_Spell.GetSpellSubtext(sid)
-                    if sub and sub ~= "" then
-                        name = name .. " (" .. sub .. ")"
+
+    -- Resolve a display name, appending subtext (e.g. "Solar", "Lunar") to
+    -- disambiguate spells that share a base name like Eclipse.
+    local function ResolveName(sid)
+        local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+        if name and C_Spell.GetSpellSubtext then
+            local sub = C_Spell.GetSpellSubtext(sid)
+            if sub and sub ~= "" then name = name .. " (" .. sub .. ")" end
+        end
+        return name
+    end
+
+    local viewer = _G["BuffBarCooldownViewer"]
+    if viewer and viewer.itemFramePool then
+        for frame in viewer.itemFramePool:EnumerateActive() do
+            if frame:IsShown() or frame.cooldownInfo then
+                local sid = GetCanonical and GetCanonical(frame)
+                if sid and sid > 0 and not seen[sid] then
+                    seen[sid] = true
+                    local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
+                    result[#result + 1] = {
+                        spellID     = sid,
+                        cdID        = frame.cooldownID,
+                        name        = ResolveName(sid) or ("Spell " .. sid),
+                        icon        = icon,
+                        layoutIndex = frame.layoutIndex or 0,
+                        -- Live pool members are always learned. Catalog entries
+                        -- appended below may not be.
+                        isKnown     = true,
+                    }
+                end
+            end
+        end
+    end
+
+    -- Tracked-but-untalented bar spells have no live BuffBar frame, so pull them
+    -- from the settings catalog (TrackedBar category). Picker-only
+    -- (includeUntalented); auto-add and section checks stay live-only. Provider
+    -- down or names missing -> nothing appended (identical to old behavior).
+    -- Dedup by canonical sid, matching the live-pool dedup above.
+    if includeUntalented and ns.EnumerateCDMSettingsCatalog then
+        local evc = Enum and Enum.CooldownViewerCategory
+        local barCat = evc and (evc.TrackedBar or 3)
+        local catalog = barCat and ns.EnumerateCDMSettingsCatalog({ [barCat] = true })
+        if catalog then
+            local extra = 0
+            for _, ce in ipairs(catalog) do
+                if ce.sid and ce.sid > 0 and not seen[ce.sid] then
+                    seen[ce.sid] = true
+                    local nm = ResolveName(ce.sid)
+                    if nm then
+                        local known = (IsPlayerSpell and IsPlayerSpell(ce.sid)) and true or false
+                        local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(ce.sid)
+                        extra = extra + 1
+                        result[#result + 1] = {
+                            spellID     = ce.sid,
+                            cdID        = ce.cdID,
+                            name        = nm,
+                            icon        = icon,
+                            -- No live frame -> no layoutIndex; sort after live
+                            -- entries, keeping catalog order among themselves.
+                            layoutIndex = 100000 + extra,
+                            isKnown     = known,
+                        }
                     end
                 end
-                local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sid)
-                result[#result + 1] = {
-                    spellID     = sid,
-                    cdID        = frame.cooldownID,
-                    name        = name or ("Spell " .. sid),
-                    icon        = icon,
-                    layoutIndex = frame.layoutIndex or 0,
-                }
             end
         end
     end

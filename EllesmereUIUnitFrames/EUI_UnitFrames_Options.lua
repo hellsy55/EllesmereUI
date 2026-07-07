@@ -12023,7 +12023,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="slider", text="Buff Text Size", min=6, max=30, step=1,
+                { type="slider", text="Buff Text Size", min=6, max=30, step=1, trackWidth=120,
                   disabled=simpleBuffTextOff, disabledTooltip="Show Duration (Inside Cog)",
                   getValue=function() return db.profile.boss.simpleBuffCooldownTextSize or 14 end,
                   setValue=function(v) db.profile.boss.simpleBuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
@@ -12061,6 +12061,32 @@ initFrame:SetScript("OnEvent", function(self)
             -- Inline cog on Simple Text Size: duration X/Y + stack size / X/Y.
             do
                 local rightRgn = simpleBuffRow._rightRegion
+                -- Inline Duration + Stack swatches mirroring the regular Buff Text
+                -- Size swatches (same keys); greyed + disabled on this row cog's
+                -- condition.
+                local buffOff = function() return ns.db.profile.boss.showBuffs or db.profile.boss.simpleBuffs == "none" end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.buffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.buffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.buffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.buffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
                 local _, simpleBuffStackCogShow = EllesmereUI.BuildCogPopup({
                     title = "Duration & Stack",
                     rows = {
@@ -12089,9 +12115,7 @@ initFrame:SetScript("OnEvent", function(self)
                           set=function(v) db.profile.boss.buffStackTextOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
-                BossCogBtn(rightRgn, simpleBuffStackCogShow, nil, function()
-                    return ns.db.profile.boss.showBuffs or db.profile.boss.simpleBuffs == "none"
-                end)
+                BossCogBtn(rightRgn, simpleBuffStackCogShow, nil, buffOff)
             end
             -- (Show Duration toggle lives inside the Duration & Stack cog above.)
 
@@ -12132,7 +12156,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="slider", text="Debuff Text Size", min=6, max=30, step=1,
+                { type="slider", text="Debuff Text Size", min=6, max=30, step=1, trackWidth=120,
                   disabled=simpleTextOff, disabledTooltip="Show Duration (Inside Cog)",
                   getValue=function() return db.profile.boss.simpleDebuffCooldownTextSize or 14 end,
                   setValue=function(v) db.profile.boss.simpleDebuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
@@ -12171,6 +12195,32 @@ initFrame:SetScript("OnEvent", function(self)
             -- Inline cog on Simple Text Size: duration X/Y + stack size / X/Y.
             do
                 local rightRgn = simpleRow._rightRegion
+                -- Inline Duration + Stack swatches mirroring the regular Debuff Text
+                -- Size swatches (same keys); greyed + disabled on this row cog's
+                -- condition.
+                local debuffOff = function() return ns.db.profile.boss.debuffAnchor ~= "none" or db.profile.boss.simpleDebuffs == "none" end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.debuffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.debuffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.debuffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.debuffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
                 local _, simpleStackCogShow = EllesmereUI.BuildCogPopup({
                     title = "Duration & Stack",
                     rows = {
@@ -12199,9 +12249,7 @@ initFrame:SetScript("OnEvent", function(self)
                           set=function(v) db.profile.boss.debuffStackTextOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
-                BossCogBtn(rightRgn, simpleStackCogShow, nil, function()
-                    return ns.db.profile.boss.debuffAnchor ~= "none" or db.profile.boss.simpleDebuffs == "none"
-                end)
+                BossCogBtn(rightRgn, simpleStackCogShow, nil, debuffOff)
             end
             -- (Show Duration toggle lives inside the Duration & Stack cog above.)
 
@@ -12362,11 +12410,11 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 local textSizeRow
                 textSizeRow, hh = Ww:DualRow(pp, yy,
-                    { type="slider", text="Buff Text Size", min=6, max=30, step=1,
+                    { type="slider", text="Buff Text Size", min=6, max=30, step=1, trackWidth=120,
                       disabled=buffTextOff, disabledTooltip="Show Duration (Inside Cog)",
                       getValue=function() return db.profile.boss.buffCooldownTextSize or 10 end,
                       setValue=function(v) db.profile.boss.buffCooldownTextSize = v; ReloadAndUpdate() end },
-                    { type="slider", text="Debuff Text Size", min=6, max=30, step=1,
+                    { type="slider", text="Debuff Text Size", min=6, max=30, step=1, trackWidth=120,
                       disabled=debuffTextOff, disabledTooltip="Show Duration (Inside Cog)",
                       getValue=function() return db.profile.boss.debuffCooldownTextSize or 10 end,
                       setValue=function(v) db.profile.boss.debuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
@@ -12374,6 +12422,32 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Disabled while Simple Buff Display is active (it uses its own text).
                 do
                     local leftRgn = textSizeRow._leftRegion
+                    -- Inline Duration + Stack text-color swatches on the Buff Text
+                    -- Size slider; greyed + mouse-disabled on the same condition as
+                    -- the row's cog.
+                    local buffOff = function() return ns.GetBossSimpleBuffMode(db.profile.boss) ~= "none" or not ns.db.profile.boss.showBuffs end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.buffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.buffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                        leftRgn._lastInline = sw
+                        local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.buffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.buffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                        leftRgn._lastInline = sw
+                        local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
                     local _, buffStackCogShow = EllesmereUI.BuildCogPopup({
                         title = "Duration & Stack",
                         rows = {
@@ -12402,13 +12476,38 @@ initFrame:SetScript("OnEvent", function(self)
                               set=function(v) db.profile.boss.buffStackTextOffsetY = v; ReloadAndUpdate() end },
                         },
                     })
-                    BossCogBtn(leftRgn, buffStackCogShow, nil,
-                        function() return ns.GetBossSimpleBuffMode(db.profile.boss) ~= "none" or not ns.db.profile.boss.showBuffs end)
+                    BossCogBtn(leftRgn, buffStackCogShow, nil, buffOff)
                 end
                 -- Debuff Text Size cog (right): Show Duration + Duration X/Y + Stack.
                 -- Disabled while Simple Debuff Display is active.
                 do
                     local rightRgn = textSizeRow._rightRegion
+                    -- Inline Duration + Stack text-color swatches on the Debuff Text
+                    -- Size slider; greyed + mouse-disabled on the same condition as
+                    -- the row's cog.
+                    local debuffOff = function() return ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" or ns.db.profile.boss.debuffAnchor == "none" end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.debuffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.debuffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                        rightRgn._lastInline = sw
+                        local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.debuffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.debuffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                        rightRgn._lastInline = sw
+                        local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
                     local _, debuffStackCogShow = EllesmereUI.BuildCogPopup({
                         title = "Duration & Stack",
                         rows = {
@@ -12440,26 +12539,24 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Disabled while Simple Debuff Display is active: simple mode
                     -- uses its own (simpleDebuff*) cooldown text, so the regular
                     -- debuff Duration & Stack controls do not apply.
-                    BossCogBtn(rightRgn, debuffStackCogShow, nil,
-                        function() return ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" or ns.db.profile.boss.debuffAnchor == "none" end)
+                    BossCogBtn(rightRgn, debuffStackCogShow, nil, debuffOff)
                 end
-                -- Boss Debuff Filter on its own row, below the text-size row (boss
-                -- buffs are never filtered, so the left slot is intentionally
-                -- blank). The multi-select checkbox dropdown is injected into the
-                -- left slot, replacing the placeholder.
+                -- Boss Debuff Filter in slot 1 (boss buffs are never filtered, so
+                -- the right slot is intentionally blank). The multi-select checkbox
+                -- dropdown is injected into the left slot, replacing the placeholder.
                 local filterRow
                 local filterOff = function()
                     local p = db.profile.boss
                     return ns.GetBossSimpleDebuffMode(p) == "none" and (p.debuffAnchor or "bottomleft") == "none"
                 end
                 filterRow, hh = Ww:DualRow(pp, yy,
-                    { type="label", text="" },
                     { type="dropdown", text="Boss Debuff Filter",
                       disabled=filterOff, disabledTooltip="Debuffs", requireState="displayed",
                       values={ __placeholder="..." }, order={ "__placeholder" },
-                      getValue=function() return "__placeholder" end, setValue=function() end });  yy = yy - hh
+                      getValue=function() return "__placeholder" end, setValue=function() end },
+                    { type="label", text="" });  yy = yy - hh
                 do
-                    local rgn = filterRow._rightRegion
+                    local rgn = filterRow._leftRegion
                     if rgn._control then rgn._control:Hide() end
                     local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                         rgn, 210, rgn:GetFrameLevel() + 2, filterItems,
@@ -12581,63 +12678,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Buff Text Color | Debuff Text Color
-            _, h = Ww:DualRow(pp, yy,
-                { type="multiSwatch", text="Buff Text Color",
-                    disabled = function()
-                        local p = db.profile.boss
-                        return ns.GetBossSimpleBuffMode(p) == "none" and p.showBuffs == false
-                    end,
-                    disabledTooltip = "Buffs", requireState="displayed",
-                    swatches = {
-                        { tooltip = "Duration", hasAlpha = false,
-                        getValue = function()
-                            local c = db.profile.boss.buffCooldownTextColor
-                            if c then return c.r, c.g, c.b end
-                            return 1, 1, 1
-                        end,
-                        setValue = function(r, g, b)
-                            db.profile.boss.buffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate()
-                        end },
-                        { tooltip = "Stack", hasAlpha = false,
-                        getValue = function()
-                            local c = db.profile.boss.buffStackTextColor
-                            if c then return c.r, c.g, c.b end
-                            return 1, 1, 1
-                        end,
-                        setValue = function(r, g, b)
-                            db.profile.boss.buffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate()
-                        end
-                    } }
-                },
-                { type="multiSwatch", text="Debuff Text Color",
-                    disabled = function()
-                        local p = db.profile.boss
-                        return ns.GetBossSimpleDebuffMode(p) == "none" and (p.debuffAnchor or "bottomleft") == "none"
-                    end,
-                    disabledTooltip = "Debuffs", requireState="displayed",
-                    swatches = {
-                        { tooltip = "Duration", hasAlpha = false,
-                        getValue = function()
-                            local c = db.profile.boss.debuffCooldownTextColor
-                            if c then return c.r, c.g, c.b end
-                            return 1, 1, 1
-                        end,
-                        setValue = function(r, g, b)
-                            db.profile.boss.debuffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate()
-                        end },
-                        { tooltip = "Stack",
-                        hasAlpha = false,
-                        getValue = function()
-                            local c = db.profile.boss.debuffStackTextColor
-                            if c then return c.r, c.g, c.b end
-                            return 1, 1, 1
-                        end,
-                        setValue = function(r, g, b)
-                            db.profile.boss.debuffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate()
-                        end
-                    } }
-                }); yy = yy - hh
+            -- Buff/Debuff text colors now live as inline swatches on the Buff Text
+            -- Size / Debuff Text Size sliders above (Duration + Stack per side).
 
             return yy
         end

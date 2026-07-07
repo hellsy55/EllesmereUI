@@ -303,6 +303,13 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
     -- profile-level bd.barSpellSettings ("Apply to Bar (All Specs)"). nil when
     -- neither exists -- the common case costs two table lookups.
     local tier = ns.GetBarTierSettings and ns.GetBarTierSettings(sd2, bk)
+    -- HOSTED BUFFS are fully removed from the Apply-to-Bar tier system: a buff on a
+    -- CD/util bar must never inherit that bar's applied (cd/util) values -- notably
+    -- for keys shared between families (Duration Text, Border). Resolve ONLY its own
+    -- per-spell entry. Cheap: sd2.hostedBuffSpellIDs is nil on bars with no host.
+    if tier and sd2 and sd2.hostedBuffSpellIDs and sd2.hostedBuffSpellIDs[sid2] then
+        tier = nil
+    end
     -- Per-spell entries live in the spec's FAMILY store (they travel with the
     -- spell across bars), not on the bar.
     local settings = bk and ns.GetSpellSettingsStore and ns.GetSpellSettingsStore(bk)
@@ -594,6 +601,31 @@ function ns.RebuildSpellRouteMap()
            and bd.key ~= "cooldowns" and bd.key ~= "utility" and bd.key ~= "buffs"
            and bd.barType ~= "buffs" and bd.barType ~= "custom_buff" then
             CollectDiversionsFor(bd)
+        end
+    end
+    -- Pass 3b: HOSTED BUFFS. A buff placed on a CD/utility bar
+    -- (sd.hostedBuffSpellIDs) must ALSO divert in the BUFF-family map to that
+    -- CD/util bar -- a buff frame comes from the BuffIcon viewer, so
+    -- ResolveCDIDToBar only reads _divertedSpellsBuff for it. Runs after the
+    -- buff-bar passes (1-2) so an explicit host outranks a stray buff-bar copy of
+    -- the same spell. (The bar's normal CD diversion in _divertedSpellsCD from
+    -- Pass 3 is untouched; these are separate family maps.)
+    for _, bd in ipairs(p.cdmBars.bars) do
+        if bd.enabled and not bd.isGhostBar
+           and bd.barType ~= "buffs" and bd.barType ~= "custom_buff" then
+            local sd = ns.GetBarSpellData(bd.key)
+            if sd and sd.hostedBuffSpellIDs then
+                -- Keyed off hostedBuffSpellIDs directly (not assignedSpells): the
+                -- CD/util drop pass can transiently strip a buff from assignedSpells
+                -- (a buff never appears in the Essential/Utility viewer), but the
+                -- diversion must survive that so the buff still renders here. SVV
+                -- expands variants so any live talent/override form resolves.
+                for sid in pairs(sd.hostedBuffSpellIDs) do
+                    if type(sid) == "number" and sid > 0 then
+                        SVV(_divertedSpellsBuff, sid, bd.key, false)
+                    end
+                end
+            end
         end
     end
     -- Pass 4: ghost bars LAST = HIGHEST priority. A spell the user HID stays
@@ -1314,6 +1346,14 @@ local function DecorateFrame(frame, barData)
     if not fd then fd = {}; hookFrameData[frame] = fd end
     fd.decorated = true
 
+    -- A HOSTED buff's frame is a Blizzard buff-viewer frame reparented onto a
+    -- CD/util bar. Its cooldown swipe is the AURA DURATION (Blizzard-driven), not a
+    -- spell cooldown -- so the cd-style swipe hooks below (Suppress-GCD, active-state
+    -- override, charge logic) must never touch it, or they'd blank the duration
+    -- swipe on every GCD. viewerFrame is stable per pooled frame, so flag it once.
+    fd._isBuffViewerFrame = (frame.viewerFrame == _G.BuffIconCooldownViewer
+        or frame.viewerFrame == _G.BuffBarCooldownViewer) or nil
+
     local iconWidget = frame.Icon
     if iconWidget and not iconWidget.GetTexture then
         if iconWidget.Icon then iconWidget = iconWidget.Icon end
@@ -1480,6 +1520,33 @@ local function DecorateFrame(frame, barData)
             local cd = fd.cooldown
             hooksecurefunc(cd, "SetSwipeColor", function()
                 if fd._isProcessingOverride then return end
+                -- Buff-viewer frame (buff bar or hosted on a CD/util bar): the swipe
+                -- is the aura DURATION, so skip all cd-style logic (Suppress-GCD,
+                -- active-state). Apply only the per-spell "Cooldown Swipe Color":
+                -- Default = the bar's swipe colour (black), Class / Custom per settings.
+                if fd._isBuffViewerFrame then
+                    fd._isProcessingOverride = true
+                    local fcB = _ecmeFC[frame]
+                    local sidB = fcB and fcB.spellID
+                    local bkB = fcB and fcB.barKey
+                    local ssB = (sidB and bkB and ns.ResolveSpellSettings)
+                        and ns.ResolveSpellSettings(frame, sidB, ns.GetBarSpellData(bkB), bkB) or nil
+                    local sr, sg, sb
+                    local alpha = barData.swipeAlpha or 0.7
+                    local mode = ssB and ssB.cdSwipeColor
+                    if mode == "class" then
+                        local _, ct = UnitClass("player")
+                        local cc = ct and RAID_CLASS_COLORS[ct]
+                        if cc then sr, sg, sb = cc.r, cc.g, cc.b end
+                    elseif mode == "custom" then
+                        sr, sg, sb = ssB.cdSwipeColorR, ssB.cdSwipeColorG, ssB.cdSwipeColorB
+                    elseif mode == "none" then
+                        alpha = 0  -- fully hide the swipe (alpha 0, geometry still valid)
+                    end
+                    cd:SetSwipeColor(sr or 0, sg or 0, sb or 0, alpha)
+                    fd._isProcessingOverride = false
+                    return
+                end
                 fd._isProcessingOverride = true
                 local fc2 = _ecmeFC[frame]
                 local sid2 = fc2 and fc2.spellID
@@ -1620,17 +1687,26 @@ local function DecorateFrame(frame, barData)
                     cb = cb or (ss2 and ss2.activeSwipeB) or 0.376
                     ca = (ss2 and ss2.activeSwipeA) or 0.7
                     cd:SetSwipeColor(cr, cg, cb, ca)
-                    if fd.tex then fd.tex:SetDesaturated(false) end
+                    if fd.tex then fd.tex:SetDesaturated(false); fd._desatNA = nil end
                     fd._wasActive = true
                 else
                     -- Not active: black swipe.
                     if not _gcdSuppressed then
                         cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
                     end
-                    -- Desaturate When Not Active (per-spell): symmetric mirror of
-                    -- the active branch's SetDesaturated(false) above.
-                    if ss2 and ss2.desatNotActive and fd.tex then
-                        fd.tex:SetDesaturated(true)
+                    -- Desaturate When Not Active (per-spell). Symmetric: desaturate
+                    -- while the setting is on, and RE-saturate when it's turned off --
+                    -- but only for icons WE desaturated (fd._desatNA), so turning it off
+                    -- never fights cdState / buff desaturation on other icons and doesn't
+                    -- have to wait for the next cooldown event to un-grey.
+                    if fd.tex then
+                        if ss2 and ss2.desatNotActive then
+                            fd.tex:SetDesaturated(true)
+                            fd._desatNA = true
+                        elseif fd._desatNA then
+                            fd.tex:SetDesaturated(false)
+                            fd._desatNA = nil
+                        end
                     end
                     -- Transition: buff just ended, CD starting. Re-apply the
                     -- cooldown duration so the swipe shows immediately
@@ -1688,6 +1764,8 @@ local function DecorateFrame(frame, barData)
             end)
             hooksecurefunc(cd, "SetDrawSwipe", function(_, show)
                 if fd._isProcessingOverride then return end
+                -- Hosted buff: never toggle its duration swipe from our cd logic.
+                if fd._isBuffViewerFrame then return end
                 -- Charge spells get the baseline edge (+ per-spell Hide Swipe).
                 -- ApplyCdmChargeStyle returns true and fully owns the swipe + edge
                 -- only for charge spells, so non-charge frames fall through to the
@@ -2244,7 +2322,17 @@ local function DecorateFrame(frame, barData)
                 local bk2 = fc2 and fc2.barKey
                 if not sid2 or not bk2 then return end
                 local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
-                if not (ss2 and ss2.desatNotActive) then return end
+                if not (ss2 and ss2.desatNotActive) then
+                    -- Setting turned off: re-saturate if WE greyed this icon, so it
+                    -- doesn't stay desaturated until the next cooldown event.
+                    if fd._desatNA then
+                        fd._isProcessingOverride = true
+                        fd.tex:SetDesaturated(false)
+                        fd._isProcessingOverride = false
+                        fd._desatNA = nil
+                    end
+                    return
+                end
                 local isAct = false
                 local sc = frame.cooldownSwipeColor
                 if sc and type(sc) ~= "number" and sc.GetRGBA then
@@ -2254,6 +2342,7 @@ local function DecorateFrame(frame, barData)
                 if isAct then return end
                 fd._isProcessingOverride = true
                 fd.tex:SetDesaturated(true)
+                fd._desatNA = true
                 fd._isProcessingOverride = false
             end
             hooksecurefunc(fd.tex, "SetDesaturated", _maintainDesat)
@@ -2292,13 +2381,18 @@ local function CategorizeFrame(frame, viewerBarKey)
         local claimType = claimBD and claimBD.barType or claimBarKey
         local viewerIsBuff = (viewerBarKey == "buffs")
         local claimIsBuff  = (claimType == "buffs" or claimType == "custom_buff")
-        if viewerIsBuff == claimIsBuff then
+        -- Same family always routes. A BUFF viewer resolving to a CD/util bar is
+        -- also honored: that only happens for an explicit HOSTED buff (the sole
+        -- writer of a CD/util bar key into _divertedSpellsBuff is the hosted-buff
+        -- pass in RebuildSpellRouteMap), so the buff's real frame reparents onto
+        -- the CD/util bar just like on a buff bar. A CD viewer -> buff bar is still
+        -- rejected (falls through) -- that direction is never wanted.
+        if viewerIsBuff == claimIsBuff or viewerIsBuff then
             return claimBarKey, displaySID, baseSID
         end
-        -- Type mismatch (buff viewer routing to CD bar, or vice versa).
-        -- Under the 1-spell-per-bar rule this can't happen via picker
-        -- claims, but legacy data could trigger it. Fall through to the
-        -- viewer's default bar so the frame still renders somewhere.
+        -- Type mismatch (CD viewer routing to a buff bar). Under the 1-spell-per-bar
+        -- rule this can't happen via picker claims, but legacy data could trigger
+        -- it. Fall through to the viewer's default bar so the frame still renders.
     end
     return viewerBarKey, displaySID, baseSID
 end
@@ -3478,9 +3572,25 @@ local function CollectAndReanchor()
                             if dedupKey and not barSeen[dedupKey] then
                                 if frame:IsShown() then
                                     -- Active buff: route Blizzard's real frame.
-                                    if not barLists[targetBar] then barLists[targetBar] = {} end
-                                    barLists[targetBar][#barLists[targetBar] + 1] =
-                                        AcquireEntry(frame, displaySID, baseSID or displaySID, frame.layoutIndex or 0)
+                                    local tbd = barDataByKey[targetBar]
+                                    if tbd and tbd.barType ~= "buffs" and tbd.barType ~= "custom_buff" then
+                                        -- HOSTED buff on a CD/util bar: push the real frame into the
+                                        -- CD pipeline (cdFrames) so Phase 3 sorts it with cooldowns by
+                                        -- assignedSpells position and draws its native swipe. FC.spellID
+                                        -- is set here (the buff path doesn't otherwise); it then enters
+                                        -- _globalClaimSet (built from cdFrames) so Phase 3 never injects
+                                        -- a duplicate. Phase 4 still treats it hands-off (viewerFrame).
+                                        if not cdFrames[targetBar] then cdFrames[targetBar] = {} end
+                                        local cf = cdFrames[targetBar]
+                                        cf[#cf + 1] = frame
+                                        local fc = FC(frame)
+                                        fc.barKey = targetBar
+                                        fc.spellID = baseSID or displaySID
+                                    else
+                                        if not barLists[targetBar] then barLists[targetBar] = {} end
+                                        barLists[targetBar][#barLists[targetBar] + 1] =
+                                            AcquireEntry(frame, displaySID, baseSID or displaySID, frame.layoutIndex or 0)
+                                    end
                                     barSeen[dedupKey] = true
                                 else
                                     -- This buff is DISPLAYED in the viewer but currently OFF
@@ -3521,7 +3631,13 @@ local function CollectAndReanchor()
                                     -- Always-Show internally (the two are mutually exclusive
                                     -- in the options). The placeholders it injects are then
                                     -- rendered invisible by the alpha-0 opacity passes.
+                                    -- A HOSTED buff on a CD/util bar (CategorizeFrame only sends a
+                                    -- buff frame to a non-buff bar for an explicit host) is treated
+                                    -- as a CD/util icon: it ALWAYS reserves its slot, and its
+                                    -- placeholder routes through the CD pipeline (Phase 3), not barLists.
+                                    local hostCD = bd and bd.barType ~= "buffs" and bd.barType ~= "custom_buff"
                                     local showInactive = bd and (bd.showInactiveBuffIcons or bd.hidePlaceholderIcon) and true or false
+                                    if hostCD then showInactive = true end
                                     -- Per-icon Always-Show override (on/off) applies only in
                                     -- Always-Show mode. "Keep Buffs in Same Place" reserves
                                     -- EVERY tracked buff's slot, so a per-icon "off" must not
@@ -3540,7 +3656,7 @@ local function CollectAndReanchor()
                                             elseif ssAS.alwaysShow == "off" then showInactive = false end
                                         end
                                     end
-                                    if bd and bd.enabled and bd.barType == "buffs"
+                                    if bd and bd.enabled and (bd.barType == "buffs" or hostCD)
                                        and showInactive and targetBar ~= ns.FOCUSKICK_BAR_KEY
                                        and not ns._cdmSpecRebuildStale then
                                         -- Two displayed-but-inactive viewer items can resolve to the
@@ -3562,13 +3678,24 @@ local function CollectAndReanchor()
                                             -- active<->inactive; cooldownID does not).
                                             ph.cooldownID = dedupKey
                                             ph:Show()
-                                            if not barLists[targetBar] then barLists[targetBar] = {} end
                                             -- realSID is the displayed/clean buff id (== the active
                                             -- frame's canonical id and the per-icon settings key the
                                             -- options menu writes), so the placeholder resolves the
                                             -- same per-icon settings as the live buff.
-                                            barLists[targetBar][#barLists[targetBar] + 1] =
-                                                AcquireEntry(ph, realSID, realSID, frame.layoutIndex or 0)
+                                            if hostCD then
+                                                -- Hosted-buff placeholder -> CD pipeline (Phase 3);
+                                                -- FC.spellID lets Phase 3 slot it by assignedSpells.
+                                                if not cdFrames[targetBar] then cdFrames[targetBar] = {} end
+                                                local cf = cdFrames[targetBar]
+                                                cf[#cf + 1] = ph
+                                                local fc = FC(ph)
+                                                fc.barKey = targetBar
+                                                fc.spellID = realSID
+                                            else
+                                                if not barLists[targetBar] then barLists[targetBar] = {} end
+                                                barLists[targetBar][#barLists[targetBar] + 1] =
+                                                    AcquireEntry(ph, realSID, realSID, frame.layoutIndex or 0)
+                                            end
                                         end
                                         barSeen[dedupKey] = true
                                     end
@@ -5431,6 +5558,12 @@ function ns.SetupViewerHooks()
                                 local fc = _ecmeFC[frame]
                                 local sid = fc and fc.resolvedSid
                                 local fd = hookFrameData[frame]
+                                -- A buff ICON (whether on a buffs bar, or a real Blizzard
+                                -- buff frame hosted on a CD/util bar, or a placeholder for
+                                -- an inactive hosted buff) gets the buff glow/desat logic
+                                -- below regardless of the hosting bar's family.
+                                local isBuffIcon = isBuff or (fd and fd._isBuffViewerFrame)
+                                    or frame._isPlaceholderFrame or false
 
                                 local isActiveBuff = (frame.wasSetFromAura == true
                                     or frame.auraInstanceID ~= nil)
@@ -5444,7 +5577,7 @@ function ns.SetupViewerHooks()
                                 -- frame that is NOT a placeholder is active regardless of
                                 -- aura props -- this is what catches totems and presets
                                 -- (for both the glow and the desaturate-inactive logic).
-                                if not isActiveBuff and isBuff
+                                if not isActiveBuff and isBuffIcon
                                    and not frame._isPlaceholderFrame then
                                     isActiveBuff = true
                                 end
@@ -5458,12 +5591,15 @@ function ns.SetupViewerHooks()
                                 -- greyed when this bar's Always Show Buffs +
                                 -- Desaturate Off CD are on. Per-bar now -- not a
                                 -- global. Active real auras stay full color.
-                                if isBuff and bd.barType ~= "custom_buff" and fd and fd.tex then
+                                if isBuffIcon and bd.barType ~= "custom_buff" and fd and fd.tex then
                                     -- A shown, inactive buff icon is present only because
                                     -- Always Show Buffs resolved true for it (bar-level OR
                                     -- per-icon -> placeholder frame). Per-icon Desaturate
                                     -- Inactive (fd._desatOverride) beats the bar's
                                     -- Desaturate Off CD. Active auras stay full color.
+                                    -- A HOSTED buff (on a CD/util bar) has no bar toggle, so
+                                    -- it defaults ON (desaturate the inactive placeholder --
+                                    -- the baked-in "cd ability" look), with no per-icon row.
                                     local desatOn = (bd.desaturateInactiveBuffs ~= false)
                                     if fd._desatOverride == "on" then desatOn = true
                                     elseif fd._desatOverride == "off" then desatOn = false end

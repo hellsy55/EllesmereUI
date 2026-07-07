@@ -1202,6 +1202,7 @@ function ns.RescanCustomForceCountFlag()
     end
 end
 
+
 -- Reverse Swipe gate: set ns._cdmAnyReverseSwipe once if any saved spell (any
 -- spec) has the per-spell reverseSwipe toggle on. The reverse-apply in
 -- RefreshCDMIconAppearance is skipped entirely for anyone who never enables it,
@@ -1863,7 +1864,7 @@ ns.UpdateAllCDMBorders = UpdateAllCDMBorders
 local _G_Glows = EllesmereUI.Glows
 local GLOW_STYLES = {
     { name = "Pixel Glow",           procedural = true },
-    { name = "Custom Shape Glow",    shapeGlow = true },
+    { name = "Shape Glow",           shapeGlow = true },
     { name = "Action Button Glow",   buttonGlow = true },
     { name = "Auto-Cast Shine",      autocast = true },
     { name = "GCD",                  atlas = "RotationHelper_Ants_Flipbook", texPadding = 1.6 },
@@ -2099,12 +2100,22 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
         local icon = parent
         local ifc2 = _ecmeFC[icon]
         local shape = (ifc2 and ifc2.shapeApplied) and (ifc2 and ifc2.shapeName) or nil
-        local maskPath   = shape and CDM_SHAPES.masks[shape]
-        local borderPath = shape and CDM_SHAPES.borders[shape]
+        local shapeMask = ifc2 and ifc2.shapeMask
+        -- No custom shape (none/cropped): the icon is a plain sharp-cornered
+        -- square. Fall back to the square glow texture so the pulse hugs the
+        -- icon edges instead of filling it with a solid additive block. There
+        -- is no live mask object in this state, so the soft square glow texture
+        -- alone defines the shape. Skip the shape border overlay -- a plain
+        -- square icon keeps its own border, so drawing the square shape border
+        -- on top just adds a stray border line.
+        local noShape = not shape
+        if noShape then shape = "square"; shapeMask = nil end
+        local maskPath   = CDM_SHAPES.masks[shape]
+        local borderPath = (not noShape) and CDM_SHAPES.borders[shape] or nil
         _G_Glows.StartShapeGlow(overlay, math.min(pW, pH), cr, cg, cb, 1.20, {
             maskPath   = maskPath,
             borderPath = borderPath,
-            shapeMask  = ifc2 and ifc2.shapeMask,
+            shapeMask  = shapeMask,
         })
     elseif entry.procedural then
         -- Pixel Glow params. The pandemic glow passes explicit opts; per-button
@@ -4790,7 +4801,12 @@ local function RefreshCDMIconAppearance(barKey)
         if ns._cdmAnyCdReadySound and not isBuffFamilyBar and ns.WatchCdReadySoundIfEnabled then
             ns.WatchCdReadySoundIfEnabled(icon)
         end
-        if isBuffFamilyBar then
+        -- Buff per-spell settings resolve for any BUFF FRAME, not just buff-family
+        -- bars: a hosted buff (a real Blizzard buff frame reparented onto a CD/util
+        -- bar, flagged fd._isBuffViewerFrame) -- and its inactive placeholder -- must
+        -- get the same per-spell resolution so its Buff Glow / Duration Text /
+        -- Charge-Stack / Border / Desaturate match the active frame.
+        if isBuffFamilyBar or (fd and fd._isBuffViewerFrame) or icon._isPlaceholderFrame then
             -- Per-icon Audio on Buff Gain/Loss: attach the gain+loss sound hooks once,
             -- and only when the feature is in use anywhere (gate = 0 cost otherwise).
             if ns._cdmAnyBuffSound and ns.EnsureBuffSoundHook then ns.EnsureBuffSoundHook(icon) end
@@ -4869,7 +4885,11 @@ local function RefreshCDMIconAppearance(barKey)
             -- (so pool reuse + talent overrides stay correct) and re-asserts on every
             -- refresh, so toggling off restores the default. Not a per-tick path.
             if ns._cdmAnyReverseSwipe then
-                local rfBuff = (barData.barType == "buffs" or barKey == "buffs" or barData.barType == "custom_buff")
+                -- A hosted buff (buff frame on a CD/util bar) uses the BUFF baseline
+                -- (fill-up), not the cd baseline, so "Reverse" flips the same way it
+                -- would on a real buffs bar.
+                local rfBuff = (barData.barType == "buffs" or barKey == "buffs"
+                    or barData.barType == "custom_buff" or (fd and fd._isBuffViewerFrame)) or false
                 local rfReverse = rfBuff
                 local rfFc = _ecmeFC[icon]
                 local rfSid = rfFc and rfFc.spellID

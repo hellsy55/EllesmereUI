@@ -3151,6 +3151,52 @@ function EllesmereUI.RefreshDarkMode()
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
 end
 
+-- Global Dark Mode master toggle.
+-- Each module stores its own Dark Mode flag in its own DB in its own shape (Unit
+-- Frames: darkTheme bool; Resource Bars: secondary.darkTheme bool; Raid Frames:
+-- healthColorMode == "dark"). Rather than teach the parent addon each module's
+-- storage, every module registers a provider that knows how to read and flip its
+-- own flag AND repaint its own frames. The master toggle in the options page is a
+-- pure view over these providers -- it reads "are they all on" and writes "set
+-- them all". No new stored key, so it can never desync from the per-module toggles.
+EllesmereUI._darkModeToggles = EllesmereUI._darkModeToggles or {}
+function EllesmereUI.RegisterDarkModeToggle(provider)
+    if type(provider) == "table" and type(provider.isOn) == "function"
+        and type(provider.setOn) == "function" then
+        EllesmereUI._darkModeToggles[#EllesmereUI._darkModeToggles + 1] = provider
+    end
+end
+
+-- True only when every registered module currently has Dark Mode on (and at least
+-- one is registered). `filter`, if given, is a function(provider) -> boolean that
+-- narrows which providers count, so a single checkbox can view just one group
+-- (e.g. only the resource bar, or everything except it). The checkbox reflects
+-- this, so it reads as "on" only when its whole group is dark.
+function EllesmereUI.IsDarkModeAllOn(filter)
+    local matched = false
+    for _, p in ipairs(EllesmereUI._darkModeToggles) do
+        if not filter or filter(p) then
+            matched = true
+            local ok, on = pcall(p.isOn)
+            if not ok or not on then return false end
+        end
+    end
+    return matched
+end
+
+-- Flip every module's Dark Mode to `on`, then refresh the shared palette so any
+-- module that only listens for palette changes repaints too. `filter` narrows the
+-- affected providers exactly as in IsDarkModeAllOn.
+function EllesmereUI.SetDarkModeAll(on, filter)
+    on = on and true or false
+    for _, p in ipairs(EllesmereUI._darkModeToggles) do
+        if not filter or filter(p) then
+            pcall(p.setOn, on)
+        end
+    end
+    EllesmereUI.RefreshDarkMode()
+end
+
 -------------------------------------------------------------------------------
 --  Global Font System
 -------------------------------------------------------------------------------
@@ -9555,7 +9601,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.3.9"
+EllesmereUI.VERSION = "8.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

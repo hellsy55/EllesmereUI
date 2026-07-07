@@ -7367,6 +7367,25 @@ function ERB:OnEnable()
         end)
     end
 
+    -- Global Dark Mode master: expose the class resource bar's darkTheme flag so
+    -- the parent addon's master toggle can flip it alongside the other modules.
+    -- ApplyAll touches secure positioning, so it is combat-guarded like the
+    -- palette refresher above.
+    if EllesmereUI.RegisterDarkModeToggle then
+        EllesmereUI.RegisterDarkModeToggle({
+            id = "resourceBars",
+            isOn = function()
+                return (ERB.db and ERB.db.profile and ERB.db.profile.secondary
+                    and ERB.db.profile.secondary.darkTheme) or false
+            end,
+            setOn = function(on)
+                if not (ERB.db and ERB.db.profile and ERB.db.profile.secondary) then return end
+                ERB.db.profile.secondary.darkTheme = on
+                if not InCombatLockdown() then ERB:ApplyAll() end
+            end,
+        })
+    end
+
     -- Collapse/restore expandIfNoResource when EUI options panel opens/closes
     if EllesmereUI.RegisterOnShow then
         EllesmereUI:RegisterOnShow(function()

@@ -586,20 +586,33 @@ initFrame:SetScript("OnEvent", function(self)
               values=texValues, order=texOrder,
               get=function() return Cfg("barBgTexture") or "none" end,
               set=function(v) Set("barBgTexture", v); Refresh() end },
+            { type="toggle", label="Custom Border Style",
+              tooltip="Show the border style and size controls for the timer bars.",
+              get=function() return Cfg("customBorderStyle") == true end,
+              set=function(v) Set("customBorderStyle", v); ApplyBorder(); EllesmereUI:RefreshPage(true) end },
         }, function() return Cfg("enabled") == false or Cfg("showTimerBar") == false end)
         y = y - h
 
         --Border Style (+ cog) | Border Size (+ inline swatch)
-        local texValues, texOrder = EllesmereUI.GetBorderTextureDropdown()
-        texValues.shadow = nil
-        for i = #texOrder, 1, -1 do
-            if texOrder[i] == "shadow" then table.remove(texOrder, i) end
+        -- Only built when "Custom Border Style" (in the Bar Texture cog above)
+        -- is on, so the whole row plus its offset cog and colour swatch stay
+        -- hidden by default and reclaim their space when off.
+        if Cfg("customBorderStyle") then
+        -- Distinct local names on purpose: this border-texture list must NOT
+        -- shadow the bar-texture "texValues"/"texOrder" (declared above), which
+        -- the Forces bar Texture + Background Texture dropdowns further down
+        -- still reference. Shadowing them fed border textures into those bar
+        -- dropdowns and let a border key get written into the shared barTexture.
+        local borderTexValues, borderTexOrder = EllesmereUI.GetBorderTextureDropdown()
+        borderTexValues.shadow = nil
+        for i = #borderTexOrder, 1, -1 do
+            if borderTexOrder[i] == "shadow" then table.remove(borderTexOrder, i) end
         end
 
         local bsRow
         bsRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Border Style",
-                values=texValues, order=texOrder,
+                values=borderTexValues, order=borderTexOrder,
                 getValue=function() return Cfg("borderTexture") or "solid" end,
                 setValue=function(v)
                     Set("borderTexture", v)
@@ -627,11 +640,14 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, cogShow = EllesmereUI.BuildCogPopup({
                     title = "Border Options",
                     rows = {
+                        { type = "toggle", label = "Apply to Forces Bar",
+                            get = function() return Cfg("borderApplyToForces") ~= false end,
+                            set = function(v) Set("borderApplyToForces", v); ApplyBorder() end },
                         { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
                             get = function()
-                                local v = Cfg("broderTextureOffset")
+                                local v = Cfg("borderTextureOffset")
                                 if v then return v end
-                                local tex = Cfg("broderTexture") or "solid"
+                                local tex = Cfg("borderTexture") or "solid"
                                 local sz = Cfg("borderSize") or 1
                                 local dox = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
                                 return dox
@@ -690,7 +706,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local rgn = bsRow._rightRegion
                     local ctrl = rgn._control
                     local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
-                        rgn, row:GetFrameLevel() + 3,
+                        rgn, rgn:GetFrameLevel() + 3,
                         function()
                             return Cfg("borderR") or 0, Cfg("borderG") or 0, Cfg("borderB") or 0, Cfg("borderA") or 1
                         end,
@@ -702,6 +718,7 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
                     EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
                 end
+        end
 
         -- Builds a threshold toggle config plus an attach() that hangs the inline
         -- RESIZE cog (white text / size / x / y) and the colour swatch onto a given
@@ -718,7 +735,7 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip="Show Timer Text",
                   disabled=function() return Cfg("enabled") == false end,
                   disabledTooltip="the module",
-                  getValue=IsTimerTextShown,    
+                  getValue=IsTimerTextShown,
                   setValue=function(v) Set(showKey, v); Refresh() end }
 
             local function attach(rgn)
@@ -843,8 +860,8 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Show Enemy Forces",
               values=texValues,
               order=texOrder,
-              getValue=function() return Cfg("barTexture") or "none" end,
-              setValue=function(v) Set("barTexture", v); Refresh() end },
+              getValue=function() return Cfg("enemyBarTexture") or "none" end,
+              setValue=function(v) Set("enemyBarTexture", v); Refresh() end },
             { type="multiSwatch", text="Enemy Bar Color",
               disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
               disabledTooltip="Show Enemy Forces",
@@ -853,8 +870,8 @@ initFrame:SetScript("OnEvent", function(self)
         _AttachPopupButton(row._leftRegion, EllesmereUI.COGS_ICON, "Bar Texture", {
             { type="dropdown", label="Background Texture",
               values=texValues, order=texOrder,
-              get=function() return Cfg("barBgTexture") or "none" end,
-              set=function(v) Set("barBgTexture", v); Refresh() end },
+              get=function() return Cfg("enemyBarBgTexture") or "none" end,
+              set=function(v) Set("enemyBarBgTexture", v); Refresh() end },
         }, function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end)
         y = y - h
 

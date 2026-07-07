@@ -150,6 +150,7 @@ function ns._appendDisplayPresetKeys(t)
         "auraDurationTextSize", "auraDurationTextColor",
         "debuffCropIcons", "buffCropIcons", "ccCropIcons",
         "showCastLockoutAsCrowdControl",
+        "castIconOffsetX", "castIconOffsetY",
         "targetGlowEllesmereUI", "targetGlowBorderColor", "targetGlowHighlight", "targetBorderColor",
     }) do t[#t + 1] = k end
 end
@@ -413,9 +414,12 @@ local defaults = {
     questObjectiveTextSize = 14,
     showCastIcon = true,
     castIconScale = 1,
+    castIconOffsetX = 0,
+    castIconOffsetY = 0,
     castbarIconInWidth = false,
     castIconOnRight = false,
     castIconFullSize = false,
+    castIconTargetBorder = false,
     bgAlpha = 1.0,
     bgColor = { r = 0.12, g = 0.12, b = 0.12 },
     hoverColor = { r = 1, g = 1, b = 1 },
@@ -773,10 +777,12 @@ local function GetPandemicGlowSpeed()
     return (p and p.pandemicGlowSpeed) or defaults.pandemicGlowSpeed
 end
 ns.GetPandemicGlowSpeed = GetPandemicGlowSpeed
-local function GetPandemicGlowBackground()
+-- Namespaced (not file-scope locals) to stay under this file's Lua 5.1 200-local
+-- cap; both still close over the p / defaults upvalues.
+function ns.GetPandemicGlowBackground()
     return p and p.pandemicGlowBackground == true
 end
-local function GetPandemicGlowBackgroundColor()
+function ns.GetPandemicGlowBackgroundColor()
     local c = (p and p.pandemicGlowBackgroundColor) or defaults.pandemicGlowBackgroundColor
     return c.r or 0, c.g or 0, c.b or 0
 end
@@ -985,6 +991,8 @@ end
 function ns.LayoutCastIcon(plate, castH)
     local icon = plate.castIconFrame
     local onRight = ns.GetCastIconOnRight()
+    local xOff = (p and p.castIconOffsetX) or defaults.castIconOffsetX
+    local yOff = (p and p.castIconOffsetY) or defaults.castIconOffsetY
     icon:ClearAllPoints()
     if ns.GetCastIconFullSize() then
         local side = GetHealthBarHeight() + castH
@@ -998,19 +1006,19 @@ function ns.LayoutCastIcon(plate, castH)
         -- the icon square (its height is fixed by the top/bottom anchors = side).
         icon:SetWidth(side)
         if onRight then
-            icon:SetPoint("TOPLEFT", plate.health, "TOPRIGHT", 0, 0)
-            icon:SetPoint("BOTTOMLEFT", plate.cast, "BOTTOMRIGHT", 0, 0)
+            icon:SetPoint("TOPLEFT", plate.health, "TOPRIGHT", xOff, yOff)
+            icon:SetPoint("BOTTOMLEFT", plate.cast, "BOTTOMRIGHT", xOff, yOff)
         else
-            icon:SetPoint("TOPRIGHT", plate.health, "TOPLEFT", 0, 0)
-            icon:SetPoint("BOTTOMRIGHT", plate.cast, "BOTTOMLEFT", 0, 0)
+            icon:SetPoint("TOPRIGHT", plate.health, "TOPLEFT", xOff, yOff)
+            icon:SetPoint("BOTTOMRIGHT", plate.cast, "BOTTOMLEFT", xOff, yOff)
         end
     else
         icon:SetScale(GetCastIconScale() or 1)
         icon:SetSize(castH, castH)
         if onRight then
-            icon:SetPoint("TOPLEFT", plate.cast, "TOPRIGHT", 0, 0)
+            icon:SetPoint("TOPLEFT", plate.cast, "TOPRIGHT", xOff, yOff)
         else
-            icon:SetPoint("TOPRIGHT", plate.cast, "TOPLEFT", 0, 0)
+            icon:SetPoint("TOPRIGHT", plate.cast, "TOPLEFT", xOff, yOff)
         end
     end
 end
@@ -1542,9 +1550,9 @@ local function StartPandemicGlow(slot, slotSize)
         local lineLen = math.floor((sz + sz) * (2 / N - 0.1))
         lineLen = min(lineLen, sz)
         if lineLen < 1 then lineLen = 1 end
-        local br, bg, bb = GetPandemicGlowBackgroundColor()
+        local br, bg, bb = ns.GetPandemicGlowBackgroundColor()
         StartProceduralAnts(pg.wrapper, N, th, period, lineLen, cr, cg, cb, sz, nil,
-            GetPandemicGlowBackground() and br or nil, bg, bb)
+            ns.GetPandemicGlowBackground() and br or nil, bg, bb)
     elseif entry.buttonGlow then
         -- Action Button Glow: animated ants texture
         pg.flipTex:Hide()
@@ -2713,6 +2721,21 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
                 -- draws over it. Only the icon-separator line is hidden so an in-width
                 -- "part of the bar" icon stays seamless with the bar.
                 if plate.castLeftBorder then plate.castLeftBorder:Hide() end
+                -- Optional (off by default): tint the full-size icon's border with the
+                -- live target border colour so it matches the wrapped bar on your
+                -- current target. The else-branch keeps the icon border black in every
+                -- other case, so turning the toggle off resets it on the next pass.
+                if plate.castIconFrame and PP.GetBorders(plate.castIconFrame) then
+                    if p and p.castIconTargetBorder
+                        and GetShowCastIcon() and ns.GetCastIconFullSize()
+                        and plate.unit and UnitIsUnit(plate.unit, "target")
+                        and ns.GetTargetGlowBorderColor()
+                    then
+                        PP.SetBorderColor(plate.castIconFrame, r, g, b, a)
+                    else
+                        PP.SetBorderColor(plate.castIconFrame, 0, 0, 0, 1)
+                    end
+                end
             end
             plate._wrapActive = true
         elseif plate._wrapActive then
@@ -2732,6 +2755,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
                 plate.castWrapRegion:Hide()
             end
             if plate.castLeftBorder then plate.castLeftBorder:Show() end
+            if plate.castIconFrame and PP.GetBorders(plate.castIconFrame) then
+                PP.SetBorderColor(plate.castIconFrame, 0, 0, 0, 1)
+            end
             plate:ApplyCastBorder()
             plate:ApplyCastBorderColor()
         end
