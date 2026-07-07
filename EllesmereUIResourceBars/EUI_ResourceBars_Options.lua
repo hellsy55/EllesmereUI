@@ -417,6 +417,10 @@ initFrame:SetScript("OnEvent", function(self)
                             math.floor(_previewPipCount / 5 * numPips + 0.5)))
                     end
                 end
+                -- Expose to the count-text block below so the number always
+                -- matches the lit segments
+                pc._pvShownCount = filledCount
+                pc._pvShownMax = numPips
                 local useThresh = _pvTsEnabled
 				-- use current spec threshold color if configured
 				local tr = _pvTsEntry2 and _pvTsEntry2.thresholdR or sp.thresholdR
@@ -595,10 +599,16 @@ initFrame:SetScript("OnEvent", function(self)
                     local percentSuffix = (sp.showPercent == false) and "" or "%"
                     pc._countText:SetText(tostring(_previewBarFillPct) .. percentSuffix)
                 else
-                    local _pvTsE3 = _G._ERB_ResolveThresholdSpecEntry and _G._ERB_ResolveThresholdSpecEntry(sp) or nil
-                    local _pvE3Enabled = _pvTsE3 and (_pvTsE3.thresholdEnabled ~= false) or false
-                    local filledCount = _pvE3Enabled and (_pvTsE3.thresholdCount or sp.thresholdCount) or _previewPipCount
-                    pc._countText:SetText(tostring(filledCount))
+                    -- Mirror the pip loop's filled count (threshold-resolved
+                    -- and rescaled to the spec's pip count) so the number
+                    -- always matches the lit segments; "cur / max" like the
+                    -- live bar unless Show Max Stacks is off.
+                    local shown = pc._pvShownCount or _previewPipCount
+                    if sp.showMaxStacks == false then
+                        pc._countText:SetText(tostring(shown))
+                    else
+                        pc._countText:SetText(shown .. " / " .. (pc._pvShownMax or shown))
+                    end
                 end
                 pc._countText:Show()
             elseif pc._countText then
