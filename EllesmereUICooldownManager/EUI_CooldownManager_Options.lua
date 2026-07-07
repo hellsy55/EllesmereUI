@@ -15557,8 +15557,20 @@ initFrame:SetScript("OnEvent", function(self)
         if not isCustomBuffBar and not isFocusKick then
         _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
-        -- Show Tooltip | Show Keybind (not for buff bars)
-        if not isAnyBuffBar then
+        -- Buffs get "Show Tooltip on Hover" only (auras aren't cast -> no keybind);
+        -- cooldown/utility icon bars get the Tooltip | Keybind pair below.
+        if isAnyBuffBar then
+        local _, tth = W:DualRow(parent, y,
+            { type="toggle", text="Show Tooltip on Hover",
+              getValue=function() return BD().showTooltip == true end,
+              setValue=function(v)
+                  BD().showTooltip = v
+                  ns.ApplyCDMTooltipState(BD().key)
+                  Refresh()
+              end },
+            { type="spacer" }
+        );  y = y - tth
+        else
         local kbRow
         kbRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Tooltip on Hover",
@@ -15640,7 +15652,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
             end
         end
-        end -- tooltip/keybind buff bar guard
+        end -- if isAnyBuffBar (tooltip only) / else (tooltip + keybind)
 
         -- Pandemic Glow
         do
