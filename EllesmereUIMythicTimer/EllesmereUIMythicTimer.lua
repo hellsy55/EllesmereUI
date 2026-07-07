@@ -131,8 +131,16 @@ end
 local DB_DEFAULTS = {
     profile = {
         enabled           = true,
+        borderTexture     = "solid",
+        borderSize        = 0,
+        borderR = 0, borderG = 0, borderB = 0, borderA = 1,
         showTitle         = true,
         showDungeonName   = true,
+        -- Show the key level (e.g. "+21") with a divider to the left of the timer
+        -- clock. Only usable while the dungeon name is hidden (the title is then
+        -- just the lone key level, which moves down onto the timer line instead).
+        showKeyLevelOnTimer = false,
+        keyLevelTimerSpacing = 8,
         showAffixes       = true,
         showPlusTwoTimer  = true,
         showPlusThreeTimer = true,
@@ -226,6 +234,51 @@ local DB_DEFAULTS = {
         enemyBarColor     = { r = 0.35, g = 0.55, b = 0.8 },
     },
 }
+
+-- Per-addon border texture defaults (same as resourcebars/cdm)
+do
+    local function AllSizes(ox, oy, sx, sy)
+        local t = {}
+        for k = 0, 4 do t[k] = { offsetX = ox, offsetY = oy, shiftX = sx, shiftY = sy } end
+        return t
+    end
+    EllesmereUI.RegisterBorderDefaults("MythicPlus", {
+        ["glow"] = {
+            defaultSize = 1,
+            sizes = AllSizes(0, 0, 0, 0),
+        },
+        ["blizz"] = {
+            defaultSize = 3,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 2, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 3, offsetY = 2, shiftX = 1, shiftY = 0 },
+                [3] = { offsetX = 4, offsetY = 2, shiftX = 1, shiftY = 0 },
+                [4] = { offsetX = 4, offsetY = 2, shiftX = 1, shiftY = 0 },
+            },
+        },
+        ["dialog"] = {
+            defaultSize = 1,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 3, offsetY = 3, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 3, offsetY = 5, shiftX = 0, shiftY = 0 },
+                [3] = { offsetX = 3, offsetY = 5, shiftX = 0, shiftY = 0 },
+                [4] = { offsetX = 5, offsetY = 10, shiftX = 0, shiftY = 0 },
+            },
+        },
+        ["sm:Blizzard Achievement Wood"] = {
+            defaultSize = 1,
+            sizes = {
+                [0] = { offsetX = 0, offsetY = 0, shiftX = 0, shiftY = 0 },
+                [1] = { offsetX = 1, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [2] = { offsetX = 1, offsetY = 1, shiftX = 0, shiftY = 0 },
+                [3] = { offsetX = 1, offsetY = 6, shiftX = 0, shiftY = 0 },
+                [4] = { offsetX = 1, offsetY = 8, shiftX = 0, shiftY = 0 },
+            },
+        },
+    })
+end
 
 -- State
 local db
@@ -899,6 +952,98 @@ end
 local standaloneFrame
 local standaloneCreated = false
 
+-- WICHTIG: Diese Funktion darf erst HIER (nach "local standaloneFrame" und
+-- "local db") definiert werden. Stand sie weiter oben im File (vor den
+-- lokalen Deklarationen), hätte sie in Lua auf die gleichnamigen GLOBALEN
+-- Variablen zugegriffen (die nie gesetzt werden) statt auf die lokalen –
+-- die Funktion wäre dadurch immer sofort mit "return" abgebrochen.
+--
+-- Verwendet jetzt das echte Border-System aus EllesmereUI.lua
+-- (EllesmereUI.ApplyBorderStyle), statt einer selbstgebauten Lösung:
+--   - "solid"            -> PP 4-Streifen-System (wie überall sonst im Addon)
+--   - alle anderen Keys  -> texturierte BackdropTemplate-Border (Glow,
+--                            Blizzard, Lightspark, SharedMedia, ...)
+-- ApplyBorderStyle braucht ein Frame, das WIR besitzen ("borderFrame").
+-- Die Bars ("_barBg", "_enemyBarBg", Segmente in "_timerSegBgs") sind aber
+-- nur Texturen -- deshalb legen wir pro Bar ein schlankes Trägerframe an,
+-- das per SetAllPoints exakt über der jeweiligen Textur sitzt, und reichen
+-- DIESES Frame an ApplyBorderStyle weiter.
+local function ApplyBorderTo(parent, anchor, key, p, size, texKey, r, g, b, a)
+    if not parent or not anchor then
+        return
+    end
+
+    local bf = parent[key]
+    if not bf then
+        bf = CreateFrame("Frame", nil, parent)
+        bf:EnableMouse(false)
+        bf:SetFrameLevel(parent:GetFrameLevel() + 10)
+        -- Zwingt jeden Rand (auch texturierte Styles mit auswärtigem
+        -- offsetX/offsetY, z.B. Glow/Blizzard) strikt auf die Fläche
+        -- von "bf" (== die jeweilige Bar/das jeweilige Segment). Ohne das
+        -- ragen texturierte Border-Styles über die Segmentgrenzen hinaus
+        -- und überlappen sich in den Gaps zwischen den Segmenten.
+        bf:SetClipsChildren(true)
+        parent[key] = bf
+    end
+
+    bf:ClearAllPoints()
+    bf:SetAllPoints(anchor)
+
+    if size <= 0 or not anchor:IsShown() then
+        bf:Hide()
+        EllesmereUI.ApplyBorderStyle(bf, 0, r, g, b, a, texKey)
+        return
+    end
+
+    bf:Show()
+    EllesmereUI.ApplyBorderStyle(
+        bf, size, r, g, b, a, texKey,
+        p.borderTextureOffset, p.borderTextureOffsetY,
+        p.borderTextureShiftX, p.borderTextureShiftY,
+        "MythicPlus", size
+    )
+end
+
+ns.ApplyBorder = function()
+    if not standaloneFrame or not db or not db.profile then
+        return
+    end
+
+    local f = standaloneFrame
+    local p = db.profile
+    local size = p.borderSize or 0
+    local texKey = p.borderTexture or "solid"
+    local r, g, b, a = p.borderR or 0, p.borderG or 0, p.borderB or 0, p.borderA or 1
+
+    -- Haupt-Timerbar
+    -- Im SEGMENTS-Modus ist "_barBg" nur noch eine unsichtbare (Alpha 0),
+    -- aber weiterhin :IsShown()-aktive Textur, die über die GESAMTE Bar-
+    -- breite reicht (inkl. der Zwischenräume zwischen den Segmenten). Würden
+    -- wir hier trotzdem einen Border draufsetzen, bekämen auch die Gaps
+    -- oben/unten eine Border-Linie (links/rechts wird das vom jeweils
+    -- angrenzenden Segment-Border verdeckt, oben/unten aber nicht). Deshalb
+    -- im SEGMENTS-Modus die Haupt-Border hier deaktivieren -- die einzelnen
+    -- Segment-Borders weiter unten übernehmen die komplette Umrandung.
+    local isSegmented = (p.timerBarStyle == "SEGMENTS")
+    if isSegmented then
+        ApplyBorderTo(f, f._barBg, "_emtBarBorderFrame", p, 0, texKey, r, g, b, a)
+    else
+        ApplyBorderTo(f, f._barBg, "_emtBarBorderFrame", p, size, texKey, r, g, b, a)
+    end
+
+    -- Forces-Bar
+    ApplyBorderTo(f, f._enemyBarBg, "_emtEnemyBorderFrame", p, size, texKey, r, g, b, a)
+
+    -- Segment-Bars (SEGMENTS-Modus des Timer-Balkens)
+    if f._timerSegBgs then
+        for i, seg in ipairs(f._timerSegBgs) do
+            local segSize = isSegmented and size or 0
+            ApplyBorderTo(f, seg, "_emtSegBorderFrame" .. i, p, segSize, texKey, r, g, b, a)
+        end
+    end
+end
+
 -- Font helpers
 local FALLBACK_FONT = "Fonts/FRIZQT__.TTF"
 local FONT_OPTIONS = {
@@ -988,9 +1133,47 @@ local function SetFittedText(fs, text, maxWidth, preferredSize, minSize)
     end
 end
 
+-- Widest single-digit glyph in fs's CURRENT font. Clock-width templates replace
+-- every digit with this instead of a hardcoded "9": proportional / oldstyle
+-- numeral fonts can render another digit (e.g. "0" or "3") wider than "9", so a
+-- "9" template under-measures and the pinned width then ellipsizes the live clock
+-- (e.g. "33:00"). fs must already have its final font applied. Clears the width so
+-- the per-glyph measurements are unbounded. Called only when a width cache key
+-- changes (font / size / scale / length), never per tick.
+local function WidestDigitChar(fs)
+    fs:SetWidth(0)
+    local widest, widestW = "9", 0
+    for d = 0, 9 do
+        local ch = tostring(d)
+        fs:SetText(ch)
+        local w = fs:GetStringWidth() or 0
+        if w > widestW then widestW = w; widest = ch end
+    end
+    return widest
+end
+
+-- Set a threshold FontString's text and pin it to a stable, jitter-free width
+-- based on the widest digit in the current font, so the small +2 / +3 / remaining
+-- countdowns do not "breathe" horizontally as the seconds tick in a proportional
+-- font (the same width-pin idea the main clock uses, applied to the threshold
+-- row). Color escapes are zero-width, so they are stripped before templatizing.
+-- The caller (placeAt) sets JustifyH to match the anchor edge so one edge stays
+-- fixed. Returns the pinned width for the remaining-mode overlap packing.
+local function SetThreshText(fs, text)
+    local visible = (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+    fs:SetText((visible:gsub("%d", WidestDigitChar(fs))))
+    -- +1px only (vs the clock's +3): the widest-digit template already covers the
+    -- worst-case text for this length, so 1px is enough to absorb subpixel rounding
+    -- at fractional UI scales -- keeps packed labels tight when GAP is 0.
+    local w = (fs:GetStringWidth() or 0) + 1
+    fs:SetWidth(w)
+    fs:SetText(text)
+    return w
+end
+
 local function GetAccentColor()
-    if EllesmereUI.ResolveThemeColor and EllesmereUI.GetActiveTheme then
-        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+    if EllesmereUI.ResolveActiveAccent then
+        return EllesmereUI.ResolveActiveAccent()
     end
     return 0.05, 0.83, 0.62
 end
@@ -1040,6 +1223,19 @@ local function CreateStandaloneFrame()
     f:SetBackdropColor(0.05, 0.04, 0.08, 0.85)
     f:SetBackdropBorderColor(0.15, 0.15, 0.15, 0.6)
 
+    -- Eigene Ebene für Text, der ÜBER den Bars sitzt (Timer-/Forces-/
+    -- Threshold-Text). ns.ApplyBorder() legt für jede Bar/jedes Segment ein
+    -- Border-Wrapper-Frame an, das zwingend über "f" liegt (siehe
+    -- EllesmereUI.MakeBorder / ApplyBorderStyle: das Border-Container-Frame
+    -- bekommt immer FrameLevel = übergebenes Frame + 1). Ohne diese Ebene
+    -- würde der Border also IMMER über dem Text liegen, egal welchen
+    -- Draw-Layer der Text nutzt (Frame-Level schlägt Draw-Layer bei
+    -- unterschiedlichen Frames). Muss VOR den Fontstrings unten erzeugt
+    -- werden, damit diese direkt hierauf umgehängt werden können.
+    f._emtTextLayer = CreateFrame("Frame", nil, f)
+    f._emtTextLayer:SetFrameLevel(f:GetFrameLevel() + 30)
+    f._emtTextLayer:EnableMouse(false)
+
     f._accent = f:CreateTexture(nil, "BORDER")
     f._accent:SetWidth(2)
     f._accent:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, -1)
@@ -1056,6 +1252,12 @@ local function CreateStandaloneFrame()
     f._timerFS:SetJustifyH("CENTER")
     f._timerFS:SetWordWrap(false)
     f._timerFS:SetNonSpaceWrap(false)
+    -- Optional "+key  |" prefix rendered to the left of the timer clock
+    -- (Show Key Level on Timer). Single-anchored, no explicit width, so it
+    -- auto-sizes and never truncates.
+    f._keyLevelFS = f:CreateFontString(nil, "OVERLAY")
+    f._keyLevelFS:SetWordWrap(false)
+    f._keyLevelFS:SetNonSpaceWrap(false)
     f._timerDetailFS = f:CreateFontString(nil, "OVERLAY")
     f._timerDetailFS:SetWordWrap(false)
     f._timerDetailFS:SetNonSpaceWrap(false)
@@ -1064,10 +1266,13 @@ local function CreateStandaloneFrame()
     f._seg3 = f:CreateTexture(nil, "OVERLAY")
     f._seg2 = f:CreateTexture(nil, "OVERLAY")
     f._threshFS = f:CreateFontString(nil, "OVERLAY")
+    f._threshFS:SetParent(f._emtTextLayer)
     f._threshFS:SetWordWrap(false)
     f._threshFS2 = f:CreateFontString(nil, "OVERLAY")
+    f._threshFS2:SetParent(f._emtTextLayer)
     f._threshFS2:SetWordWrap(false)
     f._threshRemFS = f:CreateFontString(nil, "OVERLAY")
+    f._threshRemFS:SetParent(f._emtTextLayer)
     f._threshRemFS:SetWordWrap(false)
     f._deathFS = f:CreateFontString(nil, "OVERLAY")
     f._deathFS:SetWordWrap(false)
@@ -1177,6 +1382,7 @@ local function CreateStandaloneFrame()
         deathTT:Hide()
     end)
     f._enemyFS = f:CreateFontString(nil, "OVERLAY")
+    f._enemyFS:SetParent(f._emtTextLayer)
     f._enemyFS:SetWordWrap(false)
     f._enemyBarBg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
     f._enemyBarFill = f:CreateTexture(nil, "ARTWORK")
@@ -1266,6 +1472,12 @@ local function RenderStandalone()
     local innerW = frameW - PAD * 2
     local y = -PAD
 
+    -- "Show Key Level on Timer": render "+key  |" to the left of the timer clock.
+    -- Gated on the dungeon name being hidden (the title is then just the lone key
+    -- level, which relocates onto the timer line). Used by RenderTitleAffixes (to
+    -- suppress the now-redundant title) and by the timer block below.
+    local keyLevelOnTimer = (p.showKeyLevelOnTimer == true) and (p.showDungeonName == false)
+
     local function ContentPad(align)
         if align == "LEFT" or align == "RIGHT" then return PAD + ALIGN_PAD end
         return PAD
@@ -1284,7 +1496,11 @@ local function RenderStandalone()
         else
             tR, tG, tB = 1, 1, 1
         end
-        if p.showTitle ~= false then
+        -- When "Show Key Level on Timer" is on (only possible with the dungeon
+        -- name hidden), the title would be just the lone "+key" -- that moves down
+        -- onto the timer line instead, so suppress the title row entirely here.
+        -- keyLevelOnTimer is a function-scope upvalue computed once near the top.
+        if p.showTitle ~= false and not keyLevelOnTimer then
             local titleText
             if p.showDungeonName == false then
                 -- Show only the key level number, not the dungeon name.
@@ -1510,6 +1726,13 @@ local function RenderStandalone()
                 else
                     point = aboveBar and "BOTTOM" or "TOP"
                 end
+                -- Justify to the anchored edge so the pinned width leaves the
+                -- fixed edge steady: right-anchored labels keep their right edge on
+                -- the segment/bar end; center-anchored labels align left inside a
+                -- box centered on the tick (near-centered, but the digits no longer
+                -- shift as the seconds tick, since the widest-digit pin keeps the
+                -- box a couple px wider than the live text).
+                fs:SetJustifyH(rightJustified and "RIGHT" or "LEFT")
                 fs:ClearAllPoints()
                 if aboveBar then
                     -- threshold rendered before the bar -> sit above the bar
@@ -1520,21 +1743,24 @@ local function RenderStandalone()
                 end
             end
 
-            -- Prepare each visible FontString (text + style) up front so
-            -- GetStringWidth is valid before layout.
+            -- Prepare each visible FontString (text + style) up front. Each is
+            -- pinned to a jitter-free width via SetThreshText; the returned widths
+            -- feed the remaining-mode overlap packing below (in place of a live,
+            -- per-second GetStringWidth that would make the packing shift too).
+            local threshW3, threshW2, threshWr = 0, 0, 0
             if p.showPlusThreeTimer then
                 SetFS(f._threshFS, plusThreeSize)
                 ApplyShadow(f._threshFS)
                 f._threshFS:SetTextColor(1, 1, 1)
                 local c1r, c1g, c1b = GetTimerSegmentTextColor(p, 1)
-                f._threshFS:SetText(buildLabel(plusThreeT, { r = c1r, g = c1g, b = c1b }))
+                threshW3 = SetThreshText(f._threshFS, buildLabel(plusThreeT, { r = c1r, g = c1g, b = c1b }))
             end
             if p.showPlusTwoTimer then
                 SetFS(f._threshFS2, plusTwoSize)
                 ApplyShadow(f._threshFS2)
                 f._threshFS2:SetTextColor(1, 1, 1)
                 local c2r, c2g, c2b = GetTimerSegmentTextColor(p, 2)
-                f._threshFS2:SetText(buildLabel(plusTwoT, { r = c2r, g = c2g, b = c2b }))
+                threshW2 = SetThreshText(f._threshFS2, buildLabel(plusTwoT, { r = c2r, g = c2g, b = c2b }))
             end
             if showRem then
                 SetFS(f._threshRemFS, plusOneSize)
@@ -1551,7 +1777,7 @@ local function RenderStandalone()
                 else
                     f._threshRemFS:SetTextColor(tR, tG, tB)
                 end
-                f._threshRemFS:SetText(FormatRemaining(maxTime - elapsed))
+                threshWr = SetThreshText(f._threshRemFS, FormatRemaining(maxTime - elapsed))
             end
 
             if not showRem then
@@ -1593,23 +1819,25 @@ local function RenderStandalone()
                 -- +2/+3 texts prefer their tick centers but are nudged left as
                 -- needed so none of the three ever overlap. Packed right to
                 -- left with a small gap, clamped to the bar's left edge.
-                local GAP = 2
+                local GAP = 0
                 local barW = _barW_for_thresh
                 -- Visible set, left to right (plusThree < plusTwo < bar end).
                 local entries = {}
                 if p.showPlusThreeTimer then
-                    entries[#entries + 1] = { fs = f._threshFS, w = f._threshFS:GetStringWidth() or 0,
+                    entries[#entries + 1] = { fs = f._threshFS, w = threshW3,
                         center = barW * (plusThreeT / maxTime) }
                 else
                     f._threshFS:Hide()
                 end
                 if p.showPlusTwoTimer then
-                    entries[#entries + 1] = { fs = f._threshFS2, w = f._threshFS2:GetStringWidth() or 0,
+                    entries[#entries + 1] = { fs = f._threshFS2, w = threshW2,
                         center = barW * (plusTwoT / maxTime) }
                 else
                     f._threshFS2:Hide()
                 end
-                local remW = f._threshRemFS:GetStringWidth() or 0
+                -- Use the pinned width (not a live GetStringWidth) so the right-edge
+                -- pin and the overlap packing stay put as the seconds tick.
+                local remW = threshWr
                 entries[#entries + 1] = { fs = f._threshRemFS, w = remW,
                     center = barW - remW / 2, pinRight = true }
 
@@ -1746,6 +1974,7 @@ local function RenderStandalone()
 
             if not f._enemyBarText then
                 f._enemyBarText = f:CreateFontString(nil, "OVERLAY")
+                f._enemyBarText:SetParent(f._emtTextLayer)
                 f._enemyBarText:SetWordWrap(false)
             end
             if pctPos == "BAR" then
@@ -1834,8 +2063,11 @@ local function RenderStandalone()
             .. "|" .. (_fPath or "") .. "|" .. (_fFlags or "")
         if f._timerFS._lastLen ~= _mainKey then
             f._timerFS._lastLen = _mainKey
-            -- Measure with worst-case digits so SetWidth never clips the live text.
-            local templ = (timerText or ""):gsub("%d", "9")
+            -- Worst-case template using the WIDEST digit in the CURRENT font, not a
+            -- hardcoded "9": decorative / oldstyle numeral fonts can make another
+            -- digit (e.g. "0" or "3") wider than "9", so a "9" template under-measures
+            -- and the live clock (e.g. "33:00") gets ellipsized. Once per key change.
+            local templ = (timerText or ""):gsub("%d", WidestDigitChar(f._timerFS))
             f._timerFS:SetText(templ)
             -- Keep the SetTextDiff cache in sync with what we just wrote
             -- directly. Otherwise the cache still reflects the previous
@@ -1843,10 +2075,47 @@ local function RenderStandalone()
             -- the "99:99" template stays visible (bug seen during the
             -- 10-second pre-start window where elapsed stays at 0).
             f._timerFS._lastText = templ
+            -- Clear any previously pinned width BEFORE measuring. With wrap off,
+            -- GetStringWidth() returns a value CLAMPED to the current width whenever
+            -- the text is being truncated -- so if the box needs to GROW (bigger
+            -- timer font, a heavier font finishing load, or the clock gaining a
+            -- character in overtime, e.g. "-00:01"), measuring against the old,
+            -- narrower pinned width yields a too-small result that then stays
+            -- truncated for the rest of the run. Matches the objective-row pattern
+            -- (SetWidth(0) before GetStringWidth) used later in this file.
+            f._timerFS:SetWidth(0)
             -- +3px safety margin: subpixel rounding at fractional UI scales can
             -- otherwise clip the rightmost glyph and force a wrap.
             f._timerFS:SetWidth((f._timerFS:GetStringWidth() or 0) + 3)
             SetTextDiff(f._timerFS, timerText)
+        end
+
+        -- Optional "+key  |" prefix to the left of the timer clock. keyExtra is the
+        -- horizontal room it needs on the left; the timer group is shifted right by
+        -- keyExtra (LEFT align) or keyExtra/2 (CENTER) so the whole "+21 | timer"
+        -- block stays aligned, and is left untouched (flush right, growing left) for
+        -- RIGHT align. Single-anchored with no explicit width, so it never truncates.
+        local keyExtra, keySpacing = 0, 0
+        if keyLevelOnTimer then
+            SetTimerFS(f._keyLevelFS, _timerSz)
+            ApplyShadow(f._keyLevelFS)
+            -- Title identity color (accent / custom / white) so it does not turn red
+            -- alongside the timer on depletion.
+            local klR, klG, klB
+            if p.titleUseAccent ~= false then
+                klR, klG, klB = aR, aG, aB
+            elseif p.titleColor then
+                klR, klG, klB = p.titleColor.r or 1, p.titleColor.g or 1, p.titleColor.b or 1
+            else
+                klR, klG, klB = 1, 1, 1
+            end
+            f._keyLevelFS:SetTextColor(klR, klG, klB)
+            f._keyLevelFS:SetJustifyH("LEFT")
+            f._keyLevelFS:SetWidth(0)
+            -- "||" renders as a single literal pipe ("|" is WoW's escape introducer).
+            SetTextDiff(f._keyLevelFS, format("+%d  ||", run.level))
+            keySpacing = p.keyLevelTimerSpacing or 8
+            keyExtra = (f._keyLevelFS:GetStringWidth() or 0) + keySpacing
         end
 
         if timerDetailText then
@@ -1872,8 +2141,12 @@ local function RenderStandalone()
                 .. "|" .. (_detPath or "") .. "|" .. (_detFlags or "")
             if f._timerDetailFS._lastKey ~= _detKey then
                 f._timerDetailFS._lastKey = _detKey
-                local templ = timerDetailText:gsub("%d", "9")
+                local templ = timerDetailText:gsub("%d", WidestDigitChar(f._timerDetailFS))
                 f._timerDetailFS:SetText(templ)
+                -- Clear the pinned width first so GetStringWidth returns the true
+                -- unbounded width, not one clamped to a previous, narrower pin (see
+                -- the main-timer measurement above for the full explanation).
+                f._timerDetailFS:SetWidth(0)
                 f._timerDetailFS:SetWidth((f._timerDetailFS:GetStringWidth() or 0) + 3)
                 f._timerDetailFS:SetText(timerDetailText)
             end
@@ -1885,22 +2158,40 @@ local function RenderStandalone()
                 f._timerFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + ALIGN_PAD), y)
                 f._timerDetailFS:SetPoint("BOTTOMRIGHT", f._timerFS, "BOTTOMLEFT", -gap, 4)
             elseif timerAlign == "LEFT" then
-                f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD, y)
+                f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD + keyExtra, y)
                 f._timerDetailFS:SetPoint("BOTTOMLEFT", f._timerFS, "BOTTOMRIGHT", gap, 4)
             else
-                f._timerFS:SetPoint("TOP", f, "TOP", -(detailW + gap) / 2, y)
+                f._timerFS:SetPoint("TOP", f, "TOP", -(detailW + gap) / 2 + keyExtra / 2, y)
                 f._timerDetailFS:SetPoint("BOTTOMLEFT", f._timerFS, "BOTTOMRIGHT", gap, 4)
             end
             f._timerDetailFS:Show()
+            -- Key prefix sits left of the leftmost timer element (the detail, when
+            -- it is on the left for RIGHT align; otherwise the main clock).
+            if keyLevelOnTimer then
+                local leftmost = (timerAlign == "RIGHT") and f._timerDetailFS or f._timerFS
+                f._keyLevelFS:ClearAllPoints()
+                f._keyLevelFS:SetPoint("BOTTOMRIGHT", leftmost, "BOTTOMLEFT", -keySpacing, 0)
+                f._keyLevelFS:Show()
+            else
+                f._keyLevelFS:Hide()
+            end
         else
             if timerAlign == "RIGHT" then
                 f._timerFS:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + ALIGN_PAD), y)
             elseif timerAlign == "LEFT" then
-                f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD, y)
+                f._timerFS:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ALIGN_PAD + keyExtra, y)
             else
-                f._timerFS:SetPoint("TOP", f, "TOP", 0, y)
+                f._timerFS:SetPoint("TOP", f, "TOP", keyExtra / 2, y)
             end
             f._timerDetailFS:Hide()
+            -- Key prefix immediately left of the clock, separated by the spacing.
+            if keyLevelOnTimer then
+                f._keyLevelFS:ClearAllPoints()
+                f._keyLevelFS:SetPoint("BOTTOMRIGHT", f._timerFS, "BOTTOMLEFT", -keySpacing, 0)
+                f._keyLevelFS:Show()
+            else
+                f._keyLevelFS:Hide()
+            end
         end
 
         f._timerFS:Show()
@@ -1910,6 +2201,9 @@ local function RenderStandalone()
     else
         f._timerFS:Hide()
         f._timerDetailFS:Hide()
+        -- In-bar mode: the key level is folded into the bar text (below), so the
+        -- standalone prefix string is not used.
+        f._keyLevelFS:Hide()
     end
 
     if titleAffixBelowTimer then
@@ -2064,6 +2358,7 @@ local function RenderStandalone()
         if p.timerInBar then
             if not f._barTimerFS then
                 f._barTimerFS = f:CreateFontString(nil, "OVERLAY")
+                f._barTimerFS:SetParent(f._emtTextLayer)
                 f._barTimerFS:SetWordWrap(false)
             end
             SetTimerFS(f._barTimerFS, 12)
@@ -2077,6 +2372,11 @@ local function RenderStandalone()
             local barTimerText = timerText
             if timerDetailText then
                 barTimerText = timerText .. timerDetailText
+            end
+            -- In-bar mode folds the "+key  |" prefix inline (the pixel Spacing
+            -- slider only applies to the standalone, non-in-bar clock).
+            if keyLevelOnTimer then
+                barTimerText = format("+%d  ||  ", run.level) .. barTimerText
             end
             SetTextDiff(f._barTimerFS, barTimerText)
             f._barTimerFS:ClearAllPoints()
@@ -2251,6 +2551,7 @@ local function RenderStandalone()
         f._previewFS:Hide()
     end
 
+    ns.ApplyBorder()
     f:Show()
 end
 

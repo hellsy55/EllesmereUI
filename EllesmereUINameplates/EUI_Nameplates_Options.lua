@@ -19,7 +19,7 @@ local PAGE_DISPLAY   = "Display"
 local PAGE_COLORS    = "Colors"
 
 local SECTION_FRIENDLY  = "OTHER NAMEPLATES"
-local SECTION_ENEMY_NP  = "ENEMY NAMEPLATE SPACING"
+local SECTION_ENEMY_NP  = "NAMEPLATE SPACING"
 local SECTION_MISC      = "EXTRAS"
 local SECTION_AURA      = "EXTRA AURA OPTIONS"
 
@@ -189,7 +189,6 @@ initFrame:SetScript("OnEvent", function(self)
     local activePreview
     local _displayHeaderBuilder   -- stored for page cache re-use
     local _colorPreviewRefreshAll -- refresh all color preview bars on cache restore
-    local _colorPreviewRandomizeAll -- randomize all color preview fills/icons on tab switch
     local RefreshCoreEyes          -- forward-declared; defined in BuildDisplayPage
     local _previewHintFS                 -- the hint FontString
     local _headerBaseH = 0               -- header height WITHOUT hint (for cache restore)
@@ -1251,17 +1250,10 @@ initFrame:SetScript("OnEvent", function(self)
                     hpNumber:SetPoint(point, health, anchor, xOff, yOff)
                     hpNumber:SetTextColor(cr, cg, cb, 1)
                     hpNumber:Show()
-                elseif element == "healthPctNum" then
+                elseif ns.IsComboHealthText(element) then
                     SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetParent(healthTextFrame)
-                    hpText:SetText((dec and pctStrDec or pctStr) .. " | " .. hpNumStr)
-                    hpText:SetPoint(point, health, anchor, xOff, yOff)
-                    hpText:SetTextColor(cr, cg, cb, 1)
-                    hpText:Show()
-                elseif element == "healthNumPct" then
-                    SetPVFont(hpText, fontPath, fontSize, npOutline)
-                    hpText:SetParent(healthTextFrame)
-                    hpText:SetText(hpNumStr .. " | " .. (dec and pctStrDec or pctStr))
+                    ns.SetCombinedHealthText(hpText, element, dec and pctStrDec or pctStr, hpNumStr)
                     hpText:SetPoint(point, health, anchor, xOff, yOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
@@ -1302,16 +1294,9 @@ initFrame:SetScript("OnEvent", function(self)
                     hpNumber:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
                     hpNumber:SetTextColor(cr, cg, cb, 1)
                     hpNumber:Show()
-                elseif element == "healthPctNum" then
+                elseif ns.IsComboHealthText(element) then
                     SetPVFont(hpText, fontPath, fontSize, npOutline)
-                    hpText:SetText((dec and pctStrDec or pctStr) .. " | " .. hpNumStr)
-                    hpText:SetParent(topTextFrame)
-                    hpText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
-                    hpText:SetTextColor(cr, cg, cb, 1)
-                    hpText:Show()
-                elseif element == "healthNumPct" then
-                    SetPVFont(hpText, fontPath, fontSize, npOutline)
-                    hpText:SetText(hpNumStr .. " | " .. (dec and pctStrDec or pctStr))
+                    ns.SetCombinedHealthText(hpText, element, dec and pctStrDec or pctStr, hpNumStr)
                     hpText:SetParent(topTextFrame)
                     hpText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
@@ -2702,14 +2687,12 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_ENEMY_NP, y);  y = y - h
 
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Enable Stacking Nameplates",
-              getValue=function() return DBVal("stackingEnabled") ~= false end,
-              setValue=function(v)
-                DB().stackingEnabled = v
-                ns.RefreshStackingMotion()
-              end,
-              tooltip="When enabled, nameplates stack vertically instead of overlapping." },
+        local stackingRow
+        stackingRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Stacking Nameplates",
+              values={ __placeholder = "..." }, order={ "__placeholder" },
+              getValue=function() return "__placeholder" end,
+              setValue=function() end },
             { type="slider", text="Stacked Nameplate Spacing",
               trackWidth=130,
               min=50, max=200, step=5,
@@ -2719,6 +2702,40 @@ initFrame:SetScript("OnEvent", function(self)
                 ns.RefreshStackingBounds()
               end,
               tooltip="Adjusts the vertical spacing between stacked nameplates. 100% = default, lower = tighter, higher = more spread." });  y = y - h
+
+        -- Replace the placeholder dropdown with a multi-select checkbox dropdown.
+        -- Enemy and Friendly stacking are independent toggles over the Midnight
+        -- stacking bitfield. Friendly is locked out while EUI is not managing
+        -- friendly player nameplates, since Blizzard owns that stacking bit then.
+        do
+            local leftRgn = stackingRow._leftRegion
+            if leftRgn._control then leftRgn._control:Hide() end
+            local stackItems = {
+                { key = "enemy",    label = "Enemy Nameplates" },
+                { key = "friendly", label = "Friendly Nameplates",
+                  lockedFn = function() return DBVal("showFriendlyPlayers") == false end },
+            }
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                leftRgn, 170, leftRgn:GetFrameLevel() + 2,
+                stackItems,
+                function(k)
+                    if k == "enemy" then return DBVal("stackingEnabled") ~= false end
+                    if k == "friendly" then return DBVal("stackingFriendly") == true end
+                    return false
+                end,
+                function(k, v)
+                    if k == "enemy" then DB().stackingEnabled = v
+                    elseif k == "friendly" then DB().stackingFriendly = v end
+                    ns.RefreshStackingMotion()
+                end)
+            PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+            leftRgn._control = cbDD
+            cbDD:HookScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(cbDD, "Choose which nameplates stack vertically instead of overlapping.")
+            end)
+            cbDD:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
 
         local hitboxRow
         hitboxRow, h = W:DualRow(parent, y,
@@ -3593,7 +3610,6 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Display page  (preview in content header + settings in scroll area)
     ---------------------------------------------------------------------------
-    local _updatePreviewHooked = false
     local LazyColorPreviewBar -- forward declaration; defined after MakeColorPreviewBar
 
     local function BuildDisplayPage(pageName, parent, yOffset)
@@ -3654,19 +3670,6 @@ initFrame:SetScript("OnEvent", function(self)
             return _headerBaseH + (hintShown and 29 or 0)
         end
         EllesmereUI:SetContentHeader(_displayHeaderBuilder)
-
-        -- Hook UpdatePreview so every widget setValue callback that calls it
-        -- automatically triggers drift detection (auto-creates "Custom" when editing a built-in).
-        -- Only hook once: the original UpdatePreview is a simple wrapper around activePreview:Update().
-        -- After hooking, subsequent BuildDisplayPage calls reuse the already-hooked version.
-        if not _updatePreviewHooked then
-            _updatePreviewHooked = true
-            local _origUpdatePreview = UpdatePreview
-            UpdatePreview = function()
-                _origUpdatePreview()
-                if onPresetSettingChanged then onPresetSettingChanged() end
-            end
-        end
 
         -- Enable per-row center divider for the dual-column layout
         parent._showRowDivider = true
@@ -3755,6 +3758,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 plate:UpdateRaidIcon()
                 plate:UpdateClassification()
+                if ns.ApplySlotStrata then ns.ApplySlotStrata(plate) end
             end
             UpdatePreview()
             EllesmereUI:RefreshPage()
@@ -4662,6 +4666,35 @@ initFrame:SetScript("OnEvent", function(self)
                 pf._tToggle = tToggle
                 pf._toggleSnap = tToggleSnap
 
+                -- Optional "Raise Strata" toggle row (own row, below Grow /
+                -- Cropped Icons / Wrap so it can coexist with any of them on a
+                -- Core Position slot). Wired via pf._rsGet / pf._rsSet.
+                local rsLabel = MakeFont(pf, 12, nil, 1, 1, 1)
+                rsLabel:SetAlpha(0.6)
+                rsLabel:SetText(EllesmereUI.L("Raise Strata"))
+                rsLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, G_ROW_Y - GROWTH_ROW_H / 2)
+                rsLabel:Hide()
+                pf._rsLabel = rsLabel
+                -- Invisible hover region over the label for its tooltip.
+                local rsHover = CreateFrame("Frame", nil, pf)
+                rsHover:SetFrameLevel(pf:GetFrameLevel() + 10)
+                rsHover:SetAllPoints(rsLabel)
+                rsHover:EnableMouse(true)
+                rsHover:Hide()
+                rsHover:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Renders this slot's element above the rest of the nameplate."), { width = 230 })
+                end)
+                rsHover:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                pf._rsHover = rsHover
+                local rsToggle, _, rsToggleSnap = EllesmereUI.BuildToggleControl(pf, pf:GetFrameLevel() + 5,
+                    function() return pf._rsGet and pf._rsGet() or false end,
+                    function(v) if pf._rsSet then pf._rsSet(v) end end,
+                    { sizeRatio = 0.8, noAnim = true })
+                rsToggle:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, G_ROW_Y - GROWTH_ROW_H / 2)
+                rsToggle:Hide()
+                pf._rsToggle = rsToggle
+                pf._rsToggleSnap = rsToggleSnap
+
                 -- Optional "Cropped Icons" toggle row. Unlike the generic toggle
                 -- above, this gets its OWN row below the data/grow rows so it can
                 -- coexist with the Grow row on aura slots. Wired via
@@ -4758,7 +4791,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Wire getters/setters
             cogPopup._xGet = opts.xGet; cogPopup._xSet = opts.xSet
             cogPopup._yGet = opts.yGet; cogPopup._ySet = opts.ySet
-            cogPopup._titleFS:SetText(opts.title)
+            cogPopup._titleFS:SetText(EllesmereUI.L(opts.title))
             cogPopupOwner = anchorBtn
 
             -- Show/hide size row and adjust height
@@ -4769,6 +4802,7 @@ initFrame:SetScript("OnEvent", function(self)
             local hasToggle = opts.toggleGet ~= nil
             local hasCrop = opts.cropGet ~= nil
             local hasWrap = opts.wrapGet ~= nil
+            local hasRaiseStrata = opts.raiseStrataGet ~= nil
             if hasSize then
                 -- Rebuild size slider if range changed
                 local sStep = opts.sizeStep or 1
@@ -4901,6 +4935,22 @@ initFrame:SetScript("OnEvent", function(self)
                 if cogPopup._wrapHover then cogPopup._wrapHover:Hide() end
             end
 
+            -- Show/hide Raise Strata row (its own row, below all other toggles)
+            if hasRaiseStrata then
+                cogPopup._rsGet = opts.raiseStrataGet
+                cogPopup._rsSet = opts.raiseStrataSet
+                cogPopup._rsLabel:Show()
+                cogPopup._rsToggle:Show()
+                if cogPopup._rsToggleSnap then cogPopup._rsToggleSnap() end
+                if cogPopup._rsHover then cogPopup._rsHover:Show() end
+            else
+                cogPopup._rsGet = nil
+                cogPopup._rsSet = nil
+                cogPopup._rsLabel:Hide()
+                cogPopup._rsToggle:Hide()
+                if cogPopup._rsHover then cogPopup._rsHover:Hide() end
+            end
+
             -- Row order: cogs that pass sizeFirst (core position / core text
             -- position) put Size at the top; everyone else keeps X, Y, Size.
             -- Spacing (when present) follows Size. Grow / toggle always sit in
@@ -4965,6 +5015,19 @@ initFrame:SetScript("OnEvent", function(self)
                 p._wrapLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, wrapY - GRH / 2)
                 p._wrapToggle:ClearAllPoints()
                 p._wrapToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, wrapY - GRH / 2)
+                -- Raise Strata sits in its own row, below Grow/toggle and below
+                -- Cropped Icons when those are present. Core Position cogs never
+                -- use Wrap or Width %, so it never collides with those.
+                if hasRaiseStrata then
+                    local rsRowIndex = #seq + 1
+                    if hasGrowth or hasToggle then rsRowIndex = rsRowIndex + 1 end
+                    if hasCrop or hasWrap then rsRowIndex = rsRowIndex + 1 end
+                    local rsY = rowY(rsRowIndex)
+                    p._rsLabel:ClearAllPoints()
+                    p._rsLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, rsY - GRH / 2)
+                    p._rsToggle:ClearAllPoints()
+                    p._rsToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, rsY - GRH / 2)
+                end
                 -- Width % is the very last row, one below Wrap (and below Grow /
                 -- toggle / Cropped Icons when those are present). It stays a slider
                 -- row, so anchorRow handles its label + track + value box.
@@ -5003,6 +5066,8 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasCrop then h = h + gap + p._GROWTH_ROW_H end
                 -- Wrap occupies its own extra row.
                 if hasWrap then h = h + gap + p._GROWTH_ROW_H end
+                -- Raise Strata occupies its own extra row.
+                if hasRaiseStrata then h = h + gap + p._GROWTH_ROW_H end
                 h = h + p._TOP_PAD
                 cogPopup:SetHeight(h)
             end
@@ -5108,6 +5173,11 @@ initFrame:SetScript("OnEvent", function(self)
                     opts.cropGet = function() return DBVal(cropKey) or defaults[cropKey] end
                     opts.cropSet = function(v) DB()[cropKey] = v; RefreshAllSlots(); UpdatePreview() end
                 end
+                -- Raise Strata: bumps whatever element occupies this slot one
+                -- strata level up so it renders above the rest of the plate.
+                local rsKey = posKey .. "SlotRaiseStrata"
+                opts.raiseStrataGet = function() return DBVal(rsKey) and true or false end
+                opts.raiseStrataSet = function(v) DB()[rsKey] = v and true or false; RefreshAllSlots(); UpdatePreview() end
                 ShowCogPopup(self, opts)
             end)
             EllesmereUI.RegisterWidgetRefresh(function()
@@ -5307,9 +5377,11 @@ initFrame:SetScript("OnEvent", function(self)
             healthNumber         = "Health #",
             healthPctNum         = "Health % | #",
             healthNumPct         = "Health # | %",
+            healthPctNumDash     = "Health % - #",
+            healthNumPctDash     = "Health # - %",
             none                 = "None",
         }
-        local textElementOrder = { "none", "---", "enemyName", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct" }
+        local textElementOrder = { "none", "---", "enemyName", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash" }
 
         local function TextSlotSetValue(slotKey, v)
             SetTextElementAtSlot(slotKey, v)
@@ -5460,7 +5532,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return DBVal("textSlotRight") == "none" end,
               disabledTooltip="This option requires a text to be assigned", rawTooltip=true,
               labelOnlyDisabled=true,
-              disabledValues=function(k) if (k == "healthPctNum" or k == "healthNumPct") and DBVal("textSlotCenter") == "enemyName" then return "Disabled when Enemy Name is centered on the health bar due to overlapping text" end end });  y = y - h
+              disabledValues=function(k) if ns.IsComboHealthText(k) and DBVal("textSlotCenter") == "enemyName" then return "Disabled when Enemy Name is centered on the health bar due to overlapping text" end end });  y = y - h
         MakeTextColorSwatch(textRow1, "_leftRegion",  "textSlotTop")
         MakeTextCogIcon(textRow1, "_leftRegion",  "textSlotTop",   "Top Text")
         MakeTextColorSwatch(textRow1, "_rightRegion", "textSlotRight")
@@ -5475,7 +5547,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return DBVal("textSlotLeft") == "none" end,
               disabledTooltip="This option requires a text to be assigned", rawTooltip=true,
               labelOnlyDisabled=true,
-              disabledValues=function(k) if (k == "healthPctNum" or k == "healthNumPct") and DBVal("textSlotCenter") == "enemyName" then return "Disabled when Enemy Name is centered on the health bar due to overlapping text" end end },
+              disabledValues=function(k) if ns.IsComboHealthText(k) and DBVal("textSlotCenter") == "enemyName" then return "Disabled when Enemy Name is centered on the health bar due to overlapping text" end end },
             { type="dropdown", text="Center Text", values=textElementValues,
               getValue=function() return DBVal("textSlotCenter") end,
               setValue=function(v) TextSlotSetValue("textSlotCenter", v) end,
@@ -6643,7 +6715,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if v == nil then v = defaults.classPowerClassColors end
                       return v and 0.3 or 1
                   end },
-                { tooltip = "Dynamic Colored",
+                { tooltip = "Class Color",
                   disabled = classPowerDisabled,
                   disabledTooltip = "Show Class Resource",
                   getValue = function()
@@ -6795,9 +6867,14 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(swatch, "RIGHT", rgn._control, "LEFT", -12, 0)
             rgn._lastInline = swatch
             EllesmereUI.RegisterWidgetRefresh(function()
+                local off = borderOff()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
                 updateSwatch()
-                swatch:SetAlpha(borderOff() and 0.3 or 1)
             end)
+            local off = borderOff()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
 
             local _, showCog = EllesmereUI.BuildCogPopup({
                 title = "Border Settings",
@@ -6812,12 +6889,12 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -9, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
+            cogBtn:SetAlpha(borderOff() and 0.15 or 0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
             cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
             cogBtn:SetScript("OnEnter", function(self) if not borderOff() then self:SetAlpha(0.7) end end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(borderOff() and 0.15 or 0.4) end)
             cogBtn:SetScript("OnClick", function(self) if not borderOff() then showCog(self) end end)
             EllesmereUI.RegisterWidgetRefresh(function()
                 cogBtn:SetAlpha(borderOff() and 0.15 or 0.4)
@@ -7112,6 +7189,8 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
                 EllesmereUI:RefreshPage()
             end)
+            ccSwatch:SetScript("OnEnter", function() if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(ccSwatch, "Class Color") end end)
+            ccSwatch:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
 
             -- Custom color swatch (to the left of class swatch)
             local stColorGet = function() return DBColor("castTargetColor") end
@@ -7122,6 +7201,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local stSwatch, stUpdate = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, stColorGet, stColorSet, nil, 20)
             PP.Point(stSwatch, "RIGHT", ccSwatch, "LEFT", -9, 0)
+            stSwatch._eabOrigClick = stSwatch:GetScript("OnClick")
             stSwatch:SetScript("OnClick", function(self)
                 local db = DB()
                 local cc = db and db.castTargetClassColor
@@ -7135,6 +7215,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 if self._eabOrigClick then self._eabOrigClick(self) end
             end)
+            stSwatch:SetScript("OnEnter", function() if EllesmereUI.ShowWidgetTooltip then EllesmereUI.ShowWidgetTooltip(stSwatch, "Custom Color") end end)
+            stSwatch:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
 
             EllesmereUI.RegisterWidgetRefresh(function()
                 local db = DB()
@@ -7313,7 +7395,7 @@ initFrame:SetScript("OnEvent", function(self)
             classIcon    = function() return ResolveCoreMapping("classification") end,
             enemyName    = function() return ResolveTextMapping("enemyName") end,
             healthText   = function()
-                local slot = FindTextSlotForElement("healthPercent") or FindTextSlotForElement("healthPercentNoSign") or FindTextSlotForElement("healthNumber") or FindTextSlotForElement("healthPctNum") or FindTextSlotForElement("healthNumPct")
+                local slot = FindTextSlotForElement("healthPercent") or FindTextSlotForElement("healthPercentNoSign") or FindTextSlotForElement("healthNumber") or FindTextSlotForElement("healthPctNum") or FindTextSlotForElement("healthNumPct") or FindTextSlotForElement("healthPctNumDash") or FindTextSlotForElement("healthNumPctDash")
                 if not slot then return { section = coreTextHeader, target = textRow1 } end
                 local info = textSlotToRow[slot]
                 if not info then return { section = coreTextHeader, target = textRow1 } end
@@ -7853,16 +7935,10 @@ initFrame:SetScript("OnEvent", function(self)
                         numFS:SetText(valStr)
                         numFS:SetPoint(slot.anchor, health, slot.anchor, slot.xOff, 0)
                         numFS:Show()
-                    elseif element == "healthPctNum" then
+                    elseif ns.IsComboHealthText(element) then
                         local valStr = tostring(healthVal):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
                         pctFS:SetTextColor(sc.r, sc.g, sc.b, 1)
-                        pctFS:SetText(healthPct .. "% | " .. valStr)
-                        pctFS:SetPoint(slot.anchor, health, slot.anchor, slot.xOff, 0)
-                        pctFS:Show()
-                    elseif element == "healthNumPct" then
-                        local valStr = tostring(healthVal):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-                        pctFS:SetTextColor(sc.r, sc.g, sc.b, 1)
-                        pctFS:SetText(valStr .. " | " .. healthPct .. "%")
+                        ns.SetCombinedHealthText(pctFS, element, healthPct .. "%", valStr)
                         pctFS:SetPoint(slot.anchor, health, slot.anchor, slot.xOff, 0)
                         pctFS:Show()
                     end
@@ -8227,9 +8303,6 @@ initFrame:SetScript("OnEvent", function(self)
         -- No content header on Colors tab (presets are inline in scroll area)
         EllesmereUI:ClearContentHeader()
 
-        -- Clear display preset hook (only active on Display page)
-        onPresetSettingChanged = nil
-
         -- Enable per-row center divider for the dual-column layout (same as Display tab)
         parent._showRowDivider = true
 
@@ -8315,7 +8388,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Neutral & Mini Enemies | Darken Enemies Out of Combat
-        _, h = W:DualRow(parent, y,
+        local neutralMiniRow
+        neutralMiniRow, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Neutral & Mini Enemies",
               swatches = {
                 { tooltip = "Neutral",
@@ -8324,7 +8398,7 @@ initFrame:SetScript("OnEvent", function(self)
                     DB().neutral = { r = r, g = g, b = b }
                     RefreshAllPlates()
                   end },
-                { tooltip = "Mini Enemies (dungeons only)",
+                { tooltip = "Mini Enemies",
                   -- Until explicitly set, views the user's "Enemies" color so the
                   -- swatch starts matching enemyInCombat (see GetReactionColor).
                   getValue = function()
@@ -8350,6 +8424,39 @@ initFrame:SetScript("OnEvent", function(self)
                 end
               end,
               tooltip="Dims enemy nameplate colours while the enemy is out of combat. Turn off to keep enemies at full colour whether or not they are fighting." });  y = y - h
+
+        -- Inline cog on the "Neutral & Mini Enemies" region: "Mini Coloring M+
+        -- Only" toggle. On (default) restricts the Mini Enemies color to 5-man
+        -- dungeons; off applies it everywhere.
+        do
+            local leftRgn = neutralMiniRow._leftRegion
+            local _, miniCogShow = EllesmereUI.BuildCogPopup({
+                title = "Mini Enemies",
+                rows = {
+                    { type="toggle", label="Mini Coloring M+ Only",
+                      get=function()
+                        local v = DBVal("miniColoringMPlusOnly")
+                        if v == nil then return defaults.miniColoringMPlusOnly end
+                        return v
+                      end,
+                      set=function(v)
+                        DB().miniColoringMPlusOnly = v
+                        RefreshAllPlates()
+                      end },
+                },
+            })
+            local miniCogBtn = CreateFrame("Button", nil, leftRgn)
+            miniCogBtn:SetSize(26, 26)
+            miniCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            leftRgn._lastInline = miniCogBtn
+            miniCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            miniCogBtn:SetAlpha(0.4)
+            local miniCogTex = miniCogBtn:CreateTexture(nil, "OVERLAY")
+            miniCogTex:SetAllPoints(); miniCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            miniCogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            miniCogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            miniCogBtn:SetScript("OnClick", function(s) miniCogShow(s) end)
+        end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -9003,7 +9110,6 @@ initFrame:SetScript("OnEvent", function(self)
                 if prev.RefreshHealthText then prev.RefreshHealthText() end
             end
         end
-        _colorPreviewRandomizeAll = nil
         for _, prev in ipairs(_colorPagePreviews) do
             if prev.UpdateColor then
                 EllesmereUI.RegisterWidgetRefresh(prev.UpdateColor)
@@ -9056,8 +9162,6 @@ initFrame:SetScript("OnEvent", function(self)
         end,
         onPageCacheRestore = function(pageName)
             if pageName == PAGE_DISPLAY then
-                -- Restore display preset drift hook (cleared when Colors page builds)
-                onPresetSettingChanged = _displayPresetCheckDrift
                 -- Re-evaluate Set as Default button visibility (cache restore
                 -- blanket-shows all children, which can ghost the button)
                 local pState = EllesmereUI._presetState and EllesmereUI._presetState[""]
@@ -9081,8 +9185,6 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI:SetContentHeaderHeightSilent(_headerBaseH + (dismissed and 0 or 29))
                 end
             elseif pageName == PAGE_COLORS then
-                -- Randomize preview fills/icons when switching TO this tab
-                if _colorPreviewRandomizeAll then _colorPreviewRandomizeAll() end
                 -- Refresh all color preview bars (colors from DB)
                 if _colorPreviewRefreshAll then _colorPreviewRefreshAll() end
             end

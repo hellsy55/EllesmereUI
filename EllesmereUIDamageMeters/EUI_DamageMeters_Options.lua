@@ -383,7 +383,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, hdrRow2:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return EllesmereUI.ResolveActiveAccent()
                 end,
                 function()
                     Set("hdrTextUseAccent", true)
@@ -472,7 +472,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, hdrRow2:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return EllesmereUI.ResolveActiveAccent()
                 end,
                 function()
                     Set("iconColorUseAccent", true)
@@ -545,7 +545,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = EllesmereUI.GetClassColor("PALADIN")
+                        local cc = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,
@@ -584,7 +584,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -603,20 +603,57 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         -- Bar Spacing | Icon Style
-        _, h = W:DualRow(parent, y,
+        local iconRow, h = W:DualRow(parent, y,
             { type="slider", text="Spacing", min = -1, max = 10, step = 1,
-              getValue = function() return Cfg("barSpacing") or 2 end,
-              setValue = function(v) Set("barSpacing", v); Refresh() end },
+            getValue = function() return Cfg("barSpacing") or 2 end,
+            setValue = function(v) Set("barSpacing", v); Refresh() end },
             { type="dropdown", text="Icon Style",
               values = _G._EDM_IconStyleValues or {},
               order  = _G._EDM_IconStyleOrder or {},
               getValue = function() return Cfg("iconStyle") or "spec" end,
-              setValue = function(v) 
-                Set("iconStyle", v)
-                if ns.ApplyIconBorder then ns.ApplyIconBorder() end
-                Refresh()  
-              end })
+              setValue = function(v) Set("iconStyle", v); ApplyIconBrd(); Refresh(); EllesmereUI:RefreshPage() end })
         y = y - h
+
+        -- Inline cog: Icon Zoom (right region, next to "Icon Style")
+        do
+            local rgn = iconRow._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type = "slider", label = "Zoom", min = 0, max = 0.20, step = 0.01,
+                    get = function() return Cfg("classIconZoom") or 0.06 end,
+                    set = function(v) Set("classIconZoom", v); Refresh() end },
+                },
+            })
+            -- Icon Zoom only affects the Spec + Blizzard icon styles; the sprite
+            -- presets are pre-framed art, so grey + block the cog for those (and
+            -- for "None", where there is no icon).
+            local function zoomOff()
+                local s = Cfg("iconStyle") or "spec"
+                return s ~= "spec" and s ~= "blizzard"
+            end
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(zoomOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self)
+                if zoomOff() then
+                    EllesmereUI.ShowWidgetTooltip(self, "Icon Zoom only applies to the Spec and Blizzard icon styles.")
+                else
+                    self:SetAlpha(0.7)
+                end
+            end)
+            cogBtn:SetScript("OnLeave", function(self)
+                EllesmereUI.HideWidgetTooltip()
+                self:SetAlpha(zoomOff() and 0.15 or 0.4)
+            end)
+            cogBtn:SetScript("OnClick", function(self) if not zoomOff() then cogShow(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(zoomOff() and 0.15 or 0.4) end)
+        end
 
         -- Border Style (+ cog) | Border Size (+ inline swatch)
         -- Shadow (Glow rendered behind) needs Show Behind support, which DM lacks,
@@ -655,7 +692,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = bsRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Border Offset",
+                title = "Border Options",
                 rows = {
                     { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
                       get = function()
@@ -697,6 +734,15 @@ initFrame:SetScript("OnEvent", function(self)
                           return dsy
                       end,
                       set = function(v) Set("borderTextureShiftY", v == 0 and nil or v); ApplyBrd() end },
+                    { type = "toggle", label = "Custom Icon Border",
+                      get = function() return Cfg("customIconBorder") or false end,
+                      set = function(v)
+                          Set("customIconBorder", v)
+                          ApplyIconBrd()
+                          -- force=true: the row is added/removed at build time,
+                          -- so the fast refresh path is not enough
+                          EllesmereUI:RefreshPage(true)
+                      end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
@@ -714,12 +760,9 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
             cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
-            local function UpdateCogVis()
-                local tex = Cfg("borderTexture") or "solid"
-                if tex == "solid" then cogBtn:Hide() else cogBtn:Show() end
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
-            UpdateCogVis()
+            -- Always visible: the popup hosts the Custom Icon Border toggle,
+            -- which must stay reachable for the solid style too (the offset
+            -- sliders are harmless no-ops for solid).
         end
         -- Inline color swatch on Border Size (right region)
         do
@@ -739,6 +782,10 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
         end
 
+        -- Icon Border row: shown only while "Custom Icon Border" is enabled
+        -- (the toggle lives in the Border Style inline cog above). The whole
+        -- block is skipped at build time; the toggle's set() rebuilds the page.
+        if Cfg("customIconBorder") then
         local ibsRow
         ibsRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Icon Border Style",
@@ -849,6 +896,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
         end
+        end -- if Cfg("customIconBorder")
 
         -- Show Breakdown on Hover (+ inline cog) | Background (opacity + swatch)
         local bdRow
@@ -1000,19 +1048,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Force English Number Units (K/M/B) | (spacer)
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Force English Units (K/M/B)",
-              tooltip = "Always use K/M/B instead of localized units.",
-              getValue = function() return Cfg("forceEnglishUnits") or false end,
-              setValue = function(v)
-                  Set("forceEnglishUnits", v)
-                  if ns.RebuildNumberFormat then ns.RebuildNumberFormat() end
-                  Refresh()
-              end },
-            { type="spacer" })
-        y = y - h
-
         -- Left Text Size (+ inline custom/class swatches) | Right Text Size (+ inline custom/class swatches)
         local btRow
         btRow, h = W:DualRow(parent, y,
@@ -1152,6 +1187,25 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Force English Number Units (K/M/B) | (spacer)
+        -- CJK clients only: zhCN/zhTW/koKR group numbers by wan/eok, so this
+        -- offers K/M/B instead. Every other locale already gets K/M/B and the
+        -- toggle would be a no-op, so the row is skipped for them.
+        local clientLocale = GetLocale()
+        if clientLocale == "zhCN" or clientLocale == "zhTW" or clientLocale == "koKR" then
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Force English Units (K/M/B)",
+                  tooltip = "Always use K/M/B instead of localized units.",
+                  getValue = function() return Cfg("forceEnglishUnits") or false end,
+                  setValue = function(v)
+                      Set("forceEnglishUnits", v)
+                      if ns.RebuildNumberFormat then ns.RebuildNumberFormat() end
+                      Refresh()
+                  end },
+                { type="spacer" })
+            y = y - h
+        end
+
         -- ── STANDALONE COMBAT TIMER ──────────────────────────────────
         _, h = W:SectionHeader(parent, "STANDALONE COMBAT TIMER", y); y = y - h
 
@@ -1197,7 +1251,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1526,7 +1580,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Class Color",
                     hasAlpha = false,
                     getValue = function()
-                        local cc = EllesmereUI.GetClassColor(select(2, UnitClass("player")))
+                        local cc = EllesmereUI._playerClass and EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                         if cc then return cc.r, cc.g, cc.b end
                         return 0.96, 0.55, 0.73
                     end,
@@ -1565,7 +1619,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                        return EllesmereUI.ResolveActiveAccent()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1619,7 +1673,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, textRow:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    return EllesmereUI.ResolveActiveAccent()
                 end,
                 function()
                     SHDB().textColorUseAccent = true

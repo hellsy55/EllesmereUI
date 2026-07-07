@@ -189,8 +189,10 @@ local DM_DEFAULTS = {
             numberFormat    = 2,
             forceEnglishUnits = false, -- force K/M/B units, ignoring CJK locale's 萬/億 (opt-in; default keeps localized units)
             iconStyle       = "spec",
+            classIconZoom = 0.06,
             iconColorUseAccent = false,
             iconColor       = { r = 1, g = 1, b = 1 },
+            customIconBorder  = false,
             iconBorderTexture = "solid",
             iconBorderSize    = 0,
             iconBorderR = 0, iconBorderG = 0, iconBorderB = 0, iconBorderA = 1,
@@ -482,6 +484,44 @@ local _curViewFrozenDur = 0    -- final Current-session duration, pinned when co
 -- the unit reaches 0 HP, which confirms a real death. UnitIsFeignDeath can remain
 -- true through a feign-then-die transition, so it cannot be used to clear safely.
 local _feignDeathGUIDs = {}
+
+-- Switch a window to a segment (sessionID) or session type (Current/Overall).
+-- Windows with syncSegments enabled switch together as a group.
+-- On ns instead of local: CreateDMWindow is at Lua 5.1's 60-upvalue limit.
+function ns.ApplySegmentSelection(W, sessionType, sessionID)
+    local targets = { W }
+    if WinDB(W.idx).syncSegments then
+        targets = {}
+        for _, w in ipairs(_windows) do
+            if WinDB(w.idx).syncSegments then targets[#targets + 1] = w end
+        end
+    end
+    for _, w in ipairs(targets) do
+        if sessionID then
+            w.curSessionID = sessionID
+        else
+            w.curSession = sessionType
+            WinDB(w.idx).curSession = sessionType
+            w.curSessionID = nil
+        end
+        if w.CloseSource then w.CloseSource() end
+        w.Refresh()
+    end
+end
+
+-- Combat start: switch windows viewing a past segment back to Current
+-- (per-window autoCurrentOnCombat option). Overall windows are not touched.
+function ns.AutoCurrentOnCombat()
+    for _, w in ipairs(_windows) do
+        if w.curSessionID and WinDB(w.idx).autoCurrentOnCombat then
+            w.curSessionID = nil
+            w.curSession = Enum.DamageMeterSessionType.Current
+            WinDB(w.idx).curSession = Enum.DamageMeterSessionType.Current
+            if w.CloseSource then w.CloseSource() end
+            w.Refresh()
+        end
+    end
+end
 
 -- Single source of truth for the "Current" session timer (window AND standalone
 -- both read this). While combat is live it returns the live session duration
@@ -1105,9 +1145,16 @@ local ICON_STYLE_ORDER = {
 _G._EDM_IconStyleValues = ICON_STYLE_VALUES
 _G._EDM_IconStyleOrder  = ICON_STYLE_ORDER
 
+local function ZoomCoords(u1, u2, v1, v2, z)
+    local du = (u2 - u1) * z
+    local dv = (v2 - v1) * z
+    return u1 + du, u2 - du, v1 + dv, v2 - dv
+end
+
 local function ResolveIcon(src, iconTex, barH)
     local cfg = DB()
     local style = cfg.iconStyle or "spec"
+    local zoom = cfg.classIconZoom or 0.06
     if style == "none" then iconTex:Hide(); return 0 end
 
     local classFile = src.classFilename
@@ -1117,7 +1164,7 @@ local function ResolveIcon(src, iconTex, barH)
         local specIcon = src.specIconID
         if specIcon and type(specIcon) == "number" and specIcon ~= 0 then
             iconTex:SetTexture(specIcon)
-            iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            iconTex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
             iconTex:SetSize(barH, barH)
             iconTex:SetDesaturated(false)
             iconTex:SetVertexColor(1, 1, 1, 1)
@@ -1126,15 +1173,25 @@ local function ResolveIcon(src, iconTex, barH)
         end
         iconTex:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
         local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
-        if coords then iconTex:SetTexCoord(unpack(coords)) else iconTex:SetTexCoord(0, 1, 0, 1) end
+        if coords then
+            iconTex:SetTexCoord(ZoomCoords(coords[1], coords[2], coords[3], coords[4], zoom))
+        else
+            iconTex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
+        end
     elseif style == "blizzard" then
         iconTex:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
         local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classFile]
-        if coords then iconTex:SetTexCoord(unpack(coords)) else iconTex:SetTexCoord(0, 1, 0, 1) end
+        if coords then
+            iconTex:SetTexCoord(ZoomCoords(coords[1], coords[2], coords[3], coords[4], zoom))
+        else
+            iconTex:SetTexCoord(zoom, 1 - zoom, zoom, 1 - zoom)
+        end
     else
         local coords = CLASS_SPRITE_COORDS[classFile]
         if coords then
             iconTex:SetTexture(CLASS_ICON_SPRITE_TEX[style] or (CLASS_ICON_SPRITE_BASE .. style .. ".tga"))
+            -- Sprite presets are pre-framed art; Icon Zoom does NOT apply to them
+            -- (the options cog is disabled for these styles). Use raw coords.
             iconTex:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
         else
             iconTex:Hide(); return 0
@@ -1981,7 +2038,8 @@ local function CreateDMWindow(winIdx)
         bar.fill:SetMinMaxValues(0, 1); bar.fill:SetValue(0); bar.fill:SetStatusBarTexture(BAR_TEX)
         bar.classIcon = bar.fill:CreateTexture(nil, "OVERLAY")
         bar.classIcon:SetSize(18, 18); bar.classIcon:SetPoint("LEFT", bar.row, "LEFT", 0, 0)
-        bar.classIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92); bar.classIcon:Hide()
+        local _cz = DB().classIconZoom or 0.06
+        bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:Hide()
         -- Per-bar border (lazy-created, only when borderSize > 0)
         function bar.ApplyBorder()
             local c = DB()
@@ -2007,16 +2065,19 @@ local function CreateDMWindow(winIdx)
             local c = DB()
             local sz = c.iconBorderSize or 0
             local showIcon = (c.iconStyle or "spec") ~= "none"
-            if sz <= 0 or not showIcon then
+            if not c.customIconBorder or sz <= 0 or not showIcon then
                 if bar._iconBorderFrame then bar._iconBorderFrame:Hide() end
                 return
             end
             if not bar._iconBorderFrame then
                 bar._iconBorderFrame = CreateFrame("Frame", nil, bar.row)
                 bar._iconBorderFrame:SetFrameLevel(bar.row:GetFrameLevel() + 6)
-                bar._iconBorderFrame:SetAllPoints(bar.classIcon) -- folgt Icon-Größe/Position automatisch
+                bar._iconBorderFrame:SetAllPoints(bar.classIcon) -- tracks icon size/position
             end
-            bar._iconBorderFrame:Show()
+            -- Follow the icon's actual shown state: ResolveIcon hides the icon
+            -- for sources without a usable class (secret/NPC rows), and a frame
+            -- anchored to a hidden texture would still render a floating border.
+            bar._iconBorderFrame:SetShown(bar.classIcon:IsShown())
             local tex = c.iconBorderTexture or "solid"
             EllesmereUI.ApplyBorderStyle(bar._iconBorderFrame, sz,
                 c.iconBorderR or 0, c.iconBorderG or 0, c.iconBorderB or 0, c.iconBorderA or 1,
@@ -2362,6 +2423,16 @@ local function CreateDMWindow(winIdx)
               isActive = wdb.autoSwapMythic, onClick = function()
                 wdb.autoSwapMythic = not wdb.autoSwapMythic
             end },
+            { text = L("Auto Current on Combat"),
+              tooltip = L("Entering combat switches this window back to Current if viewing a past segment"),
+              isActive = wdb.autoCurrentOnCombat, onClick = function()
+                wdb.autoCurrentOnCombat = not wdb.autoCurrentOnCombat
+            end },
+            { text = L("Sync Segment Selection"),
+              tooltip = L("Selecting a segment switches all synced windows to it"),
+              isActive = wdb.syncSegments, onClick = function()
+                wdb.syncSegments = not wdb.syncSegments
+            end },
             { text = L("Default on M+ Start"),
               tooltip = L("Set your window to this Meter Type on dungeon start"),
               children = mStartChildren },
@@ -2386,7 +2457,7 @@ local function CreateDMWindow(winIdx)
                     items[#items + 1] = {
                         text = segName, timerText = segTime, compact = true,
                         isActive = (W.curSessionID == s.sessionID),
-                        onClick = function() W.curSessionID = s.sessionID; W.CloseSource(); W.Refresh() end,
+                        onClick = function() ns.ApplySegmentSelection(W, nil, s.sessionID) end,
                     }
                 end
             end
@@ -2397,7 +2468,7 @@ local function CreateDMWindow(winIdx)
             items[#items + 1] = {
                 text = L(SESSION_TYPE_NAMES[sType] or "Unknown"),
                 isActive = (not W.curSessionID and sType == W.curSession),
-                onClick = function() W.curSession = sType; wdb.curSession = sType; W.curSessionID = nil; W.CloseSource(); W.Refresh() end,
+                onClick = function() ns.ApplySegmentSelection(W, sType, nil) end,
             }
         end
         ShowEDMMenu(items, W.segmentBtn)
@@ -3195,7 +3266,7 @@ local function CreateDMWindow(winIdx)
         local showIcon = (c.iconStyle or "spec") ~= "none"; local showClassColor = c.showClassColor ~= false
         local texPath, texKey = GetBarTexturePath()
         -- Layout cache: only rebuild on settings change
-        local stickyCacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. tostring(showIcon) .. "|" .. tostring(showClassColor) .. "|" .. barH
+        local stickyCacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. tostring(showIcon) .. "|" .. tostring(showClassColor) .. "|" .. barH .. "|" .. tostring(c.classIconZoom)
         if stickyCacheKey ~= W._stickyCacheKey then
             W._stickyCacheKey = stickyCacheKey
             bar.row:SetHeight(barH)
@@ -3213,6 +3284,7 @@ local function CreateDMWindow(winIdx)
             W._stickyClassCache = classFile
             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
             if not showIcon then bar.classIcon:Hide() end
+            if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
             if showClassColor then
@@ -3315,7 +3387,7 @@ local function CreateDMWindow(winIdx)
             count = math.min(#sources, BAR_POOL_SIZE)
             -- Cache key: detects settings changes that require full bar rebuild
             local iconStyle = c.iconStyle or "spec"
-            local cacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. iconStyle .. "|" .. tostring(showClassColor) .. "|" .. tostring(c.barColorUseAccent) .. "|" .. barH .. "|" .. barSp .. "|" .. tostring(c.hideNumbers) .. "|" .. tostring(c.leftTextUseClassColor) .. "|" .. tostring(c.rightTextUseClassColor) .. "|" .. tostring(c.barFillAlpha)
+            local cacheKey = leftFS .. "|" .. rightFS .. "|" .. texPath .. "|" .. iconStyle .. "|" .. tostring(showClassColor) .. "|" .. tostring(c.barColorUseAccent) .. "|" .. barH .. "|" .. barSp .. "|" .. tostring(c.hideNumbers) .. "|" .. tostring(c.leftTextUseClassColor) .. "|" .. tostring(c.rightTextUseClassColor) .. "|" .. tostring(c.barFillAlpha) .. "|" .. tostring(c.classIconZoom)
             local fullRebuild = (cacheKey ~= W._barCacheKey)
             if fullRebuild then W._barCacheKey = cacheKey end
 
@@ -3364,6 +3436,7 @@ local function CreateDMWindow(winIdx)
                             bar._cachedClass = classFile
                             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
                             if not showIcon then bar.classIcon:Hide() end
+                            if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
                             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
                             bar._cachedColorClass = nil
@@ -3585,7 +3658,8 @@ local function CreateDMWindow(winIdx)
                         spIcon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spID)
                     end
                     if not spIcon then spIcon = 135274 end
-                    bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(0.065, 0.935, 0.065, 0.935); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
+                    local _cz = DB().classIconZoom or 0.06
+                    bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
                     bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                     bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
                     -- Fill = HP% remaining at this event
@@ -3733,7 +3807,8 @@ local function CreateDMWindow(winIdx)
                 local iconOffset = 0
                 if spell.spellID then
                     local spIcon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spell.spellID)
-                    if spIcon then bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(0.065, 0.935, 0.065, 0.935); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
+                    local _cz = DB().classIconZoom or 0.06
+                    if spIcon then bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
                     else bar.classIcon:Hide() end
                 else bar.classIcon:Hide() end
                 bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
@@ -4674,6 +4749,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         _regenTimestamp = 0
         _needsFinalRefresh = false
         if not _sharedTicker then StartSharedTicker() end
+        ns.AutoCurrentOnCombat()
         for _, w in ipairs(_windows) do
             w._barCacheKey = nil
             w._barSources = nil
@@ -4725,6 +4801,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         _ttLastGUID = nil
         if _targetsCache then wipe(_targetsCache) end
         StartSharedTicker()
+        ns.AutoCurrentOnCombat()
         ns.ProfEnd("Combat:REGEN_DISABLED", t0)
     else
         local t0 = ns.ProfBegin("Combat:REGEN_ENABLED")

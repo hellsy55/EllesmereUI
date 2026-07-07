@@ -153,7 +153,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Build the sort menu
         local MH = 26       -- row height
         local DH = 16       -- divider height
-        local EG = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
+        local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
 
         local menuFrame = CreateFrame("Frame", nil, UIParent)
         menuFrame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1331,8 +1331,8 @@ initFrame:SetScript("OnEvent", function(self)
         local absorbBarRow
         absorbBarRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Absorb Bar",
-              values={ none="None", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left" },
-              order={ "none", "aboveRight", "aboveLeft", "topRight", "topLeft" },
+              values={ none="None", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", rightVertical="Right Edge (Vertical)", leftVertical="Left Edge (Vertical)" },
+              order={ "none", "aboveRight", "aboveLeft", "topRight", "topLeft", "rightVertical", "leftVertical" },
               getValue=function() return CurAbsorbBarPos() end,
               setValue=function(v)
                   SWrite("absorbBarEnabled", v ~= "none")  -- keep legacy flag in sync
@@ -1344,6 +1344,56 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Absorb Bar",
               getValue=function() return SVal("absorbBarHeight", 4) end,
               setValue=function(v) SSet("absorbBarHeight", v) end });  y = y - h
+        -- Inline cog: vertical grow direction (shared by both strip bars)
+        do
+            local rgn = absorbBarRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Absorb Bar Rendering",
+                rows = {
+                    { type="dropdown", label="Vertical Grow",
+                      values = { up = "Up", down = "Down" },
+                      order = { "up", "down" },
+                      disabled = function()
+                          local p = CurAbsorbBarPos()
+                          return p ~= "rightVertical" and p ~= "leftVertical"
+                      end,
+                      disabledTooltip = "Only affects the vertical (Right/Left Edge) positions",
+                      rawTooltip = true,
+                      get=function() return SVal("absorbBarGrowDir", "up") end,
+                      set=function(v) SSet("absorbBarGrowDir", v) end },
+                },
+            })
+            -- Grey + block the cog whenever the bar isn't on a vertical position
+            -- (its only setting, Vertical Grow, has no effect otherwise).
+            local function cogOff()
+                local p = CurAbsorbBarPos()
+                return p ~= "rightVertical" and p ~= "leftVertical"
+            end
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(cogOff() and 0.15 or 0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) if not cogOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(cogOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) if not cogOff() then cogShow(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(cogOff() and 0.15 or 0.4) end)
+        end
+        -- The size slider reads as width for the vertical positions; retitle live.
+        do
+            local lbl = absorbBarRow._rightRegion._label
+            local function UpdateAbsorbBarSizeLabel()
+                local p = CurAbsorbBarPos()
+                local vertical = p == "rightVertical" or p == "leftVertical"
+                lbl:SetText(EllesmereUI.L(vertical and "Bar Width" or "Bar Height"))
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateAbsorbBarSizeLabel)
+            UpdateAbsorbBarSizeLabel()
+        end
         -- Inline color swatch for the absorb bar color
         do
             local rgn = absorbBarRow._rightRegion
@@ -1460,8 +1510,8 @@ initFrame:SetScript("OnEvent", function(self)
             local healAbsorbBarRow
             healAbsorbBarRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Heal Absorb Bar",
-                  values={ none="None", belowAbsorb="Below Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left" },
-                  order={ "none", "belowAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft" },
+                  values={ none="None", belowAbsorb="Below Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", rightVertical="Right Edge (Vertical)", leftVertical="Left Edge (Vertical)" },
+                  order={ "none", "belowAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "rightVertical", "leftVertical" },
                   getValue=function() return CurHealAbsorbBarPos() end,
                   setValue=function(v) SSet("healAbsorbBarPosition", v); EllesmereUI:RefreshPage() end },
                 { type="slider", text="Bar Height", min=1, max=20, step=1,
@@ -1490,6 +1540,56 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI.RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
                 UpdateHealAbsorbBarSwatchVis()
+            end
+            -- Inline cog: heal absorb bar vertical grow direction
+            do
+                local rgn = healAbsorbBarRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Heal Absorb Bar Rendering",
+                    rows = {
+                        { type="dropdown", label="Vertical Grow",
+                          values = { up = "Up", down = "Down" },
+                          order = { "up", "down" },
+                          disabled = function()
+                              local p = CurHealAbsorbBarPos()
+                              return p ~= "rightVertical" and p ~= "leftVertical"
+                          end,
+                          disabledTooltip = "Only affects the vertical (Right/Left Edge) positions",
+                          rawTooltip = true,
+                          get=function() return SVal("healAbsorbBarGrowDir", "up") end,
+                          set=function(v) SSet("healAbsorbBarGrowDir", v) end },
+                    },
+                })
+                -- Grey + block the cog whenever the bar isn't on a vertical
+                -- position (Vertical Grow has no effect otherwise).
+                local function cogOff()
+                    local p = CurHealAbsorbBarPos()
+                    return p ~= "rightVertical" and p ~= "leftVertical"
+                end
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(cogOff() and 0.15 or 0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) if not cogOff() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(cogOff() and 0.15 or 0.4) end)
+                cogBtn:SetScript("OnClick", function(self) if not cogOff() then cogShow(self) end end)
+                EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(cogOff() and 0.15 or 0.4) end)
+            end
+            -- The size slider reads as width for the vertical positions; retitle live.
+            do
+                local lbl = healAbsorbBarRow._rightRegion._label
+                local function UpdateHealAbsorbBarSizeLabel()
+                    local p = CurHealAbsorbBarPos()
+                    local vertical = p == "rightVertical" or p == "leftVertical"
+                    lbl:SetText(EllesmereUI.L(vertical and "Bar Width" or "Bar Height"))
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateHealAbsorbBarSizeLabel)
+                UpdateHealAbsorbBarSizeLabel()
             end
         end
 
@@ -1884,7 +1984,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { tooltip = "Accent Color",
                   hasAlpha = false,
                   getValue = function()
-                      return EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                      return EllesmereUI.ResolveActiveAccent()
                   end,
                   setValue = function() end,
                   onClick = function()
@@ -2010,7 +2110,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Accent color (leftmost).
             AddHTSwatch(
                 function()
-                    local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    local r, g, b = EllesmereUI.ResolveActiveAccent()
                     return r or 1, g or 1, b or 1, 1
                 end,
                 function() end, "accent", false, "Accent Color")
@@ -2125,7 +2225,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Accent color (leftmost).
             AddHASwatch(
                 function()
-                    local r, g, b = EllesmereUI.ResolveThemeColor(EllesmereUI.GetActiveTheme())
+                    local r, g, b = EllesmereUI.ResolveActiveAccent()
                     return r or 1, g or 1, b or 1, 1
                 end,
                 function() end, "accent", false, "Accent Color")
@@ -6068,7 +6168,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local PP = EllesmereUI.PanelPP or EllesmereUI.PP
         local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
-        local accentColor = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
+        local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
         local s = db.profile
 
         -- Dimmer
@@ -6246,7 +6346,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- Glow effect
                                 C_Timer.After(0.15, function()
                                     if not target:IsShown() then return end
-                                    local ac = EllesmereUI.ACCENT_COLOR or EllesmereUI.ELLESMERE_GREEN
+                                    local ac = EllesmereUI.ELLESMERE_GREEN
                                     if not ac then return end
                                     local glow = CreateFrame("Frame", nil, target)
                                     glow:SetAllPoints()

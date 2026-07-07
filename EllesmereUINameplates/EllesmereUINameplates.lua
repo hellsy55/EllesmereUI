@@ -56,7 +56,9 @@ local function GetFont()
     if EllesmereUI and EllesmereUI.GetFontPath then
         return EllesmereUI.GetFontPath("nameplates")
     end
-    return (p and p.font) or defaults.font
+    -- The `defaults` local is declared below this function, so it is not in
+    -- scope here; fall back to the literal default font path.
+    return (p and p.font) or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
 end
 local function GetNPOutline()
     -- Already slug-gated at the source (GetFontOutlineFlag); SetFSFont also
@@ -113,11 +115,11 @@ ns.NP_ABSORB_STYLE_ALPHA = {
 -- scope to stay under Lua 5.1's 200-local limit.
 function ns._appendDisplayPresetKeys(t)
     for _, k in ipairs({
-        "topSlotSize", "topSlotXOffset", "topSlotYOffset",
-        "rightSlotSize", "rightSlotXOffset", "rightSlotYOffset",
-        "leftSlotSize", "leftSlotXOffset", "leftSlotYOffset",
-        "toprightSlotSize", "toprightSlotXOffset", "toprightSlotYOffset", "toprightSlotGrowth",
-        "topleftSlotSize", "topleftSlotXOffset", "topleftSlotYOffset", "topleftSlotGrowth",
+        "topSlotSize", "topSlotXOffset", "topSlotYOffset", "topSlotRaiseStrata",
+        "rightSlotSize", "rightSlotXOffset", "rightSlotYOffset", "rightSlotRaiseStrata",
+        "leftSlotSize", "leftSlotXOffset", "leftSlotYOffset", "leftSlotRaiseStrata",
+        "toprightSlotSize", "toprightSlotXOffset", "toprightSlotYOffset", "toprightSlotGrowth", "toprightSlotRaiseStrata",
+        "topleftSlotSize", "topleftSlotXOffset", "topleftSlotYOffset", "topleftSlotGrowth", "topleftSlotRaiseStrata",
         "textSlotTopSize", "textSlotTopXOffset", "textSlotTopYOffset",
         "textSlotRightSize", "textSlotRightXOffset", "textSlotRightYOffset",
         "textSlotLeftSize", "textSlotLeftXOffset", "textSlotLeftYOffset",
@@ -171,9 +173,12 @@ local defaults = {
     miniboss = { r = 0.518, g = 0.243, b = 0.984 },
     boss = { r = 0.518, g = 0.243, b = 0.984 },
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
-    -- "Mini Enemies" (non-elite trash, dungeons only) has NO static default: when
-    -- unset it views the user's enemyInCombat color, so it starts identical to
-    -- "Enemies" and the user customizes from there (see GetReactionColor).
+    -- "Mini Enemies" (non-elite trash) has NO static default: when unset it views
+    -- the user's enemyInCombat color, so it starts identical to "Enemies" and the
+    -- user customizes from there (see GetReactionColor).
+    -- Mini Coloring M+ Only: on = restrict the Mini Enemies color to 5-man
+    -- dungeons; off = apply it everywhere (default; see GetReactionColor).
+    miniColoringMPlusOnly = false,
     darkenEnemiesOOC = true,
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
@@ -246,9 +251,9 @@ local defaults = {
     classPowerBorderColor = { r = 0, g = 0, b = 0, a = 1.0 },
     classPowerBorderSize = 1,
     healthBarWidth = 6,
-    nameplateOverlapV = 1.10,
     stackSpacingScale = 100,
     stackingEnabled = true,
+    stackingFriendly = false,
     hitboxScaleX = 100,
     hitboxScaleY = 100,
     nameplateYOffset = 0,
@@ -416,12 +421,12 @@ local defaults = {
     importantCastGlowThickness = 2,
     importantCastGlowSpeed = 4,
     -- Core Positions: slot-based size + XY offsets
-    topSlotSize = 26,        topSlotXOffset = 0,      topSlotYOffset = 0,
-    rightSlotSize = 24,      rightSlotXOffset = 0,    rightSlotYOffset = 0,
-    leftSlotSize = 24,       leftSlotXOffset = 0,     leftSlotYOffset = 0,
-    toprightSlotSize = 24,   toprightSlotXOffset = 0, toprightSlotYOffset = 0, toprightSlotGrowth = "right",
-    topleftSlotSize = 24,    topleftSlotXOffset = 0,  topleftSlotYOffset = 0,  topleftSlotGrowth = "left",
-    bottomSlotSize = 26,     bottomSlotXOffset = 0,   bottomSlotYOffset = 0,
+    topSlotSize = 26,        topSlotXOffset = 0,      topSlotYOffset = 0,      topSlotRaiseStrata = false,
+    rightSlotSize = 24,      rightSlotXOffset = 0,    rightSlotYOffset = 0,    rightSlotRaiseStrata = false,
+    leftSlotSize = 24,       leftSlotXOffset = 0,     leftSlotYOffset = 0,     leftSlotRaiseStrata = false,
+    toprightSlotSize = 24,   toprightSlotXOffset = 0, toprightSlotYOffset = 0, toprightSlotGrowth = "right", toprightSlotRaiseStrata = false,
+    topleftSlotSize = 24,    topleftSlotXOffset = 0,  topleftSlotYOffset = 0,  topleftSlotGrowth = "left",   topleftSlotRaiseStrata = false,
+    bottomSlotSize = 26,     bottomSlotXOffset = 0,   bottomSlotYOffset = 0,   bottomSlotRaiseStrata = false,
     -- Core Text Positions: slot-based size + XY offsets
     textSlotTopSize = 10,    textSlotTopXOffset = 0,  textSlotTopYOffset = 0,
     textSlotRightSize = 10,  textSlotRightXOffset = 0, textSlotRightYOffset = 0,
@@ -1086,15 +1091,32 @@ local function FindSlotForElement(element)
 end
 ns.FindSlotForElement = FindSlotForElement
 
+-- The four combined health-text elements (percent + number, either order,
+-- "|" or "-" separator). Kept as one set so every eligibility check that treats
+-- them as a single "combined health" category stays in lockstep.
+local COMBO_HEALTH_ELEMENTS = {
+    healthPctNum     = true, healthNumPct     = true,
+    healthPctNumDash = true, healthNumPctDash = true,
+}
+local function IsComboHealthText(element)
+    return COMBO_HEALTH_ELEMENTS[element] == true
+end
+ns.IsComboHealthText = IsComboHealthText
+
 local function SetCombinedHealthText(fs, element, pctText, numText)
     if element == "healthPctNum" then
         fs:SetFormattedText("%s | %s", pctText, numText)
     elseif element == "healthNumPct" then
         fs:SetFormattedText("%s | %s", numText, pctText)
+    elseif element == "healthPctNumDash" then
+        fs:SetFormattedText("%s - %s", pctText, numText)
+    elseif element == "healthNumPctDash" then
+        fs:SetFormattedText("%s - %s", numText, pctText)
     else
         fs:SetText("")
     end
 end
+ns.SetCombinedHealthText = SetCombinedHealthText
 
 -- Estimate pixel width of health text for a given element type.
 -- We can't read actual rendered widths (WoW secret values), so we use
@@ -1106,6 +1128,8 @@ local healthTextWidths = {
     healthNumber  = 38,
     healthPctNum  = 75,
     healthNumPct  = 75,
+    healthPctNumDash = 75,
+    healthNumPctDash = 75,
 }
 local function EstimateHealthTextWidth(element)
     return (healthTextWidths[element] or 0) + HEALTH_TEXT_PADDING
@@ -1351,6 +1375,45 @@ local function GetAuraSlots()
     return ds, bs, cs
 end
 ns.GetAuraSlots = GetAuraSlots
+
+-- Raise Strata: per-slot Core Positions toggle. When on, whichever element
+-- occupies that slot is bumped one strata level (MEDIUM -> HIGH) so it renders
+-- above the rest of the plate. Default off for every slot. Defined on ns (not a
+-- file local) to respect this file's local budget.
+function ns.GetSlotRaiseStrata(posKey)
+    if not posKey or posKey == "none" then return false end
+    local key = posKey .. "SlotRaiseStrata"
+    if p and p[key] ~= nil then return p[key] end
+    return defaults[key] or false
+end
+
+-- Apply each slot's Raise Strata setting to the element frame(s) sitting in it.
+-- Element frames otherwise share MEDIUM strata (see the plate build comments);
+-- raising to HIGH lifts that element above the flattened text/aura/indicator
+-- tiers. Children (cooldown, count carrier, border) inherit the frame's strata.
+function ns.ApplySlotStrata(plate)
+    if not plate then return end
+    local function StrataFor(slot)
+        return ns.GetSlotRaiseStrata(slot) and "HIGH" or "MEDIUM"
+    end
+    if plate.raidFrame then
+        plate.raidFrame:SetFrameStrata(StrataFor(GetRaidMarkerPos()))
+    end
+    if plate.classFrame then
+        plate.classFrame:SetFrameStrata(StrataFor(GetClassificationSlot()))
+    end
+    local ds, bs, cs = GetAuraSlots()
+    local dStr, bStr, cStr = StrataFor(ds), StrataFor(bs), StrataFor(cs)
+    if plate.debuffs then
+        for i = 1, #plate.debuffs do plate.debuffs[i]:SetFrameStrata(dStr) end
+    end
+    if plate.buffs then
+        for i = 1, #plate.buffs do plate.buffs[i]:SetFrameStrata(bStr) end
+    end
+    if plate.cc then
+        for i = 1, #plate.cc do plate.cc[i]:SetFrameStrata(cStr) end
+    end
+end
 
 -- Pandemic glow engine: procedural ants, button glow, autocast shine, FlipBook
 -- Wrapped in do...end to keep all internal locals out of the main chunk's 200-local budget.
@@ -3097,13 +3160,17 @@ end
 
 function ns.RefreshStackingMotion()
     if not C_CVar or not C_CVar.SetCVarBitfield then return end
+    if not (Enum and Enum.NamePlateStackType) then return end
     local db = p or defaults
-    local enabled = (db.stackingEnabled ~= false)
-    -- Enemy stacking follows our toggle. Friendly stacking is always forced
-    -- off so Blizzard's "Stack Nameplates: Friendly Units" setting has no effect.
-    if Enum and Enum.NamePlateStackType then
-        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Enemy, enabled)
-        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Friendly, false)
+    -- Enemy stacking is always EUI-owned; apply it every time (login + runtime).
+    -- This must NOT be gated on friendly players, or enemy plates stop stacking
+    -- for anyone who hands friendly nameplates to Blizzard.
+    C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Enemy, db.stackingEnabled ~= false)
+    -- Friendly stacking is only ours to write while we manage friendly players.
+    -- When friendly players are Blizzard-managed we leave the friendly bit
+    -- untouched (login or runtime) so the user's Blizzard setting survives.
+    if (db.showFriendlyPlayers ~= false) then
+        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Friendly, db.stackingFriendly == true)
     end
 end
 
@@ -3398,7 +3465,12 @@ local function SetupAuraCVars()
         SetCVar("nameplateShowAll", 1)
         SetCVar("nameplateMinScale", 1)
         SetCVar("nameplateOverlapH", 1)
-        SetCVar("nameplateOverlapV", (p and p.nameplateOverlapV) or defaults.nameplateOverlapV)
+        -- nameplateOverlapV is intentionally left alone: it is the user's own
+        -- vertical-spacing cvar (Blizzard default 1.10, same value we used to
+        -- force here, so no existing plate spacing changes). Players who tune it
+        -- themselves are no longer overwritten every login. Our "Stacked
+        -- Nameplate Spacing" slider layers extra spacing on top via the
+        -- stacking-bounds frame.
         SetCVar("nameplateMaxAlpha", 1)
         SetCVar("nameplateMaxAlphaDistance", 40)
         SetCVar("nameplateMinAlpha", 0.6)
@@ -3425,7 +3497,7 @@ local function SetupAuraCVars()
             TextureLoadingGroupMixin.RemoveTexture(wrapper, "updateNameUsesGetUnitName")
         end
     end
-    -- Apply stacking state via the Midnight bitfield CVar
+    -- Apply stacking state via the Midnight bitfield CVar.
     ns.RefreshStackingMotion()
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
@@ -4496,6 +4568,18 @@ end)
 local function _C(key)
     return (p and p[key]) or defaults[key]
 end
+-- Neutral health-bar color: the enemy-in-combat tint while the unit is in combat,
+-- otherwise the neutral color. Shared by every precedence step that resolves to
+-- "neutral" so they stay in lockstep: high-priority step 5, the neutral+mini
+-- carve-out (step 7b), and the deferred dungeon step 10d.
+local function ResolveNeutralColor(unit)
+    if UnitAffectingCombat(unit) then
+        local c = _C("enemyInCombat")
+        return c.r, c.g, c.b
+    end
+    local c = _C("neutral")
+    return c.r, c.g, c.b
+end
 local function GetReactionColor(unit)
     local db = p or defaults
     -- 1. Tapped always highest
@@ -4583,17 +4667,15 @@ local function GetReactionColor(unit)
             return focusC.r, focusC.g, focusC.b
         end
     end
-    -- 5. Neutral (colored as an enemy while in combat with them)
+    -- 5. Neutral (colored as an enemy while in combat with them). OUTSIDE dungeons
+    -- this keeps its high priority. IN dungeons it is deferred to just above the
+    -- enemy fallback (step 10d) so mob-type / threat colors win on neutral dungeon
+    -- units and the neutral color becomes the near-last resort.
     local reaction = UnitReaction(unit, "player")
     local isNeutral = (reaction and reaction == 4)
         or (UnitCanAttack("player", unit) and not UnitIsEnemy(unit, "player"))
-    if isNeutral then
-        if UnitAffectingCombat(unit) then
-            local c = _C("enemyInCombat")
-            return c.r, c.g, c.b
-        end
-        local c = _C("neutral")
-        return c.r, c.g, c.b
+    if isNeutral and not ns._inDungeon then
+        return ResolveNeutralColor(unit)
     end
     -- 6. Enemy player class colors
     if UnitIsPlayer(unit) and UnitCanAttack("player", unit) then
@@ -4609,6 +4691,11 @@ local function GetReactionColor(unit)
     -- still returned at their own priority steps (7, 8, 10b) further down.
     local inCombat = UnitAffectingCombat(unit)
     local classification = UnitClassification(unit)
+    -- Mini Enemies color scope: restricted to 5-man dungeons when "Mini Coloring
+    -- M+ Only" is on (default), applied everywhere when it is off.
+    local miniMPlusOnly = defaults.miniColoringMPlusOnly
+    if db.miniColoringMPlusOnly ~= nil then miniMPlusOnly = db.miniColoringMPlusOnly end
+    local miniColorScope = ns._inDungeon or not miniMPlusOnly
     local _isBossUnit = false  -- deferred: boss color is applied at step 10b
     local _isMiniBoss = false
     if classification == "elite" or classification == "worldboss" or classification == "rareelite" then
@@ -4660,6 +4747,38 @@ local function GetReactionColor(unit)
         local c = _C("miniboss")
         return MaybeDarken(c.r, c.g, c.b, inCombat)
     end
+    -- 7b. Mini Enemies promoted ABOVE Caster -- but ONLY for DPS/healers and for
+    -- tanks that do NOT use the special Tank Has Aggro color. Tanks WITH that
+    -- option enabled skip this and keep Mini Enemies at its original low priority
+    -- (step 10c), so their has-aggro / caster / mob-type colors still win on trash.
+    if miniColorScope
+       and (classification == "normal" or classification == "minus" or classification == "trivial") then
+        -- Neutral + mini-enemy: neutral coloring wins over the trash color, for
+        -- ALL viewers. Placed above the tank-role gate, the DPS carve-out, and the
+        -- Mini Enemies return below, so a neutral mini beats them (and Caster too,
+        -- since 7b already sits above step 8). Non-trash neutral units are not
+        -- caught here and still defer to step 10d.
+        if isNeutral then return ResolveNeutralColor(unit) end
+        local thae = defaults.tankHasAggroEnabled
+        if db.tankHasAggroEnabled ~= nil then thae = db.tankHasAggroEnabled end
+        if not (_isTankRole and thae) then
+            -- DPS "No Aggro" still wins over the promoted Mini Enemies color, so a
+            -- DPS/healer without aggro sees the no-aggro warning on trash instead
+            -- of the trash color. Scoped to this trash branch, so Caster still
+            -- outranks DPS No Aggro on non-trash casters (step 10). Mirrors the
+            -- step 10 condition exactly.
+            if isThreatUnit and not _isTankRole and threatStatus < 2 and IsInGroup() then
+                local dpsNA = defaults.dpsNoAggroEnabled
+                if db.dpsNoAggroEnabled ~= nil then dpsNA = db.dpsNoAggroEnabled end
+                if dpsNA then
+                    local c = _C("dpsNoAggro")
+                    return c.r, c.g, c.b
+                end
+            end
+            local c = (p and p.miniEnemy) or _C("enemyInCombat")
+            return MaybeDarken(c.r, c.g, c.b, inCombat)
+        end
+    end
     -- 8. Caster
     if _isCaster then
         local c = _C("caster")
@@ -4702,12 +4821,23 @@ local function GetReactionColor(unit)
     -- 5-man trash its own color; outside dungeons these fall through to the enemy
     -- color below. Elites are handled at step 7, so same-level elites still use
     -- the enemy color. Sits below the threat colors so aggro state still wins.
-    if ns._inDungeon
+    -- NOTE: DPS/healers and non-special-aggro tanks already returned at step 7b
+    -- (Mini Enemies promoted above Caster); this low-priority path now only
+    -- applies to tanks with the special "Has Aggro" color enabled.
+    if miniColorScope
        and (classification == "normal" or classification == "minus" or classification == "trivial") then
         -- Views the user's "Enemies" color (enemyInCombat) until they explicitly
         -- set a Mini Enemies color, so trash starts identical to before.
         local c = (p and p.miniEnemy) or _C("enemyInCombat")
         return MaybeDarken(c.r, c.g, c.b, inCombat)
+    end
+    -- 10d. Neutral, deferred (dungeons only -- step 5 skipped it there). The
+    -- mob-type and threat colors above have had their turn; a neutral unit that
+    -- matched none of them uses the neutral color here, just above the generic
+    -- enemy fallback. (Outside dungeons, neutral already returned at step 5, so
+    -- isNeutral can only be true here when in a dungeon.)
+    if isNeutral then
+        return ResolveNeutralColor(unit)
     end
     -- 11. Fallback: enemy in combat / out of combat
     local eic = _C("enemyInCombat")
@@ -5307,6 +5437,7 @@ function NameplateFrame:ApplyAppearance()
     if self.UpdateBorderWrap and (self._wrapActive or ns.GetWrapBorderCastbar()) then
         self:UpdateBorderWrap()
     end
+    ns.ApplySlotStrata(self)
 end
 
 -- PERF: Set up health text font, position, color, and cache slot assignments.
@@ -5363,7 +5494,7 @@ function NameplateFrame:ApplyHealthTextAppearance()
             ca[ci].element = element
             ca[ci].fs = fs
             ca[ci].slotKey = slot.key
-        elseif element == "healthPctNum" or element == "healthNumPct" then
+        elseif IsComboHealthText(element) then
             local fs = self.hpText
             fs:SetParent(self.healthTextFrame)
             SetFSFont(fs, slotFontSz, GetNPOutline())
@@ -5387,7 +5518,7 @@ function NameplateFrame:ApplyHealthTextAppearance()
     -- Top slot health text
     local topElement = GetTextSlot("textSlotTop")
     if topElement == "healthPercent" or topElement == "healthPercentNoSign" or topElement == "healthNumber"
-       or topElement == "healthPctNum" or topElement == "healthNumPct" then
+       or IsComboHealthText(topElement) then
         local nameYOff = GetNameYOffset()
         local cpPush = GetClassPowerTopPush(self)
         local txOff, tyOff = GetTextSlotOffsets("textSlotTop")
@@ -5422,7 +5553,7 @@ function NameplateFrame:ApplyHealthTextAppearance()
         local e = ca[i]
         local el = e.element
         if el == "healthPercent" or el == "healthPercentNoSign"
-           or el == "healthPctNum" or el == "healthNumPct" then
+           or IsComboHealthText(el) then
             local dec = (p and e.slotKey and p[e.slotKey .. "PctDecimal"]) and true or false
             e.pctDecimal = dec
             if dec then anyDec = true end
@@ -5486,6 +5617,10 @@ function NameplateFrame:SetUnit(unit, nameplate)
             if np and np.SetStackingBoundsFrame then
                 if not self._stackBounds then
                     self._stackBounds = CreateFrame("Frame", nil, np)
+                    -- Load-bearing: SetStackingBoundsFrame reads this frame's
+                    -- rendered bounds (union of its regions), NOT its SetSize.
+                    -- Without a full-size region the bounds rect is empty and
+                    -- plates stop stacking. Alpha 0 so it never shows.
                     local tex = self._stackBounds:CreateTexture(nil, "BACKGROUND")
                     tex:SetColorTexture(1, 0, 0, 0)
                     tex:SetAllPoints(self._stackBounds)
@@ -5874,7 +6009,7 @@ function NameplateFrame:UpdateHealthValues()
                 fs:SetText(entry.pctDecimal and pctNoSignTextDec or pctNoSignText)
             elseif el == "healthNumber" then
                 fs:SetText(numText)
-            elseif el == "healthPctNum" or el == "healthNumPct" then
+            elseif IsComboHealthText(el) then
                 SetCombinedHealthText(fs, el, entry.pctDecimal and pctTextDec or pctText, numText)
             end
         end
@@ -7294,7 +7429,9 @@ do
             end
             plate._curScale = nv
             plate:SetScale(nv)
-            if plate.isCasting and ns.RefreshCastOverlay then ns.RefreshCastOverlay(plate) end
+            -- The held "Interrupted" flash keeps the bar visible after
+            -- isCasting clears; it must ride the shrink-back too.
+            if (plate.isCasting or plate._interrupted) and ns.RefreshCastOverlay then ns.RefreshCastOverlay(plate) end
         end
         if not next(anim) then driver:Hide() end
     end)
