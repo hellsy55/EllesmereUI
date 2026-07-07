@@ -834,8 +834,10 @@ local defaults = {
             debuffOffsetY = 0,
             buffShowCooldownText = false,
             buffCooldownTextSize = 10,
+            buffCooldownTextColor = {r=1, g=1, b=1},
             debuffShowCooldownText = false,
             debuffCooldownTextSize = 10,
+            debuffCooldownTextColor = {r=1, g=1, b=1},
             simpleDebuffShowCooldownText = false,
             simpleDebuffCooldownTextSize = 14,
             simpleDebuffs = "left",  -- "none"/"left"/"right": simple display forces that-side anchor + frame-height-matched debuff size (legacy boolean true=left / false=none honored at read time)
@@ -5314,7 +5316,7 @@ function ns.ApplyStackAnchor(fs, parent, pos, offX, offY)
     fs:SetPoint(point, parent, point, baseX + (offX or 0), offY or 0)
 end
 
-local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped, stackPos)
+local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped, stackPos, cdTextColor, stackTextColor)
     if not container then return end
     -- Cropped style: make the buttons rectangular (height = 80% of width). oUF
     -- sizes each button to element.width x element.height and uses them for the
@@ -5342,7 +5344,12 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
             btn.Cooldown:SetHideCountdownNumbers(not showCD)
             local cdText = btn.Cooldown:GetRegions()
             if cdText and cdText.SetFont then
-                if showCD then EllesmereUI.ApplyIconTextFont(cdText, cachedFontPath, cdSize, "unitFrames") end
+                if showCD then
+                    EllesmereUI.ApplyIconTextFont(cdText, cachedFontPath, cdSize, "unitFrames")
+                    if cdTextColor then
+                        cdText:SetTextColor(cdTextColor.r or 1, cdTextColor.g or 1, cdTextColor.b or 1)
+                    end
+                end
                 -- Default cooldown text is centered; offset 0,0 == default.
                 cdText:ClearAllPoints()
                 cdText:SetPoint("CENTER", btn.Cooldown, "CENTER", cdOffX or 0, cdOffY or 0)
@@ -5354,6 +5361,9 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
         -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default.
         if btn and btn.Count then
             EllesmereUI.ApplyIconTextFont(btn.Count, cachedFontPath, stackSize or 14, "unitFrames")
+            if stackTextColor then
+                btn.Count:SetTextColor(stackTextColor.r or 1, stackTextColor.g or 1, stackTextColor.b or 1)
+            end
             ns.ApplyStackAnchor(btn.Count, btn, stackPos, stackOffX, stackOffY)
         end
     end
@@ -5476,7 +5486,7 @@ local function CreateTargetAuras(frame, unit)
         if button.Cooldown then
             button.Cooldown:SetDrawEdge(false)
             button.Cooldown:SetReverse(true)
-            local showText, textSize, cdOffX, cdOffY
+            local showText, textSize, cdOffX, cdOffY, cdTextColor
             if isBuff then
                 if s and unit and unit:match("^boss") and ns.GetBossSimpleBuffMode(s) ~= "none" then
                     showText = s and s.simpleBuffShowCooldownText
@@ -5489,21 +5499,26 @@ local function CreateTargetAuras(frame, unit)
                     cdOffX = (s and s.buffCooldownTextOffsetX) or 0
                     cdOffY = (s and s.buffCooldownTextOffsetY) or 0
                 end
+                cdTextColor = (s and s.buffCooldownTextColor) or {r=1, g=1, b=1}
             elseif s and unit and unit:match("^boss") and ns.GetBossSimpleDebuffMode(s) ~= "none" then
                 showText = s and s.simpleDebuffShowCooldownText
                 textSize = s and s.simpleDebuffCooldownTextSize or 14
                 cdOffX = (s and s.debuffCooldownTextOffsetX) or 0
                 cdOffY = (s and s.debuffCooldownTextOffsetY) or 0
+                cdTextColor = (s and s.debuffCooldownTextColor) or {r=1, g=1, b=1}
             else
                 showText = s and s.debuffShowCooldownText
                 textSize = s and s.debuffCooldownTextSize or 10
                 cdOffX = (s and s.debuffCooldownTextOffsetX) or 0
                 cdOffY = (s and s.debuffCooldownTextOffsetY) or 0
+                cdTextColor = (s and s.debuffCooldownTextColor) or {r=1, g=1, b=1}
             end
             button.Cooldown:SetHideCountdownNumbers(not showText)
             local cdText = button.Cooldown:GetRegions()
             if cdText and cdText.SetFont then
                 if showText then EllesmereUI.ApplyIconTextFont(cdText, cachedFontPath, textSize, "unitFrames") end
+                cdText:SetTextColor(cdTextColor.r, cdTextColor.g, cdTextColor.b)
+
                 -- Default cooldown text is centered; offset 0,0 == default (no change).
                 cdText:ClearAllPoints()
                 cdText:SetPoint("CENTER", button.Cooldown, "CENTER", cdOffX, cdOffY)
@@ -5516,19 +5531,22 @@ local function CreateTargetAuras(frame, unit)
         -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default (no change).
         if button.Count then
             local s2 = GetSettingsForUnit(unit or "target")
-            local stackSize, sOffX, sOffY, sPos
+            local stackSize, sOffX, sOffY, sPos, sTextColor
             if container and container.filter == "HELPFUL" then
                 stackSize = s2 and s2.buffStackTextSize
                 sOffX = (s2 and s2.buffStackTextOffsetX) or 0
                 sOffY = (s2 and s2.buffStackTextOffsetY) or 0
                 sPos = s2 and s2.buffStackTextPosition
+                sTextColor = (s2 and s2.buffStackTextColor) or {r=1, g=1, b=1}
             else
                 stackSize = s2 and s2.debuffStackTextSize
                 sOffX = (s2 and s2.debuffStackTextOffsetX) or 0
                 sOffY = (s2 and s2.debuffStackTextOffsetY) or 0
                 sPos = s2 and s2.debuffStackTextPosition
+                sTextColor = (s2 and s2.debuffStackTextColor) or {r=1, g=1, b=1}
             end
             EllesmereUI.ApplyIconTextFont(button.Count, cachedFontPath, stackSize or 14, "unitFrames")
+            button.Count:SetTextColor(sTextColor.r, sTextColor.g, sTextColor.b)
             ns.ApplyStackAnchor(button.Count, button, sPos, sOffX, sOffY)
         end
 
@@ -9722,9 +9740,9 @@ local function ReloadFrames()
                     -- Use simple debuff cooldown text settings when simple display
                     -- is active, regular debuff settings otherwise.
                     if simpleOn then
-                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.simpleDebuffCooldownTextOffsetX, settings.simpleDebuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, nil, nil, settings.debuffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.simpleDebuffCooldownTextOffsetX, settings.simpleDebuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, nil, nil, settings.debuffStackTextPosition, settings.debuffCooldownTextColor, settings.debuffStackTextColor)
                     else
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition, settings.debuffCooldownTextColor, settings.debuffStackTextColor)
                     end
                 end
 
@@ -9819,9 +9837,9 @@ local function ReloadFrames()
                     -- Cooldown/stack text: simple uses the simpleBuff* keys (sharing the
                     -- regular buff stack settings), regular buff keys otherwise.
                     if simpleBuffOn then
-                        ApplyAuraCooldownText(frame.Buffs, settings.simpleBuffShowCooldownText, settings.simpleBuffCooldownTextSize or 14, settings.buffStackTextSize, settings.simpleBuffCooldownTextOffsetX, settings.simpleBuffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, nil, nil, settings.buffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Buffs, settings.simpleBuffShowCooldownText, settings.simpleBuffCooldownTextSize or 14, settings.buffStackTextSize, settings.simpleBuffCooldownTextOffsetX, settings.simpleBuffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, nil, nil, settings.buffStackTextPosition, settings.buffCooldownTextColor, settings.buffStackTextColor)
                     else
-                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition, settings.buffCooldownTextColor, settings.buffStackTextColor)
                     end
                 end
 
@@ -11626,6 +11644,8 @@ function SetupOptionsPanel()
         local stackOffX = settings.debuffStackTextOffsetX or 0
         local stackOffY = settings.debuffStackTextOffsetY or 0
         local stackPos = settings.debuffStackTextPosition
+        local cdTextColor = settings.debuffCooldownTextColor or {r=1, g=1, b=1}
+        local stackTextColor = settings.debuffStackTextColor or {r=1, g=1, b=1}
         local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
         local now = GetTime()
         for idx, spellID in ipairs(FAKE_DEBUFF_SPELLS) do
@@ -11669,6 +11689,7 @@ function SetupOptionsPanel()
             durText:SetDrawLayer("OVERLAY", 7)
             EllesmereUI.ApplyIconTextFont(durText, fontPath, cdSize, "unitFrames")
             durText:SetPoint("CENTER", iconFrame, "CENTER", cdOffX, cdOffY)
+            durText:SetTextColor(cdTextColor.r, cdTextColor.g, cdTextColor.b)
             durText:SetText(FAKE_DEBUFF_SECS[idx] or 10)
             if not showCD then durText:Hide() end
             -- Stack text on a single icon only (looks natural; most debuffs are
@@ -11678,6 +11699,7 @@ function SetupOptionsPanel()
                 stack:SetDrawLayer("OVERLAY", 7)
                 EllesmereUI.ApplyIconTextFont(stack, fontPath, stackSize, "unitFrames")
                 ns.ApplyStackAnchor(stack, iconFrame, stackPos, stackOffX, stackOffY)
+                stack:SetTextColor(stackTextColor.r, stackTextColor.g, stackTextColor.b)
                 stack:SetText(FAKE_DEBUFF_STACKS[idx])
             end
             -- Border just above the icon; its PP container renders at border+1
