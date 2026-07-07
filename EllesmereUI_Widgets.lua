@@ -4337,6 +4337,11 @@ local function BuildCogPopup(opts)
         -- Ensure popup is wide enough for dropdown rows (label + gap + dropdown + padding)
         local ddNeeded = SIDE_PAD + maxDDLblW + LABEL_SLIDER_GAP + COG_DD_W + SIDE_PAD
         if ddNeeded > POPUP_W then POPUP_W = ddNeeded end
+        -- Optional caller-supplied minimum width (some popups want more breathing room)
+        if opts.minWidth and opts.minWidth > POPUP_W then POPUP_W = opts.minWidth end
+        -- Stretch the slider track to fill whatever final width we settled on so a
+        -- widened popup doesn't leave a gap between the slider and its value box.
+        SLIDER_W = math.max(SLIDER_W, POPUP_W - SLIDER_LEFT - SLIDER_INPUT_GAP - INPUT_W - SIDE_PAD)
 
         -- Calculate total height
         local totalH = TOP_PAD + TITLE_H + TITLE_GAP
