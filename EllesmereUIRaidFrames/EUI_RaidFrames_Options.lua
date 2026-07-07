@@ -1363,18 +1363,25 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v) SSet("absorbBarGrowDir", v) end },
                 },
             })
+            -- Grey + block the cog whenever the bar isn't on a vertical position
+            -- (its only setting, Vertical Grow, has no effect otherwise).
+            local function cogOff()
+                local p = CurAbsorbBarPos()
+                return p ~= "rightVertical" and p ~= "leftVertical"
+            end
             local cogBtn = CreateFrame("Button", nil, rgn)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
+            cogBtn:SetAlpha(cogOff() and 0.15 or 0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
             cogTex:SetTexture(EllesmereUI.COGS_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            cogBtn:SetScript("OnEnter", function(self) if not cogOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(cogOff() and 0.15 or 0.4) end)
+            cogBtn:SetScript("OnClick", function(self) if not cogOff() then cogShow(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(cogOff() and 0.15 or 0.4) end)
         end
         -- The size slider reads as width for the vertical positions; retitle live.
         do
@@ -1553,18 +1560,25 @@ initFrame:SetScript("OnEvent", function(self)
                           set=function(v) SSet("healAbsorbBarGrowDir", v) end },
                     },
                 })
+                -- Grey + block the cog whenever the bar isn't on a vertical
+                -- position (Vertical Grow has no effect otherwise).
+                local function cogOff()
+                    local p = CurHealAbsorbBarPos()
+                    return p ~= "rightVertical" and p ~= "leftVertical"
+                end
                 local cogBtn = CreateFrame("Button", nil, rgn)
                 cogBtn:SetSize(26, 26)
                 cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = cogBtn
                 cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-                cogBtn:SetAlpha(0.4)
+                cogBtn:SetAlpha(cogOff() and 0.15 or 0.4)
                 local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
                 cogTex:SetAllPoints()
                 cogTex:SetTexture(EllesmereUI.COGS_ICON)
-                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-                cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+                cogBtn:SetScript("OnEnter", function(self) if not cogOff() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(cogOff() and 0.15 or 0.4) end)
+                cogBtn:SetScript("OnClick", function(self) if not cogOff() then cogShow(self) end end)
+                EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(cogOff() and 0.15 or 0.4) end)
             end
             -- The size slider reads as width for the vertical positions; retitle live.
             do

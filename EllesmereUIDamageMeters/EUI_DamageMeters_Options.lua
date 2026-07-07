@@ -611,31 +611,48 @@ initFrame:SetScript("OnEvent", function(self)
               values = _G._EDM_IconStyleValues or {},
               order  = _G._EDM_IconStyleOrder or {},
               getValue = function() return Cfg("iconStyle") or "spec" end,
-              setValue = function(v) Set("iconStyle", v); ApplyIconBrd(); Refresh() end })
+              setValue = function(v) Set("iconStyle", v); ApplyIconBrd(); Refresh(); EllesmereUI:RefreshPage() end })
         y = y - h
 
-        -- Inline cog: Icon Zoom (rechte Region, neben "Icon Style")
+        -- Inline cog: Icon Zoom (right region, next to "Icon Style")
         do
             local rgn = iconRow._rightRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Icon Zoom",
                 rows = {
                     { type = "slider", label = "Zoom", min = 0, max = 0.20, step = 0.01,
-                    get = function() return Cfg("classIconZoom") or 0.08 end,
+                    get = function() return Cfg("classIconZoom") or 0.06 end,
                     set = function(v) Set("classIconZoom", v); Refresh() end },
                 },
             })
+            -- Icon Zoom only affects the Spec + Blizzard icon styles; the sprite
+            -- presets are pre-framed art, so grey + block the cog for those (and
+            -- for "None", where there is no icon).
+            local function zoomOff()
+                local s = Cfg("iconStyle") or "spec"
+                return s ~= "spec" and s ~= "blizzard"
+            end
             local cogBtn = CreateFrame("Button", nil, rgn)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            cogBtn:SetAlpha(0.4)
+            cogBtn:SetAlpha(zoomOff() and 0.15 or 0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
             cogTex:SetTexture(EllesmereUI.COGS_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if zoomOff() then
+                    EllesmereUI.ShowWidgetTooltip(self, "Icon Zoom only applies to the Spec and Blizzard icon styles.")
+                else
+                    self:SetAlpha(0.7)
+                end
+            end)
+            cogBtn:SetScript("OnLeave", function(self)
+                EllesmereUI.HideWidgetTooltip()
+                self:SetAlpha(zoomOff() and 0.15 or 0.4)
+            end)
+            cogBtn:SetScript("OnClick", function(self) if not zoomOff() then cogShow(self) end end)
+            EllesmereUI.RegisterWidgetRefresh(function() cogBtn:SetAlpha(zoomOff() and 0.15 or 0.4) end)
         end
 
         -- Border Style (+ cog) | Border Size (+ inline swatch)

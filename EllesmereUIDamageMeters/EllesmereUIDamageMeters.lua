@@ -189,7 +189,7 @@ local DM_DEFAULTS = {
             numberFormat    = 2,
             forceEnglishUnits = false, -- force K/M/B units, ignoring CJK locale's 萬/億 (opt-in; default keeps localized units)
             iconStyle       = "spec",
-            classIconZoom = 0.08,
+            classIconZoom = 0.06,
             iconColorUseAccent = false,
             iconColor       = { r = 1, g = 1, b = 1 },
             customIconBorder  = false,
@@ -1154,7 +1154,7 @@ end
 local function ResolveIcon(src, iconTex, barH)
     local cfg = DB()
     local style = cfg.iconStyle or "spec"
-    local zoom = cfg.classIconZoom or 0.08
+    local zoom = cfg.classIconZoom or 0.06
     if style == "none" then iconTex:Hide(); return 0 end
 
     local classFile = src.classFilename
@@ -1190,7 +1190,9 @@ local function ResolveIcon(src, iconTex, barH)
         local coords = CLASS_SPRITE_COORDS[classFile]
         if coords then
             iconTex:SetTexture(CLASS_ICON_SPRITE_TEX[style] or (CLASS_ICON_SPRITE_BASE .. style .. ".tga"))
-            iconTex:SetTexCoord(ZoomCoords(coords[1], coords[2], coords[3], coords[4], zoom))
+            -- Sprite presets are pre-framed art; Icon Zoom does NOT apply to them
+            -- (the options cog is disabled for these styles). Use raw coords.
+            iconTex:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
         else
             iconTex:Hide(); return 0
         end
@@ -2036,7 +2038,7 @@ local function CreateDMWindow(winIdx)
         bar.fill:SetMinMaxValues(0, 1); bar.fill:SetValue(0); bar.fill:SetStatusBarTexture(BAR_TEX)
         bar.classIcon = bar.fill:CreateTexture(nil, "OVERLAY")
         bar.classIcon:SetSize(18, 18); bar.classIcon:SetPoint("LEFT", bar.row, "LEFT", 0, 0)
-        local _cz = DB().classIconZoom or 0.08
+        local _cz = DB().classIconZoom or 0.06
         bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:Hide()
         -- Per-bar border (lazy-created, only when borderSize > 0)
         function bar.ApplyBorder()
@@ -3656,7 +3658,7 @@ local function CreateDMWindow(winIdx)
                         spIcon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spID)
                     end
                     if not spIcon then spIcon = 135274 end
-                    local _cz = DB().classIconZoom or 0.08
+                    local _cz = DB().classIconZoom or 0.06
                     bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
                     bar.fill:ClearAllPoints(); bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                     bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0); bar.fill:SetHeight(barH)
@@ -3805,7 +3807,7 @@ local function CreateDMWindow(winIdx)
                 local iconOffset = 0
                 if spell.spellID then
                     local spIcon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spell.spellID)
-                    local _cz = DB().classIconZoom or 0.08
+                    local _cz = DB().classIconZoom or 0.06
                     if spIcon then bar.classIcon:SetTexture(spIcon); bar.classIcon:SetTexCoord(_cz, 1 - _cz, _cz, 1 - _cz); bar.classIcon:SetSize(barH, barH); bar.classIcon:Show(); iconOffset = barH
                     else bar.classIcon:Hide() end
                 else bar.classIcon:Hide() end

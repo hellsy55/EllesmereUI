@@ -1769,7 +1769,7 @@ do
         { range = 25,  id = 13289 }, -- Egan's Blaster
         { range = 30,  id = 17202 }, -- Snowball
         { range = 35,  id = 18904 }, -- Zorbin's Ultra-Shrinker
-        { range = 40,  id = 18640 }, -- Happy Fun Rock
+        { range = 40,  ids = { 18640, 28767 } }, -- Happy Fun Rock / The Decapitator (either works)
         { range = 45,  id = 32698 }, -- Wrangling Rope
         { range = 60,  id = 32825 }, -- Soul Cannon
         { range = 80,  id = 35278 }, -- Reinforced Net
@@ -1826,7 +1826,13 @@ do
             end
         elseif classFile == "PALADIN" then
             if specID == 65 then -- Holy
-                _crosshairCutoffRange = 40
+                -- Holy is a 40yd healer by default; opt into melee (5yd) via the
+                -- "Show Melee Range for Hpal" crosshair toggle.
+                if CrosshairGet("crosshairHpalMelee") then
+                    _crosshairCutoffRange = 5
+                else
+                    _crosshairCutoffRange = 40
+                end
             else
                 _crosshairCutoffRange = 5
             end
@@ -1849,6 +1855,8 @@ do
         end
     end
     RefreshCrosshairCutoffRange()
+    -- Exposed so the crosshair options toggle can re-resolve the cutoff live.
+    EllesmereUI._RefreshCrosshairCutoffRange = RefreshCrosshairCutoffRange
 
     EllesmereUI._getCrosshairCutoffRange = function()
         if _chPlayerClass == "DRUID" and DRUID_MELEE_FORMS[GetShapeshiftForm()] then
@@ -1867,7 +1875,16 @@ do
         
         local maxRange = nil
         for _, item in ipairs(checkItems) do
-            local inRange = C_Item.IsItemInRange(item.id, "target")
+            local inRange
+            if item.ids then
+                -- Either item satisfies the check: one may be invalid/removed on
+                -- some clients, so try each and take an in-range result.
+                for _, iid in ipairs(item.ids) do
+                    if C_Item.IsItemInRange(iid, "target") == true then inRange = true; break end
+                end
+            else
+                inRange = C_Item.IsItemInRange(item.id, "target")
+            end
             if inRange == true then
                 maxRange = item.range
                 break
@@ -3006,26 +3023,34 @@ do
         end
     end
 
-    -- Lazily attach (and return) the item-level FontString on a flyout button.
+    -- Item-level FontStrings live in an external weak-keyed table, NOT on the
+    -- button. The flyout buttons are Blizzard-owned (and the flyout is the
+    -- secure item-equipping path), so writing a custom key onto them would
+    -- taint their execution context. Creating the FontString region on the
+    -- button is fine; only the state reference must stay off the frame table.
+    local _flyoutFS = setmetatable({}, { __mode = "k" })  -- [button] = fontstring
+
+    -- Lazily attach (and return) the item-level FontString for a flyout button.
     local function EnsureText(button)
-        if not button.EUIFlyoutILvl then
+        local fs = _flyoutFS[button]
+        if not fs then
             local font = EllesmereUI._font
                 or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
             local flag = (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG"))
                 or "OUTLINE, SLUG"
-            local fs = button:CreateFontString(nil, "OVERLAY", nil, 7)
+            fs = button:CreateFontString(nil, "OVERLAY", nil, 7)
             fs:SetFont(font, 12, flag)
             fs:SetPoint("TOP", button, "TOP", 0, -2)
             fs:SetJustifyH("CENTER")
-            button.EUIFlyoutILvl = fs
+            _flyoutFS[button] = fs
         end
-        return button.EUIFlyoutILvl
+        return fs
     end
 
     local function InstallHook()
         if not EquipmentFlyout_DisplayButton then return end
         hooksecurefunc("EquipmentFlyout_DisplayButton", function(button)
-            local fs = button.EUIFlyoutILvl
+            local fs = _flyoutFS[button]
             if not FlyoutEnabled() then
                 if fs then fs:SetText("") end
                 return

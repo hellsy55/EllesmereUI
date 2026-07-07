@@ -101,12 +101,14 @@ initFrame:SetScript("OnEvent", function(self)
         _installPreviewAutoOff()
 
         local W = EllesmereUI.Widgets
+        local PP = EllesmereUI.PP
         local y = yOffset
         local row, h
 
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
+        local function ApplyBorder() if ns.ApplyBorder then ns.ApplyBorder() end end
 
         local alignValues = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" }
         local alignOrder  = { "LEFT", "CENTER", "RIGHT" }
@@ -587,6 +589,120 @@ initFrame:SetScript("OnEvent", function(self)
         }, function() return Cfg("enabled") == false or Cfg("showTimerBar") == false end)
         y = y - h
 
+        --Border Style (+ cog) | Border Size (+ inline swatch)
+        local texValues, texOrder = EllesmereUI.GetBorderTextureDropdown()
+        texValues.shadow = nil
+        for i = #texOrder, 1, -1 do
+            if texOrder[i] == "shadow" then table.remove(texOrder, i) end
+        end
+
+        local bsRow
+        bsRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Border Style",
+                values=texValues, order=texOrder,
+                getValue=function() return Cfg("borderTexture") or "solid" end,
+                setValue=function(v)
+                    Set("borderTexture", v)
+                    Set("borderTextureOffset", nil)
+                    Set("borderTextureOffsetY", nil)
+                    Set("borderTextureShiftX", nil)
+                    Set("borderTextureShiftY", nil)
+                    if v ~= "solid" then
+                        Set("borderR", 1); Set("borderG", 1); Set("borderB", 1); Set("borderA", 1)
+                    else
+                        Set("borderR", 0); Set("borderG", 0); Set("borderB", 0); Set("borderA", 1)
+                    end
+                    local defSz = EllesmereUI.GetBorderDefaultSize("MythicPlus", v)
+                    if defSz then Set("borderSize", defSz) end
+                    ApplyBorder(); EllesmereUI:RefreshPage()
+                end },
+            { type="slider", text="Border Size",
+                min=0, max=4, step=1,
+                getValue=function() return Cfg("borderSize") or 1 end,
+                setValue=function(v) Set("borderSize", v); ApplyBorder(); EllesmereUI:RefreshPage() end })
+            y = y - h
+            -- Inline cog for border offset (left region)
+            do
+                local rgn = bsRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Border Options",
+                    rows = {
+                        { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("broderTextureOffset")
+                                if v then return v end
+                                local tex = Cfg("broderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local dox = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return dox
+                            end,
+                            set = function(v) Set("borderTextureOffset", v); ApplyBorder() end },
+                        { type = "slider", label = "Offset Y", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureOffsetY")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local _, doy = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return doy
+                            end,
+                            set = function(v) Set("borderTextureOffsetY", v); ApplyBorder() end },
+                        { type = "slider", label = "Shift X", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureShiftX")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local _, _, dsx = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return dsx
+                            end,
+                            set = function(v) Set("borderTextureShiftX", v == 0 and nil or v); ApplyBorder() end },
+                        { type = "slider", label = "Shift Y", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureShiftY")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local _, _, _, dsy = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return dsy
+                            end,
+                            set = function(v) Set("borderTextureShiftY", v == 0 and nil or v); ApplyBorder() end },
+                        },
+                    })
+                    local cogBtn = CreateFrame("Button", nil, rgn)
+                    cogBtn:SetSize(26, 26)
+                    local ctrl = rgn._control
+                    if ctrl then
+                        cogBtn:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+                        rgn._lastInline = cogBtn
+                    end
+                    cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                    cogBtn:SetAlpha(0.4)
+                    local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                    cogTex:SetAllPoints()
+                    cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+                    cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                    cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                    cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+                end
+                -- Inline color swatch on Border Size (right region)
+                do
+                    local rgn = bsRow._rightRegion
+                    local ctrl = rgn._control
+                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                        rgn, row:GetFrameLevel() + 3,
+                        function()
+                            return Cfg("borderR") or 0, Cfg("borderG") or 0, Cfg("borderB") or 0, Cfg("borderA") or 1
+                        end,
+                        function(r, g, b, a)
+                            Set("borderR", r); Set("borderG", g); Set("borderB", b); Set("borderA", a)
+                            ApplyBorder()
+                        end,
+                        true, 20)
+                    PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                    EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
+                end
+
         -- Builds a threshold toggle config plus an attach() that hangs the inline
         -- RESIZE cog (white text / size / x / y) and the colour swatch onto a given
         -- DualRow region, so two thresholds can share one dual row.
@@ -602,7 +718,7 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip="Show Timer Text",
                   disabled=function() return Cfg("enabled") == false end,
                   disabledTooltip="the module",
-                  getValue=IsTimerTextShown,
+                  getValue=IsTimerTextShown,    
                   setValue=function(v) Set(showKey, v); Refresh() end }
 
             local function attach(rgn)

@@ -4569,84 +4569,21 @@ L["SR"]  = "하늘탑"
 L["WRS"] = "첨탑"
 
 
-if GetLocale() ~= "koKR" then return end   -- cut engine below is koKR-only; change this (and MAP) to reuse for another locale
-
-local issecretvalue  = issecretvalue
-local hooksecurefunc = hooksecurefunc
-local type, pcall, debugstack = type, pcall, debugstack
-
-local function secret(v) return issecretvalue and issecretvalue(v) end
-
--- bag keystone Korean cut -> short name; pure-Korean keys can't use core L()
+-- Bag keystone dungeon abbreviation overrides (koKR). AbbrevDungeon in
+-- EllesmereUIBags cuts the localized dungeon name to first-letters, which in
+-- Korean yields awkward 2-char cuts; remap those to cleaner short names. DATA
+-- ONLY -- EllesmereUIBags applies it after computing the abbreviation (no
+-- global SetText hook, no per-call cost). "마정"/"하늘탑" already correct.
 -- (가방 쐐기돌 한글컷 -> 단축명. 순수 한글 키는 본체 L() 불가라 자체 처리)
--- NOTE: when reusing for another locale, do NOT guess these keys - check in-game
--- how that client actually cuts the localized dungeon names, then fill MAP with
--- the exact cut strings observed.
-local MAP = {
-    ["알대"] = "대학",
-    ["마동"] = "동굴",
-    ["공제"] = "제나스",
-    ["사구"] = "사론",
-    ["삼권"] = "삼두정",
-    ["윈첨"] = "첨탑",
-    -- "마정"/"하늘탑" = already correct, omitted (이미 올바름, 생략)
-}
-
--- detect own file name at load time - works under any deployed name
--- (로드 시점 자기 파일명 자동 감지 - 배포 파일명 무관)
-local SELF_FILE = "@@unknown@@"
-do
-    local ok, top = pcall(debugstack, 1, 1, 0)
-    if ok and type(top) == "string" then
-        local nm = top:match("([^\\/:%s\"]+%.[Ll][Uu][Aa])")
-        if nm then SELF_FILE = nm end
-    end
+-- To reuse for another locale, check in-game how that client cuts the localized
+-- dungeon names, then add its own guarded override table the same way.
+if GetLocale() == "koKR" and EllesmereUI then
+    EllesmereUI._dungeonAbbrevOverride = {
+        ["알대"] = "대학",
+        ["마동"] = "동굴",
+        ["공제"] = "제나스",
+        ["사구"] = "사론",
+        ["삼권"] = "삼두정",
+        ["윈첨"] = "첨탑",
+    }
 end
-
--- swap only when the writer addon is EllesmereUI-family (2-3 char homonym guard)
--- (직접 쓴 애드온이 EllesmereUI 식구일 때만 교체 - 짧은 키 동음 오염 차단)
-local function writerIsFamily()
-    local ok, s = pcall(debugstack, 3, 30, 0)
-    if not ok or type(s) ~= "string" or secret(s) then return false end
-    local res = false
-    pcall(function()
-        for line in s:gmatch("[^\r\n]+") do
-            if not line:find(SELF_FILE, 1, true) then
-                local nm = line:match("[Aa]dd[Oo]ns[\\/]([^\\/]+)")
-                if nm then
-                    res = (nm:find("EllesmereUI", 1, true) == 1)   -- first real caller addon = family? (첫 실제 호출 애드온=식구?)
-                    return
-                end
-            end
-        end
-    end)
-    return res
-end
-
--- render hooks: exact match only, raw write + reentry guard (재발화 루프 없음)
-local guard = setmetatable({}, { __mode = "k" })
-
-local fsMeta = getmetatable(UIParent:CreateFontString(nil, "BACKGROUND")).__index
-local fsRaw  = fsMeta.SetText                       -- pre-hook original (후크 설치 전 원본)
-
-local function apply(fs, text)
-    if guard[fs] then return end
-    if type(text) ~= "string" or secret(text) then return end
-    local t = MAP[text]                             -- exact match only (정확 일치만)
-    if not t or t == text then return end
-    if not writerIsFamily() then return end         -- EUI-family writer only (식구가 쓴 텍스트만)
-    guard[fs] = true
-    fsRaw(fs, t)
-    guard[fs] = nil
-end
-
-hooksecurefunc(fsMeta, "SetText", function(self, text)
-    pcall(apply, self, text)
-end)
-
--- SetFormattedText is a separate C method; re-read the result (별도 C 메서드, 결과 재독)
-hooksecurefunc(fsMeta, "SetFormattedText", function(self)
-    if guard[self] then return end
-    local ok, cur = pcall(self.GetText, self)
-    if ok and type(cur) == "string" then pcall(apply, self, cur) end
-end)

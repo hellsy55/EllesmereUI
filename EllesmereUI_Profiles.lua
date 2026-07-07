@@ -2053,6 +2053,26 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if assignedNow and assignedNow ~= profileName then
             return true, nil, "spec_locked"
         end
+        -- Flush the OUTGOING (currently active) profile's LIVE unlock data into its
+        -- snapshot BEFORE switching to the imported profile. The live
+        -- EllesmereUIDB.unlock* tables are the source of truth; a profile's stored
+        -- unlockLayout only LAGS them (it is refreshed on switch-away/export, not
+        -- continuously). SwitchProfile does this flush (~2326); import did NOT -- so
+        -- importing, switching back to the old profile (which then restored its
+        -- STALE snapshot over the live anchors), then deleting the import silently
+        -- dropped every anchor / width-match the user had set on the old profile
+        -- since it was last saved (they survived only inside the imported profile,
+        -- so deleting it lost them for good). This is the reported "bars lose their
+        -- anchors and width match after import" bug.
+        local outgoing = db.profiles[db.activeProfile or "Default"]
+        if outgoing and EllesmereUIDB then
+            outgoing.unlockLayout = {
+                anchors       = DeepCopy(EllesmereUIDB.unlockAnchors     or {}),
+                widthMatch    = DeepCopy(EllesmereUIDB.unlockWidthMatch  or {}),
+                heightMatch   = DeepCopy(EllesmereUIDB.unlockHeightMatch or {}),
+                phantomBounds = DeepCopy(EllesmereUIDB.phantomBounds     or {}),
+            }
+        end
         -- Make it the active profile and re-point db references
         db.activeProfile = profileName
         RepointAllDBs(profileName)

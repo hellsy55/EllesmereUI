@@ -1266,8 +1266,14 @@ local function SkinAbilityHeaders(frame, depth)
                     d.hover = hov
                 end
                 -- Every native texture region goes (paper caps, highlight
-                -- strips, anonymous art), keeping only our fill + wash.
+                -- strips, anonymous art), keeping only our fill + wash -- AND
+                -- the boss ability's spell icon (<button>AbilityIcon), which is
+                -- a real texture region on the header button, so the blanket
+                -- fade below was stripping it. Preserve it by name/parentKey.
                 local keep = { [d.bg] = true, [d.hover] = true }
+                local abIcon = b.AbilityIcon
+                    or (b.GetName and b:GetName() and _G[b:GetName() .. "AbilityIcon"])
+                if abIcon then keep[abIcon] = true end
                 WSkin.FadeRegions(b, keep)
                 local hl = b.GetHighlightTexture and b:GetHighlightTexture()
                 if hl and not keep[hl] and hl.SetAlpha then hl:SetAlpha(0) end
@@ -5282,8 +5288,13 @@ end
 
 local RC_STRIP_KEYS = { "Left", "Middle", "HighlightLeft", "HighlightMiddle",
                         "HighlightRight" }
-local function SkinRCRow(child)
+local function SkinRCRow(child, isCurrency)
     if not child or child:IsForbidden() then return end
+    -- Currency (TokenFrame) rows are left 100% STOCK. Skinning them at all -- even
+    -- the band-strip fade -- taints Blizzard's warband currency transfer (forbidding
+    -- the protected RequestCurrencyFromAccountCharacter) and blanks the currency
+    -- column headers we can't safely restyle. Reputation rows below are unaffected.
+    if isCurrency then return end
     local d = GetFFD(child)
     -- Per-pass: pooled rows get re-initialized by Blizzard, so the header
     -- band fades must re-assert on every list update.
@@ -5430,14 +5441,15 @@ local function SkinRCRow(child)
     end
 end
 
-local function HookRCScrollBox(box)
+local function HookRCScrollBox(box, isCurrency)
     if not box or not box.ForEachFrame then return end
-    pcall(box.ForEachFrame, box, SkinRCRow)
+    local skin = function(row) SkinRCRow(row, isCurrency) end
+    pcall(box.ForEachFrame, box, skin)
     local d = GetFFD(box)
     if box.Update and not d.rowHook then
         d.rowHook = true
         hooksecurefunc(box, "Update", function(b)
-            pcall(b.ForEachFrame, b, SkinRCRow)
+            pcall(b.ForEachFrame, b, skin)
         end)
     end
 end
@@ -5466,7 +5478,7 @@ local function Skin_RepCurrency()
     if tok then
         if tok.filterDropdown then WSkin.Dropdown(tok.filterDropdown) end
         WSkin.ScrollBarsIn(tok)
-        HookRCScrollBox(tok.ScrollBox)
+        HookRCScrollBox(tok.ScrollBox, true)  -- currency rows: band-fade only, no collapse/content skin (taints transfer)
         -- tok.CurrencyTransferLogToggleButton stays 100% stock: restyling it
         -- taints currency transfers.
         local pop = _G.TokenFramePopup
@@ -5477,9 +5489,11 @@ local function Skin_RepCurrency()
             for _, k in ipairs({ "InactiveCheckbox", "BackpackCheckbox" }) do
                 if pop[k] then SkinGuildCheck(pop[k]) end
             end
-            if pop.CurrencyTransferToggleButton then
-                WSkin.Button(pop.CurrencyTransferToggleButton)
-            end
+            -- pop.CurrencyTransferToggleButton is left 100% stock -- same as
+            -- CurrencyTransferLogToggleButton above. Skinning it taints the
+            -- warband currency-transfer path, so the protected
+            -- RequestCurrencyFromAccountCharacter() call was being forbidden
+            -- for users who actually transfer currency (ADDON_ACTION_FORBIDDEN).
         end
     end
 end
@@ -7302,9 +7316,8 @@ local function SkinMerchantTile(item)
     WSkin.FadeRegions(item, keep)
     local nameFS = item.Name or (name and _G[name .. "Name"])
     if nameFS then
-        -- Font only -- keep Blizzard's item-quality color (no forced white).
-        WSkin.Font(nameFS)
-        -- Cap the name at 2 wrapped lines, then truncate.
+        -- Leave the font AND color alone -- keep Blizzard's native item-quality
+        -- coloring and font on the name. Only apply the 2-line wrap/truncate.
         if nameFS.SetWordWrap then nameFS:SetWordWrap(true) end
         if nameFS.SetMaxLines then nameFS:SetMaxLines(2) end
     end
@@ -7722,9 +7735,11 @@ end
 
 local function SkinGossipOption(btn)
     if not btn or btn:IsForbidden() then return end
-    if btn.GreetingText then WSkin.Font(btn.GreetingText); WSkin.White(btn.GreetingText); RecolorGossipText(btn.GreetingText) end
+    -- Recolor ONLY -- keep Blizzard's native font on gossip text (its buttons
+    -- follow the color-only widget font policy). No WSkin.Font here.
+    if btn.GreetingText then WSkin.White(btn.GreetingText); RecolorGossipText(btn.GreetingText) end
     local fs = btn.GetFontString and btn:GetFontString()
-    if fs then WSkin.Font(fs); WSkin.White(fs); RecolorGossipText(fs) end
+    if fs then WSkin.White(fs); RecolorGossipText(fs) end
     -- The NPC greeting body text is a FontString nested inside the element (not
     -- the named GreetingText field or the button label), so it slips past both
     -- checks above and renders black on the dark panel. Whiten every FontString
