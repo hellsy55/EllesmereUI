@@ -3918,6 +3918,35 @@ do
 
     local CRACKLING = 203201  -- Crackling Thunder: widens Thunder Clap / Thunder Blast
 
+    -- Cached IsSpellKnown flags. GetWhirlwindStacks is polled every 0.1 s by
+    -- the resource bar, unit frame and nameplate readouts, and
+    -- HandleWhirlwindStacks runs on every player cast for every class;
+    -- C_SpellBook.IsSpellKnown is a C call and talents cannot change in
+    -- combat, so resolve the flags once per login/spec/talent event instead
+    -- (same pattern as the Sweeping Strikes tracker below). Non-warriors
+    -- never register the watcher: the flags stay false and both entry
+    -- points early-out on a plain upvalue read.
+    local requiredKnown, crashingKnown, unhingedKnown, cracklingKnown = false, false, false, false
+    do
+        local _, cls = UnitClass("player")
+        if cls == "WARRIOR" then
+            local function RefreshKnown()
+                local sb = C_SpellBook
+                requiredKnown  = (sb and sb.IsSpellKnown(REQUIRED)) or false
+                crashingKnown  = (sb and sb.IsSpellKnown(CRASHING)) or false
+                unhingedKnown  = (sb and sb.IsSpellKnown(UNHINGED)) or false
+                cracklingKnown = (sb and sb.IsSpellKnown(CRACKLING)) or false
+            end
+            local watcher = CreateFrame("Frame")
+            watcher:RegisterEvent("PLAYER_LOGIN")
+            watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+            watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+            watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+            watcher:RegisterEvent("PLAYER_TALENT_UPDATE")
+            watcher:SetScript("OnEvent", RefreshKnown)
+        end
+    end
+
     -- Improved Whirlwind grants stacks only when the swing connects with an enemy,
     -- but UNIT_SPELLCAST_SUCCEEDED fires even when it hits nothing (swung at empty
     -- air, no target, out of combat). Gate the award on an attackable, living enemy
@@ -3927,17 +3956,19 @@ do
     -- Resolved synchronously at cast time, so a kill that ends combat is still
     -- counted (the victim is present the instant the cast succeeds).
     -- NOTE: when no hostile target is set this relies on enemy nameplates showing.
-    local function EnemyInStrikeRange(spellID)
-        local wide = (spellID == 6343 or spellID == 435222) and C_SpellBook.IsSpellKnown(CRACKLING)
-        local function InReach(u)
-            if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
-                return false
-            end
-            return CheckInteractDistance(u, 2) or (wide and CheckInteractDistance(u, 1)) or false
+    -- InReach is block-scoped (wide passed as a parameter, no upvalues from
+    -- the call) so EnemyInStrikeRange allocates no closure per cast.
+    local function InReach(u, wide)
+        if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
+            return false
         end
-        if InReach("target") then return true end
+        return CheckInteractDistance(u, 2) or (wide and CheckInteractDistance(u, 1)) or false
+    end
+    local function EnemyInStrikeRange(spellID)
+        local wide = (spellID == 6343 or spellID == 435222) and cracklingKnown
+        if InReach("target", wide) then return true end
         for i = 1, 40 do
-            if InReach("nameplate" .. i) then return true end
+            if InReach("nameplate" .. i, wide) then return true end
         end
         return false
     end
@@ -3957,7 +3988,7 @@ do
             return
         end
         if event ~= "UNIT_SPELLCAST_SUCCEEDED" or unit ~= "player" then return end
-        if not (C_SpellBook and C_SpellBook.IsSpellKnown(REQUIRED)) then return end
+        if not requiredKnown then return end
 
         if castGUID and seenGUID[castGUID] then return end
         if castGUID then
@@ -3975,8 +4006,7 @@ do
 
         if GENERATORS[spellID] then
             -- Thunder Clap / Thunder Blast only count with Crashing Thunder
-            if (spellID == 6343 or spellID == 435222)
-               and not C_SpellBook.IsSpellKnown(CRASHING) then
+            if (spellID == 6343 or spellID == 435222) and not crashingKnown then
                 return
             end
             -- Only award if the swing actually had an enemy to land on.
@@ -3985,8 +4015,7 @@ do
             expiresAt = GetTime() + DURATION
         elseif SPENDERS[spellID] and stacks > 0 then
             -- Unhinged: Bloodthirst/Bloodbath don't consume during Bladestorm
-            if UNHINGED_EXEMPT[spellID]
-               and C_SpellBook.IsSpellKnown(UNHINGED)
+            if UNHINGED_EXEMPT[spellID] and unhingedKnown
                and GetTime() < bladestormEndsAt then
                 return
             end
@@ -3996,9 +4025,7 @@ do
     end
 
     function EllesmereUI.GetWhirlwindStacks()
-        if not (C_SpellBook and C_SpellBook.IsSpellKnown(REQUIRED)) then
-            return 0, 0
-        end
+        if not requiredKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
         end
