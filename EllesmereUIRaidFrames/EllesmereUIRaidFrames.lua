@@ -194,7 +194,8 @@ local UnitExists            = UnitExists
 local UnitIsConnected       = UnitIsConnected
 local UnitIsVisible         = UnitIsVisible
 local UnitIsDeadOrGhost     = UnitIsDeadOrGhost
-local UnitHasIncomingResurrection = UnitHasIncomingResurrection
+-- HELD (PR #610 incoming rez, disabled for this build):
+-- local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitThreatSituation   = UnitThreatSituation
 local UnitIsUnit            = UnitIsUnit
@@ -558,7 +559,7 @@ local defaults = {
         raidMarkerOffsetY  = 0,
         showReadyCheck   = true,
         showSummonPending = true,
-        showIncomingRez  = true,
+        -- showIncomingRez  = true,  -- HELD (PR #610 incoming rez, disabled for this build)
         readyCheckSize   = 20,
         readyCheckPosition = "center",  -- "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom"
         readyCheckOffsetX  = 0,
@@ -4149,10 +4150,11 @@ local function UpdateButton(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
-            -- Being resurrected: hide DEAD so the incoming-rez icon (shown in the same
-            -- spot by UpdateReadyCheck) isn't covered by the status text.
-            d.statusText:Hide()
+        -- HELD (PR #610 incoming rez, disabled for this build):
+        -- elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
+        --     -- Being resurrected: hide DEAD so the incoming-rez icon (shown in the same
+        --     -- spot by UpdateReadyCheck) isn't covered by the status text.
+        --     d.statusText:Hide()
         elseif UnitIsDeadOrGhost(unit) then
             d.statusText:SetText(EllesmereUI.L("DEAD"))
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
@@ -5587,12 +5589,13 @@ local function UpdateReadyCheck(button, unit)
     -- Incoming resurrection ("someone is casting a rez / rez waiting to be
     -- accepted"). Lowest priority; only meaningful on a dead unit. Lets healers
     -- see a body is already being picked up so they don't all rez the same one.
-    if db.profile.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
-        tex:SetTexCoord(0, 1, 0, 1)
-        tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-        tex:Show()
-        return
-    end
+    -- HELD (PR #610 incoming rez, disabled for this build):
+    -- if db.profile.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
+    --     tex:SetTexCoord(0, 1, 0, 1)
+    --     tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+    --     tex:Show()
+    --     return
+    -- end
 
     tex:Hide()
 end
@@ -5860,9 +5863,10 @@ ns._UpdateButtonHealth = function(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
-            -- Being resurrected: hide DEAD so the incoming-rez icon isn't covered.
-            d.statusText:Hide()
+        -- HELD (PR #610 incoming rez, disabled for this build):
+        -- elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
+        --     -- Being resurrected: hide DEAD so the incoming-rez icon isn't covered.
+        --     d.statusText:Hide()
         elseif UnitIsDeadOrGhost(unit) then
             d.statusText:SetText(EllesmereUI.L("DEAD"))
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
@@ -7837,8 +7841,11 @@ ns._LayoutGroupsImpl = function()
     end
     containerFrame:SetSize(PixelSnap(totalW), PixelSnap(totalH))
 
-    -- Snap the container's screen position to the pixel grid
-    if not InCombatLockdown() then
+    -- Snap the container's screen position to the pixel grid. Skip when
+    -- element-anchored: ApplyAnchorPosition already pixel-snaps, and a
+    -- TOPLEFT re-anchor here would fight the anchor cascade.
+    if not InCombatLockdown()
+       and not (EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("RF_RaidFrames")) then
         local l = containerFrame:GetLeft()
         local t = containerFrame:GetTop()
         if l and t then
@@ -8356,6 +8363,12 @@ end
 -- tier offsets were rebased once by _NormalizeTierOffsetAnchors).
 ns._ApplyTierOffset = function()
     if not containerFrame or InCombatLockdown() then return end
+    -- Element-anchored container: the unlock anchor system owns the position
+    -- (absolute coords recomputed from the anchor target), so repositioning
+    -- from unlockPos here would clobber it on every roster/tier pass. The
+    -- anchor's edge-to-edge offsets keep the near edge flush across tier
+    -- size changes; per-tier offsets do not apply while anchored.
+    if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("RF_RaidFrames") then return end
     local pos = db.profile.unlockPos
     if not pos then return end
     local ox, oy = 0, 0
@@ -9200,15 +9213,16 @@ local function OnEvent(self, event, arg1, ...)
             local u = btn:GetAttribute("unit")
             if u and btn:IsVisible() then UpdateReadyCheck(btn, u) end
         end
-    elseif event == "INCOMING_RESURRECT_CHANGED" then
-        -- Fires with a unit payload when a rez starts/stops on that unit. Refresh the
-        -- status text (so DEAD hides while rezzing / reappears after) as well as the
-        -- shared rez icon.
-        local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
-        if btn and btn:IsVisible() then
-            if ns._UpdateButtonHealth then ns._UpdateButtonHealth(btn) end
-            UpdateReadyCheck(btn, arg1)
-        end
+    -- HELD (PR #610 incoming rez, disabled for this build):
+    -- elseif event == "INCOMING_RESURRECT_CHANGED" then
+    --     -- Fires with a unit payload when a rez starts/stops on that unit. Refresh the
+    --     -- status text (so DEAD hides while rezzing / reappears after) as well as the
+    --     -- shared rez icon.
+    --     local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
+    --     if btn and btn:IsVisible() then
+    --         if ns._UpdateButtonHealth then ns._UpdateButtonHealth(btn) end
+    --         UpdateReadyCheck(btn, arg1)
+    --     end
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
         -- BM_RebuildLookup only rebuilds the global spell-lookup tables for the
@@ -9360,7 +9374,7 @@ do
             "roleIconStyle", "roleIconSize", "roleIconPosition", "roleIconOffsetX", "roleIconOffsetY", "roleIconHideInCombat",
             "showRoleForTank", "showRoleForHealer", "showRoleForDPS",
             "showRaidMarker", "raidMarkerSize", "raidMarkerPosition", "raidMarkerOffsetX", "raidMarkerOffsetY",
-            "showReadyCheck", "showSummonPending", "showIncomingRez",
+            "showReadyCheck", "showSummonPending", --[[ HELD (PR #610): "showIncomingRez", ]]
             "readyCheckSize", "readyCheckPosition", "readyCheckOffsetX", "readyCheckOffsetY",
             "statusTextPosition", "statusTextOffsetX", "statusTextOffsetY", "statusTextSize", "statusTextColor",
             "showLeaderIcon", "showLeaderIconInCombat", "leaderIconPosition", "leaderIconSize", "leaderIconOffsetX", "leaderIconOffsetY",
@@ -10184,9 +10198,6 @@ local function RegisterWithUnlockMode()
             label = "Raid Frames",
             group = "Raid Frames",
             order = 500,
-            noAnchorChildren = true,
-            noAnchorTo = true,
-            noAnchorTarget = true,
             noResize = true,
             -- RF positions its own container via _ApplyTierOffset (base 20-man
             -- top-left + per-tier offset, tier-footprint-INDEPENDENT), re-run on
@@ -10226,9 +10237,6 @@ local function RegisterWithUnlockMode()
             label = "Party Frames",
             group = "Raid Frames",
             order = 501,
-            noAnchorChildren = true,
-            noAnchorTo = true,
-            noAnchorTarget = true,
             noResize = true,
 
             getFrame = function() return ns._partyContainerFrame end,
@@ -10246,6 +10254,13 @@ local function RegisterWithUnlockMode()
                 db.profile.partyUnlockPos = nil
             end,
             applyPos = function()
+                -- Element-anchored: the anchor system owns the position. Only
+                -- apply the saved pos as a bootstrap while the frame has no
+                -- resolved geometry yet (anchor pass corrects it after).
+                if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("RF_PartyFrames")
+                   and ns._partyContainerFrame and ns._partyContainerFrame:GetLeft() then
+                    return
+                end
                 local pos = db.profile.partyUnlockPos
                 if pos and ns._partyContainerFrame then
                     ns._partyContainerFrame:ClearAllPoints()
@@ -11961,18 +11976,20 @@ local function BuildPreviewRoles()
         end
         previewRoles._deadSlot    = statePool[1]  -- plain corpse
         previewRoles._offlineSlot = statePool[2]
-        previewRoles._rezSlot     = statePool[3]  -- corpse with an incoming-rez icon
+        -- HELD (PR #610 incoming rez, disabled for this build):
+        -- previewRoles._rezSlot     = statePool[3]  -- corpse with an incoming-rez icon
         -- Plain dead + offline bodies carry no readycheck/summon icon (looks wrong there).
         if rcStatuses[statePool[1]] then rcStatuses[statePool[1]] = nil end
         if rcStatuses[statePool[2]] then rcStatuses[statePool[2]] = nil end
         -- The rez corpse gets the incoming-rez icon. But markers win the shared icon
         -- slot (same as the readycheck de-confliction above): if the rez slot landed
         -- on a marker slot, skip the icon (the frame is still shown as a dead body).
-        if statePool[3] ~= ms1 and statePool[3] ~= ms2 then
-            rcStatuses[statePool[3]] = "rez"
-        else
-            rcStatuses[statePool[3]] = nil
-        end
+        -- HELD (PR #610 incoming rez, disabled for this build):
+        -- if statePool[3] ~= ms1 and statePool[3] ~= ms2 then
+        --     rcStatuses[statePool[3]] = "rez"
+        -- else
+        --     rcStatuses[statePool[3]] = nil
+        -- end
     end
 end
 
@@ -12725,11 +12742,16 @@ local function ApplyPreviewData(f, index)
         local rcStatuses = previewRoles._readyCheck
         local rcStatus = rcStatuses and rcStatuses[index]
         local isSummon = rcStatus and rcStatus:sub(1, 6) == "summon"
-        local isRez    = rcStatus == "rez"
+        -- HELD (PR #610 incoming rez, disabled for this build):
+        -- local isRez    = rcStatus == "rez"
+        -- local showRC = indVis and rcStatus and (
+        --     (isRez and s.showIncomingRez) or
+        --     (isSummon and s.showSummonPending) or
+        --     (not isSummon and not isRez and s.showReadyCheck)
+        -- )
         local showRC = indVis and rcStatus and (
-            (isRez and s.showIncomingRez) or
-            (isSummon and s.showSummonPending) or
-            (not isSummon and not isRez and s.showReadyCheck)
+            (not isSummon and s.showReadyCheck) or
+            (isSummon and s.showSummonPending)
         )
         if showRC then
             local rcSz = PixelSnap(s.readyCheckSize or 20)
@@ -12773,9 +12795,10 @@ local function ApplyPreviewData(f, index)
                 f._readyCheck:SetAtlas("RaidFrame-Icon-SummonAccepted")
             elseif rcStatus == "summon_declined" then
                 f._readyCheck:SetAtlas("RaidFrame-Icon-SummonDeclined")
-            elseif rcStatus == "rez" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
+            -- HELD (PR #610 incoming rez, disabled for this build):
+            -- elseif rcStatus == "rez" then
+            --     f._readyCheck:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+            --     f._readyCheck:SetTexCoord(0, 1, 0, 1)
             end
             f._readyCheck:Show()
         else
@@ -12846,8 +12869,10 @@ local function ApplyPreviewData(f, index)
     -- Dead/offline/AFK states (only when indicators eyeball is on). The rez slot is
     -- a second corpse (dimmed, no "DEAD" text) that shows an incoming-rez icon in
     -- place of the status text -- mirrors the live "hide DEAD while rezzing" behavior.
-    local isRezCorpse = indVis and index == previewRoles._rezSlot
-    local isDead      = indVis and (index == previewRoles._deadSlot or isRezCorpse)
+    -- HELD (PR #610 incoming rez, disabled for this build):
+    -- local isRezCorpse = indVis and index == previewRoles._rezSlot
+    -- local isDead      = indVis and (index == previewRoles._deadSlot or isRezCorpse)
+    local isDead      = indVis and index == previewRoles._deadSlot
     local isOffline   = indVis and index == previewRoles._offlineSlot
     -- Mark dead/offline preview frames so the animated-preview ticker skips them
     -- (their health bar is emptied and health text hidden -- never animated).
@@ -12994,10 +13019,12 @@ local function ApplyPreviewData(f, index)
         else
             f._statusText:SetPoint("CENTER", f._health, "CENTER", stOX, stOY)
         end
-        if isRezCorpse then
-            -- Being resurrected: the rez icon takes this spot, so no DEAD text.
-            f._statusText:Hide()
-        elseif isDead then
+        -- HELD (PR #610 incoming rez, disabled for this build):
+        -- if isRezCorpse then
+        --     -- Being resurrected: the rez icon takes this spot, so no DEAD text.
+        --     f._statusText:Hide()
+        -- elseif isDead then
+        if isDead then
             f._statusText:SetText(EllesmereUI.L("DEAD"))
             f._statusText:Show()
         elseif isOffline then
@@ -14592,7 +14619,12 @@ function ERF:OnEnable()
         local sp = s.cellSpacing or 2
         ns._partyContainerFrame:SetSize(w, h * 5 + sp * 4)
         local pos = s.partyUnlockPos
-        if pos then
+        -- Skip the saved-pos SetPoint when element-anchored with resolved
+        -- geometry: the unlock anchor system owns the position.
+        local anchored = EllesmereUI.IsUnlockAnchored
+            and EllesmereUI.IsUnlockAnchored("RF_PartyFrames")
+            and ns._partyContainerFrame:GetLeft()
+        if pos and not anchored then
             ns._partyContainerFrame:ClearAllPoints()
             ns._partyContainerFrame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
         end
@@ -14633,7 +14665,12 @@ function ERF:OnEnable()
             local sp = s.cellSpacing or 2
             ns._partyContainerFrame:SetSize(w, h * 5 + sp * 4)
             local pos = s.partyUnlockPos
-            if pos then
+            -- Skip the saved-pos SetPoint when element-anchored with resolved
+            -- geometry: the unlock anchor system owns the position.
+            local anchored = EllesmereUI.IsUnlockAnchored
+                and EllesmereUI.IsUnlockAnchored("RF_PartyFrames")
+                and ns._partyContainerFrame:GetLeft()
+            if pos and not anchored then
                 ns._partyContainerFrame:ClearAllPoints()
                 ns._partyContainerFrame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
             end
@@ -14666,7 +14703,7 @@ function ERF:OnEnable()
     eventFrame:RegisterEvent("READY_CHECK_CONFIRM")
     eventFrame:RegisterEvent("READY_CHECK_FINISHED")
     eventFrame:RegisterEvent("INCOMING_SUMMON_CHANGED")
-    eventFrame:RegisterEvent("INCOMING_RESURRECT_CHANGED")
+    -- eventFrame:RegisterEvent("INCOMING_RESURRECT_CHANGED")  -- HELD (PR #610 incoming rez, disabled for this build)
     eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")

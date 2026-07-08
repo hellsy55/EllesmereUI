@@ -713,6 +713,45 @@ end
 --  moves / spec swaps / profile swaps; metatables are never serialized).
 -------------------------------------------------------------------------------
 
+-------------------------------------------------------------------------------
+--  Hosted-buff markers
+--
+--  A buff placed on a CD/utility bar ("hosted") gets its OWN assignedSpells
+--  entry, encoded as a negative marker so it can never collide with the same
+--  spell's cooldown entry: one spellID can exist in BOTH the Essential/Utility
+--  catalog and the Tracked Buffs catalog (e.g. Divine Shield 642). The marker
+--  gives the hosted buff an independent slot -- its own position, its own
+--  remove/move, its own per-icon settings -- even when the cooldown form of
+--  the same spell sits on the same bar.
+--
+--  Encoding: -(BASE + spellID). BASE sits far below the item-preset range
+--  (<= -100, negated itemIDs) and the trinket slots (-13/-14), so every
+--  existing negative-id branch keeps working; anything <= -BASE is a marker.
+-------------------------------------------------------------------------------
+ns.HOSTED_BUFF_MARKER_BASE = 2000000000
+
+function ns.HostedBuffMarker(spellID)
+    return -(ns.HOSTED_BUFF_MARKER_BASE + spellID)
+end
+
+-- Decode a hosted-buff marker to its spellID; nil for anything else.
+function ns.HostedBuffMarkerToSpell(id)
+    if type(id) == "number" and id <= -ns.HOSTED_BUFF_MARKER_BASE then
+        return -id - ns.HOSTED_BUFF_MARKER_BASE
+    end
+    return nil
+end
+
+-- True when the list already holds the hosted marker for spellID.
+function ns.ListHasHostedMarker(list, spellID)
+    if not list then return false end
+    local marker = -(ns.HOSTED_BUFF_MARKER_BASE + spellID)
+    for i = 1, #list do
+        if list[i] == marker then return true end
+    end
+    return false
+end
+
 -- Family store key for a bar ("spellSettingsBuff" for buff-family bars,
 -- "spellSettingsCD" for everything else, including the ghost CD bar).
 function ns.SettingsFamilyKey(barKeyOrBd)
@@ -1170,7 +1209,9 @@ function ns.RescanCustomItemFlag()
                 local assigned = bs and bs.assignedSpells
                 if assigned then
                     for _, sid in ipairs(assigned) do
-                        if type(sid) == "number" and sid <= -100 then
+                        -- Hosted-buff markers are also <= -100; they are not items.
+                        if type(sid) == "number" and sid <= -100
+                           and sid > -ns.HOSTED_BUFF_MARKER_BASE then
                             ns._cdmAnyCustomItem = true
                             return
                         end
@@ -3668,6 +3709,30 @@ LayoutCDMBar = function(barKey)
     local barData = barDataByKey[barKey]
     if not barData or not barData.enabled then return end
 
+    -- Shift-Icons cd-state modes: icons flagged shift-hidden are dropped from
+    -- the layout entirely, so later icons close the gap and the bar resizes as
+    -- if the icon were removed. Everything below (sizing, match math, slot
+    -- positions) derives from this one array, so the filter is the whole
+    -- feature. The flag is only ever set by the cd-state evaluators (via
+    -- ns.SetCdStateShiftHidden); bars without it pay one field read per icon
+    -- and never build the filtered table. Skipped frames keep their last
+    -- point at alpha 0 (same as the non-shift hidden modes).
+    do
+        local filtered
+        for i = 1, #icons do
+            local sfc = _ecmeFC[icons[i]]
+            if sfc and sfc._cdStateShiftHidden then
+                if not filtered then
+                    filtered = {}
+                    for j = 1, i - 1 do filtered[j] = icons[j] end
+                end
+            elseif filtered then
+                filtered[#filtered + 1] = icons[i]
+            end
+        end
+        if filtered then icons = filtered end
+    end
+
     local grow = frame._mouseGrow or barData.growDirection or "CENTER"
     -- Row count is taken from ComputeTopRowStride's EFFECTIVE rows (effRows,
     -- computed once the icon count is known below), which collapses a custom
@@ -4198,6 +4263,72 @@ LayoutCDMBar = function(barKey)
     if barKey == FOCUSKICK_BAR_KEY and ns.ApplyFocusKickAnchor then
         ns.ApplyFocusKickAnchor()
     end
+end
+
+-- Shift-Icons cd-state modes: write the per-frame shift-hidden flag (on the
+-- external FC table, never the Blizzard frame) and, ONLY when the value
+-- actually changes, relayout that bar so the remaining icons close the gap.
+-- Deferred to a clean execution context -- callers run inside SetDesaturated
+-- hooks / the Fake-Active poll, where LayoutCDMBar's SetSize/SetPoint could
+-- otherwise propagate taint (same pattern as the _visHidden relayout in
+-- _CDMApplyVisibility). Coalesced per bar so several icons flipping on the
+-- same tick lay out once. Steady-state calls (no change) return immediately.
+--
+-- Growth-edge preservation is LOCAL to this relayout call: capture the fixed
+-- growth edge before LayoutCDMBar and, if the resize moved it, translate the
+-- frame back through whatever point it already has (offset-only SetPoint on
+-- the existing point/relTo -- no ClearAllPoints, no DB writes, no anchor-
+-- system calls). A non-CENTER-grow bar's persistent point normally IS its
+-- fixed growth edge, so the measured delta is exactly 0 and the frame is
+-- never touched; this only corrects bars whose point is center/corner-based
+-- at that moment (anchored bars mid-cascade, first-row corner pins, legacy
+-- CENTER positions). Anchored bars still get their normal deferred anchor
+-- batch reapply afterwards (OnSizeChanged fired during LayoutCDMBar), which
+-- remains authoritative -- identical to a buff-count resize today.
+ns._cdShiftLayoutPending = {}
+function ns.SetCdStateShiftHidden(fc, shiftHidden)
+    shiftHidden = shiftHidden or false
+    if (fc._cdStateShiftHidden or false) == shiftHidden then return end
+    fc._cdStateShiftHidden = shiftHidden
+    local bk = fc.barKey
+    if not bk or ns._cdShiftLayoutPending[bk] then return end
+    ns._cdShiftLayoutPending[bk] = true
+    C_Timer.After(0, function()
+        ns._cdShiftLayoutPending[bk] = nil
+        local frame = cdmBarFrames[bk]
+        local bd = barDataByKey[bk]
+        local grow = bd and bd.growDirection or "CENTER"
+        local fixedEdge
+        if frame and grow ~= "CENTER"
+           and not frame._mouseTrack and bk ~= ns.FOCUSKICK_BAR_KEY
+           and not EllesmereUI._unlockActive
+           and frame:GetNumPoints() == 1 then
+            if grow == "LEFT" then fixedEdge = frame:GetRight()
+            elseif grow == "RIGHT" then fixedEdge = frame:GetLeft()
+            elseif grow == "UP" then fixedEdge = frame:GetBottom()
+            elseif grow == "DOWN" then fixedEdge = frame:GetTop() end
+        end
+        LayoutCDMBar(bk)
+        if fixedEdge then
+            local newEdge
+            if grow == "LEFT" then newEdge = frame:GetRight()
+            elseif grow == "RIGHT" then newEdge = frame:GetLeft()
+            elseif grow == "UP" then newEdge = frame:GetBottom()
+            else newEdge = frame:GetTop() end
+            local d = newEdge and (newEdge - fixedEdge)
+            if d and (d > 0.25 or d < -0.25) then
+                local point, relTo, relPoint, x, y = frame:GetPoint(1)
+                if point then
+                    if grow == "LEFT" or grow == "RIGHT" then
+                        x = (x or 0) - d
+                    else
+                        y = (y or 0) - d
+                    end
+                    frame:SetPoint(point, relTo or frame:GetParent(), relPoint, x, y)
+                end
+            end
+        end
+    end)
 end
 
 -- (CreateCDMIcon removed -- all bars now use hook-based reparenting of Blizzard CDM frames)
@@ -5150,6 +5281,11 @@ local function RefreshCDMIconAppearance(barKey)
             -- against the family store, with bar-tier fallback.
             local csSs = ns.ResolveSpellSettings and ns.ResolveSpellSettings(icon, csSid, csSd, csBk)
             local cse = csSs and csSs.cdStateEffect
+            -- Shift-Icons variants behave exactly like their base hidden mode
+            -- plus the layout flag; normalize so the branches below stay as-is.
+            local cseShift = (cse == "hiddenOnCDShift" or cse == "hiddenReadyShift")
+            if cse == "hiddenOnCDShift" then cse = "hiddenOnCD"
+            elseif cse == "hiddenReadyShift" then cse = "hiddenReady" end
             if cse then
                 local csLive = csSid
                 if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
@@ -5160,18 +5296,29 @@ local function RefreshCDMIconAppearance(barKey)
                 if cse == "hiddenOnCD" or cse == "hiddenReady" then
                     local hide = (cse == "hiddenOnCD") == onCD
                     icon:SetAlpha(hide and 0 or EffectiveBarAlpha(barData))
-                    if fc then fc._cdStateHidden = hide or false end
+                    if fc then
+                        fc._cdStateHidden = hide or false
+                        if ns.SetCdStateShiftHidden then
+                            ns.SetCdStateShiftHidden(fc, cseShift and hide or false)
+                        end
+                    end
                 elseif cse == "lowerAlphaOnCD" then
                     -- Identical to hiddenOnCD but with a customizable opacity instead
                     -- of 0. Reuse the _cdStateHidden flag as "cd-state owns this alpha"
                     -- so the opacity appliers leave the lowered value alone.
                     icon:SetAlpha(onCD and (csSs.cdStateLowerAlpha or 0.5) or EffectiveBarAlpha(barData))
-                    if fc then fc._cdStateHidden = onCD or false end
+                    if fc then
+                        fc._cdStateHidden = onCD or false
+                        if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
+                    end
                 else
                     -- Clear stale hidden state when switching to a glow effect
                     if fc and fc._cdStateHidden then
                         fc._cdStateHidden = false
                         icon:SetAlpha(EffectiveBarAlpha(barData))
+                    end
+                    if fc and ns.SetCdStateShiftHidden then
+                        ns.SetCdStateShiftHidden(fc, false)
                     end
                     if not ifd or not ifd._cdStateGlowOn then
                         if (cse == "pixelGlowReady" or cse == "buttonGlowReady"
@@ -5201,13 +5348,14 @@ local function RefreshCDMIconAppearance(barKey)
                         ns.CDGlowWatch(icon)
                     end
                 end
-            elseif fc and fc._cdStateHidden then
+            elseif fc and (fc._cdStateHidden or fc._cdStateShiftHidden) then
                 -- A preset keeps its hidden state from the Fake-Active engine (its
                 -- cdState lives in customActiveStates, not per-bar spellSettings),
                 -- so don't clear it here or the icon flashes visible.
                 if not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then
                     fc._cdStateHidden = false
                     icon:SetAlpha(EffectiveBarAlpha(barData))
+                    if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
                 end
             end
         end
@@ -6865,6 +7013,14 @@ function ns.ReseedAssignedSpellsFromLiveIcons()
                 for _, icon in ipairs(icons) do
                     local fc = ns._ecmeFC and ns._ecmeFC[icon]
                     local sid = fc and fc.spellID
+                    -- Skip hosted-buff frames and their placeholders: their bar
+                    -- membership is the hosted MARKER entry, and their positive
+                    -- spellID would materialize the same spell's COOLDOWN form.
+                    local fdRS = ns._hookFrameData and ns._hookFrameData[icon]
+                    if (fc and fc.isHostedBuff) or icon._isPlaceholderFrame
+                       or (fdRS and fdRS._isBuffViewerFrame) then
+                        sid = nil
+                    end
                     if type(sid) == "number" and sid ~= 0 then
                         if seen[sid] then
                             -- Already has a slot (Blizzard spell OR a custom trinket/

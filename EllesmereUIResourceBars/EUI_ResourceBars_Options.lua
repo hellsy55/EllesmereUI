@@ -4051,6 +4051,29 @@ initFrame:SetScript("OnEvent", function(self)
                 IPControlTip(ipRow._leftRegion, ipBarTip)
                 IPControlTip(ipRow._rightRegion, ipHashTip)
             end
+            local function _IsArmsWarrior()
+                if ctx.advanced then return ctx.specID == 71 end
+                local _, cf = UnitClass("player")
+                if cf ~= "WARRIOR" then return false end
+                local s = GetSpecialization()
+                local sid = s and GetSpecializationInfo(s)
+                return sid == 71
+            end
+            if _IsArmsWarrior() then
+                local ssBarTip = "Shows Sweeping Strikes charges on the resource bar; Unit Frames and the personal Nameplate show them regardless."
+                local ssRow
+                ssRow, h = W:DualRow(parent, y,
+                    { type = "toggle", text = "Arms Warrior Sweeping Strikes Bar",
+                      tooltip = ssBarTip,
+                      getValue = function() local p = DB(); return p and p.secondary.armsSweepingStrikesBar end,
+                      setValue = function(v)
+                          local p = DB(); if not p then return end
+                          p.secondary.armsSweepingStrikesBar = v; RebuildClass()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type = "label", text = "" }
+                );  y = y - h
+            end
         end
 
         -- Row 1: Show Class Resource | Orientation

@@ -1227,6 +1227,7 @@ local function ApplyDarkTheme(health)
     local isDark = db and db.profile and db.profile.darkTheme
     if isDark then
         health.colorClass = false
+        health.colorClassPet = false
         health.colorReaction = false
         health.colorTapped = false
         health.colorDisconnected = false
@@ -1265,6 +1266,14 @@ local function ApplyDarkTheme(health)
         -- Check for custom fill/bg colors on this unit
         local unitKey = health._euiUnitKey
         local unitSettings = unitKey and db.profile[unitKey]
+        -- Pet class coloring is opt-in. Pets never match oUF's colorClass (that
+        -- path requires a player unit), so the pet frame uses colorClassPet, gated
+        -- on the pet page's Class Colored Fill toggle.
+        if unitKey == "pet" and unitSettings and unitSettings.healthClassColored then
+            health.colorClassPet = true
+        else
+            health.colorClassPet = false
+        end
         local customFill = unitSettings and unitSettings.customFillColor
         local customBg   = unitSettings and unitSettings.customBgColor
         if customFill then
@@ -6776,7 +6785,6 @@ local function StylePetFrame(frame, unit)
     bg:SetColorTexture(0, 0, 0, 0.5)
     health.bg = bg
 
-    health.colorClassPet = true
     health.colorReaction = true
     health.colorTapped = true
     health.colorDisconnected = true

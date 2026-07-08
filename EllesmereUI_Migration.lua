@@ -3195,6 +3195,59 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- Relocate HOSTED-buff per-spell settings from the CD family store into the
+-- BUFF family store, for every bar that hosts the buff. Hosted buffs (a buff
+-- placed on a CD/utility bar) originally resolved per-spell settings through
+-- the host bar's family key (CD); they now resolve the BUFF store, frame-keyed,
+-- so the same spellID's cooldown icon can hold independent settings. Without
+-- the move, pre-existing hosted-buff settings would silently stop applying.
+-- Idempotent: moves only while a CD-store entry exists for a flagged id, and
+-- never overwrites keys already present in the BUFF-store entry. (A cooldown
+-- twin's own settings under the same id move too -- unsplittable in the old
+-- shared-entry shape, and that state was already rendering wrong.)
+-- assignedSpells conversion (plain id -> hosted marker) is NOT done here: it
+-- needs the live viewer/catalog data to tell the buff and cooldown forms
+-- apart, so the options panel normalizes it lazily (EnsureAssignedSpells);
+-- rendering handles both shapes in the meantime.
+function EllesmereUI.MigrateCdmHostedBuffSettings(specProf)
+    if type(specProf) ~= "table" or type(specProf.barSpells) ~= "table" then return end
+    local stCD = specProf.spellSettingsCD
+    if type(stCD) ~= "table" then return end
+    for _, sd in pairs(specProf.barSpells) do
+        local hosted = type(sd) == "table" and sd.hostedBuffSpellIDs
+        if type(hosted) == "table" then
+            for hsid in pairs(hosted) do
+                local e = stCD[hsid]
+                if type(e) == "table" then
+                    local stBuff = specProf.spellSettingsBuff
+                    if type(stBuff) ~= "table" then
+                        stBuff = {}
+                        specProf.spellSettingsBuff = stBuff
+                    end
+                    local tgt = stBuff[hsid]
+                    if type(tgt) ~= "table" then
+                        stBuff[hsid] = e
+                    else
+                        for k, v in pairs(e) do
+                            if tgt[k] == nil then tgt[k] = v end
+                        end
+                    end
+                    stCD[hsid] = nil
+                end
+            end
+        end
+    end
+end
+
+EllesmereUI.RegisterMigration({
+    id          = "cdm_hosted_buff_settings_v1",
+    scope       = "specProfile",
+    description = "Move hosted-buff per-spell icon settings from the CD family store to the BUFF family store (hosted buffs now share the buff-family settings entry with the buffs bar, independent of the same spell's cooldown icon).",
+    body = function(ctx)
+        EllesmereUI.MigrateCdmHostedBuffSettings(ctx.specProfile)
+    end,
+})
+
 -- The Mythic+ Timer's Enemy Forces bar historically shared one bar texture with
 -- the main timer bar (both read barTexture / barBgTexture). The Forces bar now
 -- has its own enemyBarTexture / enemyBarBgTexture so the two can be styled

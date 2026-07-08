@@ -994,6 +994,68 @@ function EllesmereUI:UnregisterUnlockElement(key)
     PruneStaleLinks(key)
 end
 
+-------------------------------------------------------------------------------
+--  ShiftIndexedAnchorKeys -- re-keys anchor and size-match links for an
+--  index-keyed element family after one slot is removed (e.g. deleting
+--  Tracking Bar 2 of 4 shifts TBB_3 -> TBB_2 and TBB_4 -> TBB_3, mirroring
+--  the addon's own re-keyed position store). Links pointing AT the removed
+--  key are severed -- the child element simply keeps its stored position --
+--  and the removed key's own links are dropped with it.
+-------------------------------------------------------------------------------
+function EllesmereUI.ShiftIndexedAnchorKeys(prefix, removedIdx, oldCount)
+    if not EllesmereUIDB then return end
+    local removedKey = prefix .. removedIdx
+    local plen = #prefix
+
+    -- Returns the shifted key for keys above the removed index, else nil.
+    local function ShiftedKey(key)
+        if type(key) ~= "string" or key:sub(1, plen) ~= prefix then return nil end
+        local i = tonumber(key:sub(plen + 1))
+        if not i or i <= removedIdx or i > oldCount then return nil end
+        return prefix .. (i - 1)
+    end
+
+    local anchors = EllesmereUIDB.unlockAnchors
+    if anchors then
+        -- Sever children anchored to the removed key; retarget higher indexes.
+        for childKey, info in pairs(anchors) do
+            if info and info.target == removedKey then
+                anchors[childKey] = nil
+            elseif info then
+                local nt = ShiftedKey(info.target)
+                if nt then info.target = nt end
+            end
+        end
+        -- Shift child-role keys down one slot.
+        anchors[removedKey] = nil
+        for i = removedIdx + 1, oldCount do
+            local oldK, newK = prefix .. i, prefix .. (i - 1)
+            anchors[newK] = anchors[oldK]
+            anchors[oldK] = nil
+        end
+    end
+
+    local function ShiftMatchStore(store)
+        if not store then return end
+        for childKey, targetKey in pairs(store) do
+            if targetKey == removedKey then
+                store[childKey] = nil
+            else
+                local nt = ShiftedKey(targetKey)
+                if nt then store[childKey] = nt end
+            end
+        end
+        store[removedKey] = nil
+        for i = removedIdx + 1, oldCount do
+            local oldK, newK = prefix .. i, prefix .. (i - 1)
+            store[newK] = store[oldK]
+            store[oldK] = nil
+        end
+    end
+    ShiftMatchStore(EllesmereUIDB.unlockWidthMatch)
+    ShiftMatchStore(EllesmereUIDB.unlockHeightMatch)
+end
+
 -- Validate all stored relationships against currently registered elements.
 -- Removes any that point to an element that no longer exists.
 -- Runs once on load so stale data from a previous session is cleaned up.
@@ -1001,10 +1063,20 @@ local function ValidateStoredLinks()
     if not EllesmereUIDB then return end
     local elems = EllesmereUI._unlockRegisteredElements
 
+    -- Tracking Bar keys are spec-scoped: the registry only ever holds the
+    -- CURRENT spec's bars, so a TBB_ key missing here may still exist for
+    -- another spec. Never prune links over a missing TBB_ key -- explicit
+    -- bar deletion re-keys/severs them via ShiftIndexedAnchorKeys instead.
+    local function MissingForGood(key)
+        if key ~= nil and elems[key] then return false end
+        if type(key) == "string" and key:find("^TBB_%d+$") then return false end
+        return true
+    end
+
     local anchors = EllesmereUIDB.unlockAnchors
     if anchors then
         for childKey, info in pairs(anchors) do
-            if not elems[childKey] or (info and not elems[info.target]) then
+            if MissingForGood(childKey) or (info and MissingForGood(info.target)) then
                 anchors[childKey] = nil
             end
         end
@@ -1013,10 +1085,11 @@ local function ValidateStoredLinks()
     local wm = EllesmereUIDB.unlockWidthMatch
     if wm then
         for childKey, targetKey in pairs(wm) do
-            if not elems[childKey] or not elems[targetKey] then
+            if MissingForGood(childKey) or MissingForGood(targetKey) then
                 wm[childKey] = nil
-            elseif (elems[childKey].noResize and not elems[childKey].allowMatchSource)
-                or elems[targetKey].noResize then
+            elseif elems[childKey] and elems[targetKey]
+                and ((elems[childKey].noResize and not elems[childKey].allowMatchSource)
+                or elems[targetKey].noResize) then
                 wm[childKey] = nil
             end
         end
@@ -1025,10 +1098,11 @@ local function ValidateStoredLinks()
     local hm = EllesmereUIDB.unlockHeightMatch
     if hm then
         for childKey, targetKey in pairs(hm) do
-            if not elems[childKey] or not elems[targetKey] then
+            if MissingForGood(childKey) or MissingForGood(targetKey) then
                 hm[childKey] = nil
-            elseif (elems[childKey].noResize and not elems[childKey].allowMatchSource)
-                or elems[targetKey].noResize then
+            elseif elems[childKey] and elems[targetKey]
+                and ((elems[childKey].noResize and not elems[childKey].allowMatchSource)
+                or elems[targetKey].noResize) then
                 hm[childKey] = nil
             end
         end

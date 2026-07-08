@@ -303,16 +303,37 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
     -- profile-level bd.barSpellSettings ("Apply to Bar (All Specs)"). nil when
     -- neither exists -- the common case costs two table lookups.
     local tier = ns.GetBarTierSettings and ns.GetBarTierSettings(sd2, bk)
+    -- HOSTED-BUFF frame detection: a real buff frame (or its inactive
+    -- placeholder) rendered on a CD/util bar. FRAME-based, not flag-based --
+    -- the same spellID can ALSO be this bar's cooldown entry, and that icon
+    -- must keep the normal CD-family resolution. A buff frame only reaches a
+    -- non-buff bar through an explicit host, so the frame identity is exact.
+    -- Cheap: sd2.hostedBuffSpellIDs is nil on bars with no host.
+    local hostedFrame = false
+    if frame and bk and sd2 and sd2.hostedBuffSpellIDs then
+        local fdH = ns._hookFrameData and ns._hookFrameData[frame]
+        if (fdH and fdH._isBuffViewerFrame) or frame._isPlaceholderFrame then
+            local bdH = ns.barDataByKey and ns.barDataByKey[bk]
+            if bdH and bdH.barType ~= "buffs" and bdH.barType ~= "custom_buff" then
+                hostedFrame = true
+            end
+        end
+    end
     -- HOSTED BUFFS are fully removed from the Apply-to-Bar tier system: a buff on a
     -- CD/util bar must never inherit that bar's applied (cd/util) values -- notably
     -- for keys shared between families (Duration Text, Border). Resolve ONLY its own
-    -- per-spell entry. Cheap: sd2.hostedBuffSpellIDs is nil on bars with no host.
-    if tier and sd2 and sd2.hostedBuffSpellIDs and sd2.hostedBuffSpellIDs[sid2] then
+    -- per-spell entry. Nil-frame callers fall back to the flag test (they have no
+    -- frame identity, and a nil-frame lookup for a hosted id is always the buff).
+    if tier and (hostedFrame
+       or (not frame and sd2 and sd2.hostedBuffSpellIDs and sd2.hostedBuffSpellIDs[sid2])) then
         tier = nil
     end
     -- Per-spell entries live in the spec's FAMILY store (they travel with the
-    -- spell across bars), not on the bar.
-    local settings = bk and ns.GetSpellSettingsStore and ns.GetSpellSettingsStore(bk)
+    -- spell across bars), not on the bar. A hosted buff reads the BUFF store --
+    -- the same entry it had on the buffs bar -- keyed off the FRAME, so a
+    -- cooldown icon of the same spellID on this bar keeps the CD store.
+    local settings = bk and ns.GetSpellSettingsStore
+        and ns.GetSpellSettingsStore(hostedFrame and "buffs" or bk)
     if not settings or next(settings) == nil then return tier end
 
     local ChainSettings = ns.ChainSettings
@@ -1532,7 +1553,11 @@ local function DecorateFrame(frame, barData)
                     local ssB = (sidB and bkB and ns.ResolveSpellSettings)
                         and ns.ResolveSpellSettings(frame, sidB, ns.GetBarSpellData(bkB), bkB) or nil
                     local sr, sg, sb
-                    local alpha = barData.swipeAlpha or 0.7
+                    -- CURRENT bar's swipe alpha, not the decorate-time closure
+                    -- barData: pooled frames decorate once, so the closure holds
+                    -- whichever bar first decorated this frame.
+                    local bdB = bkB and barDataByKey and barDataByKey[bkB]
+                    local alpha = (bdB and bdB.swipeAlpha) or barData.swipeAlpha or 0.7
                     local mode = ssB and ssB.cdSwipeColor
                     if mode == "class" then
                         local _, ct = UnitClass("player")
@@ -2090,8 +2115,19 @@ local function DecorateFrame(frame, barData)
                 hooksecurefunc(fd.tex, "SetDesaturation", onDesatChange)
             end
         end
-        local isBuff = (barData.barType == "buffs" or barData.key == "buffs" or barData.barType == "custom_buff")
+        -- Swipe direction baseline by FRAME kind, not just bar kind: a buff
+        -- frame (or a hosted-buff placeholder) fills like a buff even when it
+        -- renders on a CD/utility bar. Decoration is once-per-frame while
+        -- Blizzard POOLS these frames across uses, so the kind is recorded in
+        -- fd._revKind and the claim loops re-assert the direction whenever the
+        -- kind changes -- a frame first decorated for the wrong bar family
+        -- otherwise kept that direction for the whole session (buffs randomly
+        -- rendering with a reversed swipe depending on pool history).
+        local isBuff = (barData.barType == "buffs" or barData.key == "buffs"
+            or barData.barType == "custom_buff"
+            or fd._isBuffViewerFrame or frame._isPlaceholderFrame) and true or false
         fd.cooldown:SetReverse(isBuff)
+        fd._revKind = isBuff
 
         -- NOTE: Clear IS hooked above (in the _swipeColorHooked block) to restore
         -- the recharge swipe on charge spells, and SetCooldown is hooked there too
@@ -2125,6 +2161,12 @@ local function DecorateFrame(frame, barData)
                 if bk2 == ns.FOCUSKICK_BAR_KEY then return end
                 local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
                 local cse = ss2 and ss2.cdStateEffect
+                -- Shift-Icons variants behave exactly like their base hidden
+                -- mode plus a bar-relayout flag; normalize here so every
+                -- comparison below stays unchanged.
+                local cseShift = (cse == "hiddenOnCDShift" or cse == "hiddenReadyShift")
+                if cse == "hiddenOnCDShift" then cse = "hiddenOnCD"
+                elseif cse == "hiddenReadyShift" then cse = "hiddenReady" end
                 if not cse then
                     if fd._cdStateGlowOn then
                         if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
@@ -2137,6 +2179,11 @@ local function DecorateFrame(frame, barData)
                        and not (ns.PresetHasCdState and ns.PresetHasCdState(frame)) then
                         fc2._cdStateHidden = false
                     end
+                    if fc2 and fc2._cdStateShiftHidden
+                       and not (ns.PresetHasCdState and ns.PresetHasCdState(frame))
+                       and ns.SetCdStateShiftHidden then
+                        ns.SetCdStateShiftHidden(fc2, false)
+                    end
                     return
                 end
                 -- Clear stale hidden state when switching to a non-hidden effect
@@ -2146,6 +2193,10 @@ local function DecorateFrame(frame, barData)
                         fc2._cdStateHidden = false
                         local bd2 = barDataByKey and barDataByKey[bk2]
                         frame:SetAlpha(ns.EffectiveBarAlpha(bd2))
+                    end
+                    -- (cse is already normalized, so Shift variants never land here.)
+                    if fc2 and ns.SetCdStateShiftHidden then
+                        ns.SetCdStateShiftHidden(fc2, false)
                     end
                 end
                 -- For hidden cdState modes, defer the evaluation by one
@@ -2162,6 +2213,9 @@ local function DecorateFrame(frame, barData)
                     fd._cdStatePending.cse = cse
                     -- Captured at arm time (a setting, not volatile); only lowerAlphaOnCD reads it.
                     fd._cdStatePending.lowAlpha = (ss2 and ss2.cdStateLowerAlpha) or 0.5
+                    -- Shift-Icons variant: the evaluator also maintains the
+                    -- bar-relayout flag (cleared for the non-shift modes).
+                    fd._cdStatePending.shift = cseShift
                     fd._cdStatePending:SetScript("OnUpdate", function(self)
                         self:Hide()
                         local fc3 = _ecmeFC[frame]
@@ -2182,7 +2236,12 @@ local function DecorateFrame(frame, barData)
                             -- "cd-state owns this alpha" flag so the opacity appliers
                             -- leave the lowered value in place, exactly like hiddenOnCD.
                             frame:SetAlpha(onCD and (self.lowAlpha or 0.5) or baseA)
-                            if fc3 then fc3._cdStateHidden = onCD or false end
+                            if fc3 then
+                                fc3._cdStateHidden = onCD or false
+                                if ns.SetCdStateShiftHidden then
+                                    ns.SetCdStateShiftHidden(fc3, false)
+                                end
+                            end
                         else
                             local hide
                             if myCse == "hiddenOnCD" then
@@ -2191,7 +2250,12 @@ local function DecorateFrame(frame, barData)
                                 hide = not onCD
                             end
                             frame:SetAlpha(hide and 0 or baseA)
-                            if fc3 then fc3._cdStateHidden = hide or false end
+                            if fc3 then
+                                fc3._cdStateHidden = hide or false
+                                if ns.SetCdStateShiftHidden then
+                                    ns.SetCdStateShiftHidden(fc3, self.shift and hide or false)
+                                end
+                            end
                         end
                     end)
                     fd._cdStatePending:Show()
@@ -3586,6 +3650,10 @@ local function CollectAndReanchor()
                                         local fc = FC(frame)
                                         fc.barKey = targetBar
                                         fc.spellID = baseSID or displaySID
+                                        -- Hosted buff: Phase 3 ranks it by its hosted
+                                        -- MARKER slot, independent of the same spell's
+                                        -- cooldown entry on this bar.
+                                        fc.isHostedBuff = true
                                     else
                                         if not barLists[targetBar] then barLists[targetBar] = {} end
                                         barLists[targetBar][#barLists[targetBar] + 1] =
@@ -3684,13 +3752,15 @@ local function CollectAndReanchor()
                                             -- same per-icon settings as the live buff.
                                             if hostCD then
                                                 -- Hosted-buff placeholder -> CD pipeline (Phase 3);
-                                                -- FC.spellID lets Phase 3 slot it by assignedSpells.
+                                                -- FC.spellID lets Phase 3 slot it by assignedSpells
+                                                -- (via the hosted MARKER rank, like the live frame).
                                                 if not cdFrames[targetBar] then cdFrames[targetBar] = {} end
                                                 local cf = cdFrames[targetBar]
                                                 cf[#cf + 1] = ph
                                                 local fc = FC(ph)
                                                 fc.barKey = targetBar
                                                 fc.spellID = realSID
+                                                fc.isHostedBuff = true
                                             else
                                                 if not barLists[targetBar] then barLists[targetBar] = {} end
                                                 barLists[targetBar][#barLists[targetBar] + 1] =
@@ -3720,6 +3790,7 @@ local function CollectAndReanchor()
                                     local fc = FC(frame)
                                     fc.barKey = barKey
                                     fc.spellID = baseSID or displaySID
+                                    fc.isHostedBuff = nil
                                 end
                             end
                         end
@@ -4088,14 +4159,41 @@ local function CollectAndReanchor()
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
                         end
+                        -- Everything claimed here renders as a buff: re-assert the
+                        -- fill direction when the frame's recorded kind differs
+                        -- (once-per-frame decoration + pooled frames can leave a
+                        -- CD-direction stamp from a previous life on another bar).
+                        -- Kind-gated so the per-spell Reverse Swipe pass, which
+                        -- runs after, is never stomped on unchanged passes.
+                        local efdR = hookFrameData[frame]
+                        if efdR and efdR._revKind ~= true then
+                            efdR._revKind = true
+                            frame.Cooldown:SetReverse(true)
+                        end
                         frame.Cooldown:SetHideCountdownNumbers(hideCD)
                     end
                 end
 
-                -- Clear excess buff icons (Blizzard owns lifecycle, only disable swipe)
+                -- Mark this bar's frames as used BEFORE the excess-clear below,
+                -- so the clear can tell a stale tail slot from a still-claimed
+                -- frame.
+                for _, entry in ipairs(list) do
+                    if entry.frame and not usedFrames[entry.frame] then
+                        usedFrames[entry.frame] = true
+                    end
+                end
+
+                -- Clear excess buff icons (Blizzard owns lifecycle, only disable
+                -- swipe). Skip frames still in the active set: when a buff
+                -- expires, every icon after it shifts one slot left, so the old
+                -- tail slot holds a frame that is STILL CLAIMED (old slot N+1 ==
+                -- new slot N). Disabling its swipe blanked the aura swipe on a
+                -- surviving buff -- and the SetDrawSwipe hook deliberately never
+                -- force-restores buff frames, so it stayed blank until the next
+                -- buff event. Mirrors the Phase 3 excess-clear guard.
                 for i = count + 1, #icons do
                     local icon = icons[i]
-                    if icon then
+                    if icon and not usedFrames[icon] then
                         local efd = hookFrameData[icon]
                         if efd then efd._cdmAnchor = nil end
                         if icon.Cooldown and icon.Cooldown.SetDrawSwipe then
@@ -4103,13 +4201,6 @@ local function CollectAndReanchor()
                         end
                     end
                     icons[i] = nil
-                end
-
-                -- Mark unclaimed buff frames as used
-                for _, entry in ipairs(list) do
-                    if entry.frame and not usedFrames[entry.frame] then
-                        usedFrames[entry.frame] = true
-                    end
                 end
 
                 -- Conditional layout for buffs (existing iconsChanged detection)
@@ -4156,7 +4247,10 @@ local function CollectAndReanchor()
             local icons = cdmBarIcons[bd.key]
             if icons then
                 for i = 1, #icons do
-                    if icons[i] then
+                    -- Skip frames another bar claimed this pass (a buff moved off
+                    -- this bar is still live elsewhere -- disabling its swipe here
+                    -- would blank it there).
+                    if icons[i] and not usedFrames[icons[i]] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
                         if icons[i].Cooldown and icons[i].Cooldown.SetDrawSwipe then
@@ -4225,29 +4319,53 @@ local function CollectAndReanchor()
                 -- change (spec swap, talent change, user edits). During
                 -- combat rotation, the assigned list is static so the cache
                 -- hit rate is ~100%.
-                local spellOrder
+                local spellOrder, hostedOrder
                 if not ns._spellOrderDirty and container._cachedSpellOrder then
                     spellOrder = container._cachedSpellOrder
+                    hostedOrder = container._cachedHostedOrder
                 else
                     if not container._cachedSpellOrder then container._cachedSpellOrder = {} end
+                    if not container._cachedHostedOrder then container._cachedHostedOrder = {} end
                     spellOrder = container._cachedSpellOrder
+                    hostedOrder = container._cachedHostedOrder
                     wipe(spellOrder)
+                    wipe(hostedOrder)
                     if spellList then
                         local idx = 0
                         for _, sid in ipairs(spellList) do
                             if sid and sid ~= 0 then
                                 idx = idx + 1
-                                if not spellOrder[sid] then spellOrder[sid] = idx end
-                                if _FindOverride then
-                                    local ovr = _FindOverride(sid)
-                                    if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
-                                        spellOrder[ovr] = idx
+                                -- Hosted-buff marker: rank the BUFF frame of the
+                                -- decoded spell at this slot. Kept in its own map so
+                                -- the same spell's cooldown entry ranks independently.
+                                local hSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid)
+                                if hSid then
+                                    if not hostedOrder[hSid] then hostedOrder[hSid] = idx end
+                                    if _FindOverride then
+                                        local hOvr = _FindOverride(hSid)
+                                        if hOvr and hOvr > 0 and hOvr ~= hSid and not hostedOrder[hOvr] then
+                                            hostedOrder[hOvr] = idx
+                                        end
                                     end
-                                end
-                                if C_Spell and C_Spell.GetBaseSpell then
-                                    local base = C_Spell.GetBaseSpell(sid)
-                                    if base and base > 0 and base ~= sid and not spellOrder[base] then
-                                        spellOrder[base] = idx
+                                    if C_Spell and C_Spell.GetBaseSpell then
+                                        local hBase = C_Spell.GetBaseSpell(hSid)
+                                        if hBase and hBase > 0 and hBase ~= hSid and not hostedOrder[hBase] then
+                                            hostedOrder[hBase] = idx
+                                        end
+                                    end
+                                else
+                                    if not spellOrder[sid] then spellOrder[sid] = idx end
+                                    if _FindOverride then
+                                        local ovr = _FindOverride(sid)
+                                        if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
+                                            spellOrder[ovr] = idx
+                                        end
+                                    end
+                                    if C_Spell and C_Spell.GetBaseSpell then
+                                        local base = C_Spell.GetBaseSpell(sid)
+                                        if base and base > 0 and base ~= sid and not spellOrder[base] then
+                                            spellOrder[base] = idx
+                                        end
                                     end
                                 end
                             end
@@ -4258,7 +4376,12 @@ local function CollectAndReanchor()
                 -- Inject custom frames (trinkets, items, racials)
                 if spellList then
                     for _, sid in ipairs(spellList) do
-                        if sid and (sid == -13 or sid == -14) then
+                        if sid and ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid) then
+                            -- Hosted-buff marker: the buff renders via the reparent
+                            -- path (route map -> cdFrames), never as an injected
+                            -- custom frame. Must be tested before the item-preset
+                            -- branch (markers are also <= -100).
+                        elseif sid and (sid == -13 or sid == -14) then
                             -- Trinket
                             local slot = -sid
                             local tf = _trinketFrames[slot]
@@ -4440,41 +4563,57 @@ local function CollectAndReanchor()
                 -- Blizzard CDM position rather than piling new spells after a
                 -- trinket/racial slot.
                 local hasSpill = false
-                for _, frame in ipairs(frames) do
-                    local fc = _ecmeFC[frame]
-                    local sid = fc and fc.spellID
-                    local key = sid and spellOrder[sid]
+                -- Identity probe shared by both member kinds. The first 4 probes
+                -- key off fc.spellID = cooldownInfo.spellID (the base) and bridge
+                -- base<->override. For some hero-talent slots that base is an
+                -- UNRELATED spell to the DISPLAYED/castable form the picker
+                -- actually stored (documented: a Wither slot whose cooldownInfo
+                -- base is Immolate), so the frame's displayed identity -- the same
+                -- GetCanonicalSpellIDForFrame id the add path wrote -- is matched
+                -- too, and a placed cooldown finds its saved rank on return
+                -- instead of being mistaken for a brand-new spillover.
+                local function OrderKeyFor(frame, fc, sid, map)
+                    if not map then return nil end
+                    local key = sid and map[sid]
                     -- Check cached baseSpellID (stable across transforms)
                     if not key and fc and fc.baseSpellID then
-                        key = spellOrder[fc.baseSpellID]
+                        key = map[fc.baseSpellID]
                     end
                     if not key and sid and sid > 0 and _FindOverride then
                         local ovr = _FindOverride(sid)
-                        if ovr and ovr > 0 then key = spellOrder[ovr] end
+                        if ovr and ovr > 0 then key = map[ovr] end
                     end
                     if not key and sid and sid > 0 and C_Spell and C_Spell.GetBaseSpell then
                         local base = C_Spell.GetBaseSpell(sid)
-                        if base and base > 0 and base ~= sid then key = spellOrder[base] end
+                        if base and base > 0 and base ~= sid then key = map[base] end
                     end
-                    -- The 4 probes above all key off fc.spellID = cooldownInfo.spellID
-                    -- (the base) and only bridge base<->override. For some hero-talent
-                    -- slots that base is an UNRELATED spell to the DISPLAYED/castable
-                    -- form the picker actually stored (documented: a Wither slot whose
-                    -- cooldownInfo base is Immolate). Match the frame's displayed
-                    -- identity too -- the same GetCanonicalSpellIDForFrame id the add
-                    -- path wrote -- so a placed cooldown finds its saved rank on return
-                    -- instead of being mistaken for a brand-new spillover.
                     if not key and fc and fc.resolvedSid then
-                        key = spellOrder[fc.resolvedSid]
+                        key = map[fc.resolvedSid]
                     end
                     if not key and ns.GetCanonicalSpellIDForFrame then
                         local canon = ns.GetCanonicalSpellIDForFrame(frame)
-                        if canon and canon > 0 then key = spellOrder[canon] end
+                        if canon and canon > 0 then key = map[canon] end
                     end
                     if not key and fc and fc.linkedSpellIDs then
                         for _, lid in ipairs(fc.linkedSpellIDs) do
-                            if lid and lid > 0 and spellOrder[lid] then key = spellOrder[lid]; break end
+                            if lid and lid > 0 and map[lid] then key = map[lid]; break end
                         end
+                    end
+                    return key
+                end
+                for _, frame in ipairs(frames) do
+                    local fc = _ecmeFC[frame]
+                    local sid = fc and fc.spellID
+                    local key
+                    if fc and fc.isHostedBuff then
+                        -- Hosted buff: rank by its MARKER slot. Legacy fallback to
+                        -- the plain map covers hosted buffs stored before the
+                        -- marker model (plain entry + flag) -- they keep rendering
+                        -- at their old position until the options pass normalizes.
+                        key = OrderKeyFor(frame, fc, sid, hostedOrder)
+                        if not key then key = OrderKeyFor(frame, fc, sid, spellOrder) end
+                    else
+                        key = OrderKeyFor(frame, fc, sid, spellOrder)
                     end
                     if fc then
                         if key then
@@ -4609,6 +4748,21 @@ local function CollectAndReanchor()
                         if frame.Cooldown.SetDrawSwipe then
                             frame.Cooldown:SetDrawSwipe(true)
                         end
+                        -- Re-assert the swipe direction when the frame's recorded
+                        -- kind differs: hosted buffs / placeholders fill like buffs,
+                        -- everything else depletes. Once-per-frame decoration +
+                        -- pooled frames can leave the other family's stamp from a
+                        -- previous life. Kind-gated so the per-spell Reverse Swipe
+                        -- pass (runs after) is never stomped on unchanged passes.
+                        local fdRv = hookFrameData[frame]
+                        local fcRv = _ecmeFC[frame]
+                        local wantRev = ((fcRv and fcRv.isHostedBuff)
+                            or (fdRv and fdRv._isBuffViewerFrame)
+                            or frame._isPlaceholderFrame) and true or false
+                        if fdRv and fdRv._revKind ~= wantRev then
+                            fdRv._revKind = wantRev
+                            frame.Cooldown:SetReverse(wantRev)
+                        end
                         local hcd = hideCDText
                         if ns.CdmShouldHideCountdown then hcd = ns.CdmShouldHideCountdown(frame, hcd) end
                         frame.Cooldown:SetHideCountdownNumbers(hcd)
@@ -4733,7 +4887,10 @@ local function CollectAndReanchor()
             local icons = cdmBarIcons[bd.key]
             if icons then
                 for i = 1, #icons do
-                    if icons[i] then
+                    -- Skip frames another bar claimed this pass: a spell moved off
+                    -- this (now empty) bar is still live elsewhere -- alpha-0 /
+                    -- swipe-off here would blank it there.
+                    if icons[i] and not usedFrames[icons[i]] then
                         local efd = hookFrameData[icons[i]]
                         if efd then efd._cdmAnchor = nil end
                         local isCustom2 = icons[i]._isRacialFrame or icons[i]._isTrinketFrame

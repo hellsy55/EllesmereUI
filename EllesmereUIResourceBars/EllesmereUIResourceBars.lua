@@ -555,9 +555,13 @@ local function GetSecondaryResource()
         return { power = "IGNOREPAIN_BAR", max = mx * IP.CAP, type = "bar" }
     elseif classFile == "WARRIOR" and spec == 2 then
         return { power = "WHIRLWIND_STACKS", max = 4, type = "custom" }
-    elseif classFile == "WARRIOR" and spec == 1 then
+    elseif classFile == "WARRIOR" and spec == 1
+           and ERB.db and ERB.db.profile and ERB.db.profile.secondary
+           and ERB.db.profile.secondary.armsSweepingStrikesBar then
         -- Arms: Sweeping Strikes charges (12, or 18 with Improved Sweeping
         -- Strikes). Base max here; BuildBars refreshes from the tracker.
+        -- Toggle-gated (opt-in, default off); the Unit Frames and personal
+        -- Nameplate readouts show the charges regardless of this toggle.
         return { power = "SWEEPING_STRIKES", max = 12, type = "custom" }
     end
 
@@ -1159,6 +1163,7 @@ local DEFAULTS = {
             guardianShowHashLines = true,  -- Guardian Ironfur: draw the moving per-cast hash lines
             protIgnorePainBar = true,      -- Prot Warrior: show Ignore Pain bar (total absorbs vs the IP cap = 30% max health; aura stacks are secret). New-user default; existing profiles pinned off via migration "resourcebars_protwar_ignorepain_existing_off_v1".
             protIgnorePainHashLine = true, -- Prot Ignore Pain: draw the moving duration hash line (resets on cast)
+            armsSweepingStrikesBar = false, -- Arms Warrior: show Sweeping Strikes charge pips on the resource bar (opt-in, default off). Unit Frames + personal Nameplate show them regardless. Brand-new key defaulting off, so no migration needed.
             runesSimple = false,  -- DK: treat runes as flat pips (no recharge animation/timer)
             runesCustomRecharge = false,  -- DK: use a custom color for recharging runes instead of a dimmed version of the rune color
             runesRechargeR = 0.5, runesRechargeG = 0.5, runesRechargeB = 0.5, runesRechargeA = 1,

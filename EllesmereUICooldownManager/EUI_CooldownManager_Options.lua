@@ -5492,6 +5492,14 @@ initFrame:SetScript("OnEvent", function(self)
                 -- custom frames (no GetSpellID/cooldownInfo to resolve).
                 local _sid = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
                              or (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID)
+                -- Skip hosted-buff frames and their placeholders: their bar
+                -- membership is the hosted MARKER entry. Materializing their
+                -- canonical spellID here would fabricate a plain COOLDOWN entry
+                -- for the same spell (the buff frame's id resolves positive).
+                local _fdLI = ns._hookFrameData and ns._hookFrameData[icon]
+                if icon._isPlaceholderFrame or (_fdLI and _fdLI._isBuffViewerFrame) then
+                    _sid = nil
+                end
                 if _sid and _sid ~= 0 then
                     if _sid > 0 then _sid = NormalizeToBase(_sid) end
                     if seen[_sid] then
@@ -5712,6 +5720,21 @@ initFrame:SetScript("OnEvent", function(self)
                     local sdurs   = sd.spellDurations
                     local groups  = sd.customSpellGroups
                     local hosted  = sd.hostedBuffSpellIDs
+                    -- Marker-present set: when a hosted buff has its own MARKER
+                    -- entry, a PLAIN entry of the same id is the spell's COOLDOWN
+                    -- form and must not borrow the hosted exemption below --
+                    -- untracking the cooldown in Blizzard's CDM should drop it
+                    -- like any other cooldown while the hosted buff stays.
+                    local hostedMarkerFor
+                    if hosted then
+                        for _, mid in ipairs(sd.assignedSpells) do
+                            local mSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(mid)
+                            if mSid then
+                                hostedMarkerFor = hostedMarkerFor or {}
+                                hostedMarkerFor[mSid] = true
+                            end
+                        end
+                    end
                     local writeIdx = 1
                     for readIdx = 1, #sd.assignedSpells do
                         local id = sd.assignedSpells[readIdx]
@@ -5726,7 +5749,8 @@ initFrame:SetScript("OnEvent", function(self)
                            and not (cdurs and cdurs[id])
                            and not (sdurs and sdurs[id])
                            and not (groups and groups[id])
-                           and not (hosted and hosted[id]) then
+                           and not (hosted and hosted[id]
+                                    and not (hostedMarkerFor and hostedMarkerFor[id])) then
                             -- Plain Blizzard cooldown. Keep it if still displayed OR if
                             -- the player no longer HAS the spell (talented out): a
                             -- talented-out cooldown must hold its rank in the ordered
@@ -5772,23 +5796,114 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                     for i = writeIdx, #sd.assignedSpells do sd.assignedSpells[i] = nil end
+                    -- Normalize the hosted-buff representation. A hosted buff owns
+                    -- a MARKER entry; a plain entry of the same id means the
+                    -- COOLDOWN form. Pre-marker data stored the hosted buff as a
+                    -- plain entry (flag only), which is ambiguous when the same
+                    -- spell is also a cooldown -- resolve each flagged id here,
+                    -- where the displayed/catalog sets can tell the forms apart.
+                    if sd.hostedBuffSpellIDs and ns.HostedBuffMarker then
+                        local list = sd.assignedSpells
+                        local ghostSdN = ns.GetBarSpellData and ns.GetBarSpellData("__ghost_cd")
+                        local ghostListN = ghostSdN and ghostSdN.assignedSpells
+                        local FindVarN = ns.FindVariantIndexInList
+                        -- Plain entries claimed by OTHER visible bars (variant-aware):
+                        -- if the cooldown form lives elsewhere, a plain entry here is
+                        -- a resurrected artifact of the old shared-id model.
+                        local claimedN
+                        do
+                            local spN = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+                            local skN = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+                            local aprofN = spN and skN and spN[skN]
+                            local bsAllN = aprofN and aprofN.barSpells
+                            if bsAllN and ns.StoreVariantValue then
+                                for kN, bsdN in pairs(bsAllN) do
+                                    if kN ~= barKeyE and kN ~= "__ghost_cd"
+                                       and type(bsdN) == "table" and type(bsdN.assignedSpells) == "table" then
+                                        for _, sidN in ipairs(bsdN.assignedSpells) do
+                                            if type(sidN) == "number" and sidN > 0 then
+                                                claimedN = claimedN or {}
+                                                ns.StoreVariantValue(claimedN, sidN, true, false)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        for hsid in pairs(sd.hostedBuffSpellIDs) do
+                            if type(hsid) == "number" and hsid > 0 then
+                                local markerN = ns.HostedBuffMarker(hsid)
+                                local markerIdx, plainIdx
+                                for i = 1, #list do
+                                    local v = list[i]
+                                    if v == markerN then markerIdx = i
+                                    elseif v == hsid then plainIdx = i end
+                                end
+                                if plainIdx then
+                                    -- Is there a real COOLDOWN form for this id --
+                                    -- displayed or in the tracked catalog, not
+                                    -- hidden on the ghost bar, not claimed by
+                                    -- another bar? Then the plain entry is a
+                                    -- legitimate cooldown member of this bar.
+                                    local isCdForm = (displayed[hsid]
+                                        or displayed[NormalizeToBase(hsid)]
+                                        or displayed[ResolveToLive(hsid)]
+                                        or (catalogSet and (catalogSet[hsid]
+                                            or catalogSet[NormalizeToBase(hsid)]
+                                            or catalogSet[ResolveToLive(hsid)]))) and true or false
+                                    if isCdForm and ghostListN and FindVarN
+                                       and FindVarN(ghostListN, hsid) then
+                                        isCdForm = false
+                                    end
+                                    if isCdForm and claimedN and ns.ResolveVariantValue
+                                       and ns.ResolveVariantValue(claimedN, hsid) then
+                                        isCdForm = false
+                                    end
+                                    if markerIdx then
+                                        -- Marker already present: a plain twin is
+                                        -- only kept when it is a real cooldown
+                                        -- member; otherwise it is an artifact.
+                                        if not isCdForm then
+                                            table.remove(list, plainIdx)
+                                            ns._spellOrderDirty = true
+                                        end
+                                    elseif isCdForm then
+                                        -- Legit dual form: keep the cooldown entry
+                                        -- and give the hosted buff its own slot
+                                        -- right next to it.
+                                        table.insert(list, plainIdx + 1, markerN)
+                                        ns._spellOrderDirty = true
+                                    else
+                                        -- Buff-only: the plain entry IS the hosted
+                                        -- buff -- convert in place (keeps its slot).
+                                        list[plainIdx] = markerN
+                                        ns._spellOrderDirty = true
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
             end
         end
         -- Self-heal HOSTED buffs. A hosted buff must live in assignedSpells (the
-        -- route map + Phase 3 sort both key off it). An earlier build's drop pass
+        -- Phase 3 sort keys off its MARKER entry). An earlier build's drop pass
         -- could have stranded one in hostedBuffSpellIDs alone (it never appears in
-        -- the Essential/Utility viewer). Re-append any hosted buff that's missing so
-        -- it renders and stays removable instead of vanishing from every bar.
-        if sd.hostedBuffSpellIDs and sd.assignedSpells then
+        -- the Essential/Utility viewer). Re-append the MARKER when neither it nor
+        -- a legacy plain entry represents the buff -- never the plain id, which
+        -- would resurrect the spell's COOLDOWN form onto this bar (the "removed
+        -- cooldown comes back" bug).
+        if sd.hostedBuffSpellIDs and sd.assignedSpells and ns.HostedBuffMarker then
             for hsid in pairs(sd.hostedBuffSpellIDs) do
                 if type(hsid) == "number" and hsid > 0 then
+                    local markerH = ns.HostedBuffMarker(hsid)
                     local present = false
                     for _, sid in ipairs(sd.assignedSpells) do
-                        if sid == hsid then present = true; break end
+                        if sid == hsid or sid == markerH then present = true; break end
                     end
                     if not present then
-                        sd.assignedSpells[#sd.assignedSpells + 1] = hsid
+                        sd.assignedSpells[#sd.assignedSpells + 1] = markerH
+                        ns._spellOrderDirty = true
                     end
                 end
             end
@@ -7189,22 +7304,41 @@ initFrame:SetScript("OnEvent", function(self)
                     if (not spellID or spellID == 0) and anchorFrame and anchorFrame._previewSpellID then
                         spellID = anchorFrame._previewSpellID
                     end
+                    -- Hosted-buff MARKER slot: settings key by the DECODED spell id
+                    -- (the id the render resolver and the buffs bar key by), never
+                    -- the raw marker.
+                    if spellID and ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(spellID) then
+                        spellID = ns.HostedBuffMarkerToSpell(spellID)
+                    end
                 end
                 if spellID and spellID ~= 0 then
+                    -- Hosted-buff SLOT? The slot decides, not the flag alone: the
+                    -- same spellID can also be this bar's cooldown entry, and that
+                    -- slot must keep the CD store + cd/util menu. Legacy fallback:
+                    -- flag set with no marker entry yet means the plain entry is
+                    -- the buff (pre-marker data).
+                    local isHostedBuff = (anchorFrame and anchorFrame._previewHostedBuff) or false
+                    if not isHostedBuff and sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[spellID]
+                       and not (ns.ListHasHostedMarker and sd.assignedSpells
+                                and ns.ListHasHostedMarker(sd.assignedSpells, spellID)) then
+                        isHostedBuff = true
+                    end
                     -- Per-spell entries live in the spec FAMILY store (they travel
                     -- with the spell across bars). The bar tiers sit below them:
                     -- sd.barSettings ("Apply to Bar") -> bd.barSpellSettings
-                    -- ("Apply to Bar (All Specs)").
-                    local store = ns.GetSpellSettingsStore(barKey, true)
+                    -- ("Apply to Bar (All Specs)"). A hosted buff uses the BUFF
+                    -- store -- the same entry it had on the buffs bar -- and never
+                    -- chains to this bar's (cd/util) tiers.
+                    local store = ns.GetSpellSettingsStore(isHostedBuff and "buffs" or barKey, true)
                     local bdSel = ns.barDataByKey and ns.barDataByKey[barKey]
-                    local famKey = ns.SettingsFamilyKey(barKey)
+                    local famKey = ns.SettingsFamilyKey(isHostedBuff and "buffs" or barKey)
                     -- Effective-read view: the entry (or a not-yet-persisted fresh
                     -- table) chained to the bar tiers, so the menu shows the values
                     -- the icon actually renders with. EnsureSS() persists the entry
                     -- on first WRITE.
                     local ss = store and store[spellID]
                     if not ss then ss = {} end
-                    ns.ChainSettings(ss, ns.GetBarTierSettings(sd, barKey))
+                    ns.ChainSettings(ss, isHostedBuff and nil or ns.GetBarTierSettings(sd, barKey))
                     local function EnsureSS()
                         if store and not store[spellID] then
                             store[spellID] = ss
@@ -8027,6 +8161,10 @@ initFrame:SetScript("OnEvent", function(self)
                               end
                               return base
                           end },
+                        -- Shift variants: same hide as the plain modes below, but the
+                        -- bar re-lays out so the remaining icons close the gap.
+                        { val = "hiddenOnCDShift",  label = "Hidden on CD (Shift Icons)" },
+                        { val = "hiddenReadyShift", label = "Hidden CD Ready (Shift Icons)" },
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -8660,8 +8798,8 @@ initFrame:SetScript("OnEvent", function(self)
                     -- A HOSTED buff (a buff placed on a CD/util bar) is a real
                     -- Blizzard buff frame reparented onto the bar, so it takes the
                     -- BUFF per-icon menu, not the CD/util one -- same settings as it
-                    -- would have on a buffs bar.
-                    local isHostedBuff = sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[spellID] or false
+                    -- would have on a buffs bar. isHostedBuff is resolved above
+                    -- (slot-based) where the settings store is selected.
                     -- Hosted buffs are removed from the Apply-to-Bar system (no strip on
                     -- their rows, no bar-tier chaining in ResolveSpellSettings).
                     hostedBuffNoApply = isHostedBuff
@@ -9256,6 +9394,10 @@ initFrame:SetScript("OnEvent", function(self)
                                   end
                                   return base
                               end },
+                            -- Shift variants: same hide as the plain modes below, but
+                            -- the bar re-lays out so remaining icons close the gap.
+                            { val = "hiddenOnCDShift",  label = "Hidden on CD (Shift Icons)" },
+                            { val = "hiddenReadyShift", label = "Hidden CD Ready (Shift Icons)" },
                             { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                             { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                             { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -12232,12 +12374,23 @@ initFrame:SetScript("OnEvent", function(self)
             if PP then PP.CreateBorder(slot, 0, 0, 0, 1, 1, "OVERLAY", 7) end
             slot._edges = sEdges  -- empty; borders managed by PP
 
+            -- Hosted-buff marker border: gold (same color as the buff "+" add
+            -- button), same 2px geometry as the hover highlight, always ON for
+            -- buff icons hosted on this CD/utility bar so they read apart from
+            -- the cooldowns at a glance. Level +1 -- UNDER the hover highlight
+            -- (+2), so hovering still shows the accent border on top.
+            local slotPP = EllesmereUI and EllesmereUI.PP
+            local slotHostCont = CreateFrame("Frame", nil, slot)
+            slotHostCont:SetAllPoints()
+            slotHostCont:SetFrameLevel(slot:GetFrameLevel() + 1)
+            local hostBrd = slotPP and slotPP.CreateBorder(slotHostCont, 1, 0.82, 0.25, 1, 2, "OVERLAY", 7)
+            if hostBrd then hostBrd:Hide() end
+            slot._hostBrd = hostBrd
             -- Hover highlight (2px accent border, child container avoids conflict with existing PP border)
             local eg = EllesmereUI.ELLESMERE_GREEN
             local slotHlCont = CreateFrame("Frame", nil, slot)
             slotHlCont:SetAllPoints()
-            slotHlCont:SetFrameLevel(slot:GetFrameLevel() + 1)
-            local slotPP = EllesmereUI and EllesmereUI.PP
+            slotHlCont:SetFrameLevel(slot:GetFrameLevel() + 2)
             local slotBrd = slotPP and slotPP.CreateBorder(slotHlCont, eg.r, eg.g, eg.b, 1, 2, "OVERLAY", 7)
             if slotBrd then slotBrd:Hide() end
             slot._hlBrd = slotBrd
@@ -12277,18 +12430,24 @@ initFrame:SetScript("OnEvent", function(self)
                 if dragSlot then return end
                 local bdHov = SelectedCDMBar()
                 if slot._shapeBorder and slot._shapeBorder:IsShown() then
-                    local bR, bG, bB = 0, 0, 0
-                    if bdHov then
-                        bR, bG, bB = bdHov.borderR or 0, bdHov.borderG or 0, bdHov.borderB or 0
-                        if bdHov.borderClassColor then
-                            local _, ct = UnitClass("player")
-                            if ct then
-                                local cc = RAID_CLASS_COLORS[ct]
-                                if cc then bR, bG, bB = cc.r, cc.g, cc.b end
+                    if slot._previewHostedBuff then
+                        -- Hosted buff: restore the persistent gold tint, not
+                        -- the bar border color.
+                        slot._shapeBorder:SetVertexColor(1, 0.82, 0.25, 1)
+                    else
+                        local bR, bG, bB = 0, 0, 0
+                        if bdHov then
+                            bR, bG, bB = bdHov.borderR or 0, bdHov.borderG or 0, bdHov.borderB or 0
+                            if bdHov.borderClassColor then
+                                local _, ct = UnitClass("player")
+                                if ct then
+                                    local cc = RAID_CLASS_COLORS[ct]
+                                    if cc then bR, bG, bB = cc.r, cc.g, cc.b end
+                                end
                             end
                         end
+                        slot._shapeBorder:SetVertexColor(bR, bG, bB, 1)
                     end
-                    slot._shapeBorder:SetVertexColor(bR, bG, bB, 1)
                 else
                     if slotBrd then slotBrd:Hide() end
                 end
@@ -13178,9 +13337,22 @@ initFrame:SetScript("OnEvent", function(self)
                     slot._previewSpellID = nil  -- reset each update
                     slot._previewCdID = trackedCd and trackedCd[i] or nil
                     slot._previewItemID = nil
+                    slot._previewHostedBuff = nil
                     if id then
                         local tex
-                        if id <= -100 then
+                        local hostedSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(id)
+                        if hostedSid then
+                            -- Hosted-buff marker: previews as its spell, flagged so
+                            -- the per-icon menu takes the buff branch while the same
+                            -- id's cooldown slot keeps the cd/util one.
+                            local displayID = ResolveToLive(hostedSid)
+                            tex = C_Spell.GetSpellTexture(displayID)
+                            if not tex and displayID ~= hostedSid then
+                                tex = C_Spell.GetSpellTexture(hostedSid)
+                            end
+                            slot._previewSpellID = hostedSid
+                            slot._previewHostedBuff = true
+                        elseif id <= -100 then
                             -- On-use bag item: negated itemID
                             tex = C_Item.GetItemIconByID(-id)
                             slot._previewItemID = -id
@@ -13211,6 +13383,7 @@ initFrame:SetScript("OnEvent", function(self)
                     slot._previewSpellID = nil
                     slot._previewCdID = nil
                     slot._previewItemID = nil
+                    slot._previewHostedBuff = nil
                 end
 
                 local bSz = bd.borderSize or 1
@@ -13231,6 +13404,21 @@ initFrame:SetScript("OnEvent", function(self)
                 -- (ApplyShapeToCDMIcon hides the slot's own PP border but not _hlBrd)
                 if slot._hlBrd and shape ~= "square" and shape ~= "csquare" and shape ~= "none" then
                     slot._hlBrd:Hide()
+                end
+                -- Hosted-buff gold border: always on for a buff icon hosted on
+                -- this CD/utility bar. Square-family shapes use the dedicated
+                -- gold strips; masked shapes tint the shape border instead
+                -- (their square strips are hidden, like the hover highlight).
+                if slot._hostBrd then
+                    if slot._previewHostedBuff
+                       and not (slot._shapeBorder and slot._shapeBorder:IsShown()) then
+                        slot._hostBrd:Show()
+                    else
+                        slot._hostBrd:Hide()
+                    end
+                end
+                if slot._previewHostedBuff and slot._shapeBorder and slot._shapeBorder:IsShown() then
+                    slot._shapeBorder:SetVertexColor(1, 0.82, 0.25, 1)
                 end
 
                 -- Stack count preview text

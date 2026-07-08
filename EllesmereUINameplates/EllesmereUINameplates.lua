@@ -128,7 +128,7 @@ function ns._appendDisplayPresetKeys(t)
         "tankHasAggroEnabled", "tankHasAggro", "classicTankAggro", "tankHasAggroOverrideMobType",
         "tankHasAggroOverrideBoss",
         "dpsHasAggro", "dpsNearAggro", "offTankAggroEnabled", "offTankAggro",
-        "dpsNoAggroEnabled", "dpsNoAggro",
+        "dpsNoAggroEnabled", "dpsNoAggro", "dpsNoAggroOverrideMiniBoss", "dpsNoAggroOverrideCaster",
         "targetArrowDouble", "targetArrowStyle", "targetArrowColor", "targetArrowClassColor",
         "auraStackTextSize", "auraStackTextColor",
         "auraStackTextPosition", "auraStackTextX", "auraStackTextY",
@@ -212,6 +212,12 @@ local defaults = {
     offTankAggroEnabled = true,
     dpsNoAggro = { r = 0.35, g = 0.75, b = 0.35 },
     dpsNoAggroEnabled = false,
+    -- When on, the DPS/healer No Aggro color overrides the Mini-Boss color
+    -- (promotes it above priority step 7); off (default) = it stays low priority.
+    dpsNoAggroOverrideMiniBoss = false,
+    -- When on, the DPS/healer No Aggro color overrides the Caster color (promotes
+    -- it above priority step 8); off (default) = Casters keep their own color.
+    dpsNoAggroOverrideCaster = false,
     interruptReady = { r = 0.92, g = 0.35, b = 0.20 },  
     castBar = { r = 0.70, g = 0.40, b = 0.90 },
     interruptMidCastEnabled = false,
@@ -4808,6 +4814,17 @@ local function GetReactionColor(unit)
     end
     local unitClass = UnitClassBase and UnitClassBase(unit)
     local _isCaster = (unitClass == "PALADIN")
+    -- DPS/healer No Aggro override state (mirrors the tank has-aggro overrides at
+    -- 6b). Each override independently promotes the No Aggro color above a single
+    -- mob-type step (mini-boss step 7, caster step 8). Only active for a non-tank
+    -- without aggro in a group -- the exact condition the low-priority No Aggro
+    -- step (10) uses. Off by default, so default behavior is unchanged.
+    local dpsNoAggroActive = isThreatUnit and (not _isTankRole) and threatStatus < 2 and IsInGroup()
+    if dpsNoAggroActive then
+        local en = defaults.dpsNoAggroEnabled
+        if db.dpsNoAggroEnabled ~= nil then en = db.dpsNoAggroEnabled end
+        dpsNoAggroActive = en
+    end
     -- 6b. Tank has aggro -- "Override Mini-Boss and Caster colors" option.
     -- Promotes the has-aggro color above the mini-boss/caster steps (but still
     -- below target/focus/enemy-class). Boss units are excluded here -- they are
@@ -4829,6 +4846,16 @@ local function GetReactionColor(unit)
     -- threat colors below, so it is deferred to step 10b (see _isBossUnit);
     -- mini-boss stays here, above threat.
     if _isMiniBoss then
+        -- DPS/healer No Aggro "Override Mini-Boss colors": promotes the No Aggro
+        -- color above the mini-boss color when enabled.
+        if dpsNoAggroActive then
+            local ovr = defaults.dpsNoAggroOverrideMiniBoss
+            if db.dpsNoAggroOverrideMiniBoss ~= nil then ovr = db.dpsNoAggroOverrideMiniBoss end
+            if ovr then
+                local c = _C("dpsNoAggro")
+                return c.r, c.g, c.b
+            end
+        end
         local c = _C("miniboss")
         return MaybeDarken(c.r, c.g, c.b, inCombat)
     end
@@ -4866,6 +4893,17 @@ local function GetReactionColor(unit)
     end
     -- 8. Caster
     if _isCaster then
+        -- DPS/healer No Aggro "Override Caster colors": promotes the No Aggro
+        -- color above the caster color when enabled. Kept separate from the
+        -- mini-boss override so Casters can stay their own color for contrast.
+        if dpsNoAggroActive then
+            local ovr = defaults.dpsNoAggroOverrideCaster
+            if db.dpsNoAggroOverrideCaster ~= nil then ovr = db.dpsNoAggroOverrideCaster end
+            if ovr then
+                local c = _C("dpsNoAggro")
+                return c.r, c.g, c.b
+            end
+        end
         local c = _C("caster")
         return MaybeDarken(c.r, c.g, c.b, inCombat)
     end

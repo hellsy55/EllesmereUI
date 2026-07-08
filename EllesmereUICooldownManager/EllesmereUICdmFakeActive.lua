@@ -532,14 +532,25 @@ end
 ApplyCdState = function(frame, fc, cas, eff, onCD)
     local fd = ns._hookFrameData and ns._hookFrameData[frame]
     if fd then fd._presetCdTouched = true end
-    if eff == "hiddenOnCD" or eff == "hiddenReady" then
+    if eff == "hiddenOnCD" or eff == "hiddenReady"
+       or eff == "hiddenOnCDShift" or eff == "hiddenReadyShift" then
+        local isShift = (eff == "hiddenOnCDShift" or eff == "hiddenReadyShift")
         local hide
-        if eff == "hiddenOnCD" then hide = onCD else hide = not onCD end
+        if eff == "hiddenOnCD" or eff == "hiddenOnCDShift" then
+            hide = onCD
+        else
+            hide = not onCD
+        end
         frame:SetAlpha(hide and 0 or FrameBaseAlpha(fc))
         -- Set the SAME flag the layout / visibility / refresh code already honors,
         -- so a relayout (mount, dismount, settings change) keeps it hidden instead
         -- of flashing it visible until the next tick.
         fc._cdStateHidden = hide or false
+        -- Shift variants also maintain the bar-relayout flag (only relayouts
+        -- on an actual transition; steady-state calls return immediately).
+        if ns.SetCdStateShiftHidden then
+            ns.SetCdStateShiftHidden(fc, isShift and hide or false)
+        end
         return
     end
     if eff == "lowerAlphaOnCD" then
@@ -548,10 +559,12 @@ ApplyCdState = function(frame, fc, cas, eff, onCD)
         -- keeps the lowered value instead of flashing back to full opacity.
         frame:SetAlpha(onCD and ((cas and cas.cdStateLowerAlpha) or 0.5) or FrameBaseAlpha(fc))
         fc._cdStateHidden = onCD or false
+        if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
         return
     end
     -- Glow modes: glow while the ability is READY (off cooldown). Not a hide.
     fc._cdStateHidden = false
+    if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
     local glow = fd and fd.glowOverlay
     if not glow then return end
     if not onCD then
@@ -579,7 +592,10 @@ RestoreAllCdState = function()
             if fd and fd._presetCdTouched then
                 local fc = FCt[f]
                 f:SetAlpha(FrameBaseAlpha(fc))
-                if fc then fc._cdStateHidden = false end
+                if fc then
+                    fc._cdStateHidden = false
+                    if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
+                end
                 if fd._presetCdGlowOn and fd.glowOverlay then
                     ns.StopNativeGlow(fd.glowOverlay)
                     fd._presetCdGlowOn = false

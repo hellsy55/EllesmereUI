@@ -358,6 +358,19 @@ function ns.RemoveSpellFromBar(barKey, spellID)
             if primaryID == removed then sd.customSpellGroups[variantID] = nil end
         end
     end
+    -- Hosted-buff bookkeeping. Removing the MARKER (or a legacy plain entry
+    -- that represents the buff: flag set, no marker in the list) un-hosts the
+    -- buff. Without this, the flag is orphaned and the options self-heal
+    -- re-appends the spell to this bar -- the "removed spell comes back and
+    -- shows on two bars" bug. Removing a plain entry while a marker exists is
+    -- a cooldown-only removal: the hosted buff stays.
+    local hostedSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(removed)
+    if not hostedSid and removed and removed > 0
+       and sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[removed]
+       and not (ns.ListHasHostedMarker and ns.ListHasHostedMarker(sd.assignedSpells, removed)) then
+        hostedSid = removed
+    end
+    if hostedSid and sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[hostedSid] = nil end
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
     return removed
@@ -867,7 +880,13 @@ local function EnsureBarOrderSeeded(barKey, sd)
                 sid = fc and fc.spellID
             end
             if type(sid) == "number" and sid > 0 then
-                sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                -- A hosted buff seeds as its MARKER: the plain id would register
+                -- the same spell's COOLDOWN form on this bar.
+                if fc and fc.isHostedBuff and ns.HostedBuffMarker then
+                    sd.assignedSpells[#sd.assignedSpells + 1] = ns.HostedBuffMarker(sid)
+                else
+                    sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                end
             end
         end
     end
@@ -1237,6 +1256,7 @@ function ns.AddTrackedSpell(barKey, id)
     else
         sd.assignedSpells[newCount] = id
     end
+    ns._spellOrderDirty = true
 
     if sd.removedSpells then sd.removedSpells[id] = nil end
 
@@ -1260,12 +1280,23 @@ function ns.AddBuffToCDUtilBar(barKey, spellID)
     if type(spellID) ~= "number" or spellID <= 0 then return false end
     local sd = ns.GetBarSpellData(barKey)
     if not sd then return false end
-    -- Claim the spell for this bar (auto-moves it off any other CD/util bar).
-    ns.AddTrackedSpell(barKey, spellID)
-    -- Keyed by the picked/canonical spellID (the same id stored in assignedSpells),
-    -- so the route-map pass, the drop-pass keep test, and the self-heal all match it
-    -- directly. The route map itself expands variants when it writes the diversion,
-    -- so the LIVE frame still resolves regardless of its talent/override form.
+    -- Already hosted here (marker entry, or a legacy plain entry from before
+    -- the marker model): idempotent no-op.
+    if sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[spellID] and sd.assignedSpells
+       and (ns.ListHasHostedMarker(sd.assignedSpells, spellID)
+            or ns.FindVariantIndexInList(sd.assignedSpells, spellID)) then
+        return true
+    end
+    -- Claim the slot via the hosted MARKER, never the plain spellID: the plain
+    -- id is the COOLDOWN form's identity, and one spell can be both a cooldown
+    -- and a buff (same id). The marker gives the hosted buff its own slot, so
+    -- the two coexist on one bar and add/remove/reorder independently.
+    -- AddTrackedSpell also auto-moves the marker off any other CD/util bar.
+    ns.AddTrackedSpell(barKey, ns.HostedBuffMarker(spellID))
+    -- Flag keyed by the picked/canonical spellID, so the route-map pass, the
+    -- drop-pass keep test, and the self-heal all match it directly. The route
+    -- map itself expands variants when it writes the diversion, so the LIVE
+    -- frame still resolves regardless of its talent/override form.
     if not sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs = {} end
     sd.hostedBuffSpellIDs[spellID] = true
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
@@ -1283,31 +1314,49 @@ function ns.RemoveTrackedSpell(barKey, idx)
     if not list or idx < 1 or idx > #list then return false end
     local removedID = list[idx]
     table.remove(list, idx)
+    ns._spellOrderDirty = true
 
-    -- Auxiliary metadata cleanup (kept here so the wrapper exposes the same
-    -- side effects RemoveSpellFromBar does for symmetry with index-based
-    -- removal).
-    if removedID and sd.customSpellDurations then sd.customSpellDurations[removedID] = nil end
-    if removedID and sd.spellDurations       then sd.spellDurations[removedID]       = nil end
-    if removedID and sd.customSpellIDs       then sd.customSpellIDs[removedID]       = nil end
-    if removedID and sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[removedID] = nil end
-    if removedID and sd.customSpellGroups then
-        for variantID, primaryID in pairs(sd.customSpellGroups) do
-            if primaryID == removedID then sd.customSpellGroups[variantID] = nil end
-        end
+    -- Hosted-buff removal? Either the entry is a MARKER, or it is a legacy
+    -- plain entry that represents the buff (flag set, no marker anywhere in
+    -- the list). A plain entry WITH a marker present is the same spell's
+    -- COOLDOWN slot -- the hosted buff stays.
+    local hostedSid = removedID and ns.HostedBuffMarkerToSpell(removedID)
+    if not hostedSid and removedID and removedID > 0
+       and sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[removedID]
+       and not ns.ListHasHostedMarker(list, removedID) then
+        hostedSid = removedID
     end
+    if hostedSid then
+        -- Un-host: clear the flag so the route map stops diverting the buff
+        -- here (it returns to the buffs bar). Never ghost-route a hosted
+        -- buff -- the ghost bar hides by spellID, so it would also hide the
+        -- spell's COOLDOWN form everywhere.
+        if sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[hostedSid] = nil end
+    else
+        -- Auxiliary metadata cleanup (kept here so the wrapper exposes the
+        -- same side effects RemoveSpellFromBar does for symmetry with
+        -- index-based removal).
+        if removedID and sd.customSpellDurations then sd.customSpellDurations[removedID] = nil end
+        if removedID and sd.spellDurations       then sd.spellDurations[removedID]       = nil end
+        if removedID and sd.customSpellIDs       then sd.customSpellIDs[removedID]       = nil end
+        if removedID and sd.customSpellGroups then
+            for variantID, primaryID in pairs(sd.customSpellGroups) do
+                if primaryID == removedID then sd.customSpellGroups[variantID] = nil end
+            end
+        end
 
-    -- Route the removed spell to the ghost CD bar so frames stay in the
-    -- routing system but are hidden. Buff-family bars no longer ghost:
-    -- buff visibility is managed by Blizzard's CDM settings. Negative
-    -- IDs (presets/trinkets) and non-viewer spells (customs, racials) skip
-    -- ghost routing entirely.
-    local isNonViewer = removedID and removedID > 0
-        and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
-          or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
-    if removedID and removedID > 0 and not isNonViewer
-       and not IsBarBuffFamily(barKey) then
-        ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
+        -- Route the removed spell to the ghost CD bar so frames stay in the
+        -- routing system but are hidden. Buff-family bars no longer ghost:
+        -- buff visibility is managed by Blizzard's CDM settings. Negative
+        -- IDs (presets/trinkets) and non-viewer spells (customs, racials) skip
+        -- ghost routing entirely.
+        local isNonViewer = removedID and removedID > 0
+            and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
+              or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
+        if removedID and removedID > 0 and not isNonViewer
+           and not IsBarBuffFamily(barKey) then
+            ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
+        end
     end
 
     local frame = cdmBarFrames[barKey]

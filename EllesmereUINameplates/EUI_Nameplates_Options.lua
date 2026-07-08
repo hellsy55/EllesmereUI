@@ -9152,6 +9152,49 @@ initFrame:SetScript("OnEvent", function(self)
             local off = isDpsNoAggroDisabled()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
+
+            -- Inline cog: independent "Override Mini-Boss colors" and "Override
+            -- Caster colors". Each promotes the DPS No Aggro color above that
+            -- single mob-type color. Kept separate so Casters can stay their own
+            -- color for contrast. Dimmed + non-interactive while the toggle is off.
+            local _, dpsNoAggroCogShow = EllesmereUI.BuildCogPopup({
+                title = "No Aggro",
+                rows = {
+                    { type="toggle", label="Override Mini-Boss colors",
+                      get=function()
+                        local db = DB()
+                        if db and db.dpsNoAggroOverrideMiniBoss ~= nil then return db.dpsNoAggroOverrideMiniBoss end
+                        return defaults.dpsNoAggroOverrideMiniBoss
+                      end,
+                      set=function(v) DB().dpsNoAggroOverrideMiniBoss = v; RefreshAllPlates() end },
+                    { type="toggle", label="Override Caster colors",
+                      get=function()
+                        local db = DB()
+                        if db and db.dpsNoAggroOverrideCaster ~= nil then return db.dpsNoAggroOverrideCaster end
+                        return defaults.dpsNoAggroOverrideCaster
+                      end,
+                      set=function(v) DB().dpsNoAggroOverrideCaster = v; RefreshAllPlates() end },
+                },
+            })
+            local dpsNoAggroCogBtn = CreateFrame("Button", nil, leftRgn)
+            dpsNoAggroCogBtn:SetSize(26, 26)
+            dpsNoAggroCogBtn:SetPoint("RIGHT", swatch, "LEFT", -8, 0)
+            dpsNoAggroCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            local dpsNoAggroCogTex = dpsNoAggroCogBtn:CreateTexture(nil, "OVERLAY")
+            dpsNoAggroCogTex:SetAllPoints(); dpsNoAggroCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            dpsNoAggroCogBtn:SetScript("OnEnter", function(s) if not isDpsNoAggroDisabled() then s:SetAlpha(0.7) end end)
+            dpsNoAggroCogBtn:SetScript("OnLeave", function(s) if not isDpsNoAggroDisabled() then s:SetAlpha(0.4) end end)
+            dpsNoAggroCogBtn:SetScript("OnClick", function(s) if not isDpsNoAggroDisabled() then dpsNoAggroCogShow(s) end end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local cogOff = isDpsNoAggroDisabled()
+                dpsNoAggroCogBtn:SetAlpha(cogOff and 0.15 or 0.4)
+                dpsNoAggroCogBtn:EnableMouse(not cogOff)
+            end)
+            do
+                local cogOff = isDpsNoAggroDisabled()
+                dpsNoAggroCogBtn:SetAlpha(cogOff and 0.15 or 0.4)
+                dpsNoAggroCogBtn:EnableMouse(not cogOff)
+            end
         end
 
         -- Inline "Has Aggro" color swatch next to Classic Tank Aggro toggle

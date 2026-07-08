@@ -2018,6 +2018,11 @@ function EllesmereUI.ImportProfile(importStr, profileName)
                     if EllesmereUI.MigrateCdmSpellSettingsShape then
                         EllesmereUI.MigrateCdmSpellSettingsShape(specProf, importedBarsCfg)
                     end
+                    -- Hosted-buff settings moved family stores (CD -> BUFF);
+                    -- relocate old-format imports the same way (idempotent).
+                    if EllesmereUI.MigrateCdmHostedBuffSettings then
+                        EllesmereUI.MigrateCdmHostedBuffSettings(specProf)
+                    end
                 end
             end
         end

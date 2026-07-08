@@ -468,6 +468,12 @@ function ns.RemoveTrackedBuffBar(idx)
         pos[tostring(j)] = pos[tostring(j + 1)]
     end
     pos[tostring(oldCount)] = nil
+    -- Re-key element-anchor / size-match links the same way (TBB_3 -> TBB_2
+    -- etc.) so anchors keep tracking the same visual bar; links pointing AT
+    -- the deleted bar are severed.
+    if EllesmereUI and EllesmereUI.ShiftIndexedAnchorKeys then
+        EllesmereUI.ShiftIndexedAnchorKeys("TBB_", idx, oldCount)
+    end
     if tbb.selectedBar > #tbb.bars then tbb.selectedBar = max(1, #tbb.bars) end
     ns.BuildTrackedBuffBars()
 end
@@ -3359,7 +3365,6 @@ function ns.RegisterTBBUnlockElements()
                     or ("Tracking Bar: " .. (cfg.name or ("Bar " .. idx))),
                 group = "Cooldown Manager",
                 order = 650,
-                noAnchorTarget = true,
                 noResize = true,
                 -- Tracking bars may size-MATCH to other elements (allowMatchSource),
                 -- but other elements may NOT match to them (noSizeMatchTarget): a
@@ -3396,7 +3401,16 @@ function ns.RegisterTBBUnlockElements()
                     if gid == 0 then return false end
                     return idx ~= ns.TBBGroupAnchorIndex(gid)
                 end,
-                getFrame = function() return tbbFrames[idx] end,
+                getFrame = function()
+                    -- Never expose a stale frame when the current spec has
+                    -- fewer bars: anchors involving this key stay dormant
+                    -- (children hold position) instead of gluing to a hidden
+                    -- frame left at another spec's coordinates.
+                    local t = ns.GetTrackedBuffBars()
+                    local b = t and t.bars
+                    if not b or idx > #b then return nil end
+                    return tbbFrames[idx]
+                end,
                 getSize  = function()
                     -- width/height ARE the total footprint (icon included),
                     -- so matching reads the stored dims directly.
