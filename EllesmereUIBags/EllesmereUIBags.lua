@@ -2035,7 +2035,8 @@ local function GetOrCreateSlot(idx)
 
     btn:SetSize(SLOT_SIZE, SLOT_SIZE)
     if btn.icon then
-        btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local z = BP().bagItemIconZoom or 0.08
+        btn.icon:SetTexCoord(z, 1 - z, z, 1 - z)
         btn.icon:ClearAllPoints()
         btn.icon:SetAllPoints(btn)
     end
@@ -2151,7 +2152,8 @@ local function GetOrCreateReagentSlot(idx)
 
     btn:SetSize(SLOT_SIZE, SLOT_SIZE)
     if btn.icon then
-        btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        local z = BP().bagItemIconZoom or 0.08
+        btn.icon:SetTexCoord(z, 1 - z, z, 1 - z)
         btn.icon:ClearAllPoints()
         btn.icon:SetAllPoints(btn)
     end
@@ -2224,7 +2226,8 @@ local function GetOrCreateBagSlot(idx)
     btn:SetAllPoints(slotParent)
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn.icon = btn:CreateTexture(nil, "ARTWORK")
-    btn.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    local z = BP().bagItemIconZoom or 0.08
+    btn.icon:SetTexCoord(z, 1 - z, z, 1 - z)
     btn.icon:SetAllPoints(btn)
     btn.Count = btn:CreateFontString(nil, "OVERLAY")
     EllesmereUI.ApplyIconTextFont(btn.Count, GetFont(), BP().bagCountFontSize or 11, "bags")
@@ -2272,6 +2275,24 @@ local function RefreshTextSizes()
     end
 end
 EUI_Bags.RefreshTextSizes = RefreshTextSizes
+
+-------------------------------------------------------------------------------
+--  Fast icon-zoom update: re-applies the item-icon crop to existing slots
+--  without a full RefreshInventory. Called by the options zoom cog.
+-------------------------------------------------------------------------------
+local function RefreshIconZoom()
+    local z = BP().bagItemIconZoom or 0.08
+    for _, btn in pairs(itemSlots) do
+        if btn.icon then btn.icon:SetTexCoord(z, 1 - z, z, 1 - z) end
+    end
+    for _, btn in pairs(reagentSlots) do
+        if btn.icon then btn.icon:SetTexCoord(z, 1 - z, z, 1 - z) end
+    end
+    for _, btn in pairs(bagSlots) do
+        if btn.icon then btn.icon:SetTexCoord(z, 1 - z, z, 1 - z) end
+    end
+end
+EUI_Bags.RefreshIconZoom = RefreshIconZoom
 
 -------------------------------------------------------------------------------
 --  Bind type text (shared by bags and bank render paths)
