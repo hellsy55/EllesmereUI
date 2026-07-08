@@ -11914,9 +11914,19 @@ initFrame:SetScript("OnEvent", function(self)
             local parentLabel = (unitKey == "focustarget") and "Focus" or "Target"
             local childName = (unitKey == "focustarget") and "focus-target" or "target-of-target"
             local parentIsBlizzard = ns.GetUnitFrameSource(parentLabel:lower()) == "blizzard"
-            local srcTip = "\"Blizzard Default\" is only available when the " .. parentLabel
-                .. " frame's source is set to Blizzard Default -- the " .. childName
-                .. " then comes from Blizzard's " .. parentLabel:lower() .. " frame."
+            -- Parent is Blizzard -> "Blizzard Default" is offered here; briefly warn that the
+            -- native child can't be hidden in combat (see SuppressBlizzardChildFrame for why).
+            -- Parent isn't Blizzard -> the option is dropped; explain why instead.
+            local srcTip
+            if parentIsBlizzard then
+                srcTip = "Due to Blizzard API restrictions, Blizzard's native " .. childName
+                    .. " can't be hidden in combat and will show the whole time you are in combat. Recommended: match the "
+                    .. parentLabel .. " frame's source -- both Blizzard Default, or both EllesmereUI."
+            else
+                srcTip = "\"Blizzard Default\" is only available when the " .. parentLabel
+                    .. " frame's source is set to Blizzard Default -- the " .. childName
+                    .. " then comes from Blizzard's " .. parentLabel:lower() .. " frame."
+            end
             local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, nil, not parentIsBlizzard, srcTip)
             local total = h
             if isEUI then

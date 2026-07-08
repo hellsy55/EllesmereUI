@@ -10947,11 +10947,21 @@ function InitializeFrames()
     end)
 
     -- Durably suppress a live Blizzard child frame (target-of-target /
-    -- focus-target). These are CHILDREN of TargetFrame/FocusFrame: when the
-    -- parent uses Blizzard's source it stays alive and re-drives the child on
-    -- every target change, so a one-shot Hide is undone. Re-hide on OnShow, and
-    -- because hiding a frame in combat can taint, defer to PLAYER_REGEN_ENABLED
-    -- while locked.
+    -- focus-target). These are PROTECTED CHILDREN of TargetFrame/FocusFrame: when
+    -- the parent uses Blizzard's source it stays alive and re-drives the child
+    -- (TargetOfTargetMixin:Update) on every target change, so a one-shot Hide is
+    -- undone. We unregister its events and re-hide on OnShow.
+    --
+    -- KNOWN LIMITATION (in-combat double frame): the child is a protected frame, so
+    -- Hide() is blocked in combat. If the player changes target mid-combat, Blizzard
+    -- (secure) re-Shows the native child and our OnShow re-hide cannot fire until
+    -- PLAYER_REGEN_ENABLED -- so with the parent on Blizzard Default and this mini
+    -- frame on EllesmereUI/Hidden, the native child stays visible for the WHOLE of
+    -- combat (not just a flash): once Blizzard shows it we cannot re-hide until combat
+    -- ends, so it sits alongside the EllesmereUI frame (or shows despite "Hidden").
+    -- Not fixable without reparenting/overriding a secure frame in combat, so it's
+    -- surfaced in the mini-frame "Frame Source" tooltip (see BuildFoTToTOptions), which
+    -- recommends matching the parent's source instead of mixing them.
     local _suppressedChildren, _suppressWatcher
     local function SuppressBlizzardChildFrame(frame)
         if not frame then return end
