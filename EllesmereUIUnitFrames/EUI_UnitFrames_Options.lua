@@ -3841,14 +3841,15 @@ initFrame:SetScript("OnEvent", function(self)
     -- (mini/boss pass Show Portrait when on the EUI source; otherwise the slot is
     -- empty). onBeforeSet(v) runs before the write -- boss uses it to stop the
     -- live preview. Returns row, height.
-    local function BuildFrameSourceRow(Ww, pp, yy, unitKey, onBeforeSet, rightCfg, noBlizzard)
-        -- Target-of-target / focus-target have no standalone Blizzard frame, so
-        -- they omit the "Blizzard Default" option (see ns.GetUnitFrameSource).
+    local function BuildFrameSourceRow(Ww, pp, yy, unitKey, onBeforeSet, rightCfg, noBlizzard, tooltip)
+        -- Target-of-target / focus-target only offer "Blizzard Default" when their
+        -- parent target/focus frame is itself Blizzard's (see ns.GetUnitFrameSource);
+        -- otherwise noBlizzard drops the option and `tooltip` explains why.
         local values = noBlizzard and { eui="EllesmereUI", hidden="Hidden" }
             or { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" }
         local order = noBlizzard and { "eui", "hidden" } or { "eui", "blizzard", "hidden" }
         return Ww:DualRow(pp, yy,
-            { type="dropdown", text="Frame Source",
+            { type="dropdown", text="Frame Source", tooltip=tooltip,
               values = values,
               order = order,
               getValue=function() return ns.GetUnitFrameSource(unitKey) end,
@@ -11907,7 +11908,16 @@ initFrame:SetScript("OnEvent", function(self)
             -- flush on the next row, only on the EllesmereUI source. For
             -- Blizzard/hidden the row is Frame Source alone + the notice below.
             local isEUI = ns.GetUnitFrameSource(unitKey) == "eui"
-            local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, nil, true)
+            -- "Blizzard Default" only makes sense when the parent target/focus is
+            -- itself on Blizzard's frame (its native child target-of-target is then
+            -- alive); otherwise offer only EllesmereUI / Hidden and explain why.
+            local parentLabel = (unitKey == "focustarget") and "Focus" or "Target"
+            local childName = (unitKey == "focustarget") and "focus-target" or "target-of-target"
+            local parentIsBlizzard = ns.GetUnitFrameSource(parentLabel:lower()) == "blizzard"
+            local srcTip = "\"Blizzard Default\" is only available when the " .. parentLabel
+                .. " frame's source is set to Blizzard Default -- the " .. childName
+                .. " then comes from Blizzard's " .. parentLabel:lower() .. " frame."
+            local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, nil, not parentIsBlizzard, srcTip)
             local total = h
             if isEUI then
                 local ph
