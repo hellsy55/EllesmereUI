@@ -194,8 +194,7 @@ local UnitExists            = UnitExists
 local UnitIsConnected       = UnitIsConnected
 local UnitIsVisible         = UnitIsVisible
 local UnitIsDeadOrGhost     = UnitIsDeadOrGhost
--- HELD (PR #610 incoming rez, disabled for this build):
--- local UnitHasIncomingResurrection = UnitHasIncomingResurrection
+local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitThreatSituation   = UnitThreatSituation
 local UnitIsUnit            = UnitIsUnit
@@ -559,7 +558,7 @@ local defaults = {
         raidMarkerOffsetY  = 0,
         showReadyCheck   = true,
         showSummonPending = true,
-        -- showIncomingRez  = true,  -- HELD (PR #610 incoming rez, disabled for this build)
+        showIncomingRez  = true,
         readyCheckSize   = 20,
         readyCheckPosition = "center",  -- "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom"
         readyCheckOffsetX  = 0,
@@ -4150,11 +4149,10 @@ local function UpdateButton(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        -- HELD (PR #610 incoming rez, disabled for this build):
-        -- elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
-        --     -- Being resurrected: hide DEAD so the incoming-rez icon (shown in the same
-        --     -- spot by UpdateReadyCheck) isn't covered by the status text.
-        --     d.statusText:Hide()
+        elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
+            -- Being resurrected: hide DEAD so the incoming-rez icon (shown in the same
+            -- spot by UpdateReadyCheck) isn't covered by the status text.
+            d.statusText:Hide()
         elseif UnitIsDeadOrGhost(unit) then
             d.statusText:SetText(EllesmereUI.L("DEAD"))
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
@@ -5589,13 +5587,12 @@ local function UpdateReadyCheck(button, unit)
     -- Incoming resurrection ("someone is casting a rez / rez waiting to be
     -- accepted"). Lowest priority; only meaningful on a dead unit. Lets healers
     -- see a body is already being picked up so they don't all rez the same one.
-    -- HELD (PR #610 incoming rez, disabled for this build):
-    -- if db.profile.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
-    --     tex:SetTexCoord(0, 1, 0, 1)
-    --     tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-    --     tex:Show()
-    --     return
-    -- end
+    if db.profile.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
+        tex:SetTexCoord(0, 1, 0, 1)
+        tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+        tex:Show()
+        return
+    end
 
     tex:Hide()
 end
@@ -5863,10 +5860,9 @@ ns._UpdateButtonHealth = function(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        -- HELD (PR #610 incoming rez, disabled for this build):
-        -- elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
-        --     -- Being resurrected: hide DEAD so the incoming-rez icon isn't covered.
-        --     d.statusText:Hide()
+        elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
+            -- Being resurrected: hide DEAD so the incoming-rez icon isn't covered.
+            d.statusText:Hide()
         elseif UnitIsDeadOrGhost(unit) then
             d.statusText:SetText(EllesmereUI.L("DEAD"))
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
@@ -9213,16 +9209,15 @@ local function OnEvent(self, event, arg1, ...)
             local u = btn:GetAttribute("unit")
             if u and btn:IsVisible() then UpdateReadyCheck(btn, u) end
         end
-    -- HELD (PR #610 incoming rez, disabled for this build):
-    -- elseif event == "INCOMING_RESURRECT_CHANGED" then
-    --     -- Fires with a unit payload when a rez starts/stops on that unit. Refresh the
-    --     -- status text (so DEAD hides while rezzing / reappears after) as well as the
-    --     -- shared rez icon.
-    --     local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
-    --     if btn and btn:IsVisible() then
-    --         if ns._UpdateButtonHealth then ns._UpdateButtonHealth(btn) end
-    --         UpdateReadyCheck(btn, arg1)
-    --     end
+    elseif event == "INCOMING_RESURRECT_CHANGED" then
+        -- Fires with a unit payload when a rez starts/stops on that unit. Refresh the
+        -- status text (so DEAD hides while rezzing / reappears after) as well as the
+        -- shared rez icon.
+        local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
+        if btn and btn:IsVisible() then
+            if ns._UpdateButtonHealth then ns._UpdateButtonHealth(btn) end
+            UpdateReadyCheck(btn, arg1)
+        end
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
         -- BM_RebuildLookup only rebuilds the global spell-lookup tables for the
@@ -9374,7 +9369,7 @@ do
             "roleIconStyle", "roleIconSize", "roleIconPosition", "roleIconOffsetX", "roleIconOffsetY", "roleIconHideInCombat",
             "showRoleForTank", "showRoleForHealer", "showRoleForDPS",
             "showRaidMarker", "raidMarkerSize", "raidMarkerPosition", "raidMarkerOffsetX", "raidMarkerOffsetY",
-            "showReadyCheck", "showSummonPending", --[[ HELD (PR #610): "showIncomingRez", ]]
+            "showReadyCheck", "showSummonPending", "showIncomingRez",
             "readyCheckSize", "readyCheckPosition", "readyCheckOffsetX", "readyCheckOffsetY",
             "statusTextPosition", "statusTextOffsetX", "statusTextOffsetY", "statusTextSize", "statusTextColor",
             "showLeaderIcon", "showLeaderIconInCombat", "leaderIconPosition", "leaderIconSize", "leaderIconOffsetX", "leaderIconOffsetY",
@@ -11976,20 +11971,18 @@ local function BuildPreviewRoles()
         end
         previewRoles._deadSlot    = statePool[1]  -- plain corpse
         previewRoles._offlineSlot = statePool[2]
-        -- HELD (PR #610 incoming rez, disabled for this build):
-        -- previewRoles._rezSlot     = statePool[3]  -- corpse with an incoming-rez icon
+        previewRoles._rezSlot     = statePool[3]  -- corpse with an incoming-rez icon
         -- Plain dead + offline bodies carry no readycheck/summon icon (looks wrong there).
         if rcStatuses[statePool[1]] then rcStatuses[statePool[1]] = nil end
         if rcStatuses[statePool[2]] then rcStatuses[statePool[2]] = nil end
         -- The rez corpse gets the incoming-rez icon. But markers win the shared icon
         -- slot (same as the readycheck de-confliction above): if the rez slot landed
         -- on a marker slot, skip the icon (the frame is still shown as a dead body).
-        -- HELD (PR #610 incoming rez, disabled for this build):
-        -- if statePool[3] ~= ms1 and statePool[3] ~= ms2 then
-        --     rcStatuses[statePool[3]] = "rez"
-        -- else
-        --     rcStatuses[statePool[3]] = nil
-        -- end
+        if statePool[3] ~= ms1 and statePool[3] ~= ms2 then
+            rcStatuses[statePool[3]] = "rez"
+        else
+            rcStatuses[statePool[3]] = nil
+        end
     end
 end
 
@@ -12742,16 +12735,11 @@ local function ApplyPreviewData(f, index)
         local rcStatuses = previewRoles._readyCheck
         local rcStatus = rcStatuses and rcStatuses[index]
         local isSummon = rcStatus and rcStatus:sub(1, 6) == "summon"
-        -- HELD (PR #610 incoming rez, disabled for this build):
-        -- local isRez    = rcStatus == "rez"
-        -- local showRC = indVis and rcStatus and (
-        --     (isRez and s.showIncomingRez) or
-        --     (isSummon and s.showSummonPending) or
-        --     (not isSummon and not isRez and s.showReadyCheck)
-        -- )
+        local isRez    = rcStatus == "rez"
         local showRC = indVis and rcStatus and (
-            (not isSummon and s.showReadyCheck) or
-            (isSummon and s.showSummonPending)
+            (isRez and s.showIncomingRez) or
+            (isSummon and s.showSummonPending) or
+            (not isSummon and not isRez and s.showReadyCheck)
         )
         if showRC then
             local rcSz = PixelSnap(s.readyCheckSize or 20)
@@ -12795,10 +12783,9 @@ local function ApplyPreviewData(f, index)
                 f._readyCheck:SetAtlas("RaidFrame-Icon-SummonAccepted")
             elseif rcStatus == "summon_declined" then
                 f._readyCheck:SetAtlas("RaidFrame-Icon-SummonDeclined")
-            -- HELD (PR #610 incoming rez, disabled for this build):
-            -- elseif rcStatus == "rez" then
-            --     f._readyCheck:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-            --     f._readyCheck:SetTexCoord(0, 1, 0, 1)
+            elseif rcStatus == "rez" then
+                f._readyCheck:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+                f._readyCheck:SetTexCoord(0, 1, 0, 1)
             end
             f._readyCheck:Show()
         else
@@ -12869,10 +12856,8 @@ local function ApplyPreviewData(f, index)
     -- Dead/offline/AFK states (only when indicators eyeball is on). The rez slot is
     -- a second corpse (dimmed, no "DEAD" text) that shows an incoming-rez icon in
     -- place of the status text -- mirrors the live "hide DEAD while rezzing" behavior.
-    -- HELD (PR #610 incoming rez, disabled for this build):
-    -- local isRezCorpse = indVis and index == previewRoles._rezSlot
-    -- local isDead      = indVis and (index == previewRoles._deadSlot or isRezCorpse)
-    local isDead      = indVis and index == previewRoles._deadSlot
+    local isRezCorpse = indVis and index == previewRoles._rezSlot
+    local isDead      = indVis and (index == previewRoles._deadSlot or isRezCorpse)
     local isOffline   = indVis and index == previewRoles._offlineSlot
     -- Mark dead/offline preview frames so the animated-preview ticker skips them
     -- (their health bar is emptied and health text hidden -- never animated).
@@ -13019,12 +13004,10 @@ local function ApplyPreviewData(f, index)
         else
             f._statusText:SetPoint("CENTER", f._health, "CENTER", stOX, stOY)
         end
-        -- HELD (PR #610 incoming rez, disabled for this build):
-        -- if isRezCorpse then
-        --     -- Being resurrected: the rez icon takes this spot, so no DEAD text.
-        --     f._statusText:Hide()
-        -- elseif isDead then
-        if isDead then
+        if isRezCorpse then
+            -- Being resurrected: the rez icon takes this spot, so no DEAD text.
+            f._statusText:Hide()
+        elseif isDead then
             f._statusText:SetText(EllesmereUI.L("DEAD"))
             f._statusText:Show()
         elseif isOffline then
@@ -14703,7 +14686,7 @@ function ERF:OnEnable()
     eventFrame:RegisterEvent("READY_CHECK_CONFIRM")
     eventFrame:RegisterEvent("READY_CHECK_FINISHED")
     eventFrame:RegisterEvent("INCOMING_SUMMON_CHANGED")
-    -- eventFrame:RegisterEvent("INCOMING_RESURRECT_CHANGED")  -- HELD (PR #610 incoming rez, disabled for this build)
+    eventFrame:RegisterEvent("INCOMING_RESURRECT_CHANGED")
     eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
