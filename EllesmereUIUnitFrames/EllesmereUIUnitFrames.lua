@@ -1857,10 +1857,12 @@ function ns.GetUnitFrameSource(unit)
     if db.profile.enabledFrames[unit] == false then return "hidden" end
     local fs = db.profile.frameSource and db.profile.frameSource[unit]
     if fs == "blizzard" then
-        -- Target-of-target / focus-target have no standalone Blizzard frame:
-        -- Blizzard's is a child of the parent target/focus frame, so it can't
-        -- render on its own (and when the parent is the EUI frame it's gone
-        -- entirely). Treat "blizzard" as the EllesmereUI frame for these two.
+        -- Target-of-target / focus-target: Blizzard's is a parent-driven child of
+        -- TargetFrame/FocusFrame -- it has no self-update events (oUF strips them)
+        -- and Blizzard never renders it standalone (its parent target frame drives
+        -- it). Reviving it detached would mean re-implementing that update loop on
+        -- a secure/taint-prone frame just to duplicate the EllesmereUI ToT we
+        -- already spawn -- not worth it. Treat "blizzard" as "eui" for these two.
         if unit == "targettarget" or unit == "focustarget" then return "eui" end
         return "blizzard"
     end

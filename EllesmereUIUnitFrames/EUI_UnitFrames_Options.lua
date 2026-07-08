@@ -11903,23 +11903,26 @@ initFrame:SetScript("OnEvent", function(self)
 
         local portraitRow
         local function enableRow(Ww, pp, yy)
-            -- Show Portrait shares the Frame Source row (right slot), but only on
-            -- the EllesmereUI source -- for Blizzard/hidden the right slot is empty
-            -- and the settings below are skipped entirely.
+            -- Frame Source on its own row (like player/target); Show Portrait sits
+            -- flush on the next row, only on the EllesmereUI source. For
+            -- Blizzard/hidden the row is Frame Source alone + the notice below.
             local isEUI = ns.GetUnitFrameSource(unitKey) == "eui"
-            local rightCfg = isEUI and
-                { type="toggle", text="Show Portrait",
-                  getValue=function() return settingsTable.showPortrait ~= false end,
-                  setValue=function(v)
-                    settingsTable.showPortrait = v
-                    ReloadAndUpdate()
-                  end } or nil
-            local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, rightCfg, true)
+            local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, nil, true)
+            local total = h
             if isEUI then
-                portraitRow = row
-                AttachPortraitSideCog(row._rightRegion, settingsTable)
+                local ph
+                portraitRow, ph = Ww:DualRow(pp, yy - h,
+                    { type="toggle", text="Show Portrait",
+                      getValue=function() return settingsTable.showPortrait ~= false end,
+                      setValue=function(v)
+                        settingsTable.showPortrait = v
+                        ReloadAndUpdate()
+                      end },
+                    { type="spacer" })
+                AttachPortraitSideCog(portraitRow._leftRegion, settingsTable)
+                total = total + ph
             end
-            return row, h
+            return row, total
         end
 
         local displayHeader, sizeRow, textHeader, textRow
@@ -11928,7 +11931,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
             healthBar  = { section = displayHeader,  target = sizeRow },
-            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "left" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
         }
@@ -11942,19 +11945,22 @@ initFrame:SetScript("OnEvent", function(self)
         local portraitRow
         local function enableRow(Ww, pp, yy)
             local isEUI = ns.GetUnitFrameSource("pet") == "eui"
-            local rightCfg = isEUI and
-                { type="toggle", text="Show Portrait",
-                  getValue=function() return db.profile.pet.showPortrait ~= false end,
-                  setValue=function(v)
-                    db.profile.pet.showPortrait = v
-                    ReloadAndUpdate()
-                  end } or nil
-            local row, h = BuildFrameSourceRow(Ww, pp, yy, "pet", nil, rightCfg)
+            local row, h = BuildFrameSourceRow(Ww, pp, yy, "pet")
+            local total = h
             if isEUI then
-                portraitRow = row
-                AttachPortraitSideCog(row._rightRegion, db.profile.pet)
+                local ph
+                portraitRow, ph = Ww:DualRow(pp, yy - h,
+                    { type="toggle", text="Show Portrait",
+                      getValue=function() return db.profile.pet.showPortrait ~= false end,
+                      setValue=function(v)
+                        db.profile.pet.showPortrait = v
+                        ReloadAndUpdate()
+                      end },
+                    { type="spacer" })
+                AttachPortraitSideCog(portraitRow._leftRegion, db.profile.pet)
+                total = total + ph
             end
-            return row, h
+            return row, total
         end
 
         local displayHeader, sizeRow, textHeader, textRow
@@ -11963,7 +11969,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
             healthBar  = { section = displayHeader,  target = sizeRow },
-            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "left" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
         }
@@ -12020,27 +12026,29 @@ initFrame:SetScript("OnEvent", function(self)
         local portraitRow, growthRow, simpleRow, simpleBuffRow, bossAuraRow, bossAuraHeader, bossCastHeader, castMainRow
         local function enableRow(Ww, pp, yy)
             local isEUI = ns.GetUnitFrameSource("boss") == "eui"
-            local rightCfg = isEUI and
-                { type="toggle", text="Show Portrait",
-                  getValue=function() return db.profile.boss.showPortrait ~= false end,
-                  setValue=function(v)
-                    db.profile.boss.showPortrait = v
-                    ReloadAndUpdate()
-                  end } or nil
             local row, h = BuildFrameSourceRow(Ww, pp, yy, "boss", function(v)
                 -- Force-stop the in-game preview when boss frames are no longer
                 -- EUI-owned; it rides on the real boss frames and renders broken.
                 if v ~= "eui" and ns._bossPreviewActive and ns.SetBossPreview then
                     ns.SetBossPreview(false)
                 end
-            end, rightCfg)
+            end)
             local total = h
-            -- Show Portrait shares the row above; the boss stack layout sits flush
-            -- below it, all only for the EUI boss frames.
+            -- Frame Source on its own row; Show Portrait then the boss stack layout
+            -- sit flush below, all only for the EUI boss frames.
             if isEUI then
-                portraitRow = row
-                AttachPortraitSideCog(row._rightRegion, db.profile.boss)
-                local castRow, ch = Ww:DualRow(pp, yy - h,
+                local ph
+                portraitRow, ph = Ww:DualRow(pp, yy - h,
+                    { type="toggle", text="Show Portrait",
+                      getValue=function() return db.profile.boss.showPortrait ~= false end,
+                      setValue=function(v)
+                        db.profile.boss.showPortrait = v
+                        ReloadAndUpdate()
+                      end },
+                    { type="spacer" })
+                AttachPortraitSideCog(portraitRow._leftRegion, db.profile.boss)
+                total = total + ph
+                local castRow, ch = Ww:DualRow(pp, yy - total,
                     { type="dropdown", text="Stack Direction", values={ up="Up", down="Down" }, order={ "up", "down" },
                       getValue=function() return db.profile.boss.bossStackDirection or "down" end,
                       setValue=function(v) db.profile.boss.bossStackDirection = v; ReloadAndUpdate() end },
@@ -13112,7 +13120,7 @@ initFrame:SetScript("OnEvent", function(self)
             healthBar  = { section = textHeader or displayHeader,  target = sizeRow,  slotSide = "left" },
             powerBar   = { section = parent._powerHeaderFrame or displayHeader,  target = parent._powerHeightRow,  slotSide = "left" },
             powerBarText = { section = parent._powerHeaderFrame or displayHeader,  target = parent._powerTextRow,  slotSide = "left" },
-            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "left" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             -- Cast bar -> Cast Bar Height; spell icon -> Show Cast Icon. Both live
