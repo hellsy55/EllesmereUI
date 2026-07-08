@@ -896,6 +896,11 @@ local defaults = {
             focustarget = false,
             boss = true,
         },
+        -- Per-unit frame source: "eui" (EllesmereUI skinned frame), "blizzard"
+        -- (leave Blizzard's default frame in place), or "hidden" (no frame).
+        -- Resolved through ns.GetUnitFrameSource, which also honours the legacy
+        -- enabledFrames flag (false => "hidden") for backward compatibility.
+        frameSource = {},
         positions = {
             player = { point = "CENTER", relPoint = "CENTER", x = -317, y = -193.5 },
             target = { point = "CENTER", relPoint = "CENTER", x = 317, y = -201 },
@@ -1838,6 +1843,49 @@ local function GetSettingsForUnit(unit)
         end
     end
     return unitSettingsMap[unit] or db.profile.player
+end
+
+-- Per-unit frame source resolver. Returns one of:
+--   "eui"      -- spawn the EllesmereUI skinned frame (default)
+--   "blizzard" -- do not spawn; leave Blizzard's default frame in place
+--   "hidden"   -- do not spawn; actively disable Blizzard's frame too
+-- "hidden" has the highest precedence so a legacy disabled frame
+-- (enabledFrames[unit] == false, e.g. Visibility set to "never" or an
+-- "Enable X Frame" toggle turned off) keeps meaning "no frame at all".
+function ns.GetUnitFrameSource(unit)
+    if not db or not db.profile then return "eui" end
+    if db.profile.enabledFrames[unit] == false then return "hidden" end
+    local fs = db.profile.frameSource and db.profile.frameSource[unit]
+    if fs == "blizzard" then return "blizzard" end
+    return "eui"
+end
+
+-- Writes a unit's frame source, keeping the legacy enabledFrames flag and the
+-- per-unit "never" visibility in sync so all existing readers stay correct.
+-- Switching source only takes full effect after a UI reload (oUF permanently
+-- disables the Blizzard frame at spawn, and secure frames cannot be created or
+-- torn down in combat), so callers should also prompt a reload.
+function ns.SetUnitFrameSource(unit, source)
+    if not db or not db.profile then return end
+    db.profile.frameSource = db.profile.frameSource or {}
+    db.profile.frameSource[unit] = source
+    db.profile.enabledFrames[unit] = (source ~= "hidden")
+    -- Keep the player/target/focus "Visibility" dropdown ("never") consistent
+    -- with the hidden state; other units have no barVisibility key.
+    local s = db.profile[unit]
+    if s and s.barVisibility ~= nil then
+        if source == "hidden" then
+            -- Remember the visible mode so a hidden -> visible round trip does
+            -- not lose an "in_combat"/"mouseover"/etc. preference.
+            if s.barVisibility ~= "never" then
+                s._preHiddenBarVisibility = s.barVisibility
+            end
+            s.barVisibility = "never"
+        elseif s.barVisibility == "never" then
+            s.barVisibility = s._preHiddenBarVisibility or "always"
+            s._preHiddenBarVisibility = nil
+        end
+    end
 end
 
 -- Cast-bar icon "part of the bar" resolver. Returns true when the spell icon
@@ -10163,7 +10211,12 @@ end
 -- other EUI modules and releases control cleanly for external addons.
 local function ApplyBlizzCastbarState()
     if EllesmereUI and EllesmereUI.SetPlayerCastBarSuppressed and db and db.profile and db.profile.player then
-        EllesmereUI.SetPlayerCastBarSuppressed("UnitFrames", db.profile.player.showPlayerCastbar)
+        -- Only suppress Blizzard's player cast bar when EUI actually provides a
+        -- replacement. If the player is on the Blizzard (or hidden) frame source,
+        -- there is no EUI cast bar, so leave Blizzard's alone.
+        local suppress = (db.profile.player.showPlayerCastbar
+            and ns.GetUnitFrameSource("player") == "eui") or false
+        EllesmereUI.SetPlayerCastBarSuppressed("UnitFrames", suppress)
     end
 end
 
@@ -10233,6 +10286,11 @@ function InitializeFrames()
     end
 
     local classPowerStyle = db.profile.player.classPowerStyle or "none"
+    -- Per-unit frame source, resolved once for this build. When a unit is set to
+    -- "blizzard" (leave Blizzard's default frame) or "hidden", the EllesmereUI
+    -- frame is not spawned at all -- which is the ONLY way to keep Blizzard's own
+    -- frame alive, because oUF:Spawn() permanently disables it.
+    local playerFrameSource = ns.GetUnitFrameSource("player")
     -- Per-class Blizzard class power bar frame names
     local BLIZZARD_CP_FRAMES = {
         DEATHKNIGHT = "RuneFrame",
@@ -10248,7 +10306,9 @@ function InitializeFrames()
     -- Blizzard frames -- see CLAUDE.md _FFD rule).
     local _blizzCPState = {}  -- { origParent, hooked }
     local savedClassPowerBar = nil
-    if classPowerStyle == "blizzard" then
+    -- Only take over the Blizzard class power bar when the EUI player frame is
+    -- actually being spawned; otherwise leave it to Blizzard's player frame.
+    if classPowerStyle == "blizzard" and playerFrameSource == "eui" then
         local _, classFile = UnitClass("player")
         local frameName = BLIZZARD_CP_FRAMES[classFile]
         local cpFrame = frameName and _G[frameName]
@@ -10287,9 +10347,15 @@ function InitializeFrames()
         ClickCastFrames[frame] = true
     end
 
-    -- Always spawn all frames; hide disabled ones for zero performance impact
+    -- Spawn each unit's EllesmereUI frame only when its source is "eui". A unit
+    -- set to "blizzard" keeps Blizzard's own frame (we never call oUF:Spawn for
+    -- it, so oUF never disables it); "hidden" removes Blizzard's frame too.
     oUF:SetActiveStyle("EllesmerePlayer")
-    frames.player = oUF:Spawn("player", "EllesmereUIUnitFrames_Player")
+    if playerFrameSource == "eui" then
+        frames.player = oUF:Spawn("player", "EllesmereUIUnitFrames_Player")
+    elseif playerFrameSource == "hidden" then
+        oUF:DisableBlizzard("player")
+    end
 
     -- Visibility wrapper for the player frame only. Parent the player frame
     -- to a non-secure wrapper and drive visibility via the wrapper's alpha
@@ -10302,6 +10368,7 @@ function InitializeFrames()
     -- The wrapper is inserted between the player frame and whatever parent
     -- oUF originally gave it (PetBattleFrameHider), so the pet-battle state
     -- driver chain continues to work.
+    if frames.player then
     local origParent = frames.player:GetParent() or UIParent
     local playerVisWrap = CreateFrame("Frame", nil, origParent)
     playerVisWrap:SetAllPoints(origParent)
@@ -10316,10 +10383,12 @@ function InitializeFrames()
         frames.player:Hide()
         frames.player:SetAttribute("unit", nil)
     end
+    end
 
     -- Combat indicator overlay on player frame
     do
         local pf = frames.player
+        if pf then
         local ps = db.profile.player
         local COMBAT_MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\combat\\"
 
@@ -10422,6 +10491,7 @@ function InitializeFrames()
         if style ~= "none" and UnitAffectingCombat("player") then
             ApplyCombatTexture()
             combat:Show()
+        end
         end
     end
 
@@ -10775,6 +10845,9 @@ function InitializeFrames()
     -- Live toggle for class power bar (no reload needed)
     -- Called with the style string: "none", "modern", or "blizzard"
     frames._toggleClassPower = function(style)
+        -- Class power is a player-frame feature; if the player is on Blizzard's
+        -- default frame (or hidden), there is no EUI frame to attach it to.
+        if not frames.player then return end
         style = style or db.profile.player.classPowerStyle or "none"
         -- Keep showClassPowerBar in sync with style
         db.profile.player.showClassPowerBar = (style ~= "none")
@@ -10861,22 +10934,56 @@ function InitializeFrames()
         end)
     end)
 
-    oUF:SetActiveStyle("EllesmereTarget")
-    frames.target = oUF:Spawn("target", "EllesmereUIUnitFrames_Target")
-    ApplyFramePosition(frames.target, "target")
-    SetupUnitMenu(frames.target, "target")
-    if enabled.target == false then
-        frames.target:Hide()
-        frames.target:SetAttribute("unit", nil)
+    -- Durably suppress a live Blizzard child frame (target-of-target /
+    -- focus-target). These are CHILDREN of TargetFrame/FocusFrame: when the
+    -- parent uses Blizzard's source it stays alive and re-drives the child on
+    -- every target change, so a one-shot Hide is undone. Re-hide on OnShow, and
+    -- because hiding a frame in combat can taint, defer to PLAYER_REGEN_ENABLED
+    -- while locked.
+    local _suppressedChildren, _suppressWatcher
+    local function SuppressBlizzardChildFrame(frame)
+        if not frame then return end
+        frame:UnregisterAllEvents()
+        if not InCombatLockdown() then frame:Hide() end
+        _suppressedChildren = _suppressedChildren or {}
+        if not _suppressWatcher then
+            _suppressWatcher = CreateFrame("Frame")
+            _suppressWatcher:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                if InCombatLockdown() then return end
+                for f in pairs(_suppressedChildren) do f:Hide() end
+            end)
+        end
+        if not _suppressedChildren[frame] then
+            _suppressedChildren[frame] = true
+            frame:HookScript("OnShow", function(self)
+                if InCombatLockdown() then
+                    _suppressWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+                else
+                    self:Hide()
+                end
+            end)
+        end
     end
 
-    oUF:SetActiveStyle("EllesmereFocus")
-    frames.focus = oUF:Spawn("focus", "EllesmereUIUnitFrames_Focus")
-    ApplyFramePosition(frames.focus, "focus")
-    SetupUnitMenu(frames.focus, "focus")
-    if enabled.focus == false then
-        frames.focus:Hide()
-        frames.focus:SetAttribute("unit", nil)
+    local targetFrameSource = ns.GetUnitFrameSource("target")
+    if targetFrameSource == "eui" then
+        oUF:SetActiveStyle("EllesmereTarget")
+        frames.target = oUF:Spawn("target", "EllesmereUIUnitFrames_Target")
+        ApplyFramePosition(frames.target, "target")
+        SetupUnitMenu(frames.target, "target")
+    elseif targetFrameSource == "hidden" then
+        oUF:DisableBlizzard("target")
+    end
+
+    local focusFrameSource = ns.GetUnitFrameSource("focus")
+    if focusFrameSource == "eui" then
+        oUF:SetActiveStyle("EllesmereFocus")
+        frames.focus = oUF:Spawn("focus", "EllesmereUIUnitFrames_Focus")
+        ApplyFramePosition(frames.focus, "focus")
+        SetupUnitMenu(frames.focus, "focus")
+    elseif focusFrameSource == "hidden" then
+        oUF:DisableBlizzard("focus")
     end
 
     -- Leader indicator (crown when unit is the group/raid leader). oUF doesn't
@@ -10957,33 +11064,48 @@ function InitializeFrames()
         end
     end
 
-    oUF:SetActiveStyle("EllesmerePet")
-    frames.pet = oUF:Spawn("pet", "EllesmereUIUnitFrames_Pet")
-    ApplyFramePosition(frames.pet, "pet")
-    SetupUnitMenu(frames.pet, "pet")
-    if enabled.pet == false then
-        frames.pet:Hide()
-        frames.pet:SetAttribute("unit", nil)
+    local petFrameSource = ns.GetUnitFrameSource("pet")
+    if petFrameSource == "eui" then
+        oUF:SetActiveStyle("EllesmerePet")
+        frames.pet = oUF:Spawn("pet", "EllesmereUIUnitFrames_Pet")
+        ApplyFramePosition(frames.pet, "pet")
+        SetupUnitMenu(frames.pet, "pet")
+    elseif petFrameSource == "hidden" then
+        oUF:DisableBlizzard("pet")
     end
 
-    oUF:SetActiveStyle("EllesmereTargetTarget")
-    frames.targettarget = oUF:Spawn("targettarget", "EllesmereUIUnitFrames_TargetTarget")
-    ApplyFramePosition(frames.targettarget, "targettarget")
-    SetupUnitMenu(frames.targettarget, "targettarget")
-    if enabled.targettarget == false then
-        frames.targettarget:Hide()
-        frames.targettarget:SetAttribute("unit", nil)
+    local totFrameSource = ns.GetUnitFrameSource("targettarget")
+    if totFrameSource == "eui" then
+        oUF:SetActiveStyle("EllesmereTargetTarget")
+        frames.targettarget = oUF:Spawn("targettarget", "EllesmereUIUnitFrames_TargetTarget")
+        ApplyFramePosition(frames.targettarget, "targettarget")
+        SetupUnitMenu(frames.targettarget, "targettarget")
+    end
+    -- Blizzard's target-of-target is a child of TargetFrame. When the target
+    -- frame itself is EUI or hidden, oUF/our code already disabled TargetFrame so
+    -- the child is gone with it. It only needs suppressing when the target uses
+    -- Blizzard's live frame but the user does NOT want Blizzard's ToT (EUI or
+    -- hidden) -- otherwise the EUI ToT and Blizzard's would both show.
+    if totFrameSource ~= "blizzard" and targetFrameSource == "blizzard" then
+        SuppressBlizzardChildFrame(TargetFrame and TargetFrame.totFrame)
     end
 
-    oUF:SetActiveStyle("EllesmereFocusTarget")
-    frames.focustarget = oUF:Spawn("focustarget", "EllesmereUIUnitFrames_FocusTarget")
-    ApplyFramePosition(frames.focustarget, "focustarget")
-    SetupUnitMenu(frames.focustarget, "focustarget")
-    if enabled.focustarget == false then
-        frames.focustarget:Hide()
-        frames.focustarget:SetAttribute("unit", nil)
+    local ftFrameSource = ns.GetUnitFrameSource("focustarget")
+    if ftFrameSource == "eui" then
+        oUF:SetActiveStyle("EllesmereFocusTarget")
+        frames.focustarget = oUF:Spawn("focustarget", "EllesmereUIUnitFrames_FocusTarget")
+        ApplyFramePosition(frames.focustarget, "focustarget")
+        SetupUnitMenu(frames.focustarget, "focustarget")
+    end
+    -- Same as target-of-target: FocusFrame's native focus-target is a child of
+    -- FocusFrame, so it only needs suppressing when focus uses Blizzard's live
+    -- frame and the user does not want the native focus-target.
+    if ftFrameSource ~= "blizzard" and focusFrameSource == "blizzard" then
+        SuppressBlizzardChildFrame(FocusFrame and FocusFrame.totFrame)
     end
 
+    local bossFrameSource = ns.GetUnitFrameSource("boss")
+    if bossFrameSource == "eui" then
     oUF:SetActiveStyle("EllesmereBoss")
     local bossPos = db.profile.positions.boss
 
@@ -11018,18 +11140,23 @@ function InitializeFrames()
         end
 
         SetupUnitMenu(bossFrame, bossUnit)
-
-        if enabled.boss == false then
-            bossFrame:Hide()
-            bossFrame:SetAttribute("unit", nil)
-        end
+    end
+    elseif bossFrameSource == "hidden" then
+        -- Disabling boss1 makes oUF hide the whole BossTargetFrameContainer
+        -- (and all five Boss*TargetFrame children).
+        oUF:DisableBlizzard("boss1")
     end
 
-    for i = 1, 5 do
-        local blizzBoss = _G["Boss" .. i .. "TargetFrame"]
-        if blizzBoss then
-            blizzBoss:UnregisterAllEvents()
-            blizzBoss:Hide()
+    -- Kill Blizzard's boss frames for every source except "blizzard" (where the
+    -- user wants them). For "eui" oUF already disabled them at spawn; this pass
+    -- is belt-and-suspenders and also runs for "hidden".
+    if bossFrameSource ~= "blizzard" then
+        for i = 1, 5 do
+            local blizzBoss = _G["Boss" .. i .. "TargetFrame"]
+            if blizzBoss then
+                blizzBoss:UnregisterAllEvents()
+                blizzBoss:Hide()
+            end
         end
     end
 
@@ -12305,14 +12432,21 @@ local function RegisterUFUnlockElements()
             })
         end
 
-        -- Core unit frames
-        elements[#elements + 1] = MakeUFElement("player", 1)
-        elements[#elements + 1] = MakeUFElement("target", 2)
-        elements[#elements + 1] = MakeUFElement("focus", 3)
-        elements[#elements + 1] = MakeUFElement("pet", 4)
-        elements[#elements + 1] = MakeUFElement("targettarget", 5)
-        elements[#elements + 1] = MakeUFElement("focustarget", 6)
-        do
+        -- Core unit frames. Only register a mover for units that actually use
+        -- the EllesmereUI frame; a unit set to Blizzard-default or Hidden has no
+        -- EUI frame to move.
+        local function AddUFElement(u, order)
+            if ns.GetUnitFrameSource(u) == "eui" then
+                elements[#elements + 1] = MakeUFElement(u, order)
+            end
+        end
+        AddUFElement("player", 1)
+        AddUFElement("target", 2)
+        AddUFElement("focus", 3)
+        AddUFElement("pet", 4)
+        AddUFElement("targettarget", 5)
+        AddUFElement("focustarget", 6)
+        if ns.GetUnitFrameSource("boss") == "eui" then
             local bossElem = MakeUFElement("boss", 7)
             -- Boss is a stack of 5 chained frames; resize / match actions
             -- don't make sense on the aggregate element. Boss can still
@@ -12324,7 +12458,7 @@ local function RegisterUFUnlockElements()
         end
 
         -- Conditional elements
-        if db.profile.player.showClassPowerBar and not db.profile.player.lockClassPowerToFrame then
+        if ns.GetUnitFrameSource("player") == "eui" and db.profile.player.showClassPowerBar and not db.profile.player.lockClassPowerToFrame then
             elements[#elements + 1] = MakeUFElement("classPower", 9)
         end
 
@@ -12443,9 +12577,15 @@ local function RegisterUFUnlockElements()
         -- Always register all three cast bars; visibility is gated live via each
         -- element's isHidden (mirrors the show setting), so toggling a cast bar
         -- on/off takes effect on the next unlock-mode open -- no /reload needed.
-        elements[#elements + 1] = MakeCastBarElement("playerCastbar", "player", 10)
-        elements[#elements + 1] = MakeCastBarElement("targetCastbar", "target", 11)
-        elements[#elements + 1] = MakeCastBarElement("focusCastbar", "focus", 12)
+        if ns.GetUnitFrameSource("player") == "eui" then
+            elements[#elements + 1] = MakeCastBarElement("playerCastbar", "player", 10)
+        end
+        if ns.GetUnitFrameSource("target") == "eui" then
+            elements[#elements + 1] = MakeCastBarElement("targetCastbar", "target", 11)
+        end
+        if ns.GetUnitFrameSource("focus") == "eui" then
+            elements[#elements + 1] = MakeCastBarElement("focusCastbar", "focus", 12)
+        end
 
         EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIUnitFrames")
 

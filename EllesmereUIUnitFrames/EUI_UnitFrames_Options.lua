@@ -2103,9 +2103,10 @@ initFrame:SetScript("OnEvent", function(self)
                 else ds = db.profile.player end
             end
 
-            -- Enabled/disabled overlay
+            -- Enabled/disabled overlay: the preview mocks the EllesmereUI frame,
+            -- so it is only "enabled" when the unit's source is the EUI frame.
             local unitKey2 = unitKey:match("^boss") and "boss" or unitKey
-            local isEnabled = db.profile.enabledFrames[unitKey2] ~= false
+            local isEnabled = ns.GetUnitFrameSource(unitKey2) == "eui"
             if isEnabled then
                 disabledOverlay:Hide()
                 pf:SetAlpha(1)
@@ -3964,8 +3965,11 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return UNIT_DB_MAP[selectedUnit]().barVisibility or "always" end,
               setValue=function(v)
                   UNIT_DB_MAP[selectedUnit]().barVisibility = v
-                  -- Sync enabledFrames: "never" disables the frame entirely
-                  db.profile.enabledFrames[selectedUnit] = (v ~= "never")
+                  -- Keep the frame source consistent so the Visibility and Frame
+                  -- Source dropdowns can't disagree: "never" == Hidden; any
+                  -- visible mode implies the EllesmereUI frame (clearing a stale
+                  -- Blizzard/hidden source rather than resurrecting it later).
+                  ns.SetUnitFrameSource(selectedUnit, (v == "never") and "hidden" or "eui")
                   -- Keep boolean keys in sync for safety
                   local s = UNIT_DB_MAP[selectedUnit]()
                   if v == "always" then
@@ -4025,7 +4029,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
                         UNIT_DB_MAP[key]().barVisibility = v
-                        db.profile.enabledFrames[key] = (v ~= "never")
+                        ns.SetUnitFrameSource(key, (v == "never") and "hidden" or "eui")
                     end
                     if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -4039,7 +4043,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
                         for _, key in ipairs(checkedKeys) do
                             UNIT_DB_MAP[key]().barVisibility = v
-                            db.profile.enabledFrames[key] = (v ~= "never")
+                            ns.SetUnitFrameSource(key, (v == "never") and "hidden" or "eui")
                         end
                         if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
                         ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -4097,6 +4101,30 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
+
+        -- Row 1b: Frame Source -- EllesmereUI skin / Blizzard default / hidden.
+        -- Switching source needs a /reload (oUF permanently disables the Blizzard
+        -- frame at spawn, and secure frames can't be created/torn down in combat).
+        local fsRow
+        fsRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Frame Source",
+              values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
+              order = { "eui", "blizzard", "hidden" },
+              getValue = function() return ns.GetUnitFrameSource(selectedUnit) end,
+              setValue = function(v)
+                  ns.SetUnitFrameSource(selectedUnit, v)
+                  if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                  ReloadAndUpdate()
+                  EllesmereUI:RefreshPage()
+                  EllesmereUI:ShowConfirmPopup({
+                      title = "Reload Required",
+                      message = "Changing the frame source requires a UI reload to take effect.",
+                      confirmText = "Reload Now",
+                      cancelText = "Later",
+                      onConfirm = function() ReloadUI() end,
+                  })
+              end },
+            { type="spacer" });  y = y - h
 
         -- Row 2: Bar Texture (per-unit + sync) | Dark Mode
         -- healthBarTexture is per-unit (drives health/power/cast/absorb). The global
@@ -11813,11 +11841,21 @@ initFrame:SetScript("OnEvent", function(self)
         local portraitRow
         local function enableRow(Ww, pp, yy)
             portraitRow, h = Ww:DualRow(pp, yy,
-                { type="toggle", text=enableText,
-                  getValue=function() return db.profile.enabledFrames[unitKey] ~= false end,
+                { type="dropdown", text="Frame Source",
+                  values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
+                  order = { "eui", "blizzard", "hidden" },
+                  getValue=function() return ns.GetUnitFrameSource(unitKey) end,
                   setValue=function(v)
-                    db.profile.enabledFrames[unitKey] = v
+                    ns.SetUnitFrameSource(unitKey, v)
                     ReloadAndUpdate()
+                    EllesmereUI:RefreshPage()
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Reload Required",
+                        message = "Changing the frame source requires a UI reload to take effect.",
+                        confirmText = "Reload Now",
+                        cancelText = "Later",
+                        onConfirm = function() ReloadUI() end,
+                    })
                   end },
                 { type="toggle", text="Show Portrait",
                   getValue=function() return settingsTable.showPortrait ~= false end,
@@ -11849,11 +11887,21 @@ initFrame:SetScript("OnEvent", function(self)
         local portraitRow
         local function enableRow(Ww, pp, yy)
             portraitRow, h = Ww:DualRow(pp, yy,
-                { type="toggle", text="Enable Pet Frame",
-                  getValue=function() return db.profile.enabledFrames.pet ~= false end,
+                { type="dropdown", text="Frame Source",
+                  values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
+                  order = { "eui", "blizzard", "hidden" },
+                  getValue=function() return ns.GetUnitFrameSource("pet") end,
                   setValue=function(v)
-                    db.profile.enabledFrames.pet = v
+                    ns.SetUnitFrameSource("pet", v)
                     ReloadAndUpdate()
+                    EllesmereUI:RefreshPage()
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Reload Required",
+                        message = "Changing the frame source requires a UI reload to take effect.",
+                        confirmText = "Reload Now",
+                        cancelText = "Later",
+                        onConfirm = function() ReloadUI() end,
+                    })
                   end },
                 { type="toggle", text="Show Portrait",
                   getValue=function() return db.profile.pet.showPortrait ~= false end,
@@ -11891,7 +11939,7 @@ initFrame:SetScript("OnEvent", function(self)
             return ns._bossPreviewActive and EllesmereUI.L("Deactivate Boss Preview") or EllesmereUI.L("Activate Boss Preview")
         end
         local function BossFramesDisabled()
-            return db.profile.enabledFrames.boss == false
+            return ns.GetUnitFrameSource("boss") ~= "eui"
         end
         activateBtnFrame, h = W:WideButton(parent, PreviewLabel(), y, function()
             if BossFramesDisabled() then return end
@@ -11929,17 +11977,26 @@ initFrame:SetScript("OnEvent", function(self)
         local function enableRow(Ww, pp, yy)
             local eh
             portraitRow, eh = Ww:DualRow(pp, yy,
-                { type="toggle", text="Enable Boss Frames",
-                  getValue=function() return db.profile.enabledFrames.boss ~= false end,
+                { type="dropdown", text="Frame Source",
+                  values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
+                  order = { "eui", "blizzard", "hidden" },
+                  getValue=function() return ns.GetUnitFrameSource("boss") end,
                   setValue=function(v)
-                    db.profile.enabledFrames.boss = v
-                    -- Force-stop the in-game preview when disabling boss frames;
-                    -- it rides on the now-disabled frames and renders broken.
-                    if not v and ns._bossPreviewActive and ns.SetBossPreview then
+                    -- Force-stop the in-game preview when boss frames are no longer
+                    -- EUI-owned; it rides on the real boss frames and renders broken.
+                    if v ~= "eui" and ns._bossPreviewActive and ns.SetBossPreview then
                         ns.SetBossPreview(false)
                     end
+                    ns.SetUnitFrameSource("boss", v)
                     ReloadAndUpdate()
                     EllesmereUI:RefreshPage()
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Reload Required",
+                        message = "Changing the frame source requires a UI reload to take effect.",
+                        confirmText = "Reload Now",
+                        cancelText = "Later",
+                        onConfirm = function() ReloadUI() end,
+                    })
                   end },
                 { type="toggle", text="Show Portrait",
                   getValue=function() return db.profile.boss.showPortrait ~= false end,
