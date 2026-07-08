@@ -1299,7 +1299,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 12);  y = y - h
 
         -------------------------------------------------------------------
-        --  EXPERIENCE BAR / REPUTATION BAR
+        --  EXPERIENCE BAR / REPUTATION BAR / HOUSE FAVOR BAR
         -------------------------------------------------------------------
         -- Shared bar-texture dropdown tables (built-ins + SharedMedia, with
         -- menu preview backgrounds -- same treatment as the nameplate Bar
@@ -1336,6 +1336,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         local function BuildDataBarSection(barKey, sectionTitle, visLabel)
             local visRow, sizeRow
+            local function S() return EAB.db.profile.bars[barKey] end
+
             _, h = W:SectionHeader(parent, sectionTitle, y);  y = y - h
             visRow = BuildVisRow(barKey, visLabel, _blizzDis, BLIZZ_DIS_TIP)
 
@@ -1344,22 +1346,21 @@ initFrame:SetScript("OnEvent", function(self)
             sizeRow, h = W:DualRow(parent, y,
                 { type="slider", text="Width", min=50, max=600, step=1,
                   disabled=wDis, disabledTooltip=wTip, rawTooltip=wRaw,
-                  getValue=function() return EAB.db.profile.bars[barKey].width or 400 end,
+                  getValue=function() return S().width or 400 end,
                   setValue=function(v)
-                      EAB.db.profile.bars[barKey].width = v
+                      S().width = v
                       if ns.ApplyDataBarLayout then ns.ApplyDataBarLayout(barKey) end
                   end },
                 { type="slider", text="Height", min=4, max=40, step=1,
                   disabled=hDis, disabledTooltip=hTip, rawTooltip=hRaw,
-                  getValue=function() return EAB.db.profile.bars[barKey].height or 18 end,
+                  getValue=function() return S().height or 18 end,
                   setValue=function(v)
-                      EAB.db.profile.bars[barKey].height = v
+                      S().height = v
                       if ns.ApplyDataBarLayout then ns.ApplyDataBarLayout(barKey) end
                   end });  y = y - h
 
             -- Color mode (custom | accent | reactive) + bar texture.
             local rp = REACTIVE_PREVIEW[barKey] or { 1, 1, 1 }
-            local function S() return EAB.db.profile.bars[barKey] end
             _, h = W:DualRow(parent, y,
                 { type="multiSwatch", text="Color",
                   swatches = {
@@ -1421,6 +1422,19 @@ initFrame:SetScript("OnEvent", function(self)
                       S().barTexture = v
                       if ns.ApplyDataBarLayout then ns.ApplyDataBarLayout(barKey) end
                   end });  y = y - h
+
+            -- Click Through | (empty)
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Click Through",
+                tooltip="A detailed tooltip will show on mouuseover",
+                getValue=function() return S().clickThrough end,
+                setValue=function(v)
+                    S().clickThrough = v
+
+                    -- Combat check is already done by EUI frame being open
+                    EAB:ApplyClickThroughForBar(barKey)
+                end },
+                { type="text", text=""});  y = y - h
 
             return visRow, sizeRow
         end
