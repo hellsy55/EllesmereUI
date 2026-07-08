@@ -6713,7 +6713,7 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rightRgn = visRow._rightRegion
             if rightRgn._control then rightRgn._control:Hide() end
-            local visItems = EllesmereUI.VIS_OPT_ITEMS
+            local visItems = EllesmereUI.VIS_OPT_ITEMS_RESOURCE_BARS
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                 rightRgn, 210, rightRgn:GetFrameLevel() + 2,
                 visItems,
