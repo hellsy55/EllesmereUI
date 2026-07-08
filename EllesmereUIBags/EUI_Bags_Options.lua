@@ -186,7 +186,7 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagAutoSize = v
                       if _G.EUI_Bags then
                           _G.EUI_Bags._asCols = nil
-                          _G.EUI_Bags._asMaxW = nil
+                          _G.EUI_Bags._asMaxGridW = nil
                           _G.EUI_Bags._asMaxH = nil
                           if _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                       end

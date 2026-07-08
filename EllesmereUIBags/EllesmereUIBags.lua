@@ -9,7 +9,7 @@ EUI_Bags:Hide()
 -- from its first/active tab; while open it only ever grows (never shrinks).
 EUI_Bags:HookScript("OnHide", function(self)
     self._asCols  = nil
-    self._asMaxW  = nil
+    self._asMaxGridW = nil
     self._asMaxH  = nil
 end)
 
@@ -1603,7 +1603,7 @@ local function CreateFooter()
     end
 
     local money = CreateFrame("Frame", "EUI_BagMoneyFrame", footer, "SmallMoneyFrameTemplate")
-    money:SetPoint("RIGHT", footer, "RIGHT", 0, 0)
+    money:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", 0, 7)
     MoneyFrame_SetType(money, "PLAYER")
 
     -- Style money frame text with our font
@@ -1647,9 +1647,24 @@ local function CreateFooter()
     EUI_Bags.Footer, EUI_Bags.Money = footer, money
 end
 
-local function UpdateCurrencyDisplays()
+local function SyncBagFrameToFooter(footerH)
+    footerH = footerH or FOOTER_H
+    local prev = EUI_Bags._footerH or FOOTER_H
+    if footerH == prev then return end
+    EUI_Bags._footerH = footerH
+    if not EUI_Bags:IsVisible() then return end
+    local delta = footerH - prev
+    if BP().bagAutoSize then
+        EUI_Bags._asMaxH = math.max(EUI_Bags._asMaxH or EUI_Bags:GetHeight() or 0, EUI_Bags:GetHeight() + delta)
+        EUI_Bags:SetHeight(EUI_Bags._asMaxH)
+    else
+        EUI_Bags:SetHeight(EUI_Bags:GetHeight() + delta)
+    end
+end
+
+local function UpdateCurrencyDisplays(footerWidth)
     local pool = EUI_Bags._currencyPool
-    if not pool or not EUI_Bags.Footer then return end
+    if not pool or not EUI_Bags.Footer then return FOOTER_H end
     local footer = EUI_Bags.Footer
 
     -- Hide all existing displays/hitboxes
@@ -1694,10 +1709,13 @@ local function UpdateCurrencyDisplays()
     local padding = 5
     local rowHeight = 14
     local rowGap = 8
+    local bottomPad = 7
+    local topPad = 7
     local leftOffset = 10
     local rightMargin = 180
-    local footerWidth = footer:GetWidth()
-    local availableWidth = footerWidth - leftOffset - rightMargin
+    footerWidth = footerWidth or footer:GetWidth() or EUI_Bags:GetWidth() or 0
+    if footerWidth <= 0 then footerWidth = EUI_Bags:GetWidth() or 400 end
+    local availableWidth = math.max(40, footerWidth - leftOffset - rightMargin)
     local currentRow = 0
     local currentX = leftOffset
     local currencyLayout = {}
@@ -1723,13 +1741,19 @@ local function UpdateCurrencyDisplays()
         end
     end
 
-    -- Position displays and hitboxes
-    local numRows = currentRow + 1
+    local numRows = math.max(1, currentRow + 1)
+    if #currencyLayout == 0 then numRows = 1 end
+    local footerHeight = math.max(
+        FOOTER_H,
+        bottomPad + topPad + numRows * rowHeight + math.max(0, numRows - 1) * rowGap
+    )
+
     for _, layout in ipairs(currencyLayout) do
         local display = pool.displays[layout.idx]
         display:ClearAllPoints()
-        local yPos = -7 - ((numRows - 1 - layout.row) * (rowHeight + rowGap))
-        display:SetPoint("TOPLEFT", footer, "TOPLEFT", layout.x, yPos)
+        local rowFromBottom = numRows - 1 - layout.row
+        local yPos = bottomPad + rowFromBottom * (rowHeight + rowGap)
+        display:SetPoint("BOTTOMLEFT", footer, "BOTTOMLEFT", layout.x, yPos)
         display:Show()
 
         local hb = pool.hitboxes[layout.idx]
@@ -1740,7 +1764,9 @@ local function UpdateCurrencyDisplays()
         hb:Show()
     end
 
-    footer:SetHeight(FOOTER_H)
+    footer:SetHeight(footerHeight)
+    EUI_Bags._footerH = footerHeight
+    return footerHeight
 end
 
 -------------------------------------------------------------------------------
@@ -3726,27 +3752,22 @@ local function CreateSidebar()
         if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
     end)
     collapseBtn:SetScript("OnClick", function()
-        -- Determine which edge to preserve based on screen position
         local center = EUI_Bags:GetCenter()
         local screenW = UIParent:GetWidth()
         local onRightSide = center and screenW and (center > screenW / 2)
-        local oldWidth = onRightSide and EUI_Bags:GetWidth() or nil
+        local oldRight = onRightSide and EUI_Bags:GetRight() or nil
+        local oldTop = onRightSide and EUI_Bags:GetTop() or nil
 
         BP().bagSidebarCollapsed = not BP().bagSidebarCollapsed
         UpdateCollapseArrow()
         sidebar:SetWidth(GetSidebarWidth())
         EUI_Bags:RefreshInventory()
 
-        -- Shift frame by width difference to preserve right edge
-        if onRightSide and oldWidth then
-            local newWidth = EUI_Bags:GetWidth()
-            local shift = oldWidth - newWidth
-            if math.abs(shift) > 0.5 then
-                local point, rel, relPoint, x, y = EUI_Bags:GetPoint()
-                EUI_Bags:ClearAllPoints()
-                EUI_Bags:SetPoint(point, rel, relPoint, x + shift, y)
-                BP().bagsPosition = { point = point, relativePoint = relPoint, x = x + shift, y = y }
-            end
+        if onRightSide and oldRight and oldTop then
+            local left = oldRight - EUI_Bags:GetWidth()
+            EUI_Bags:ClearAllPoints()
+            EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, oldTop)
+            BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = oldTop }
         end
     end)
 
@@ -6039,21 +6060,26 @@ function EUI_Bags:RefreshInventory()
     -- column count; both track a running max while open so the window never
     -- shrinks mid-session, floored at the base height and capped at the screen.
     local FIXED_H = 650
-    local totalW = sidebarW + gridW + gridPadX * 2 + scrollbarPad + 2
+    local gridContentW = gridW + gridPadX * 2 + scrollbarPad + 2
+    local totalW = sidebarW + gridContentW
+    if BP().bagAutoSize then
+        EUI_Bags._asMaxGridW = math.max(EUI_Bags._asMaxGridW or 0, gridContentW)
+        totalW = sidebarW + EUI_Bags._asMaxGridW
+    end
+    local currencyFooterH = UpdateCurrencyDisplays(totalW) or FOOTER_H
 
     if BP().bagAutoSize then
         local sc = EUI_Bags:GetScale(); if not sc or sc <= 0 then sc = 1 end
         local maxH = (UIParent:GetHeight() / sc) * 0.95
         -- Cap at the screen first, then floor at the base height so the window
         -- is never smaller than its normal size (even on very short screens).
-        local neededH = math.max(FIXED_H, math.min(contentH + HEADER_H + FOOTER_H + 2, maxH))
-        EUI_Bags._asMaxW = math.max(EUI_Bags._asMaxW or 0, totalW)
+        local neededH = math.max(FIXED_H, math.min(contentH + HEADER_H + currencyFooterH + 2, maxH))
         EUI_Bags._asMaxH = math.max(EUI_Bags._asMaxH or 0, neededH)
-        EUI_Bags:SetWidth(EUI_Bags._asMaxW)
+        EUI_Bags:SetWidth(totalW)
         EUI_Bags:SetHeight(EUI_Bags._asMaxH)
     else
         EUI_Bags:SetWidth(totalW)
-        EUI_Bags:SetHeight(FIXED_H)
+        EUI_Bags:SetHeight(FIXED_H + currencyFooterH - FOOTER_H)
     end
 
     -- Update header item count
@@ -6084,7 +6110,6 @@ function EUI_Bags:RefreshInventory()
     end
 
     UpdateBagMoneyDisplay()
-    UpdateCurrencyDisplays()
 end
 
 -------------------------------------------------------------------------------
@@ -6630,7 +6655,9 @@ local function StartAddon()
                 end
             end
             _lastBlizzSet = blizzSet
-            if EUI_Bags:IsVisible() then UpdateCurrencyDisplays() end
+            if EUI_Bags:IsVisible() then
+                SyncBagFrameToFooter(UpdateCurrencyDisplays())
+            end
             if EllesmereUI and EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
         end, EUI_Bags)
     end
@@ -6675,7 +6702,7 @@ local function StartAddon()
             CaptureTrackedGold()
             UpdateBagMoneyDisplay()
         elseif event == "CURRENCY_DISPLAY_UPDATE" then
-            UpdateCurrencyDisplays()
+            SyncBagFrameToFooter(UpdateCurrencyDisplays())
         end
     end)
 
