@@ -3821,6 +3821,48 @@ initFrame:SetScript("OnEvent", function(self)
     }
     local UNIT_LABELS_SUP = { player="Player", target="Target", focus="Focus" }
 
+    -- Shown in place of a unit's settings when it isn't using the EllesmereUI
+    -- frame (Blizzard default / hidden): we simply don't build the inapplicable
+    -- controls, and this one-line notice explains why. Returns the new y.
+    local function BuildInactiveNotice(parent, y, src)
+        local CPAD = EllesmereUI.CONTENT_PAD or 10
+        local note = EllesmereUI.MakeFont(parent, 13, nil, 1, 1, 1)
+        note:SetTextColor(1, 1, 1, 0.55)
+        note:SetPoint("TOPLEFT", parent, "TOPLEFT", CPAD + 4, y - 18)
+        note:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -(CPAD + 4), y - 18)
+        note:SetJustifyH("LEFT")
+        note:SetText(src == "blizzard"
+            and EllesmereUI.L("This unit uses the Blizzard default frame -- there are no EllesmereUI settings to configure here.")
+            or  EllesmereUI.L("This unit's frame is hidden -- there are no EllesmereUI settings to configure here."))
+        return y - 54
+    end
+
+    -- "Frame Source" row (dropdown on the left). rightCfg fills the right slot
+    -- (mini/boss pass Show Portrait when on the EUI source; otherwise the slot is
+    -- empty). onBeforeSet(v) runs before the write -- boss uses it to stop the
+    -- live preview. Returns row, height.
+    local function BuildFrameSourceRow(Ww, pp, yy, unitKey, onBeforeSet, rightCfg)
+        return Ww:DualRow(pp, yy,
+            { type="dropdown", text="Frame Source",
+              values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
+              order = { "eui", "blizzard", "hidden" },
+              getValue=function() return ns.GetUnitFrameSource(unitKey) end,
+              setValue=function(v)
+                if onBeforeSet then onBeforeSet(v) end
+                ns.SetUnitFrameSource(unitKey, v)
+                ReloadAndUpdate()
+                EllesmereUI:RefreshPage(true)
+                EllesmereUI:ShowConfirmPopup({
+                    title = "Reload Required",
+                    message = "Changing the frame source requires a UI reload to take effect.",
+                    confirmText = "Reload Now",
+                    cancelText = "Later",
+                    onConfirm = function() ReloadUI() end,
+                })
+              end },
+            rightCfg or { type="spacer" })
+    end
+
     local function BuildSharedSettings(parent, y)
         local W = EllesmereUI.Widgets
         local _, h
@@ -3954,6 +3996,39 @@ initFrame:SetScript("OnEvent", function(self)
                 if not coords then return nil end
                 return CLASS_FULL_SPRITE_BASE .. styleKey .. ".tga", coords[1], coords[2], coords[3], coords[4]
             end
+        end
+
+        -- Row 0: Frame Source -- EllesmereUI skin / Blizzard default / hidden.
+        -- Placed first so the disable overlay can cover every setting below it
+        -- while this selector stays usable. Switching source needs a /reload
+        -- (oUF permanently disables the Blizzard frame at spawn, and secure
+        -- frames can't be created/torn down in combat).
+        local fsRow
+        fsRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Frame Source",
+              values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
+              order = { "eui", "blizzard", "hidden" },
+              getValue = function() return ns.GetUnitFrameSource(selectedUnit) end,
+              setValue = function(v)
+                  ns.SetUnitFrameSource(selectedUnit, v)
+                  if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                  ReloadAndUpdate()
+                  EllesmereUI:RefreshPage(true)
+                  EllesmereUI:ShowConfirmPopup({
+                      title = "Reload Required",
+                      message = "Changing the frame source requires a UI reload to take effect.",
+                      confirmText = "Reload Now",
+                      cancelText = "Later",
+                      onConfirm = function() ReloadUI() end,
+                  })
+              end },
+            { type="spacer" });  y = y - h
+
+        -- If this unit isn't on the EllesmereUI frame, the settings below are
+        -- inapplicable (its EUI frame isn't spawned) -- show a short notice
+        -- instead of the full settings list.
+        if ns.GetUnitFrameSource(selectedUnit) ~= "eui" then
+            return BuildInactiveNotice(parent, y, ns.GetUnitFrameSource(selectedUnit))
         end
 
         -- Row 1: Visibility | Visibility Options (checkbox dropdown)
@@ -4101,30 +4176,6 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
         end
-
-        -- Row 1b: Frame Source -- EllesmereUI skin / Blizzard default / hidden.
-        -- Switching source needs a /reload (oUF permanently disables the Blizzard
-        -- frame at spawn, and secure frames can't be created/torn down in combat).
-        local fsRow
-        fsRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Frame Source",
-              values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
-              order = { "eui", "blizzard", "hidden" },
-              getValue = function() return ns.GetUnitFrameSource(selectedUnit) end,
-              setValue = function(v)
-                  ns.SetUnitFrameSource(selectedUnit, v)
-                  if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-                  ReloadAndUpdate()
-                  EllesmereUI:RefreshPage()
-                  EllesmereUI:ShowConfirmPopup({
-                      title = "Reload Required",
-                      message = "Changing the frame source requires a UI reload to take effect.",
-                      confirmText = "Reload Now",
-                      cancelText = "Later",
-                      onConfirm = function() ReloadUI() end,
-                  })
-              end },
-            { type="spacer" });  y = y - h
 
         -- Row 2: Bar Texture (per-unit + sync) | Dark Mode
         -- healthBarTexture is per-unit (drives health/power/cast/absorb). The global
@@ -10797,6 +10848,13 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
         end
 
+        -- If this unit isn't on the EllesmereUI frame, skip the (inapplicable)
+        -- settings below and show a short notice instead.
+        if enableRow and ns.GetUnitFrameSource(unitKey) ~= "eui" then
+            y = BuildInactiveNotice(parent, y, ns.GetUnitFrameSource(unitKey))
+            return y, displayHeader, nil, nil, nil, enableRowFrame
+        end
+
         -- Bar Texture override (new row, slot 1). Mini frames inherit the main
         -- frames' donor texture (focus > target > player) by default; picking a
         -- specific texture here overrides that for this frame only. Lands as the
@@ -11840,31 +11898,23 @@ initFrame:SetScript("OnEvent", function(self)
 
         local portraitRow
         local function enableRow(Ww, pp, yy)
-            portraitRow, h = Ww:DualRow(pp, yy,
-                { type="dropdown", text="Frame Source",
-                  values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
-                  order = { "eui", "blizzard", "hidden" },
-                  getValue=function() return ns.GetUnitFrameSource(unitKey) end,
-                  setValue=function(v)
-                    ns.SetUnitFrameSource(unitKey, v)
-                    ReloadAndUpdate()
-                    EllesmereUI:RefreshPage()
-                    EllesmereUI:ShowConfirmPopup({
-                        title = "Reload Required",
-                        message = "Changing the frame source requires a UI reload to take effect.",
-                        confirmText = "Reload Now",
-                        cancelText = "Later",
-                        onConfirm = function() ReloadUI() end,
-                    })
-                  end },
+            -- Show Portrait shares the Frame Source row (right slot), but only on
+            -- the EllesmereUI source -- for Blizzard/hidden the right slot is empty
+            -- and the settings below are skipped entirely.
+            local isEUI = ns.GetUnitFrameSource(unitKey) == "eui"
+            local rightCfg = isEUI and
                 { type="toggle", text="Show Portrait",
                   getValue=function() return settingsTable.showPortrait ~= false end,
                   setValue=function(v)
                     settingsTable.showPortrait = v
                     ReloadAndUpdate()
-                  end })
-            AttachPortraitSideCog(portraitRow._rightRegion, settingsTable)
-            return portraitRow, h
+                  end } or nil
+            local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, rightCfg)
+            if isEUI then
+                portraitRow = row
+                AttachPortraitSideCog(row._rightRegion, settingsTable)
+            end
+            return row, h
         end
 
         local displayHeader, sizeRow, textHeader, textRow
@@ -11886,31 +11936,20 @@ initFrame:SetScript("OnEvent", function(self)
 
         local portraitRow
         local function enableRow(Ww, pp, yy)
-            portraitRow, h = Ww:DualRow(pp, yy,
-                { type="dropdown", text="Frame Source",
-                  values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
-                  order = { "eui", "blizzard", "hidden" },
-                  getValue=function() return ns.GetUnitFrameSource("pet") end,
-                  setValue=function(v)
-                    ns.SetUnitFrameSource("pet", v)
-                    ReloadAndUpdate()
-                    EllesmereUI:RefreshPage()
-                    EllesmereUI:ShowConfirmPopup({
-                        title = "Reload Required",
-                        message = "Changing the frame source requires a UI reload to take effect.",
-                        confirmText = "Reload Now",
-                        cancelText = "Later",
-                        onConfirm = function() ReloadUI() end,
-                    })
-                  end },
+            local isEUI = ns.GetUnitFrameSource("pet") == "eui"
+            local rightCfg = isEUI and
                 { type="toggle", text="Show Portrait",
                   getValue=function() return db.profile.pet.showPortrait ~= false end,
                   setValue=function(v)
                     db.profile.pet.showPortrait = v
                     ReloadAndUpdate()
-                  end })
-            AttachPortraitSideCog(portraitRow._rightRegion, db.profile.pet)
-            return portraitRow, h
+                  end } or nil
+            local row, h = BuildFrameSourceRow(Ww, pp, yy, "pet", nil, rightCfg)
+            if isEUI then
+                portraitRow = row
+                AttachPortraitSideCog(row._rightRegion, db.profile.pet)
+            end
+            return row, h
         end
 
         local displayHeader, sizeRow, textHeader, textRow
@@ -11975,46 +12014,37 @@ initFrame:SetScript("OnEvent", function(self)
         -- the aura rows under the "Buffs and Debuffs" section.
         local portraitRow, growthRow, simpleRow, simpleBuffRow, bossAuraRow, bossAuraHeader, bossCastHeader, castMainRow
         local function enableRow(Ww, pp, yy)
-            local eh
-            portraitRow, eh = Ww:DualRow(pp, yy,
-                { type="dropdown", text="Frame Source",
-                  values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
-                  order = { "eui", "blizzard", "hidden" },
-                  getValue=function() return ns.GetUnitFrameSource("boss") end,
-                  setValue=function(v)
-                    -- Force-stop the in-game preview when boss frames are no longer
-                    -- EUI-owned; it rides on the real boss frames and renders broken.
-                    if v ~= "eui" and ns._bossPreviewActive and ns.SetBossPreview then
-                        ns.SetBossPreview(false)
-                    end
-                    ns.SetUnitFrameSource("boss", v)
-                    ReloadAndUpdate()
-                    EllesmereUI:RefreshPage()
-                    EllesmereUI:ShowConfirmPopup({
-                        title = "Reload Required",
-                        message = "Changing the frame source requires a UI reload to take effect.",
-                        confirmText = "Reload Now",
-                        cancelText = "Later",
-                        onConfirm = function() ReloadUI() end,
-                    })
-                  end },
+            local isEUI = ns.GetUnitFrameSource("boss") == "eui"
+            local rightCfg = isEUI and
                 { type="toggle", text="Show Portrait",
                   getValue=function() return db.profile.boss.showPortrait ~= false end,
                   setValue=function(v)
                     db.profile.boss.showPortrait = v
                     ReloadAndUpdate()
-                  end })
-            AttachPortraitSideCog(portraitRow._rightRegion, db.profile.boss)
-            local castRow, ch = Ww:DualRow(pp, yy - eh,
-                { type="dropdown", text="Stack Direction", values={ up="Up", down="Down" }, order={ "up", "down" },
-                  getValue=function() return db.profile.boss.bossStackDirection or "down" end,
-                  setValue=function(v) db.profile.boss.bossStackDirection = v; ReloadAndUpdate() end },
-                { type="slider", text="Vertical Spacing", min=-200, max=200, step=1,
-                  getValue=function() return db.profile.bossSpacing or 80 end,
-                  setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
-            -- Show Cast Icon + Cast Bar Height moved to their own "CAST BAR"
-            -- section below the Power Bar (see bossCastBar()).
-            return portraitRow, eh + ch
+                  end } or nil
+            local row, h = BuildFrameSourceRow(Ww, pp, yy, "boss", function(v)
+                -- Force-stop the in-game preview when boss frames are no longer
+                -- EUI-owned; it rides on the real boss frames and renders broken.
+                if v ~= "eui" and ns._bossPreviewActive and ns.SetBossPreview then
+                    ns.SetBossPreview(false)
+                end
+            end, rightCfg)
+            local total = h
+            -- Show Portrait shares the row above; the boss stack layout sits flush
+            -- below it, all only for the EUI boss frames.
+            if isEUI then
+                portraitRow = row
+                AttachPortraitSideCog(row._rightRegion, db.profile.boss)
+                local castRow, ch = Ww:DualRow(pp, yy - h,
+                    { type="dropdown", text="Stack Direction", values={ up="Up", down="Down" }, order={ "up", "down" },
+                      getValue=function() return db.profile.boss.bossStackDirection or "down" end,
+                      setValue=function(v) db.profile.boss.bossStackDirection = v; ReloadAndUpdate() end },
+                    { type="slider", text="Vertical Spacing", min=-200, max=200, step=1,
+                      getValue=function() return db.profile.bossSpacing or 80 end,
+                      setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
+                total = total + ch
+            end
+            return row, total
         end
 
         local function bossAfterSize(Ww, pp, yy)
