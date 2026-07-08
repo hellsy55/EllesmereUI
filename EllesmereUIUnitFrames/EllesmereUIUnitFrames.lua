@@ -1222,6 +1222,11 @@ local function AnchorHealthBg(health)
     end
 end
 
+local function ClassColorSourceUnit(unitKey, unit)
+    if unitKey == "pet" then return "player" end
+    return unit or unitKey
+end
+
 local function ApplyDarkTheme(health)
     if not health then return end
     local isDark = db and db.profile and db.profile.darkTheme
@@ -1266,13 +1271,17 @@ local function ApplyDarkTheme(health)
         -- Check for custom fill/bg colors on this unit
         local unitKey = health._euiUnitKey
         local unitSettings = unitKey and db.profile[unitKey]
-        -- Pet class coloring is opt-in. Pets never match oUF's colorClass (that
-        -- path requires a player unit), so the pet frame uses colorClassPet, gated
-        -- on the pet page's Class Colored Fill toggle.
-        if unitKey == "pet" and unitSettings and unitSettings.healthClassColored then
-            health.colorClassPet = true
-        else
-            health.colorClassPet = false
+        health.colorClassPet = false
+        if unitKey == "pet" then
+            health.colorClass = false
+            if unitSettings and unitSettings.healthClassColored then
+                health.colorReaction = false
+                health.colorTapped = false
+                health.colorDisconnected = false
+                local _, ct = UnitClass("player")
+                local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
+                if cc then health:SetStatusBarColor(cc.r, cc.g, cc.b) end
+            end
         end
         local customFill = unitSettings and unitSettings.customFillColor
         local customBg   = unitSettings and unitSettings.customBgColor
@@ -1301,6 +1310,10 @@ local function ApplyDarkTheme(health)
             local bR, bG, bB
             if cFill and not classColored then
                 bR, bG, bB = cFill.r, cFill.g, cFill.b
+            elseif classColored and uKey == "pet" then
+                local _, ct = UnitClass("player")
+                local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
+                if cc then bR, bG, bB = cc.r, cc.g, cc.b end
             elseif color and color.GetRGB then
                 bR, bG, bB = color:GetRGB()
             end
@@ -1313,6 +1326,8 @@ local function ApplyDarkTheme(health)
                 ApplyBarGradient(self:GetStatusBarTexture(), uSettings.gradientDir or "HORIZONTAL",
                     bR, bG, bB, ga,
                     gc and gc.r or 0.20, gc and gc.g or 0.20, gc and gc.b or 0.80, ga)
+            elseif classColored and uKey == "pet" and bR then
+                self:SetStatusBarColor(bR, bG, bB)
             elseif cFill and not classColored then
                 self:SetStatusBarColor(cFill.r, cFill.g, cFill.b)
             end
@@ -1323,9 +1338,9 @@ local function ApplyDarkTheme(health)
                 AnchorHealthBg(self)
                 local bgClassR, bgClassG, bgClassB
                 if bgClassColored then
-                    local u = unit or self.unit or uKey
-                    if u then
-                        local _, ct = UnitClass(u)
+                    local classUnit = ClassColorSourceUnit(uKey, unit or self.unit or uKey)
+                    if classUnit then
+                        local _, ct = UnitClass(classUnit)
                         -- ct can be a secret value (out-of-range/uninspectable units); skip if so.
                         local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
                         if cc then bgClassR, bgClassG, bgClassB = cc.r, cc.g, cc.b end
@@ -1356,9 +1371,9 @@ local function ApplyDarkTheme(health)
             local bgClassColored = unitSettings and unitSettings.bgClassColored
             local bgClassR, bgClassG, bgClassB
             if bgClassColored then
-                local u = unitKey or (health.__owner and health.__owner.unit)
-                if u then
-                    local _, ct = UnitClass(u)
+                local classUnit = ClassColorSourceUnit(unitKey, unitKey or (health.__owner and health.__owner.unit))
+                if classUnit then
+                    local _, ct = UnitClass(classUnit)
                     -- ct can be a secret value (out-of-range/uninspectable units); skip if so.
                     local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
                     if cc then bgClassR, bgClassG, bgClassB = cc.r, cc.g, cc.b end
