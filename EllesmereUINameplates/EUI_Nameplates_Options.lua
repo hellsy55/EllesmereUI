@@ -1102,6 +1102,8 @@ initFrame:SetScript("OnEvent", function(self)
             local onRight = (icdb and icdb.castIconOnRight) or false
             local fullSize = (icdb and icdb.castIconFullSize) or false
             local iconScale = (icdb and icdb.castIconScale) or defaults.castIconScale
+            local iconXOff = (icdb and icdb.castIconOffsetX) or defaults.castIconOffsetX or 0
+            local iconYOff = (icdb and icdb.castIconOffsetY) or defaults.castIconOffsetY or 0
             local castIconLeftPush, castIconRightPush = 0, 0
             if showIcon then
                 if fullSize then
@@ -1202,17 +1204,17 @@ initFrame:SetScript("OnEvent", function(self)
                     local fs = barH + castH
                     castParts.iconFrame:SetSize(fs, fs)
                     if onRight then
-                        castParts.iconFrame:SetPoint("BOTTOMLEFT", cast, "BOTTOMRIGHT", 0, 0)
+                        castParts.iconFrame:SetPoint("BOTTOMLEFT", cast, "BOTTOMRIGHT", iconXOff, iconYOff)
                     else
-                        castParts.iconFrame:SetPoint("BOTTOMRIGHT", cast, "BOTTOMLEFT", 0, 0)
+                        castParts.iconFrame:SetPoint("BOTTOMRIGHT", cast, "BOTTOMLEFT", iconXOff, iconYOff)
                     end
                 else
                     local scaledH = castH * iconScale
                     castParts.iconFrame:SetSize(scaledH, scaledH)
                     if onRight then
-                        castParts.iconFrame:SetPoint("TOPLEFT", cast, "TOPRIGHT", 0, 0)
+                        castParts.iconFrame:SetPoint("TOPLEFT", cast, "TOPRIGHT", iconXOff, iconYOff)
                     else
-                        castParts.iconFrame:SetPoint("TOPRIGHT", cast, "TOPLEFT", 0, 0)
+                        castParts.iconFrame:SetPoint("TOPRIGHT", cast, "TOPLEFT", iconXOff, iconYOff)
                     end
                 end
                 castParts.iconFrame:Show()
@@ -3603,8 +3605,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetAlpha(questObjOff() and 0.15 or 0.4)
         end
 
-        local nameRaidMarkerRow
-        nameRaidMarkerRow, h = W:DualRow(parent, y,
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Enemy Name While Casting",
               tooltip="Hide the enemy name text while that nameplate's cast bar is visible.",
               getValue=function() return DBVal("hideEnemyNameWhileCasting") == true end,
@@ -3613,63 +3614,13 @@ initFrame:SetScript("OnEvent", function(self)
                 ns.RefreshAllSettings()
                 UpdatePreview()
               end },
-            { type="toggle", text="Name Raid Marker",
-              tooltip="Shows the target marker directly before the enemy name text. Uses its own size and does not use the Core Positions raid marker slot.",
-              getValue=function() return DBVal("nameRaidMarkerEnabled") == true end,
-              setValue=function(v)
-                DB().nameRaidMarkerEnabled = v
-                ns.RefreshAllSettings()
-                UpdatePreview()
-                EllesmereUI:RefreshPage()
-              end });  y = y - h
-
-        do
-            local function nameRaidMarkerOff() return DBVal("nameRaidMarkerEnabled") ~= true end
-            local rgn = nameRaidMarkerRow._rightRegion
-            local _, nameRaidMarkerCogShow = EllesmereUI.BuildCogPopup({
-                title = "Name Raid Marker",
-                rows = {
-                    { type="slider", label="Size", min=6, max=32, step=1,
-                      get=function() return DBVal("nameRaidMarkerSize") or defaults.nameRaidMarkerSize end,
-                      set=function(v)
-                        DB().nameRaidMarkerSize = v
-                        ns.RefreshAllSettings()
-                        UpdatePreview()
-                      end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, rgn)
-            cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = cogBtn
-            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints()
-            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            if cogTex.SetSnapToPixelGrid then cogTex:SetSnapToPixelGrid(false); cogTex:SetTexelSnappingBias(0) end
-            local function UpdateCogAlpha()
-                cogBtn:SetAlpha(nameRaidMarkerOff() and 0.15 or 0.4)
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
-            UpdateCogAlpha()
-            cogBtn:SetScript("OnClick", function(self)
-                if not nameRaidMarkerOff() then nameRaidMarkerCogShow(self) end
-            end)
-            cogBtn:SetScript("OnEnter", function(self)
-                if not nameRaidMarkerOff() then self:SetAlpha(0.75) end
-            end)
-            cogBtn:SetScript("OnLeave", function() UpdateCogAlpha() end)
-        end
-
-        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Experimental: Cast Lockout as CC Icon",
               tooltip = "Show successful interrupt lockouts in the crowd-control icon slot.\n\nDue to addon restrictions, the duration shown is a generic 4 seconds for all classes, so it is not 100% accurate.",
               getValue = function() return DBVal("showCastLockoutAsCrowdControl") == true end,
               setValue = function(v)
                   DB().showCastLockoutAsCrowdControl = v
                   RefreshAllAuras()
-              end },
-            nil);  y = y - h
+              end });  y = y - h
 
         -- Focus Letter: draws a white "F" on the current focus nameplate.
         local focusLetterOff = function()
@@ -3753,6 +3704,61 @@ initFrame:SetScript("OnEvent", function(self)
                 if not focusLetterOff() then self:SetAlpha(0.75) end
             end)
             cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+        end
+
+        -- Name Raid Marker: the target raid marker shown directly before the enemy
+        -- name. Sits at the bottom of this section in slot 1 (left); the right slot
+        -- is intentionally blank so the rest of the section keeps its layout. Size
+        -- lives on the inline cog.
+        local nameRaidMarkerRow
+        nameRaidMarkerRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Name Raid Marker",
+              tooltip="Shows the target marker directly before the enemy name text. Uses its own size and does not use the Core Positions raid marker slot.",
+              getValue=function() return DBVal("nameRaidMarkerEnabled") == true end,
+              setValue=function(v)
+                DB().nameRaidMarkerEnabled = v
+                ns.RefreshAllSettings()
+                UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" });  y = y - h
+
+        do
+            local function nameRaidMarkerOff() return DBVal("nameRaidMarkerEnabled") ~= true end
+            local rgn = nameRaidMarkerRow._leftRegion
+            local _, nameRaidMarkerCogShow = EllesmereUI.BuildCogPopup({
+                title = "Name Raid Marker",
+                rows = {
+                    { type="slider", label="Size", min=6, max=32, step=1,
+                      get=function() return DBVal("nameRaidMarkerSize") or defaults.nameRaidMarkerSize end,
+                      set=function(v)
+                        DB().nameRaidMarkerSize = v
+                        ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            if cogTex.SetSnapToPixelGrid then cogTex:SetSnapToPixelGrid(false); cogTex:SetTexelSnappingBias(0) end
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(nameRaidMarkerOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            UpdateCogAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not nameRaidMarkerOff() then nameRaidMarkerCogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not nameRaidMarkerOff() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function() UpdateCogAlpha() end)
         end
 
         return math.abs(y)
@@ -5791,6 +5797,20 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         UpdatePreview()
                       end },
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return DBVal("castIconOffsetX") or defaults.castIconOffsetX or 0 end,
+                      set=function(v)
+                        DB().castIconOffsetX = v
+                        ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return DBVal("castIconOffsetY") or defaults.castIconOffsetY or 0 end,
+                      set=function(v)
+                        DB().castIconOffsetY = v
+                        ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
                     { type="toggle", label="Make Icon Part of the Bar",
                       tooltip="This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
                       get=function()
@@ -5825,6 +5845,18 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         DB().castIconFullSize = v
                         ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
+                    { type="toggle", label="Use Target Border Color",
+                      tooltip="Colors the full-size spell icon border with your target border color while the cast bar wrap border is active.",
+                      get=function()
+                        local db = DB()
+                        if db and db.castIconTargetBorder ~= nil then return db.castIconTargetBorder end
+                        return defaults.castIconTargetBorder
+                      end,
+                      set=function(v)
+                        DB().castIconTargetBorder = v
+                        if ns.ApplyBorderWrapToAll then ns.ApplyBorderWrapToAll() end
                         UpdatePreview()
                       end },
                 },

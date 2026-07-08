@@ -72,6 +72,8 @@ local defaults = {
             borderSize    = 1,
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             noBorderDebuffs = true,
+            buffIconZoom   = 0.055,
+            debuffIconZoom = 0.055,
         },
         castbarOpacity = 1.0,
         castbarColor = { r = 0.114, g = 0.655, b = 0.514 },
@@ -834,8 +836,12 @@ local defaults = {
             debuffOffsetY = 0,
             buffShowCooldownText = false,
             buffCooldownTextSize = 10,
+            buffCooldownTextColor = {r=1, g=1, b=1},
+            buffStackTextColor = {r=1, g=1, b=1},
             debuffShowCooldownText = false,
             debuffCooldownTextSize = 10,
+            debuffCooldownTextColor = {r=1, g=1, b=1},
+            debuffStackTextColor = {r=1, g=1, b=1},
             simpleDebuffShowCooldownText = false,
             simpleDebuffCooldownTextSize = 14,
             simpleDebuffs = "left",  -- "none"/"left"/"right": simple display forces that-side anchor + frame-height-matched debuff size (legacy boolean true=left / false=none honored at read time)
@@ -941,23 +947,16 @@ end
 
 local SOLID_BACKDROP = { bgFile = "Interface\\Buttons\\WHITE8X8" }
 
--- Locale system font override: for CJK/Cyrillic clients, bypass all custom
--- fonts and use the WoW built-in font that supports the locale's glyphs.
-local LOCALE_FONT_OVERRIDE = EllesmereUI and EllesmereUI.LOCALE_FONT_FALLBACK
-
-local cachedFontPath = LOCALE_FONT_OVERRIDE or (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames"))
+-- Font resolution routes through the shared EllesmereUI.GetFontPath("unitFrames"),
+-- which already handles glyph-restricted locales (CJK/Cyrillic): it keeps a
+-- user-installed SharedMedia font that can render the locale's glyphs and only
+-- falls back to the system glyph font otherwise. Unit frames must NOT re-decide
+-- the locale fallback locally, or a locale client could never use a custom font
+-- here even when every other module honors it.
+local cachedFontPath = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames"))
     or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
 local cachedFontPaths = {}  -- per-unit font cache
 local function ResolveFontPath(unitKey)
-    -- Locale override takes absolute priority -- no custom font can render CJK/Cyrillic
-    if LOCALE_FONT_OVERRIDE then
-        cachedFontPath = LOCALE_FONT_OVERRIDE
-        for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "targettarget", "focustarget"}) do
-            cachedFontPaths[uKey] = LOCALE_FONT_OVERRIDE
-        end
-        return
-    end
-    -- Global font system
     local gPath = EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")
         or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
     cachedFontPath = gPath
@@ -1389,6 +1388,23 @@ if EllesmereUI.RegisterDarkModeRefresh then
             ns._ReapplyBossPreviewColor()
         end
     end)
+end
+
+-- Global Dark Mode master: expose Unit Frames' darkTheme flag so the parent
+-- addon's master toggle can flip it alongside the other modules. setOn mirrors
+-- the individual Dark Mode toggle (write the flag + reload the frames).
+if EllesmereUI.RegisterDarkModeToggle then
+    EllesmereUI.RegisterDarkModeToggle({
+        id = "unitFrames",
+        isOn = function()
+            return (db and db.profile and db.profile.darkTheme) or false
+        end,
+        setOn = function(on)
+            if not (db and db.profile) then return end
+            db.profile.darkTheme = on
+            if ns.ReloadFrames then ns.ReloadFrames() end
+        end,
+    })
 end
 
 -- Smart power text: percent for healers/prot pally/arcane mage, numeric for everyone else.
@@ -5314,7 +5330,7 @@ function ns.ApplyStackAnchor(fs, parent, pos, offX, offY)
     fs:SetPoint(point, parent, point, baseX + (offX or 0), offY or 0)
 end
 
-local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped, stackPos)
+local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOffX, cdOffY, stackOffX, stackOffY, auraSize, cropped, stackPos, cdTextColor, stackTextColor)
     if not container then return end
     -- Cropped style: make the buttons rectangular (height = 80% of width). oUF
     -- sizes each button to element.width x element.height and uses them for the
@@ -5342,7 +5358,12 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
             btn.Cooldown:SetHideCountdownNumbers(not showCD)
             local cdText = btn.Cooldown:GetRegions()
             if cdText and cdText.SetFont then
-                if showCD then EllesmereUI.ApplyIconTextFont(cdText, cachedFontPath, cdSize, "unitFrames") end
+                if showCD then
+                    EllesmereUI.ApplyIconTextFont(cdText, cachedFontPath, cdSize, "unitFrames")
+                    if cdTextColor then
+                        cdText:SetTextColor(cdTextColor.r or 1, cdTextColor.g or 1, cdTextColor.b or 1)
+                    end
+                end
                 -- Default cooldown text is centered; offset 0,0 == default.
                 cdText:ClearAllPoints()
                 cdText:SetPoint("CENTER", btn.Cooldown, "CENTER", cdOffX or 0, cdOffY or 0)
@@ -5354,6 +5375,9 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
         -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default.
         if btn and btn.Count then
             EllesmereUI.ApplyIconTextFont(btn.Count, cachedFontPath, stackSize or 14, "unitFrames")
+            if stackTextColor then
+                btn.Count:SetTextColor(stackTextColor.r or 1, stackTextColor.g or 1, stackTextColor.b or 1)
+            end
             ns.ApplyStackAnchor(btn.Count, btn, stackPos, stackOffX, stackOffY)
         end
     end
@@ -5476,7 +5500,7 @@ local function CreateTargetAuras(frame, unit)
         if button.Cooldown then
             button.Cooldown:SetDrawEdge(false)
             button.Cooldown:SetReverse(true)
-            local showText, textSize, cdOffX, cdOffY
+            local showText, textSize, cdOffX, cdOffY, cdTextColor
             if isBuff then
                 if s and unit and unit:match("^boss") and ns.GetBossSimpleBuffMode(s) ~= "none" then
                     showText = s and s.simpleBuffShowCooldownText
@@ -5489,21 +5513,26 @@ local function CreateTargetAuras(frame, unit)
                     cdOffX = (s and s.buffCooldownTextOffsetX) or 0
                     cdOffY = (s and s.buffCooldownTextOffsetY) or 0
                 end
+                cdTextColor = (s and s.buffCooldownTextColor) or {r=1, g=1, b=1}
             elseif s and unit and unit:match("^boss") and ns.GetBossSimpleDebuffMode(s) ~= "none" then
                 showText = s and s.simpleDebuffShowCooldownText
                 textSize = s and s.simpleDebuffCooldownTextSize or 14
                 cdOffX = (s and s.debuffCooldownTextOffsetX) or 0
                 cdOffY = (s and s.debuffCooldownTextOffsetY) or 0
+                cdTextColor = (s and s.debuffCooldownTextColor) or {r=1, g=1, b=1}
             else
                 showText = s and s.debuffShowCooldownText
                 textSize = s and s.debuffCooldownTextSize or 10
                 cdOffX = (s and s.debuffCooldownTextOffsetX) or 0
                 cdOffY = (s and s.debuffCooldownTextOffsetY) or 0
+                cdTextColor = (s and s.debuffCooldownTextColor) or {r=1, g=1, b=1}
             end
             button.Cooldown:SetHideCountdownNumbers(not showText)
             local cdText = button.Cooldown:GetRegions()
             if cdText and cdText.SetFont then
                 if showText then EllesmereUI.ApplyIconTextFont(cdText, cachedFontPath, textSize, "unitFrames") end
+                cdText:SetTextColor(cdTextColor.r, cdTextColor.g, cdTextColor.b)
+
                 -- Default cooldown text is centered; offset 0,0 == default (no change).
                 cdText:ClearAllPoints()
                 cdText:SetPoint("CENTER", button.Cooldown, "CENTER", cdOffX, cdOffY)
@@ -5516,19 +5545,22 @@ local function CreateTargetAuras(frame, unit)
         -- oUF (BOTTOMRIGHT -1,0); offset 0,0 == default (no change).
         if button.Count then
             local s2 = GetSettingsForUnit(unit or "target")
-            local stackSize, sOffX, sOffY, sPos
+            local stackSize, sOffX, sOffY, sPos, sTextColor
             if container and container.filter == "HELPFUL" then
                 stackSize = s2 and s2.buffStackTextSize
                 sOffX = (s2 and s2.buffStackTextOffsetX) or 0
                 sOffY = (s2 and s2.buffStackTextOffsetY) or 0
                 sPos = s2 and s2.buffStackTextPosition
+                sTextColor = (s2 and s2.buffStackTextColor) or {r=1, g=1, b=1}
             else
                 stackSize = s2 and s2.debuffStackTextSize
                 sOffX = (s2 and s2.debuffStackTextOffsetX) or 0
                 sOffY = (s2 and s2.debuffStackTextOffsetY) or 0
                 sPos = s2 and s2.debuffStackTextPosition
+                sTextColor = (s2 and s2.debuffStackTextColor) or {r=1, g=1, b=1}
             end
             EllesmereUI.ApplyIconTextFont(button.Count, cachedFontPath, stackSize or 14, "unitFrames")
+            button.Count:SetTextColor(sTextColor.r, sTextColor.g, sTextColor.b)
             ns.ApplyStackAnchor(button.Count, button, sPos, sOffX, sOffY)
         end
 
@@ -7373,7 +7405,8 @@ local CLASS_POWER_TYPES = {
                     [1480] = { "SOUL_FRAGMENTS_DEVOURER", 50, "bar" } },
     SHAMAN      = { [263] = { "MAELSTROM_WEAPON", 10 } },
     HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },
-    WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 } },
+    WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 },
+                    [71]  = { "SWEEPING_STRIKES", 12 } },
 }
 
 -- Returns true if the player's current spec has a class resource in CLASS_POWER_TYPES
@@ -7447,6 +7480,8 @@ local function CreateCustomClassPower(playerFrame, style)
         elseif powerType == "TIP_OF_THE_SPEAR" then
             maxPower = customMax
         elseif powerType == "WHIRLWIND_STACKS" then
+            maxPower = customMax
+        elseif powerType == "SWEEPING_STRIKES" then
             maxPower = customMax
         elseif powerType == "ICICLES" then
             maxPower = customMax or 5
@@ -7660,6 +7695,8 @@ local function CreateCustomClassPower(playerFrame, style)
                 cur, max = EllesmereUI.GetTipOfTheSpear()
             elseif powerType == "WHIRLWIND_STACKS" and EllesmereUI and EllesmereUI.GetWhirlwindStacks then
                 cur, max = EllesmereUI.GetWhirlwindStacks()
+            elseif powerType == "SWEEPING_STRIKES" and EllesmereUI and EllesmereUI.GetSweepingStrikes then
+                cur, max = EllesmereUI.GetSweepingStrikes()
             elseif powerType == "ICICLES" then
                 -- Frost Mage Icicles: stack count from the Icicles aura (205473).
                 local count = 0
@@ -7759,7 +7796,8 @@ local function CreateCustomClassPower(playerFrame, style)
         local auraDriven    = (powerType == "MAELSTROM_WEAPON" or powerType == "ICICLES")
         local needsOnUpdate = not auraDriven
         local needsAura     = auraDriven
-        local needsCasts    = (powerType == "TIP_OF_THE_SPEAR" or powerType == "WHIRLWIND_STACKS")
+        local needsCasts    = (powerType == "TIP_OF_THE_SPEAR" or powerType == "WHIRLWIND_STACKS"
+                               or powerType == "SWEEPING_STRIKES")
 
         if needsOnUpdate then
             local elapsed = 0
@@ -7782,7 +7820,7 @@ local function CreateCustomClassPower(playerFrame, style)
             eventFrame:RegisterEvent("PLAYER_DEAD")
             eventFrame:RegisterEvent("PLAYER_ALIVE")
         end
-        if powerType == "WHIRLWIND_STACKS" then
+        if powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES" then
             eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         end
 
@@ -7805,6 +7843,9 @@ local function CreateCustomClassPower(playerFrame, style)
                         if EllesmereUI.HandleWhirlwindStacks then
                             EllesmereUI.HandleWhirlwindStacks(event, unit, castGUID, spellID)
                         end
+                        if EllesmereUI.HandleSweepingStrikes then
+                            EllesmereUI.HandleSweepingStrikes(event, unit, castGUID, spellID)
+                        end
                     end
                 end
             elseif event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
@@ -7815,10 +7856,18 @@ local function CreateCustomClassPower(playerFrame, style)
                     if EllesmereUI.HandleWhirlwindStacks then
                         EllesmereUI.HandleWhirlwindStacks(event)
                     end
+                    if EllesmereUI.HandleSweepingStrikes then
+                        EllesmereUI.HandleSweepingStrikes(event)
+                    end
                 end
             elseif event == "PLAYER_REGEN_ENABLED" then
-                if not _G._ERB_AceDB and EllesmereUI and EllesmereUI.HandleWhirlwindStacks then
-                    EllesmereUI.HandleWhirlwindStacks(event)
+                if not _G._ERB_AceDB and EllesmereUI then
+                    if EllesmereUI.HandleWhirlwindStacks then
+                        EllesmereUI.HandleWhirlwindStacks(event)
+                    end
+                    if EllesmereUI.HandleSweepingStrikes then
+                        EllesmereUI.HandleSweepingStrikes(event)
+                    end
                 end
             end
             UpdatePips()
@@ -9722,9 +9771,9 @@ local function ReloadFrames()
                     -- Use simple debuff cooldown text settings when simple display
                     -- is active, regular debuff settings otherwise.
                     if simpleOn then
-                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.simpleDebuffCooldownTextOffsetX, settings.simpleDebuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, nil, nil, settings.debuffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.simpleDebuffShowCooldownText, settings.simpleDebuffCooldownTextSize or 14, settings.debuffStackTextSize, settings.simpleDebuffCooldownTextOffsetX, settings.simpleDebuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, nil, nil, settings.debuffStackTextPosition, settings.debuffCooldownTextColor, settings.debuffStackTextColor)
                     else
-                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Debuffs, settings.debuffShowCooldownText, settings.debuffCooldownTextSize or 10, settings.debuffStackTextSize, settings.debuffCooldownTextOffsetX, settings.debuffCooldownTextOffsetY, settings.debuffStackTextOffsetX, settings.debuffStackTextOffsetY, settings.debuffSize or 22, settings.debuffCropIcons, settings.debuffStackTextPosition, settings.debuffCooldownTextColor, settings.debuffStackTextColor)
                     end
                 end
 
@@ -9819,9 +9868,9 @@ local function ReloadFrames()
                     -- Cooldown/stack text: simple uses the simpleBuff* keys (sharing the
                     -- regular buff stack settings), regular buff keys otherwise.
                     if simpleBuffOn then
-                        ApplyAuraCooldownText(frame.Buffs, settings.simpleBuffShowCooldownText, settings.simpleBuffCooldownTextSize or 14, settings.buffStackTextSize, settings.simpleBuffCooldownTextOffsetX, settings.simpleBuffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, nil, nil, settings.buffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Buffs, settings.simpleBuffShowCooldownText, settings.simpleBuffCooldownTextSize or 14, settings.buffStackTextSize, settings.simpleBuffCooldownTextOffsetX, settings.simpleBuffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, nil, nil, settings.buffStackTextPosition, settings.buffCooldownTextColor, settings.buffStackTextColor)
                     else
-                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition)
+                        ApplyAuraCooldownText(frame.Buffs, settings.buffShowCooldownText, settings.buffCooldownTextSize or 10, settings.buffStackTextSize, settings.buffCooldownTextOffsetX, settings.buffCooldownTextOffsetY, settings.buffStackTextOffsetX, settings.buffStackTextOffsetY, settings.buffSize or 22, settings.buffCropIcons, settings.buffStackTextPosition, settings.buffCooldownTextColor, settings.buffStackTextColor)
                     end
                 end
 
@@ -11626,6 +11675,8 @@ function SetupOptionsPanel()
         local stackOffX = settings.debuffStackTextOffsetX or 0
         local stackOffY = settings.debuffStackTextOffsetY or 0
         local stackPos = settings.debuffStackTextPosition
+        local cdTextColor = settings.debuffCooldownTextColor or {r=1, g=1, b=1}
+        local stackTextColor = settings.debuffStackTextColor or {r=1, g=1, b=1}
         local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
         local now = GetTime()
         for idx, spellID in ipairs(FAKE_DEBUFF_SPELLS) do
@@ -11669,6 +11720,7 @@ function SetupOptionsPanel()
             durText:SetDrawLayer("OVERLAY", 7)
             EllesmereUI.ApplyIconTextFont(durText, fontPath, cdSize, "unitFrames")
             durText:SetPoint("CENTER", iconFrame, "CENTER", cdOffX, cdOffY)
+            durText:SetTextColor(cdTextColor.r, cdTextColor.g, cdTextColor.b)
             durText:SetText(FAKE_DEBUFF_SECS[idx] or 10)
             if not showCD then durText:Hide() end
             -- Stack text on a single icon only (looks natural; most debuffs are
@@ -11678,6 +11730,7 @@ function SetupOptionsPanel()
                 stack:SetDrawLayer("OVERLAY", 7)
                 EllesmereUI.ApplyIconTextFont(stack, fontPath, stackSize, "unitFrames")
                 ns.ApplyStackAnchor(stack, iconFrame, stackPos, stackOffX, stackOffY)
+                stack:SetTextColor(stackTextColor.r, stackTextColor.g, stackTextColor.b)
                 stack:SetText(FAKE_DEBUFF_STACKS[idx])
             end
             -- Border just above the icon; its PP container renders at border+1

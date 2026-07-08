@@ -1818,6 +1818,29 @@ WSkin.RegisterWindow({
 local PROF_FRAMES = { "PrimaryProfession1", "PrimaryProfession2",
                       "SecondaryProfession1", "SecondaryProfession2", "SecondaryProfession3" }
 
+-- Settle gate: Shifter applies the user's scale on OnShow, AFTER the book has
+-- shown, so Blizzard's content reflows across several passes on a scaled
+-- reopen. If the per-pass text seating runs mid-reflow it nudges strings from
+-- a transient baseline, then the layout settles under it and the correction
+-- stacks -- text ends up flung 60-70px off. We seat ONLY when the content's
+-- geometry signature matches the previous pass (settled); while it is still
+-- moving we skip seating and schedule one trailing pass so the settled state
+-- always gets a clean seat.
+local _profSettleSig, _profSettlePending
+local function ProfContentSig()
+    local sig = 0
+    for _, n in ipairs(PROF_FRAMES) do
+        local fr = _G[n]
+        if fr then
+            local t = fr.GetTop and fr:GetTop()
+            local sb = fr.statusBar
+            local bt = sb and sb.GetTop and sb:GetTop()
+            sig = sig + (t or 0) * 7 + (bt or 0) * 13
+        end
+    end
+    return sig
+end
+
 local function SkinProfSpellButton(b)
     if not b then return end
     local bn = b.GetName and b:GetName()
@@ -1910,6 +1933,22 @@ local function RecolorProfessions()
         local fr = _G[n]
         if fr then profSet[fr] = true end
     end
+    -- Text seating runs only on a settled layout (signature matches the prior
+    -- pass). While the content is still reflowing -- e.g. a Shifter-scaled
+    -- reopen -- skip seating and queue one trailing pass so the settled frame
+    -- still gets seated. The one-shot geometry below is idempotent and can run
+    -- every pass; only the delta-nudge seating is gated.
+    local sig = ProfContentSig()
+    local seatOK = (_profSettleSig ~= nil) and (math.abs(sig - _profSettleSig) <= 0.5)
+    _profSettleSig = sig
+    if not seatOK and not _profSettlePending then
+        _profSettlePending = true
+        C_Timer.After(0.05, function()
+            _profSettlePending = false
+            local pf = _G.ProfessionsBookFrame
+            if pf and pf:IsVisible() then RecolorProfessions() end
+        end)
+    end
     for _, n in ipairs(PROF_FRAMES) do
         local fr = _G[n]
         if fr then
@@ -1982,9 +2021,16 @@ local function RecolorProfessions()
             -- it does NOT ride the bar (bar-anchored ones followed the raise).
             if gd.skipAlignOnce then
                 gd.skipAlignOnce = nil
-            else
+            elseif seatOK then
                 local sbL = fr.statusBar and fr.statusBar.GetLeft and fr.statusBar:GetLeft()
-                if sbL then
+                -- The Y target is stored as a gap from the FRAME top, not an
+                -- absolute local-Y. A frame and its strings share one effective
+                -- scale, so their GetTop difference is a scale-invariant local
+                -- offset -- an absolute local-Y is NOT (the whole local origin
+                -- shifts with scale), which flung every string ~300px when the
+                -- user shifted to a very different scale and reopened.
+                local frameTop = fr.GetTop and fr:GetTop()
+                if sbL and frameTop then
                     local rankRel = fr.rank and fr.rank.GetPoint and select(2, fr.rank:GetPoint(1))
                     -- Anything the BAR hangs from (directly or up its anchor
                     -- chain) must not be aligned TO the bar: moving such a
@@ -2017,24 +2063,23 @@ local function RecolorProfessions()
                                 -- Title capture sanity: the profession name
                                 -- always sits ABOVE its bar. A capture taken
                                 -- from a mid-relayout pass (name measured at
-                                -- or below the bar) locks a bogus target --
-                                -- drop such captures and re-learn on a
-                                -- settled pass (the Archaeology tile hit
+                                -- or below the bar) locks a bogus gap -- skip
+                                -- capturing until a settled pass measures it
+                                -- above the bar (the Archaeology tile hit
                                 -- this).
-                                if fs == fr.professionName and fr.statusBar
-                                    and fr.statusBar.GetTop then
+                                if fs == fr.professionName and td.gapTop == nil
+                                    and fr.statusBar and fr.statusBar.GetTop then
                                     local barTop = fr.statusBar:GetTop()
-                                    if barTop then
-                                        if td.targetTop ~= nil and td.targetTop <= barTop then
-                                            td.targetTop = nil
-                                        end
-                                        if td.targetTop == nil and t <= barTop then
-                                            l = nil -- stale measure; skip this pass
-                                        end
+                                    if barTop and t <= barTop then
+                                        l = nil -- stale measure; skip this pass
                                     end
                                 end
-                                if l and td.targetTop == nil then td.targetTop = t - s.drop end
-                                if l then
+                                -- Capture the string's default gap from the
+                                -- frame top once (scale-invariant), then drive
+                                -- to frameTop + gap - drop every pass.
+                                if l and td.gapTop == nil then td.gapTop = t - frameTop end
+                                local targetTop = td.gapTop and (frameTop + td.gapTop - s.drop)
+                                if l and targetTop then
                                     -- WHOLE pixels only: rects are quantized
                                     -- but point offsets are continuous, so
                                     -- applying fractional residuals
@@ -2043,7 +2088,7 @@ local function RecolorProfessions()
                                     -- cluster ~1px left per open.
                                     local wantX = s.alignX and not barChain[fs]
                                     local dx = math.floor((wantX and (sbL - l) or 0) + 0.5)
-                                    local dy = math.floor((td.targetTop - t) + 0.5)
+                                    local dy = math.floor((targetTop - t) + 0.5)
                                     if dx ~= 0 or dy ~= 0 then
                                         local p, rel, rp, x, y = fs:GetPoint(1)
                                         if p then

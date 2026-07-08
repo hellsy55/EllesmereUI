@@ -3195,6 +3195,37 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- The Mythic+ Timer's Enemy Forces bar historically shared one bar texture with
+-- the main timer bar (both read barTexture / barBgTexture). The Forces bar now
+-- has its own enemyBarTexture / enemyBarBgTexture so the two can be styled
+-- independently. Seed the new keys from the old shared ones on every existing
+-- profile so an existing user's Forces bar looks exactly as before; fresh
+-- installs have no profiles here yet and inherit the new "none" default for
+-- both. Global scope runs once, and it only seeds when the new key is unset, so
+-- a later reset of the Forces texture is respected (not re-seeded each login).
+EllesmereUI.RegisterMigration({
+    id          = "mythictimer_split_forces_bar_texture_v1",
+    scope       = "global",
+    description = "Give the M+ Timer Forces bar its own texture keys, seeded from the shared bar texture so existing users' Forces bar is unchanged.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            if type(profData) == "table" and type(profData.addons) == "table" then
+                local mt = profData.addons.EllesmereUIMythicTimer
+                if type(mt) == "table" then
+                    if mt.enemyBarTexture == nil and mt.barTexture ~= nil then
+                        mt.enemyBarTexture = mt.barTexture
+                    end
+                    if mt.enemyBarBgTexture == nil and mt.barBgTexture ~= nil then
+                        mt.enemyBarBgTexture = mt.barBgTexture
+                    end
+                end
+            end
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)

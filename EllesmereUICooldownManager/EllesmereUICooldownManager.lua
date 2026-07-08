@@ -220,6 +220,17 @@ local _keybindDebounceTimer  = nil   -- cancellable timer for debounced keybind 
 -- Combat state tracked via events (InCombatLockdown() can lag behind PLAYER_REGEN_DISABLED)
 local _inCombat = false
 
+-- Resting alpha for a bar's icons: the out-of-combat fade value when enabled
+-- and out of combat, otherwise the bar's opacity. Callers restoring an icon's
+-- alpha go through this so the fade survives cd-state and buff re-renders.
+local function EffectiveBarAlpha(barData)
+    if barData and barData.oocFadeEnabled and not _inCombat then
+        return barData.oocFadeAlpha or 0.5
+    end
+    return (barData and barData.barOpacity) or 1
+end
+ns.EffectiveBarAlpha = EffectiveBarAlpha
+
 -- Vehicle/petbattle state proxy. Created once in CDMFinishSetup; drives
 -- _CDMApplyVisibility on state change so CDM bars hide while in vehicle UI.
 local _cdmVehicleProxy = nil
@@ -1191,6 +1202,7 @@ function ns.RescanCustomForceCountFlag()
     end
 end
 
+
 -- Reverse Swipe gate: set ns._cdmAnyReverseSwipe once if any saved spell (any
 -- spec) has the per-spell reverseSwipe toggle on. The reverse-apply in
 -- RefreshCDMIconAppearance is skipped entirely for anyone who never enables it,
@@ -1852,7 +1864,7 @@ ns.UpdateAllCDMBorders = UpdateAllCDMBorders
 local _G_Glows = EllesmereUI.Glows
 local GLOW_STYLES = {
     { name = "Pixel Glow",           procedural = true },
-    { name = "Custom Shape Glow",    shapeGlow = true },
+    { name = "Shape Glow",           shapeGlow = true },
     { name = "Action Button Glow",   buttonGlow = true },
     { name = "Auto-Cast Shine",      autocast = true },
     { name = "GCD",                  atlas = "RotationHelper_Ants_Flipbook", texPadding = 1.6 },
@@ -2088,12 +2100,22 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
         local icon = parent
         local ifc2 = _ecmeFC[icon]
         local shape = (ifc2 and ifc2.shapeApplied) and (ifc2 and ifc2.shapeName) or nil
-        local maskPath   = shape and CDM_SHAPES.masks[shape]
-        local borderPath = shape and CDM_SHAPES.borders[shape]
+        local shapeMask = ifc2 and ifc2.shapeMask
+        -- No custom shape (none/cropped): the icon is a plain sharp-cornered
+        -- square. Fall back to the square glow texture so the pulse hugs the
+        -- icon edges instead of filling it with a solid additive block. There
+        -- is no live mask object in this state, so the soft square glow texture
+        -- alone defines the shape. Skip the shape border overlay -- a plain
+        -- square icon keeps its own border, so drawing the square shape border
+        -- on top just adds a stray border line.
+        local noShape = not shape
+        if noShape then shape = "square"; shapeMask = nil end
+        local maskPath   = CDM_SHAPES.masks[shape]
+        local borderPath = (not noShape) and CDM_SHAPES.borders[shape] or nil
         _G_Glows.StartShapeGlow(overlay, math.min(pW, pH), cr, cg, cb, 1.20, {
             maskPath   = maskPath,
             borderPath = borderPath,
-            shapeMask  = ifc2 and ifc2.shapeMask,
+            shapeMask  = shapeMask,
         })
     elseif entry.procedural then
         -- Pixel Glow params. The pandemic glow passes explicit opts; per-button
@@ -4779,7 +4801,12 @@ local function RefreshCDMIconAppearance(barKey)
         if ns._cdmAnyCdReadySound and not isBuffFamilyBar and ns.WatchCdReadySoundIfEnabled then
             ns.WatchCdReadySoundIfEnabled(icon)
         end
-        if isBuffFamilyBar then
+        -- Buff per-spell settings resolve for any BUFF FRAME, not just buff-family
+        -- bars: a hosted buff (a real Blizzard buff frame reparented onto a CD/util
+        -- bar, flagged fd._isBuffViewerFrame) -- and its inactive placeholder -- must
+        -- get the same per-spell resolution so its Buff Glow / Duration Text /
+        -- Charge-Stack / Border / Desaturate match the active frame.
+        if isBuffFamilyBar or (fd and fd._isBuffViewerFrame) or icon._isPlaceholderFrame then
             -- Per-icon Audio on Buff Gain/Loss: attach the gain+loss sound hooks once,
             -- and only when the feature is in use anywhere (gate = 0 cost otherwise).
             if ns._cdmAnyBuffSound and ns.EnsureBuffSoundHook then ns.EnsureBuffSoundHook(icon) end
@@ -4858,7 +4885,11 @@ local function RefreshCDMIconAppearance(barKey)
             -- (so pool reuse + talent overrides stay correct) and re-asserts on every
             -- refresh, so toggling off restores the default. Not a per-tick path.
             if ns._cdmAnyReverseSwipe then
-                local rfBuff = (barData.barType == "buffs" or barKey == "buffs" or barData.barType == "custom_buff")
+                -- A hosted buff (buff frame on a CD/util bar) uses the BUFF baseline
+                -- (fill-up), not the cd baseline, so "Reverse" flips the same way it
+                -- would on a real buffs bar.
+                local rfBuff = (barData.barType == "buffs" or barKey == "buffs"
+                    or barData.barType == "custom_buff" or (fd and fd._isBuffViewerFrame)) or false
                 local rfReverse = rfBuff
                 local rfFc = _ecmeFC[icon]
                 local rfSid = rfFc and rfFc.spellID
@@ -5128,19 +5159,19 @@ local function RefreshCDMIconAppearance(barKey)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "hiddenOnCD" or cse == "hiddenReady" then
                     local hide = (cse == "hiddenOnCD") == onCD
-                    icon:SetAlpha(hide and 0 or (barData.barOpacity or 1))
+                    icon:SetAlpha(hide and 0 or EffectiveBarAlpha(barData))
                     if fc then fc._cdStateHidden = hide or false end
                 elseif cse == "lowerAlphaOnCD" then
                     -- Identical to hiddenOnCD but with a customizable opacity instead
                     -- of 0. Reuse the _cdStateHidden flag as "cd-state owns this alpha"
                     -- so the opacity appliers leave the lowered value alone.
-                    icon:SetAlpha(onCD and (csSs.cdStateLowerAlpha or 0.5) or (barData.barOpacity or 1))
+                    icon:SetAlpha(onCD and (csSs.cdStateLowerAlpha or 0.5) or EffectiveBarAlpha(barData))
                     if fc then fc._cdStateHidden = onCD or false end
                 else
                     -- Clear stale hidden state when switching to a glow effect
                     if fc and fc._cdStateHidden then
                         fc._cdStateHidden = false
-                        icon:SetAlpha(barData.barOpacity or 1)
+                        icon:SetAlpha(EffectiveBarAlpha(barData))
                     end
                     if not ifd or not ifd._cdStateGlowOn then
                         if (cse == "pixelGlowReady" or cse == "buttonGlowReady"
@@ -5176,7 +5207,7 @@ local function RefreshCDMIconAppearance(barKey)
                 -- so don't clear it here or the icon flashes visible.
                 if not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then
                     fc._cdStateHidden = false
-                    icon:SetAlpha(barData.barOpacity or 1)
+                    icon:SetAlpha(EffectiveBarAlpha(barData))
                 end
             end
         end
@@ -6047,8 +6078,9 @@ _CDMApplyVisibility = function()
                 end
                 frame._visHidden = false
                 -- Apply opacity to icons every pass (idempotent, handles
-                -- fresh loads where wasHidden is false).
-                local visAlpha = barData.barOpacity or 1
+                -- fresh loads where wasHidden is false). EffectiveBarAlpha folds
+                -- in the out-of-combat fade when that option is on.
+                local visAlpha = EffectiveBarAlpha(barData)
                 local icons = cdmBarIcons[barData.key]
                 local icCombat2 = InCombatLockdown()
                 if icons then
@@ -6155,7 +6187,7 @@ local function ApplyBarOpacity(barKey)
     local barData = barDataByKey[barKey]
     if not barData then return end
     if barKey == FOCUSKICK_BAR_KEY then return end
-    local a = barData.barOpacity or 1
+    local a = EffectiveBarAlpha(barData)
     local icons = cdmBarIcons[barKey]
     if icons then
         for i = 1, #icons do

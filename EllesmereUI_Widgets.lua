@@ -4339,9 +4339,13 @@ local function BuildCogPopup(opts)
         if ddNeeded > POPUP_W then POPUP_W = ddNeeded end
         -- Optional caller-supplied minimum width (some popups want more breathing room)
         if opts.minWidth and opts.minWidth > POPUP_W then POPUP_W = opts.minWidth end
-        -- Stretch the slider track to fill whatever final width we settled on so a
-        -- widened popup doesn't leave a gap between the slider and its value box.
-        SLIDER_W = math.max(SLIDER_W, POPUP_W - SLIDER_LEFT - SLIDER_INPUT_GAP - INPUT_W - SIDE_PAD)
+        -- Stretch the slider track to fill the popup so a widened popup does not
+        -- leave a gap between the slider and its value box. Gated to minWidth
+        -- popups so existing (un-widened) cog popups keep their original slider
+        -- width unchanged.
+        if opts.minWidth then
+            SLIDER_W = math.max(SLIDER_W, POPUP_W - SLIDER_LEFT - SLIDER_INPUT_GAP - INPUT_W - SIDE_PAD)
+        end
 
         -- Calculate total height
         local totalH = TOP_PAD + TITLE_H + TITLE_GAP

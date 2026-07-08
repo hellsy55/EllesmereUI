@@ -269,6 +269,9 @@ local function StartProceduralAnts(wrapper, N, th, period, lineLen, cr, cg, cb, 
     d.bottom:SetTexture(DASH_H, "REPEAT", "REPEAT"); d.bottom:SetHeight(th)
     d.left:SetTexture(DASH_V, "REPEAT", "REPEAT");   d.left:SetWidth(th)
     d.right:SetTexture(DASH_V, "REPEAT", "REPEAT");  d.right:SetWidth(th)
+    -- bgR being non-nil is the "background on" signal; callers pass nil to
+    -- disable. Do NOT change this to `bgR > 0`: a fully black background is
+    -- r=0, which is a valid enabled color and must still draw.
     if bgR then
         if not d.bgTop then
             local function mkBg(p1, p1f, p2, p2f)

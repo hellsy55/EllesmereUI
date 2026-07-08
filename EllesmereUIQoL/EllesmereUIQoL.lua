@@ -922,6 +922,9 @@ qolFrame:SetScript("OnEvent", function(self)
             return false
         end
 
+        local resetAnnouncePending = false -- one announce per /reset batch (multi-dungeon reset = multiple system msgs)
+        local resetFailPending = false
+
         local resetAnnounceFrame = CreateFrame("Frame")
         resetAnnounceFrame:RegisterEvent("CHAT_MSG_SYSTEM")
         resetAnnounceFrame:SetScript("OnEvent", function(self, event, msg)
@@ -938,7 +941,10 @@ qolFrame:SetScript("OnEvent", function(self)
 
             -- Small delay so Blizzard's own system message renders first.
             if MatchesAny(msg, RESET_PATTERNS) then
+                if resetAnnouncePending then return end
+                resetAnnouncePending = true
                 C_Timer.After(0.3, function()
+                    resetAnnouncePending = false
                     local channel = IsInRaid() and "RAID" or "PARTY"
                     local customMsg = (EllesmereUIDB.instanceResetAnnounceMsg and
                                        EllesmereUIDB.instanceResetAnnounceMsg ~= "")
@@ -947,7 +953,10 @@ qolFrame:SetScript("OnEvent", function(self)
                     SendChatMessage("[EUI] " .. customMsg, channel)
                 end)
             elseif MatchesAny(msg, FAIL_PATTERNS) then
+                if resetFailPending then return end
+                resetFailPending = true
                 C_Timer.After(0.3, function()
+                    resetFailPending = false
                     local channel = IsInRaid() and "RAID" or "PARTY"
                     SendChatMessage("[EUI] Reset failed - there are still players inside the instance.", channel)
                 end)
