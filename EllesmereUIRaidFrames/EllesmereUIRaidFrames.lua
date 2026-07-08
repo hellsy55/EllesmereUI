@@ -687,6 +687,7 @@ local defaults = {
             durTextOffsetY  = 0,
         },
 
+        buffHideTooltips = true,
         debuffSize       = 18,
         debuffCap        = 3,
         debuffHideTooltips = true,
@@ -813,6 +814,22 @@ ns._ResolveTooltipMode = function(s)
     if s.showTooltip == false then return "never" end
     if EllesmereUIDB and EllesmereUIDB.showUnitTooltipsInCombat then return "always" end
     return "outOfCombat"
+end
+
+-- Whether raid-frame hover tooltips are allowed right now, per the "Show Raid
+-- Frames Tooltip" mode + current combat state. Shared by the unit tooltip and
+-- the buff/debuff aura-icon tooltips so one setting governs every raid-frame
+-- tip (an aura tip is still gated by its own "Hide Tooltips" toggle on top).
+function ns.RaidFrameTooltipAllowed(button)
+    local fd = button and ns.GetFFD and ns.GetFFD(button)
+    local s = (fd and (fd._isParty and ns._scaledPartyProxy
+        or (fd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile))
+        or ns._scaledProfile
+    local ttMode = ns._ResolveTooltipMode(s)
+    if ttMode == "never" then return false end
+    if ttMode == "outOfCombat" and inCombat then return false end
+    if ttMode == "outOfBossCombat" and ns._inBossCombat then return false end
+    return true
 end
 
 -------------------------------------------------------------------------------
@@ -3377,6 +3394,8 @@ local function StyleButton(button)
                 fd._hovered = true
                 if fd.ApplyBorderColor then fd.ApplyBorderColor() end
             end
+            -- Aura tooltip honors the same combat-visibility mode as the unit tip.
+            if not ns.RaidFrameTooltipAllowed(b) then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             if GameTooltip.SetUnitAuraByAuraInstanceID then
                 GameTooltip:SetUnitAuraByAuraInstanceID(u, iid)
@@ -3725,6 +3744,17 @@ local function StyleButton(button)
         local fd = GetFFD(self)
         fd._hovered = true
         if fd.ApplyBorderColor then fd.ApplyBorderColor() end
+        -- Aura icons (buff/debuff) enable mouse and propagate motion up to this
+        -- button, so a direct enter onto an icon fires the icon's OnEnter first
+        -- (aura tooltip) then bubbles here -- which would clobber it with the unit
+        -- tooltip. If the cursor is genuinely over one of our aura icons (marked by
+        -- a stashed _tipIID), let that icon own the tooltip and bail here.
+        local foci = (GetMouseFoci and GetMouseFoci()) or (GetMouseFocus and { GetMouseFocus() })
+        if foci then
+            for _, mf in ipairs(foci) do
+                if mf ~= self and mf._tipIID ~= nil then return end
+            end
+        end
         -- Read through the party-aware proxy (like every other render path), not
         -- raw db.profile -- otherwise party_<key> overrides written by a custom
         -- party "Range & Tooltip" section are never seen and the tooltip mode
