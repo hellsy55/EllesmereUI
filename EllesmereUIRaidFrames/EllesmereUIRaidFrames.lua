@@ -36,7 +36,8 @@ ns.NICK_ADDON = ADDON_NAME:find("Standalone") and ADDON_NAME or "EllesmereUI"
 --  auras, dispel-type icons, and Buff Manager icons/squares/bars. Each aura
 --  unit renders its own children (cooldown/border/text) up to +5 above its base.
 --  Only the target/hover border-raise and the marker carrier sit above the aura
---  band; name/health text (ns.LVL_TEXT) sits above the raised border too.
+--  band; name/health text (ns.LVL_TEXT) sits above the raised border; the marker
+--  carrier also hosts ready-check / summon / rez icons above the text.
 --  Kept on `ns` (not file-scope locals) to avoid the Lua 5.1 local cap in this
 --  large file, and shared with EUI_RaidFrames_BuffManager.lua.
 -------------------------------------------------------------------------------
@@ -3275,8 +3276,8 @@ local function StyleButton(button)
     AnchorRaidMarker()
     d.AnchorRaidMarker = AnchorRaidMarker
 
-    -- Ready check icon (shared with the incoming-summon indicator)
-    local readyCheck = health:CreateTexture(nil, "OVERLAY", nil, 3)
+    -- Ready check icon (shared with incoming-summon / incoming-rez; above name text)
+    local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:Hide()
     d.readyCheck = readyCheck
@@ -11649,7 +11650,7 @@ local function CreatePreviewFrame(index)
     raidMarker:Hide()
 
     -- Ready check icon (position/size re-applied in the preview indicator pass)
-    local readyCheck = health:CreateTexture(nil, "OVERLAY", nil, 3)
+    local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:SetPoint("CENTER", health, "CENTER", 0, 0)
     readyCheck:Hide()
