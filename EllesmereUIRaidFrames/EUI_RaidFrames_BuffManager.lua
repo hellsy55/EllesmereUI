@@ -2903,11 +2903,10 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
     end
 
     local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
-    local nameOutline = ns.ResolveRFNameOutline and ns.ResolveRFNameOutline(s) or outline
 
     -- Name text
     local nameFS = health:CreateFontString(nil, "OVERLAY")
-    if ns.ApplyRFNameFont then ns.ApplyRFNameFont(nameFS, s.nameSize or 10, s) end
+    if ns.ApplyFont then ns.ApplyFont(nameFS, s.nameSize or 10, s) end
     nameFS:SetWordWrap(false)
     local npos = s.namePosition or "center"
     nameFS:SetShown(npos ~= "none" and not s.topNameBarEnabled)
@@ -2958,7 +2957,7 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
         local tbgc = s.topNameBarBgColor or { r=17/255, g=17/255, b=17/255 }
         tnbBg:SetColorTexture(tbgc.r, tbgc.g, tbgc.b, (s.topNameBarBgOpacity or 80) / 100)
         local tnbText = tnb:CreateFontString(nil, "OVERLAY")
-        tnbText:SetFont(fontPath, s.topNameBarTextSize or 11, nameOutline)
+        if ns.ApplyFont then ns.ApplyFont(tnbText, s.topNameBarTextSize or 11, s) end
         tnbText:SetWordWrap(false)
         tnbText:SetText(playerName)
         local talign = s.topNameBarTextAlign or "center"
@@ -4212,11 +4211,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         end
 
         local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
-        local nameOutline = ns.ResolveRFNameOutline and ns.ResolveRFNameOutline(s) or outline
 
         -- Name text (real sizes, SetScale handles the magnification)
         local nameFS = health:CreateFontString(nil, "OVERLAY")
-        if ns.ApplyRFNameFont then ns.ApplyRFNameFont(nameFS, s.nameSize or 10, s) end
+        if ns.ApplyFont then ns.ApplyFont(nameFS, s.nameSize or 10, s) end
         nameFS:SetWordWrap(false)
 
         -- Name position (exact match of AnchorNameText logic)
@@ -4281,7 +4279,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             local tbgc = s.topNameBarBgColor or { r=17/255, g=17/255, b=17/255 }
             tnbBg:SetColorTexture(tbgc.r, tbgc.g, tbgc.b, (s.topNameBarBgOpacity or 80) / 100)
             local tnbText = tnb:CreateFontString(nil, "OVERLAY")
-            tnbText:SetFont(fontPath, s.topNameBarTextSize or 11, nameOutline)
+            if ns.ApplyFont then ns.ApplyFont(tnbText, s.topNameBarTextSize or 11, s) end
             tnbText:SetWordWrap(false)
             tnbText:SetText(playerName)
             local talign = s.topNameBarTextAlign or "center"

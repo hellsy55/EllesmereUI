@@ -1033,41 +1033,33 @@ end
 local function GetUseShadow()
     return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames")
 end
-function ns.ResolveRFNameOutline(s)
-    local mode = (s and s.nameOutlineMode) or "__global"
-    if mode == "__global" then return GetOutline() end
-    if mode == "outline" then
-        return (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG"
-    end
-    if mode == "thick" then
-        return (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("THICKOUTLINE, SLUG")) or "THICKOUTLINE, SLUG"
-    end
-    return ""
-end
-function ns.ResolveRFNameUseShadow(s)
-    local mode = (s and s.nameOutlineMode) or "__global"
-    if mode == "__global" then return GetUseShadow() end
-    return mode == "none"
-end
-function ns.ApplyRFNameFont(fs, size, s)
+local function ApplyFont(fs, size, s)
     if not (fs and fs.SetFont) then return end
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
-    local outline = ns.ResolveRFNameOutline(s)
-    if EllesmereUI and EllesmereUI.PrimeFontShadow then
-        EllesmereUI.PrimeFontShadow(fs, outline == "" and ns.ResolveRFNameUseShadow(s))
+    local outline, useShadow
+    if type(s) == "table" then
+        local mode = s.nameOutlineMode or "__global"
+        if mode == "__global" then
+            outline = GetOutline()
+            useShadow = GetUseShadow()
+        elseif mode == "outline" then
+            outline = (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG"
+            useShadow = false
+        elseif mode == "thick" then
+            outline = (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("THICKOUTLINE, SLUG")) or "THICKOUTLINE, SLUG"
+            useShadow = false
+        else
+            outline = ""
+            useShadow = true
+        end
+    else
+        outline = GetOutline()
+        useShadow = GetUseShadow()
     end
+    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outline == "" and useShadow) end
     fs:SetFont(fontPath, size, outline)
 end
-local function ApplyNameFont(fs, size, s)
-    ns.ApplyRFNameFont(fs, size, s)
-end
-local function ApplyFont(fs, size)
-    if not (fs and fs.SetFont) then return end
-    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
-    local outline = GetOutline()
-    if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, outline == "" and GetUseShadow()) end
-    fs:SetFont(fontPath, size, outline)
-end
+ns.ApplyFont = ApplyFont
 
 -------------------------------------------------------------------------------
 --  Health bar texture helpers
@@ -3083,7 +3075,7 @@ local function StyleButton(button)
 
     -- Name text
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
-    ApplyNameFont(nameFS, s.nameSize or 10, s)
+    ApplyFont(nameFS, s.nameSize or 10, s)
     nameFS:SetJustifyH("CENTER")
     nameFS:SetWordWrap(false)
     d.nameText = nameFS
@@ -6383,7 +6375,7 @@ FB.ApplyStyle = function(owner)
         -- No power bar / top name bar here: health fills the button.
         b._health:SetHeight(h)
 
-        ApplyNameFont(b._nameText, s.nameSize or 10, s)
+        ApplyFont(b._nameText, s.nameSize or 10, s)
         ApplyFont(b._healthText, s.healthTextSize or 9)
         b._nameText:SetWidth(w * ns.RF_NAME_WIDTH_FRACTION)
         b._nameText:SetHeight(0)
@@ -6845,7 +6837,7 @@ XF.Layout = function()
         -- size). Bounded to five buttons; runs after the bulk base pass.
         local xs = ns._scaledExtraProxy
         if d.nameText then
-            ApplyNameFont(d.nameText, xs.nameSize or 10, xs)
+            ApplyFont(d.nameText, xs.nameSize or 10, xs)
             if d.AnchorNameText then d.AnchorNameText() end
             -- AnchorNameText derives width from the BASE frame width; the
             -- offset width is authoritative here.
@@ -8021,7 +8013,7 @@ local function ReloadFrames()
 
         -- Name text
         if d.nameText then
-            ApplyNameFont(d.nameText, s.nameSize or 10, s)
+            ApplyFont(d.nameText, s.nameSize or 10, s)
             if d.AnchorNameText then d.AnchorNameText() end
         end
 
@@ -8272,7 +8264,7 @@ ns._ResizePartyButtons = function(w, h)
                         icon:SetSize(pp.defSize or 22, pp.defSize or 22)
                     end
                 end
-                if d.nameText then ApplyNameFont(d.nameText, pp.nameSize or 10, pp) end
+                if d.nameText then ApplyFont(d.nameText, pp.nameSize or 10, pp) end
                 if d.healthText then ApplyFont(d.healthText, pp.healthTextSize or 9) end
                 if d.healAbsorbText then ApplyFont(d.healAbsorbText, pp.healAbsorbTextSize or 9) end
                 if d.statusText then ApplyFont(d.statusText, pp.statusTextSize or 14) end
@@ -10086,7 +10078,7 @@ ns.ReloadPartyFrames = function()
 
         -- Name text
         if d.nameText then
-            ApplyNameFont(d.nameText, pp.nameSize or 10, pp)
+            ApplyFont(d.nameText, pp.nameSize or 10, pp)
             if d.AnchorNameText then d.AnchorNameText() end
             -- Override width constraint for party button dimensions
             d.nameText:SetWidth(bw * ns.RF_NAME_WIDTH_FRACTION)
@@ -11662,7 +11654,7 @@ local function CreatePreviewFrame(index)
 
     -- Name text (anchoring done by ApplyPreviewData on every refresh)
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
-    ApplyNameFont(nameFS, s.nameSize or 10, s)
+    ApplyFont(nameFS, s.nameSize or 10, s)
     nameFS:SetJustifyH("CENTER")
     nameFS:SetWordWrap(false)
     nameFS:SetPoint("CENTER", health, "CENTER", 0, 0)
@@ -12867,7 +12859,7 @@ local function ApplyPreviewData(f, index)
         -- Force text re-render (WoW doesn't visually re-layout on JustifyH change alone)
         f._nameText:SetText("")
         f._nameText:SetText(ns.CapName(name))
-        ApplyNameFont(f._nameText, s.nameSize or 10, s)
+        ApplyFont(f._nameText, s.nameSize or 10, s)
         local nameMode = s.nameColorMode or "class"
         if nameMode == "accent" then
             local ar, ag, ab = EllesmereUI.ResolveActiveAccent()
@@ -13878,7 +13870,7 @@ ns._ShowSizePreview = function(tier)
 
         -- Centered unit number.
         if f._nameText then
-            ApplyNameFont(f._nameText, math.max(11, nameSize), s)
+            ApplyFont(f._nameText, math.max(11, nameSize), s)
             f._nameText:SetText(tostring(i))
             f._nameText:SetTextColor(0.9, 0.9, 0.9)
             f._nameText:SetWidth(bw)
