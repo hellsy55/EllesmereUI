@@ -447,7 +447,6 @@ local CDM_ITEM_PRESETS = {
         name     = "Demonic Healthstone",
         itemID   = 224464,
         spellID  = 452930,
-        combatLockout = true,
     },
 }
 ns.CDM_ITEM_PRESETS = CDM_ITEM_PRESETS

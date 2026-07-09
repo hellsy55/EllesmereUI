@@ -13614,10 +13614,17 @@ initFrame:SetScript("OnEvent", function(self)
                     fkFS:SetJustifyH("CENTER")
                     fkFS:SetWordWrap(true)
                     fkFS:SetTextColor(1, 1, 1, 1)
-                    fkFS:SetText(EllesmereUI.L("This bar will always be attached to your focus target's nameplate"))
                     self._focusKickInfoText = fkFS
                 end
                 local fkFS = self._focusKickInfoText
+                -- Wording must track the "Show on Target" toggle -- otherwise this
+                -- text keeps promising focus-tracking even when the bar is
+                -- configured to follow the current target instead.
+                if bd.focusKickUseTarget then
+                    fkFS:SetText(EllesmereUI.L("This bar will always be attached to your current target's nameplate"))
+                else
+                    fkFS:SetText(EllesmereUI.L("This bar will always be attached to your focus target's nameplate"))
+                end
                 fkFS:ClearAllPoints()
                 fkFS:SetPoint("TOP", self, "TOPLEFT", self:GetWidth() / 2, -(totalH + 14))
                 fkFS:SetWidth(self:GetWidth() - 20)
