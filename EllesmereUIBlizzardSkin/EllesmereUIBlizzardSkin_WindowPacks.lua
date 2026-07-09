@@ -6760,8 +6760,9 @@ local function Skin_WorldMap()
                     if fs and fs.SetTextColor then fs:SetTextColor(1, 0.82, 0) end
                 end
                 local rw = _G.QuestInfoRewardsFrame
-                if rw and rw.Header and rw.Header.SetTextColor then
-                    rw.Header:SetTextColor(1, 0.82, 0)
+                if rw then
+                    WhitenTextIn(rw)  -- catch nested spell/effect + SimpleHTML reward blurbs
+                    if rw.Header and rw.Header.SetTextColor then rw.Header:SetTextColor(1, 0.82, 0) end
                 end
                 for _, n in ipairs({ "QuestInfoDescriptionText", "QuestInfoObjectivesText",
                                      "QuestInfoGroupSize" }) do
@@ -7958,13 +7959,13 @@ local function Skin_Quest()
             if fs and fs.SetTextColor then fs:SetTextColor(1, 0.82, 0) end
         end
         local rw = _G.QuestInfoRewardsFrame
-        if rw and rw.Header and rw.Header.SetTextColor then rw.Header:SetTextColor(1, 0.82, 0) end
         for _, n in ipairs({ "QuestInfoDescriptionText", "QuestInfoObjectivesText",
                              "QuestInfoGroupSize", "QuestInfoRewardText", "QuestInfoQuestType" }) do
             local fs = _G[n]
             if fs and fs.SetTextColor then fs:SetTextColor(1, 1, 1) end
         end
         if rw then
+            WhitenTextIn(rw)  -- catch nested spell/effect + SimpleHTML reward blurbs the fields below miss
             for _, k in ipairs({ "ItemChooseText", "ItemReceiveText",
                                  "PlayerTitleText", "SpellLearnText" }) do
                 local fs = rw[k]
@@ -7980,6 +7981,7 @@ local function Skin_Quest()
                     if btn.Name and btn.Name.SetTextColor then btn.Name:SetTextColor(1, 1, 1) end
                 end
             end
+            if rw.Header and rw.Header.SetTextColor then rw.Header:SetTextColor(1, 0.82, 0) end
         end
         local of = _G.QuestInfoObjectivesFrame
         if of and of.Objectives then
@@ -8004,25 +8006,32 @@ local function Skin_Quest()
             end
         end
     end
-    local function SkinQuestGreetingButtons()
+    -- Greeting text + section labels + quest title buttons. Blizzard re-applies
+    -- the dark parchment material colour in the greeting panel OnShow after our
+    -- skin runs, so re-white on every show (hooked below), not just once here.
+    local function StyleQuestGreeting()
+        if _G.QuestGreetingText then WSkin.White(_G.QuestGreetingText) end
+        for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
+            local fs = _G[n]
+            if fs then WSkin.White(fs) end
+        end
         local gp = _G.QuestFrameGreetingPanel
-        if not gp or not gp.titleButtonPool then return end
-        for btn in gp.titleButtonPool:EnumerateActive() do
-            SkinQuestGreetingButton(btn)
+        if gp and gp.titleButtonPool then
+            for btn in gp.titleButtonPool:EnumerateActive() do
+                SkinQuestGreetingButton(btn)
+            end
         end
     end
 
-    -- Greeting panel body: white greeting paragraph + section labels, faded
-    -- divider, readable quest title buttons.
-    if _G.QuestGreetingText then WSkin.Font(_G.QuestGreetingText); WSkin.White(_G.QuestGreetingText) end
+    if _G.QuestGreetingText then WSkin.Font(_G.QuestGreetingText) end
     for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
         local fs = _G[n]
-        if fs then WSkin.Font(fs); WSkin.White(fs) end
+        if fs then WSkin.Font(fs) end
     end
     if _G.QuestGreetingFrameHorizontalBreak and _G.QuestGreetingFrameHorizontalBreak.SetAlpha then
         _G.QuestGreetingFrameHorizontalBreak:SetAlpha(0)
     end
-    SkinQuestGreetingButtons()
+    StyleQuestGreeting()
 
     -- Progress panel static text.
     if _G.QuestProgressTitleText then
@@ -8037,9 +8046,12 @@ local function Skin_Quest()
         end))
         -- Greeting rows repopulate on QUEST_GREETING / QUEST_LOG_UPDATE.
         local gp = _G.QuestFrameGreetingPanel
-        if gp then gp:HookScript("OnShow", WSkin.Debounce(SkinQuestGreetingButtons)) end
+        if gp then gp:HookScript("OnShow", WSkin.Debounce(StyleQuestGreeting)) end
         if type(_G.QuestFrameGreetingPanel_OnShow) == "function" then
-            hooksecurefunc("QuestFrameGreetingPanel_OnShow", SkinQuestGreetingButtons)
+            hooksecurefunc("QuestFrameGreetingPanel_OnShow", function()
+                StyleQuestGreeting()
+                if C_Timer then C_Timer.After(0, StyleQuestGreeting) end
+            end)
         end
         -- Body text: Blizzard re-colors it on each display, so re-assert in the
         -- hook (and once more next frame -- objectives are colored after this).
