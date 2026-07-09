@@ -1724,6 +1724,46 @@ function ns.RefreshAllUnitNames()
     end
 end
 
+-- Cold-login text repaint: on a first (uncached) login a unit-frame text
+-- fontstring can hold the correct string yet render blank until a /reload. A
+-- fontstring only repaints when its text changes, and re-running the tag sets the
+-- same string (a no-op), so shortly after login we force a "" -> value transition
+-- on every tagged fontstring, repeated a few times as the timing varies. Only
+-- ._curTag strings are blanked (UpdateTags restores them) and the blank+restore is
+-- synchronous, so there is no visible flicker.
+do
+    local TEXT_FIELDS = { "LeftText", "RightText", "CenterText", "ExtraText" }
+
+    local function ForceTextRepaint()
+        for _, f in pairs(frames) do
+            if type(f) == "table" then
+                local changed = false
+                for _, host in ipairs({ f, f.BottomTextBar }) do
+                    if type(host) == "table" then
+                        for _, key in ipairs(TEXT_FIELDS) do
+                            local fs = host[key]
+                            if fs and fs._curTag and fs.SetText then
+                                fs:SetText("")
+                                changed = true
+                            end
+                        end
+                    end
+                end
+                if changed and f.UpdateTags then f:UpdateTags() end
+            end
+        end
+    end
+
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        for _, delay in ipairs({ 0.25, 1, 3 }) do
+            C_Timer.After(delay, ForceTextRepaint)
+        end
+    end)
+end
+
 -- Provider callbacks. NSRT (NSAPI) and Timeline Reminders (TR) may load after us,
 -- so registration retries on PLAYER_LOGIN / PLAYER_ENTERING_WORLD until it sticks.
 -- Registrant key is "EllesmereUIUnitFrames" (NOT "EllesmereUI" -- Raid Frames
