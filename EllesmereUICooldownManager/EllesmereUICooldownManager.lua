@@ -7138,6 +7138,13 @@ function ns.RepopulateFromBlizzard()
     end
     -- Ghost buff bar removed: buff visibility managed by Blizzard CDM.
 
+    local buffSD = ns.GetBarSpellData("buffs")
+    if buffSD then
+        buffSD.buffDisplayOrder = nil
+        buffSD._buffDisplayOrderUserModified = nil
+    end
+    ns._spellOrderDirty = true
+
     -- (Site #10 re-snapshot deleted: under the new model, "repopulate from
     -- Blizzard" is just "wipe diversions and let the route map's spillover
     -- show everything from the viewer." The wipes above already cleared

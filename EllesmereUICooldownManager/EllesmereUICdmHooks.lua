@@ -4001,6 +4001,7 @@ local function CollectAndReanchor()
     ---------------------------------------------------------------------------
     --  PHASE 2: Process BUFF bars (existing flow, plus injected custom frames)
     ---------------------------------------------------------------------------
+    if ns.ReconcileBuffDisplayOrder then ns.ReconcileBuffDisplayOrder() end
     for barKey, list in pairs(barLists) do
         local barData = barDataByKey[barKey]
         if barData and barData.enabled and barData.barType ~= "custom_buff" then
@@ -4080,22 +4081,12 @@ local function CollectAndReanchor()
                 end
                 if buffOrder and next(buffOrder) then
                     for _, entry in ipairs(list) do
-                        local okey
-                        if isDefaultBuffs then
-                            -- Stable key: cooldownID when present (active frame or
-                            -- placeholder), else the custom spellID.
-                            local cd = entry.frame and entry.frame.cooldownID
-                            if type(cd) == "number" then okey = buffOrder["c" .. cd] end
-                            if not okey and entry.spellID then okey = buffOrder["s" .. entry.spellID] end
-                        else
-                            -- Extra bars: match by DISPLAYED id (canon), mirroring the
-                            -- per-icon settings resolver; fall back to entry ids.
-                            local ef = entry.frame
-                            local canon = ef and ns.GetCanonicalSpellIDForFrame
-                                and ns.GetCanonicalSpellIDForFrame(ef)
-                            okey = (canon and buffOrder[canon])
-                                or (entry.spellID and buffOrder[entry.spellID])
-                                or (entry.baseSpellID and buffOrder[entry.baseSpellID])
+                        local okey = ns.ResolveBuffDisplaySortIndex
+                            and ns.ResolveBuffDisplaySortIndex(entry, buffOrder, isDefaultBuffs)
+                        if not okey and isDefaultBuffs then
+                            -- Transient spillover (Blizzard layoutIndex glitch / re-talent
+                            -- gap): sort among misses by layoutIndex, not after every hit.
+                            okey = 50000 + (entry.layoutIndex or 0)
                         end
                         entry.sortOrder = okey or 99999
                     end
