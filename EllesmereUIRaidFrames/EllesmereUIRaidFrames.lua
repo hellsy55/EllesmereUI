@@ -35,15 +35,15 @@ ns.NICK_ADDON = ADDON_NAME:find("Standalone") and ADDON_NAME or "EllesmereUI"
 --  threat border renders behind them: debuffs, defensives/externals, private
 --  auras, dispel-type icons, and Buff Manager icons/squares/bars. Each aura
 --  unit renders its own children (cooldown/border/text) up to +5 above its base.
---  Only the target/hover border-raise (and name/health text while highlighted)
---  and the marker carrier sit above the aura band.
+--  Only the target/hover border-raise and the marker carrier sit above the aura
+--  band; name/health text (ns.LVL_TEXT) sits above the raised border too.
 --  Kept on `ns` (not file-scope locals) to avoid the Lua 5.1 local cap in this
 --  large file, and shared with EUI_RaidFrames_BuffManager.lua.
 -------------------------------------------------------------------------------
-ns.LVL_DISPEL_OVERLAY = 7  -- Blizzard private-aura dispel gradient: below the border (+8) and name/health text (+12) so it renders BEHIND them (like the regular dispel overlay), but above the health bar so it stays visible. Per-slot private-aura icons stay above at LVL_AURA.
-ns.LVL_AURA   = 13   -- base level for every aura icon/bar (children at +1..+5); sits ONE above the name/health text (+12) so auras draw over text
+ns.LVL_DISPEL_OVERLAY = 7  -- Blizzard private-aura dispel gradient: below the border (+8) and name/health text (ns.LVL_TEXT) so it renders BEHIND them (like the regular dispel overlay), but above the health bar so it stays visible. Per-slot private-aura icons stay above at LVL_AURA.
+ns.LVL_AURA   = 13   -- base level for every aura icon/bar (children at +1..+5)
 ns.LVL_RAISE  = 20   -- main border while hovered/targeted (PP container at +1)
-ns.LVL_TEXT   = 21   -- name/health text while hovered/targeted (above LVL_RAISE)
+ns.LVL_TEXT   = 21   -- name/health text (above LVL_RAISE; matches Unit Frames)
 ns.LVL_MARKER = 22   -- raid marker icon (always on top)
 
 -------------------------------------------------------------------------------
@@ -3045,13 +3045,11 @@ local function StyleButton(button)
     AnchorDispelIcon()
     d.AnchorDispelIcon = AnchorDispelIcon
 
-    -- Text carrier: name + health text sit ABOVE the base/threat/dispel borders
-    -- (+8/+10/+11) and the BM frame-border effect (+11) so they stay readable,
-    -- but BELOW the aura layer (ns.LVL_AURA = +13) so debuffs/buffs draw over them.
+    -- Text carrier: name + health text sit above borders and the hover/target
+    -- raise (ns.LVL_TEXT), matching Unit Frames text overlay layering.
     local textCarrier = CreateFrame("Frame", nil, button)
     textCarrier:SetAllPoints(health)
-    textCarrier:SetFrameLevel(button:GetFrameLevel() + (ns.LVL_AURA - 1))
-    d.textCarrier = textCarrier
+    textCarrier:SetFrameLevel(button:GetFrameLevel() + ns.LVL_TEXT)
 
     -- Name text
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
@@ -3620,23 +3618,17 @@ local function StyleButton(button)
         if not (PP and d.borderFrame) then return end
         local pl = button:GetFrameLevel()
         local lvl = s.borderBehind and math.max(0, pl - 1) or (pl + (raised and ns.LVL_RAISE or 8))
-        local textLvl = pl + (raised and ns.LVL_TEXT or (ns.LVL_AURA - 1))
         -- Hot path: this runs from ApplyBorderColor on every UpdateButton. Skip
         -- the SetFrameLevel calls unless the level actually needs to change (only
         -- on a hover/target transition or a borderBehind toggle), so the common
         -- per-update case is just two cheap getter comparisons.
         local container = PP.GetBorders(d.borderFrame)
-        local borderOk = d.borderFrame:GetFrameLevel() == lvl
-            and (not container or container:GetFrameLevel() == lvl + 1)
-        local textOk = not d.textCarrier or d.textCarrier:GetFrameLevel() == textLvl
-        if borderOk and textOk then return end
-        if not borderOk then
-            d.borderFrame:SetFrameLevel(lvl)
-            if container then container:SetFrameLevel(lvl + 1) end
+        if d.borderFrame:GetFrameLevel() == lvl
+           and (not container or container:GetFrameLevel() == lvl + 1) then
+            return
         end
-        if d.textCarrier and not textOk then
-            d.textCarrier:SetFrameLevel(textLvl)
-        end
+        d.borderFrame:SetFrameLevel(lvl)
+        if container then container:SetFrameLevel(lvl + 1) end
     end
 
     -- Recolor the single border to reflect the current state. Priority matches
@@ -6046,14 +6038,10 @@ FB.ApplyBorderColor = function(b)
     -- raid buttons: overlapping frames would cover the highlight otherwise).
     local pl = b:GetFrameLevel()
     local lvl = s.borderBehind and math.max(0, pl - 1) or (pl + (raised and ns.LVL_RAISE or 8))
-    local textLvl = pl + (raised and ns.LVL_TEXT or (ns.LVL_AURA - 1))
     if b._borderFrame:GetFrameLevel() ~= lvl then
         b._borderFrame:SetFrameLevel(lvl)
         local container = PP.GetBorders(b._borderFrame)
         if container then container:SetFrameLevel(lvl + 1) end
-    end
-    if b._textCarrier and b._textCarrier:GetFrameLevel() ~= textLvl then
-        b._textCarrier:SetFrameLevel(textLvl)
     end
     EllesmereUI.SetBorderStyleColor(b._borderFrame, r, g, bcol, a)
 end
@@ -6184,8 +6172,7 @@ FB.EnsureBuilt = function()
 
         local carrier = CreateFrame("Frame", nil, b)
         carrier:SetAllPoints(health)
-        carrier:SetFrameLevel(b:GetFrameLevel() + (ns.LVL_AURA - 1))
-        b._textCarrier = carrier
+        carrier:SetFrameLevel(b:GetFrameLevel() + ns.LVL_TEXT)
         local nameFS = carrier:CreateFontString(nil, "OVERLAY")
         nameFS:SetWordWrap(false)
         b._nameText = nameFS
@@ -11563,21 +11550,11 @@ local function CreatePreviewFrame(index)
         -- Guard the level writes so a refresh only touches them on a real change.
         local pl = f:GetFrameLevel()
         local lvl = s.borderBehind and math.max(0, pl - 1) or (pl + (raised and ns.LVL_RAISE or 8))
-        local textLvl = pl + (raised and ns.LVL_TEXT or (ns.LVL_AURA - 1))
         local container = PP.GetBorders(bdrFrame)
-        local borderOk = bdrFrame:GetFrameLevel() == lvl
-            and (not container or container:GetFrameLevel() == lvl + 1)
-        local textOk = not f._textCarrier or f._textCarrier:GetFrameLevel() == textLvl
-        if borderOk and textOk then
-            EllesmereUI.SetBorderStyleColor(bdrFrame, r, g, b, a)
-            return
-        end
-        if not borderOk then
+        if bdrFrame:GetFrameLevel() ~= lvl
+           or (container and container:GetFrameLevel() ~= lvl + 1) then
             bdrFrame:SetFrameLevel(lvl)
             if container then container:SetFrameLevel(lvl + 1) end
-        end
-        if f._textCarrier and not textOk then
-            f._textCarrier:SetFrameLevel(textLvl)
         end
         EllesmereUI.SetBorderStyleColor(bdrFrame, r, g, b, a)
     end
@@ -11648,11 +11625,10 @@ local function CreatePreviewFrame(index)
     readyCheck:SetPoint("CENTER", health, "CENTER", 0, 0)
     readyCheck:Hide()
 
-    -- Text carrier: above borders (+8/+10/+11), below the aura layer (+13).
+    -- Text carrier: above borders and the hover/target raise (ns.LVL_TEXT).
     local textCarrier = CreateFrame("Frame", nil, f)
     textCarrier:SetAllPoints(health)
-    textCarrier:SetFrameLevel(f:GetFrameLevel() + (ns.LVL_AURA - 1))
-    f._textCarrier = textCarrier
+    textCarrier:SetFrameLevel(f:GetFrameLevel() + ns.LVL_TEXT)
 
     -- Name text (anchoring done by ApplyPreviewData on every refresh)
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
