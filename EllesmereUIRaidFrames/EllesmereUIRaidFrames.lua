@@ -13849,7 +13849,11 @@ ns._ShowSizePreview = function(tier)
 
         -- Centered unit number.
         if f._nameText then
-            ApplyFont(f._nameText, math.max(11, nameSize))
+            local nameOutline = GetOutline()
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then
+                EllesmereUI.PrimeFontShadow(f._nameText, nameOutline == "" and GetUseShadow())
+            end
+            f._nameText:SetFont(fontPath, math.max(11, nameSize), nameOutline)
             f._nameText:SetText(tostring(i))
             f._nameText:SetTextColor(0.9, 0.9, 0.9)
             f._nameText:SetWidth(bw)
