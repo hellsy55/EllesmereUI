@@ -744,6 +744,24 @@ local function FadeEJArt(frame, depth)
     end
 end
 
+-- Some Blizzard text bakes a |cff000000 black or |cff414141 dark grey run INTO
+-- the string (gossip/quest option titles, and localized quest reward/greeting
+-- blurbs on non-English clients); a plain SetTextColor cannot lighten those --
+-- the embedded run wins. Rewrite just those two tones to readable light ones in
+-- place, leaving every other color (links, quest difficulty) untouched.
+-- Idempotent: once rewritten the source codes are gone, so re-runs are no-ops.
+local DARK_TEXT_RECOLOR = { ["000000"] = "ffffff", ["414141"] = "b0b8bc" }
+local function RecolorDarkText(fs)
+    if not fs or not fs.GetText then return end
+    local txt = fs:GetText()
+    if not txt or txt == "" or not txt:find("|cff", 1, true) then return end
+    local new, n = txt:gsub("|c[fF][fF](%x%x%x%x%x%x)", function(hex)
+        local repl = DARK_TEXT_RECOLOR[hex:lower()]
+        if repl then return "|cff" .. repl end
+    end)
+    if n > 0 and new ~= txt then fs:SetText(new) end
+end
+
 -- Force encounter text white so it reads on the dark panel once the parchment
 -- is gone. SimpleHTML bodies take per-element colors. Embedded ability/gear
 -- hyperlinks carry baked-in |c color codes; those are rewritten in place to
@@ -766,6 +784,7 @@ local function WhitenTextIn(frame, depth)
             if r and r.IsObjectType and r:IsObjectType("FontString") and r.SetTextColor then
                 r:SetTextColor(1, 1, 1)
                 RecolorLinks(r)
+                RecolorDarkText(r)
             end
         end
     end
@@ -7761,31 +7780,13 @@ WSkin.RegisterWindow({
 -------------------------------------------------------------------------------
 --  Gossip (GossipFrame) -- NPC dialog window. Base UI, always loaded.
 -------------------------------------------------------------------------------
--- One gossip / quest option: white text for readability on the dark bg.
--- Gossip quest/option titles bake a |cff000000 black (or |cff414141 dark grey)
--- color code INTO the string, so a plain SetTextColor cannot lighten them --
--- the embedded run wins. Rewrite just those two tones to readable light ones in
--- place, leaving every other color (links, quest difficulty) untouched.
--- Idempotent: once rewritten the source codes are gone, so re-runs are no-ops.
-local GOSSIP_TEXT_RECOLOR = { ["000000"] = "ffffff", ["414141"] = "b0b8bc" }
-local function RecolorGossipText(fs)
-    if not fs or not fs.GetText then return end
-    local txt = fs:GetText()
-    if not txt or txt == "" or not txt:find("|cff", 1, true) then return end
-    local new, n = txt:gsub("|c[fF][fF](%x%x%x%x%x%x)", function(hex)
-        local repl = GOSSIP_TEXT_RECOLOR[hex:lower()]
-        if repl then return "|cff" .. repl end
-    end)
-    if n > 0 and new ~= txt then fs:SetText(new) end
-end
-
 local function SkinGossipOption(btn)
     if not btn or btn:IsForbidden() then return end
     -- Recolor ONLY -- keep Blizzard's native font on gossip text (its buttons
     -- follow the color-only widget font policy). No WSkin.Font here.
-    if btn.GreetingText then WSkin.White(btn.GreetingText); RecolorGossipText(btn.GreetingText) end
+    if btn.GreetingText then WSkin.White(btn.GreetingText); RecolorDarkText(btn.GreetingText) end
     local fs = btn.GetFontString and btn:GetFontString()
-    if fs then WSkin.White(fs); RecolorGossipText(fs) end
+    if fs then WSkin.White(fs); RecolorDarkText(fs) end
     -- The NPC greeting body text is a FontString nested inside the element (not
     -- the named GreetingText field or the button label), so it slips past both
     -- checks above and renders black on the dark panel. Whiten every FontString
@@ -8010,10 +8011,10 @@ local function Skin_Quest()
     -- the dark parchment material colour in the greeting panel OnShow after our
     -- skin runs, so re-white on every show (hooked below), not just once here.
     local function StyleQuestGreeting()
-        if _G.QuestGreetingText then WSkin.White(_G.QuestGreetingText) end
+        if _G.QuestGreetingText then WSkin.White(_G.QuestGreetingText); RecolorDarkText(_G.QuestGreetingText) end
         for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
             local fs = _G[n]
-            if fs then WSkin.White(fs) end
+            if fs then WSkin.White(fs); RecolorDarkText(fs) end
         end
         local gp = _G.QuestFrameGreetingPanel
         if gp and gp.titleButtonPool then
