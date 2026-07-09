@@ -2697,10 +2697,20 @@ local function ReparentBarsToClip(frame, powerPosition)
                 frame.Power:SetParent(clip)
             end
         end
-        -- Power bar must render above absorb overlay (health level + 1).
         -- SetParent resets frame level, so re-assert after every reparent.
-        local hpLevel = frame.Health and frame.Health:GetFrameLevel() or clip:GetFrameLevel()
-        frame.Power:SetFrameLevel(hpLevel + 2)
+        if detached then
+            -- Detached bars are reparented onto `frame` itself (not the bar
+            -- clip), which also holds the border (frame:GetFrameLevel() + 10,
+            -- see CreateUnifiedBorder/UpdatePowerBorder). hpLevel + 2 (below)
+            -- sits well under that and let the border render over a detached
+            -- power bar dragged onto its edge -- match CreatePowerBar's own
+            -- detached offset instead so this stays consistently above it.
+            frame.Power:SetFrameLevel(frame:GetFrameLevel() + 12)
+        else
+            -- Power bar must render above absorb overlay (health level + 1).
+            local hpLevel = frame.Health and frame.Health:GetFrameLevel() or clip:GetFrameLevel()
+            frame.Power:SetFrameLevel(hpLevel + 2)
+        end
     end
 end
 
@@ -8045,6 +8055,22 @@ local function ReloadFrames()
                     frame.BottomTextBar:SetFrameStrata(strata)
                 end
             end
+            -- Same re-lift for a detached power bar. frame:SetFrameStrata above
+            -- just reset it to the frame's strata (same reason the cast bar needs
+            -- re-lifting below), so without this a detached power bar silently
+            -- falls back to the frame's strata and can end up behind the frame's
+            -- own border, however "Detached Power Bar" strata is configured.
+            if frame.Power then
+                local us2 = GetSettingsForUnit(unitKey)
+                local ppPos = us2 and us2.powerPosition or "below"
+                if ppPos == "detached_top" or ppPos == "detached_bottom" then
+                    if profile.enableCustomBarStratas then
+                        frame.Power:SetFrameStrata(profile.detachedPowerStrata or "HIGH")
+                    else
+                        frame.Power:SetFrameStrata("MEDIUM")
+                    end
+                end
+            end
             -- The cast bar is a child of the frame, so the SetFrameStrata above
             -- reset it to the frame's strata. Lift player/target/focus cast bars
             -- to HIGH so they never hide behind other MEDIUM-strata frames -- unless
@@ -11049,6 +11075,19 @@ function InitializeFrames()
                     frame.BottomTextBar:SetFrameStrata(db.profile.detachedTextBarStrata or "DIALOG")
                 else
                     frame.BottomTextBar:SetFrameStrata(strata)
+                end
+            end
+            -- Same re-lift for a detached power bar -- see the matching comment
+            -- in the other frameStrata-apply pass above for why this is needed.
+            if frame.Power then
+                local us2 = GetSettingsForUnit(unitKey)
+                local ppPos = us2 and us2.powerPosition or "below"
+                if ppPos == "detached_top" or ppPos == "detached_bottom" then
+                    if db.profile.enableCustomBarStratas then
+                        frame.Power:SetFrameStrata(db.profile.detachedPowerStrata or "HIGH")
+                    else
+                        frame.Power:SetFrameStrata("MEDIUM")
+                    end
                 end
             end
             -- The cast bar is a child of the frame, so the SetFrameStrata above
