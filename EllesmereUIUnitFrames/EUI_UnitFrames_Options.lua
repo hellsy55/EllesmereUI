@@ -3107,7 +3107,7 @@ initFrame:SetScript("OnEvent", function(self)
                             if bf._iconTex then
                                 bf._iconTex:SetTexture(_previewBuffIcons[i] or 135932)
                                 -- SetTexture resets texcoord, so re-apply the crop each update.
-                                ns.SetAuraIconCrop(bf._iconTex, buffCrop, buffSize, buffH)
+                                ns.SetAuraIconCrop(bf._iconTex, buffCrop, buffSize, buffH, s.buffIconZoom or 0.07)
                             end
                         else
                             if bf:IsShown() then bf:Hide() end
@@ -3222,12 +3222,12 @@ initFrame:SetScript("OnEvent", function(self)
                     local simpleIconPt   = (simpleMode == "right") and "TOPLEFT"  or "TOPRIGHT"
                     local simpleParentPt = (simpleMode == "right") and "TOPRIGHT" or "TOPLEFT"
                     local simpleEdgeSign = (simpleMode == "right") and 1 or -1
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. dOffX .. "gx" .. debuffGapX .. "gy" .. debuffGapY
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. dOffX .. "gx" .. debuffGapX .. "gy" .. debuffGapY .. "z" .. (s.debuffIconZoom or 0.07)
                     for i, df in ipairs(debuffIcons) do
                         if i <= visibleDebuffCount then
                             if df._anchorKey ~= anchorKey then
                                 PP.Size(df, debuffSize, debuffH)
-                                if df._iconTex then ns.SetAuraIconCrop(df._iconTex, debuffCrop, debuffSize, debuffH) end
+                                if df._iconTex then ns.SetAuraIconCrop(df._iconTex, debuffCrop, debuffSize, debuffH, s.debuffIconZoom or 0.07) end
                                 df:ClearAllPoints()
                                 if i == 1 then
                                     if useSimpleBossAnchor then
@@ -9151,6 +9151,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Cropped Icons",
                       get=function() return SValSupported("buffCropIcons", false) end,
                       set=function(v) SSetSupported("buffCropIcons", v) end },
+                    { type="slider", label="Icon Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return SValSupported("buffIconZoom", 0.07) end,
+                      set=function(v) SSetSupported("buffIconZoom", v) end },
                 },
             })
             MakeCogBtn(leftRgn, buffCogShow, nil, nil, BuffDisabled)
@@ -9272,6 +9275,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Cropped Icons",
                       get=function() return SValSupported("debuffCropIcons", false) end,
                       set=function(v) SSetSupported("debuffCropIcons", v) end },
+                    { type="slider", label="Icon Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return SValSupported("debuffIconZoom", 0.07) end,
+                      set=function(v) SSetSupported("debuffIconZoom", v) end },
                 },
             })
             MakeCogBtn(leftRgn, debuffCogShow, nil, nil, DebuffDisabled)
@@ -12361,6 +12367,16 @@ initFrame:SetScript("OnEvent", function(self)
                 } })
                 BossCogBtn(bossAuraSizeRow._leftRegion, bSizeCog, EllesmereUI.DIRECTIONS_ICON, bossBuffSizeOff)
             end
+            do  -- Icon Zoom cog on Buff Size (gated only on buffs hidden, so it
+                -- stays adjustable in Simple Buff Display, where zoom still applies)
+                local bossBuffZoomOff = function() return db.profile.boss.showBuffs == false end
+                local _, bZoomCog = EllesmereUI.BuildCogPopup({ title = "Icon Zoom", rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return db.profile.boss.buffIconZoom or 0.07 end,
+                      set=function(v) db.profile.boss.buffIconZoom = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+                BossCogBtn(bossAuraSizeRow._leftRegion, bZoomCog, nil, bossBuffZoomOff)
+            end
             do  -- Directions cog on Debuff Size (X/Y cluster offset)
                 local _, dSizeCog = EllesmereUI.BuildCogPopup({ title = "Debuff Position", rows = {
                     { type="slider", label="Offset X", min=-200, max=200, step=1,
@@ -12375,6 +12391,15 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v) db.profile.boss.debuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                 } })
                 BossCogBtn(bossAuraSizeRow._rightRegion, dSizeCog, EllesmereUI.DIRECTIONS_ICON, bossDebuffSizeOff)
+            end
+            do  -- Icon Zoom cog on Debuff Size
+                local bossDebuffZoomOff = function() return (db.profile.boss.debuffAnchor or "bottomleft") == "none" end
+                local _, dZoomCog = EllesmereUI.BuildCogPopup({ title = "Icon Zoom", rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return db.profile.boss.debuffIconZoom or 0.07 end,
+                      set=function(v) db.profile.boss.debuffIconZoom = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+                BossCogBtn(bossAuraSizeRow._rightRegion, dZoomCog, nil, bossDebuffZoomOff)
             end
 
             -- Per-unit DEBUFF filter for boss frames (NOT synced). Boss BUFFS are
