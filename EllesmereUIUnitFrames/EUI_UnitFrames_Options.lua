@@ -4048,6 +4048,37 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
+        -- Out of Combat Alpha: inline cog on the Visibility row (left region,
+        -- next to the Visibility dropdown/sync). Fades the whole unit frame to a
+        -- chosen alpha while out of combat (100 = no fade; full alpha in combat).
+        -- Off by default. Applied via ns.ResolveFrameAlpha inside
+        -- UpdateFrameVisibility, so it reacts to combat on the existing regen path.
+        -- Reuses the CDM fade's strings ("Fade Out of Combat" / "Out of Combat
+        -- Alpha") so the terminology stays consistent across modules.
+        do
+            local rgn = visRow._leftRegion
+            local _, oocCogShow = EllesmereUI.BuildCogPopup({
+                title = "Out of Combat Alpha",
+                rows = {
+                    { type = "toggle", label = "Fade Out of Combat",
+                      tooltip = "Fades the entire frame (portrait, health and power bars, text) while out of combat.",
+                      get = function() return SVal("oocFadeEnabled", false) == true end,
+                      set = function(v)
+                          SSet("oocFadeEnabled", v)
+                          if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                      end },
+                    { type = "slider", label = "Out of Combat Alpha", min = 0, max = 100, step = 1,
+                      disabled = function() return not SVal("oocFadeEnabled", false) end,
+                      get = function() return math.floor((SVal("oocAlpha", 0.5)) * 100 + 0.5) end,
+                      set = function(v)
+                          SSet("oocAlpha", v / 100)
+                          if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                      end },
+                },
+            })
+            MakeCogBtn(rgn, oocCogShow)
+        end
+
         -- Sync icon on Visibility Options (right)
         do
             local rgn = visRow._rightRegion

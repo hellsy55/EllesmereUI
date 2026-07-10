@@ -272,6 +272,8 @@ local defaults = {
             showInParty = true,
             showSolo = true,
             barVisibility = "always",
+            oocFadeEnabled = false,  -- "Fade Out of Combat" toggle (off by default)
+            oocAlpha       = 0.5,    -- whole-frame alpha while out of combat
             visHideHousing = false,
             visOnlyInstances = false,
             visHideMounted = false,
@@ -437,6 +439,8 @@ local defaults = {
             showInParty = true,
             showSolo = true,
             barVisibility = "always",
+            oocFadeEnabled = false,  -- "Fade Out of Combat" toggle (off by default)
+            oocAlpha       = 0.5,    -- whole-frame alpha while out of combat
             visHideHousing = false,
             visOnlyInstances = false,
             visHideMounted = false,
@@ -754,6 +758,8 @@ local defaults = {
             showInParty = true,
             showSolo = true,
             barVisibility = "always",
+            oocFadeEnabled = false,  -- "Fade Out of Combat" toggle (off by default)
+            oocAlpha       = 0.5,    -- whole-frame alpha while out of combat
             visHideHousing = false,
             visOnlyInstances = false,
             visHideMounted = false,
@@ -10167,13 +10173,28 @@ local function ApplyBlizzCastbarState()
     end
 end
 
+-- Effective whole-frame alpha for a unit frame. When "Fade Out of Combat" is
+-- enabled and the player is out of combat, the frame shows at its chosen
+-- oocAlpha; otherwise full opacity. Off by default, so existing setups are
+-- unchanged. Every "shown" SetAlpha site (visibility loop + mouseover hover)
+-- routes through this so a combat transition or hover can't clobber the fade.
+-- Combat state is passed in by the caller (the visibility loop uses its own
+-- event-tracked _ufInCombat, which leads InCombatLockdown() on regen events).
+-- On ns (not a new file-scope local) to respect the Lua 200-locals cap.
+function ns.ResolveFrameAlpha(s, inCombat)
+    if s and s.oocFadeEnabled and not inCombat then
+        return s.oocAlpha or 0.5
+    end
+    return 1
+end
+
 local function UnitFrame_OnEnter(self)
     local unit = self.unit
     if not unit then return end
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
-        (self._visWrap or self):SetAlpha(1)
+        (self._visWrap or self):SetAlpha(ns.ResolveFrameAlpha(s, InCombatLockdown()))
     end
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
         local showTooltip = not s or s.showUnitTooltip ~= false
@@ -10214,7 +10235,7 @@ local function UnitFrame_OnLeave(self)
                            or s.visHideHousing
                            or s.visOnlyInstances
         local keepShown = (not hiddenByOpts) and hasAnyHideOpt
-        ;(self._visWrap or self):SetAlpha(keepShown and 1 or 0)
+        ;(self._visWrap or self):SetAlpha(keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0)
     end
     if self._tooltipTicker then self._tooltipTicker:Cancel(); self._tooltipTicker = nil end
     if GameTooltip and GameTooltip:IsOwned(self) then
@@ -11193,6 +11214,13 @@ function InitializeFrames()
                 local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(s)
                 local vis = s.barVisibility or "always"
 
+                -- Whole-frame out-of-combat fade: the alpha to use whenever the
+                -- frame is "shown" below. 1 unless "Fade Out of Combat" is on and
+                -- we are out of combat, in which case the chosen oocAlpha. Uses the
+                -- event-tracked _ufInCombat (authoritative on regen transitions,
+                -- which lead InCombatLockdown()) so the fade flips instantly.
+                local shownAlpha = ns.ResolveFrameAlpha(s, _ufInCombat)
+
                 -- Combat-sensitive and mouseover modes use SetAlpha to show/hide
                 -- (SetAlpha is not a restricted API). The frame stays technically
                 -- shown so it can transition instantly; alpha controls visibility.
@@ -11204,9 +11232,9 @@ function InitializeFrames()
                 -- parent chain so wrapper alpha 0 always wins.
                 local alphaTarget = frame._visWrap or frame
                 if vis == "in_combat" then
-                    alphaTarget:SetAlpha((not hiddenByOpts and _ufInCombat) and 1 or 0)
+                    alphaTarget:SetAlpha((not hiddenByOpts and _ufInCombat) and shownAlpha or 0)
                 elseif vis == "out_of_combat" then
-                    alphaTarget:SetAlpha((not hiddenByOpts and not _ufInCombat) and 1 or 0)
+                    alphaTarget:SetAlpha((not hiddenByOpts and not _ufInCombat) and shownAlpha or 0)
                 elseif vis == "mouseover" then
                     -- Mouseover: hidden by default; hover toggles alpha.
                     -- But when the user has configured any positive "Hide if"
@@ -11223,14 +11251,14 @@ function InitializeFrames()
                     if hiddenByOpts then
                         alphaTarget:SetAlpha(0)
                     elseif hasAnyHideOpt then
-                        alphaTarget:SetAlpha(1)
+                        alphaTarget:SetAlpha(shownAlpha)
                     else
                         alphaTarget:SetAlpha(0)
                     end
                 else
-                    -- Non-combat modes: restore full alpha; Show/Hide controls
-                    -- visibility in the block below.
-                    alphaTarget:SetAlpha(1)
+                    -- Non-combat modes: restore the resting alpha (full, or the
+                    -- out-of-combat fade); Show/Hide controls visibility below.
+                    alphaTarget:SetAlpha(shownAlpha)
                 end
 
                 -- Alpha-only hide for the "visHide*" overrides (mounted,
@@ -11245,10 +11273,12 @@ function InitializeFrames()
                 end
 
                 -- 3D PlayerModel frames don't inherit parent alpha, so
-                -- explicitly sync the model's alpha with the visibility state.
+                -- explicitly sync the model's alpha with the visibility state
+                -- (including the out-of-combat fade, so the portrait dims with
+                -- the rest of the frame instead of staying fully opaque).
                 local bd3d = frame.Portrait and frame.Portrait.backdrop and frame.Portrait.backdrop._3d
                 if bd3d then
-                    bd3d:SetAlpha(hiddenByOpts and 0 or 1)
+                    bd3d:SetAlpha(hiddenByOpts and 0 or shownAlpha)
                 end
 
                 -- Show/Hide and SetAttribute are restricted during lockdown.
@@ -11563,6 +11593,14 @@ function SetupOptionsPanel()
         -- name. Re-assert the preview (red color + fake name) so a settings
         -- change doesn't revert it. Secret-safe: no health values are read.
         if ns._bossPreviewActive and ns.SetBossPreview then ns.SetBossPreview(true) end
+        -- ReloadFrames rebuilds frames but never touches the top-level wrapper /
+        -- 3D-portrait alpha, so recompute the out-of-combat fade here. Without
+        -- this, a profile/spec swap (or first switch to a 3D portrait, whose
+        -- PlayerModel is created at alpha 1) leaves player/target/focus stuck at
+        -- the old opacity until the next combat/target/zone event. Safe from the
+        -- throttle: UpdateFrameVisibility guards its restricted Show/Hide behind
+        -- InCombatLockdown, and SetAlpha is unrestricted.
+        if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
     end)
     ns.ReloadFrames = function()
         if not reloadPending then
