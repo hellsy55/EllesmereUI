@@ -101,12 +101,14 @@ initFrame:SetScript("OnEvent", function(self)
         _installPreviewAutoOff()
 
         local W = EllesmereUI.Widgets
+        local PP = EllesmereUI.PP
         local y = yOffset
         local row, h
 
         if EllesmereUI.ClearContentHeader then EllesmereUI:ClearContentHeader() end
         parent._showRowDivider = true
 
+        local function ApplyBorder() if ns.ApplyBorder then ns.ApplyBorder() end end
 
         local alignValues = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" }
         local alignOrder  = { "LEFT", "CENTER", "RIGHT" }
@@ -584,8 +586,139 @@ initFrame:SetScript("OnEvent", function(self)
               values=texValues, order=texOrder,
               get=function() return Cfg("barBgTexture") or "none" end,
               set=function(v) Set("barBgTexture", v); Refresh() end },
+            { type="toggle", label="Custom Border Style",
+              tooltip="Show the border style and size controls for the timer bars.",
+              get=function() return Cfg("customBorderStyle") == true end,
+              set=function(v) Set("customBorderStyle", v); ApplyBorder(); EllesmereUI:RefreshPage(true) end },
         }, function() return Cfg("enabled") == false or Cfg("showTimerBar") == false end)
         y = y - h
+
+        --Border Style (+ cog) | Border Size (+ inline swatch)
+        -- Only built when "Custom Border Style" (in the Bar Texture cog above)
+        -- is on, so the whole row plus its offset cog and colour swatch stay
+        -- hidden by default and reclaim their space when off.
+        if Cfg("customBorderStyle") then
+        -- Distinct local names on purpose: this border-texture list must NOT
+        -- shadow the bar-texture "texValues"/"texOrder" (declared above), which
+        -- the Forces bar Texture + Background Texture dropdowns further down
+        -- still reference. Shadowing them fed border textures into those bar
+        -- dropdowns and let a border key get written into the shared barTexture.
+        local borderTexValues, borderTexOrder = EllesmereUI.GetBorderTextureDropdown()
+        borderTexValues.shadow = nil
+        for i = #borderTexOrder, 1, -1 do
+            if borderTexOrder[i] == "shadow" then table.remove(borderTexOrder, i) end
+        end
+
+        local bsRow
+        bsRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Border Style",
+                values=borderTexValues, order=borderTexOrder,
+                getValue=function() return Cfg("borderTexture") or "solid" end,
+                setValue=function(v)
+                    Set("borderTexture", v)
+                    Set("borderTextureOffset", nil)
+                    Set("borderTextureOffsetY", nil)
+                    Set("borderTextureShiftX", nil)
+                    Set("borderTextureShiftY", nil)
+                    if v ~= "solid" then
+                        Set("borderR", 1); Set("borderG", 1); Set("borderB", 1); Set("borderA", 1)
+                    else
+                        Set("borderR", 0); Set("borderG", 0); Set("borderB", 0); Set("borderA", 1)
+                    end
+                    local defSz = EllesmereUI.GetBorderDefaultSize("MythicPlus", v)
+                    if defSz then Set("borderSize", defSz) end
+                    ApplyBorder(); EllesmereUI:RefreshPage()
+                end },
+            { type="slider", text="Border Size",
+                min=0, max=4, step=1,
+                getValue=function() return Cfg("borderSize") or 1 end,
+                setValue=function(v) Set("borderSize", v); ApplyBorder(); EllesmereUI:RefreshPage() end })
+            y = y - h
+            -- Inline cog for border offset (left region)
+            do
+                local rgn = bsRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Border Options",
+                    rows = {
+                        { type = "toggle", label = "Apply to Forces Bar",
+                            get = function() return Cfg("borderApplyToForces") ~= false end,
+                            set = function(v) Set("borderApplyToForces", v); ApplyBorder() end },
+                        { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureOffset")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local dox = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return dox
+                            end,
+                            set = function(v) Set("borderTextureOffset", v); ApplyBorder() end },
+                        { type = "slider", label = "Offset Y", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureOffsetY")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local _, doy = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return doy
+                            end,
+                            set = function(v) Set("borderTextureOffsetY", v); ApplyBorder() end },
+                        { type = "slider", label = "Shift X", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureShiftX")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local _, _, dsx = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return dsx
+                            end,
+                            set = function(v) Set("borderTextureShiftX", v == 0 and nil or v); ApplyBorder() end },
+                        { type = "slider", label = "Shift Y", min = -10, max = 10, step = 1,
+                            get = function()
+                                local v = Cfg("borderTextureShiftY")
+                                if v then return v end
+                                local tex = Cfg("borderTexture") or "solid"
+                                local sz = Cfg("borderSize") or 1
+                                local _, _, _, dsy = EllesmereUI.GetBorderDefaults("MythicPlus", tex, sz)
+                                return dsy
+                            end,
+                            set = function(v) Set("borderTextureShiftY", v == 0 and nil or v); ApplyBorder() end },
+                        },
+                    })
+                    local cogBtn = CreateFrame("Button", nil, rgn)
+                    cogBtn:SetSize(26, 26)
+                    local ctrl = rgn._control
+                    if ctrl then
+                        cogBtn:SetPoint("RIGHT", ctrl, "LEFT", -8, 0)
+                        rgn._lastInline = cogBtn
+                    end
+                    cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                    cogBtn:SetAlpha(0.4)
+                    local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                    cogTex:SetAllPoints()
+                    cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+                    cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                    cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                    cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+                end
+                -- Inline color swatch on Border Size (right region)
+                do
+                    local rgn = bsRow._rightRegion
+                    local ctrl = rgn._control
+                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                        rgn, rgn:GetFrameLevel() + 3,
+                        function()
+                            return Cfg("borderR") or 0, Cfg("borderG") or 0, Cfg("borderB") or 0, Cfg("borderA") or 1
+                        end,
+                        function(r, g, b, a)
+                            Set("borderR", r); Set("borderG", g); Set("borderB", b); Set("borderA", a)
+                            ApplyBorder()
+                        end,
+                        true, 20)
+                    PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+                    EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
+                end
+        end
 
         -- Builds a threshold toggle config plus an attach() that hangs the inline
         -- RESIZE cog (white text / size / x / y) and the colour swatch onto a given
@@ -727,8 +860,8 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Show Enemy Forces",
               values=texValues,
               order=texOrder,
-              getValue=function() return Cfg("barTexture") or "none" end,
-              setValue=function(v) Set("barTexture", v); Refresh() end },
+              getValue=function() return Cfg("enemyBarTexture") or "none" end,
+              setValue=function(v) Set("enemyBarTexture", v); Refresh() end },
             { type="multiSwatch", text="Enemy Bar Color",
               disabled=function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end,
               disabledTooltip="Show Enemy Forces",
@@ -737,8 +870,8 @@ initFrame:SetScript("OnEvent", function(self)
         _AttachPopupButton(row._leftRegion, EllesmereUI.COGS_ICON, "Bar Texture", {
             { type="dropdown", label="Background Texture",
               values=texValues, order=texOrder,
-              get=function() return Cfg("barBgTexture") or "none" end,
-              set=function(v) Set("barBgTexture", v); Refresh() end },
+              get=function() return Cfg("enemyBarBgTexture") or "none" end,
+              set=function(v) Set("enemyBarBgTexture", v); Refresh() end },
         }, function() return Cfg("enabled") == false or Cfg("showEnemyBar") == false end)
         y = y - h
 

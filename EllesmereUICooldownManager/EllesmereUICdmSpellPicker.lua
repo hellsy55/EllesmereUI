@@ -358,6 +358,19 @@ function ns.RemoveSpellFromBar(barKey, spellID)
             if primaryID == removed then sd.customSpellGroups[variantID] = nil end
         end
     end
+    -- Hosted-buff bookkeeping. Removing the MARKER (or a legacy plain entry
+    -- that represents the buff: flag set, no marker in the list) un-hosts the
+    -- buff. Without this, the flag is orphaned and the options self-heal
+    -- re-appends the spell to this bar -- the "removed spell comes back and
+    -- shows on two bars" bug. Removing a plain entry while a marker exists is
+    -- a cooldown-only removal: the hosted buff stays.
+    local hostedSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(removed)
+    if not hostedSid and removed and removed > 0
+       and sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[removed]
+       and not (ns.ListHasHostedMarker and ns.ListHasHostedMarker(sd.assignedSpells, removed)) then
+        hostedSid = removed
+    end
+    if hostedSid and sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[hostedSid] = nil end
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
     return removed
@@ -381,9 +394,17 @@ end
 --  Returns: array of { cdID, sid, category } in the user's arranged order,
 --  Essential and Utility categories only.
 -------------------------------------------------------------------------------
-function ns.EnumerateCDMSettingsCatalog()
+function ns.EnumerateCDMSettingsCatalog(wantSet)
     local evc = Enum and Enum.CooldownViewerCategory
-    if not evc or evc.Essential == nil or evc.Utility == nil then return nil end
+    if not evc then return nil end
+    -- Default (no arg): CD/utility catalog (Essential + Utility), preserving the
+    -- original behavior for existing callers. Buff (TrackedBuff = 2) and
+    -- tracked-bar (TrackedBar = 3) callers pass an explicit { [catValue] = true }
+    -- set so each bar type scopes its own catalog and never cross-contaminates.
+    if wantSet == nil then
+        if evc.Essential == nil or evc.Utility == nil then return nil end
+        wantSet = { [evc.Essential] = true, [evc.Utility] = true }
+    end
     local settings = _G.CooldownViewerSettings
     if not settings or type(settings.GetDataProvider) ~= "function" then return nil end
     local okP, provider = pcall(settings.GetDataProvider, settings)
@@ -400,7 +421,7 @@ function ns.EnumerateCDMSettingsCatalog()
         local okI, pInfo = pcall(provider.GetCooldownInfoForID, provider, cdID)
         local category
         if okI and type(pInfo) == "table" then category = pInfo.category end
-        if category == evc.Essential or category == evc.Utility then
+        if category ~= nil and wantSet[category] then
             -- Resolve the spell id from the C_CooldownViewer info (the same
             -- shape the migration and spell caches use). Prefer the override
             -- form only when the player actually has it -- CDM info can
@@ -432,7 +453,7 @@ end
 --- routed to bars at reanchor time. For CD/utility bars, tracked spells
 --- with no live frame (untalented) are appended from the settings catalog
 --- so whole layouts can be arranged without swapping talents.
-function ns.GetCDMSpellsForBar(barKey)
+function ns.GetCDMSpellsForBar(barKey, includeUntalented)
     -- Pickers walk the buff icon viewer for buff bars, or the Essential +
     -- Utility viewers for CD/util bars. ns.* exports because IsBarBuffFamily
     -- is defined further down in this file (forward reference).
@@ -510,6 +531,46 @@ function ns.GetCDMSpellsForBar(barKey)
                             -- so catalog spells sort beside learned peers.
                             cdmCat      = (evc and ce.category == evc.Utility) and 10000 or 0,
                             cdmCatGroup = "cooldown",
+                            onEUIBar    = (ResolveVariantValue(ourPool, ce.sid) == true),
+                            isKnown     = known,
+                        }
+                        StoreVariantValue(seenSid, ce.sid, true, false)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Buff bars: also list tracked-but-untalented buffs (no live BuffIcon
+    -- frame) from the settings catalog (TrackedBuff category). Picker-only
+    -- (includeUntalented) so BarGlows and other consumers stay live-only. When
+    -- the provider is unavailable nothing is appended (identical to the old
+    -- behavior). Same variant-aware dedup as the CD/util path above.
+    if isBuffType and includeUntalented and ns.EnumerateCDMSettingsCatalog then
+        local evc = Enum and Enum.CooldownViewerCategory
+        local buffCat = evc and (evc.TrackedBuff or 2)
+        local catalog = buffCat and ns.EnumerateCDMSettingsCatalog({ [buffCat] = true })
+        if catalog then
+            local seenCd, seenSid = {}, {}
+            for _, e in ipairs(entries) do
+                if e.cdID ~= nil then seenCd[e.cdID] = true end
+                StoreVariantValue(seenSid, e.sid, true, false)
+            end
+            for _, ce in ipairs(catalog) do
+                if not seenCd[ce.cdID]
+                   and not ResolveVariantValue(seenSid, ce.sid) then
+                    local name = C_Spell.GetSpellName(ce.sid)
+                    local tex  = C_Spell.GetSpellTexture(ce.sid)
+                    if name then
+                        local known = false
+                        if IsPlayerSpell and IsPlayerSpell(ce.sid) then known = true end
+                        spells[#spells + 1] = {
+                            cdID        = ce.cdID,
+                            spellID     = ce.sid,
+                            name        = name,
+                            icon        = tex,
+                            cdmCat      = 0,  -- single buff viewer bucket
+                            cdmCatGroup = "buff",
                             onEUIBar    = (ResolveVariantValue(ourPool, ce.sid) == true),
                             isKnown     = known,
                         }
@@ -819,7 +880,13 @@ local function EnsureBarOrderSeeded(barKey, sd)
                 sid = fc and fc.spellID
             end
             if type(sid) == "number" and sid > 0 then
-                sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                -- A hosted buff seeds as its MARKER: the plain id would register
+                -- the same spell's COOLDOWN form on this bar.
+                if fc and fc.isHostedBuff and ns.HostedBuffMarker then
+                    sd.assignedSpells[#sd.assignedSpells + 1] = ns.HostedBuffMarker(sid)
+                else
+                    sd.assignedSpells[#sd.assignedSpells + 1] = sid
+                end
             end
         end
     end
@@ -1189,11 +1256,49 @@ function ns.AddTrackedSpell(barKey, id)
     else
         sd.assignedSpells[newCount] = id
     end
+    ns._spellOrderDirty = true
 
     if sd.removedSpells then sd.removedSpells[id] = nil end
 
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+    if ns.QueueReanchor then ns.QueueReanchor() end
+    return true
+end
+
+--- Place a BUFF on a CD/utility bar. The buff is HOSTED: RebuildSpellRouteMap
+--- diverts its real Blizzard buff-viewer frame onto this bar, and the reanchor
+--- reparents that frame into the bar's layout when active / a placeholder when
+--- inactive -- exactly how the buffs bar works, just on a CD/util bar. Blizzard's
+--- CDM stays the source of truth (icon, duration, stacks, active state), so real
+--- auras, DoTs, totems and pet-summons all work with no detection code and get
+--- the normal buff per-icon settings. It is NOT a custom injected spell -- Phase 3
+--- must never draw its own frame for it. Additive: only our own data table is
+--- written (variant-keyed so any live form of the spell resolves).
+function ns.AddBuffToCDUtilBar(barKey, spellID)
+    if type(spellID) ~= "number" or spellID <= 0 then return false end
+    local sd = ns.GetBarSpellData(barKey)
+    if not sd then return false end
+    -- Already hosted here (marker entry, or a legacy plain entry from before
+    -- the marker model): idempotent no-op.
+    if sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[spellID] and sd.assignedSpells
+       and (ns.ListHasHostedMarker(sd.assignedSpells, spellID)
+            or ns.FindVariantIndexInList(sd.assignedSpells, spellID)) then
+        return true
+    end
+    -- Claim the slot via the hosted MARKER, never the plain spellID: the plain
+    -- id is the COOLDOWN form's identity, and one spell can be both a cooldown
+    -- and a buff (same id). The marker gives the hosted buff its own slot, so
+    -- the two coexist on one bar and add/remove/reorder independently.
+    -- AddTrackedSpell also auto-moves the marker off any other CD/util bar.
+    ns.AddTrackedSpell(barKey, ns.HostedBuffMarker(spellID))
+    -- Flag keyed by the picked/canonical spellID, so the route-map pass, the
+    -- drop-pass keep test, and the self-heal all match it directly. The route
+    -- map itself expands variants when it writes the diversion, so the LIVE
+    -- frame still resolves regardless of its talent/override form.
+    if not sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs = {} end
+    sd.hostedBuffSpellIDs[spellID] = true
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     if ns.QueueReanchor then ns.QueueReanchor() end
     return true
@@ -1209,30 +1314,49 @@ function ns.RemoveTrackedSpell(barKey, idx)
     if not list or idx < 1 or idx > #list then return false end
     local removedID = list[idx]
     table.remove(list, idx)
+    ns._spellOrderDirty = true
 
-    -- Auxiliary metadata cleanup (kept here so the wrapper exposes the same
-    -- side effects RemoveSpellFromBar does for symmetry with index-based
-    -- removal).
-    if removedID and sd.customSpellDurations then sd.customSpellDurations[removedID] = nil end
-    if removedID and sd.spellDurations       then sd.spellDurations[removedID]       = nil end
-    if removedID and sd.customSpellIDs       then sd.customSpellIDs[removedID]       = nil end
-    if removedID and sd.customSpellGroups then
-        for variantID, primaryID in pairs(sd.customSpellGroups) do
-            if primaryID == removedID then sd.customSpellGroups[variantID] = nil end
-        end
+    -- Hosted-buff removal? Either the entry is a MARKER, or it is a legacy
+    -- plain entry that represents the buff (flag set, no marker anywhere in
+    -- the list). A plain entry WITH a marker present is the same spell's
+    -- COOLDOWN slot -- the hosted buff stays.
+    local hostedSid = removedID and ns.HostedBuffMarkerToSpell(removedID)
+    if not hostedSid and removedID and removedID > 0
+       and sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[removedID]
+       and not ns.ListHasHostedMarker(list, removedID) then
+        hostedSid = removedID
     end
+    if hostedSid then
+        -- Un-host: clear the flag so the route map stops diverting the buff
+        -- here (it returns to the buffs bar). Never ghost-route a hosted
+        -- buff -- the ghost bar hides by spellID, so it would also hide the
+        -- spell's COOLDOWN form everywhere.
+        if sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[hostedSid] = nil end
+    else
+        -- Auxiliary metadata cleanup (kept here so the wrapper exposes the
+        -- same side effects RemoveSpellFromBar does for symmetry with
+        -- index-based removal).
+        if removedID and sd.customSpellDurations then sd.customSpellDurations[removedID] = nil end
+        if removedID and sd.spellDurations       then sd.spellDurations[removedID]       = nil end
+        if removedID and sd.customSpellIDs       then sd.customSpellIDs[removedID]       = nil end
+        if removedID and sd.customSpellGroups then
+            for variantID, primaryID in pairs(sd.customSpellGroups) do
+                if primaryID == removedID then sd.customSpellGroups[variantID] = nil end
+            end
+        end
 
-    -- Route the removed spell to the ghost CD bar so frames stay in the
-    -- routing system but are hidden. Buff-family bars no longer ghost:
-    -- buff visibility is managed by Blizzard's CDM settings. Negative
-    -- IDs (presets/trinkets) and non-viewer spells (customs, racials) skip
-    -- ghost routing entirely.
-    local isNonViewer = removedID and removedID > 0
-        and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
-          or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
-    if removedID and removedID > 0 and not isNonViewer
-       and not IsBarBuffFamily(barKey) then
-        ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
+        -- Route the removed spell to the ghost CD bar so frames stay in the
+        -- routing system but are hidden. Buff-family bars no longer ghost:
+        -- buff visibility is managed by Blizzard's CDM settings. Negative
+        -- IDs (presets/trinkets) and non-viewer spells (customs, racials) skip
+        -- ghost routing entirely.
+        local isNonViewer = removedID and removedID > 0
+            and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
+              or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
+        if removedID and removedID > 0 and not isNonViewer
+           and not IsBarBuffFamily(barKey) then
+            ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
+        end
     end
 
     local frame = cdmBarFrames[barKey]

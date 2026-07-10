@@ -1989,6 +1989,31 @@ do
     end
 
     ---------------------------------------------------------------------------
+    --  CenterToPixels(center, dim, effectiveScale)
+    --
+    --  Inverse of SnapCenterForDim, for LIVE-geometry readouts and deltas:
+    --  convert a frame's live CENTER coordinate (UIParent units) into the
+    --  stored-convention physical pixel value. An odd-pixel-dimension frame
+    --  rests its center on a half pixel (stored N applies to N+0.5 so both
+    --  edges are whole pixels), so the readout subtracts that half pixel
+    --  before rounding. Plain ToPixels' tie-up round maps N+0.5 to N+1, and
+    --  a centering delta computed from that overshoots: the frame lands at
+    --  center -0.5, one whole pixel off an identical element centered from
+    --  its stored value. Even dimensions behave exactly like ToPixels.
+    ---------------------------------------------------------------------------
+    function PP.CenterToPixels(center, dim, es)
+        if center == nil then return nil end
+        local v = center / PP.mult
+        if dim and dim > 0 then
+            es = es or (UIParent and UIParent:GetEffectiveScale() or 1)
+            local onePixel = PP.perfect / es
+            local dimPx = math.floor(dim / onePixel + 0.5 + 0.001)
+            if dimPx % 2 == 1 then v = v - 0.5 end
+        end
+        return math.floor(v + 0.5 + 0.001)
+    end
+
+    ---------------------------------------------------------------------------
     --  Convenience wrappers -- pixel-snapped frame geometry
     ---------------------------------------------------------------------------
     function PP.Size(frame, w, h)
@@ -2199,17 +2224,19 @@ do
         if not container.GetEffectiveScale then return end
         local ok, es = pcall(container.GetEffectiveScale, container)
         if not ok or not es then return end
-        -- Degenerate effective scale guard -- OPT-IN, only for borders that set
-        -- container._scaleGuard (nameplate frames; see PP.CreateBorder). onePixel
-        -- below is perfect/es, so a near-zero es makes onePixel (and the edge-strip
-        -- thickness) explode -- a 1px border becomes a frame-spanning black box that
-        -- then STICKS until the next valid re-snap. Nameplate frames are WorldFrame
-        -- children that transiently hit near-zero scale during recycle/hide/
-        -- PLAYER_ENTERING_WORLD (e.g. the SetScale(0.001) hide path); UIParent-based
-        -- borders never do, so they leave this unset and are completely unaffected.
-        -- Skip the snap so the strips keep their last-good size; the next valid snap
-        -- restores 1px.
-        if container._scaleGuard and es < 0.1 then return end
+        -- Degenerate PARENT-scale guard -- OPT-IN, only for borders that set
+        -- container._scaleGuard (nameplate frames; see PP.CreateBorder). Those
+        -- containers are scale-DECOUPLED (SetIgnoreParentScale), so their own es
+        -- is pinned to 1 and onePixel below can never explode -- but the plate
+        -- they anchor to still transiently hits near-zero scale during recycle/
+        -- hide/PLAYER_ENTERING_WORLD (the SetScale(0.001) hide path). Snapping
+        -- against that degenerate rect is pointless churn; skip it and let the
+        -- next valid pass re-assert. UIParent-based borders leave the flag unset
+        -- and are completely unaffected.
+        if container._scaleGuard then
+            local pok, pes = pcall(frame.GetEffectiveScale, frame)
+            if pok and pes and pes < 0.1 then return end
+        end
         local onePixel = es > 0 and (PP.perfect / es) or PP.mult
         local bs = borderSize or 1
         local edgeSize = bs > 0 and math.max(onePixel, math.floor(bs + 0.5) * onePixel) or 0
@@ -2324,16 +2351,48 @@ do
         end
     end
 
-    -- scaleGuard (opt-in): when true, SnapBorderTextures skips this border's snap
-    -- while the frame's effective scale is degenerately small (< 0.1). Only
-    -- nameplate frames pass it -- they are WorldFrame children that transiently hit
-    -- near-zero scale and would otherwise explode a 1px strip into a black box.
-    -- Every other caller leaves it nil and is unaffected.
+    -- scaleGuard (opt-in, nameplate borders): marks a border whose PARENT frame has
+    -- a DYNAMIC effective scale. Nameplates are the only such surface: our Scale
+    -- Target Nameplate / Scale Casting Nameplate features ease plate:SetScale live,
+    -- recycled plates snap back to 1, and Blizzard can rescale the base plate.
+    -- Two effects, both scoped strictly to flagged borders:
+    --
+    --  1. The container is scale-DECOUPLED (SetIgnoreParentScale(true) + SetScale 1):
+    --     its strips render in a fixed scale-1 coordinate space while their anchors
+    --     keep tracking the plate's live rect, so edge thickness stays EXACTLY
+    --     round(borderSize) physical pixels no matter how the plate's scale changes
+    --     AFTER the snap. Without this, thickness is baked at snap-time effective
+    --     scale; any later DOWN-scale (target lost, cast ended, every mid-ease
+    --     frame, plate recycled from an enlarged unit) leaves the strips thinner
+    --     than 1 physical pixel -- and a sub-1px unsnapped quad covers NO pixel
+    --     center at many sub-pixel screen positions, so individual border sides
+    --     VANISH as the plate slides with the camera (angle/resolution dependent).
+    --     DisablePixelSnap alone cannot fix that: it removes the snap-to-0 failure
+    --     but keeps exact-geometry rasterization, which is where sub-1px quads drop.
+    --
+    --  2. SnapBorderTextures skips its work while the PARENT's effective scale is
+    --     degenerately small (< 0.1, the SetScale(0.001) hide path).
+    --
+    -- Every other caller leaves it nil and is completely unaffected.
+    local function DecoupleBorderScale(container)
+        if container._scaleDecoupled then return end
+        if not container.SetIgnoreParentScale then return end
+        container._scaleDecoupled = true
+        container:SetIgnoreParentScale(true)
+        container:SetScale(1)
+    end
+
     function PP.CreateBorder(frame, r, g, b, a, borderSize, drawLayer, subLevel, scaleGuard)
         local bd = _ppBorderData[frame]
         if bd then
             -- Let a later call opt an already-created border into the guard.
-            if scaleGuard then bd.container._scaleGuard = true end
+            -- Decoupling changes the container's coordinate space, so re-snap
+            -- immediately -- the strips' stored sizes were computed in the old one.
+            if scaleGuard and not bd.container._scaleGuard then
+                bd.container._scaleGuard = true
+                DecoupleBorderScale(bd.container)
+                SnapBorderTextures(bd.container, frame, bd.borderSize or 1)
+            end
             return bd.container
         end
         r = r or 0; g = g or 0; b = b or 0; a = a or 1
@@ -2366,6 +2425,7 @@ do
 
         container._bdColor = { r, g, b, a }
         container._scaleGuard = scaleGuard or nil
+        if scaleGuard then DecoupleBorderScale(container) end
         bd = { container = container, borderSize = borderSize, borderColor = { r, g, b, a } }
         _ppBorderData[frame] = bd
 
@@ -2946,6 +3006,7 @@ EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS = {
     MaelstromWeapon = { r = 0.0,    g = 0.4392, b = 0.8706 },
     TipOfTheSpear   = { r = 0.6667, g = 0.8275, b = 0.4471 },
     WhirlwindStacks = { r = 0.7765, g = 0.6078, b = 0.4275 },
+    SweepingStrikes = { r = 0.8510, g = 0.4157, b = 0.3373 },
 }
 
 -- Get a class-resource color (custom override or default), keyed by resource.
@@ -3149,6 +3210,52 @@ function EllesmereUI.RefreshDarkMode()
     EllesmereUI.InvalidateColorCache()
     for _, fn in ipairs(EllesmereUI._darkModeRefreshers) do pcall(fn) end
     if EllesmereUI.ApplyColorsToOUF then EllesmereUI.ApplyColorsToOUF() end
+end
+
+-- Global Dark Mode master toggle.
+-- Each module stores its own Dark Mode flag in its own DB in its own shape (Unit
+-- Frames: darkTheme bool; Resource Bars: secondary.darkTheme bool; Raid Frames:
+-- healthColorMode == "dark"). Rather than teach the parent addon each module's
+-- storage, every module registers a provider that knows how to read and flip its
+-- own flag AND repaint its own frames. The master toggle in the options page is a
+-- pure view over these providers -- it reads "are they all on" and writes "set
+-- them all". No new stored key, so it can never desync from the per-module toggles.
+EllesmereUI._darkModeToggles = EllesmereUI._darkModeToggles or {}
+function EllesmereUI.RegisterDarkModeToggle(provider)
+    if type(provider) == "table" and type(provider.isOn) == "function"
+        and type(provider.setOn) == "function" then
+        EllesmereUI._darkModeToggles[#EllesmereUI._darkModeToggles + 1] = provider
+    end
+end
+
+-- True only when every registered module currently has Dark Mode on (and at least
+-- one is registered). `filter`, if given, is a function(provider) -> boolean that
+-- narrows which providers count, so a single checkbox can view just one group
+-- (e.g. only the resource bar, or everything except it). The checkbox reflects
+-- this, so it reads as "on" only when its whole group is dark.
+function EllesmereUI.IsDarkModeAllOn(filter)
+    local matched = false
+    for _, p in ipairs(EllesmereUI._darkModeToggles) do
+        if not filter or filter(p) then
+            matched = true
+            local ok, on = pcall(p.isOn)
+            if not ok or not on then return false end
+        end
+    end
+    return matched
+end
+
+-- Flip every module's Dark Mode to `on`, then refresh the shared palette so any
+-- module that only listens for palette changes repaints too. `filter` narrows the
+-- affected providers exactly as in IsDarkModeAllOn.
+function EllesmereUI.SetDarkModeAll(on, filter)
+    on = on and true or false
+    for _, p in ipairs(EllesmereUI._darkModeToggles) do
+        if not filter or filter(p) then
+            pcall(p.setOn, on)
+        end
+    end
+    EllesmereUI.RefreshDarkMode()
 end
 
 -------------------------------------------------------------------------------
@@ -3917,6 +4024,35 @@ do
 
     local CRACKLING = 203201  -- Crackling Thunder: widens Thunder Clap / Thunder Blast
 
+    -- Cached IsSpellKnown flags. GetWhirlwindStacks is polled every 0.1 s by
+    -- the resource bar, unit frame and nameplate readouts, and
+    -- HandleWhirlwindStacks runs on every player cast for every class;
+    -- C_SpellBook.IsSpellKnown is a C call and talents cannot change in
+    -- combat, so resolve the flags once per login/spec/talent event instead
+    -- (same pattern as the Sweeping Strikes tracker below). Non-warriors
+    -- never register the watcher: the flags stay false and both entry
+    -- points early-out on a plain upvalue read.
+    local requiredKnown, crashingKnown, unhingedKnown, cracklingKnown = false, false, false, false
+    do
+        local _, cls = UnitClass("player")
+        if cls == "WARRIOR" then
+            local function RefreshKnown()
+                local sb = C_SpellBook
+                requiredKnown  = (sb and sb.IsSpellKnown(REQUIRED)) or false
+                crashingKnown  = (sb and sb.IsSpellKnown(CRASHING)) or false
+                unhingedKnown  = (sb and sb.IsSpellKnown(UNHINGED)) or false
+                cracklingKnown = (sb and sb.IsSpellKnown(CRACKLING)) or false
+            end
+            local watcher = CreateFrame("Frame")
+            watcher:RegisterEvent("PLAYER_LOGIN")
+            watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+            watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+            watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+            watcher:RegisterEvent("PLAYER_TALENT_UPDATE")
+            watcher:SetScript("OnEvent", RefreshKnown)
+        end
+    end
+
     -- Improved Whirlwind grants stacks only when the swing connects with an enemy,
     -- but UNIT_SPELLCAST_SUCCEEDED fires even when it hits nothing (swung at empty
     -- air, no target, out of combat). Gate the award on an attackable, living enemy
@@ -3926,17 +4062,19 @@ do
     -- Resolved synchronously at cast time, so a kill that ends combat is still
     -- counted (the victim is present the instant the cast succeeds).
     -- NOTE: when no hostile target is set this relies on enemy nameplates showing.
-    local function EnemyInStrikeRange(spellID)
-        local wide = (spellID == 6343 or spellID == 435222) and C_SpellBook.IsSpellKnown(CRACKLING)
-        local function InReach(u)
-            if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
-                return false
-            end
-            return CheckInteractDistance(u, 2) or (wide and CheckInteractDistance(u, 1)) or false
+    -- InReach is block-scoped (wide passed as a parameter, no upvalues from
+    -- the call) so EnemyInStrikeRange allocates no closure per cast.
+    local function InReach(u, wide)
+        if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
+            return false
         end
-        if InReach("target") then return true end
+        return CheckInteractDistance(u, 2) or (wide and CheckInteractDistance(u, 1)) or false
+    end
+    local function EnemyInStrikeRange(spellID)
+        local wide = (spellID == 6343 or spellID == 435222) and cracklingKnown
+        if InReach("target", wide) then return true end
         for i = 1, 40 do
-            if InReach("nameplate" .. i) then return true end
+            if InReach("nameplate" .. i, wide) then return true end
         end
         return false
     end
@@ -3956,7 +4094,7 @@ do
             return
         end
         if event ~= "UNIT_SPELLCAST_SUCCEEDED" or unit ~= "player" then return end
-        if not (C_SpellBook and C_SpellBook.IsSpellKnown(REQUIRED)) then return end
+        if not requiredKnown then return end
 
         if castGUID and seenGUID[castGUID] then return end
         if castGUID then
@@ -3974,8 +4112,7 @@ do
 
         if GENERATORS[spellID] then
             -- Thunder Clap / Thunder Blast only count with Crashing Thunder
-            if (spellID == 6343 or spellID == 435222)
-               and not C_SpellBook.IsSpellKnown(CRASHING) then
+            if (spellID == 6343 or spellID == 435222) and not crashingKnown then
                 return
             end
             -- Only award if the swing actually had an enemy to land on.
@@ -3984,8 +4121,7 @@ do
             expiresAt = GetTime() + DURATION
         elseif SPENDERS[spellID] and stacks > 0 then
             -- Unhinged: Bloodthirst/Bloodbath don't consume during Bladestorm
-            if UNHINGED_EXEMPT[spellID]
-               and C_SpellBook.IsSpellKnown(UNHINGED)
+            if UNHINGED_EXEMPT[spellID] and unhingedKnown
                and GetTime() < bladestormEndsAt then
                 return
             end
@@ -3995,13 +4131,190 @@ do
     end
 
     function EllesmereUI.GetWhirlwindStacks()
-        if not (C_SpellBook and C_SpellBook.IsSpellKnown(REQUIRED)) then
-            return 0, 0
-        end
+        if not requiredKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
         end
         return stacks, MAX
+    end
+end
+
+-- Sweeping Strikes tracker (Arms Warrior, Midnight charge rework)
+-- Sweeping Strikes (260708) grants 12 charges (18 with Improved Sweeping
+-- Strikes 383155). Single-target damaging abilities consume charges to
+-- strike an additional enemy within ~8 yd; a charge is only consumed when a
+-- sweep partner is actually in range ("less waste" rework design).
+-- Broad Strokes (1261049): Colossus Smash / Warbreaker also activate
+-- Sweeping Strikes. Buff duration: 30 seconds, cooldown: 30 seconds.
+-- 12.1: charges from the ability and Broad Strokes stack; we track only up
+-- to the visual cap, so either source simply refreshes to max.
+-- Fervor of Battle (202316): Cleave/Whirlwind hitting 3+ targets also Slam
+-- the primary target -- that Slam sweeps and consumes a charge.
+do
+    local stacks, expiresAt = 0, nil
+    local BASE_MAX     = 12
+    local IMPROVED_MAX = 18
+    local DURATION = 30
+    local SWEEP    = 260708
+    local IMPROVED = 383155   -- Improved Sweeping Strikes: 12 -> 18 charges
+    local BROAD    = 1261049  -- Broad Strokes: Colossus Smash activates Sweep
+    local FERVOR   = 202316   -- Fervor of Battle: Cleave/WW on 3+ targets Slams
+
+    -- Cached IsSpellKnown flags. GetSweepingStrikes is polled every 0.1 s by
+    -- the resource bar, unit frame and nameplate readouts, and
+    -- HandleSweepingStrikes runs on every player cast for every class;
+    -- C_SpellBook.IsSpellKnown is a C call and talents cannot change in
+    -- combat, so resolve once per login/spec/talent event instead (same
+    -- rationale as the cached spec ID above GetSoulFragments). Non-warriors
+    -- never register the watcher: the flags stay false and both entry
+    -- points early-out on a plain upvalue read.
+    local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
+    do
+        local _, cls = UnitClass("player")
+        if cls == "WARRIOR" then
+            local function RefreshKnown()
+                local sb = C_SpellBook
+                sweepKnown    = (sb and sb.IsSpellKnown(SWEEP)) or false
+                improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
+                broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
+                fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
+            end
+            local watcher = CreateFrame("Frame")
+            watcher:RegisterEvent("PLAYER_LOGIN")
+            watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+            watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+            watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+            watcher:RegisterEvent("PLAYER_TALENT_UPDATE")
+            watcher:SetScript("OnEvent", RefreshKnown)
+        end
+    end
+
+    local function MaxStacks()
+        return improvedKnown and IMPROVED_MAX or BASE_MAX
+    end
+
+    -- Broad Strokes generators (only count with the talent known)
+    local CS_GENERATORS = {
+        [167105] = true,  -- Colossus Smash
+        [262161] = true,  -- Warbreaker (replaces Colossus Smash)
+    }
+
+    -- Single-target damaging cast IDs whose damage effects sit in the
+    -- Sweeping Strikes affected-spells list (wowhead spell=260708), mapped
+    -- to how many charges each cast consumes.
+    -- Rend and Storm Bolt do NOT sweep and are deliberately absent.
+    local SPENDERS = {
+        [12294]   = 1,  -- Mortal Strike
+        [7384]    = 1,  -- Overpower
+        [1464]    = 1,  -- Slam
+        [163201]  = 1,  -- Execute (Arms)
+        [5308]    = 1,  -- Execute (base)
+        [260643]  = 1,  -- Skullsplitter
+        [34428]   = 1,  -- Victory Rush
+        [202168]  = 1,  -- Impending Victory
+        [1715]    = 1,  -- Hamstring
+        [1269383] = 1,  -- Heroic Strike (replaces Slam via Master of Warfare)
+        [436358]  = 2,  -- Demolish: the channel sweeps twice (damage IDs
+                        -- 440884/440886) -- confirmed in-game, 2 per cast
+    }
+
+    -- Fervor of Battle: the triggered Slam happens on Cleave/Whirlwind casts
+    local FOB_TRIGGERS = {
+        [1680] = true,  -- Whirlwind (Arms)
+        [845]  = true,  -- Cleave
+    }
+    local fobWindow = 0  -- suppress a possibly-echoed Slam cast event
+
+    -- Deduplicate cast events via GUID
+    local seenGUID = {}
+    local guidCount = 0
+
+    -- A charge is only consumed when the strike can sweep onto a second
+    -- enemy (~8 yd). Count the hostile target plus enemy nameplates inside
+    -- the index-2 interact probe (~11 yd, slightly generous; same probe as
+    -- the Whirlwind tracker above). `need` = how many enemies must be in
+    -- reach (2 for a sweep partner, 3 for a Fervor of Battle trigger).
+    -- NOTE: relies on enemy nameplates showing for off-target enemies.
+    -- InReach is block-scoped (no upvalues from the call) so EnemiesInReach
+    -- allocates nothing -- it runs on every tracked spender cast in combat.
+    local function InReach(u)
+        if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
+            return false
+        end
+        return CheckInteractDistance(u, 2) or false
+    end
+    local function EnemiesInReach(need)
+        local count, targetPlated = 0, false
+        for i = 1, 40 do
+            local u = "nameplate" .. i
+            if InReach(u) then
+                count = count + 1
+                if UnitIsUnit(u, "target") then targetPlated = true end
+                if count >= need then return true end
+            end
+        end
+        -- Target without a visible nameplate still counts as one body
+        if not targetPlated and InReach("target") then count = count + 1 end
+        return count >= need
+    end
+
+    function EllesmereUI.HandleSweepingStrikes(event, unit, castGUID, spellID)
+        if event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
+            stacks, expiresAt = 0, nil
+            fobWindow = 0
+            wipe(seenGUID)
+            guidCount = 0
+            return
+        end
+        if event == "PLAYER_REGEN_ENABLED" then
+            -- Clean up GUID cache on combat end to prevent unbounded growth
+            wipe(seenGUID)
+            guidCount = 0
+            return
+        end
+        if event ~= "UNIT_SPELLCAST_SUCCEEDED" or unit ~= "player" then return end
+        if not sweepKnown then return end
+
+        if castGUID and seenGUID[castGUID] then return end
+        if castGUID then
+            seenGUID[castGUID] = true
+            guidCount = guidCount + 1
+            -- Safety: flush if table grows too large (shouldn't happen normally)
+            if guidCount > 200 then wipe(seenGUID); guidCount = 0 end
+        end
+
+        if spellID == SWEEP
+           or (CS_GENERATORS[spellID] and broadKnown) then
+            stacks = MaxStacks()
+            expiresAt = GetTime() + DURATION
+        elseif FOB_TRIGGERS[spellID] and stacks > 0 and fervorKnown then
+            -- Fervor of Battle: Cleave/Whirlwind hitting 3+ targets also
+            -- Slams the primary target; that Slam sweeps and consumes a
+            -- charge. The trigger itself is not a player cast event, so it
+            -- is counted here off the Cleave/WW cast, gated on 3 enemies in
+            -- reach (with 3+ up, a sweep partner necessarily exists).
+            if not EnemiesInReach(3) then return end
+            fobWindow = GetTime() + 0.3
+            stacks = max(0, stacks - 1)
+            if stacks == 0 then expiresAt = nil end
+        elseif SPENDERS[spellID] and stacks > 0 then
+            -- If the game echoes the Fervor-of-Battle Slam as a real cast
+            -- event, skip it -- the charge was already counted above. A
+            -- player-pressed Slam can't land inside the 0.3 s window (GCD).
+            if spellID == 1464 and GetTime() < fobWindow then return end
+            -- No sweep partner in range -> the game doesn't consume a charge
+            if not EnemiesInReach(2) then return end
+            stacks = max(0, stacks - SPENDERS[spellID])
+            if stacks == 0 then expiresAt = nil end
+        end
+    end
+
+    function EllesmereUI.GetSweepingStrikes()
+        if not sweepKnown then return 0, 0 end
+        if expiresAt and GetTime() >= expiresAt then
+            stacks, expiresAt = 0, nil
+        end
+        return stacks, MaxStacks()
     end
 end
 
@@ -8082,6 +8395,17 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
 
         tabBar._searchBox = editBox
         tabBar._searchFrame = searchFrame
+
+        -- Spec Override capture toggle (left of the search box). All look
+        -- and behavior live in EllesmereUI_SpecOverrides.lua.
+        if EllesmereUI.SpecOverrides_SetupButton then
+            local soBtn = CreateFrame("Button", nil, tabBar)
+            soBtn:SetSize(26, 26)
+            soBtn:SetPoint("RIGHT", searchFrame, "LEFT", -10, 0)
+            soBtn:SetFrameLevel(tabBar:GetFrameLevel() + 2)
+            EllesmereUI.SpecOverrides_SetupButton(soBtn)
+            tabBar._specOvBtn = soBtn
+        end
     end
     tabBar._searchFrame:Show()
     -- Clear search text when tabs are rebuilt (module switch)
@@ -9101,6 +9425,11 @@ function EllesmereUI:GetActiveModule()
     return activeModule
 end
 
+function EllesmereUI:GetModuleTitle(folderName)
+    local m = folderName and modules[folderName]
+    return m and m.title
+end
+
 function EllesmereUI:SelectModule(folderName)
     if not modules[folderName] then return end
     if folderName == activeModule then return end
@@ -9555,7 +9884,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.3.9"
+EllesmereUI.VERSION = "8.4.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

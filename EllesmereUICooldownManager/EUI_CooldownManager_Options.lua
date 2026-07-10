@@ -322,6 +322,11 @@ initFrame:SetScript("OnEvent", function(self)
                 N = bd.pandemicGlowLines or 8,
                 th = bd.pandemicGlowThickness or 2,
                 period = bd.pandemicGlowSpeed or 4,
+                bg = bd.pandemicGlowBackground and {
+                    r = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.r) or 0,
+                    g = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.g) or 0,
+                    b = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.b) or 0,
+                } or nil,
             } or nil
             ns.StartNativeGlow(glowOvr, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
         end
@@ -345,7 +350,7 @@ initFrame:SetScript("OnEvent", function(self)
     local _sharedPgPopup, _sharedPgPopupOwner
     -- Default key set: pandemic glow. Other callers (e.g. Buff Glow) pass their
     -- own keys so the shared popup reads/writes that feature's Lines/Thickness/Speed.
-    local PG_DEFAULT_KEYS = { lines = "pandemicGlowLines", thickness = "pandemicGlowThickness", speed = "pandemicGlowSpeed" }
+    local PG_DEFAULT_KEYS = { lines = "pandemicGlowLines", thickness = "pandemicGlowThickness", speed = "pandemicGlowSpeed", background = "pandemicGlowBackground", backgroundColor = "pandemicGlowBackgroundColor" }
     local function ShowPandemicPixelGlowPopup(anchorBtn, getDataFn, refreshFn, keys)
         -- Bind data source before popup creation so slider getValue callbacks work
         if _sharedPgPopup then
@@ -358,6 +363,8 @@ initFrame:SetScript("OnEvent", function(self)
             local MakeBorder = EllesmereUI.MakeBorder
             local MakeFont   = EllesmereUI.MakeFont
             local BuildSliderCore = EllesmereUI.BuildSliderCore
+            local BuildToggleControl = EllesmereUI.BuildToggleControl
+            local BuildColorSwatch = EllesmereUI.BuildColorSwatch
             local BORDER_COLOR   = EllesmereUI.BORDER_COLOR
 
             local SIDE_PAD = 14; local TOP_PAD = 14
@@ -366,7 +373,7 @@ initFrame:SetScript("OnEvent", function(self)
             local INPUT_W = 34; local SLIDER_INPUT_GAP = 8; local LABEL_SLIDER_GAP = 12
             local MIN_POPUP_W = 180
 
-            local totalH = TOP_PAD + TITLE_H + TITLE_GAP + GAP + ROW_H + GAP + ROW_H + GAP + ROW_H + TOP_PAD
+            local totalH = TOP_PAD + TITLE_H + TITLE_GAP + (GAP * 5) + (ROW_H * 5) + TOP_PAD
 
             local pf = CreateFrame("Frame", nil, UIParent)
             pf:SetSize(260, totalH); pf:SetFrameStrata("DIALOG"); pf:SetFrameLevel(200)
@@ -391,7 +398,7 @@ initFrame:SetScript("OnEvent", function(self)
             local tmpFS = pf:CreateFontString(nil, "OVERLAY")
             tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
             local maxLblW = 0
-            for _, txt in ipairs({"Lines", "Thickness", "Speed"}) do
+            for _, txt in ipairs({"Lines", "Thickness", "Speed", "Background", "Background Color"}) do
                 tmpFS:SetText(txt); local w = tmpFS:GetStringWidth(); if w > maxLblW then maxLblW = w end
             end
             tmpFS:Hide(); if maxLblW < 10 then maxLblW = 60 end
@@ -431,6 +438,58 @@ initFrame:SetScript("OnEvent", function(self)
             t3:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, r3Y - 2)
             v3:ClearAllPoints(); v3:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r3Y)
 
+            local r4Y = r3Y - ROW_H - GAP
+            local lbl4 = MakeFont(pf, 11, nil, 1, 1, 1); lbl4:SetAlpha(0.6)
+            lbl4:SetText(EllesmereUI.L("Background")); lbl4:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r4Y)
+            local bgToggle, _, bgSnap = BuildToggleControl(pf, pf:GetFrameLevel() + 2,
+                function()
+                    local d = pf._getData(); local k = pf._keys.background
+                    return d and k and d[k] == true
+                end,
+                function(v)
+                    local d = pf._getData(); local k = pf._keys.background
+                    if d and k then d[k] = v and true or nil end
+                    if pf._refresh then pf._refresh() end
+                end, { sizeRatio = 0.8, noAnim = true })
+            bgToggle:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, r4Y - ROW_H / 2)
+
+            local r5Y = r4Y - ROW_H - GAP
+            local lbl5 = MakeFont(pf, 11, nil, 1, 1, 1); lbl5:SetAlpha(0.6)
+            lbl5:SetText(EllesmereUI.L("Background Color")); lbl5:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r5Y)
+            local bgSwatch, bgUpdate = BuildColorSwatch(pf, pf:GetFrameLevel() + 2,
+                function()
+                    local d = pf._getData(); local k = pf._keys.backgroundColor
+                    local c = d and k and d[k]
+                    if c then return c.r or 0, c.g or 0, c.b or 0 end
+                    return 0, 0, 0
+                end,
+                function(r, g, b)
+                    local d = pf._getData(); local k = pf._keys.backgroundColor
+                    if d and k then d[k] = { r = r, g = g, b = b } end
+                    if pf._refresh then pf._refresh() end
+                end, false, 20)
+            bgSwatch:ClearAllPoints()
+            bgSwatch:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, r5Y - ROW_H / 2)
+            local bgBlock = CreateFrame("Frame", nil, bgSwatch)
+            bgBlock:SetAllPoints(); bgBlock:SetFrameLevel(bgSwatch:GetFrameLevel() + 10); bgBlock:EnableMouse(true)
+            bgBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(bgSwatch, EllesmereUI.DisabledTooltip("Pixel Glow Background"))
+            end)
+            bgBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function UpdateBgControls()
+                if bgSnap then bgSnap() end
+                if bgUpdate then bgUpdate() end
+                local d = pf._getData()
+                local k = pf._keys.background
+                local on = d and k and d[k] == true
+                bgSwatch:SetAlpha(on and 1 or 0.3)
+                if on then bgBlock:Hide() else bgBlock:Show() end
+            end
+            bgToggle:HookScript("OnClick", UpdateBgControls)
+            pf._refreshControls = UpdateBgControls
+            UpdateBgControls()
+
             local wasDown = false
             pf:SetScript("OnHide", function(self)
                 self:SetScript("OnUpdate", nil)
@@ -461,6 +520,7 @@ initFrame:SetScript("OnEvent", function(self)
         _sharedPgPopup._getData = getDataFn
         _sharedPgPopup._refresh = refreshFn
         _sharedPgPopup._keys = keys or PG_DEFAULT_KEYS
+        if _sharedPgPopup._refreshControls then _sharedPgPopup._refreshControls() end
         _sharedPgPopupOwner = anchorBtn
 
         _sharedPgPopup:ClearAllPoints()
@@ -1511,11 +1571,6 @@ initFrame:SetScript("OnEvent", function(self)
                           values = glowLabels, order = glowOrder,
                           disabled = function() return BarHasCustomShape(curBar) end,
                           disabledTooltip = "This option is not available for custom shaped icons",
-                          disabledValues = function(v)
-                              if not BarHasCustomShape(curBar) and tonumber(v) == 2 then
-                                  return "Custom Shape Glow requires a custom button shape"
-                              end
-                          end,
                           getValue = function()
                               if BarHasCustomShape(curBar) then return 2 end
                               return entry.glowStyle or 1
@@ -2358,7 +2413,7 @@ initFrame:SetScript("OnEvent", function(self)
     local function ShowTBBSpellPicker(anchorFrame, barCfg, onChanged)
         if _tbbSpellPickerMenu then _tbbSpellPickerMenu:Hide() end
 
-        local trackedBars = ns.GetTrackedBarSpells and ns.GetTrackedBarSpells() or {}
+        local trackedBars = ns.GetTrackedBarSpells and ns.GetTrackedBarSpells(true) or {}
         local popular = ns.TBB_POPULAR_BUFFS or {}
 
         -- No early bail on empty trackedBars: the picker still shows
@@ -2557,12 +2612,23 @@ initFrame:SetScript("OnEvent", function(self)
                 return
             end
 
-            item:SetScript("OnEnter", function() lbl:SetTextColor(1,1,1,1); hl:SetColorTexture(1,1,1,hlA) end)
+            -- Tracked-but-untalented bar spells (no live BuffBar frame) stay
+            -- fully clickable but render desaturated with a hint, matching the
+            -- CD/utility and buff pickers, so bars can be set without swapping
+            -- talents.
+            local notLearned = (sp.isKnown == false)
+            if notLearned then ico:SetDesaturated(true); ico:SetAlpha(0.5) end
+            item:SetScript("OnEnter", function()
+                lbl:SetTextColor(1,1,1,1); hl:SetColorTexture(1,1,1,hlA)
+                if notLearned then EllesmereUI.ShowWidgetTooltip(item, EllesmereUI.L("Not currently talented")) end
+            end)
             item:SetScript("OnLeave", function()
                 lbl:SetTextColor(baseR, baseG, baseB, baseA)
                 hl:SetColorTexture(1, 1, 1, isSelected and 0.12 or 0)
+                if notLearned then EllesmereUI.HideWidgetTooltip() end
             end)
             item:SetScript("OnClick", function()
+                if notLearned then EllesmereUI.HideWidgetTooltip() end
                 menu:Hide()
                 barCfg.spellID        = sp.spellID
                 barCfg.spellIDs       = nil
@@ -3057,7 +3123,10 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Group header: clickable -- selects the GROUP as the editing
                 -- context (group settings replace the per-bar sections).
-                local function AddGroupHeaderRow(gid)
+                -- gkey (optional): the group's globalKey -- adds the GLOBAL
+                -- tag and a delete button that removes the global group for
+                -- every spec (with confirmation).
+                local function AddGroupHeaderRow(gid, gkey)
                     if mH > 4 then mH = mH + 4 end
                     local item = CreateFrame("Button", nil, inner)
                     item:SetHeight(22)
@@ -3068,13 +3137,58 @@ initFrame:SetScript("OnEvent", function(self)
                     hLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
                     hLbl:SetTextColor(1, 1, 1, 0.9)
                     hLbl:SetPoint("LEFT", item, "LEFT", 10, 0)
-                    hLbl:SetText(ns.TBBGroupName and ns.TBBGroupName(gid)
-                        or (EllesmereUI.L("GROUP") .. " " .. gid))
+                    local groupDisplayName = (ns.TBBGroupName and ns.TBBGroupName(gid))
+                        or (EllesmereUI.L("GROUP") .. " " .. gid)
+                    hLbl:SetText(groupDisplayName)
+                    if gkey then
+                        local gTag = item:CreateFontString(nil, "OVERLAY")
+                        gTag:SetFont(FONT_PATH, 9, GetCDMOptOutline())
+                        gTag:SetTextColor(ar, ag, ab, 0.9)
+                        gTag:SetPoint("LEFT", hLbl, "RIGHT", 6, 0)
+                        gTag:SetText(EllesmereUI.L("GLOBAL"))
+                    end
                     local eLbl = item:CreateFontString(nil, "OVERLAY")
                     eLbl:SetFont(FONT_PATH, 10, GetCDMOptOutline())
                     eLbl:SetTextColor(ar, ag, ab, 0.85)
-                    eLbl:SetPoint("RIGHT", item, "RIGHT", -10, 0)
                     eLbl:SetText(EllesmereUI.L("Edit Group"))
+                    local delBtn
+                    if gkey then
+                        delBtn = CreateFrame("Button", nil, item)
+                        delBtn:SetSize(ICON_SZ, ICON_SZ)
+                        delBtn:SetPoint("RIGHT", item, "RIGHT", -8, 0)
+                        delBtn:SetFrameLevel(item:GetFrameLevel() + 2)
+                        local delIcon = delBtn:CreateTexture(nil, "OVERLAY")
+                        delIcon:SetSize(ICON_SZ, ICON_SZ)
+                        delIcon:SetPoint("CENTER")
+                        if delIcon.SetSnapToPixelGrid then delIcon:SetSnapToPixelGrid(false); delIcon:SetTexelSnappingBias(0) end
+                        delIcon:SetTexture(MEDIA .. "icons\\eui-close.png")
+                        delBtn:SetAlpha(0.6)
+                        delBtn:SetScript("OnEnter", function()
+                            delBtn:SetAlpha(1)
+                            EllesmereUI.ShowWidgetTooltip(delBtn, EllesmereUI.L("Delete this global group for all specs"))
+                        end)
+                        delBtn:SetScript("OnLeave", function()
+                            delBtn:SetAlpha(0.6)
+                            EllesmereUI.HideWidgetTooltip()
+                        end)
+                        delBtn:SetScript("OnClick", function()
+                            menu:Hide()
+                            EllesmereUI:ShowConfirmPopup({
+                                title = "Delete Global Group",
+                                message = EllesmereUI.Lf("Delete \"%1$s\" for ALL specs? Bars keep their current positions.", groupDisplayName),
+                                confirmText = "Delete", cancelText = "Cancel",
+                                onConfirm = function()
+                                    if ns.TBBDeleteGlobalGroup then ns.TBBDeleteGlobalGroup(gkey) end
+                                    if _tbbSelectedGroup == gid then _tbbSelectedGroup = nil end
+                                    ns.BuildTrackedBuffBars()
+                                    EllesmereUI:RefreshPage(true)
+                                end,
+                            })
+                        end)
+                        eLbl:SetPoint("RIGHT", delBtn, "LEFT", -8, 0)
+                    else
+                        eLbl:SetPoint("RIGHT", item, "RIGHT", -10, 0)
+                    end
                     local hl = item:CreateTexture(nil, "ARTWORK")
                     hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 1)
                     local isSel = _tbbSelectedGroup == gid
@@ -3251,7 +3365,10 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Grouped bars, one section per group (each section doubles as
                 -- a drop zone for bar drags)
                 local gids = ns.TBBGroupIDsInUse and ns.TBBGroupIDsInUse() or {}
+                local renderedGlobal = {}
                 for _, gid in ipairs(gids) do
+                    local gkey = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid) or nil
+                    if gkey then renderedGlobal[gkey] = true end
                     local zone = {
                         gid = gid,
                         label = (ns.TBBGroupName and ns.TBBGroupName(gid))
@@ -3259,7 +3376,7 @@ initFrame:SetScript("OnEvent", function(self)
                         frames = {},
                     }
                     dropZones[#dropZones + 1] = zone
-                    zone.frames[#zone.frames + 1] = AddGroupHeaderRow(gid)
+                    zone.frames[#zone.frames + 1] = AddGroupHeaderRow(gid, gkey)
                     for idx, b in ipairs(t.bars) do
                         if ns.TBBBarGroupID(b) == gid then
                             zone.frames[#zone.frames + 1] = AddBarItem(idx, b, 8)
@@ -3268,6 +3385,31 @@ initFrame:SetScript("OnEvent", function(self)
                     zone.frames[#zone.frames + 1] = AddActionItem(EllesmereUI.L("+ Add Bar to Group"), 8, function()
                         SelectNewBar(ns.AddTrackedBuffBar(gid))
                     end)
+                end
+
+                -- Global groups with no bars on this spec: always listed so
+                -- any spec can assign (or drag) bars into them -- that is the
+                -- point of a global group. Selecting one edits its shared
+                -- settings; the section is a normal drop zone.
+                if ns.TBBGlobalGroupKeys then
+                    for _, gkey in ipairs(ns.TBBGlobalGroupKeys()) do
+                        if not renderedGlobal[gkey] then
+                            local lgid = ns.TBBEnsureLocalGroupForGlobal(gkey)
+                            if lgid then
+                                local zone = {
+                                    gid = lgid,
+                                    label = (ns.TBBGroupName and ns.TBBGroupName(lgid))
+                                        or (EllesmereUI.L("Group") .. " " .. lgid),
+                                    frames = {},
+                                }
+                                dropZones[#dropZones + 1] = zone
+                                zone.frames[#zone.frames + 1] = AddGroupHeaderRow(lgid, gkey)
+                                zone.frames[#zone.frames + 1] = AddActionItem(EllesmereUI.L("+ Add Bar to Group"), 8, function()
+                                    SelectNewBar(ns.AddTrackedBuffBar(lgid))
+                                end)
+                            end
+                        end
+                    end
                 end
 
                 -- Independent bars (the section is the "make independent" zone)
@@ -3974,6 +4116,22 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             );  y = y - h
 
+            -- Global Group | (empty)
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = "Global Group",
+                  tooltip = "Share this group's name, layout, and position across all specs.",
+                  getValue = function()
+                      return (ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid) ~= nil) or false
+                  end,
+                  setValue = function(v)
+                      if not ns.TBBSetGroupGlobal then return end
+                      ns.TBBSetGroupGlobal(gid, v)
+                      ns.BuildTrackedBuffBars()
+                      EllesmereUI:RefreshPage(true)
+                  end },
+                { type = "label", text = "" }
+            );  y = y - h
+
             -- Ensure bar frames exist before showing placeholders
             ns.BuildTrackedBuffBars()
             UpdateTBBPlaceholder()
@@ -4286,6 +4444,12 @@ initFrame:SetScript("OnEvent", function(self)
                           local bd = SelectedTBB(); if not bd then return end
                           bd.nameSize = v; RefreshTBB()
                       end },
+                    { type = "toggle", label = "Text Wrap",
+                      get = function() local bd = SelectedTBB(); return bd and bd.nameWrap == true end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.nameWrap = v or nil; RefreshTBB()
+                      end },
                     { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
                       get = function() local bd = SelectedTBB(); return bd and bd.nameX or 0 end,
                       set = function(v)
@@ -4355,9 +4519,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Cog on Duration Text: timer size + x/y
         do
             local rgn = nameRow._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Duration Text Settings",
-                rows = {
+            local durationRows = {
                     { type = "slider", label = "Timer Size", min = 8, max = 24, step = 1,
                       get = function() local bd = SelectedTBB(); return bd and bd.timerSize or 11 end,
                       set = function(v)
@@ -4376,7 +4538,35 @@ initFrame:SetScript("OnEvent", function(self)
                           local bd = SelectedTBB(); if not bd then return end
                           bd.timerY = v; RefreshTBB()
                       end },
-                },
+            }
+            -- 12.1 only: engine-rendered tenths below the threshold (see
+            -- EllesmereUICdmTbbDecimals.lua). No 12.0 equivalent exists --
+            -- the rows are absent there rather than permanently disabled.
+            if EllesmereUI.IS_121 then
+                table.insert(durationRows, 2,
+                    { type = "toggle", label = "Decimals",
+                      tooltip = "Cannot work for pet/totem summon bars (Call Dreadstalkers, etc.) -- they expose no readable timer.",
+                      get = function() local bd = SelectedTBB(); return bd and bd.timerDecimals == true end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.timerDecimals = v or nil; RefreshTBB()
+                      end })
+                table.insert(durationRows, 3,
+                    { type = "slider", label = "Decimal Threshold", min = 3, max = 120, step = 1,
+                      disabled = function()
+                          local bd = SelectedTBB()
+                          return not (bd and bd.timerDecimals)
+                      end,
+                      disabledTooltip = "Decimals enabled",
+                      get = function() local bd = SelectedTBB(); return bd and bd.timerDecimalThreshold or 5 end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.timerDecimalThreshold = v; RefreshTBB()
+                      end })
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Duration Text Settings",
+                rows = durationRows,
             })
             local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
             local cogDis = CreateFrame("Frame", nil, rgn)
@@ -5420,6 +5610,14 @@ initFrame:SetScript("OnEvent", function(self)
                 -- custom frames (no GetSpellID/cooldownInfo to resolve).
                 local _sid = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
                              or (ns._ecmeFC[icon] and ns._ecmeFC[icon].spellID)
+                -- Skip hosted-buff frames and their placeholders: their bar
+                -- membership is the hosted MARKER entry. Materializing their
+                -- canonical spellID here would fabricate a plain COOLDOWN entry
+                -- for the same spell (the buff frame's id resolves positive).
+                local _fdLI = ns._hookFrameData and ns._hookFrameData[icon]
+                if icon._isPlaceholderFrame or (_fdLI and _fdLI._isBuffViewerFrame) then
+                    _sid = nil
+                end
                 if _sid and _sid ~= 0 then
                     if _sid > 0 then _sid = NormalizeToBase(_sid) end
                     if seen[_sid] then
@@ -5639,16 +5837,38 @@ initFrame:SetScript("OnEvent", function(self)
                     local cdurs   = sd.customSpellDurations
                     local sdurs   = sd.spellDurations
                     local groups  = sd.customSpellGroups
+                    local hosted  = sd.hostedBuffSpellIDs
+                    -- Marker-present set: when a hosted buff has its own MARKER
+                    -- entry, a PLAIN entry of the same id is the spell's COOLDOWN
+                    -- form and must not borrow the hosted exemption below --
+                    -- untracking the cooldown in Blizzard's CDM should drop it
+                    -- like any other cooldown while the hosted buff stays.
+                    local hostedMarkerFor
+                    if hosted then
+                        for _, mid in ipairs(sd.assignedSpells) do
+                            local mSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(mid)
+                            if mSid then
+                                hostedMarkerFor = hostedMarkerFor or {}
+                                hostedMarkerFor[mSid] = true
+                            end
+                        end
+                    end
                     local writeIdx = 1
                     for readIdx = 1, #sd.assignedSpells do
                         local id = sd.assignedSpells[readIdx]
                         local keep = true
+                        -- A HOSTED buff is a real buff (never in the Essential/Utility
+                        -- viewer), so the "owned but not displayed -> drop" test below
+                        -- would wrongly delete it. It is user-placed -- always keep,
+                        -- exactly like a custom spell ID / racial.
                         if type(id) == "number" and id > 0
                            and not (custom and custom[id])
                            and not (racials and racials[id])
                            and not (cdurs and cdurs[id])
                            and not (sdurs and sdurs[id])
-                           and not (groups and groups[id]) then
+                           and not (groups and groups[id])
+                           and not (hosted and hosted[id]
+                                    and not (hostedMarkerFor and hostedMarkerFor[id])) then
                             -- Plain Blizzard cooldown. Keep it if still displayed OR if
                             -- the player no longer HAS the spell (talented out): a
                             -- talented-out cooldown must hold its rank in the ordered
@@ -5694,6 +5914,115 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                     for i = writeIdx, #sd.assignedSpells do sd.assignedSpells[i] = nil end
+                    -- Normalize the hosted-buff representation. A hosted buff owns
+                    -- a MARKER entry; a plain entry of the same id means the
+                    -- COOLDOWN form. Pre-marker data stored the hosted buff as a
+                    -- plain entry (flag only), which is ambiguous when the same
+                    -- spell is also a cooldown -- resolve each flagged id here,
+                    -- where the displayed/catalog sets can tell the forms apart.
+                    if sd.hostedBuffSpellIDs and ns.HostedBuffMarker then
+                        local list = sd.assignedSpells
+                        local ghostSdN = ns.GetBarSpellData and ns.GetBarSpellData("__ghost_cd")
+                        local ghostListN = ghostSdN and ghostSdN.assignedSpells
+                        local FindVarN = ns.FindVariantIndexInList
+                        -- Plain entries claimed by OTHER visible bars (variant-aware):
+                        -- if the cooldown form lives elsewhere, a plain entry here is
+                        -- a resurrected artifact of the old shared-id model.
+                        local claimedN
+                        do
+                            local spN = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+                            local skN = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+                            local aprofN = spN and skN and spN[skN]
+                            local bsAllN = aprofN and aprofN.barSpells
+                            if bsAllN and ns.StoreVariantValue then
+                                for kN, bsdN in pairs(bsAllN) do
+                                    if kN ~= barKeyE and kN ~= "__ghost_cd"
+                                       and type(bsdN) == "table" and type(bsdN.assignedSpells) == "table" then
+                                        for _, sidN in ipairs(bsdN.assignedSpells) do
+                                            if type(sidN) == "number" and sidN > 0 then
+                                                claimedN = claimedN or {}
+                                                ns.StoreVariantValue(claimedN, sidN, true, false)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        for hsid in pairs(sd.hostedBuffSpellIDs) do
+                            if type(hsid) == "number" and hsid > 0 then
+                                local markerN = ns.HostedBuffMarker(hsid)
+                                local markerIdx, plainIdx
+                                for i = 1, #list do
+                                    local v = list[i]
+                                    if v == markerN then markerIdx = i
+                                    elseif v == hsid then plainIdx = i end
+                                end
+                                if plainIdx then
+                                    -- Is there a real COOLDOWN form for this id --
+                                    -- displayed or in the tracked catalog, not
+                                    -- hidden on the ghost bar, not claimed by
+                                    -- another bar? Then the plain entry is a
+                                    -- legitimate cooldown member of this bar.
+                                    local isCdForm = (displayed[hsid]
+                                        or displayed[NormalizeToBase(hsid)]
+                                        or displayed[ResolveToLive(hsid)]
+                                        or (catalogSet and (catalogSet[hsid]
+                                            or catalogSet[NormalizeToBase(hsid)]
+                                            or catalogSet[ResolveToLive(hsid)]))) and true or false
+                                    if isCdForm and ghostListN and FindVarN
+                                       and FindVarN(ghostListN, hsid) then
+                                        isCdForm = false
+                                    end
+                                    if isCdForm and claimedN and ns.ResolveVariantValue
+                                       and ns.ResolveVariantValue(claimedN, hsid) then
+                                        isCdForm = false
+                                    end
+                                    if markerIdx then
+                                        -- Marker already present: a plain twin is
+                                        -- only kept when it is a real cooldown
+                                        -- member; otherwise it is an artifact.
+                                        if not isCdForm then
+                                            table.remove(list, plainIdx)
+                                            ns._spellOrderDirty = true
+                                        end
+                                    elseif isCdForm then
+                                        -- Legit dual form: keep the cooldown entry
+                                        -- and give the hosted buff its own slot
+                                        -- right next to it.
+                                        table.insert(list, plainIdx + 1, markerN)
+                                        ns._spellOrderDirty = true
+                                    else
+                                        -- Buff-only: the plain entry IS the hosted
+                                        -- buff -- convert in place (keeps its slot).
+                                        list[plainIdx] = markerN
+                                        ns._spellOrderDirty = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        -- Self-heal HOSTED buffs. A hosted buff must live in assignedSpells (the
+        -- Phase 3 sort keys off its MARKER entry). An earlier build's drop pass
+        -- could have stranded one in hostedBuffSpellIDs alone (it never appears in
+        -- the Essential/Utility viewer). Re-append the MARKER when neither it nor
+        -- a legacy plain entry represents the buff -- never the plain id, which
+        -- would resurrect the spell's COOLDOWN form onto this bar (the "removed
+        -- cooldown comes back" bug).
+        if sd.hostedBuffSpellIDs and sd.assignedSpells and ns.HostedBuffMarker then
+            for hsid in pairs(sd.hostedBuffSpellIDs) do
+                if type(hsid) == "number" and hsid > 0 then
+                    local markerH = ns.HostedBuffMarker(hsid)
+                    local present = false
+                    for _, sid in ipairs(sd.assignedSpells) do
+                        if sid == hsid or sid == markerH then present = true; break end
+                    end
+                    if not present then
+                        sd.assignedSpells[#sd.assignedSpells + 1] = markerH
+                        ns._spellOrderDirty = true
+                    end
                 end
             end
         end
@@ -6103,7 +6432,7 @@ initFrame:SetScript("OnEvent", function(self)
         local MAX_H = 350
 
         -- Use the same data source as CD/utility: GetCDMSpellsForBar
-        local allSpells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar(targetBarKey) or {}
+        local allSpells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar(targetBarKey, true) or {}
 
         -- Every buff spell is shown and every row is clickable. Clicking a
         -- spell routes AddTrackedSpell, whose family sweep removes the
@@ -6162,13 +6491,21 @@ initFrame:SetScript("OnEvent", function(self)
             local hl = item:CreateTexture(nil, "ARTWORK")
             hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0)
 
+            -- Tracked-but-untalented buffs stay fully clickable but render
+            -- desaturated with a hint, matching the CD/utility picker, so bars
+            -- can be arranged without swapping talents.
+            local notLearned = (sp.isKnown == false)
+            if notLearned then iconTex:SetDesaturated(true); iconTex:SetAlpha(0.5) end
+
             item:SetScript("OnEnter", function()
                 lbl:SetTextColor(1, 1, 1, 1)
                 hl:SetColorTexture(1, 1, 1, hlA)
+                if notLearned then EllesmereUI.ShowWidgetTooltip(item, EllesmereUI.L("Not currently talented")) end
             end)
             item:SetScript("OnLeave", function()
                 lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                 hl:SetColorTexture(1, 1, 1, 0)
+                if notLearned then EllesmereUI.HideWidgetTooltip() end
             end)
 
             -- Gray the row in place and make it inert. Called after the user
@@ -6178,6 +6515,7 @@ initFrame:SetScript("OnEvent", function(self)
                 lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
                 iconTex:SetDesaturated(true); iconTex:SetAlpha(0.4)
                 hl:SetColorTexture(1, 1, 1, 0)
+                if notLearned then EllesmereUI.HideWidgetTooltip() end
                 item:SetScript("OnEnter", nil)
                 item:SetScript("OnLeave", nil)
                 item:SetScript("OnClick", nil)
@@ -6401,6 +6739,239 @@ initFrame:SetScript("OnEvent", function(self)
         menu:Show()
     end
 
+    -- Buff picker targeting a CD/UTILITY bar. A buff placed here is modelled as a
+    -- custom injected spell (always-shown icon) whose Active State is aura-driven:
+    -- ns.AddBuffToCDUtilBar wires the injection + the gold aura overlay together.
+    -- Lists the class's CDM-trackable buffs plus a Custom Spell ID entry. No
+    -- durations (aura-driven, never cast-timed) and no item/preset rows (those are
+    -- cast-timer / CD-utility concepts that do not belong on an aura tracker).
+    local function ShowBuffToCDPicker(anchorFrame, targetBarKey, onChanged)
+        if _spellPickerMenu and _spellPickerMenu:IsShown() then
+            _spellPickerMenu:Hide()
+            if _spellPickerMenu._anchorFrame == anchorFrame then return end
+        end
+
+        local mBgR  = EllesmereUI.DD_BG_R  or 0.075
+        local mBgG  = EllesmereUI.DD_BG_G  or 0.113
+        local mBgB  = EllesmereUI.DD_BG_B  or 0.141
+        local mBgA  = EllesmereUI.DD_BG_HA or 0.98
+        local mBrdA = EllesmereUI.DD_BRD_A or 0.20
+        local hlA   = EllesmereUI.DD_ITEM_HL_A or 0.08
+        local tDimR = EllesmereUI.DD_ITEM_R or 0.75
+        local tDimG = EllesmereUI.DD_ITEM_G or 0.75
+        local tDimB = EllesmereUI.DD_ITEM_B or 0.75
+        local tDimA = EllesmereUI.DD_ITEM_A or 0.9
+        local menuW = 240
+        local ITEM_H = 26
+        local MAX_H = 350
+
+        -- Buff catalog comes from the default buffs bar (passing a CD/util barKey
+        -- would return Essential/Utility spells). Dedup against buffs already
+        -- HOSTED on this bar so re-opening the menu never re-lists an added
+        -- buff. The hosted flag table is the membership truth (assignedSpells
+        -- stores hosted buffs as negative markers, and a PLAIN id entry is the
+        -- spell's COOLDOWN form -- which must not hide its buff form here).
+        local allSpells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar("buffs", true) or {}
+        local already = {}
+        local sdCur = ns.GetBarSpellData(targetBarKey)
+        if sdCur and sdCur.hostedBuffSpellIDs then
+            for sid in pairs(sdCur.hostedBuffSpellIDs) do already[sid] = true end
+        end
+        local knownSpells = {}
+        for _, sp in ipairs(allSpells) do
+            if sp.cdmCatGroup == "buff" and sp.spellID and not already[sp.spellID] then
+                knownSpells[#knownSpells + 1] = sp
+            end
+        end
+
+        local menu = CreateFrame("Frame", nil, UIParent)
+        menu:SetFrameStrata("FULLSCREEN_DIALOG")
+        menu:SetFrameLevel(300)
+        menu:SetClampedToScreen(true)
+        menu:SetSize(menuW, 10)
+
+        local bgTex = menu:CreateTexture(nil, "BACKGROUND")
+        bgTex:SetAllPoints(); bgTex:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
+        EllesmereUI.MakeBorder(menu, 1, 1, 1, mBrdA, EllesmereUI.PP)
+
+        local inner = CreateFrame("Frame", nil, menu)
+        inner:SetWidth(menuW)
+        inner:SetPoint("TOPLEFT")
+
+        local mH = 4
+
+        -- Post-add refresh; picker stays open so several buffs add in a row.
+        -- onChanged reanchors the live bars and refreshes the preview in place
+        -- (same flow as the CD/utility "+" add). No RefreshCDPreview here: its
+        -- full page rebuild orphans this still-open picker's anchor, and the
+        -- next click falls through onto the rebuilt preview slots -- popping
+        -- the per-icon settings dropdown uninvited.
+        local function AfterAdd()
+            if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+            if ns.QueueReanchor then ns.QueueReanchor() end
+            if onChanged then onChanged() end
+        end
+
+        -- Custom Spell ID (no duration -- aura-driven).
+        do
+            local csItem = CreateFrame("Button", nil, inner)
+            csItem:SetHeight(ITEM_H)
+            csItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            csItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            csItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+            local csHl = csItem:CreateTexture(nil, "ARTWORK")
+            csHl:SetAllPoints(); csHl:SetColorTexture(1, 1, 1, 0); csHl:SetAlpha(0)
+            local csLbl = csItem:CreateFontString(nil, "OVERLAY")
+            csLbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            csLbl:SetPoint("LEFT", 10, 0); csLbl:SetJustifyH("LEFT")
+            csLbl:SetText(EllesmereUI.L("Custom Spell ID"))
+            csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+            csItem:SetScript("OnEnter", function() csLbl:SetTextColor(1, 1, 1, 1); csHl:SetColorTexture(1, 1, 1, hlA); csHl:SetAlpha(1) end)
+            csItem:SetScript("OnLeave", function() csLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA); csHl:SetAlpha(0) end)
+            csItem:SetScript("OnClick", function()
+                menu:Hide()
+                ShowCustomSpellIDPopup(targetBarKey, false, function(sid)
+                    ns.AddBuffToCDUtilBar(targetBarKey, sid)
+                    AfterAdd()
+                end)
+            end)
+            mH = mH + ITEM_H
+        end
+
+        -- Divider below Custom Spell ID.
+        do
+            local csDiv = inner:CreateTexture(nil, "ARTWORK")
+            csDiv:SetHeight(1); csDiv:SetColorTexture(1, 1, 1, 0.10)
+            csDiv:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
+            csDiv:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
+            mH = mH + 9
+        end
+
+        -- Class buff rows.
+        local function MakeSpellRow(sp)
+            local item = CreateFrame("Button", nil, inner)
+            item:SetHeight(ITEM_H)
+            item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            item:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            item:SetFrameLevel(menu:GetFrameLevel() + 2)
+            local iconTex = item:CreateTexture(nil, "ARTWORK")
+            iconTex:SetSize(ITEM_H - 4, ITEM_H - 4)
+            iconTex:SetPoint("LEFT", 4, 0)
+            iconTex:SetTexture(sp.icon); iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            local lbl = item:CreateFontString(nil, "OVERLAY")
+            lbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            lbl:SetPoint("LEFT", iconTex, "RIGHT", 6, 0); lbl:SetPoint("RIGHT", -4, 0)
+            lbl:SetJustifyH("LEFT"); lbl:SetWordWrap(false); lbl:SetMaxLines(1)
+            lbl:SetText(EllesmereUI.L(sp.name or ""))
+            lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+            local hl = item:CreateTexture(nil, "ARTWORK")
+            hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0)
+            -- Tracked-but-untalented buffs: desaturate + hint, still clickable
+            -- (AddBuffToCDUtilBar has no learned gate; routes when talented).
+            local notLearned = (sp.isKnown == false)
+            if notLearned then iconTex:SetDesaturated(true); iconTex:SetAlpha(0.5) end
+            item:SetScript("OnEnter", function()
+                lbl:SetTextColor(1, 1, 1, 1); hl:SetColorTexture(1, 1, 1, hlA)
+                if notLearned then EllesmereUI.ShowWidgetTooltip(item, EllesmereUI.L("Not currently talented")) end
+            end)
+            item:SetScript("OnLeave", function()
+                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA); hl:SetColorTexture(1, 1, 1, 0)
+                if notLearned then EllesmereUI.HideWidgetTooltip() end
+            end)
+            item:SetScript("OnClick", function()
+                if notLearned then EllesmereUI.HideWidgetTooltip() end
+                ns.AddBuffToCDUtilBar(targetBarKey, sp.spellID)
+                AfterAdd()
+                -- Gray this row in place; keep the picker open.
+                lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
+                iconTex:SetDesaturated(true); iconTex:SetAlpha(0.4)
+                hl:SetColorTexture(1, 1, 1, 0)
+                item:SetScript("OnEnter", nil); item:SetScript("OnLeave", nil); item:SetScript("OnClick", nil)
+            end)
+            mH = mH + ITEM_H
+            return item
+        end
+        for _, sp in ipairs(knownSpells) do MakeSpellRow(sp) end
+
+        -- "Missing Buffs?" footer -- opens Blizzard's CDM to Display more buffs.
+        do
+            local fDiv = inner:CreateTexture(nil, "ARTWORK")
+            fDiv:SetHeight(1); fDiv:SetColorTexture(1, 1, 1, 0.10)
+            fDiv:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
+            fDiv:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
+            mH = mH + 9
+
+            local FOOTER_H = 38
+            local mbItem = CreateFrame("Button", nil, inner)
+            mbItem:SetHeight(FOOTER_H)
+            mbItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+            mbItem:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+            mbItem:SetFrameLevel(menu:GetFrameLevel() + 2)
+            local mbFS = mbItem:CreateFontString(nil, "OVERLAY")
+            mbFS:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            mbFS:SetAllPoints(); mbFS:SetJustifyH("CENTER"); mbFS:SetJustifyV("MIDDLE")
+            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            mbFS:SetTextColor(ar, ag, ab, 1)
+            mbFS:SetText(EllesmereUI.L("Missing Buffs?") .. "\n" .. EllesmereUI.L("Add in Blizzard CDM"))
+            mbItem:SetScript("OnEnter", function() mbFS:SetTextColor(1, 1, 1, 1) end)
+            mbItem:SetScript("OnLeave", function()
+                local r, g, b = EllesmereUI.GetAccentColor(); mbFS:SetTextColor(r, g, b, 1)
+            end)
+            mbItem:SetScript("OnClick", function()
+                menu:Hide()
+                if ns.OpenBlizzardCDMTab then ns.OpenBlizzardCDMTab(true) end
+            end)
+            mH = mH + FOOTER_H
+        end
+
+        inner:SetHeight(mH + 4)
+        local totalH = math.min(mH + 4, MAX_H)
+        menu:SetSize(menuW, totalH)
+
+        if mH + 4 > MAX_H then
+            local sf = CreateFrame("ScrollFrame", nil, menu)
+            sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+            sf:SetFrameLevel(menu:GetFrameLevel() + 1)
+            sf:EnableMouseWheel(true)
+            sf:SetScrollChild(inner)
+            inner:SetWidth(menuW)
+            local scrollTarget = 0
+            local maxScroll = (mH + 4) - MAX_H
+            local SCROLL_STEP = 40
+            local SMOOTH_SPEED = 12
+            local smoothFrame = CreateFrame("Frame")
+            smoothFrame:Hide()
+            smoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                local cur = sf:GetVerticalScroll()
+                scrollTarget = math.max(0, math.min(maxScroll, scrollTarget))
+                local diff = scrollTarget - cur
+                if math.abs(diff) < 0.3 then sf:SetVerticalScroll(scrollTarget); smoothFrame:Hide(); return end
+                sf:SetVerticalScroll(cur + diff * math.min(1, SMOOTH_SPEED * elapsed))
+            end)
+            sf:SetScript("OnMouseWheel", function(_, delta)
+                if maxScroll <= 0 then return end
+                local base = smoothFrame:IsShown() and scrollTarget or sf:GetVerticalScroll()
+                scrollTarget = math.max(0, math.min(maxScroll, base - delta * SCROLL_STEP))
+                smoothFrame:Show()
+            end)
+        end
+
+        menu:ClearAllPoints()
+        menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -4)
+        menu._anchorFrame = anchorFrame
+        _spellPickerMenu = menu
+
+        menu:SetScript("OnUpdate", function(m)
+            if not m:IsMouseOver() and not anchorFrame:IsMouseOver() and IsMouseButtonDown("LeftButton") then
+                m:Hide()
+            end
+        end)
+        menu:SetScript("OnHide", function(m)
+            m:SetScript("OnUpdate", nil)
+        end)
+        menu:Show()
+    end
+
     -- Simple numeric "timer" popup for custom Active State on preset icons.
     -- onConfirm(seconds) fires only when a positive number is entered.
     local function ShowDurationPopup(currentVal, onConfirm)
@@ -6598,6 +7169,105 @@ initFrame:SetScript("OnEvent", function(self)
         popup._box:HighlightText()
     end
 
+    -- Numeric popup for the per-spell "Threshold Seconds" (Threshold Text): the
+    -- user enters the seconds-remaining boundary below which Threshold Color /
+    -- Threshold Decimals apply. 0 disarms the feature for the spell. Mirrors
+    -- ShowAlphaPopup's look; onConfirm receives the integer seconds (0-59).
+    local function ShowThresholdSecondsPopup(currentVal, onConfirm)
+        local popupName = "EUI_CDM_ThresholdSecondsPopup"
+        local popup = _G[popupName]
+        if not popup then
+            local dimmer = CreateFrame("Frame", popupName .. "Dimmer", UIParent)
+            dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+            dimmer:SetAllPoints(UIParent)
+            dimmer:EnableMouse(true)
+            dimmer:Hide()
+            local dimTex = dimmer:CreateTexture(nil, "BACKGROUND")
+            dimTex:SetAllPoints(); dimTex:SetColorTexture(0, 0, 0, 0.25)
+            dimmer:SetScript("OnMouseDown", function(self) self:Hide() end)
+
+            popup = CreateFrame("Frame", popupName, dimmer)
+            popup:SetSize(300, 150)
+            popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+            popup:SetFrameStrata("FULLSCREEN_DIALOG")
+            popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+            popup:EnableMouse(true)
+            local popBg = popup:CreateTexture(nil, "BACKGROUND")
+            popBg:SetAllPoints(); popBg:SetColorTexture(0.06, 0.08, 0.10, 1)
+            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, EllesmereUI.PP)
+            popup._dimmer = dimmer
+
+            local title = popup:CreateFontString(nil, "OVERLAY")
+            title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
+            title:SetPoint("TOP", popup, "TOP", 0, -18)
+            title:SetTextColor(1, 1, 1, 1)
+            title:SetText(EllesmereUI.L("Threshold Seconds"))
+
+            local hint = popup:CreateFontString(nil, "OVERLAY")
+            hint:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+            hint:SetPoint("TOP", title, "BOTTOM", 0, -6)
+            hint:SetTextColor(0.7, 0.7, 0.7, 0.85)
+            hint:SetText(EllesmereUI.L("Seconds left when threshold text starts (0 = off)"))
+
+            local box = CreateFrame("EditBox", nil, popup)
+            box:SetSize(180, 28)
+            box:SetPoint("TOP", hint, "BOTTOM", 0, -12)
+            box:SetAutoFocus(true)
+            box:SetNumeric(true)
+            box:SetMaxLetters(2)
+            box:SetFont(FONT_PATH, 13, GetCDMOptOutline())
+            box:SetTextColor(1, 1, 1, 0.9)
+            box:SetJustifyH("CENTER")
+            local boxBg = box:CreateTexture(nil, "BACKGROUND")
+            boxBg:SetAllPoints(); boxBg:SetColorTexture(0.04, 0.06, 0.08, 1)
+            EllesmereUI.MakeBorder(box, 1, 1, 1, 0.12, EllesmereUI.PP)
+            popup._box = box
+
+            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            local okBtn = CreateFrame("Button", nil, popup)
+            okBtn:SetSize(80, 28)
+            okBtn:SetPoint("BOTTOMRIGHT", popup, "BOTTOM", -4, 16)
+            local okBg = okBtn:CreateTexture(nil, "BACKGROUND")
+            okBg:SetAllPoints(); okBg:SetColorTexture(ar, ag, ab, 0.15)
+            EllesmereUI.MakeBorder(okBtn, ar, ag, ab, 0.3, EllesmereUI.PP)
+            local okLbl = okBtn:CreateFontString(nil, "OVERLAY")
+            okLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            okLbl:SetPoint("CENTER"); okLbl:SetText(EllesmereUI.L("Save"))
+            okLbl:SetTextColor(ar, ag, ab, 0.9)
+            okBtn:SetScript("OnEnter", function() okLbl:SetTextColor(1, 1, 1, 1) end)
+            okBtn:SetScript("OnLeave", function() okLbl:SetTextColor(ar, ag, ab, 0.9) end)
+
+            local cancelBtn = CreateFrame("Button", nil, popup)
+            cancelBtn:SetSize(80, 28)
+            cancelBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", 4, 16)
+            local cBg = cancelBtn:CreateTexture(nil, "BACKGROUND")
+            cBg:SetAllPoints(); cBg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+            EllesmereUI.MakeBorder(cancelBtn, 1, 1, 1, 0.10, EllesmereUI.PP)
+            local cLbl = cancelBtn:CreateFontString(nil, "OVERLAY")
+            cLbl:SetFont(FONT_PATH, 12, GetCDMOptOutline())
+            cLbl:SetPoint("CENTER"); cLbl:SetText(EllesmereUI.L("Cancel"))
+            cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8)
+            cancelBtn:SetScript("OnEnter", function() cLbl:SetTextColor(1, 1, 1, 1) end)
+            cancelBtn:SetScript("OnLeave", function() cLbl:SetTextColor(0.7, 0.7, 0.7, 0.8) end)
+
+            local function Commit()
+                local v = tonumber(box:GetText())
+                if v and v >= 0 and v <= 59 then
+                    dimmer:Hide()
+                    if popup._onConfirm then popup._onConfirm(math.floor(v)) end
+                end
+            end
+            okBtn:SetScript("OnClick", Commit)
+            box:SetScript("OnEnterPressed", Commit)
+            box:SetScript("OnEscapePressed", function() dimmer:Hide() end)
+        end
+        popup._onConfirm = onConfirm
+        popup._box:SetText(currentVal and tostring(currentVal) or "")
+        popup._dimmer:Show()
+        popup._box:SetFocus()
+        popup._box:HighlightText()
+    end
+
     local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSelect, removeOnly)
         -- Toggle: if the picker is already open for this same icon, close it
         if _spellPickerMenu and _spellPickerMenu:IsShown() and _spellPickerMenu._anchorFrame == anchorFrame then
@@ -6644,7 +7314,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local menuW = 210
         local ITEM_H = 26
-        local MAX_H = 340  -- tall enough for the CD/utility per-spell rows (Remove Spell + 9 settings + dividers); this menu has no scroll, so anything over MAX_H gets clipped
+        local MAX_H = 400  -- tall enough for the fullest per-spell menus (buff branch: actions + 10 settings incl. Threshold Text + dividers); this menu has no scroll, so anything over MAX_H gets clipped
 
         local menu = CreateFrame("Frame", nil, UIParent)
         menu:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -6858,22 +7528,41 @@ initFrame:SetScript("OnEvent", function(self)
                     if (not spellID or spellID == 0) and anchorFrame and anchorFrame._previewSpellID then
                         spellID = anchorFrame._previewSpellID
                     end
+                    -- Hosted-buff MARKER slot: settings key by the DECODED spell id
+                    -- (the id the render resolver and the buffs bar key by), never
+                    -- the raw marker.
+                    if spellID and ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(spellID) then
+                        spellID = ns.HostedBuffMarkerToSpell(spellID)
+                    end
                 end
                 if spellID and spellID ~= 0 then
+                    -- Hosted-buff SLOT? The slot decides, not the flag alone: the
+                    -- same spellID can also be this bar's cooldown entry, and that
+                    -- slot must keep the CD store + cd/util menu. Legacy fallback:
+                    -- flag set with no marker entry yet means the plain entry is
+                    -- the buff (pre-marker data).
+                    local isHostedBuff = (anchorFrame and anchorFrame._previewHostedBuff) or false
+                    if not isHostedBuff and sd.hostedBuffSpellIDs and sd.hostedBuffSpellIDs[spellID]
+                       and not (ns.ListHasHostedMarker and sd.assignedSpells
+                                and ns.ListHasHostedMarker(sd.assignedSpells, spellID)) then
+                        isHostedBuff = true
+                    end
                     -- Per-spell entries live in the spec FAMILY store (they travel
                     -- with the spell across bars). The bar tiers sit below them:
                     -- sd.barSettings ("Apply to Bar") -> bd.barSpellSettings
-                    -- ("Apply to Bar (All Specs)").
-                    local store = ns.GetSpellSettingsStore(barKey, true)
+                    -- ("Apply to Bar (All Specs)"). A hosted buff uses the BUFF
+                    -- store -- the same entry it had on the buffs bar -- and never
+                    -- chains to this bar's (cd/util) tiers.
+                    local store = ns.GetSpellSettingsStore(isHostedBuff and "buffs" or barKey, true)
                     local bdSel = ns.barDataByKey and ns.barDataByKey[barKey]
-                    local famKey = ns.SettingsFamilyKey(barKey)
+                    local famKey = ns.SettingsFamilyKey(isHostedBuff and "buffs" or barKey)
                     -- Effective-read view: the entry (or a not-yet-persisted fresh
                     -- table) chained to the bar tiers, so the menu shows the values
                     -- the icon actually renders with. EnsureSS() persists the entry
                     -- on first WRITE.
                     local ss = store and store[spellID]
                     if not ss then ss = {} end
-                    ns.ChainSettings(ss, ns.GetBarTierSettings(sd, barKey))
+                    ns.ChainSettings(ss, isHostedBuff and nil or ns.GetBarTierSettings(sd, barKey))
                     local function EnsureSS()
                         if store and not store[spellID] then
                             store[spellID] = ss
@@ -6917,15 +7606,30 @@ initFrame:SetScript("OnEvent", function(self)
                                             claimed[sid2] = true
                                         end
                                     end
+                                    -- Also exclude HOSTED buffs (on cd/util bars): they are
+                                    -- removed from Apply-to-Bar, so a default-buffs-bar apply
+                                    -- must not treat their buff-store entry as an unclaimed
+                                    -- member and wipe it.
+                                    if type(b2) == "table" and type(b2.hostedBuffSpellIDs) == "table" then
+                                        for hsid in pairs(b2.hostedBuffSpellIDs) do
+                                            claimed[hsid] = true
+                                        end
+                                    end
                                 end
                             end
                             for sid2, e in pairs(st) do
                                 if type(e) == "table" and not claimed[sid2] then fn(sid2, e) end
                             end
                         elseif bsX and type(bsX.assignedSpells) == "table" then
+                            -- Hosted buffs are excluded from Apply-to-Bar: never treat one
+                            -- as a bar member (so a bar apply can't clear/overwrite its
+                            -- per-spell settings).
+                            local hosted = bsX.hostedBuffSpellIDs
                             for _, sid2 in ipairs(bsX.assignedSpells) do
-                                local e = st[sid2]
-                                if type(e) == "table" then fn(sid2, e) end
+                                if not (hosted and hosted[sid2]) then
+                                    local e = st[sid2]
+                                    if type(e) == "table" then fn(sid2, e) end
+                                end
                             end
                         end
                     end
@@ -6936,6 +7640,7 @@ initFrame:SetScript("OnEvent", function(self)
                         if not t then return end
                         if t.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                         if t.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                        if (tonumber(t.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
                         if t.maxStacksGlow and t.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
                         if t.desatNotActive then ns._cdmAnyDesatNotActive = true end
                         if t.chargeHideCdText then ns._cdmAnyChargeHideCdText = true end
@@ -6987,22 +7692,60 @@ initFrame:SetScript("OnEvent", function(self)
                         glowColorR = true, glowColorG = true, glowColorB = true,
                         cdStateEffect = true, cdStateLowerAlpha = true,
                         reverseSwipe = true, hideCDSwipe = true,
+                        thresholdSeconds = true, thresholdDecimals = true,
+                        thresholdColorEnabled = true, thresholdColorR = true,
+                        thresholdColorG = true, thresholdColorB = true,
                     }
-                    AB.StampMemberCas = function(bsX, applyWrite, val)
+                    AB.StampMemberCas = function(bsX, applyWrite, val, keys)
                         if not (bsX and type(bsX.assignedSpells) == "table") then return end
                         if not (ns.GetCustomActiveState and ns.ResolveCustomActiveKey) then return end
+                        -- cas semantics: nil = no cd-state effect (PresetHasCdState
+                        -- checks effect presence). The explicit blocking-false is a
+                        -- tier / per-trinket-exclusion concept -- strip it from
+                        -- stamps. Threshold Text keys share the same cas semantics.
+                        local function StripFalse(e)
+                            if e.cdStateEffect == false then e.cdStateEffect = nil end
+                            if e.thresholdSeconds == false then e.thresholdSeconds = nil end
+                            if e.thresholdDecimals == false then e.thresholdDecimals = nil end
+                            if e.thresholdColorEnabled == false then e.thresholdColorEnabled = nil end
+                        end
                         for _, sid2 in ipairs(bsX.assignedSpells) do
-                            local isInj = (type(sid2) == "number" and sid2 < 0)
+                            local isInj = ((type(sid2) == "number" and sid2 < 0)
                                 or (ns._myRacialsSet and ns._myRacialsSet[sid2])
-                                or (bsX.customSpellIDs and bsX.customSpellIDs[sid2])
+                                or (bsX.customSpellIDs and bsX.customSpellIDs[sid2]))
+                                -- Hosted-buff markers are reparented Blizzard buff
+                                -- frames, not preset icons -- never mint cas entries
+                                -- for them.
+                                and not (ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid2))
                             if isInj then
-                                local e = ns.GetCustomActiveState(ns.ResolveCustomActiveKey(sid2), true)
-                                if e then
-                                    applyWrite(e, val)
-                                    -- cas semantics: nil = no cd-state effect
-                                    -- (PresetHasCdState checks ~= nil). The explicit
-                                    -- blocking-false is a TIER concept -- strip it.
-                                    if e.cdStateEffect == false then e.cdStateEffect = nil end
+                                if sid2 == -13 or sid2 == -14 then
+                                    -- Trinket slots stamp the SLOT entry: one bar
+                                    -- application that covers whatever trinket is
+                                    -- equipped, now or after any swap -- no entry
+                                    -- minted per equipped item.
+                                    local e = ns.GetCustomActiveState(sid2, true)
+                                    if e then
+                                        applyWrite(e, val)
+                                        StripFalse(e)
+                                    end
+                                    -- Clear the applied keys from the EQUIPPED
+                                    -- trinket's own (item-keyed) entry so the apply
+                                    -- visibly takes effect on it -- mirroring the
+                                    -- member-entry clear RunBarApply does for family
+                                    -- keys. A per-trinket exclusion is re-chosen in
+                                    -- the menu AFTER an apply; benched trinkets keep
+                                    -- their per-item choices untouched.
+                                    local itemID = GetInventoryItemID("player", -sid2)
+                                    local own = itemID and ns.GetCustomActiveState(-itemID) or nil
+                                    if own and keys then
+                                        for _, k2 in ipairs(keys) do own[k2] = nil end
+                                    end
+                                else
+                                    local e = ns.GetCustomActiveState(ns.ResolveCustomActiveKey(sid2), true)
+                                    if e then
+                                        applyWrite(e, val)
+                                        StripFalse(e)
+                                    end
                                 end
                             end
                         end
@@ -7025,12 +7768,16 @@ initFrame:SetScript("OnEvent", function(self)
                             if AB.CAS_KEYS[k] then touchesCas = true; break end
                         end
                         local count = 0
+                        local CAS_FALSE_STRIPPED = {
+                            cdStateEffect = true, thresholdSeconds = true,
+                            thresholdDecimals = true, thresholdColorEnabled = true,
+                        }
                         local function entryLoses(e, isCas)
                             for _, k in ipairs(keys) do
                                 local own = rawget(e, k)
                                 local new = temp[k]
                                 -- cas stamping normalizes the blocking-false away.
-                                if isCas and k == "cdStateEffect" and new == false then new = nil end
+                                if isCas and CAS_FALSE_STRIPPED[k] and new == false then new = nil end
                                 if own ~= nil and own ~= new then return true end
                             end
                             return false
@@ -7053,10 +7800,15 @@ initFrame:SetScript("OnEvent", function(self)
                             if touchesCas and bsX and type(bsX.assignedSpells) == "table"
                                and ns.GetCustomActiveState and ns.ResolveCustomActiveKey then
                                 for _, sid2 in ipairs(bsX.assignedSpells) do
-                                    local isInj = (type(sid2) == "number" and sid2 < 0)
+                                    local isInj = ((type(sid2) == "number" and sid2 < 0)
                                         or (ns._myRacialsSet and ns._myRacialsSet[sid2])
-                                        or (bsX.customSpellIDs and bsX.customSpellIDs[sid2])
+                                        or (bsX.customSpellIDs and bsX.customSpellIDs[sid2]))
+                                        and not (ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid2))
                                     if isInj then
+                                        -- Trinket slots resolve to the EQUIPPED item's
+                                        -- own entry -- the values the stamp will clear;
+                                        -- the slot entry is the bar-level stamp itself
+                                        -- (analogous to the tier) and is not counted.
                                         local e = ns.GetCustomActiveState(ns.ResolveCustomActiveKey(sid2))
                                         if e and entryLoses(e, true) then count = count + 1 end
                                     end
@@ -7103,7 +7855,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end)
                             if touchesCas then
-                                AB.StampMemberCas(bsX, applyWrite, val)
+                                AB.StampMemberCas(bsX, applyWrite, val, keys)
                             end
                         end
                         if allSpecs then
@@ -7144,71 +7896,44 @@ initFrame:SetScript("OnEvent", function(self)
                         if ns.QueueReanchor then ns.QueueReanchor() end
                     end
 
-                    -- Excluded = this spec has opted OUT of an active "Apply to Bar (All
-                    -- Specs)" for a key: a per-spec false-block (sd.barSettings[k]==false)
-                    -- sitting over an All Specs value. Unambiguous because mutual
-                    -- exclusivity means a per-spec value and an All Specs value never
-                    -- coexist except via this deliberate opt-out.
-                    AB.KeysExcluded = function(keys)
-                        if not keys then return false end
-                        local bs = sd.barSettings
-                        local abs = bdSel and bdSel.barSpellSettings
-                        for _, k in ipairs(keys) do
-                            if bs and rawget(bs, k) == false and abs and abs[k] ~= nil then
-                                return true
-                            end
-                        end
-                        return false
-                    end
-
-                    -- True when the BAR drives this setting -- "Apply to Bar" (per-spec)
-                    -- or "Apply to Bar (All Specs)" holds a value for any of these keys
-                    -- AND this spec is not excluded from it. While it does, the per-icon
-                    -- flyout option is LOCKED (clicking it is a no-op) -- change it from
-                    -- the strip. An excluded spec is on its own, so it stays editable.
+                    -- True when a BAR tier drives this setting -- "Apply to Bar" (this
+                    -- spec) or "Apply to Bar (All Specs)" holds a value for any of these
+                    -- keys. A blocking false counts (it's a bar-spec "= Default" apply).
+                    -- Exclusion is per-spell now (SpellHasOwn), so there is no spec-level
+                    -- carve-out here: this only answers "does the bar drive this setting".
                     AB.KeysBarApplied = function(keys)
                         if not keys then return false end
                         local bs = sd.barSettings
                         local abs = bdSel and bdSel.barSpellSettings
                         for _, k in ipairs(keys) do
-                            local pv = bs and rawget(bs, k)
-                            local av = abs and abs[k]
-                            -- per-spec false + All Specs present = excluded -> editable
-                            if not (pv == false and av ~= nil) and (pv ~= nil or av ~= nil) then
+                            if (bs and rawget(bs, k) ~= nil) or (abs and abs[k] ~= nil) then
                                 return true
                             end
                         end
                         return false
                     end
 
-                    -- Opt THIS spec in/out of an active "Apply to Bar (All Specs)" for
-                    -- these keys. Exclude writes a per-spec false-block (bar tier),
-                    -- leaving All Specs intact for other specs -- regular spell members
-                    -- read the chain and fall to default here. Include clears the block
-                    -- so the spec re-inherits All Specs. (Preset icons read cas, not the
-                    -- chain, so an All-Specs cas value stays on presets on the excluded
-                    -- spec -- niche; regular spells are the case this serves.)
-                    AB.SetSpecExcluded = function(keys, excluded)
-                        local touchesCas = false
+                    -- True when the SPELL holds its OWN value for any of these keys (a
+                    -- per-spell override in THIS spec's store). This IS the "excluded
+                    -- from the bar" state: the spell has broken out of the bar apply
+                    -- into its own value. Inherently per spell AND spec, because the
+                    -- store is the active spec's profile.
+                    AB.SpellHasOwn = function(keys)
+                        if not (keys and ss) then return false end
                         for _, k in ipairs(keys) do
-                            if AB.CAS_KEYS[k] then touchesCas = true; break end
+                            if rawget(ss, k) ~= nil then return true end
                         end
-                        if excluded then
-                            local bs = sd.barSettings
-                            if not bs then bs = {}; sd.barSettings = bs end
-                            ns.ChainSettings(bs, bdSel and bdSel.barSpellSettings)
-                            for _, k in ipairs(keys) do rawset(bs, k, false) end
-                        else
-                            local bs = sd.barSettings
-                            if bs then
-                                for _, k in ipairs(keys) do rawset(bs, k, nil) end
-                                if next(bs) == nil then sd.barSettings = nil end
-                            end
-                        end
+                        return false
+                    end
+
+                    -- Include This Spell: drop this spell's own value for these keys so
+                    -- it rejoins the bar apply (per spell+spec). Caller does the UI
+                    -- refresh. Shared by the b3 button and by Apply to Bar/All Specs on
+                    -- an already-excluded spell (which means the same thing).
+                    AB.IncludeSpell = function(keys)
+                        if not (keys and ss) then return end
+                        for _, k in ipairs(keys) do rawset(ss, k, nil) end
                         ns.ChainSettings(ss, ns.GetBarTierSettings(sd, barKey))
-                        if touchesCas and ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
-                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
-                        if ns.QueueReanchor then ns.QueueReanchor() end
                     end
 
                     -- Remove an active apply from one scope: clears the setting's
@@ -7241,21 +7966,46 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end
                         if touchesCas and ns.GetCustomActiveState and ns.ResolveCustomActiveKey then
+                            -- Remove still-equal stamped values from one cas entry.
+                            -- rawget: a trinket item entry may be CHAINED to its slot
+                            -- entry, and an inherited value must not read as an own
+                            -- stamp (clearing own nil is a no-op, but the equality
+                            -- test has to see own values only).
+                            local function unstampEntry(e)
+                                if not e then return end
+                                for _, k in ipairs(keys) do
+                                    local rv = removed[k]
+                                    -- cas never stores the blocking-false
+                                    -- (cdStateEffect + Threshold Text keys).
+                                    if rv == false and (k == "cdStateEffect"
+                                        or k == "thresholdSeconds"
+                                        or k == "thresholdDecimals"
+                                        or k == "thresholdColorEnabled") then
+                                        rv = nil
+                                    end
+                                    if rv ~= nil and rawget(e, k) == rv then e[k] = nil end
+                                end
+                            end
                             local function unstamp(bsX)
                                 if not (bsX and type(bsX.assignedSpells) == "table") then return end
                                 for _, sid2 in ipairs(bsX.assignedSpells) do
-                                    local isInj = (type(sid2) == "number" and sid2 < 0)
+                                    local isInj = ((type(sid2) == "number" and sid2 < 0)
                                         or (ns._myRacialsSet and ns._myRacialsSet[sid2])
-                                        or (bsX.customSpellIDs and bsX.customSpellIDs[sid2])
+                                        or (bsX.customSpellIDs and bsX.customSpellIDs[sid2]))
+                                        and not (ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid2))
                                     if isInj then
-                                        local e = ns.GetCustomActiveState(ns.ResolveCustomActiveKey(sid2))
-                                        if e then
-                                            for _, k in ipairs(keys) do
-                                                local rv = removed[k]
-                                                -- cas never stores the blocking-false.
-                                                if k == "cdStateEffect" and rv == false then rv = nil end
-                                                if rv ~= nil and e[k] == rv then e[k] = nil end
+                                        if sid2 == -13 or sid2 == -14 then
+                                            -- Trinket slots: the stamp lives on the SLOT
+                                            -- entry. Also sweep the equipped trinket's
+                                            -- item entry -- it may carry a legacy
+                                            -- per-item stamp from before slot stamping.
+                                            unstampEntry(ns.GetCustomActiveState(sid2))
+                                            local itemID = GetInventoryItemID("player", -sid2)
+                                            if itemID then
+                                                unstampEntry(ns.GetCustomActiveState(-itemID))
                                             end
+                                        else
+                                            unstampEntry(ns.GetCustomActiveState(ns.ResolveCustomActiveKey(sid2)))
                                         end
                                     end
                                 end
@@ -7281,114 +8031,212 @@ initFrame:SetScript("OnEvent", function(self)
                         if ns.QueueReanchor then ns.QueueReanchor() end
                     end
 
-                    -- The hover strip itself: "Apply to Bar | Apply to Bar (All
-                    -- Specs)" docked to the right of the hovered flyout item. One
-                    -- shared frame per menu; context swapped on each hover.
+                    -- The scope flyout itself: a vertical list (Apply to This
+                    -- Spell / Apply to Bar / Apply to Bar (All Specs) / conditional
+                    -- Exclude this spec) docked to the right of the hovered flyout
+                    -- item. One shared frame per menu; context swapped on each hover.
                     AB.GetApplyStrip = function()
                         if menu._applyStrip then return menu._applyStrip end
+                        -- Vertical flyout styled exactly like a subnav flyout: the
+                        -- scope choices ("Apply to This Spell" / "Apply to Bar" /
+                        -- "Apply to Bar (All Specs)", plus a conditional Exclude/
+                        -- Include this spec) stack as rows with a left-aligned label
+                        -- and the same white hover/selected overlay.
+                        local SUBW = 180
                         local s = CreateFrame("Frame", nil, menu)
                         s:SetFrameStrata("FULLSCREEN_DIALOG")
                         s:SetFrameLevel(menu:GetFrameLevel() + 8)
                         s:SetClampedToScreen(true)
-                        s:SetHeight(ITEM_H)
+                        s:SetWidth(SUBW)
+                        s:EnableMouse(true)
                         local bg = s:CreateTexture(nil, "BACKGROUND")
                         bg:SetAllPoints(); bg:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
                         EllesmereUI.MakeBorder(s, 1, 1, 1, mBrdA, EllesmereUI.PP)
-                        local function MakeStripBtn(text)
-                            local b = CreateFrame("Button", nil, s)
+                        local sInner = CreateFrame("Frame", nil, s)
+                        sInner:SetWidth(SUBW)
+                        sInner:SetPoint("TOPLEFT")
+                        -- One scope row. _active drives BOTH the accent label colour
+                        -- and the persistent white overlay (the "selected" look, same
+                        -- as a subnav item); _rest repaints from it.
+                        local function MakeScopeItem(text)
+                            local b = CreateFrame("Button", nil, sInner)
                             b:SetHeight(ITEM_H)
+                            b:SetFrameLevel(s:GetFrameLevel() + 2)
                             local l = b:CreateFontString(nil, "OVERLAY")
                             l:SetFont(FONT_PATH, 11, GetCDMOptOutline())
-                            l:SetPoint("CENTER")
+                            l:SetPoint("LEFT", 10, 0)
+                            l:SetJustifyH("LEFT")
                             l:SetText(text)
                             l:SetTextColor(tDimR, tDimG, tDimB, tDimA)
-                            b:SetWidth(math.floor(l:GetStringWidth() + 0.5) + 16)
-                            local bh = b:CreateTexture(nil, "ARTWORK")
-                            bh:SetAllPoints(); bh:SetColorTexture(1, 1, 1, 0)
-                            -- Resting color: accent while this scope holds an active
-                            -- value for the hovered setting, dim otherwise.
+                            local hl = b:CreateTexture(nil, "ARTWORK")
+                            hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, hlA); hl:SetAlpha(0)
+                            b._label = l
+                            b._hl = hl
+                            b._active = false
                             b._rest = function()
                                 if b._active then
                                     local aR, aG, aB = EllesmereUI.GetAccentColor()
                                     l:SetTextColor(aR, aG, aB, 1)
+                                    hl:SetAlpha(1)
                                 else
                                     l:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                                    hl:SetAlpha(0)
                                 end
                             end
                             b:SetScript("OnEnter", function()
-                                l:SetTextColor(1, 1, 1, 1); bh:SetColorTexture(1, 1, 1, hlA)
+                                l:SetTextColor(1, 1, 1, 1); hl:SetAlpha(1)
                             end)
                             b:SetScript("OnLeave", function()
-                                b._rest(); bh:SetColorTexture(1, 1, 1, 0)
+                                b._rest()
                             end)
-                            -- Dynamic-label buttons (the exclude/include button) re-fit
-                            -- their width when the caption changes.
-                            b._setText = function(text)
-                                l:SetText(text)
-                                b:SetWidth(math.floor(l:GetStringWidth() + 0.5) + 16)
-                            end
+                            b._setText = function(t) l:SetText(t) end
                             return b
                         end
-                        local b1 = MakeStripBtn(EllesmereUI.L("Apply to Bar"))
-                        b1:SetPoint("LEFT", s, "LEFT", 0, 0)
-                        local div = s:CreateTexture(nil, "ARTWORK")
-                        div:SetSize(1, ITEM_H - 10)
-                        div:SetColorTexture(1, 1, 1, 0.15)
-                        div:SetPoint("LEFT", b1, "RIGHT", 0, 0)
-                        local b2 = MakeStripBtn(EllesmereUI.L("Apply to Bar (All Specs)"))
-                        b2:SetPoint("LEFT", div, "RIGHT", 0, 0)
-                        -- Third button: opt THIS spec in/out of an active All Specs apply.
-                        -- Only shown (and only folded into the strip width) while All Specs
-                        -- holds the setting -- see s._updateActive.
-                        local div2 = s:CreateTexture(nil, "ARTWORK")
-                        div2:SetSize(1, ITEM_H - 10)
-                        div2:SetColorTexture(1, 1, 1, 0.15)
-                        div2:SetPoint("LEFT", b2, "RIGHT", 0, 0)
-                        local b3 = MakeStripBtn(EllesmereUI.L("Exclude this spec"))
-                        b3:SetPoint("LEFT", div2, "RIGHT", 0, 0)
-                        div2:Hide(); b3:Hide()
-                        s:SetWidth(b1:GetWidth() + 1 + b2:GetWidth())
-                        -- Accent whichever scope currently holds a value for the
-                        -- hovered setting ("this bar has an active apply").
+                        local thisBtn = MakeScopeItem(EllesmereUI.L("Apply to This Spell"))
+                        local b1 = MakeScopeItem(EllesmereUI.L("Apply to Bar"))
+                        local b2 = MakeScopeItem(EllesmereUI.L("Apply to Bar (All Specs)"))
+                        local b3 = MakeScopeItem(EllesmereUI.L("Exclude This Spell"))
+                        b3._shown = false
+                        -- Exclude/Include This Spell reads apart from the scope rows:
+                        -- soft red when it will Exclude, soft green when it will
+                        -- Include, and NO persistent white overlay when active (a
+                        -- hover overlay only) -- b3._excluded (set in _updateActive)
+                        -- picks the colour.
+                        b3._rest = function()
+                            if b3._excluded then
+                                b3._label:SetTextColor(0.55, 0.82, 0.55, 1)  -- Include: soft green
+                            else
+                                b3._label:SetTextColor(0.90, 0.45, 0.45, 1)  -- Exclude: soft red
+                            end
+                            b3._hl:SetAlpha(0)
+                        end
+                        b3:SetScript("OnEnter", function()
+                            -- Hover overlay same as the other rows (the texture's own
+                            -- colour is already hlA, so SetAlpha(1) shows it); only the
+                            -- ACTIVE/persistent overlay is suppressed, in _rest.
+                            b3._rest(); b3._hl:SetAlpha(1)
+                        end)
+                        b3:SetScript("OnLeave", function()
+                            b3._rest()
+                        end)
+                        -- (Re)stack the visible rows top-to-bottom and size the frame.
+                        -- Row 1 is "Apply to This Spell" normally, but a bar apply
+                        -- REPLACES it with "Exclude / Include This Spell" (b3._shown) --
+                        -- the two are mutually exclusive there. Then Apply to Bar / All
+                        -- Specs.
+                        local function Relayout()
+                            local y = 4
+                            local function place(it)
+                                it:ClearAllPoints()
+                                it:SetPoint("TOPLEFT", sInner, "TOPLEFT", 1, -y)
+                                it:SetPoint("TOPRIGHT", sInner, "TOPRIGHT", -1, -y)
+                                it:Show()
+                                y = y + ITEM_H
+                            end
+                            if b3._shown then place(b3); thisBtn:Hide() else place(thisBtn); b3:Hide() end
+                            place(b1); place(b2)
+                            local total = y + 4
+                            sInner:SetHeight(total)
+                            s:SetHeight(total)
+                        end
+                        -- Accent (and overlay) a scope ONLY when it holds an OWN value
+                        -- for these keys that EQUALS the hovered item's value -- so the
+                        -- highlight tracks the specific choice under the cursor, not
+                        -- merely "this scope has some value applied".
                         s._updateActive = function()
                             local ctx = s._ctx
-                            local keys = ctx and ctx.keys
-                            local function tierHas(t, raw)
-                                if not (t and keys) then return false end
+                            local keys = (ctx and ctx.keys) or {}
+                            -- Simulate the write once: the hovered item's value as it
+                            -- would land in a tier table (false-blocks and all).
+                            local temp = {}
+                            if ctx and ctx.write and ctx.valueOf then
+                                ctx.write(temp, ctx.valueOf())
+                            end
+                            local function holds(tier, raw)
+                                if not tier then return false end
+                                local anyOwn, match = false, true
                                 for _, k in ipairs(keys) do
-                                    local v
-                                    if raw then v = rawget(t, k) else v = t[k] end
-                                    if v ~= nil then return true end
+                                    local own
+                                    if raw then own = rawget(tier, k) else own = tier[k] end
+                                    if own ~= nil then anyOwn = true end
+                                    if own ~= temp[k] then match = false end
                                 end
-                                return false
+                                return anyOwn and match
                             end
-                            -- barSettings is chained to the all-specs tier below it:
-                            -- rawget so each scope reflects only its OWN values.
-                            b1._active = tierHas(sd.barSettings, true)
-                            b2._active = tierHas(bdSel and bdSel.barSpellSettings, false)
-                            b1._rest(); b2._rest()
-                            -- Exclude/Include this spec: only meaningful while All Specs
-                            -- holds the setting. Label flips on the spec's exclude state;
-                            -- accent when excluded so the opt-out reads clearly. The strip
-                            -- width folds the button in/out.
-                            if b2._active then
-                                local excl = AB.KeysExcluded(keys)
-                                b3._setText(excl and EllesmereUI.L("Include this spec")
-                                    or EllesmereUI.L("Exclude this spec"))
-                                b3._active = excl
-                                b3._rest()
-                                div2:Show(); b3:Show()
-                                s:SetWidth(b1:GetWidth() + 1 + b2:GetWidth() + 1 + b3:GetWidth())
+                            -- Excluded = the spell holds its OWN value for these keys.
+                            -- Exactly ONE scope is the effective source: this spell when
+                            -- excluded, otherwise whichever bar tier drives it -- so the
+                            -- overlay never sits on Apply to Bar while the spell is off
+                            -- on its own (even though the bar still holds it for others).
+                            local excluded = false
+                            for _, k in ipairs(keys) do
+                                if rawget(ss, k) ~= nil then excluded = true; break end
+                            end
+                            -- "Apply to This Spell" only shows when NO bar apply drives the
+                            -- setting (a bar apply REPLACES it with Exclude/Include -- see
+                            -- Relayout), so it just lights on the value the spell owns.
+                            -- Toggles light whenever the spell has its own value (on OR off);
+                            -- OR settings match the specific value.
+                            if ctx and ctx.isToggle then
+                                thisBtn._active = excluded
                             else
-                                div2:Hide(); b3:Hide()
-                                s:SetWidth(b1:GetWidth() + 1 + b2:GetWidth())
+                                thisBtn._active = holds(ss, true)
                             end
+                            b1._active = (not excluded) and holds(sd.barSettings, true)
+                            b2._active = (not excluded) and holds(bdSel and bdSel.barSpellSettings, false)
+                            thisBtn._rest(); b1._rest(); b2._rest()
+                            -- Exclude/Include This Spell: shown whenever a bar apply drives
+                            -- the setting (so this spell+spec can opt out / back in). Label
+                            -- + soft red/green colour flip on the excluded state (b3._excluded
+                            -- drives the colour -- see b3._rest above).
+                            if AB.KeysBarApplied(keys) then
+                                b3._excluded = excluded
+                                b3._setText(excluded and ("+ " .. EllesmereUI.L("Include This Spell"))
+                                    or ("+ " .. EllesmereUI.L("Exclude This Spell")))
+                                b3._shown = true
+                            else
+                                b3._excluded = false
+                                b3._shown = false
+                            end
+                            b3._rest()
+                            Relayout()
+                        end
+                        -- Flash the border of whichever bar scope currently holds a
+                        -- value for the hovered keys (the "selected apply to bar
+                        -- setting"). Called when a subnav click was a no-op because
+                        -- the bar already drives the setting -- the standard white
+                        -- border flash used across the UI, as a "look here" cue.
+                        s._flashScopeFor = function()
+                            local ctx = s._ctx
+                            local keys = ctx and ctx.keys
+                            if not keys then return end
+                            local abs = bdSel and bdSel.barSpellSettings
+                            local allActive = false
+                            if abs then
+                                for _, k in ipairs(keys) do
+                                    if abs[k] ~= nil then allActive = true; break end
+                                end
+                            end
+                            local target = allActive and b2 or b1
+                            if EllesmereUI.PlayWhiteFlash then EllesmereUI.PlayWhiteFlash(target) end
                         end
                         local function DoApply(allSpecs)
                             local ctx = s._ctx
                             if not ctx then return end
                             local val = ctx.valueOf and ctx.valueOf()
                             local keys = ctx.keys or {}
+                            -- On an EXCLUDED spell the flyout sits on the bar's own value,
+                            -- so Apply to Bar / All Specs here means "rejoin the bar" -- the
+                            -- same as Include This Spell. Do that instead of re-applying the
+                            -- value already on the bar (which would just toggle it off).
+                            if AB.KeysBarApplied(keys) and AB.SpellHasOwn(keys) then
+                                AB.IncludeSpell(keys)
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                if ns.QueueReanchor then ns.QueueReanchor() end
+                                if ctx.refresh then ctx.refresh() end
+                                if s._updateActive then s._updateActive() end
+                                return
+                            end
                             -- Simulate the write once: drives the toggle-off check
                             -- and the replace warning below.
                             local temp = {}
@@ -7474,16 +8322,45 @@ initFrame:SetScript("OnEvent", function(self)
                                 onConfirm   = go,
                             })
                         end
+                        -- Apply to This Spell: write the hovered value into the spell's
+                        -- OWN entry in THIS spec's store (a per-spell override = excluding
+                        -- this spell+spec from the bar). No dissolve, no popup -- only this
+                        -- one spell changes; the bar apply stays for every other spell.
+                        thisBtn:SetScript("OnClick", function()
+                            local ctx = s._ctx
+                            if not (ctx and ctx.write) then return end
+                            EnsureSS()
+                            ctx.write(ss, ctx.valueOf and ctx.valueOf())
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                            if ns.QueueReanchor then ns.QueueReanchor() end
+                            if ctx.refresh then ctx.refresh() end
+                            if s:IsShown() and s._updateActive then s._updateActive() end
+                        end)
                         b1:SetScript("OnClick", function() DoApply(false) end)
                         b2:SetScript("OnClick", function() DoApply(true) end)
+                        -- Exclude / Include This Spell (per spell+spec, via ss).
                         b3:SetScript("OnClick", function()
                             local ctx = s._ctx
-                            if not ctx then return end
+                            if not (ctx and ctx.write) then return end
                             local keys = ctx.keys or {}
-                            AB.SetSpecExcluded(keys, not AB.KeysExcluded(keys))
+                            if AB.SpellHasOwn(keys) then
+                                -- Include: drop this spell's own value -> rejoin the bar.
+                                AB.IncludeSpell(keys)
+                            else
+                                -- Exclude: break this spell out with its own value. OR
+                                -- settings copy the current value (look unchanged); the
+                                -- "+" toggles exclude by turning OFF for this spell.
+                                EnsureSS()
+                                local v
+                                if ctx.isToggle then v = false else v = ctx.valueOf and ctx.valueOf() end
+                                ctx.write(ss, v)
+                            end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                            if ns.QueueReanchor then ns.QueueReanchor() end
                             if ctx.refresh then ctx.refresh() end
                             if s._updateActive then s._updateActive() end
                         end)
+                        Relayout()
                         s:Hide()
                         menu._applyStrip = s
                         return s
@@ -7496,12 +8373,12 @@ initFrame:SetScript("OnEvent", function(self)
                         s._ownerItem = itemBtn
                         if s._updateActive then s._updateActive() end
                         s:ClearAllPoints()
-                        -- Same 2px offset as the subnav flyouts. Like a subnav, the
-                        -- strip does NOT hide on hover-out (crossing the gap would
-                        -- kill it otherwise) -- it hides when its owner item goes
-                        -- away (flyout closed/rebuilt), when another item retargets
-                        -- it, or when the menu closes.
-                        s:SetPoint("LEFT", itemBtn, "RIGHT", 2, 0)
+                        -- Same 2px offset as the subnav flyouts, top-aligned to the
+                        -- hovered item. Like a subnav, the strip does NOT hide on
+                        -- hover-out (crossing the gap would kill it otherwise) -- it
+                        -- hides when its owner item goes away (flyout closed/rebuilt),
+                        -- when another item retargets it, or when the menu closes.
+                        s:SetPoint("TOPLEFT", itemBtn, "TOPRIGHT", 2, 0)
                         s:Show()
                     end
 
@@ -7581,6 +8458,10 @@ initFrame:SetScript("OnEvent", function(self)
                               end
                               return base
                           end },
+                        -- Shift variants: same hide as the plain modes below, but the
+                        -- bar re-lays out so the remaining icons close the gap.
+                        { val = "hiddenOnCDShift",  label = "Hidden on CD (Shift Icons)" },
+                        { val = "hiddenReadyShift", label = "Hidden CD Ready (Shift Icons)" },
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -7611,6 +8492,11 @@ initFrame:SetScript("OnEvent", function(self)
                     }
 
                     -- Track open subnavs on the menu frame so OnUpdate can see them
+
+                    -- Hosted buffs are fully removed from the Apply-to-Bar system: this
+                    -- flag (set per-icon below, once isHostedBuff is known) suppresses the
+                    -- "Apply to Bar" hover strip on every row for a hosted buff.
+                    local hostedBuffNoApply = false
 
                     -- Helper: subnav flyout (same style as Potions & Healthstone)
                     -- isDefault: function returning true when the setting is at default value
@@ -7687,6 +8573,9 @@ initFrame:SetScript("OnEvent", function(self)
 
                             local subH = 4
                             local curVal = getVal()
+                            -- "None"/default is stored as a blocking false; treat it as
+                            -- nil so its item reads as selected (false ~= nil otherwise).
+                            if curVal == false then curVal = nil end
                             local flyoutEntries = {}
                             -- Re-highlight the selection in place after a value click.
                             -- The flyout stays OPEN (no rebuild -- that would reset
@@ -7704,6 +8593,9 @@ initFrame:SetScript("OnEvent", function(self)
                                         e.setSelected(e.computeSelected())
                                     end
                                     if e.refreshLabel then e.refreshLabel() end
+                                    -- Applying / un-applying to the bar changes which value
+                                    -- is the unclickable arrow row -- refresh it in place.
+                                    if e.updateArrow then e.updateArrow() end
                                 end
                             end
                             -- Reachable from onItemCreated closures (color swatches),
@@ -7742,15 +8634,21 @@ initFrame:SetScript("OnEvent", function(self)
 
                                 -- Highlight selected item. Charge entries are
                                 -- independent toggles (item.charge names the ss
-                                -- boolean key); all other items are single-select
-                                -- on item.val.
+                                -- boolean key); item.toggleGet/toggleSet entries
+                                -- are independent toggles over ANY store (the row
+                                -- supplies the accessors, so the same items work
+                                -- in the ss, buff and customActiveStates branches);
+                                -- all other items are single-select on item.val.
                                 local isChargeToggle = item.charge ~= nil
                                 local isActiveBorder = item.activeBorder == true
+                                local isFnToggle = item.toggleGet ~= nil
                                 local isSelected
                                 if isChargeToggle then
                                     isSelected = (ss[item.charge] == true)
                                 elseif isActiveBorder then
                                     isSelected = (ss.activeBorderEnabled == true)
+                                elseif isFnToggle then
+                                    isSelected = item.toggleGet() and true or false
                                 else
                                     isSelected = (curVal == item.val)
                                         or (curVal == nil and item.val == nil)
@@ -7768,7 +8666,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- persistent "hovered" look) so the active choice reads
                                 -- clearly; the toggles ("+ " ones + Border Color) never do.
                                 sHl:SetAllPoints(); sHl:SetColorTexture(1, 1, 1, hlA); sHl:SetAlpha(0)
-                                if not (isChargeToggle or isActiveBorder) and isSelected then
+                                if not (isChargeToggle or isActiveBorder or isFnToggle) and isSelected then
                                     sHl:SetAlpha(1)
                                 end
 
@@ -7779,7 +8677,33 @@ initFrame:SetScript("OnEvent", function(self)
                                 local rowApply = opts and opts.apply
                                 local applyKeys  = item.applyKeys or (rowApply and rowApply.keys)
                                 local applyWrite = item.applyWrite or (rowApply and rowApply.write)
-                                local canApply = applyWrite ~= nil
+                                -- Hosted buffs are excluded from Apply-to-Bar entirely.
+                                local canApply = applyWrite ~= nil and not hostedBuffNoApply
+                                -- When a bar apply drives this setting, the value the BAR
+                                -- applies acts like a submenu row: it shows a right-arrow and
+                                -- is unclickable -- you manage it through the scope flyout that
+                                -- opens on hover (Exclude / Include / Apply to Bar), never by
+                                -- re-selecting the value. A bar-applied "+ " toggle counts too.
+                                local function itemIsBarApplied()
+                                    if not (applyKeys and AB.KeysBarApplied(applyKeys)) then return false end
+                                    if isChargeToggle or isActiveBorder or isFnToggle then return true end
+                                    local barTier = ns.GetBarTierSettings and ns.GetBarTierSettings(sd, barKey)
+                                    local pk = applyKeys[1]
+                                    if not (barTier and pk) then return false end
+                                    local temp = {}
+                                    applyWrite(temp, item.val)
+                                    return barTier[pk] == temp[pk]
+                                end
+                                local sArrow = si:CreateTexture(nil, "ARTWORK")
+                                sArrow:SetSize(10, 10)
+                                sArrow:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                sArrow:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\right-arrow.png")
+                                sArrow:SetAlpha(0.7)
+                                sArrow:Hide()
+                                local function updateArrow()
+                                    if canApply and itemIsBarApplied() then sArrow:Show() else sArrow:Hide() end
+                                end
+                                updateArrow()
                                 si:SetScript("OnEnter", function()
                                     if not isSelected then sLbl:SetTextColor(1, 1, 1, 1) end
                                     sHl:SetColorTexture(1, 1, 1, hlA); sHl:SetAlpha(1)
@@ -7788,11 +8712,22 @@ initFrame:SetScript("OnEvent", function(self)
                                     if item.tooltip then
                                         EllesmereUI.ShowWidgetTooltip(si, item.tooltip)
                                     end
-                                    if canApply then
+                                    -- Whenever a bar apply drives this setting, only the value the
+                                    -- BAR applies keeps the Apply-to flyout (it's the arrow row);
+                                    -- the OR-siblings hide theirs and stay normal clickable values.
+                                    -- Holds on both a following spell and an excluded one (the flyout
+                                    -- tracks the bar's value, never the spell's override). Settings
+                                    -- with no bar apply show it on everything. "+ " toggles are never
+                                    -- OR, so they keep it.
+                                    local suppressStrip = canApply and not (isChargeToggle or isActiveBorder or isFnToggle)
+                                        and AB.KeysBarApplied(applyKeys) and not itemIsBarApplied()
+                                    if suppressStrip then
+                                        if menu._applyStrip then menu._applyStrip:Hide() end
+                                    elseif canApply then
                                         AB.ShowApplyStripFor(si, {
                                             keys  = applyKeys,
                                             write = applyWrite,
-                                            isToggle = isChargeToggle or isActiveBorder,
+                                            isToggle = isChargeToggle or isActiveBorder or isFnToggle,
                                             -- Toggles: "Apply to Bar" ENABLES the feature
                                             -- on the bar (apply true). Disabling is the
                                             -- toggle-off press -- ctx.isToggle un-applies
@@ -7803,7 +8738,7 @@ initFrame:SetScript("OnEvent", function(self)
                                             -- and killed the effect). Value items apply
                                             -- the value they represent.
                                             valueOf = function()
-                                                if isChargeToggle or isActiveBorder then
+                                                if isChargeToggle or isActiveBorder or isFnToggle then
                                                     return true
                                                 end
                                                 return item.val
@@ -7834,88 +8769,142 @@ initFrame:SetScript("OnEvent", function(self)
                                     if not isSelected then sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA) end
                                     -- Keep the overlay on for a selected single-select
                                     -- (persistent highlight); clear it for everything else.
-                                    sHl:SetAlpha((not (isChargeToggle or isActiveBorder) and isSelected) and 1 or 0)
+                                    sHl:SetAlpha((not (isChargeToggle or isActiveBorder or isFnToggle) and isSelected) and 1 or 0)
                                     if item.tooltip then EllesmereUI.HideWidgetTooltip() end
                                 end)
                                 si:SetScript("OnClick", function()
-                                    -- Locked while the BAR drives this setting (Apply to
-                                    -- Bar / All Specs holds the key): the per-icon option
-                                    -- is read-only -- change it from the strip. Covers all
-                                    -- three item kinds since it precedes their branches.
-                                    if AB.KeysBarApplied(applyKeys) then return end
-                                    -- Charge toggles flip an independent boolean and
-                                    -- keep the flyout open (so both can be set in one
-                                    -- pass). They never touch the single-select
-                                    -- cdStateEffect.
-                                    if isChargeToggle then
-                                        EnsureSS()
-                                        if ss[item.charge] == true then
-                                            SetOwn(item.charge, nil)
-                                        else
-                                            ss[item.charge] = true
-                                        end
-                                        isSelected = (ss[item.charge] == true)
-                                        if isSelected then
-                                            local acR, acG, acB = EllesmereUI.GetAccentColor()
-                                            sLbl:SetTextColor(acR, acG, acB, 1)
-                                            if item.charge == "chargeHideCdText" then
-                                                ns._cdmAnyChargeHideCdText = true
+                                    -- The value the bar applies is unclickable -- it's the
+                                    -- submenu/arrow row. Manage it through the scope flyout
+                                    -- (Exclude / Include / Apply to Bar), not by re-selecting.
+                                    if itemIsBarApplied() then return end
+                                    -- The write this click performs, always into the
+                                    -- spell's OWN entry (charge toggle / active border /
+                                    -- single-select value). Wrapped so the bar-override
+                                    -- confirm below can defer it to the popup callback.
+                                    local function doWrite()
+                                        -- Generic independent toggle (item.toggleGet /
+                                        -- item.toggleSet): flips its own boolean through
+                                        -- the row's store accessors (the setter owns the
+                                        -- persist + gate flip + refresh calls) and keeps
+                                        -- the flyout open, exactly like the charge toggles.
+                                        if isFnToggle and item.toggleSet then
+                                            item.toggleSet(not item.toggleGet())
+                                            isSelected = item.toggleGet() and true or false
+                                            if isSelected then
+                                                local acR, acG, acB = EllesmereUI.GetAccentColor()
+                                                sLbl:SetTextColor(acR, acG, acB, 1)
                                             else
-                                                ns._cdmAnyChargeStyle = true
+                                                sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                                             end
-                                        else
-                                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                                            UpdateLabelColor()
+                                            local strip = menu._applyStrip
+                                            if strip and strip:IsShown() and strip._updateActive then strip._updateActive() end
+                                            return
                                         end
-                                        -- Live-update the collapsed row's accent, like the
-                                        -- single-select path does -- the toggles skipped it,
-                                        -- so the parent nav only recoloured on reopen.
+                                        -- Charge toggles flip an independent boolean and
+                                        -- keep the flyout open (so both can be set in one
+                                        -- pass). They never touch the single-select
+                                        -- cdStateEffect.
+                                        if isChargeToggle then
+                                            EnsureSS()
+                                            if ss[item.charge] == true then
+                                                SetOwn(item.charge, nil)
+                                            else
+                                                ss[item.charge] = true
+                                            end
+                                            isSelected = (ss[item.charge] == true)
+                                            if isSelected then
+                                                local acR, acG, acB = EllesmereUI.GetAccentColor()
+                                                sLbl:SetTextColor(acR, acG, acB, 1)
+                                                if item.charge == "chargeHideCdText" then
+                                                    ns._cdmAnyChargeHideCdText = true
+                                                else
+                                                    ns._cdmAnyChargeStyle = true
+                                                end
+                                            else
+                                                sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                                            end
+                                            -- Live-update the collapsed row's accent, like the
+                                            -- single-select path does -- the toggles skipped it,
+                                            -- so the parent nav only recoloured on reopen.
+                                            UpdateLabelColor()
+                                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                            if ns.QueueReanchor then ns.QueueReanchor() end
+                                            local strip = menu._applyStrip
+                                            if strip and strip:IsShown() and strip._updateActive then strip._updateActive() end
+                                            return
+                                        end
+                                        -- Border Color: independent toggle (keeps flyout
+                                        -- open). The inline swatch picks the color; the row
+                                        -- toggles it on/off. Recolors the icon border during
+                                        -- active state only.
+                                        if isActiveBorder then
+                                            EnsureSS()
+                                            if ss.activeBorderEnabled == true then
+                                                SetOwn("activeBorderEnabled", nil)
+                                            else
+                                                ss.activeBorderEnabled = true
+                                            end
+                                            isSelected = (ss.activeBorderEnabled == true)
+                                            if isSelected then
+                                                if not ss.activeBorderR then
+                                                    ss.activeBorderR = 1; ss.activeBorderG = 0.776
+                                                    ss.activeBorderB = 0.376; ss.activeBorderA = 1
+                                                end
+                                                local acR, acG, acB = EllesmereUI.GetAccentColor()
+                                                sLbl:SetTextColor(acR, acG, acB, 1)
+                                            else
+                                                sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
+                                            end
+                                            UpdateLabelColor()
+                                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                            if ns.QueueReanchor then ns.QueueReanchor() end
+                                            local strip = menu._applyStrip
+                                            if strip and strip:IsShown() and strip._updateActive then strip._updateActive() end
+                                            return
+                                        end
+                                        setVal(item.val)
+                                        -- Keep the flyout open (same as the toggle items):
+                                        -- selecting a value should close neither the menu
+                                        -- nor the subnav. Re-highlight in place.
+                                        RefreshFlyoutSelection()
                                         UpdateLabelColor()
                                         if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                                         if ns.QueueReanchor then ns.QueueReanchor() end
-                                        return
+                                        local strip = menu._applyStrip
+                                        if strip and strip:IsShown() and strip._updateActive then strip._updateActive() end
                                     end
-                                    -- Border Color: independent toggle (keeps flyout
-                                    -- open). The inline swatch picks the color; the row
-                                    -- toggles it on/off. Recolors the icon border during
-                                    -- active state only.
-                                    if isActiveBorder then
-                                        EnsureSS()
-                                        if ss.activeBorderEnabled == true then
-                                            SetOwn("activeBorderEnabled", nil)
-                                        else
-                                            ss.activeBorderEnabled = true
-                                        end
-                                        isSelected = (ss.activeBorderEnabled == true)
-                                        if isSelected then
-                                            if not ss.activeBorderR then
-                                                ss.activeBorderR = 1; ss.activeBorderG = 0.776
-                                                ss.activeBorderB = 0.376; ss.activeBorderA = 1
+                                    -- When the BAR drives this setting and the spell hasn't
+                                    -- already broken out with its own value:
+                                    --  * clicking the value the bar already applies changes
+                                    --    nothing -> flash the scope holding it (no-op cue).
+                                    --  * clicking a different value (or a "+" toggle) breaks
+                                    --    THIS spell+spec out into its own value -- no popup,
+                                    --    only this spell changes; the bar apply stays for
+                                    --    every other spell. (doWrite flips a toggle OFF, which
+                                    --    is the break-out for a bar-applied-ON toggle.)
+                                    -- Once the spell owns a value it reports editable and
+                                    -- writes straight through (the excluded state).
+                                    if AB.KeysBarApplied(applyKeys) and not AB.SpellHasOwn(applyKeys) then
+                                        if not (isChargeToggle or isActiveBorder or isFnToggle) then
+                                            local cv = getVal()
+                                            if (cv == item.val) or (cv == nil and item.val == nil) then
+                                                local strip = menu._applyStrip
+                                                if strip and strip._flashScopeFor then strip._flashScopeFor() end
+                                                return
                                             end
-                                            local acR, acG, acB = EllesmereUI.GetAccentColor()
-                                            sLbl:SetTextColor(acR, acG, acB, 1)
-                                        else
-                                            sLbl:SetTextColor(tDimR, tDimG, tDimB, tDimA)
                                         end
-                                        UpdateLabelColor()
-                                        if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
-                                        if ns.QueueReanchor then ns.QueueReanchor() end
+                                        doWrite()
                                         return
                                     end
-                                    setVal(item.val)
-                                    -- Keep the flyout open (same as the toggle items):
-                                    -- selecting a value should close neither the menu
-                                    -- nor the subnav. Re-highlight in place.
-                                    RefreshFlyoutSelection()
-                                    UpdateLabelColor()
-                                    if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
-                                    if ns.QueueReanchor then ns.QueueReanchor() end
+                                    doWrite()
                                 end)
 
                                 if onItemCreated then onItemCreated(si, item, sub) end
                                 flyoutEntries[#flyoutEntries + 1] = {
                                     frame = si, label = sLbl, name = item.label,
                                     itemVal = item.val,
-                                    isToggle = isChargeToggle or isActiveBorder,
+                                    isToggle = isChargeToggle or isActiveBorder or isFnToggle,
                                     -- Live selected-state predicate, mirroring the
                                     -- render-time isSelected assignment above. Reads
                                     -- effective (chained) values, so it reflects a
@@ -7923,7 +8912,9 @@ initFrame:SetScript("OnEvent", function(self)
                                     computeSelected = function()
                                         if isChargeToggle then return ss[item.charge] == true end
                                         if isActiveBorder then return ss.activeBorderEnabled == true end
+                                        if isFnToggle then return item.toggleGet() and true or false end
                                         local cv = getVal()
+                                        if cv == false then cv = nil end  -- None/default blocks with false
                                         return (cv == item.val) or (cv == nil and item.val == nil)
                                     end,
                                     -- In-place selection update for the keep-open
@@ -7946,6 +8937,9 @@ initFrame:SetScript("OnEvent", function(self)
                                     refreshLabel = function()
                                         if item.dynamicLabel then sLbl:SetText(item.dynamicLabel()) end
                                     end,
+                                    -- Live-update the arrow/unclickable state after an apply
+                                    -- or un-apply (the flyout doesn't rebuild in place).
+                                    updateArrow = updateArrow,
                                 }
                                 subH = subH + ITEM_H
                                 end -- item.divider / else
@@ -8124,7 +9118,170 @@ initFrame:SetScript("OnEvent", function(self)
                         return row, sub
                     end
 
-                    if isBuffBar then
+                    -- "Threshold Text" per-spell subnav, shared by the buff, cd/util
+                    -- and preset/custom branches. Threshold Seconds arms the feature
+                    -- for the spell (0 = off = zero cost); Threshold Color and
+                    -- Threshold Decimals are independent toggles that apply below
+                    -- that boundary (rendered by the engine countdown formatter --
+                    -- ns.ApplyThresholdFormatter). acc bridges the branch's store
+                    -- (per-spell family entry or customActiveStates):
+                    --   get(key)      effective read
+                    --   set(key, v)   own write (persists the entry first)
+                    --   clear(key)    own clear (tier-blocking where applicable)
+                    --   refresh()     post-change gate flip + apply calls
+                    local function AddThresholdTextRow(acc)
+                        local function armedSeconds()
+                            return tonumber(acc.get("thresholdSeconds")) or 0
+                        end
+                        local TT_ITEMS = {
+                            { val = "seconds", label = "Threshold Seconds",
+                              dynamicLabel = function()
+                                  local base = EllesmereUI.L("Threshold Seconds")
+                                  local s = armedSeconds()
+                                  if s > 0 then return base .. " (" .. s .. "s)" end
+                                  return base
+                              end,
+                              tooltip = "Seconds remaining below which Threshold Color and Threshold Decimals apply (0 = off).",
+                              toggleGet = function() return armedSeconds() > 0 end,
+                              applyKeys = { "thresholdSeconds" },
+                              applyWrite = function(t)
+                                  -- Push this spell's current seconds; "off" applied
+                                  -- bar-wide blocks the tier below.
+                                  local s = armedSeconds()
+                                  t.thresholdSeconds = (s > 0) and s or false
+                              end },
+                            { val = "color", label = "Threshold Color",
+                              tooltip = "Recolor the countdown text below Threshold Seconds.",
+                              toggleGet = function() return acc.get("thresholdColorEnabled") == true end,
+                              toggleSet = function(v)
+                                  if v then
+                                      acc.set("thresholdColorEnabled", true)
+                                      if not acc.get("thresholdColorR") then
+                                          acc.set("thresholdColorR", 1)
+                                          acc.set("thresholdColorG", 0.2)
+                                          acc.set("thresholdColorB", 0.2)
+                                      end
+                                  else
+                                      acc.clear("thresholdColorEnabled")
+                                  end
+                                  acc.refresh()
+                              end,
+                              applyKeys = { "thresholdColorEnabled", "thresholdColorR",
+                                            "thresholdColorG", "thresholdColorB" },
+                              applyWrite = function(t, v)
+                                  t.thresholdColorEnabled = v or false
+                                  if v then
+                                      -- Push this spell's current color.
+                                      t.thresholdColorR = acc.get("thresholdColorR") or 1
+                                      t.thresholdColorG = acc.get("thresholdColorG") or 0.2
+                                      t.thresholdColorB = acc.get("thresholdColorB") or 0.2
+                                  else
+                                      -- Colour keys belong to the enabled state only;
+                                      -- clear them so a stale colour can't linger in
+                                      -- the tier and make valuesMatch always fail.
+                                      t.thresholdColorR = nil
+                                      t.thresholdColorG = nil
+                                      t.thresholdColorB = nil
+                                  end
+                              end },
+                            { val = "decimals", label = "Threshold Decimals",
+                              tooltip = "Show a 1-decimal countdown (2.7) below Threshold Seconds.",
+                              toggleGet = function() return acc.get("thresholdDecimals") == true end,
+                              toggleSet = function(v)
+                                  if v then acc.set("thresholdDecimals", true)
+                                  else acc.clear("thresholdDecimals") end
+                                  acc.refresh()
+                              end,
+                              applyKeys = { "thresholdDecimals" },
+                              applyWrite = function(t, v)
+                                  t.thresholdDecimals = v or false
+                              end },
+                        }
+                        return MakeSubnavRow("Threshold Text", TT_ITEMS,
+                            function() return nil end,
+                            function() end,
+                            function()
+                                return armedSeconds() == 0
+                                    and acc.get("thresholdColorEnabled") ~= true
+                                    and acc.get("thresholdDecimals") ~= true
+                            end,
+                            function(si, item, sub)
+                                if item.val == "seconds" then
+                                    -- Popup flow (mirrors Lower Alpha): close the
+                                    -- menu so only the popup shows; 0 disarms.
+                                    si:SetScript("OnClick", function()
+                                        local cur = armedSeconds()
+                                        menu:Hide()
+                                        ShowThresholdSecondsPopup(cur > 0 and cur or nil, function(v)
+                                            if v and v > 0 then
+                                                acc.set("thresholdSeconds", v)
+                                            else
+                                                acc.clear("thresholdSeconds")
+                                            end
+                                            acc.refresh()
+                                        end)
+                                    end)
+                                elseif item.val == "color" then
+                                    -- Inline color swatch (same shape as the Active
+                                    -- State swipe swatch): picking a color also
+                                    -- enables the toggle.
+                                    local swatchBtn = CreateFrame("Button", nil, si)
+                                    swatchBtn:SetSize(14, 14)
+                                    swatchBtn:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                    swatchBtn:SetFrameLevel(si:GetFrameLevel() + 3)
+                                    local swatchTex = swatchBtn:CreateTexture(nil, "ARTWORK")
+                                    swatchTex:SetAllPoints()
+                                    swatchTex:SetColorTexture(
+                                        acc.get("thresholdColorR") or 1,
+                                        acc.get("thresholdColorG") or 0.2,
+                                        acc.get("thresholdColorB") or 0.2, 1)
+                                    swatchBtn:SetScript("OnClick", function()
+                                        acc.set("thresholdColorEnabled", true)
+                                        if not acc.get("thresholdColorR") then
+                                            acc.set("thresholdColorR", 1)
+                                            acc.set("thresholdColorG", 0.2)
+                                            acc.set("thresholdColorB", 0.2)
+                                        end
+                                        -- Keep the dropdown AND flyout open (OnUpdate
+                                        -- cpOpen guard); re-highlight the now-on toggle.
+                                        if sub._refreshSelection then sub._refreshSelection() end
+                                        acc.refresh()
+                                        local snapR = acc.get("thresholdColorR") or 1
+                                        local snapG = acc.get("thresholdColorG") or 0.2
+                                        local snapB = acc.get("thresholdColorB") or 0.2
+                                        EllesmereUI:ShowColorPicker({
+                                            r = snapR, g = snapG, b = snapB,
+                                            swatchFunc = function()
+                                                local popup = EllesmereUI._colorPickerPopup
+                                                if not popup then return end
+                                                local r, g, b = popup:GetColorRGB()
+                                                acc.set("thresholdColorR", r)
+                                                acc.set("thresholdColorG", g)
+                                                acc.set("thresholdColorB", b)
+                                                swatchTex:SetColorTexture(r, g, b, 1)
+                                                acc.refresh()
+                                            end,
+                                            cancelFunc = function()
+                                                acc.set("thresholdColorR", snapR)
+                                                acc.set("thresholdColorG", snapG)
+                                                acc.set("thresholdColorB", snapB)
+                                                acc.refresh()
+                                            end,
+                                        }, swatchBtn)
+                                    end)
+                                end
+                            end)
+                    end
+
+                    -- A HOSTED buff (a buff placed on a CD/util bar) is a real
+                    -- Blizzard buff frame reparented onto the bar, so it takes the
+                    -- BUFF per-icon menu, not the CD/util one -- same settings as it
+                    -- would have on a buffs bar. isHostedBuff is resolved above
+                    -- (slot-based) where the settings store is selected.
+                    -- Hosted buffs are removed from the Apply-to-Bar system (no strip on
+                    -- their rows, no bar-tier chaining in ResolveSpellSettings).
+                    hostedBuffNoApply = isHostedBuff
+                    if isBuffBar or isHostedBuff then
                         -- Injected custom/preset buffs (cast-timer driven, identified
                         -- by a stored spellDuration) are show-on-cast only, so the
                         -- Always Show Buffs / Desaturate Inactive overrides (which act
@@ -8217,6 +9374,75 @@ initFrame:SetScript("OnEvent", function(self)
                                                 t.buffGlowColorR = nil
                                                 t.buffGlowColorG = nil
                                                 t.buffGlowColorB = nil
+                                            end
+                                        end } })
+
+                        -- Cooldown Swipe (buffs only): tints the aura-duration swipe.
+                        -- Default = the bar's swipe colour; Class / Custom mirror Glow
+                        -- Effect Color; None fully hides the swipe (alpha 0). Applied on
+                        -- the buff frame by the SetSwipeColor hook (which reads these keys).
+                        local CD_SWIPE_COLOR_ITEMS = {
+                            { val = nil,      label = "Default" },
+                            { val = "class",  label = "Class Color" },
+                            { val = "custom", label = "Custom" },
+                            { val = "none",   label = "None" },
+                        }
+                        MakeSubnavRow("Cooldown Swipe", CD_SWIPE_COLOR_ITEMS,
+                            function() return ss.cdSwipeColor end,
+                            function(v)
+                                EnsureSS()
+                                SetOwn("cdSwipeColor", v)
+                                if v == "custom" and not ss.cdSwipeColorR then
+                                    ss.cdSwipeColorR = 1; ss.cdSwipeColorG = 0.776; ss.cdSwipeColorB = 0.376
+                                end
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                            end,
+                            function() return ss.cdSwipeColor == nil end,
+                            function(si, item, sub)
+                                if item.val == "custom" then
+                                    local swatchBtn = CreateFrame("Button", nil, si)
+                                    swatchBtn:SetSize(14, 14)
+                                    swatchBtn:SetPoint("RIGHT", si, "RIGHT", -8, 0)
+                                    swatchBtn:SetFrameLevel(si:GetFrameLevel() + 3)
+                                    local swatchTex = swatchBtn:CreateTexture(nil, "ARTWORK")
+                                    swatchTex:SetAllPoints()
+                                    swatchTex:SetColorTexture(ss.cdSwipeColorR or 1, ss.cdSwipeColorG or 0.776, ss.cdSwipeColorB or 0.376, 1)
+                                    swatchBtn:SetScript("OnClick", function()
+                                        EnsureSS()
+                                        ss.cdSwipeColor = "custom"
+                                        if not ss.cdSwipeColorR then
+                                            ss.cdSwipeColorR = 1; ss.cdSwipeColorG = 0.776; ss.cdSwipeColorB = 0.376
+                                        end
+                                        if sub._refreshSelection then sub._refreshSelection() end
+                                        local snapR, snapG, snapB = ss.cdSwipeColorR, ss.cdSwipeColorG, ss.cdSwipeColorB
+                                        EllesmereUI:ShowColorPicker({
+                                            r = snapR, g = snapG, b = snapB,
+                                            swatchFunc = function()
+                                                local popup = EllesmereUI._colorPickerPopup
+                                                if not popup then return end
+                                                local r, g, b = popup:GetColorRGB()
+                                                ss.cdSwipeColorR = r; ss.cdSwipeColorG = g; ss.cdSwipeColorB = b
+                                                swatchTex:SetColorTexture(r, g, b, 1)
+                                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                            end,
+                                            cancelFunc = function()
+                                                ss.cdSwipeColorR = snapR; ss.cdSwipeColorG = snapG; ss.cdSwipeColorB = snapB
+                                            end,
+                                        }, swatchBtn)
+                                    end)
+                                end
+                            end,
+                            { apply = { keys = { "cdSwipeColor", "cdSwipeColorR", "cdSwipeColorG", "cdSwipeColorB" },
+                                        write = function(t, v)
+                                            t.cdSwipeColor = v
+                                            if v == "custom" then
+                                                t.cdSwipeColorR = ss.cdSwipeColorR or 1
+                                                t.cdSwipeColorG = ss.cdSwipeColorG or 0.776
+                                                t.cdSwipeColorB = ss.cdSwipeColorB or 0.376
+                                            else
+                                                t.cdSwipeColorR = nil
+                                                t.cdSwipeColorG = nil
+                                                t.cdSwipeColorB = nil
                                             end
                                         end } })
 
@@ -8486,6 +9712,11 @@ initFrame:SetScript("OnEvent", function(self)
                         -- Blizzard-tracked buffs (inactive placeholders); injected
                         -- custom/preset buffs skip them and get only the gain row.
                         if not isInjectedCustom then
+                            -- Hosted buffs (on a CD/util bar) OMIT these two bar-toggle
+                            -- overrides: always-show and desaturate-inactive are baked in
+                            -- (a cd/util bar has no such bar toggle to override). Audio
+                            -- rows below still apply, so they stay outside this guard.
+                            if not isHostedBuff then
                             -- Always Show Buffs: per-icon tri-state override of the bar
                             -- toggle. Default = inherit bar; Show = force the inactive
                             -- placeholder on; Hide = force it off. A reanchor (queued by
@@ -8535,6 +9766,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 nil,
                                 { apply = { keys = { "desatInactive" },
                                             write = function(t, v) t.desatInactive = v end } })
+                            end  -- if not isHostedBuff (bar-toggle overrides omitted)
 
                             AddBuffGainRow()
                             AddBuffLossRow()
@@ -8564,6 +9796,24 @@ initFrame:SetScript("OnEvent", function(self)
                                             -- "Off" applied bar-wide blocks the tier below.
                                             t.reverseSwipe = v or false
                                         end } })
+
+                        -- Threshold Text (every buff type): decimals / color change
+                        -- on the aura countdown below the spell's Threshold Seconds.
+                        -- Same per-spell store (ss) + engine countdown formatter as
+                        -- cd/utility spells; the engine evaluates it, so secret aura
+                        -- durations format fine.
+                        do
+                            local acc = {}
+                            acc.get = function(k) return ss[k] end
+                            acc.set = function(k, v) EnsureSS(); ss[k] = v end
+                            acc.clear = function(k) EnsureSS(); SetOwn(k, nil) end
+                            acc.refresh = function()
+                                if (tonumber(ss.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                if ns.QueueReanchor then ns.QueueReanchor() end
+                            end
+                            AddThresholdTextRow(acc)
+                        end
                     else
                     local isCustomInjected = spellID < 0
                         or (ns._myRacialsSet and ns._myRacialsSet[spellID])
@@ -8582,11 +9832,40 @@ initFrame:SetScript("OnEvent", function(self)
                         -- item, so each trinket tracks separately (casKey).
                         local casKey = (ns.ResolveCustomActiveKey and ns.ResolveCustomActiveKey(spellID)) or spellID
                         local cas = ns.GetCustomActiveState and ns.GetCustomActiveState(casKey) or nil
+                        -- Trinket slots: the menu DISPLAYS the effective view -- the
+                        -- equipped item's own entry chained per-key over the slot's
+                        -- "Apply to Bar" stamp (GetEffectiveCustomActiveState uses the
+                        -- same chain at render time) -- while WRITES stay item-keyed
+                        -- (casKey), so each trinket still tracks separately. casKey ==
+                        -- spellID means no item is equipped (writes then target the
+                        -- slot entry itself); never chain an entry to itself.
+                        local casSlot = nil
+                        if (spellID == -13 or spellID == -14) and casKey ~= spellID
+                           and ns.GetCustomActiveState then
+                            casSlot = ns.GetCustomActiveState(spellID)
+                        end
+                        -- Not-yet-persisted fresh view, persisted on first WRITE --
+                        -- same contract as the family-store EnsureSS above.
+                        if not cas then cas = {} end
+                        if ns.ChainSettings then ns.ChainSettings(cas, casSlot) end
                         local function EnsureCAS()
-                            cas = ns.GetCustomActiveState(casKey, true)
+                            local storeC = ns.GetCustomActiveStates and ns.GetCustomActiveStates()
+                            if storeC and not storeC[casKey] then storeC[casKey] = cas end
                             return cas
                         end
-                        local hasActive = cas and (cas.duration or 0) > 0
+                        -- Own-value writer for nil-off keys: writing nil would let a
+                        -- slot-stamp value show through the chain; when that would
+                        -- change the effective value, store explicit false instead
+                        -- (render-equivalent to nil, but blocks the inheritance --
+                        -- the per-trinket exclusion). Mirrors the family SetOwn.
+                        local function SetCasOwn(key, v2)
+                            local e = EnsureCAS()
+                            e[key] = v2
+                            if v2 == nil and e[key] ~= nil then
+                                e[key] = false
+                            end
+                        end
+                        local hasActive = (cas.duration or 0) > 0
 
                         -- (The divider above the per-icon settings is already drawn
                         -- before the buff/CD branch, so we don't add another here.)
@@ -8640,6 +9919,10 @@ initFrame:SetScript("OnEvent", function(self)
                                   end
                                   return base
                               end },
+                            -- Shift variants: same hide as the plain modes below, but
+                            -- the bar re-lays out so remaining icons close the gap.
+                            { val = "hiddenOnCDShift",  label = "Hidden on CD (Shift Icons)" },
+                            { val = "hiddenReadyShift", label = "Hidden CD Ready (Shift Icons)" },
                             { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                             { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                             { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
@@ -8675,12 +9958,16 @@ initFrame:SetScript("OnEvent", function(self)
                         -- driven by the live cooldown, independent of the active
                         -- overlay).
                         MakeSubnavRow("Cooldown State Effect", CD_STATE_ITEMS,
-                            function() return cas and cas.cdStateEffect end,
+                            function()
+                                local v = cas.cdStateEffect
+                                if v == false then v = nil end  -- blocked slot value = None
+                                return v
+                            end,
                             function(v)
-                                EnsureCAS().cdStateEffect = v
+                                SetCasOwn("cdStateEffect", v)
                                 if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                             end,
-                            function() return not (cas and cas.cdStateEffect) end,
+                            function() return not cas.cdStateEffect end,
                             function(si, item, sub)
                                 -- Lower Alpha (On CD): prompt for the opacity percent,
                                 -- then select the effect (mirrors the setVal above).
@@ -8709,6 +9996,31 @@ initFrame:SetScript("OnEvent", function(self)
                                             end
                                         end } })
 
+                        -- Threshold Text (preset / custom): decimals / color change
+                        -- on this icon's countdowns (item/spell cooldown and the
+                        -- fake-active window) below its Threshold Seconds. Stored
+                        -- in the profile customActiveStates so it travels with the
+                        -- spell; the Fake-Active engine and the appearance pass
+                        -- both read it.
+                        do
+                            local acc = {}
+                            acc.get = function(k) return cas[k] end
+                            acc.set = function(k, v) local e = EnsureCAS(); e[k] = v end
+                            acc.clear = function(k)
+                                -- Own clear; when a slot-stamp value would show
+                                -- through the chain, store the blocking false.
+                                cas[k] = nil
+                                if cas[k] ~= nil then SetCasOwn(k, false) end
+                            end
+                            acc.refresh = function()
+                                if (tonumber(cas.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                                if ns.QueueReanchor then ns.QueueReanchor() end
+                            end
+                            AddThresholdTextRow(acc)
+                        end
+
                         -- Cooldown Swipe (preset / custom): Reverse Swipe flips this
                         -- icon's swipe direction; Hide CD Swipe removes it. Default off.
                         -- Stored in the profile customActiveStates so it travels with the spell.
@@ -8719,11 +10031,10 @@ initFrame:SetScript("OnEvent", function(self)
                                 return nil
                             end,
                             function(v)
-                                local c = EnsureCAS()
-                                c.reverseSwipe = (v == "reverse") or nil
-                                c.hideCDSwipe = (v == "hide") or nil
-                                if c.reverseSwipe then ns._cdmAnyReverseSwipe = true end
-                                if c.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                                SetCasOwn("reverseSwipe", (v == "reverse") or nil)
+                                SetCasOwn("hideCDSwipe", (v == "hide") or nil)
+                                if v == "reverse" then ns._cdmAnyReverseSwipe = true end
+                                if v == "hide" then ns._cdmAnyHideCDSwipe = true end
                                 if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                                 if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                             end,
@@ -8794,11 +10105,16 @@ initFrame:SetScript("OnEvent", function(self)
                                 function(v)
                                     local e = EnsureCAS()
                                     if v == "class" then
-                                        e.activeSwipeMode = nil; e.activeSwipeClassColor = true
+                                        SetCasOwn("activeSwipeMode", nil)
+                                        SetCasOwn("activeSwipeClassColor", true)
                                     elseif v == "none" then
-                                        e.activeSwipeMode = "none"; e.activeSwipeClassColor = nil
+                                        SetCasOwn("activeSwipeMode", "none")
+                                        SetCasOwn("activeSwipeClassColor", nil)
                                     else
-                                        e.activeSwipeMode = "custom"; e.activeSwipeClassColor = nil
+                                        SetCasOwn("activeSwipeMode", "custom")
+                                        SetCasOwn("activeSwipeClassColor", nil)
+                                        -- Chained read: a slot-stamp color showing
+                                        -- through is kept as the starting custom color.
                                         if not e.activeSwipeR then
                                             e.activeSwipeR = 1; e.activeSwipeG = 0.776
                                             e.activeSwipeB = 0.376; e.activeSwipeA = 0.7
@@ -8814,7 +10130,8 @@ initFrame:SetScript("OnEvent", function(self)
                                             function() return (cas and cas.activeSwipeB) or 0.376 end,
                                             function(r, g, b)
                                                 local e = EnsureCAS()
-                                                e.activeSwipeMode = "custom"; e.activeSwipeClassColor = nil
+                                                e.activeSwipeMode = "custom"
+                                                SetCasOwn("activeSwipeClassColor", nil)
                                                 e.activeSwipeR = r; e.activeSwipeG = g; e.activeSwipeB = b
                                                 e.activeSwipeA = e.activeSwipeA or 0.7
                                             end)
@@ -8823,6 +10140,14 @@ initFrame:SetScript("OnEvent", function(self)
                                 { apply = { keys = { "activeSwipeMode", "activeSwipeClassColor",
                                                      "activeSwipeR", "activeSwipeG", "activeSwipeB", "activeSwipeA" },
                                             write = function(t, v)
+                                                -- Colour keys belong to Custom only; clear them for
+                                                -- class/none so a stale colour from an earlier Custom
+                                                -- apply can't linger in the tier. Leftover R/G/B/A
+                                                -- make valuesMatch always fail, so the apply never
+                                                -- toggles off and re-prompts the overwrite popup
+                                                -- forever without visibly changing anything.
+                                                t.activeSwipeR = nil; t.activeSwipeG = nil
+                                                t.activeSwipeB = nil; t.activeSwipeA = nil
                                                 if v == "class" then
                                                     t.activeSwipeMode = false
                                                     t.activeSwipeClassColor = true
@@ -8842,9 +10167,13 @@ initFrame:SetScript("OnEvent", function(self)
 
                             -- Active State Glow
                             MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
-                                function() return cas and cas.activeGlow end,
-                                function(v) EnsureCAS().activeGlow = v end,
-                                function() return not (cas and cas.activeGlow) end,
+                                function()
+                                    local v = cas.activeGlow
+                                    if v == false then v = nil end  -- blocked slot value = None
+                                    return v
+                                end,
+                                function(v) SetCasOwn("activeGlow", v) end,
+                                function() return not cas.activeGlow end,
                                 nil,
                                 { apply = { keys = { "activeGlow" },
                                             write = function(t, v) t.activeGlow = v end } })
@@ -8858,8 +10187,11 @@ initFrame:SetScript("OnEvent", function(self)
                                 return nil
                             end,
                             function(v)
-                                local e = EnsureCAS(); e.glowColor = v
-                                if v == "custom" and not e.glowColorR then
+                                SetCasOwn("glowColor", v)
+                                -- Chained read: a slot-stamp color showing through
+                                -- is kept as the starting custom color.
+                                if v == "custom" and not cas.glowColorR then
+                                    local e = EnsureCAS()
                                     e.glowColorR = 1; e.glowColorG = 0.788; e.glowColorB = 0.137
                                 end
                             end,
@@ -8900,7 +10232,9 @@ initFrame:SetScript("OnEvent", function(self)
                                 local e = store and store[casKey]
                                 if e then
                                     e.duration = nil
-                                    if not e.cdStateEffect then store[casKey] = nil end
+                                    -- rawget: a chained slot-stamp effect must not
+                                    -- hold this own entry alive.
+                                    if rawget(e, "cdStateEffect") == nil then store[casKey] = nil end
                                 end
                                 if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                                 menu:Hide()
@@ -9104,6 +10438,12 @@ initFrame:SetScript("OnEvent", function(self)
                         { apply = { keys = { "activeSwipeMode", "activeSwipeClassColor",
                                              "activeSwipeR", "activeSwipeG", "activeSwipeB", "activeSwipeA" },
                                     write = function(t, v)
+                                        -- Colour keys belong to Custom only; clear them for
+                                        -- class/none so a stale colour from an earlier Custom
+                                        -- apply can't linger in the tier and make valuesMatch
+                                        -- always fail (perpetual overwrite popup, no change).
+                                        t.activeSwipeR = nil; t.activeSwipeG = nil
+                                        t.activeSwipeB = nil; t.activeSwipeA = nil
                                         if v == "class" then
                                             t.activeSwipeMode = false
                                             t.activeSwipeClassColor = true
@@ -9284,7 +10624,24 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
-                    -- 4a. Cooldown Swipe (per-spell): Reverse Swipe flips the swipe
+                    -- 4a. Threshold Text: decimals / color change on this spell's
+                    -- countdowns (cooldown, recharge and active state) below its
+                    -- Threshold Seconds. Engine countdown formatter -- see
+                    -- ns.ApplyThresholdFormatter; zero cost until armed.
+                    do
+                        local acc = {}
+                        acc.get = function(k) return ss[k] end
+                        acc.set = function(k, v) EnsureSS(); ss[k] = v end
+                        acc.clear = function(k) EnsureSS(); SetOwn(k, nil) end
+                        acc.refresh = function()
+                            if (tonumber(ss.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                            if ns.QueueReanchor then ns.QueueReanchor() end
+                        end
+                        AddThresholdTextRow(acc)
+                    end
+
+                    -- 4b. Cooldown Swipe (per-spell): Reverse Swipe flips the swipe
                     -- direction; Hide CD Swipe removes it. Default off. Runtime apply +
                     -- zero-cost gates live in RefreshCDMIconAppearance /
                     -- RescanReverseSwipeFlag and the SetDrawSwipe hook.
@@ -9311,7 +10668,7 @@ initFrame:SetScript("OnEvent", function(self)
                                         t.hideCDSwipe = (v == "hide") or false
                                     end } })
 
-                    -- 4b. Audio Effect on CD Ready (cd/utility per-icon): play a sound
+                    -- 4c. Audio Effect on CD Ready (cd/utility per-icon): play a sound
                     -- the moment the spell's real cooldown finishes. Same sound list +
                     -- speaker preview as the buff Audio rows / Focus Cast Sound (shared
                     -- ns.FOCUSKICK_SOUND_* tables); stored as ss.cdReadySoundKey
@@ -11602,12 +12959,23 @@ initFrame:SetScript("OnEvent", function(self)
             if PP then PP.CreateBorder(slot, 0, 0, 0, 1, 1, "OVERLAY", 7) end
             slot._edges = sEdges  -- empty; borders managed by PP
 
+            -- Hosted-buff marker border: gold (same color as the buff "+" add
+            -- button), same 2px geometry as the hover highlight, always ON for
+            -- buff icons hosted on this CD/utility bar so they read apart from
+            -- the cooldowns at a glance. Level +1 -- UNDER the hover highlight
+            -- (+2), so hovering still shows the accent border on top.
+            local slotPP = EllesmereUI and EllesmereUI.PP
+            local slotHostCont = CreateFrame("Frame", nil, slot)
+            slotHostCont:SetAllPoints()
+            slotHostCont:SetFrameLevel(slot:GetFrameLevel() + 1)
+            local hostBrd = slotPP and slotPP.CreateBorder(slotHostCont, 1, 0.82, 0.25, 1, 2, "OVERLAY", 7)
+            if hostBrd then hostBrd:Hide() end
+            slot._hostBrd = hostBrd
             -- Hover highlight (2px accent border, child container avoids conflict with existing PP border)
             local eg = EllesmereUI.ELLESMERE_GREEN
             local slotHlCont = CreateFrame("Frame", nil, slot)
             slotHlCont:SetAllPoints()
-            slotHlCont:SetFrameLevel(slot:GetFrameLevel() + 1)
-            local slotPP = EllesmereUI and EllesmereUI.PP
+            slotHlCont:SetFrameLevel(slot:GetFrameLevel() + 2)
             local slotBrd = slotPP and slotPP.CreateBorder(slotHlCont, eg.r, eg.g, eg.b, 1, 2, "OVERLAY", 7)
             if slotBrd then slotBrd:Hide() end
             slot._hlBrd = slotBrd
@@ -11647,18 +13015,24 @@ initFrame:SetScript("OnEvent", function(self)
                 if dragSlot then return end
                 local bdHov = SelectedCDMBar()
                 if slot._shapeBorder and slot._shapeBorder:IsShown() then
-                    local bR, bG, bB = 0, 0, 0
-                    if bdHov then
-                        bR, bG, bB = bdHov.borderR or 0, bdHov.borderG or 0, bdHov.borderB or 0
-                        if bdHov.borderClassColor then
-                            local _, ct = UnitClass("player")
-                            if ct then
-                                local cc = RAID_CLASS_COLORS[ct]
-                                if cc then bR, bG, bB = cc.r, cc.g, cc.b end
+                    if slot._previewHostedBuff then
+                        -- Hosted buff: restore the persistent gold tint, not
+                        -- the bar border color.
+                        slot._shapeBorder:SetVertexColor(1, 0.82, 0.25, 1)
+                    else
+                        local bR, bG, bB = 0, 0, 0
+                        if bdHov then
+                            bR, bG, bB = bdHov.borderR or 0, bdHov.borderG or 0, bdHov.borderB or 0
+                            if bdHov.borderClassColor then
+                                local _, ct = UnitClass("player")
+                                if ct then
+                                    local cc = RAID_CLASS_COLORS[ct]
+                                    if cc then bR, bG, bB = cc.r, cc.g, cc.b end
+                                end
                             end
                         end
+                        slot._shapeBorder:SetVertexColor(bR, bG, bB, 1)
                     end
-                    slot._shapeBorder:SetVertexColor(bR, bG, bB, 1)
                 else
                     if slotBrd then slotBrd:Hide() end
                 end
@@ -12083,11 +13457,24 @@ initFrame:SetScript("OnEvent", function(self)
             local ar, ag, ab = EllesmereUI.GetAccentColor()
             addLbl:SetTextColor(ar, ag, ab, 1)
             if addBrd then addBrd:Show() end
+            if EllesmereUI.ShowWidgetTooltip then
+                -- This same button adds buffs on buff-family bars, so the tip
+                -- follows the selected bar rather than hard-coding CD/Utility.
+                local bdHov = SelectedCDMBar()
+                local tip
+                if bdHov and ns.IsBarBuffFamily(bdHov) then
+                    tip = "Add a Buff Spell"
+                else
+                    tip = "Add a CD/Utility Spell"
+                end
+                EllesmereUI.ShowWidgetTooltip(addBtn, EllesmereUI.L(tip))
+            end
         end)
         addBtn:SetScript("OnLeave", function()
             local ar, ag, ab = EllesmereUI.GetAccentColor()
             addLbl:SetTextColor(ar, ag, ab, 0.6)
             if addBrd then addBrd:Hide() end
+            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
         end)
         addBtn:SetScript("OnClick", function(self)
             local bd = SelectedCDMBar()
@@ -12141,12 +13528,67 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end)
 
+        -- Second "+" button: add a BUFF to this CD/utility bar (buff-family bars
+        -- keep the single "+" above). A buff placed here renders as a regular
+        -- CD/utility icon whose gold Active State is driven by its aura. Gold-tinted
+        -- so it reads apart from the standard add button; shown for CD/util only.
+        local BUFF_ADD_R, BUFF_ADD_G, BUFF_ADD_B = 1, 0.82, 0.25
+        local buffAddBtn = CreateFrame("Button", nil, pf)
+        PP.Size(buffAddBtn, 36, 36); buffAddBtn:Hide()
+        local buffAddBg = buffAddBtn:CreateTexture(nil, "BACKGROUND")
+        buffAddBg:SetAllPoints(); buffAddBg:SetColorTexture(0.08, 0.08, 0.08, 0.6)
+        if buffAddBg.SetSnapToPixelGrid then buffAddBg:SetSnapToPixelGrid(false); buffAddBg:SetTexelSnappingBias(0) end
+        -- Resting border matches the standard add button (neutral gray, not
+        -- gold) -- the gold "+" glyph alone marks this as the buff-add button.
+        if PP then PP.CreateBorder(buffAddBtn, 0.3, 0.3, 0.3, 0.5, 1, "OVERLAY", 7) end
+        local buffAddLbl = buffAddBtn:CreateFontString(nil, "OVERLAY")
+        buffAddLbl:SetFont(FONT_PATH, 22, GetCDMOptOutline())
+        buffAddLbl:SetPoint("CENTER", 0, 1)
+        buffAddLbl:SetText("+")
+        buffAddLbl:SetTextColor(BUFF_ADD_R, BUFF_ADD_G, BUFF_ADD_B, 0.7)
+
+        local buffAddHlCont = CreateFrame("Frame", nil, buffAddBtn)
+        buffAddHlCont:SetAllPoints()
+        buffAddHlCont:SetFrameLevel(buffAddBtn:GetFrameLevel() + 1)
+        local buffAddBrd = EllesmereUI and EllesmereUI.PP
+            and EllesmereUI.PP.CreateBorder(buffAddHlCont, BUFF_ADD_R, BUFF_ADD_G, BUFF_ADD_B, 1, 2, "OVERLAY", 7)
+        if buffAddBrd then buffAddBrd:Hide() end
+
+        buffAddBtn:SetScript("OnEnter", function()
+            buffAddLbl:SetTextColor(BUFF_ADD_R, BUFF_ADD_G, BUFF_ADD_B, 1)
+            if buffAddBrd then buffAddBrd:Show() end
+            if EllesmereUI.ShowWidgetTooltip then
+                EllesmereUI.ShowWidgetTooltip(buffAddBtn, EllesmereUI.L("Add a Buff Spell"))
+            end
+        end)
+        buffAddBtn:SetScript("OnLeave", function()
+            buffAddLbl:SetTextColor(BUFF_ADD_R, BUFF_ADD_G, BUFF_ADD_B, 0.7)
+            if buffAddBrd then buffAddBrd:Hide() end
+            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+        end)
+        buffAddBtn:SetScript("OnClick", function(self)
+            local bd = SelectedCDMBar()
+            if not bd then return end
+            -- CD/utility bars only (defensive: the button is hidden elsewhere).
+            if ns.IsBarBuffFamily(bd) or bd.barType == "custom_buff" then return end
+            ShowBuffToCDPicker(self, bd.key, function()
+                if ns.CollectAndReanchor then ns.CollectAndReanchor() end
+                -- The buff-mirror walk (10Hz) binds to the freshly-created icon on
+                -- its own next tick; no re-arm needed.
+                C_Timer.After(0.05, function()
+                    if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                    if pf.Update then pf:Update() end
+                    UpdateCDMPreviewAndResize()
+                end)
+            end)
+        end)
+
         -- Update: mirrors tracked spells with interactive slots
         pf.Update = function(self)
             local bd = SelectedCDMBar()
             if not bd then
                 for i = 1, MAX_PREVIEW_ICONS do previewSlots[i]:Hide() end
-                addBtn:Hide(); self:SetHeight(1); return
+                addBtn:Hide(); buffAddBtn:Hide(); self:SetHeight(1); return
             end
 
             local iconSize = bd.iconSize or 36
@@ -12182,16 +13624,27 @@ initFrame:SetScript("OnEvent", function(self)
             local trackedCd
             pf._buffDispGroups = nil
             if bd.key == "buffs" then
-                -- Build exclusion set: spells claimed by other buff bars
+                -- Build exclusion set: spells claimed by other buff bars OR hosted
+                -- on a CD/utility bar. A buff moved to either place is diverted off
+                -- the default buffs bar live (the route map), so its preview must
+                -- leave the default too -- otherwise it would show on both previews.
                 local diverted = {}
                 local pp = DB()
                 if pp and pp.cdmBars and pp.cdmBars.bars then
                     for _, otherBd in ipairs(pp.cdmBars.bars) do
-                        if otherBd.enabled and otherBd.key ~= "buffs"
-                           and (otherBd.barType == "buffs" or otherBd.barType == "custom_buff") then
+                        if otherBd.enabled and otherBd.key ~= "buffs" then
                             local otherSd = ns.GetBarSpellData(otherBd.key)
-                            if otherSd and otherSd.assignedSpells then
-                                for _, sid in ipairs(otherSd.assignedSpells) do
+                            if otherBd.barType == "buffs" or otherBd.barType == "custom_buff" then
+                                if otherSd and otherSd.assignedSpells then
+                                    for _, sid in ipairs(otherSd.assignedSpells) do
+                                        if type(sid) == "number" and sid > 0 then
+                                            diverted[sid] = true
+                                        end
+                                    end
+                                end
+                            elseif otherSd and otherSd.hostedBuffSpellIDs then
+                                -- CD/utility bar hosting buffs (variant-keyed set).
+                                for sid in pairs(otherSd.hostedBuffSpellIDs) do
                                     if type(sid) == "number" and sid > 0 then
                                         diverted[sid] = true
                                     end
@@ -12469,9 +13922,22 @@ initFrame:SetScript("OnEvent", function(self)
                     slot._previewSpellID = nil  -- reset each update
                     slot._previewCdID = trackedCd and trackedCd[i] or nil
                     slot._previewItemID = nil
+                    slot._previewHostedBuff = nil
                     if id then
                         local tex
-                        if id <= -100 then
+                        local hostedSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(id)
+                        if hostedSid then
+                            -- Hosted-buff marker: previews as its spell, flagged so
+                            -- the per-icon menu takes the buff branch while the same
+                            -- id's cooldown slot keeps the cd/util one.
+                            local displayID = ResolveToLive(hostedSid)
+                            tex = C_Spell.GetSpellTexture(displayID)
+                            if not tex and displayID ~= hostedSid then
+                                tex = C_Spell.GetSpellTexture(hostedSid)
+                            end
+                            slot._previewSpellID = hostedSid
+                            slot._previewHostedBuff = true
+                        elseif id <= -100 then
                             -- On-use bag item: negated itemID
                             tex = C_Item.GetItemIconByID(-id)
                             slot._previewItemID = -id
@@ -12502,6 +13968,7 @@ initFrame:SetScript("OnEvent", function(self)
                     slot._previewSpellID = nil
                     slot._previewCdID = nil
                     slot._previewItemID = nil
+                    slot._previewHostedBuff = nil
                 end
 
                 local bSz = bd.borderSize or 1
@@ -12522,6 +13989,21 @@ initFrame:SetScript("OnEvent", function(self)
                 -- (ApplyShapeToCDMIcon hides the slot's own PP border but not _hlBrd)
                 if slot._hlBrd and shape ~= "square" and shape ~= "csquare" and shape ~= "none" then
                     slot._hlBrd:Hide()
+                end
+                -- Hosted-buff gold border: always on for a buff icon hosted on
+                -- this CD/utility bar. Square-family shapes use the dedicated
+                -- gold strips; masked shapes tint the shape border instead
+                -- (their square strips are hidden, like the hover highlight).
+                if slot._hostBrd then
+                    if slot._previewHostedBuff
+                       and not (slot._shapeBorder and slot._shapeBorder:IsShown()) then
+                        slot._hostBrd:Show()
+                    else
+                        slot._hostBrd:Hide()
+                    end
+                end
+                if slot._previewHostedBuff and slot._shapeBorder and slot._shapeBorder:IsShown() then
+                    slot._shapeBorder:SetVertexColor(1, 0.82, 0.25, 1)
                 end
 
                 -- Stack count preview text
@@ -12632,6 +14114,18 @@ initFrame:SetScript("OnEvent", function(self)
 
             addLbl:SetTextColor(ar, ag, ab, 0.6)
             addBtn:Show()
+
+            -- Second "+" (buff) button sits one slot right of the standard "+",
+            -- on CD/utility bars only (buff-family / custom_buff / focuskick bars
+            -- track buffs their own way).
+            if not isBuffBar and not isCustomBuffBar and not isFocusKick then
+                PP.Size(buffAddBtn, iconSize, iconH); buffAddBtn:ClearAllPoints()
+                PP.Point(buffAddBtn, "TOPLEFT", self, "TOPLEFT", addPx + iconSize + spacing, addPy)
+                if PP.GetBorders(buffAddBtn) then PP.SetBorderSize(buffAddBtn, 1) end
+                buffAddBtn:Show()
+            else
+                buffAddBtn:Hide()
+            end
 
             -- Bar background covers spell grid only (not the + column)
             local spellW, spellH
@@ -13890,6 +15384,39 @@ initFrame:SetScript("OnEvent", function(self)
             -- Cog stays clickable at any row count; the rows inside gate
             -- themselves on the 2-row requirement individually.
             MakeCogBtn(leftRgn, topRowCogShow, ctrl, EllesmereUI.COGS_ICON)
+        end
+
+        -- Inline cog on Bar Opacity: fade the bar to a chosen alpha while out
+        -- of combat. Off by default.
+        if isCDOrUtilityRow3 then
+            local rgn = numRowsRow._rightRegion
+            local ctrl = rgn and rgn._control
+            local _, oocCogShow = EllesmereUI.BuildCogPopup({
+                title = "Out of Combat Alpha",
+                rows = {
+                    { type="toggle", label="Fade Out of Combat",
+                      tooltip="Dims this bar while out of combat.",
+                      rawTooltip=true,
+                      get=function() return BD().oocFadeEnabled == true end,
+                      set=function(v)
+                          BD().oocFadeEnabled = v
+                          if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                          UpdateCDMPreview()
+                      end },
+                    { type="slider", label="Out of Combat Alpha",
+                      min=0, max=100, step=1,
+                      disabled=function() return not BD().oocFadeEnabled end,
+                      disabledTooltip="Enable Fade Out of Combat first",
+                      rawTooltip=true,
+                      get=function() return math.floor((BD().oocFadeAlpha or 0.5) * 100 + 0.5) end,
+                      set=function(v)
+                          BD().oocFadeAlpha = v / 100
+                          if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
+                          UpdateCDMPreview()
+                      end },
+                },
+            })
+            MakeCogBtn(rgn, oocCogShow, ctrl, EllesmereUI.COGS_ICON)
         end
 
         -- Hide Buffs When Inactive (global setting, applies to all buff bars)
@@ -15414,6 +16941,20 @@ initFrame:SetScript("OnEvent", function(self)
                               BD().pixelGlowSpeed = 9 - v
                               ns.BuildAllCDMBars(); if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
                           end },
+                        { type="toggle", label="Background",
+                          get=function() return BD().pixelGlowBackground == true end,
+                          set=function(v)
+                              BD().pixelGlowBackground = v and true or nil
+                              ns.BuildAllCDMBars(); if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+                          end },
+                        { type="colorpicker", label="Background Color",
+                          get=function() return BD().pixelGlowBackgroundR or 0, BD().pixelGlowBackgroundG or 0, BD().pixelGlowBackgroundB or 0 end,
+                          set=function(r, g, b)
+                              BD().pixelGlowBackgroundR = r; BD().pixelGlowBackgroundG = g; BD().pixelGlowBackgroundB = b
+                              ns.BuildAllCDMBars(); if ns.RequestBarGlowUpdate then ns.RequestBarGlowUpdate() end
+                          end,
+                          disabled=function() return BD().pixelGlowBackground ~= true end,
+                          disabledTooltip=EllesmereUI.DisabledTooltip("Pixel Glow Background") },
                     },
                 })
                 MakeCogBtn(rightRgn, pgCogShow, nil, EllesmereUI.RESIZE_ICON)
@@ -15453,6 +16994,20 @@ initFrame:SetScript("OnEvent", function(self)
                               BD().buffGlowSpeed = 9 - v
                               ns.BuildAllCDMBars(); if ns.RefreshBuffGlows then ns.RefreshBuffGlows() end
                           end },
+                        { type="toggle", label="Background",
+                          get=function() return BD().buffGlowBackground == true end,
+                          set=function(v)
+                              BD().buffGlowBackground = v and true or nil
+                              ns.BuildAllCDMBars(); if ns.RefreshBuffGlows then ns.RefreshBuffGlows() end
+                          end },
+                        { type="colorpicker", label="Background Color",
+                          get=function() return BD().buffGlowBackgroundR or 0, BD().buffGlowBackgroundG or 0, BD().buffGlowBackgroundB or 0 end,
+                          set=function(r, g, b)
+                              BD().buffGlowBackgroundR = r; BD().buffGlowBackgroundG = g; BD().buffGlowBackgroundB = b
+                              ns.BuildAllCDMBars(); if ns.RefreshBuffGlows then ns.RefreshBuffGlows() end
+                          end,
+                          disabled=function() return BD().buffGlowBackground ~= true end,
+                          disabledTooltip=EllesmereUI.DisabledTooltip("Pixel Glow Background") },
                     },
                 })
                 MakeCogBtn(leftRgn, pgCogShow, nil, EllesmereUI.RESIZE_ICON)
@@ -15469,8 +17024,20 @@ initFrame:SetScript("OnEvent", function(self)
         if not isCustomBuffBar and not isFocusKick then
         _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
-        -- Show Tooltip | Show Keybind (not for buff bars)
-        if not isAnyBuffBar then
+        -- Buffs get "Show Tooltip on Hover" only (auras aren't cast -> no keybind);
+        -- cooldown/utility icon bars get the Tooltip | Keybind pair below.
+        if isAnyBuffBar then
+        local _, tth = W:DualRow(parent, y,
+            { type="toggle", text="Show Tooltip on Hover",
+              getValue=function() return BD().showTooltip == true end,
+              setValue=function(v)
+                  BD().showTooltip = v
+                  ns.ApplyCDMTooltipState(BD().key)
+                  Refresh()
+              end },
+            { type="spacer" }
+        );  y = y - tth
+        else
         local kbRow
         kbRow, h = W:DualRow(parent, y,
             { type="toggle", text="Show Tooltip on Hover",
@@ -15552,7 +17119,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end)
             end
         end
-        end -- tooltip/keybind buff bar guard
+        end -- if isAnyBuffBar (tooltip only) / else (tooltip + keybind)
 
         -- Pandemic Glow
         do
@@ -15652,9 +17219,24 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end });  y = y - h
 
-        -- Hide Items if Missing | Custom Active State Decimals
-        local decRow
-        decRow, h = W:DualRow(parent, y,
+        -- Hide Items if Missing | Mirror Key Presses. Mirror Key Presses is not
+        -- for buff-family bars (buffs are auto-tracked auras, not keybind-pressed
+        -- abilities, so a "pressed" look has no meaning) -- those bars keep the
+        -- right slot visually empty. (Per-spell threshold decimals/color moved to
+        -- the per-icon dropdown: Threshold Text.)
+        local mirrorCfg
+        if not (ns.IsBarBuffFamily and ns.IsBarBuffFamily(barData)) then
+            mirrorCfg = { type="toggle", text="Mirror Key Presses",
+              tooltip = "When you press an ability's keybind, show the action button's \"pushed down\" look on its icon on this bar -- even while the ability is on cooldown.",
+              getValue=function() return BD().pressMirror == true end,
+              setValue=function(v)
+                  BD().pressMirror = v
+                  if ns.ClearCdmPressPush then ns.ClearCdmPressPush() end
+              end }
+        else
+            mirrorCfg = { type="label", text="" }
+        end
+        _, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Items if Missing",
               tooltip = "Hide consumable items (potions, healthstone) from the bar when you have none in your bags, instead of showing them dimmed. They reappear automatically once you have the item again.",
               getValue=function() return BD().hideItemsIfMissing == true end,
@@ -15662,56 +17244,7 @@ initFrame:SetScript("OnEvent", function(self)
                   BD().hideItemsIfMissing = v
                   if ns.FullCDMRebuild then ns.FullCDMRebuild("hide_missing_toggle") end
               end },
-            { type="toggle", text="Custom Active State Decimals",
-              tooltip = "Show a 1-decimal countdown on presets and custom spell/item IDs when under the cog's Seconds Left threshold -- their active state on cooldown/utility bars, their buff duration on buff bars (both are hardcoded, so the remaining time is exact).",
-              getValue=function() return BD().faDecimals == true end,
-              setValue=function(v) BD().faDecimals = v; EllesmereUI:RefreshPage() end });  y = y - h
-
-        -- Inline cog on Custom Active State Decimals: the Seconds Left threshold.
-        do
-            local rgn = decRow._rightRegion
-            local _, decCogShow = EllesmereUI.BuildCogPopup({
-                title = "Custom Active State Decimals",
-                rows = {
-                    { type = "slider", label = "Seconds Left", min = 0, max = 10, step = 1,
-                      get = function() return BD().faDecimalsThreshold or 5 end,
-                      set = function(v) BD().faDecimalsThreshold = v end },
-                    { type = "toggle", label = "Change Text Color",
-                      tooltip = "Also recolour the countdown text once the decimals kick in.",
-                      get = function() return BD().faDecimalsColorEnabled == true end,
-                      set = function(v) BD().faDecimalsColorEnabled = v end },
-                    { type = "colorpicker", label = "Text Color",
-                      disabled = function() return not (BD().faDecimalsColorEnabled == true) end,
-                      disabledTooltip = "Change Text Color",
-                      get = function() return BD().faDecimalsColorR or 1, BD().faDecimalsColorG or 0.2, BD().faDecimalsColorB or 0.2 end,
-                      set = function(r, g, b) BD().faDecimalsColorR = r; BD().faDecimalsColorG = g; BD().faDecimalsColorB = b end },
-                },
-            })
-            local decCog = MakeCogBtn(rgn, decCogShow, nil, EllesmereUI.RESIZE_ICON)
-            if decCog then
-                local function updateDecCog()
-                    local on = BD().faDecimals == true
-                    decCog:SetAlpha(on and 0.4 or 0.15)
-                    decCog:EnableMouse(on)
-                end
-                EllesmereUI.RegisterWidgetRefresh(updateDecCog)
-                updateDecCog()
-            end
-        end
-
-        -- Mirror Key Presses -- not for buff-family bars (buffs are auto-tracked
-        -- auras, not keybind-pressed abilities, so a "pressed" look has no meaning).
-        if not (ns.IsBarBuffFamily and ns.IsBarBuffFamily(barData)) then
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Mirror Key Presses",
-                  tooltip = "When you press an ability's keybind, show the action button's \"pushed down\" look on its icon on this bar -- even while the ability is on cooldown.",
-                  getValue=function() return BD().pressMirror == true end,
-                  setValue=function(v)
-                      BD().pressMirror = v
-                      if ns.ClearCdmPressPush then ns.ClearCdmPressPush() end
-                  end },
-                { type="label", text="" });  y = y - h
-        end
+            mirrorCfg);  y = y - h
 
         end -- custom_buff extras guard
 

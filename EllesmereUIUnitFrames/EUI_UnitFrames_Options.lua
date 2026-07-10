@@ -74,7 +74,11 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     local function ReloadAndUpdate()
-        if ReloadFrames then ReloadFrames() end
+        -- Resolve at call time: ns.ReloadFrames gets wrapped after this file's
+        -- setup runs (aura containers, dispel overlay); a load-time capture
+        -- would bypass those hooks and settings would stop live-updating.
+        local rf = ns.ReloadFrames or ReloadFrames
+        if rf then rf() end
         UpdatePreview()
     end
 
@@ -2983,9 +2987,11 @@ initFrame:SetScript("OnEvent", function(self)
                     if mode == "full" then
                         dispelOverlayPreview:SetAllPoints(health)
                         dispelOverlayPreview:SetColorTexture(c.r, c.g, c.b, alpha)
-                    elseif mode == "gradient" then
+                    elseif mode == "gradient" or mode == "gradient_sharp" then
                         dispelOverlayPreview:SetAllPoints(health)
-                        dispelOverlayPreview:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-tb.tga")
+                        dispelOverlayPreview:SetTexture(mode == "gradient_sharp"
+                            and "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-sharp.tga"
+                            or "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-tb.tga")
                         dispelOverlayPreview:SetVertexColor(c.r, c.g, c.b, alpha)
                     else
                         dispelOverlayPreview:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
@@ -3118,7 +3124,7 @@ initFrame:SetScript("OnEvent", function(self)
                             if bf._iconTex then
                                 bf._iconTex:SetTexture(_previewBuffIcons[i] or 135932)
                                 -- SetTexture resets texcoord, so re-apply the crop each update.
-                                ns.SetAuraIconCrop(bf._iconTex, buffCrop, buffSize, buffH)
+                                ns.SetAuraIconCrop(bf._iconTex, buffCrop, buffSize, buffH, s.buffIconZoom or 0.07)
                             end
                         else
                             if bf:IsShown() then bf:Hide() end
@@ -3233,12 +3239,12 @@ initFrame:SetScript("OnEvent", function(self)
                     local simpleIconPt   = (simpleMode == "right") and "TOPLEFT"  or "TOPRIGHT"
                     local simpleParentPt = (simpleMode == "right") and "TOPRIGHT" or "TOPLEFT"
                     local simpleEdgeSign = (simpleMode == "right") and 1 or -1
-                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. dOffX .. "gx" .. debuffGapX .. "gy" .. debuffGapY
+                    local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. dOffX .. "gx" .. debuffGapX .. "gy" .. debuffGapY .. "z" .. (s.debuffIconZoom or 0.07)
                     for i, df in ipairs(debuffIcons) do
                         if i <= visibleDebuffCount then
                             if df._anchorKey ~= anchorKey then
                                 PP.Size(df, debuffSize, debuffH)
-                                if df._iconTex then ns.SetAuraIconCrop(df._iconTex, debuffCrop, debuffSize, debuffH) end
+                                if df._iconTex then ns.SetAuraIconCrop(df._iconTex, debuffCrop, debuffSize, debuffH, s.debuffIconZoom or 0.07) end
                                 df:ClearAllPoints()
                                 if i == 1 then
                                     if useSimpleBossAnchor then
@@ -3291,7 +3297,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Show Cooldown Text / Stack controls live-update here.
             do
                 local showExtras = (unitKey == "boss") and not noDebuffPreview
-                local showCDText, cdTextSize, cdTOffX, cdTOffY, stackTextSize, stackTOffX, stackTOffY
+                local showCDText, cdTextSize, cdTOffX, cdTOffY, stackTextSize, stackTextPosition, stackTOffX, stackTOffY, cdTextColor, stackTextColor
                 if showExtras then
                     if ns.GetBossSimpleDebuffMode(s) ~= "none" then
                         showCDText = s.simpleDebuffShowCooldownText
@@ -3305,8 +3311,11 @@ initFrame:SetScript("OnEvent", function(self)
                         cdTOffY = s.debuffCooldownTextOffsetY or 0
                     end
                     stackTextSize = s.debuffStackTextSize or 14
+                    stackTextPosition = s.debuffStackTextPosition or "bottomright"
                     stackTOffX = s.debuffStackTextOffsetX or 0
                     stackTOffY = s.debuffStackTextOffsetY or 0
+                    cdTextColor = s.debuffCooldownTextColor or {r=1, g=1, b=1}
+                    stackTextColor = s.debuffStackTextColor or {r=1, g=1, b=1}
                 end
                 local fontP = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
                 for i = 1, #debuffIcons do
@@ -3319,6 +3328,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 EllesmereUI.ApplyIconTextFont(dt, fontP, cdTextSize, "unitFrames")
                                 dt:ClearAllPoints()
                                 dt:SetPoint("CENTER", df, "CENTER", cdTOffX, cdTOffY)
+                                dt:SetTextColor(cdTextColor.r, cdTextColor.g, cdTextColor.b)
                                 dt:Show()
                             else
                                 dt:Hide()
@@ -3330,8 +3340,8 @@ initFrame:SetScript("OnEvent", function(self)
                             if i == 2 then
                                 EllesmereUI.ApplyIconTextFont(st, fontP, stackTextSize, "unitFrames")
                                 st:SetText(3)
-                                st:ClearAllPoints()
-                                st:SetPoint("BOTTOMRIGHT", df, "BOTTOMRIGHT", -1 + stackTOffX, stackTOffY)
+                                ns.ApplyStackAnchor(st, df, stackTextPosition, stackTOffX, stackTOffY)
+                                st:SetTextColor(stackTextColor.r, stackTextColor.g, stackTextColor.b)
                                 st:Show()
                             else
                                 st:Hide()
@@ -9252,6 +9262,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Cropped Icons",
                       get=function() return SValSupported("buffCropIcons", false) end,
                       set=function(v) SSetSupported("buffCropIcons", v) end },
+                    { type="slider", label="Icon Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return SValSupported("buffIconZoom", 0.07) end,
+                      set=function(v) SSetSupported("buffIconZoom", v) end },
                 },
             })
             MakeCogBtn(leftRgn, buffCogShow, nil, nil, BuffDisabled)
@@ -9373,6 +9386,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Cropped Icons",
                       get=function() return SValSupported("debuffCropIcons", false) end,
                       set=function(v) SSetSupported("debuffCropIcons", v) end },
+                    { type="slider", label="Icon Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return SValSupported("debuffIconZoom", 0.07) end,
+                      set=function(v) SSetSupported("debuffIconZoom", v) end },
                 },
             })
             MakeCogBtn(leftRgn, debuffCogShow, nil, nil, DebuffDisabled)
@@ -9467,24 +9483,61 @@ initFrame:SetScript("OnEvent", function(self)
         -- RAID, Crowd Control, Big Defensive, External Defensive). "Own Only"
         -- reuses the legacy onlyPlayerDebuffs key so existing settings carry over.
         do
-            local filterItems = {
-                { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Buffs/Debuffs that appear on Raid Frames" },
-                { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
-                { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
-                { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
-                { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Buffs/Debuffs you apply" },
-            }
-            local BUFF_FILTER_KEYS   = { ownOnly = "onlyPlayerBuffs",   raidFrames = "buffRaid",   crowdControl = "buffCrowdControl",   bigDefensive = "buffBigDefensive",   externalDefensive = "buffExternalDefensive" }
-            local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive" }
+            -- Version-branched classification lists: 12.1 exposes the full
+            -- engine set; 12.0 keeps today's exact five entries. Both
+            -- branches assign the SAME local names the consumers below use.
+            local buffFilterItems, debuffFilterItems, BUFF_FILTER_KEYS, DEBUFF_FILTER_KEYS
+            if EllesmereUI.IS_121 then
+                -- Full 12.1 classification set. Checked classes OR together at
+                -- runtime; all default OFF (off = show everything). Cancelable and
+                -- Stealable are buff-side classes; Boss/Role/Priority are
+                -- debuff-side engine selectors.
+                buffFilterItems = {
+                    { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Buffs that appear on Raid Frames" },
+                    { key = "raidInCombat",      label = "Raid (In Combat)",   tooltip = "Shows only auras flagged for raid frames during combat" },
+                    { key = "dispellable",       label = "Dispellable",        tooltip = "Shows only auras with a dispel type you can dispel" },
+                    { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                    { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                    { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                    { key = "cancelable",        label = "Cancelable",         tooltip = "Shows only buffs that can be canceled" },
+                    { key = "stealable",         label = "Stealable",          tooltip = "Shows only buffs you can spellsteal or purge" },
+                    { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Buffs you apply" },
+                }
+                debuffFilterItems = {
+                    { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Debuffs that appear on Raid Frames" },
+                    { key = "raidInCombat",      label = "Raid (In Combat)",   tooltip = "Shows only auras flagged for raid frames during combat" },
+                    { key = "dispellable",       label = "Dispellable",        tooltip = "Shows only auras with a dispel type you can dispel" },
+                    { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                    { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                    { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                    { key = "bossAura",          label = "Boss Auras",         tooltip = "Shows only debuffs applied by bosses" },
+                    { key = "roleAura",          label = "Role Auras",         tooltip = "Shows only debuffs flagged for your role" },
+                    { key = "priorityAura",      label = "Priority",           tooltip = "Shows only priority debuffs" },
+                    { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Debuffs you apply" },
+                }
+                BUFF_FILTER_KEYS   = { ownOnly = "onlyPlayerBuffs",   raidFrames = "buffRaid",   raidInCombat = "buffRaidInCombat",   dispellable = "buffDispellable",   crowdControl = "buffCrowdControl",   bigDefensive = "buffBigDefensive",   externalDefensive = "buffExternalDefensive",   cancelable = "buffCancelable", stealable = "buffStealable" }
+                DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", raidInCombat = "debuffRaidInCombat", dispellable = "debuffDispellable", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive", bossAura = "debuffBossAura", roleAura = "debuffRoleAura", priorityAura = "debuffPriorityAura" }
+            else
+                buffFilterItems = {
+                    { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Buffs/Debuffs that appear on Raid Frames" },
+                    { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                    { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                    { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                    { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Buffs/Debuffs you apply" },
+                }
+                debuffFilterItems = buffFilterItems
+                BUFF_FILTER_KEYS   = { ownOnly = "onlyPlayerBuffs",   raidFrames = "buffRaid",   crowdControl = "buffCrowdControl",   bigDefensive = "buffBigDefensive",   externalDefensive = "buffExternalDefensive" }
+                DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive" }
+            end
             -- "Own Only" is not offered for the PLAYER's debuffs (you rarely apply
             -- your own debuffs to yourself); any stale onlyPlayerDebuffs value is
-            -- ignored at runtime (see ns.EUIAuraFilter).
-            local debuffFilterItems = filterItems
+            -- ignored at runtime.
             if selectedUnit == "player" then
-                debuffFilterItems = {}
-                for _, it in ipairs(filterItems) do
-                    if it.key ~= "ownOnly" then debuffFilterItems[#debuffFilterItems + 1] = it end
+                local trimmed = {}
+                for _, it in ipairs(debuffFilterItems) do
+                    if it.key ~= "ownOnly" then trimmed[#trimmed + 1] = it end
                 end
+                debuffFilterItems = trimmed
             end
             local unitLabel = UNIT_LABELS_SUP[selectedUnit] or "Player"
             local filterRow
@@ -9511,7 +9564,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local rgn = filterRow._leftRegion
                 if rgn._control then rgn._control:Hide() end
                 local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                    rgn, 210, rgn:GetFrameLevel() + 2, filterItems,
+                    rgn, 210, rgn:GetFrameLevel() + 2, buffFilterItems,
                     function(k) return SValSupported(BUFF_FILTER_KEYS[k], false) end,
                     function(k, v) SSetSupported(BUFF_FILTER_KEYS[k], v) end)
                 PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
@@ -9553,8 +9606,9 @@ initFrame:SetScript("OnEvent", function(self)
                 fill     = "Fill Overlay",
                 full     = "Full Overlay",
                 gradient = "Gradient Overlay",
+                gradient_sharp = "Gradient Sharp",
             }
-            local dispelOverlayOrder = { "none", "fill", "full", "gradient" }
+            local dispelOverlayOrder = { "none", "fill", "full", "gradient", "gradient_sharp" }
             local function DispelRefresh()
                 if ns.UpdatePlayerDispelOverlay then ns.UpdatePlayerDispelOverlay() end
                 UpdatePreview()
@@ -9820,6 +9874,19 @@ initFrame:SetScript("OnEvent", function(self)
                       tooltip="Show the part of an absorb that exceeds your empty health and backfills over your current health. When off, absorbs only fill the empty part of the health bar.",
                       get=function() return SValSupported("showOvershield", true) end,
                       set=function(v) SSetSupported("showOvershield", v) end },
+                    -- Single global toggle (boss block key, nil = enabled):
+                    -- boss frames render absorbs with the TARGET frame's
+                    -- absorb styling -- no per-boss customization.
+                    { type="toggle", label="Show on Boss Frames",
+                      tooltip="Render absorbs on Boss Frames using the Target frame's absorb styling.",
+                      get=function() return not (db.profile.boss and db.profile.boss.showAbsorbs == false) end,
+                      set=function(v)
+                          local b = db.profile.boss
+                          if b then
+                              if v then b.showAbsorbs = nil else b.showAbsorbs = false end
+                          end
+                          ReloadAndUpdate()
+                      end },
                 },
             })
             MakeCogBtn(rgn, cogShow)
@@ -12019,7 +12086,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- disabled) boss frames and renders broken, so it must not be activatable.
         local activateBtnFrame, activateBtnLbl, activateBtn
         local function PreviewLabel()
-            return ns._bossPreviewActive and "Deactivate Boss Preview" or "Activate Boss Preview"
+            return ns._bossPreviewActive and EllesmereUI.L("Deactivate Boss Preview") or EllesmereUI.L("Activate Boss Preview")
         end
         local function BossFramesDisabled()
             return db.profile.enabledFrames.boss == false
@@ -12120,14 +12187,173 @@ initFrame:SetScript("OnEvent", function(self)
             -- BUFFS AND DEBUFFS section (below DISPLAY)
             bossAuraHeader, hh = Ww:SectionHeader(pp, "Buffs and Debuffs", yy);  yy = yy - hh
 
+            -- Effective boss aura locations. Simple display overrides the stored
+            -- location at runtime and the location dropdowns display None while
+            -- it is active, so every disabled check must treat the location as
+            -- None whenever the matching simple mode is on. Raw key checks
+            -- deadlock: defaults hold simpleDebuffs="left" alongside
+            -- debuffAnchor="bottomleft", which locked BOTH the Simple Debuff
+            -- Display dropdown (raw anchor not none) and the Debuffs Location
+            -- dropdown (simple active) at the same time.
+            local function BossDebuffLocationActive()
+                local s = db.profile.boss
+                if ns.GetBossSimpleDebuffMode(s) ~= "none" then return false end
+                return (s.debuffAnchor or "bottomleft") ~= "none"
+            end
+            local function BossBuffLocationActive()
+                local s = db.profile.boss
+                if ns.GetBossSimpleBuffMode(s) ~= "none" then return false end
+                if s.showBuffs == false then return false end
+                return (s.buffAnchor or "topleft") ~= "none"
+            end
+
+            -- Simple Buff Display: identical to Simple Debuff Display above but for
+            -- buffs. Defaults to None. Forces a single Left/Right column matched to
+            -- the frame height, overriding Buffs Location + Buff Size while active.
+            local simpleBuffTextOff = function()
+                return BossBuffLocationActive()
+                or ns.GetBossSimpleBuffMode(db.profile.boss) == "none"
+                or not db.profile.boss.simpleBuffShowCooldownText
+            end
+            simpleBuffRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Simple Buff Display",
+                  disabled = function()
+                      return BossBuffLocationActive()
+                  end,
+                  disabledTooltip="Buffs Location", requireState="disabled",
+                  tooltip = "Force boss buffs into a single large column matched to the frame height.",
+                  values = { none = "None", left = "Left", right = "Right" },
+                  order = { "none", "left", "right" },
+                  getValue=function() return ns.GetBossSimpleBuffMode(db.profile.boss) end,
+                  setValue=function(v)
+                      db.profile.boss.simpleBuffs = v
+                      if v ~= "none" then
+                          -- Same-side collision: if Simple Debuff Display occupies this
+                          -- side, push it off (set to None) so they never overlap.
+                          if ns.GetBossSimpleDebuffMode(db.profile.boss) == v then
+                              db.profile.boss.simpleDebuffs = "none"
+                          end
+                          -- Selecting a side takes over from the normal Buffs
+                          -- Location, so force that setting to None.
+                          db.profile.boss.showBuffs = false
+                      end
+                      ReloadAndUpdate()
+                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Buff Text Size", min=6, max=30, step=1, trackWidth=120,
+                  disabled=simpleBuffTextOff, disabledTooltip="Show Duration (Inside Cog)",
+                  getValue=function() return db.profile.boss.simpleBuffCooldownTextSize or 14 end,
+                  setValue=function(v) db.profile.boss.simpleBuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
+
+            -- Directions cog on Simple Buff Display: the simple column's own X/Y
+            -- offset (defaults to the regular buff offsets via ns.GetBossSimpleBuffOffset);
+            -- writing here makes the simple offset independent. Disabled while None.
+            do
+                local leftRgn = simpleBuffRow._leftRegion
+                local _, simpleBuffPosCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Simple Buff Position",
+                    rows = {
+                        -- Max buffs shown in simple mode. Shares the boss maxBuffs key
+                        -- with Buffs Location (the two modes are mutually exclusive);
+                        -- the runtime caps frame.Buffs.num to it.
+                        { type="slider", label="Max Count", min=1, max=20, step=1,
+                          get=function() return db.profile.boss.maxBuffs or 4 end,
+                          set=function(v) db.profile.boss.maxBuffs = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                        { type="slider", label="Offset X", min=-200, max=200, step=1,
+                          get=function() local x = ns.GetBossSimpleBuffOffset(db.profile.boss); return x end,
+                          set=function(v) db.profile.boss.simpleBuffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                        { type="slider", label="Offset Y", min=-200, max=200, step=1,
+                          get=function() local _, y = ns.GetBossSimpleBuffOffset(db.profile.boss); return y end,
+                          set=function(v) db.profile.boss.simpleBuffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                        -- Physical-pixel-perfect gap between the simple buff icons.
+                        { type="slider", label="Spacing", min=-1, max=10, step=1,
+                          get=function() return db.profile.boss.simpleBuffSpacing or 1 end,
+                          set=function(v) db.profile.boss.simpleBuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                    },
+                })
+                BossCogBtn(leftRgn, simpleBuffPosCogShow, EllesmereUI.DIRECTIONS_ICON,
+                    function() return ns.GetBossSimpleBuffMode(db.profile.boss) == "none" end)
+            end
+
+            -- Inline cog on Simple Text Size: duration X/Y + stack size / X/Y.
+            do
+                local rightRgn = simpleBuffRow._rightRegion
+                -- Inline Duration + Stack swatches mirroring the regular Buff Text
+                -- Size swatches (same keys); greyed + disabled on this row cog's
+                -- condition.
+                local buffOff = function() return BossBuffLocationActive() or ns.GetBossSimpleBuffMode(db.profile.boss) == "none" end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.buffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.buffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.buffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.buffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
+                local _, simpleBuffStackCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Duration & Stack",
+                    rows = {
+                        { type="toggle", label="Show Duration",
+                          get=function() return db.profile.boss.simpleBuffShowCooldownText end,
+                          set=function(v) db.profile.boss.simpleBuffShowCooldownText = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
+                        { type="slider", label="Duration X", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.simpleBuffCooldownTextOffsetX or 0 end,
+                          set=function(v) db.profile.boss.simpleBuffCooldownTextOffsetX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Duration Y", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.simpleBuffCooldownTextOffsetY or 0 end,
+                          set=function(v) db.profile.boss.simpleBuffCooldownTextOffsetY = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack Size", min=6, max=30, step=1,
+                          get=function() return db.profile.boss.buffStackTextSize or 14 end,
+                          set=function(v) db.profile.boss.buffStackTextSize = v; ReloadAndUpdate() end },
+                        { type="dropdown", label="Stack Position",
+                          values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
+                          order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                          get=function() return db.profile.boss.buffStackTextPosition or "bottomright" end,
+                          set=function(v) db.profile.boss.buffStackTextPosition = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack X", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.buffStackTextOffsetX or 0 end,
+                          set=function(v) db.profile.boss.buffStackTextOffsetX = v; ReloadAndUpdate() end },
+                        { type="slider", label="Stack Y", min=-100, max=100, step=1,
+                          get=function() return db.profile.boss.buffStackTextOffsetY or 0 end,
+                          set=function(v) db.profile.boss.buffStackTextOffsetY = v; ReloadAndUpdate() end },
+                    },
+                })
+                BossCogBtn(rightRgn, simpleBuffStackCogShow, nil, buffOff)
+            end
+            -- (Show Duration toggle lives inside the Duration & Stack cog above.)
+
             -- Simple Debuff Display: forces Left anchor + debuff height =
             -- frame bar height so boss debuffs render as one large column.
             -- Row 1 slot 2 is "Simple Text Size": the cooldown-text size slider,
             -- gated by an inline Show-Cooldown-Text toggle, with an inline cog
             -- holding the stack size and stack X/Y position controls.
-            local simpleTextOff = function() return not db.profile.boss.simpleDebuffShowCooldownText end
+            
+            local simpleTextOff = function()
+                return BossDebuffLocationActive()
+                or ns.GetBossSimpleDebuffMode(db.profile.boss) == "none"
+                or not db.profile.boss.simpleDebuffShowCooldownText
+            end
             simpleRow, hh = Ww:DualRow(pp, yy,
                 { type="dropdown", text="Simple Debuff Display",
+                  disabled = function()
+                      return BossDebuffLocationActive()
+                  end,
+                  disabledTooltip="Debuffs Location", requireState="disabled",
                   tooltip = "Force boss debuffs into a single large column matched to the frame height.",
                   values = { none = "None", left = "Left", right = "Right" },
                   order = { "none", "left", "right" },
@@ -12148,7 +12374,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="slider", text="Debuff Text Size", min=6, max=30, step=1,
+                { type="slider", text="Debuff Text Size", min=6, max=30, step=1, trackWidth=120,
                   disabled=simpleTextOff, disabledTooltip="Show Duration (Inside Cog)",
                   getValue=function() return db.profile.boss.simpleDebuffCooldownTextSize or 14 end,
                   setValue=function(v) db.profile.boss.simpleDebuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
@@ -12187,6 +12413,32 @@ initFrame:SetScript("OnEvent", function(self)
             -- Inline cog on Simple Text Size: duration X/Y + stack size / X/Y.
             do
                 local rightRgn = simpleRow._rightRegion
+                -- Inline Duration + Stack swatches mirroring the regular Debuff Text
+                -- Size swatches (same keys); greyed + disabled on this row cog's
+                -- condition.
+                local debuffOff = function() return BossDebuffLocationActive() or ns.GetBossSimpleDebuffMode(db.profile.boss) == "none" end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.debuffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.debuffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
+                do
+                    local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                        function() local c = db.profile.boss.debuffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                        function(r, g, b) db.profile.boss.debuffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                    sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                    sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                    rightRgn._lastInline = sw
+                    local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                    apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                end
                 local _, simpleStackCogShow = EllesmereUI.BuildCogPopup({
                     title = "Duration & Stack",
                     rows = {
@@ -12215,104 +12467,7 @@ initFrame:SetScript("OnEvent", function(self)
                           set=function(v) db.profile.boss.debuffStackTextOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
-                BossCogBtn(rightRgn, simpleStackCogShow)
-            end
-
-            -- (Show Duration toggle lives inside the Duration & Stack cog above.)
-
-            -- Simple Buff Display: identical to Simple Debuff Display above but for
-            -- buffs. Defaults to None. Forces a single Left/Right column matched to
-            -- the frame height, overriding Buffs Location + Buff Size while active.
-            local simpleBuffTextOff = function() return not db.profile.boss.simpleBuffShowCooldownText end
-            simpleBuffRow, hh = Ww:DualRow(pp, yy,
-                { type="dropdown", text="Simple Buff Display",
-                  tooltip = "Force boss buffs into a single large column matched to the frame height.",
-                  values = { none = "None", left = "Left", right = "Right" },
-                  order = { "none", "left", "right" },
-                  getValue=function() return ns.GetBossSimpleBuffMode(db.profile.boss) end,
-                  setValue=function(v)
-                      db.profile.boss.simpleBuffs = v
-                      if v ~= "none" then
-                          -- Same-side collision: if Simple Debuff Display occupies this
-                          -- side, push it off (set to None) so they never overlap.
-                          if ns.GetBossSimpleDebuffMode(db.profile.boss) == v then
-                              db.profile.boss.simpleDebuffs = "none"
-                          end
-                          -- Selecting a side takes over from the normal Buffs
-                          -- Location, so force that setting to None.
-                          db.profile.boss.showBuffs = false
-                      end
-                      ReloadAndUpdate()
-                      if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type="slider", text="Buff Text Size", min=6, max=30, step=1,
-                  disabled=simpleBuffTextOff, disabledTooltip="Show Duration (Inside Cog)",
-                  getValue=function() return db.profile.boss.simpleBuffCooldownTextSize or 14 end,
-                  setValue=function(v) db.profile.boss.simpleBuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
-
-            -- Directions cog on Simple Buff Display: the simple column's own X/Y
-            -- offset (defaults to the regular buff offsets via ns.GetBossSimpleBuffOffset);
-            -- writing here makes the simple offset independent. Disabled while None.
-            do
-                local leftRgn = simpleBuffRow._leftRegion
-                local _, simpleBuffPosCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Simple Buff Position",
-                    rows = {
-                        -- Max buffs shown in simple mode. Shares the boss maxBuffs key
-                        -- with Buffs Location (the two modes are mutually exclusive);
-                        -- the runtime caps frame.Buffs.num to it.
-                        { type="slider", label="Max Count", min=1, max=20, step=1,
-                          get=function() return db.profile.boss.maxBuffs or 4 end,
-                          set=function(v) db.profile.boss.maxBuffs = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
-                        { type="slider", label="Offset X", min=-200, max=200, step=1,
-                          get=function() local x = ns.GetBossSimpleBuffOffset(db.profile.boss); return x end,
-                          set=function(v) db.profile.boss.simpleBuffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
-                        { type="slider", label="Offset Y", min=-200, max=200, step=1,
-                          get=function() local _, y = ns.GetBossSimpleBuffOffset(db.profile.boss); return y end,
-                          set=function(v) db.profile.boss.simpleBuffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
-                        -- Physical-pixel-perfect gap between the simple buff icons.
-                        { type="slider", label="Spacing", min=-1, max=10, step=1,
-                          get=function() return db.profile.boss.simpleBuffSpacing or 1 end,
-                          set=function(v) db.profile.boss.simpleBuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
-                    },
-                })
-                BossCogBtn(leftRgn, simpleBuffPosCogShow, EllesmereUI.DIRECTIONS_ICON,
-                    function() return ns.GetBossSimpleBuffMode(db.profile.boss) == "none" end)
-            end
-
-            -- Inline cog on Simple Text Size: duration X/Y + stack size / X/Y.
-            do
-                local rightRgn = simpleBuffRow._rightRegion
-                local _, simpleBuffStackCogShow = EllesmereUI.BuildCogPopup({
-                    title = "Duration & Stack",
-                    rows = {
-                        { type="toggle", label="Show Duration",
-                          get=function() return db.profile.boss.simpleBuffShowCooldownText end,
-                          set=function(v) db.profile.boss.simpleBuffShowCooldownText = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
-                        { type="slider", label="Duration X", min=-100, max=100, step=1,
-                          get=function() return db.profile.boss.simpleBuffCooldownTextOffsetX or 0 end,
-                          set=function(v) db.profile.boss.simpleBuffCooldownTextOffsetX = v; ReloadAndUpdate() end },
-                        { type="slider", label="Duration Y", min=-100, max=100, step=1,
-                          get=function() return db.profile.boss.simpleBuffCooldownTextOffsetY or 0 end,
-                          set=function(v) db.profile.boss.simpleBuffCooldownTextOffsetY = v; ReloadAndUpdate() end },
-                        { type="slider", label="Stack Size", min=6, max=30, step=1,
-                          get=function() return db.profile.boss.buffStackTextSize or 14 end,
-                          set=function(v) db.profile.boss.buffStackTextSize = v; ReloadAndUpdate() end },
-                        { type="dropdown", label="Stack Position",
-                          values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
-                          order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
-                          get=function() return db.profile.boss.buffStackTextPosition or "bottomright" end,
-                          set=function(v) db.profile.boss.buffStackTextPosition = v; ReloadAndUpdate() end },
-                        { type="slider", label="Stack X", min=-100, max=100, step=1,
-                          get=function() return db.profile.boss.buffStackTextOffsetX or 0 end,
-                          set=function(v) db.profile.boss.buffStackTextOffsetX = v; ReloadAndUpdate() end },
-                        { type="slider", label="Stack Y", min=-100, max=100, step=1,
-                          get=function() return db.profile.boss.buffStackTextOffsetY or 0 end,
-                          set=function(v) db.profile.boss.buffStackTextOffsetY = v; ReloadAndUpdate() end },
-                    },
-                })
-                BossCogBtn(rightRgn, simpleBuffStackCogShow)
+                BossCogBtn(rightRgn, simpleStackCogShow, nil, debuffOff)
             end
             -- (Show Duration toggle lives inside the Duration & Stack cog above.)
 
@@ -12351,6 +12506,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end,
                   setValue=function(v)
                       SwapAuraSlot(db.profile.boss, "debuffAnchor", v)
+                      if db.profile.boss.buffAnchor == "none" then
+                          db.profile.boss.showBuffs = false
+                      end
                       ReloadAndUpdate()
                       if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                       -- Refresh so dependent disabled states (Debuff Size, Boss
@@ -12421,6 +12579,16 @@ initFrame:SetScript("OnEvent", function(self)
                 } })
                 BossCogBtn(bossAuraSizeRow._leftRegion, bSizeCog, EllesmereUI.DIRECTIONS_ICON, bossBuffSizeOff)
             end
+            do  -- Icon Zoom cog on Buff Size (gated only on buffs hidden, so it
+                -- stays adjustable in Simple Buff Display, where zoom still applies)
+                local bossBuffZoomOff = function() return db.profile.boss.showBuffs == false end
+                local _, bZoomCog = EllesmereUI.BuildCogPopup({ title = "Icon Zoom", rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return db.profile.boss.buffIconZoom or 0.07 end,
+                      set=function(v) db.profile.boss.buffIconZoom = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+                BossCogBtn(bossAuraSizeRow._leftRegion, bZoomCog, nil, bossBuffZoomOff)
+            end
             do  -- Directions cog on Debuff Size (X/Y cluster offset)
                 local _, dSizeCog = EllesmereUI.BuildCogPopup({ title = "Debuff Position", rows = {
                     { type="slider", label="Offset X", min=-200, max=200, step=1,
@@ -12436,6 +12604,15 @@ initFrame:SetScript("OnEvent", function(self)
                 } })
                 BossCogBtn(bossAuraSizeRow._rightRegion, dSizeCog, EllesmereUI.DIRECTIONS_ICON, bossDebuffSizeOff)
             end
+            do  -- Icon Zoom cog on Debuff Size
+                local bossDebuffZoomOff = function() return (db.profile.boss.debuffAnchor or "bottomleft") == "none" end
+                local _, dZoomCog = EllesmereUI.BuildCogPopup({ title = "Icon Zoom", rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return db.profile.boss.debuffIconZoom or 0.07 end,
+                      set=function(v) db.profile.boss.debuffIconZoom = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+                BossCogBtn(bossAuraSizeRow._rightRegion, dZoomCog, nil, bossDebuffZoomOff)
+            end
 
             -- Per-unit DEBUFF filter for boss frames (NOT synced). Boss BUFFS are
             -- never filtered -- they always show every HELPFUL aura. Multi-select
@@ -12445,27 +12622,67 @@ initFrame:SetScript("OnEvent", function(self)
             -- key so existing boss settings carry over.
             do
                 local PP = EllesmereUI.PanelPP
-                local filterItems = {
-                    { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Debuffs that appear on Raid Frames" },
-                    { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
-                    { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
-                    { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
-                    { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Debuffs you apply" },
-                }
-                local DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive" }
+                -- Version-branched: 12.1 exposes the full engine
+                -- classification set plus a buff-side list for the 12.1-only
+                -- Boss Buff Filter; 12.0 keeps today's exact five entries
+                -- (buff vars stay nil -- only the 12.1 block consumes them).
+                local filterItems, DEBUFF_FILTER_KEYS, buffFilterItems, BUFF_FILTER_KEYS
+                if EllesmereUI.IS_121 then
+                    filterItems = {
+                        { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Debuffs that appear on Raid Frames" },
+                        { key = "raidInCombat",      label = "Raid (In Combat)",   tooltip = "Shows only auras flagged for raid frames during combat" },
+                        { key = "dispellable",       label = "Dispellable",        tooltip = "Shows only auras with a dispel type you can dispel" },
+                        { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                        { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                        { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                        { key = "bossAura",          label = "Boss Auras",         tooltip = "Shows only debuffs applied by bosses" },
+                        { key = "roleAura",          label = "Role Auras",         tooltip = "Shows only debuffs flagged for your role" },
+                        { key = "priorityAura",      label = "Priority",           tooltip = "Shows only priority debuffs" },
+                        { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Debuffs you apply" },
+                    }
+                    DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", raidInCombat = "debuffRaidInCombat", dispellable = "debuffDispellable", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive", bossAura = "debuffBossAura", roleAura = "debuffRoleAura", priorityAura = "debuffPriorityAura" }
+                    buffFilterItems = {
+                        { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Buffs that appear on Raid Frames" },
+                        { key = "raidInCombat",      label = "Raid (In Combat)",   tooltip = "Shows only auras flagged for raid frames during combat" },
+                        { key = "dispellable",       label = "Dispellable",        tooltip = "Shows only auras with a dispel type you can dispel" },
+                        { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                        { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                        { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                        { key = "cancelable",        label = "Cancelable",         tooltip = "Shows only buffs that can be canceled" },
+                        { key = "stealable",         label = "Stealable",          tooltip = "Shows only buffs you can spellsteal or purge" },
+                        { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Buffs you apply" },
+                    }
+                    BUFF_FILTER_KEYS = { ownOnly = "onlyPlayerBuffs", raidFrames = "buffRaid", raidInCombat = "buffRaidInCombat", dispellable = "buffDispellable", crowdControl = "buffCrowdControl", bigDefensive = "buffBigDefensive", externalDefensive = "buffExternalDefensive", cancelable = "buffCancelable", stealable = "buffStealable" }
+                else
+                    filterItems = {
+                        { key = "raidFrames",        label = "Raid Frames",        tooltip = "Shows only the Debuffs that appear on Raid Frames" },
+                        { key = "crowdControl",      label = "Crowd Control",      tooltip = "Shows only crowd-control auras" },
+                        { key = "bigDefensive",      label = "Big Defensive",      tooltip = "Shows only major defensive cooldowns" },
+                        { key = "externalDefensive", label = "External Defensive", tooltip = "Shows only external defensive cooldowns cast on the unit" },
+                        { key = "ownOnly",           label = "Own Only",           tooltip = "Shows only the Debuffs you apply" },
+                    }
+                    DEBUFF_FILTER_KEYS = { ownOnly = "onlyPlayerDebuffs", raidFrames = "debuffRaid", crowdControl = "debuffCrowdControl", bigDefensive = "debuffBigDefensive", externalDefensive = "debuffExternalDefensive" }
+                end
                 -- Buff/Debuff Text Size: cooldown-text size sliders, each gated by
                 -- the "Show Duration" toggle at the top of its own Duration & Stack
                 -- cog (which also holds Duration X/Y + Stack size/position/X/Y).
                 -- Buff Text Size is a 1:1 mirror of Debuff Text Size.
-                local debuffTextOff = function() return not db.profile.boss.debuffShowCooldownText end
-                local buffTextOff = function() return not db.profile.boss.buffShowCooldownText end
+
+                local buffTextOff = function()
+                    return not BossBuffLocationActive()
+                    or not db.profile.boss.buffShowCooldownText
+                end
+                local debuffTextOff = function()
+                    return not BossDebuffLocationActive()
+                    or not db.profile.boss.debuffShowCooldownText
+                end
                 local textSizeRow
                 textSizeRow, hh = Ww:DualRow(pp, yy,
-                    { type="slider", text="Buff Text Size", min=6, max=30, step=1,
-                      disabled=buffTextOff, disabledTooltip="Show Duration",
+                    { type="slider", text="Buff Text Size", min=6, max=30, step=1, trackWidth=120,
+                      disabled=buffTextOff, disabledTooltip="Show Duration (Inside Cog)",
                       getValue=function() return db.profile.boss.buffCooldownTextSize or 10 end,
                       setValue=function(v) db.profile.boss.buffCooldownTextSize = v; ReloadAndUpdate() end },
-                    { type="slider", text="Debuff Text Size", min=6, max=30, step=1,
+                    { type="slider", text="Debuff Text Size", min=6, max=30, step=1, trackWidth=120,
                       disabled=debuffTextOff, disabledTooltip="Show Duration (Inside Cog)",
                       getValue=function() return db.profile.boss.debuffCooldownTextSize or 10 end,
                       setValue=function(v) db.profile.boss.debuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
@@ -12473,6 +12690,32 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Disabled while Simple Buff Display is active (it uses its own text).
                 do
                     local leftRgn = textSizeRow._leftRegion
+                    -- Inline Duration + Stack text-color swatches on the Buff Text
+                    -- Size slider; greyed + mouse-disabled on the same condition as
+                    -- the row's cog.
+                    local buffOff = function() return not BossBuffLocationActive() end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.buffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.buffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                        leftRgn._lastInline = sw
+                        local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.buffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.buffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+                        leftRgn._lastInline = sw
+                        local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
                     local _, buffStackCogShow = EllesmereUI.BuildCogPopup({
                         title = "Duration & Stack",
                         rows = {
@@ -12501,13 +12744,38 @@ initFrame:SetScript("OnEvent", function(self)
                               set=function(v) db.profile.boss.buffStackTextOffsetY = v; ReloadAndUpdate() end },
                         },
                     })
-                    BossCogBtn(leftRgn, buffStackCogShow, nil,
-                        function() return ns.GetBossSimpleBuffMode(db.profile.boss) ~= "none" end)
+                    BossCogBtn(leftRgn, buffStackCogShow, nil, buffOff)
                 end
                 -- Debuff Text Size cog (right): Show Duration + Duration X/Y + Stack.
                 -- Disabled while Simple Debuff Display is active.
                 do
                     local rightRgn = textSizeRow._rightRegion
+                    -- Inline Duration + Stack text-color swatches on the Debuff Text
+                    -- Size slider; greyed + mouse-disabled on the same condition as
+                    -- the row's cog.
+                    local debuffOff = function() return not BossDebuffLocationActive() end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.debuffCooldownTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.debuffCooldownTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Duration Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                        rightRgn._lastInline = sw
+                        local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
+                    do
+                        local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                            function() local c = db.profile.boss.debuffStackTextColor; if c then return c.r, c.g, c.b end; return 1, 1, 1 end,
+                            function(r, g, b) db.profile.boss.debuffStackTextColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
+                        sw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Stack Text Color") end)
+                        sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                        rightRgn._lastInline = sw
+                        local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
+                        apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    end
                     local _, debuffStackCogShow = EllesmereUI.BuildCogPopup({
                         title = "Duration & Stack",
                         rows = {
@@ -12539,19 +12807,34 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Disabled while Simple Debuff Display is active: simple mode
                     -- uses its own (simpleDebuff*) cooldown text, so the regular
                     -- debuff Duration & Stack controls do not apply.
-                    BossCogBtn(rightRgn, debuffStackCogShow, nil,
-                        function() return ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" end)
+                    BossCogBtn(rightRgn, debuffStackCogShow, nil, debuffOff)
                 end
-                -- Boss Debuff Filter on its own row, below the text-size row (boss
-                -- buffs are never filtered, so the right slot is intentionally
-                -- blank). The multi-select checkbox dropdown is injected into the
-                -- left slot, replacing the placeholder.
+                -- Boss Debuff Filter in slot 1. The right slot is the
+                -- 12.1-only Boss Buff Filter; on 12.0 it stays the blank
+                -- label it is today (boss buffs are never filtered there).
                 local filterRow
+                local filterOff = function()
+                    local p = db.profile.boss
+                    return ns.GetBossSimpleDebuffMode(p) == "none" and (p.debuffAnchor or "bottomleft") == "none"
+                end
+                local buffFilterOff
+                local bossFilterRightSlot = { type="label", text="" }
+                if EllesmereUI.IS_121 then
+                    buffFilterOff = function()
+                        local p = db.profile.boss
+                        return ns.GetBossSimpleBuffMode(p) == "none" and not p.showBuffs
+                    end
+                    bossFilterRightSlot = { type="dropdown", text="Boss Buff Filter",
+                      disabled=buffFilterOff, disabledTooltip="Buffs", requireState="displayed",
+                      values={ __placeholder="..." }, order={ "__placeholder" },
+                      getValue=function() return "__placeholder" end, setValue=function() end }
+                end
                 filterRow, hh = Ww:DualRow(pp, yy,
                     { type="dropdown", text="Boss Debuff Filter",
+                      disabled=filterOff, disabledTooltip="Debuffs", requireState="displayed",
                       values={ __placeholder="..." }, order={ "__placeholder" },
                       getValue=function() return "__placeholder" end, setValue=function() end },
-                    { type="label", text="" });  yy = yy - hh
+                    bossFilterRightSlot);  yy = yy - hh
                 do
                     local rgn = filterRow._leftRegion
                     if rgn._control then rgn._control:Hide() end
@@ -12571,12 +12854,11 @@ initFrame:SetScript("OnEvent", function(self)
                     filterBlock:SetFrameLevel(cbDD:GetFrameLevel() + 10)
                     filterBlock:EnableMouse(true)
                     filterBlock:SetScript("OnEnter", function()
-                        EllesmereUI.ShowWidgetTooltip(cbDD, EllesmereUI.DisabledTooltip("Debuffs Location"))
+                        EllesmereUI.ShowWidgetTooltip(cbDD, EllesmereUI.DisabledTooltip("Debuffs", "displayed"))
                     end)
                     filterBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     local function UpdateFilterDisabled()
-                        local p = db.profile.boss
-                        local off = ns.GetBossSimpleDebuffMode(p) == "none" and (p.debuffAnchor or "bottomleft") == "none"
+                        local off = filterOff()
                         if off then
                             cbDD:SetAlpha(0.3); filterBlock:Show()
                         else
@@ -12585,6 +12867,36 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     UpdateFilterDisabled()
                     EllesmereUI.RegisterWidgetRefresh(UpdateFilterDisabled)
+                end
+                -- Right slot: Boss Buff Filter (12.1 only; mirror of the
+                -- debuff dropdown).
+                if EllesmereUI.IS_121 then
+                    local rgn = filterRow._rightRegion
+                    if rgn._control then rgn._control:Hide() end
+                    local cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                        rgn, 210, rgn:GetFrameLevel() + 2, buffFilterItems,
+                        function(k) return db.profile.boss[BUFF_FILTER_KEYS[k]] or false end,
+                        function(k, v) db.profile.boss[BUFF_FILTER_KEYS[k]] = v; ReloadAndUpdate() end)
+                    PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+                    rgn._control = cbDD; rgn._lastInline = nil
+                    EllesmereUI.RegisterWidgetRefresh(cbRefresh)
+                    local buffFilterBlock = CreateFrame("Frame", nil, cbDD)
+                    buffFilterBlock:SetAllPoints()
+                    buffFilterBlock:SetFrameLevel(cbDD:GetFrameLevel() + 10)
+                    buffFilterBlock:EnableMouse(true)
+                    buffFilterBlock:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(cbDD, EllesmereUI.DisabledTooltip("Buffs", "displayed"))
+                    end)
+                    buffFilterBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                    local function UpdateBuffFilterDisabled()
+                        if buffFilterOff() then
+                            cbDD:SetAlpha(0.3); buffFilterBlock:Show()
+                        else
+                            cbDD:SetAlpha(1); buffFilterBlock:Hide()
+                        end
+                    end
+                    UpdateBuffFilterDisabled()
+                    EllesmereUI.RegisterWidgetRefresh(UpdateBuffFilterDisabled)
                 end
             end
 
@@ -12618,8 +12930,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                     cogBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     local function UpdateBuffCogDisabled()
-                        local p = db.profile.boss
-                        local off = ns.GetBossSimpleBuffMode(p) ~= "none" or p.showBuffs == false
+                        local off = bossBuffSizeOff()
                         if off then
                             cogBtn:SetAlpha(0.15)
                             cogBlock:Show()
@@ -12676,6 +12987,9 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.RegisterWidgetRefresh(UpdateDebuffCogDisabled)
                 end
             end
+
+            -- Buff/Debuff text colors now live as inline swatches on the Buff Text
+            -- Size / Debuff Text Size sliders above (Duration + Stack per side).
 
             return yy
         end
@@ -13483,7 +13797,7 @@ initFrame:SetScript("OnEvent", function(self)
     local ufSearchTerms = {}
     for _, label in pairs(unitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
     for _, label in pairs(miniUnitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
-    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs" }
+    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs", "icon zoom" }
     for _, t in ipairs(_paTerms) do ufSearchTerms[#ufSearchTerms + 1] = t end
 
     -- Rebuild preview when spec changes (class resource pips may appear/disappear)
@@ -13528,7 +13842,8 @@ initFrame:SetScript("OnEvent", function(self)
         parent._showRowDivider = true
 
         -- Row 1: Enable Styled Buffs & Debuffs | Icon Size
-        _, h = W:DualRow(parent, y,
+        local paRow1
+        paRow1, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Styled Buffs & Debuffs",
               getValue = function() return PAGet("enabled") or false end,
               setValue = function(v)
@@ -13545,6 +13860,35 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return PAGet("iconSize") or 32 end,
               setValue = function(v) PASet("iconSize", v) end }
         );  y = y - h
+
+        -- Inline cog: Icon Zoom (next to "Icon Size"). Buffs and debuffs
+        -- crop independently.
+        do
+            local rgn = paRow1._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type = "slider", label = "Buff Zoom", min = 0, max = 0.20, step = 0.01,
+                      get = function() return PAGet("buffIconZoom") or 0.055 end,
+                      set = function(v) PASet("buffIconZoom", v) end },
+                    { type = "slider", label = "Debuff Zoom", min = 0, max = 0.20, step = 0.01,
+                      get = function() return PAGet("debuffIconZoom") or 0.055 end,
+                      set = function(v) PASet("debuffIconZoom", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
 
         -- Row 2: Show Text | Text Size
         _, h = W:DualRow(parent, y,

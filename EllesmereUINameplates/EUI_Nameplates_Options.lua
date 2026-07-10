@@ -59,6 +59,7 @@ initFrame:SetScript("OnEvent", function(self)
         fs:SetFont(fontPath, size, flags)
     end
     local floor = math.floor
+    local NAME_RAID_MARKER_GAP = 3
 
     ---------------------------------------------------------------------------
     --  DB helper reads from the centralized profile via ns.db
@@ -557,6 +558,14 @@ initFrame:SetScript("OnEvent", function(self)
         nameFS:SetMaxLines(1)
         nameFS:SetText(EllesmereUI.L("Enemy Name Text"))
         nameFS:SetTextColor(1, 1, 1, 1)
+
+        local nameRaidFrame = CreateFrame("Frame", nil, pf)
+        nameRaidFrame:SetFrameLevel(health:GetFrameLevel() + 8)
+        nameRaidFrame:Hide()
+        local nameRaidIcon = nameRaidFrame:CreateTexture(nil, "ARTWORK")
+        nameRaidIcon:SetAllPoints()
+        nameRaidIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+        if SetRaidTargetIconTexture then SetRaidTargetIconTexture(nameRaidIcon, 1) end
 
         -- Health percentage text (right-aligned inside health bar)
         local hpText = healthTextFrame:CreateFontString(nil, "OVERLAY")
@@ -1093,6 +1102,8 @@ initFrame:SetScript("OnEvent", function(self)
             local onRight = (icdb and icdb.castIconOnRight) or false
             local fullSize = (icdb and icdb.castIconFullSize) or false
             local iconScale = (icdb and icdb.castIconScale) or defaults.castIconScale
+            local iconXOff = (icdb and icdb.castIconOffsetX) or defaults.castIconOffsetX or 0
+            local iconYOff = (icdb and icdb.castIconOffsetY) or defaults.castIconOffsetY or 0
             local castIconLeftPush, castIconRightPush = 0, 0
             if showIcon then
                 if fullSize then
@@ -1193,17 +1204,17 @@ initFrame:SetScript("OnEvent", function(self)
                     local fs = barH + castH
                     castParts.iconFrame:SetSize(fs, fs)
                     if onRight then
-                        castParts.iconFrame:SetPoint("BOTTOMLEFT", cast, "BOTTOMRIGHT", 0, 0)
+                        castParts.iconFrame:SetPoint("BOTTOMLEFT", cast, "BOTTOMRIGHT", iconXOff, iconYOff)
                     else
-                        castParts.iconFrame:SetPoint("BOTTOMRIGHT", cast, "BOTTOMLEFT", 0, 0)
+                        castParts.iconFrame:SetPoint("BOTTOMRIGHT", cast, "BOTTOMLEFT", iconXOff, iconYOff)
                     end
                 else
                     local scaledH = castH * iconScale
                     castParts.iconFrame:SetSize(scaledH, scaledH)
                     if onRight then
-                        castParts.iconFrame:SetPoint("TOPLEFT", cast, "TOPRIGHT", 0, 0)
+                        castParts.iconFrame:SetPoint("TOPLEFT", cast, "TOPRIGHT", iconXOff, iconYOff)
                     else
-                        castParts.iconFrame:SetPoint("TOPRIGHT", cast, "TOPLEFT", 0, 0)
+                        castParts.iconFrame:SetPoint("TOPRIGHT", cast, "TOPLEFT", iconXOff, iconYOff)
                     end
                 end
                 castParts.iconFrame:Show()
@@ -1324,14 +1335,53 @@ initFrame:SetScript("OnEvent", function(self)
             nameFS:SetWordWrap(pvNameWrap)
             nameFS:SetNonSpaceWrap(false)
             nameFS:SetMaxLines(pvNameWrap and 2 or 1)
+            local pvNameMarkerEnabled = DBVal("nameRaidMarkerEnabled") == true
+            local pvNameMarkerSize = DBVal("nameRaidMarkerSize") or defaults.nameRaidMarkerSize or 14
+            local pvNameMarkerReserve = pvNameMarkerEnabled and (pvNameMarkerSize + NAME_RAID_MARKER_GAP) or 0
+            local pvNameSlotKey
+
+            local function PreviewNameTextWidth()
+                local fallback = nameFS:GetWidth() or 0
+                local ok, w = pcall(nameFS.GetStringWidth, nameFS)
+                if ok and type(w) == "number" then
+                    return math.min(w, fallback > 0 and fallback or w)
+                end
+                return fallback
+            end
+
+            local function LayoutPreviewNameRaidMarker()
+                if not (pvNameMarkerEnabled and pvNameSlotKey and nameFS:IsShown()) then
+                    nameRaidFrame:Hide()
+                    return
+                end
+                nameRaidFrame:SetParent((pvNameSlotKey == "textSlotTop") and topTextFrame or healthTextFrame)
+                nameRaidFrame:SetFrameLevel(health:GetFrameLevel() + 8)
+                nameRaidFrame:SetSize(pvNameMarkerSize, pvNameMarkerSize)
+                nameRaidFrame:ClearAllPoints()
+                local textW = PreviewNameTextWidth()
+                if pvNameSlotKey == "textSlotLeft" then
+                    nameRaidFrame:SetPoint("RIGHT", nameFS, "LEFT", -NAME_RAID_MARKER_GAP, 0)
+                elseif pvNameSlotKey == "textSlotRight" then
+                    nameRaidFrame:SetPoint("RIGHT", nameFS, "RIGHT", -textW - NAME_RAID_MARKER_GAP, 0)
+                else
+                    nameRaidFrame:SetPoint("RIGHT", nameFS, "CENTER", -(textW * 0.5) - NAME_RAID_MARKER_GAP, 0)
+                end
+                if SetRaidTargetIconTexture then SetRaidTargetIconTexture(nameRaidIcon, 1) end
+                nameRaidFrame:Show()
+            end
 
             -- Helper: position the name in a bar slot
             local function PlaceNameInBar(anchor, point, xOff, justify, txOff, tyOff, fontSize, cr, cg, cb, nameSlotKey)
                 txOff = txOff or 0
                 tyOff = tyOff or 0
+                pvNameSlotKey = nameSlotKey
+                local markerShift = 0
+                if pvNameMarkerEnabled then
+                    markerShift = (justify == "LEFT") and pvNameMarkerReserve or ((justify == "CENTER") and (pvNameMarkerReserve * 0.5) or 0)
+                end
                 SetPVFont(nameFS, fontPath, fontSize, npOutline)
                 nameFS:SetParent(healthTextFrame)
-                nameFS:SetPoint(point, health, anchor, xOff + txOff, tyOff)
+                nameFS:SetPoint(point, health, anchor, xOff + txOff + markerShift, tyOff)
                 nameFS:SetJustifyH(justify)
                 -- Estimate health text width in opposing bar slots
                 local usedWidth = 0
@@ -1348,7 +1398,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                 end
-                nameFS:SetWidth(math.max((barW - usedWidth) * pvNameWPct / 100, 20))
+                nameFS:SetWidth(math.max((barW - usedWidth - pvNameMarkerReserve) * pvNameWPct / 100, 20))
                 nameFS:SetTextColor(cr, cg, cb, 1)
                 nameFS:Show()
             end
@@ -1359,13 +1409,14 @@ initFrame:SetScript("OnEvent", function(self)
             local topFontSz = DBVal("textSlotTopSize") or defaults.textSlotTopSize
             local topC = (DB() and DB().textSlotTopColor) or defaults.textSlotTopColor
             if slotTop == "enemyName" then
+                pvNameSlotKey = "textSlotTop"
                 SetPVFont(nameFS, fontPath, topFontSz, npOutline)
                 nameFS:SetParent(topTextFrame)
-                nameFS:SetPoint("BOTTOM", health, "TOP", topXOff, 4 + nameYOff + cpPush + topYOff)
+                nameFS:SetPoint("BOTTOM", health, "TOP", topXOff + (pvNameMarkerReserve * 0.5), 4 + nameYOff + cpPush + topYOff)
                 nameFS:SetJustifyH("CENTER")
-                local nameW = barW
+                local nameW = barW - pvNameMarkerReserve
                 if rmPos ~= "none" and showRM then
-                    nameW = barW - 2 * (rmSize - 2) - 7
+                    nameW = nameW - 2 * (rmSize - 2) - 7
                 end
                 if showCL and clPos ~= "none" then
                     nameW = nameW - (reIconSz + 4)
@@ -1410,6 +1461,7 @@ initFrame:SetScript("OnEvent", function(self)
                 PlaceHealthInBar(slotCenter, "CENTER", "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             end
             if DBVal("hideEnemyNameWhileCasting") == true then nameFS:Hide() end
+            LayoutPreviewNameRaidMarker()
 
             -- Health bar color: always uses "enemies in combat" color
             local eic = (DB() and DB().enemyInCombat) or defaults.enemyInCombat
@@ -1702,7 +1754,8 @@ initFrame:SetScript("OnEvent", function(self)
                     ApplyTimerPos(buffs[i].durationText, buffs[i], buffTPos, buffDurSz, buffDurX, buffDurY, buffDurC)
                     PlaceInSlot(buffs[i], buffSlotVal, i, PV_CONST.BUFF_COUNT, buffSz, buffH, buffSpacing, buffXOff, buffYOff)
                     -- Dispel glow preview (always stop first to pick up color/style changes)
-                    if showDispelGlowPreview and DBVal("dispelGlow") == true then
+                    if showDispelGlowPreview and DBVal("dispelGlow") == true
+                        and DBVal("showAllEnemyBuffs") ~= true then
                         if buffs[i].dispelGlow and buffs[i].dispelGlow.active then
                             ns.StopDispelGlow(buffs[i])
                         end
@@ -2265,7 +2318,9 @@ initFrame:SetScript("OnEvent", function(self)
             local lineLen = math.floor((iconSize + iconSize) * (2 / N - 0.1))
             lineLen = math.min(lineLen, iconSize)
             if lineLen < 1 then lineLen = 1 end
-            ns.StartProceduralAnts(f, N, th, period, lineLen, cr, cg, cb, iconSize)
+            local bgc = DB().pandemicGlowBackgroundColor or defaults.pandemicGlowBackgroundColor or { r = 0, g = 0, b = 0 }
+            ns.StartProceduralAnts(f, N, th, period, lineLen, cr, cg, cb, iconSize, nil,
+                DBVal("pandemicGlowBackground") == true and (bgc.r or 0) or nil, bgc.g or 0, bgc.b or 0)
         elseif entry.buttonGlow then
             -- Action Button Glow preview
             ns.StartButtonGlow(f, iconSize, cr, cg, cb, entry.previewScale or 1.28)
@@ -2999,7 +3054,7 @@ initFrame:SetScript("OnEvent", function(self)
             return raw ~= 1
         end
 
-        -- Cog popup for Pixel Glow settings (Lines, Thickness, Speed)
+        -- Cog popup for Pixel Glow settings.
         do
             local pgPopup, pgPopupOwner
             local function ShowPixelGlowPopup(anchorBtn)
@@ -3008,6 +3063,8 @@ initFrame:SetScript("OnEvent", function(self)
                     local MakeBorder = EllesmereUI.MakeBorder
                     local MakeFont   = EllesmereUI.MakeFont
                     local BuildSliderCore = EllesmereUI.BuildSliderCore
+                    local BuildToggleControl = EllesmereUI.BuildToggleControl
+                    local BuildColorSwatch = EllesmereUI.BuildColorSwatch
                     local BORDER_COLOR   = EllesmereUI.BORDER_COLOR
                     local SL_INPUT_A     = EllesmereUI.SL_INPUT_A
 
@@ -3020,7 +3077,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local MIN_POPUP_W = 180
 
                     local totalH = TOP_PAD + TITLE_H + TITLE_GAP + GAP
-                                 + ROW_H + GAP + ROW_H + GAP + ROW_H
+                                 + ROW_H + GAP + ROW_H + GAP + ROW_H + GAP + ROW_H + GAP + ROW_H
                                  + TOP_PAD
 
                     local pf = CreateFrame("Frame", nil, UIParent)
@@ -3045,7 +3102,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Measure label widths to compute layout BEFORE creating sliders
                     local tmpFS = pf:CreateFontString(nil, "OVERLAY")
                     tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, GetNPOptOutline())
-                    local labelTexts = {"Lines", "Thickness", "Speed"}
+                    local labelTexts = {"Lines", "Thickness", "Speed", "Background", "Background Color"}
                     local maxLblW = 0
                     for _, txt in ipairs(labelTexts) do
                         tmpFS:SetText(txt)
@@ -3096,6 +3153,51 @@ initFrame:SetScript("OnEvent", function(self)
                     t3:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, r3Y - 2)
                     v3:ClearAllPoints(); v3:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r3Y)
 
+                    -- Row 4: Background
+                    local r4Y = r3Y - ROW_H - GAP
+                    local lbl4 = MakeFont(pf, 11, nil, 1, 1, 1); lbl4:SetAlpha(0.6)
+                    lbl4:SetText(EllesmereUI.L("Background")); lbl4:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r4Y)
+                    local bgToggle, _, bgSnap = BuildToggleControl(pf, pf:GetFrameLevel() + 2,
+                        function() return DBVal("pandemicGlowBackground") == true end,
+                        function(v)
+                            DB().pandemicGlowBackground = v and true or nil
+                            RefreshAllAuras(); RefreshPandemicPreview()
+                        end, { sizeRatio = 0.8, noAnim = true })
+                    bgToggle:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, r4Y - ROW_H / 2)
+
+                    -- Row 5: Background Color
+                    local r5Y = r4Y - ROW_H - GAP
+                    local lbl5 = MakeFont(pf, 11, nil, 1, 1, 1); lbl5:SetAlpha(0.6)
+                    lbl5:SetText(EllesmereUI.L("Background Color")); lbl5:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r5Y)
+                    local bgSwatch, bgUpdate = BuildColorSwatch(pf, pf:GetFrameLevel() + 2,
+                        function()
+                            local c = DB().pandemicGlowBackgroundColor or defaults.pandemicGlowBackgroundColor or { r = 0, g = 0, b = 0 }
+                            return c.r or 0, c.g or 0, c.b or 0
+                        end,
+                        function(r, g, b)
+                            DB().pandemicGlowBackgroundColor = { r = r, g = g, b = b }
+                            RefreshAllAuras(); RefreshPandemicPreview()
+                        end, false, 20)
+                    bgSwatch:ClearAllPoints()
+                    bgSwatch:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, r5Y - ROW_H / 2)
+                    local bgBlock = CreateFrame("Frame", nil, bgSwatch)
+                    bgBlock:SetAllPoints(); bgBlock:SetFrameLevel(bgSwatch:GetFrameLevel() + 10); bgBlock:EnableMouse(true)
+                    bgBlock:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(bgSwatch, EllesmereUI.DisabledTooltip("Pixel Glow Background"))
+                    end)
+                    bgBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+                    local function RefreshBgControls()
+                        if bgSnap then bgSnap() end
+                        if bgUpdate then bgUpdate() end
+                        local on = DBVal("pandemicGlowBackground") == true
+                        bgSwatch:SetAlpha(on and 1 or 0.3)
+                        if on then bgBlock:Hide() else bgBlock:Show() end
+                    end
+                    bgToggle:HookScript("OnClick", RefreshBgControls)
+                    pf._refreshBgControls = RefreshBgControls
+                    RefreshBgControls()
+
                     -- Close on click outside
                     local wasDown = false
                     pf:SetScript("OnHide", function(self)
@@ -3127,6 +3229,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 pgPopupOwner = anchorBtn
 
+                if pgPopup._refreshBgControls then pgPopup._refreshBgControls() end
                 pgPopup:ClearAllPoints()
                 pgPopup:SetPoint("BOTTOM", anchorBtn, "TOP", 0, 6)
                 pgPopup:SetAlpha(0)
@@ -3173,6 +3276,22 @@ initFrame:SetScript("OnEvent", function(self)
             return DBVal("dispelGlow") ~= true
         end
 
+        -- Shared graying for the inline swatch/eye. 12.1: Show All Enemy
+        -- Buffs suppresses the glow entirely (the row is no longer
+        -- dispellable-only), locking the style/color controls. 12.0 keeps
+        -- the legacy conditions: the swatch also grays while Use Dispel
+        -- Type Color is on (checkTypeColor); the eye button never did.
+        local function dispelGlowLocked(checkTypeColor)
+            if dispelGlowOff() then return true end
+            if EllesmereUI.IS_121 then
+                return DBVal("showAllEnemyBuffs") == true
+            end
+            if checkTypeColor and DBVal("dispelGlowUseTypeColor") == true then
+                return true
+            end
+            return false
+        end
+
         local dispelGlowStyleValues = { [0] = "None" }
         local dispelGlowStyleOrder = { 0 }
         for i, entry in ipairs(ns.PANDEMIC_GLOW_STYLES) do
@@ -3180,37 +3299,84 @@ initFrame:SetScript("OnEvent", function(self)
             dispelGlowStyleOrder[#dispelGlowStyleOrder + 1] = i
         end
 
-        local dispelGlowRow
-        dispelGlowRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Dispel Glow Style",
-              values=dispelGlowStyleValues,
-              getValue=function()
+        -- Build-both-select-one: the dropdown table is shared; the right
+        -- slot differs per client (12.1 replaces Use Dispel Type Color --
+        -- per-aura type is unreadable there -- with Show All Enemy Buffs).
+        local dispelGlowDropdown = {
+            type="dropdown", text="Dispel Glow Style",
+            values=dispelGlowStyleValues,
+            getValue=function()
                 if dispelGlowOff() then return 0 end
                 local raw = ns.GetDispelGlowStyle and ns.GetDispelGlowStyle() or (DBVal("dispelGlowStyle") or 2)
                 if type(raw) ~= "number" then return 2 end
                 if raw < 1 or raw > #ns.PANDEMIC_GLOW_STYLES then return 2 end
                 return raw
-              end,
-              setValue=function(v)
-                if v == 0 then
-                    DB().dispelGlow = false
-                else
-                    DB().dispelGlow = true
-                    DB().dispelGlowStyle = v
+            end,
+            setValue=function(v)
+                local function applyStyle()
+                    if v == 0 then
+                        DB().dispelGlow = false
+                    else
+                        DB().dispelGlow = true
+                        DB().dispelGlowStyle = v
+                    end
+                    RefreshAllAuras()
+                    UpdatePreview()
+                    C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
                 end
+                -- 12.1: off->on pays the per-plate aura-watcher cost --
+                -- prompt like the suite's other performance-priced enables.
+                -- Style switches while already enabled never prompt.
+                if EllesmereUI.IS_121 and v ~= 0 and DBVal("dispelGlow") ~= true then
+                    EllesmereUI:ShowConfirmPopup({
+                        title       = "Dispel Glow",
+                        message     = "Dispel Glow may cause a slight loss in performance efficiency. Do you want to enable it?",
+                        confirmText = "Enable",
+                        cancelText  = "Cancel",
+                        onConfirm   = applyStyle,
+                        onCancel    = function()
+                            C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+                        end,
+                    })
+                    return
+                end
+                applyStyle()
+            end,
+            order=dispelGlowStyleOrder,
+        }
+        local dispelRightWidget
+        if EllesmereUI.IS_121 then
+            -- Disabled fields attach ONLY here: on 12.0 they must be
+            -- absent, not false.
+            dispelGlowDropdown.disabled = function() return DBVal("showAllEnemyBuffs") == true end
+            dispelGlowDropdown.disabledTooltip = "Disable Show All Enemy Buffs"
+            dispelRightWidget = { type="toggle", text="Show All Enemy Buffs",
+              getValue=function() return DBVal("showAllEnemyBuffs") or false end,
+              setValue=function(v)
+                DB().showAllEnemyBuffs = v
                 RefreshAllAuras()
                 UpdatePreview()
                 C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
-              end,
-              order=dispelGlowStyleOrder },
-            { type="toggle", text="Use Dispel Type Color",
+                EllesmereUI:ShowConfirmPopup({
+                    title = "Reload Required",
+                    message = "Changing Show All Enemy Buffs requires a UI reload to take effect.",
+                    confirmText = "Reload Now",
+                    cancelText = "Later",
+                    onConfirm = function() ReloadUI() end,
+                })
+              end }
+        else
+            dispelRightWidget = { type="toggle", text="Use Dispel Type Color",
               getValue=function() return DBVal("dispelGlowUseTypeColor") or false end,
               setValue=function(v)
                 DB().dispelGlowUseTypeColor = v
                 RefreshAllAuras()
                 UpdatePreview()
                 C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
-              end });  y = y - h
+              end }
+        end
+        local dispelGlowRow
+        dispelGlowRow, h = W:DualRow(parent, y, dispelGlowDropdown, dispelRightWidget);  y = y - h
 
         -- Inline color swatch for dispel glow
         do
@@ -3227,14 +3393,14 @@ initFrame:SetScript("OnEvent", function(self)
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, glowColorGet, glowColorSet, nil, 20)
             PP.Point(swatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
             leftRgn._lastInline = swatch
-            -- Gray out swatch when dispel glow is off or using type color
+            -- Gray out swatch when dispel glow is off or suppressed
             EllesmereUI.RegisterWidgetRefresh(function()
-                local off = dispelGlowOff() or (DBVal("dispelGlowUseTypeColor") == true)
+                local off = dispelGlowLocked(true)
                 swatch:SetAlpha(off and 0.15 or 1)
                 swatch:EnableMouse(not off)
                 updateSwatch()
             end)
-            local initialOff = dispelGlowOff() or (DBVal("dispelGlowUseTypeColor") == true)
+            local initialOff = dispelGlowLocked(true)
             swatch:SetAlpha(initialOff and 0.15 or 1)
             swatch:EnableMouse(not initialOff)
         end
@@ -3269,9 +3435,9 @@ initFrame:SetScript("OnEvent", function(self)
                 self:SetAlpha(0.4)
                 EllesmereUI.HideWidgetTooltip()
             end)
-            -- Gray out when dispel glow is off
+            -- Gray out when dispel glow is off or suppressed
             EllesmereUI.RegisterWidgetRefresh(function()
-                local off = dispelGlowOff()
+                local off = dispelGlowLocked(false)
                 eyeBtn:SetAlpha(off and 0.15 or 0.4)
                 eyeBtn:EnableMouse(not off)
             end)
@@ -3602,6 +3768,61 @@ initFrame:SetScript("OnEvent", function(self)
                 if not focusLetterOff() then self:SetAlpha(0.75) end
             end)
             cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
+        end
+
+        -- Name Raid Marker: the target raid marker shown directly before the enemy
+        -- name. Sits at the bottom of this section in slot 1 (left); the right slot
+        -- is intentionally blank so the rest of the section keeps its layout. Size
+        -- lives on the inline cog.
+        local nameRaidMarkerRow
+        nameRaidMarkerRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Name Raid Marker",
+              tooltip="Shows the target marker directly before the enemy name text. Uses its own size and does not use the Core Positions raid marker slot.",
+              getValue=function() return DBVal("nameRaidMarkerEnabled") == true end,
+              setValue=function(v)
+                DB().nameRaidMarkerEnabled = v
+                ns.RefreshAllSettings()
+                UpdatePreview()
+                EllesmereUI:RefreshPage()
+              end },
+            { type="label", text="" });  y = y - h
+
+        do
+            local function nameRaidMarkerOff() return DBVal("nameRaidMarkerEnabled") ~= true end
+            local rgn = nameRaidMarkerRow._leftRegion
+            local _, nameRaidMarkerCogShow = EllesmereUI.BuildCogPopup({
+                title = "Name Raid Marker",
+                rows = {
+                    { type="slider", label="Size", min=6, max=32, step=1,
+                      get=function() return DBVal("nameRaidMarkerSize") or defaults.nameRaidMarkerSize end,
+                      set=function(v)
+                        DB().nameRaidMarkerSize = v
+                        ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            if cogTex.SetSnapToPixelGrid then cogTex:SetSnapToPixelGrid(false); cogTex:SetTexelSnappingBias(0) end
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(nameRaidMarkerOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            UpdateCogAlpha()
+            cogBtn:SetScript("OnClick", function(self)
+                if not nameRaidMarkerOff() then nameRaidMarkerCogShow(self) end
+            end)
+            cogBtn:SetScript("OnEnter", function(self)
+                if not nameRaidMarkerOff() then self:SetAlpha(0.75) end
+            end)
+            cogBtn:SetScript("OnLeave", function() UpdateCogAlpha() end)
         end
 
         return math.abs(y)
@@ -5640,6 +5861,20 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         UpdatePreview()
                       end },
+                    { type="slider", label="X Offset", min=-50, max=50, step=1,
+                      get=function() return DBVal("castIconOffsetX") or defaults.castIconOffsetX or 0 end,
+                      set=function(v)
+                        DB().castIconOffsetX = v
+                        ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
+                    { type="slider", label="Y Offset", min=-50, max=50, step=1,
+                      get=function() return DBVal("castIconOffsetY") or defaults.castIconOffsetY or 0 end,
+                      set=function(v)
+                        DB().castIconOffsetY = v
+                        ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
                     { type="toggle", label="Make Icon Part of the Bar",
                       tooltip="This makes it so the width of the cast bar includes the icon, rather than placing it to the left of the cast bars width.",
                       get=function()
@@ -5674,6 +5909,18 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         DB().castIconFullSize = v
                         ns.RefreshAllSettings()
+                        UpdatePreview()
+                      end },
+                    { type="toggle", label="Use Target Border Color",
+                      tooltip="Colors the full-size spell icon border with your target border color while the cast bar wrap border is active.",
+                      get=function()
+                        local db = DB()
+                        if db and db.castIconTargetBorder ~= nil then return db.castIconTargetBorder end
+                        return defaults.castIconTargetBorder
+                      end,
+                      set=function(v)
+                        DB().castIconTargetBorder = v
+                        if ns.ApplyBorderWrapToAll then ns.ApplyBorderWrapToAll() end
                         UpdatePreview()
                       end },
                 },
@@ -8699,7 +8946,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Cog popup for Pixel Glow settings (Lines, Thickness, Speed)
+            -- Cog popup for Pixel Glow settings.
             do
                 local _, ShowImpCastGlowPopup = EllesmereUI.BuildCogPopup({
                     title = "Pixel Glow Settings",
@@ -8713,6 +8960,17 @@ initFrame:SetScript("OnEvent", function(self)
                         { type = "slider", label = "Speed", min = 1, max = 8, step = 1,
                           get = function() local s = DB().importantCastGlowSpeed or defaults.importantCastGlowSpeed or 4; return 9 - s end,
                           set = function(v) DB().importantCastGlowSpeed = 9 - v; RefreshAllPlates() end },
+                        { type = "toggle", label = "Background",
+                          get = function() return DB().importantCastGlowBackground == true end,
+                          set = function(v) DB().importantCastGlowBackground = v and true or nil; RefreshAllPlates() end },
+                        { type = "colorpicker", label = "Background Color",
+                          get = function()
+                              local c = DB().importantCastGlowBackgroundColor or defaults.importantCastGlowBackgroundColor or { r = 0, g = 0, b = 0 }
+                              return c.r or 0, c.g or 0, c.b or 0
+                          end,
+                          set = function(r, g, b) DB().importantCastGlowBackgroundColor = { r = r, g = g, b = b }; RefreshAllPlates() end,
+                          disabled = function() return DB().importantCastGlowBackground ~= true end,
+                          disabledTooltip = EllesmereUI.DisabledTooltip("Pixel Glow Background") },
                     },
                 })
 
@@ -8958,6 +9216,49 @@ initFrame:SetScript("OnEvent", function(self)
             local off = isDpsNoAggroDisabled()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
+
+            -- Inline cog: independent "Override Mini-Boss colors" and "Override
+            -- Caster colors". Each promotes the DPS No Aggro color above that
+            -- single mob-type color. Kept separate so Casters can stay their own
+            -- color for contrast. Dimmed + non-interactive while the toggle is off.
+            local _, dpsNoAggroCogShow = EllesmereUI.BuildCogPopup({
+                title = "No Aggro",
+                rows = {
+                    { type="toggle", label="Override Mini-Boss colors",
+                      get=function()
+                        local db = DB()
+                        if db and db.dpsNoAggroOverrideMiniBoss ~= nil then return db.dpsNoAggroOverrideMiniBoss end
+                        return defaults.dpsNoAggroOverrideMiniBoss
+                      end,
+                      set=function(v) DB().dpsNoAggroOverrideMiniBoss = v; RefreshAllPlates() end },
+                    { type="toggle", label="Override Caster colors",
+                      get=function()
+                        local db = DB()
+                        if db and db.dpsNoAggroOverrideCaster ~= nil then return db.dpsNoAggroOverrideCaster end
+                        return defaults.dpsNoAggroOverrideCaster
+                      end,
+                      set=function(v) DB().dpsNoAggroOverrideCaster = v; RefreshAllPlates() end },
+                },
+            })
+            local dpsNoAggroCogBtn = CreateFrame("Button", nil, leftRgn)
+            dpsNoAggroCogBtn:SetSize(26, 26)
+            dpsNoAggroCogBtn:SetPoint("RIGHT", swatch, "LEFT", -8, 0)
+            dpsNoAggroCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            local dpsNoAggroCogTex = dpsNoAggroCogBtn:CreateTexture(nil, "OVERLAY")
+            dpsNoAggroCogTex:SetAllPoints(); dpsNoAggroCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            dpsNoAggroCogBtn:SetScript("OnEnter", function(s) if not isDpsNoAggroDisabled() then s:SetAlpha(0.7) end end)
+            dpsNoAggroCogBtn:SetScript("OnLeave", function(s) if not isDpsNoAggroDisabled() then s:SetAlpha(0.4) end end)
+            dpsNoAggroCogBtn:SetScript("OnClick", function(s) if not isDpsNoAggroDisabled() then dpsNoAggroCogShow(s) end end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local cogOff = isDpsNoAggroDisabled()
+                dpsNoAggroCogBtn:SetAlpha(cogOff and 0.15 or 0.4)
+                dpsNoAggroCogBtn:EnableMouse(not cogOff)
+            end)
+            do
+                local cogOff = isDpsNoAggroDisabled()
+                dpsNoAggroCogBtn:SetAlpha(cogOff and 0.15 or 0.4)
+                dpsNoAggroCogBtn:EnableMouse(not cogOff)
+            end
         end
 
         -- Inline "Has Aggro" color swatch next to Classic Tank Aggro toggle

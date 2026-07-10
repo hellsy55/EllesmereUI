@@ -922,6 +922,9 @@ qolFrame:SetScript("OnEvent", function(self)
             return false
         end
 
+        local resetAnnouncePending = false -- one announce per /reset batch (multi-dungeon reset = multiple system msgs)
+        local resetFailPending = false
+
         local resetAnnounceFrame = CreateFrame("Frame")
         resetAnnounceFrame:RegisterEvent("CHAT_MSG_SYSTEM")
         resetAnnounceFrame:SetScript("OnEvent", function(self, event, msg)
@@ -938,7 +941,10 @@ qolFrame:SetScript("OnEvent", function(self)
 
             -- Small delay so Blizzard's own system message renders first.
             if MatchesAny(msg, RESET_PATTERNS) then
+                if resetAnnouncePending then return end
+                resetAnnouncePending = true
                 C_Timer.After(0.3, function()
+                    resetAnnouncePending = false
                     local channel = IsInRaid() and "RAID" or "PARTY"
                     local customMsg = (EllesmereUIDB.instanceResetAnnounceMsg and
                                        EllesmereUIDB.instanceResetAnnounceMsg ~= "")
@@ -947,7 +953,10 @@ qolFrame:SetScript("OnEvent", function(self)
                     SendChatMessage("[EUI] " .. customMsg, channel)
                 end)
             elseif MatchesAny(msg, FAIL_PATTERNS) then
+                if resetFailPending then return end
+                resetFailPending = true
                 C_Timer.After(0.3, function()
+                    resetFailPending = false
                     local channel = IsInRaid() and "RAID" or "PARTY"
                     SendChatMessage("[EUI] Reset failed - there are still players inside the instance.", channel)
                 end)
@@ -2759,6 +2768,230 @@ do
 end
 
 -------------------------------------------------------------------------------
+--  Combat Alert
+--  Shows a large center-screen text alert when you enter and/or leave combat
+--  (PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED). Each transition has its own
+--  display text and color (a custom color or the player's class color); a single
+--  Text Size and a shared unlock-mode position apply to both. The "Show On" mode
+--  selects enter-only, leave-only or both. Zero cost when idle: no combat events
+--  are registered unless the master toggle is on.
+-------------------------------------------------------------------------------
+do
+    local alertFrame
+    local watcher
+    local installed = false
+    local DEFAULT_TEXT_SIZE = 22
+    local DEFAULT_POS = { point = "CENTER", relPoint = "CENTER", x = 0, y = 169 }
+
+    local DEFAULTS = {
+        enterText  = "+Combat",
+        leaveText  = "-Combat",
+        enterColor = { r = 1.00, g = 1.00, b = 1.00 },
+        leaveColor = { r = 1.00, g = 1.00, b = 1.00 },
+    }
+
+    -- Resolve the effective color for a transition: the player's class color
+    -- when the class-color toggle is on, otherwise the stored custom color.
+    local function ResolveColor(which)
+        local db = EllesmereUIDB
+        local useClass = db and db[which == "leave" and "combatAlertLeaveUseClassColor" or "combatAlertEnterUseClassColor"]
+        if useClass then
+            local _, classToken = UnitClass("player")
+            local c = classToken and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken]
+            if c then return c.r, c.g, c.b end
+        end
+        local c = (db and db[which == "leave" and "combatAlertLeaveColor" or "combatAlertEnterColor"])
+            or (which == "leave" and DEFAULTS.leaveColor or DEFAULTS.enterColor)
+        return c.r, c.g, c.b
+    end
+
+    local function AlertText(which)
+        local db = EllesmereUIDB
+        if which == "leave" then
+            return (db and db.combatAlertLeaveText) or DEFAULTS.leaveText
+        end
+        return (db and db.combatAlertEnterText) or DEFAULTS.enterText
+    end
+
+    -- Applies the configured font size and saved position (or the default
+    -- dead-center placement) to the overlay.
+    local function ApplyOverlaySettings()
+        if not alertFrame then return end
+        local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras"))
+            or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
+        -- Always keep an outline so the alert stays readable over any background.
+        local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("extras")) or ""
+        if not outline:find("OUTLINE") then
+            outline = (outline == "" ) and "OUTLINE" or (outline .. ", OUTLINE")
+        end
+        local size = (EllesmereUIDB and EllesmereUIDB.combatAlertTextSize) or DEFAULT_TEXT_SIZE
+        alertFrame._text:SetFont(fontPath, size, outline)
+        -- Keep the frame (and the unlock-mode mover) sized to roughly the text.
+        alertFrame:SetSize(size * 7, size + 14)
+
+        alertFrame:ClearAllPoints()
+        local pos = EllesmereUIDB and EllesmereUIDB.combatAlertPos
+        if pos and pos.point then
+            alertFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+        else
+            alertFrame:SetPoint(DEFAULT_POS.point, UIParent, DEFAULT_POS.relPoint, DEFAULT_POS.x, DEFAULT_POS.y)
+        end
+    end
+
+    local function CreateAlertFrame()
+        if alertFrame then return end
+
+        alertFrame = CreateFrame("Frame", nil, UIParent)
+        alertFrame:SetSize(240, 50)
+        alertFrame:SetFrameStrata("HIGH")
+        alertFrame:SetFrameLevel(60)
+        alertFrame:EnableMouse(false)
+        alertFrame:SetMouseClickEnabled(false)
+
+        local fs = alertFrame:CreateFontString(nil, "OVERLAY")
+        fs:SetPoint("CENTER")
+        alertFrame._text = fs
+        ApplyOverlaySettings()
+
+        -- Quick fade-in, brief hold, fade-out; hide when finished.
+        local ag = alertFrame:CreateAnimationGroup()
+        local fadeIn = ag:CreateAnimation("Alpha")
+        fadeIn:SetFromAlpha(0); fadeIn:SetToAlpha(1); fadeIn:SetDuration(0.15); fadeIn:SetOrder(1)
+        local hold = ag:CreateAnimation("Alpha")
+        hold:SetFromAlpha(1); hold:SetToAlpha(1); hold:SetDuration(1.2); hold:SetOrder(2)
+        local fadeOut = ag:CreateAnimation("Alpha")
+        fadeOut:SetFromAlpha(1); fadeOut:SetToAlpha(0); fadeOut:SetDuration(0.5); fadeOut:SetOrder(3)
+        ag:SetScript("OnFinished", function() alertFrame:Hide() end)
+        alertFrame._ag = ag
+
+        alertFrame:SetScript("OnHide", function() ag:Stop() end)
+        alertFrame:Hide()
+    end
+
+    local function ShowAlert(which)
+        -- Never fire live alerts while unlock mode is positioning the frame.
+        if EllesmereUI._unlockActive then return end
+        CreateAlertFrame()
+        ApplyOverlaySettings()
+
+        alertFrame._text:SetText(AlertText(which))
+        alertFrame._text:SetTextColor(ResolveColor(which))
+        alertFrame._text:SetAlpha(1)
+
+        alertFrame._ag:Stop()
+        alertFrame:SetAlpha(1)
+        alertFrame:Show()
+        alertFrame._ag:Play()
+    end
+
+    local function OnCombatEvent(_, event)
+        local db = EllesmereUIDB
+        if not (db and db.combatAlertEnabled) then return end
+        local mode = db.combatAlertMode or "both"
+        if event == "PLAYER_REGEN_DISABLED" then
+            if mode ~= "leave" then ShowAlert("enter") end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            if mode ~= "enter" then ShowAlert("leave") end
+        end
+    end
+
+    local function ApplyCombatAlert()
+        local on = EllesmereUIDB and EllesmereUIDB.combatAlertEnabled
+        if on and not installed then
+            watcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+            watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+            installed = true
+        elseif not on and installed then
+            watcher:UnregisterAllEvents()
+            installed = false
+        end
+        if alertFrame then ApplyOverlaySettings() end
+    end
+    EllesmereUI._applyCombatAlert = ApplyCombatAlert
+
+    -- Fires a sample alert for the given transition ("enter"/"leave") so the
+    -- look can be checked from the options cog without a real combat change.
+    EllesmereUI._combatAlertPreview = function(which)
+        if EllesmereUI._unlockActive then return end
+        CreateAlertFrame()
+        ApplyOverlaySettings()
+        alertFrame._text:SetText(AlertText(which))
+        alertFrame._text:SetTextColor(ResolveColor(which))
+        alertFrame._ag:Stop()
+        alertFrame:SetAlpha(1)
+        alertFrame:Show()
+        alertFrame._ag:Play()
+    end
+
+    -- Re-apply font size / position (called from the Text Size slider and from
+    -- unlock mode when the saved position changes).
+    EllesmereUI._applyCombatAlertFrame = function()
+        CreateAlertFrame()
+        ApplyOverlaySettings()
+    end
+
+    watcher = CreateFrame("Frame")
+    watcher:SetScript("OnEvent", OnCombatEvent)
+
+    -- Register the alert with Unlock Mode so its position can be dragged.
+    C_Timer.After(2, function()
+        if not (EllesmereUI and EllesmereUI.RegisterUnlockElements) then return end
+        local MK = EllesmereUI.MakeUnlockElement
+        if not MK then return end
+        EllesmereUI:RegisterUnlockElements({
+            MK({
+                key      = "EUI_CombatAlert",
+                label    = "Combat Alert",
+                group    = "Quality of Life",
+                order    = 721,
+                noResize = true,
+                isHidden = function()
+                    return not (EllesmereUIDB and EllesmereUIDB.combatAlertEnabled)
+                end,
+                getFrame = function()
+                    CreateAlertFrame()
+                    return alertFrame
+                end,
+                getSize = function()
+                    local size = (EllesmereUIDB and EllesmereUIDB.combatAlertTextSize) or DEFAULT_TEXT_SIZE
+                    return size * 7, size + 14
+                end,
+                savePos = function(_, point, relPoint, x, y)
+                    if not point then return end
+                    if not EllesmereUIDB then EllesmereUIDB = {} end
+                    EllesmereUIDB.combatAlertPos = { point = point, relPoint = relPoint, x = x, y = y }
+                    if alertFrame and not EllesmereUI._unlockActive then
+                        ApplyOverlaySettings()
+                    end
+                end,
+                loadPos = function()
+                    local pos = EllesmereUIDB and EllesmereUIDB.combatAlertPos
+                    if pos and pos.point then return pos end
+                    return { point = DEFAULT_POS.point, relPoint = DEFAULT_POS.relPoint, x = DEFAULT_POS.x, y = DEFAULT_POS.y }
+                end,
+                clearPos = function()
+                    if EllesmereUIDB then EllesmereUIDB.combatAlertPos = nil end
+                    if alertFrame then ApplyOverlaySettings() end
+                end,
+                applyPos = function()
+                    CreateAlertFrame()
+                    ApplyOverlaySettings()
+                end,
+            }),
+        })
+    end)
+
+    local boot = CreateFrame("Frame")
+    boot:RegisterEvent("PLAYER_LOGIN")
+    boot:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if EllesmereUIDB and EllesmereUIDB.combatAlertEnabled then
+            ApplyCombatAlert()
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
 --  Hide Item Transforms
 --  Cancels cosmetic transform auras (profession gear, holiday costumes, toys,
 --  consumables) as soon as they land on the player. CancelUnitBuff is blocked
@@ -2841,11 +3074,21 @@ do
 
     local auraFrame = CreateFrame("Frame")
 
+    -- 12.1: index scans hard-error while aura restrictions are active
+    -- (M+/raids, even out of combat). Transforms are cosmetic; skipping the
+    -- sweep there is fine -- it re-runs on the next event outside.
+    local function AurasRestricted()
+        local AK = EllesmereUI and EllesmereUI.AuraKit
+        if AK and AK.AurasRestricted then return AK.AurasRestricted() end
+        return false
+    end
+
     -- Sweep current buffs, canceling any included transform. Descending so a
     -- cancel (which shifts later buff indices down) cannot skip a match.
     local function CancelMatching(force)
         if not (C_UnitAuras and C_UnitAuras.GetBuffDataByIndex) then return end
         if not force and UnitAffectingCombat("player") then return end
+        if AurasRestricted() then return end
         for i = 40, 1, -1 do
             local data = C_UnitAuras.GetBuffDataByIndex("player", i)
             if data then
@@ -2863,9 +3106,14 @@ do
             CancelMatching(true)
             return
         end
-        -- UNIT_AURA (player only, via RegisterUnitEvent)
+        -- UNIT_AURA (player only, via RegisterUnitEvent). 12.1: the payload
+        -- (and its fields) can be secret in restricted content -- boolean
+        -- use of a secret errors, and the sweep would error anyway; bail.
         if not updateInfo then return end
-        if updateInfo.isFullUpdate then
+        if issecretvalue and issecretvalue(updateInfo) then return end
+        local isFull = updateInfo.isFullUpdate
+        if isFull ~= nil and issecretvalue and issecretvalue(isFull) then return end
+        if isFull then
             CancelMatching(false)
         elseif updateInfo.addedAuras then
             for _, aura in ipairs(updateInfo.addedAuras) do
@@ -2887,6 +3135,7 @@ do
         if spellID ~= 131476 then return end
         if UnitAffectingCombat("player") then return end
         if not (C_UnitAuras and C_UnitAuras.GetBuffDataByIndex) then return end
+        if AurasRestricted() then return end
         for i = 40, 1, -1 do
             local data = C_UnitAuras.GetBuffDataByIndex("player", i)
             if data then

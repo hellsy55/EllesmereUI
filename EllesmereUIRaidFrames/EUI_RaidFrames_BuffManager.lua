@@ -52,10 +52,39 @@ local INDICATOR_TYPE_VALUES = {}
 local INDICATOR_TYPE_ORDER = {}
 for _, t in ipairs(INDICATOR_TYPES) do
     INDICATOR_TYPE_VALUES[t.key] = t.name
-    INDICATOR_TYPE_ORDER[#INDICATOR_TYPE_ORDER + 1] = t.key
+    -- 12.1 only: Frame Border indicators cannot be created there (no
+    -- aura-container equivalent); existing ones stay listed with a removal
+    -- notice. On 12.0 the type remains fully creatable.
+    if not (EllesmereUI.IS_121 and t.key == "border") then
+        INDICATOR_TYPE_ORDER[#INDICATOR_TYPE_ORDER + 1] = t.key
+    end
 end
 -- Insert divider after "bar"
 tinsert(INDICATOR_TYPE_ORDER, 4, "---")
+
+-- 12.1 PTR: gray blocking overlay with a red removal notice, for settings
+-- whose backing machinery has no aura-container equivalent (styled after
+-- the party-tab sync overlays). UI-only; the runtime side of these
+-- settings is inert elsewhere. Callers anchor the returned frame.
+local function BuildPTROverlay(parentFrame, label, fontSize)
+    local ov = CreateFrame("Frame", nil, parentFrame)
+    ov._searchIgnore = true -- inline search must never re-anchor/collapse it
+    ov:SetFrameLevel(parentFrame:GetFrameLevel() + 60)
+    ov:EnableMouse(true)
+    local bg = ov:CreateTexture(nil, "OVERLAY")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.10, 0.10, 0.12, 0.95)
+    local fs = ov:CreateFontString(nil, "OVERLAY")
+    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
+    fs:SetFont(fp, fontSize or 12, "")
+    fs:SetPoint("LEFT", ov, "LEFT", 8, 0)
+    fs:SetPoint("RIGHT", ov, "RIGHT", -8, 0)
+    fs:SetJustifyH("CENTER")
+    fs:SetTextColor(0.86, 0.24, 0.24, 0.95)
+    fs:SetText(EllesmereUI.Lf("%1$s Removed in 12.1 Unless API Changes", EllesmereUI.L(label)))
+    ov._msg = fs
+    return ov
+end
 
 -- 9-position grid
 local POSITION_VALUES = {
@@ -666,6 +695,22 @@ local function GetSpecIndicators(db, specKey)
         PopulateDefaults(db.profile.bmIndicators[specKey], specKey)
     end
     return db.profile.bmIndicators[specKey]
+end
+-- 12.1 aura containers read the indicator config to build slots.
+ns.BM_GetSpecIndicators = GetSpecIndicators
+ns.BM_PrimaryByAlt = PRIMARY_BY_ALT
+
+-- Borrow specs (Enh/Ele -> Resto, Prot/Ret -> Holy) only track the spells
+-- they can cast; the container slots apply the same restriction.
+function ns.BM_BorrowSpellFilter()
+    if activeBorrow_BM then return activeBorrow_BM.spells end
+    return nil
+end
+
+-- Simple Setup whitelist for the container grid (rebuilt by RebuildLookup;
+-- read-only for consumers -- the engine copies candidate tables on set).
+function ns.BM_SimpleTrackedSpellIDs()
+    return simpleTrackedSpellIDs
 end
 
 local function CountSpecIndicators(db, specKey)
@@ -1547,6 +1592,8 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
             local icon = d.bmSimpleIcons[shown]
             icon:SetSize(sz, sz)
             icon._tex:SetTexture(tex or 136243)
+            local _z = bs.iconZoom or 0.08
+            icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
 
             local cd = icon._cooldown
             if cd then
@@ -1615,10 +1662,35 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
 end
 
 function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
+    -- 12.1 migration scaffolding: skip silently while auras are secret so the
+    -- restriction error cannot abort shared handler chains. Removed when the
+    -- BuffManager migrates to container slots.
+    if ns.RFC_LegacyAuraGuard and ns.RFC_LegacyAuraGuard() then return end
     local GetFFD = ns.GetFFD
     if not GetFFD then return end
     local d = GetFFD(button)
     if not d.bmIconPool then return end
+
+    -- 12.1: BOTH display modes render via aura containers now (custom mode
+    -- as slots/chains, Simple Setup as a grid group). Hide any lingering
+    -- legacy visuals from either mode and hand off entirely.
+    if ns.RFC_OwnsBM then
+        for _, f in ipairs(d.bmIconPool) do f:Hide() end
+        if d.bmBarPool then for _, b in ipairs(d.bmBarPool) do ClearBarDrain(b); b:Hide() end end
+        if d.bmHCOverlay then d.bmHCOverlay:Hide() end
+        if d.bmEffectBorder then d.bmEffectBorder:Hide() end
+        d.bmActiveInstanceIDs = nil
+        button._bmSavedAlpha = nil
+        if d.rangeAlpha then button:SetAlpha(d.rangeAlpha) end
+        if d.bmSimpleIcons and d.bmSimpleActiveIDs then
+            for _, f in ipairs(d.bmSimpleIcons) do
+                if f._cooldown then f._cooldown:Hide() end
+                f:Hide()
+            end
+            d.bmSimpleActiveIDs = nil
+        end
+        return
+    end
 
     -- Simple Setup mode takes over entirely: hide every custom-indicator visual
     -- and render the isolated buff grid instead. The two systems never coexist.
@@ -1950,7 +2022,8 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 else
                                     f._tex:SetTexture(136243)
                                 end
-                                f._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                                local _z = db.profile.bmIconZoom or 0.08
+                                f._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
                                 f._tex:SetVertexColor(1, 1, 1, iconAlpha)
                                 ncR, ncG, ncB, ncA = 1, 1, 1, iconAlpha
                             else -- square
@@ -2639,7 +2712,8 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                     fr:SetAlpha(pvAlpha)
                                     if indType == "icon" then
                                         fr._tex:SetTexture(GetSpellIcon(sid))
-                                        fr._tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                                        local _z = s.bmIconZoom or 0.08
+                                        fr._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
                                         fr._tex:SetVertexColor(1, 1, 1, pvHideIcon and 0 or 1)
                                     else
                                         -- Per-ability color (preview): this spell's
@@ -3056,6 +3130,8 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
             end
             icon:SetSize(sz, sz)
             icon._tex:SetTexture(exampleIcons[i] or 136243)
+            local _z = bs.iconZoom or 0.08
+            icon._tex:SetTexCoord(_z, 1 - _z, _z, 1 - _z)
             if icon._borderFrame and PP then
                 local bdrSz = bs.borderSize or 1
                 local bc = bs.borderColor or { r=0, g=0, b=0 }
@@ -3359,8 +3435,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             UpdCog(); EllesmereUI.RegisterWidgetRefresh(UpdCog)
         end
 
-        -- Row 2: Growth Direction | Size
-        _, hh = W:DualRow(optsFrame, sy,
+        -- Row 2: Growth Direction | Size (+ icon zoom cog)
+        local row2
+        row2, hh = W:DualRow(optsFrame, sy,
             { type="dropdown", text="Growth Direction", values=GROW_VALUES, order=GROW_ORDER,
               disabled=BuffsOff, disabledTooltip="Show Buffs",
               getValue=function() return BVal("growDirection", "LEFT") end,
@@ -3369,6 +3446,29 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
               disabled=BuffsOff, disabledTooltip="Show Buffs",
               getValue=function() return BVal("size", 22) end,
               setValue=function(v) BSet("size", v) end });  sy = sy - hh
+        do
+            local rgn = row2._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Zoom",
+                rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return BVal("iconZoom", 0.08) end,
+                      set=function(v) BSet("iconZoom", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            local function UpdCog() local off = BuffsOff(); cogBtn:SetAlpha(off and 0.15 or 0.4); cogBtn:EnableMouse(not off) end
+            cogBtn:SetScript("OnEnter", function(self) if not BuffsOff() then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) UpdCog() end)
+            cogBtn:SetScript("OnClick", function(self) if not BuffsOff() then cogShow(self) end end)
+            UpdCog(); EllesmereUI.RegisterWidgetRefresh(UpdCog)
+        end
 
         -- Row 3: Spacing | Border Size (+ swatch)
         local row3
@@ -3667,6 +3767,15 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         sep:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 0, 0)
         sep:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", 0, 0)
         sep:SetColorTexture(1, 1, 1, 0.04)
+
+        -- 12.1: Frame Border indicators are removed; the notice covers the
+        -- tile body but leaves the right controls column usable so the
+        -- indicator can still be toggled off or deleted.
+        if EllesmereUI.IS_121 and ind.type == "border" then
+            local ov = BuildPTROverlay(tile, "Frame Border", 10)
+            ov:SetPoint("TOPLEFT", tile, "TOPLEFT", 0, 0)
+            ov:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -52, 1)
+        end
 
         tileY = tileY - TILE_H
     end
@@ -4560,6 +4669,22 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             return row
         end
 
+        -- 12.1 removal overlays (BuildPTROverlay): section variant spans a
+        -- y-range of leftFrame (header left visible, like the party sync
+        -- overlays); slot variant covers one DualRow region.
+        local function PTRSectionOverlay(label, startY, endY)
+            local ov = BuildPTROverlay(leftFrame, label, 12)
+            ov:SetPoint("TOPLEFT", leftFrame, "TOPLEFT", 0, startY)
+            ov:SetPoint("TOPRIGHT", leftFrame, "TOPRIGHT", 0, startY)
+            ov:SetHeight(math.abs(endY - startY))
+        end
+
+        local function PTRSlotOverlay(label, region)
+            if not region then return end
+            local ov = BuildPTROverlay(region, label, 11)
+            ov:SetAllPoints(region)
+        end
+
         -- Own Only checkbox dropdown (per-spell) builder
         local function BuildOwnOnlyRow()
             if not ind.spells or #ind.spells == 0 then return end
@@ -4629,6 +4754,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         -- Frame Alpha (useAlpha) has no colour, so Row 2 is a single Alpha slider.
         local function BuildThresholdRow(useAlpha)
             _, h = W:SectionHeader(leftFrame, "THRESHOLD", sy); sy = sy - h
+            local thContentStart = sy -- overlay spans content below the header
 
             -- Sub-settings are interactive only while Enable Threshold is on.
             local thOff = function() return not ind.thresholdEnabled end
@@ -4754,6 +4880,13 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     EllesmereUI.RegisterWidgetRefresh(function() updateGlowSwatch(); updateClassSwatch(); UpdateGlowState() end)
                     UpdateGlowState()
                 end
+            end
+
+            -- 12.1: no engine binding for threshold recolors/glows yet; the
+            -- whole section is inert there until the upstream APIs land.
+            -- Fully functional on 12.0.
+            if EllesmereUI.IS_121 then
+                PTRSectionOverlay("Threshold", thContentStart, sy)
             end
         end
 
@@ -4997,8 +5130,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             -----------------------------------------------------------
             _, h = W:SectionHeader(leftFrame, "DISPLAY", sy); sy = sy - h
 
-            -- Row 1: Size | Spacing
-            SettingsRow(
+            -- Row 1: Size (+ icon zoom cog) | Spacing
+            local IconHidden = function() return indType == "icon" and ind.hideIcon == true end
+            local sizeRow = SettingsRow(
                 { type="slider", text="Size", min=4, max=40, step=1,
                   getValue=function() return ind.size or 12 end,
                   setValue=function(v) ind.size = v; ReloadAndUpdate() end },
@@ -5006,8 +5140,33 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                   getValue=function() return ind.spacing or 1 end,
                   setValue=function(v) ind.spacing = v; ReloadAndUpdate() end })
 
+            -- Inline cog on Size: Icon Zoom (icon type only). One
+            -- profile-wide value shared by all icon indicators.
+            if indType == "icon" then
+                local rgn = sizeRow._leftRegion
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Icon Zoom",
+                    rows = {
+                        { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                          get=function() return ns.db.profile.bmIconZoom or 0.08 end,
+                          set=function(v) ns.db.profile.bmIconZoom = v; ReloadAndUpdate() end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function UpdCog() local off = IconHidden(); cogBtn:SetAlpha(off and 0.15 or 0.4); cogBtn:EnableMouse(not off) end
+                cogBtn:SetScript("OnEnter", function(self) if not IconHidden() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) UpdCog() end)
+                cogBtn:SetScript("OnClick", function(self) if not IconHidden() then cogShow(self) end end)
+                UpdCog(); EllesmereUI.RegisterWidgetRefresh(UpdCog)
+            end
+
             -- Row 2: Opacity | Border (+ inline color swatch)
-            local IconHidden = function() return indType == "icon" and ind.hideIcon == true end
             local bdrRow = SettingsRow(
                 { type="slider", text="Opacity", min=0, max=100, step=1,
                   disabled=IconHidden, disabledTooltip="Hide Icons",
@@ -5206,6 +5365,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 setValue = function(v) ind.maxDurationEnabled = v end,
                 onToggle = function() ReloadAndUpdate() end,
             })
+            -- 12.1: no baseline/cap option on the engine duration bindings.
+            if EllesmereUI.IS_121 then
+                PTRSlotOverlay("Max Duration", mdRow._leftRegion)
+            end
 
             -- THRESHOLD section (Enable, seconds, color, opacity)
             BuildThresholdRow(false)
@@ -5410,6 +5573,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     setValue = function(v) ind.maxDurationEnabled = v end,
                     onToggle = function() ReloadAndUpdate() end,
                 })
+                -- 12.1: no baseline/cap option on the engine duration bindings.
+                if EllesmereUI.IS_121 then
+                    PTRSlotOverlay("Max Duration", mdRow._leftRegion)
+                end
 
                 -- THRESHOLD section (Enable, seconds, color, opacity)
                 BuildThresholdRow(false)
