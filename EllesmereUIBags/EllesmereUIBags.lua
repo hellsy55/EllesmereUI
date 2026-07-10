@@ -1647,21 +1647,6 @@ local function CreateFooter()
     EUI_Bags.Footer, EUI_Bags.Money = footer, money
 end
 
-local function SyncBagFrameToFooter(footerH)
-    footerH = footerH or FOOTER_H
-    local prev = EUI_Bags._footerH or FOOTER_H
-    if footerH == prev then return end
-    EUI_Bags._footerH = footerH
-    if not EUI_Bags:IsVisible() then return end
-    local delta = footerH - prev
-    if BP().bagAutoSize then
-        EUI_Bags._asMaxH = math.max(EUI_Bags._asMaxH or EUI_Bags:GetHeight() or 0, EUI_Bags:GetHeight() + delta)
-        EUI_Bags:SetHeight(EUI_Bags._asMaxH)
-    else
-        EUI_Bags:SetHeight(EUI_Bags:GetHeight() + delta)
-    end
-end
-
 local function UpdateCurrencyDisplays(footerWidth)
     local pool = EUI_Bags._currencyPool
     if not pool or not EUI_Bags.Footer then return FOOTER_H end
@@ -1742,7 +1727,6 @@ local function UpdateCurrencyDisplays(footerWidth)
     end
 
     local numRows = math.max(1, currentRow + 1)
-    if #currencyLayout == 0 then numRows = 1 end
     local footerHeight = math.max(
         FOOTER_H,
         bottomPad + topPad + numRows * rowHeight + math.max(0, numRows - 1) * rowGap
@@ -1767,6 +1751,23 @@ local function UpdateCurrencyDisplays(footerWidth)
     footer:SetHeight(footerHeight)
     EUI_Bags._footerH = footerHeight
     return footerHeight
+end
+
+-- Re-lay-out the currency footer and grow/shrink the bag frame by the height
+-- delta. Reads the previous footer height BEFORE UpdateCurrencyDisplays stamps
+-- the new one, so the delta is real.
+local function SyncBagFrameToFooter()
+    local prev = EUI_Bags._footerH or FOOTER_H
+    local footerH = UpdateCurrencyDisplays() or FOOTER_H
+    if footerH == prev then return end
+    if not EUI_Bags:IsVisible() then return end
+    local delta = footerH - prev
+    if BP().bagAutoSize then
+        EUI_Bags._asMaxH = math.max(EUI_Bags._asMaxH or EUI_Bags:GetHeight() or 0, EUI_Bags:GetHeight() + delta)
+        EUI_Bags:SetHeight(EUI_Bags._asMaxH)
+    else
+        EUI_Bags:SetHeight(EUI_Bags:GetHeight() + delta)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -6677,7 +6678,7 @@ local function StartAddon()
             end
             _lastBlizzSet = blizzSet
             if EUI_Bags:IsVisible() then
-                SyncBagFrameToFooter(UpdateCurrencyDisplays())
+                SyncBagFrameToFooter()
             end
             if EllesmereUI and EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
         end, EUI_Bags)
@@ -6723,7 +6724,7 @@ local function StartAddon()
             CaptureTrackedGold()
             UpdateBagMoneyDisplay()
         elseif event == "CURRENCY_DISPLAY_UPDATE" then
-            SyncBagFrameToFooter(UpdateCurrencyDisplays())
+            SyncBagFrameToFooter()
         end
     end)
 

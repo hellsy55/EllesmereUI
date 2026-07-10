@@ -476,7 +476,7 @@ end
             end
             if mountName then
                 -- Append a green check / red X for whether YOU own this mount
-                -- (nil = unknown, so no marker), like TipTac's collected flag.
+                -- (nil = unknown, so no marker) Credit for Fix: TipTac
                 local valText = mountName
                 if mountCollected == true then
                     valText = mountName .. " |TInterface\\RaidFrame\\ReadyCheck-Ready:0|t"
