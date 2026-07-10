@@ -1819,6 +1819,26 @@ do
             or (mod == "control" and (key == "LCTRL"  or key == "RCTRL"))
             or (mod == "alt"     and (key == "LALT"   or key == "RALT"))
     end
+    -- The topmost mouse-focus frame is often an overlay/highlight without an
+    -- OnEnter (the tip lives on a button/nameplate below or a parent), so scan
+    -- every frame under the cursor and walk up parents for the first handler.
+    local function FireHoveredOnEnter()
+        local foci = (GetMouseFoci and GetMouseFoci()) or (GetMouseFocus and { GetMouseFocus() })
+        if not foci then return end
+        for _, focus in ipairs(foci) do
+            local frame = focus
+            while frame and frame ~= WorldFrame and frame ~= UIParent do
+                if frame.GetScript then
+                    local onEnter = frame:GetScript("OnEnter")
+                    if onEnter then
+                        pcall(onEnter, frame)
+                        return
+                    end
+                end
+                frame = frame.GetParent and frame:GetParent()
+            end
+        end
+    end
     local modWatcher = CreateFrame("Frame")
     modWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
     modWatcher:SetScript("OnEvent", function(_, key, down)
@@ -1828,11 +1848,7 @@ do
         local mod = (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none"
         if mod == "none" or not KeyMatchesModifier(key, mod) then return end
         if down == 1 then
-            local frame = (GetMouseFoci and GetMouseFoci()[1]) or (GetMouseFocus and GetMouseFocus())
-            if frame and frame ~= WorldFrame and frame.GetScript then
-                local onEnter = frame:GetScript("OnEnter")
-                if onEnter then pcall(onEnter, frame) end
-            end
+            FireHoveredOnEnter()
         elseif GameTooltip:IsShown() and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then
             GameTooltip:Hide()
         end
