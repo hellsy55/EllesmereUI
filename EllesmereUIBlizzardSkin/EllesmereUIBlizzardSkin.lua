@@ -1766,8 +1766,18 @@ end
 --  IsEncounterInProgress() is queried inline (only for the outOfBossCombat case)
 --  so there is no ENCOUNTER event bookkeeping. Installed once at load; a no-op
 --  for the default mode, costing one table read per tooltip when unused.
+--  An optional "peek" modifier (tooltipShowModifier) lifts suppression while the
+--  chosen key is held, so a hidden tip can be read on hover (e.g. mid-combat).
 -------------------------------------------------------------------------------
 do
+    local function ShowModifierHeld()
+        local mod = (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none"
+        if mod == "none" then return false end
+        if mod == "control" then return IsControlKeyDown() end
+        if mod == "alt" then return IsAltKeyDown() end
+        return IsShiftKeyDown()
+    end
+
     -- Shared decision: should GameTooltip be suppressed right now given the
     -- user's "Show Tooltips" mode + combat state? Exposed on EllesmereUI so the
     -- cursor-anchor hook can honor it too (otherwise the cursor re-anchor would
@@ -1780,6 +1790,8 @@ do
         -- suppressed at, e.g., "Never".
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return false end
         local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
+        if mode == "always" then return false end
+        if ShowModifierHeld() then return false end
         if mode == "never" then
             return true
         elseif mode == "outOfCombat" then
@@ -1798,6 +1810,33 @@ do
     if GameTooltip_SetDefaultAnchor then
         hooksecurefunc("GameTooltip_SetDefaultAnchor", HideTooltipByMode)
     end
+
+    -- Live peek: pressing the modifier while already hovering reveals the tip
+    -- (re-run the hovered frame's OnEnter); releasing it hides it again. The
+    -- hover-then-hold flow already works via the SetDefaultAnchor hook above.
+    local function KeyMatchesModifier(key, mod)
+        return (mod == "shift"   and (key == "LSHIFT" or key == "RSHIFT"))
+            or (mod == "control" and (key == "LCTRL"  or key == "RCTRL"))
+            or (mod == "alt"     and (key == "LALT"   or key == "RALT"))
+    end
+    local modWatcher = CreateFrame("Frame")
+    modWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+    modWatcher:SetScript("OnEvent", function(_, key, down)
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
+        local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
+        if mode == "always" then return end
+        local mod = (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none"
+        if mod == "none" or not KeyMatchesModifier(key, mod) then return end
+        if down == 1 then
+            local frame = (GetMouseFoci and GetMouseFoci()[1]) or (GetMouseFocus and GetMouseFocus())
+            if frame and frame ~= WorldFrame and frame.GetScript then
+                local onEnter = frame:GetScript("OnEnter")
+                if onEnter then pcall(onEnter, frame) end
+            end
+        elseif GameTooltip:IsShown() and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then
+            GameTooltip:Hide()
+        end
+    end)
 end
 
 -------------------------------------------------------------------------------

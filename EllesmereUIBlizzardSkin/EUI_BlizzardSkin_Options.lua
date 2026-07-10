@@ -393,6 +393,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipShowMode = v
+                  EllesmereUI:RefreshPage()  -- update the Use Modifier cog disabled state
               end },
             -- Front-end duplicate of the toggle in Global Settings > Developer;
             -- same EllesmereUIDB.showSpellID key read by the tooltip logic in
@@ -459,6 +460,61 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateSidModState)
             UpdateSidModState()
+        end
+
+        -- "Use Modifier" cog on Show Tooltips (left region): while the chosen
+        -- modifier is held, suppression is lifted so a hidden tooltip can be
+        -- read on hover (e.g. peeking a spell in combat). Disabled (blocked +
+        -- dimmed) when the reskin is off or the mode is "Always" (nothing hides).
+        do
+            local leftRgn = ttModeRow._leftRegion
+            local function showModOff()
+                if ttReskinOff() then return true end
+                return ((EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always") == "always"
+            end
+            local _, showModShow = EllesmereUI.BuildCogPopup({
+                title = "Show Tooltips",
+                rows = {
+                    { type="dropdown", label="Peek Modifier",
+                      values={ none="None", shift="Shift", control="Control", alt="Alt" },
+                      order={ "none", "shift", "control", "alt" },
+                      get=function() return (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none" end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.tooltipShowModifier = v
+                      end },
+                },
+            })
+            local showModBtn = CreateFrame("Button", nil, leftRgn)
+            showModBtn:SetSize(26, 26)
+            showModBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = showModBtn
+            showModBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            showModBtn:SetAlpha(showModOff() and 0.15 or 0.4)
+            local showModTex = showModBtn:CreateTexture(nil, "OVERLAY")
+            showModTex:SetAllPoints()
+            showModTex:SetTexture(EllesmereUI.COGS_ICON)
+            showModBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            showModBtn:SetScript("OnLeave", function(self) self:SetAlpha(showModOff() and 0.15 or 0.4) end)
+            showModBtn:SetScript("OnClick", function(self) showModShow(self) end)
+
+            local showModBlock = CreateFrame("Frame", nil, showModBtn)
+            showModBlock:SetAllPoints()
+            showModBlock:SetFrameLevel(showModBtn:GetFrameLevel() + 10)
+            showModBlock:EnableMouse(true)
+            showModBlock:SetScript("OnEnter", function()
+                local msg = ttReskinOff() and EllesmereUI.DisabledTooltip("Reskin Tooltip")
+                    or "This option requires Show Tooltips to be set to hide tooltips"
+                EllesmereUI.ShowWidgetTooltip(showModBtn, msg)
+            end)
+            showModBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateShowModState()
+                local off = showModOff()
+                showModBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then showModBlock:Show() else showModBlock:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateShowModState)
+            UpdateShowModState()
         end
 
         -- Border: size slider with an inline colour + opacity swatch. Part of the
