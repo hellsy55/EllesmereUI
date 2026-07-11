@@ -74,6 +74,7 @@ local defaults = {
             noBorderDebuffs = true,
             buffIconZoom   = 0.055,
             debuffIconZoom = 0.055,
+            durationFormat = "blizzard",
         },
         castbarOpacity = 1.0,
         castbarColor = { r = 0.114, g = 0.655, b = 0.514 },

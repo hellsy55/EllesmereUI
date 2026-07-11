@@ -13886,6 +13886,21 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) PASet("textSize", v) end }
         );  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Duration Format",
+              tooltip = "How aura duration text is written. All styles except Blizzard Default are short and locale-independent, so they never overflow the icon.",
+              values = {
+                  blizzard = { text = "Blizzard Default (2 min)" },
+                  compact  = { text = "Standard (5m / 32)" },
+                  colon    = { text = "Colon (5:32)" },
+                  seconds  = { text = "Seconds (152)" },
+              },
+              order = { "blizzard", "compact", "colon", "seconds" },
+              getValue = function() return PAGet("durationFormat") or "blizzard" end,
+              setValue = function(v) PASet("durationFormat", v) end },
+            nil
+        );  y = y - h
+
         -- Row 3: Border Size (+ inline color swatch) | (empty)
         do
             local bsRow
