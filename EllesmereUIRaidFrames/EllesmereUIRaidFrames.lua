@@ -35,13 +35,16 @@ ns.NICK_ADDON = ADDON_NAME:find("Standalone") and ADDON_NAME or "EllesmereUI"
 --  threat border renders behind them: debuffs, defensives/externals, private
 --  auras, dispel-type icons, and Buff Manager icons/squares/bars. Each aura
 --  unit renders its own children (cooldown/border/text) up to +5 above its base.
---  Only the target/hover border-raise and the marker carrier sit above the band.
+--  Only the target/hover border-raise and the marker carrier sit above the aura
+--  band; name/health text (ns.LVL_TEXT) sits above the raised border; the marker
+--  carrier also hosts ready-check / summon / rez icons above the text.
 --  Kept on `ns` (not file-scope locals) to avoid the Lua 5.1 local cap in this
 --  large file, and shared with EUI_RaidFrames_BuffManager.lua.
 -------------------------------------------------------------------------------
-ns.LVL_DISPEL_OVERLAY = 7  -- Blizzard private-aura dispel gradient: below the border (+8) and name/health text (+12) so it renders BEHIND them (like the regular dispel overlay), but above the health bar so it stays visible. Per-slot private-aura icons stay above at LVL_AURA.
-ns.LVL_AURA   = 13   -- base level for every aura icon/bar (children at +1..+5); sits ONE above the name/health text (+12) so auras draw over text
+ns.LVL_DISPEL_OVERLAY = 7  -- Blizzard private-aura dispel gradient: below the border (+8) and name/health text (ns.LVL_TEXT) so it renders BEHIND them (like the regular dispel overlay), but above the health bar so it stays visible. Per-slot private-aura icons stay above at LVL_AURA.
+ns.LVL_AURA   = 13   -- base level for every aura icon/bar (children at +1..+5)
 ns.LVL_RAISE  = 20   -- main border while hovered/targeted (PP container at +1)
+ns.LVL_TEXT   = 21   -- name/health text (above LVL_RAISE; matches Unit Frames)
 ns.LVL_MARKER = 22   -- raid marker icon (always on top)
 
 -------------------------------------------------------------------------------
@@ -3072,12 +3075,11 @@ local function StyleButton(button)
     AnchorDispelIcon()
     d.AnchorDispelIcon = AnchorDispelIcon
 
-    -- Text carrier: name + health text sit ABOVE the base/threat/dispel borders
-    -- (+8/+10/+11) and the BM frame-border effect (+11) so they stay readable,
-    -- but BELOW the aura layer (ns.LVL_AURA = +13) so debuffs/buffs draw over them.
+    -- Text carrier: name + health text sit above borders and the hover/target
+    -- raise (ns.LVL_TEXT), matching Unit Frames text overlay layering.
     local textCarrier = CreateFrame("Frame", nil, button)
     textCarrier:SetAllPoints(health)
-    textCarrier:SetFrameLevel(button:GetFrameLevel() + 12)
+    textCarrier:SetFrameLevel(button:GetFrameLevel() + ns.LVL_TEXT)
 
     -- Name text
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
@@ -3274,8 +3276,8 @@ local function StyleButton(button)
     AnchorRaidMarker()
     d.AnchorRaidMarker = AnchorRaidMarker
 
-    -- Ready check icon (shared with the incoming-summon indicator)
-    local readyCheck = health:CreateTexture(nil, "OVERLAY", nil, 3)
+    -- Ready check icon (shared with incoming-summon / incoming-rez; above name text)
+    local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:Hide()
     d.readyCheck = readyCheck
@@ -6277,7 +6279,7 @@ FB.EnsureBuilt = function()
 
         local carrier = CreateFrame("Frame", nil, b)
         carrier:SetAllPoints(health)
-        carrier:SetFrameLevel(b:GetFrameLevel() + 12)
+        carrier:SetFrameLevel(b:GetFrameLevel() + ns.LVL_TEXT)
         local nameFS = carrier:CreateFontString(nil, "OVERLAY")
         nameFS:SetWordWrap(false)
         b._nameText = nameFS
@@ -11763,15 +11765,15 @@ local function CreatePreviewFrame(index)
     raidMarker:Hide()
 
     -- Ready check icon (position/size re-applied in the preview indicator pass)
-    local readyCheck = health:CreateTexture(nil, "OVERLAY", nil, 3)
+    local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:SetPoint("CENTER", health, "CENTER", 0, 0)
     readyCheck:Hide()
 
-    -- Text carrier: above borders (+8/+10/+11), below the aura layer (+13).
+    -- Text carrier: above borders and the hover/target raise (ns.LVL_TEXT).
     local textCarrier = CreateFrame("Frame", nil, f)
     textCarrier:SetAllPoints(health)
-    textCarrier:SetFrameLevel(f:GetFrameLevel() + 12)
+    textCarrier:SetFrameLevel(f:GetFrameLevel() + ns.LVL_TEXT)
 
     -- Name text (anchoring done by ApplyPreviewData on every refresh)
     local nameFS = textCarrier:CreateFontString(nil, "OVERLAY")
