@@ -6283,8 +6283,20 @@ do
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
             return id
-        elseif actionType == "macro" and id then
-            if subType == "spell" then return id else return GetMacroSpell(id) end
+        elseif actionType == "macro" then
+            if subType == "spell" then
+                return id
+            elseif subType == "item" then
+                return nil
+            end
+            local macroName = GetActionText(slot)
+            local macroIndex = macroName and GetMacroIndexByName(macroName)
+            if macroIndex and macroIndex > 0 then
+                if GetMacroItem and GetMacroItem(macroIndex) then
+                    return nil
+                end
+                return GetMacroSpell(macroIndex)
+            end
         end
         return nil
     end
