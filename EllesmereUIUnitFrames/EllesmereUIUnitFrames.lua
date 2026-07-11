@@ -163,6 +163,18 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
+            extraTextShortNameLength = 0,
+            extraTextShortNameEllipsis = true,
+
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -189,6 +201,15 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
+            btbLeftShortNameLength = 0,
+            btbLeftShortNameEllipsis = true,
+
+            btbRightShortNameLength = 0,
+            btbRightShortNameEllipsis = true,
+
+            btbCenterShortNameLength = 0,
+            btbCenterShortNameEllipsis = true,
+
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -382,6 +403,18 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
+            extraTextShortNameLength = 0,
+            extraTextShortNameEllipsis = true,
+
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -408,6 +441,15 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
+            btbLeftShortNameLength = 0,
+            btbLeftShortNameEllipsis = true,
+
+            btbRightShortNameLength = 0,
+            btbRightShortNameEllipsis = true,
+
+            btbCenterShortNameLength = 0,
+            btbCenterShortNameEllipsis = true,
+
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -532,6 +574,15 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -567,6 +618,15 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -598,6 +658,15 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -676,6 +745,18 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
+            extraTextShortNameLength = 0,
+            extraTextShortNameEllipsis = true,
+
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -700,6 +781,15 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
+            btbLeftShortNameLength = 0,
+            btbLeftShortNameEllipsis = true,
+
+            btbRightShortNameLength = 0,
+            btbRightShortNameEllipsis = true,
+
+            btbCenterShortNameLength = 0,
+            btbCenterShortNameEllipsis = true,
+
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -866,6 +956,15 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextShortNameLength = 0,
+            leftTextShortNameEllipsis = true,
+
+            rightTextShortNameLength = 0,
+            rightTextShortNameEllipsis = true,
+
+            centerTextShortNameLength = 0,
+            centerTextShortNameEllipsis = true,
+
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -1731,8 +1830,17 @@ end
 -- Nickname-aware replacement for the stock [name] tag (see ContentToTag). Returns
 -- the nickname when one applies, else the raw unit name -- identical to [name] for
 -- everyone without a nickname.
-oUF.Tags.Methods["eui-name"] = function(unit)
-    return ns.ResolveUnitNickname(unit)
+oUF.Tags.Methods["eui-name"] = function(unit, realUnit, lenStr, ellipsisStr)
+    local name = ns.ResolveUnitNickname(unit)
+    local maxLen = tonumber(lenStr) or 0
+    if maxLen <= 0 or #name <= maxLen then return name end
+
+    local useEllipsis = ellipsisStr ~= "0"
+    if useEllipsis then
+        return name:sub(1, maxLen) .. "..."
+    else
+        return name:sub(1, maxLen)
+    end
 end
 oUF.Tags.Events["eui-name"] = "UNIT_NAME_UPDATE"
 
@@ -2232,11 +2340,20 @@ local function GetBossHealthTag()
     end
 end
 
+-- Build a truncated name tag for the given settings prefix (e.g. "leftText", "btbLeft").
+local function BuildShortNameTag(prefix, settings)
+    local len = settings[prefix .. "ShortNameLength"] or 0
+    if len <= 0 then return "[eui-name]" end
+    local ellipsis = settings[prefix .. "ShortNameEllipsis"] ~= false and "1" or "0"
+    return "[eui-name(" .. len .. "," .. ellipsis .. ")]"
+end
+
 -- Resolve a leftTextContent / rightTextContent value to an oUF tag string.
 -- content: "name", "both", "curhpshort", "perhp", "perhpnosign", "perhpnum", "none"
-local function ContentToTag(content)
-    if content == "name" then return "[eui-name]"
-    elseif content == "nametotarget" then return "[eui-name][eui-tgtsep][eui-tgtcol][eui-tgtname]"
+local function ContentToTag(content, prefix, settings)
+    if content == "name" then return BuildShortNameTag(prefix, settings)
+    elseif content == "nametotarget" then
+        return BuildShortNameTag(prefix, settings) .. "[eui-tgtsep][eui-tgtcol][eui-tgtname]"
     elseif content == "both" then return "[curhpshort] | [eui-perhp]%"
     elseif content == "bothdash" then return "[curhpshort] - [eui-perhp]%"
     elseif content == "perhpnum" then return "[eui-perhp]% | [curhpshort]"
@@ -2630,9 +2747,9 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
 
     -- Tag and position the BTB texts
     local function ApplyBTBTextTags(lc, rc, cc)
-        local lt = ContentToTag(lc)
-        local rt = ContentToTag(rc)
-        local ct = ContentToTag(cc)
+        local lt = ContentToTag(lc, "btbLeft", settings)
+        local rt = ContentToTag(rc, "btbRight", settings)
+        local ct = ContentToTag(cc, "btbCenter", settings)
         if leftFS._curTag then frame:Untag(leftFS); leftFS._curTag = nil end
         if rightFS._curTag then frame:Untag(rightFS); rightFS._curTag = nil end
         if centerFS._curTag then frame:Untag(centerFS); centerFS._curTag = nil end
@@ -6200,10 +6317,10 @@ local function StyleFullFrame(frame, unit)
     -- alignment-based anchor and a 95%-of-bar-width clamp (ellipsis truncation).
     local function ApplyTextTags(lc, rc, cc, ec)
         ec = ec or (settings.extraTextContent or "none")
-        local ltag = ContentToTag(lc)
-        local rtag = ContentToTag(rc)
-        local ctag = ContentToTag(cc)
-        local etag = ContentToTag(ec)
+        local ltag = ContentToTag(lc, "leftText", settings)
+        local rtag = ContentToTag(rc, "rightText", settings)
+        local ctag = ContentToTag(cc, "centerText", settings)
+        local etag = ContentToTag(ec, "extraText", settings)
         if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
         if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
         if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
@@ -6534,10 +6651,10 @@ local function StyleFocusFrame(frame, unit)
     -- alignment-based anchor and a 95%-of-bar-width clamp (ellipsis truncation).
     local function ApplyTextTags(lc, rc, cc, ec)
         ec = ec or (settings.extraTextContent or "none")
-        local ltag = ContentToTag(lc)
-        local rtag = ContentToTag(rc)
-        local ctag = ContentToTag(cc)
-        local etag = ContentToTag(ec)
+        local ltag = ContentToTag(lc, "leftText", settings)
+        local rtag = ContentToTag(rc, "rightText", settings)
+        local ctag = ContentToTag(cc, "centerText", settings)
+        local etag = ContentToTag(ec, "extraText", settings)
         if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
         if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
         if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
@@ -6825,9 +6942,9 @@ local function StyleSimpleFrame(frame, unit)
     end
 
     local function ApplyTextTags(lc, rc, cc)
-        local ltag = ContentToTag(lc)
-        local rtag = ContentToTag(rc)
-        local ctag = ContentToTag(cc)
+        local ltag = ContentToTag(lc, "leftText", settings)
+        local rtag = ContentToTag(rc, "rightText", settings)
+        local ctag = ContentToTag(cc, "centerText", settings)
         if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
         if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
         if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
@@ -7070,9 +7187,9 @@ local function StylePetFrame(frame, unit)
     end
 
     local function ApplyTextTags(lc, rc, cc)
-        local ltag = ContentToTag(lc)
-        local rtag = ContentToTag(rc)
-        local ctag = ContentToTag(cc)
+        local ltag = ContentToTag(lc, "leftText", settings)
+        local rtag = ContentToTag(rc, "rightText", settings)
+        local ctag = ContentToTag(cc, "centerText", settings)
         if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
         if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
         if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
@@ -7328,9 +7445,9 @@ local function StyleBossFrame(frame, unit)
     end
 
     local function ApplyTextTags(lc, rc, cc)
-        local ltag = ContentToTag(lc)
-        local rtag = ContentToTag(rc)
-        local ctag = ContentToTag(cc)
+        local ltag = ContentToTag(lc, "leftText", settings)
+        local rtag = ContentToTag(rc, "rightText", settings)
+        local ctag = ContentToTag(cc, "centerText", settings)
         if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
         if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
         if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
