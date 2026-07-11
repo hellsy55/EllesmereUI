@@ -448,6 +448,8 @@ This is where you can control the settings of Unlock Mode.\n\nElements can be re
 This option requires %1$s to be %2$s
 This preset
 This spell is already being used on %s
+This unit uses the Blizzard default frame -- there are no EllesmereUI settings to configure here.
+This unit's frame is hidden -- there are no EllesmereUI settings to configure here.
 Threshold
 Threshold Seconds
 Threshold Settings
