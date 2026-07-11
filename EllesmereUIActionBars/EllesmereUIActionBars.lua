@@ -5622,6 +5622,10 @@ local function BuildVisibilityString(info, s, visOverride)
     local key = info.key
     local vis = visOverride or s.barVisibility or "always"
 
+    if info.isStance and (GetNumShapeshiftForms() or 0) == 0 then
+        return "hide" -- classes/specs with no forms have no stance bar to show
+    end
+
     -- Build visibility-option hide clauses that can be expressed as macro
     -- conditionals. These run inside the secure state driver so they work
     -- even in combat without taint.
@@ -9369,6 +9373,7 @@ function EAB:FinishSetup()
         C_Timer_After(0, function()
             _gridState.spellsPending = false
             LayoutBar("StanceBar")
+            self:RefreshRuntimeVisibility() -- form count may have changed; re-eval stance bar show/hide
             for _, info in ipairs(BAR_CONFIG) do
                 self:ApplyAlwaysShowButtons(info.key)
             end
