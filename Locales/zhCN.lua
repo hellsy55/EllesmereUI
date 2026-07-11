@@ -1605,6 +1605,7 @@ L["Only Color At/Above Threshold"] = "仅在阈值及以上着色"
 L["Show Power Bar"] = "显示能量条"
 L["Show Health Bar"] = "显示生命条"
 L["Enable Player Cast Bar"] = "启用玩家施法条"
+L["Out of Combat Opacity"] = "战斗外不透明度"
 L["When enabled, EUI relinquishes full control of friendly player nameplates to Blizzard."] = "启用后，EUI 会将友方玩家姓名板的控制权完全交还给暴雪。"
 
 -- == Unit Labels (from EUI_UnitFrames_Options.lua) ============================
