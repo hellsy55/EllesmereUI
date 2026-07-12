@@ -1766,8 +1766,25 @@ end
 --  IsEncounterInProgress() is queried inline (only for the outOfBossCombat case)
 --  so there is no ENCOUNTER event bookkeeping. Installed once at load; a no-op
 --  for the default mode, costing one table read per tooltip when unused.
+--  An optional "peek" modifier (tooltipShowModifier) lifts suppression while the
+--  chosen key is held, so a hidden tip can be read on hover (e.g. mid-combat).
 -------------------------------------------------------------------------------
 do
+    local function ShowModifierHeld()
+        local mod = (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none"
+        if mod == "none" then return false end
+        if mod == "control" then return IsControlKeyDown() end
+        if mod == "alt" then return IsAltKeyDown() end
+        return IsShiftKeyDown()
+    end
+
+    -- Exposed so modules with their own tooltip suppression (e.g. the raid/party
+    -- frames, whose OnEnter hides tips per its own combat mode) can let the same
+    -- peek modifier reveal their tips through their normal hover path.
+    function EllesmereUI._tooltipPeekHeld()
+        return ShowModifierHeld()
+    end
+
     -- Shared decision: should GameTooltip be suppressed right now given the
     -- user's "Show Tooltips" mode + combat state? Exposed on EllesmereUI so the
     -- cursor-anchor hook can honor it too (otherwise the cursor re-anchor would
@@ -1780,6 +1797,8 @@ do
         -- suppressed at, e.g., "Never".
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return false end
         local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
+        if mode == "always" then return false end
+        if ShowModifierHeld() then return false end
         if mode == "never" then
             return true
         elseif mode == "outOfCombat" then
@@ -1798,6 +1817,66 @@ do
     if GameTooltip_SetDefaultAnchor then
         hooksecurefunc("GameTooltip_SetDefaultAnchor", HideTooltipByMode)
     end
+
+    -- Live peek: pressing the modifier while already hovering reveals the tip
+    -- for the current frame; releasing it hides it again. Moving onto other
+    -- frames while the key stays held reveals each in turn through the normal
+    -- hover path -- suppression is lifted while held (globally via
+    -- _tooltipSuppressedByMode, and per-module via _tooltipPeekHeld, which the
+    -- raid/party frames honor in their own OnEnter).
+    local function KeyMatchesModifier(key, mod)
+        return (mod == "shift"   and (key == "LSHIFT" or key == "RSHIFT"))
+            or (mod == "control" and (key == "LCTRL"  or key == "RCTRL"))
+            or (mod == "alt"     and (key == "LALT"   or key == "RALT"))
+    end
+    -- Reveal the tooltip for whatever the cursor is over. First re-run the
+    -- hovered frame's OnEnter (buttons, icons, unit frames build their own
+    -- tip) -- the topmost mouse-focus frame is often an overlay without one,
+    -- so scan every frame under the cursor and walk up parents. Nameplates'
+    -- clickable frame has an OnEnter that builds nothing (its tip comes from
+    -- the engine's mouseover unit on a real hover), so fall back to driving
+    -- the unit tooltip directly when one is up.
+    local function FireHoveredOnEnter()
+        local foci = (GetMouseFoci and GetMouseFoci()) or (GetMouseFocus and { GetMouseFocus() })
+        local anchorFrame = foci and foci[1]
+        if foci then
+            for _, focus in ipairs(foci) do
+                local frame = focus
+                while frame and frame ~= WorldFrame and frame ~= UIParent do
+                    if frame.GetScript then
+                        local onEnter = frame:GetScript("OnEnter")
+                        if onEnter then
+                            pcall(onEnter, frame)
+                            if GameTooltip:IsShown() then return end
+                            anchorFrame = frame
+                            break
+                        end
+                    end
+                    frame = frame.GetParent and frame:GetParent()
+                end
+            end
+        end
+        if not GameTooltip:IsShown() and UnitExists("mouseover") then
+            GameTooltip_SetDefaultAnchor(GameTooltip, anchorFrame or UIParent)
+            GameTooltip:SetUnit("mouseover")
+            if EllesmereUI._repointTooltipAtCursor then
+                EllesmereUI._repointTooltipAtCursor(GameTooltip)
+            end
+            GameTooltip:Show()
+        end
+    end
+    local modWatcher = CreateFrame("Frame")
+    modWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+    modWatcher:SetScript("OnEvent", function(_, _event, key, down)
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
+        local mod = (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none"
+        if mod == "none" or not KeyMatchesModifier(key, mod) then return end
+        if down == 1 then
+            FireHoveredOnEnter()
+        elseif GameTooltip:IsShown() and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then
+            GameTooltip:Hide()
+        end
+    end)
 end
 
 -------------------------------------------------------------------------------

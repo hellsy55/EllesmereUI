@@ -834,6 +834,9 @@ function ns.RaidFrameTooltipAllowed(button)
     local s = (fd and (fd._isParty and ns._scaledPartyProxy
         or (fd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile))
         or ns._scaledProfile
+    -- Holding the Blizz UI Enhanced peek modifier lifts the mode so a hidden
+    -- tip can be read on hover (e.g. mid-combat), matching the global tooltips.
+    if EllesmereUI._tooltipPeekHeld and EllesmereUI._tooltipPeekHeld() then return true end
     local ttMode = ns._ResolveTooltipMode(s)
     if ttMode == "never" then return false end
     if ttMode == "outOfCombat" and inCombat then return false end
@@ -3809,10 +3812,14 @@ local function StyleButton(button)
         -- Tooltip" mode, and ONLY these frames -- no other unit tooltips are
         -- touched. never = no tooltip; outOfCombat = hidden in any combat;
         -- outOfBossCombat = hidden during an encounter; always = always shown.
-        local ttMode = ns._ResolveTooltipMode(s)
-        if ttMode == "never" then return end
-        if ttMode == "outOfCombat" and inCombat then return end
-        if ttMode == "outOfBossCombat" and ns._inBossCombat then return end
+        -- The peek modifier (Blizz UI Enhanced) lifts the mode while held so a
+        -- hidden tip can be read on hover, in step with the global tooltips.
+        if not (EllesmereUI._tooltipPeekHeld and EllesmereUI._tooltipPeekHeld()) then
+            local ttMode = ns._ResolveTooltipMode(s)
+            if ttMode == "never" then return end
+            if ttMode == "outOfCombat" and inCombat then return end
+            if ttMode == "outOfBossCombat" and ns._inBossCombat then return end
+        end
         local u = self:GetAttribute("unit")
         if u and UnitExists(u) then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)
