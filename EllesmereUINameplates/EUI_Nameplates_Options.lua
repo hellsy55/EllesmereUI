@@ -1166,6 +1166,8 @@ initFrame:SetScript("OnEvent", function(self)
                     classIcon:SetPoint("BOTTOMLEFT", health, "TOPLEFT", clXOff, 2 + cpPush + clYOff)
                 elseif clPos == "topright" then
                     classIcon:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", clXOff, 2 + cpPush + clYOff)
+                elseif clPos == "bottom" then
+                    classIcon:SetPoint("TOP", cast, "BOTTOM", clXOff, -2 + clYOff)
                 end
                 classIcon:Show()
                 if pf._classOverlay then pf._classOverlay:Show() end
@@ -4730,13 +4732,12 @@ initFrame:SetScript("OnEvent", function(self)
                 titleFS:SetPoint("TOP", pf, "TOP", 0, -TOP_PAD)
                 pf._titleFS = titleFS
 
-                -- Measure label widths to compute layout BEFORE creating sliders
                 local tmpFS = pf:CreateFontString(nil, "OVERLAY")
                 tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 12, GetNPOptOutline())
-                local labelTexts = {"X Offset", "Y Offset", "Size", "Width %"}
+                local labelTexts = {"X Offset", "Y Offset", "Size", "Width %", "Spacing", "Opacity"}
                 local maxLblW = 0
                 for _, txt in ipairs(labelTexts) do
-                    tmpFS:SetText(txt)
+                    tmpFS:SetText(EllesmereUI.L(txt))
                     local w = tmpFS:GetStringWidth()
                     if w > maxLblW then maxLblW = w end
                 end
