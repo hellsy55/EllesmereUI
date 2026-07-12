@@ -3220,7 +3220,13 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
                     PP.CreateBorder(b, 0, 0, 0, 1, 1)
                     icon._borderFrame = b
                 end
-                local countFS = icon:CreateFontString(nil, "OVERLAY")
+                -- Carrier frame above the cooldown swipe/border so the stack
+                -- count preview isn't hidden behind them (mirrors the live
+                -- grid's _textCarrier in ns.BM_CreateIndicators).
+                local textCarrier = CreateFrame("Frame", nil, icon)
+                textCarrier:SetAllPoints()
+                textCarrier:SetFrameLevel(icon:GetFrameLevel() + 5)
+                local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
                 countFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -1, 1)
                 icon._count = countFS
                 previewIcons[i] = icon
@@ -3680,9 +3686,16 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+            local function UpdateStacksCog()
+                local off = BuffsOff() or not BVal("showStacks", true)
+                cogBtn:SetAlpha(off and 0.15 or 0.4)
+                cogBtn:EnableMouse(not off)
+            end
+            cogBtn:SetScript("OnEnter", function(self) if not (BuffsOff() or not BVal("showStacks", true)) then self:SetAlpha(0.7) end end)
+            cogBtn:SetScript("OnLeave", function(self) UpdateStacksCog() end)
+            cogBtn:SetScript("OnClick", function(self) if not (BuffsOff() or not BVal("showStacks", true)) then cogShow(self) end end)
+            UpdateStacksCog()
+            EllesmereUI.RegisterWidgetRefresh(UpdateStacksCog)
         end
 
         return 0
