@@ -1364,8 +1364,65 @@ end
 -------------------------------------------------------------------------------
 local function DecorateFrame(frame, barData)
     local fd = hookFrameData[frame]
-    if fd and fd.decorated then return fd end
     if not fd then fd = {}; hookFrameData[frame] = fd end
+
+    -- Border + background must track the CURRENT bar's settings on every
+    -- call, not just the first: Blizzard recycles a shared pool of icon
+    -- frames across bars/spells, so a physical frame already decorated
+    -- under a different bar's (or an older) style must still pick up this
+    -- bar's current settings whenever it's (re)claimed. For hooked default
+    -- bars (Essential/Utility), this DecorateFrame call from
+    -- CollectAndReanchor is the ONLY re-style path -- RefreshCDMIconAppearance,
+    -- which otherwise keeps custom bars current, is skipped for those bars.
+    -- Structural frame/texture creation stays one-time via the fd.borderFrame /
+    -- fd.bg guards; only the styling calls below are unconditional. Frame
+    -- levels are relative to the icon's own live level (not a value cached at
+    -- first decoration) so a pooled frame reclaimed at a different base level
+    -- stays correctly layered against its own border/glow/text overlays.
+    local baseLvl = frame:GetFrameLevel()
+
+    if not fd.bg then
+        local bg = frame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        fd.bg = bg
+    end
+    fd.bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
+        barData.bgB or 0.08, barData.bgA or 0.6)
+
+    if not fd.borderFrame then
+        local bf = CreateFrame("Frame", nil, frame)
+        bf:SetAllPoints(frame)
+        fd.borderFrame = bf
+    end
+    local textureKey = barData.borderTexture or "solid"
+    EllesmereUI.ApplyBorderStyle(fd.borderFrame,
+        barData.borderSize or 1,
+        barData.borderR or 0, barData.borderG or 0,
+        barData.borderB or 0, barData.borderA or 1,
+        textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
+        barData.borderTextureShiftX, barData.borderTextureShiftY,
+        "cdm", barData.borderThickness or "thin")
+    -- ApplyBorderStyle above always paints the bar's BASE color. If this
+    -- spell's active-state tint is currently engaged (ns.ApplyActiveOverlays
+    -- drives fd._activeBorderOn independently of DecorateFrame, via Blizzard's
+    -- own SetSwipeColor callback), re-assert it immediately so a reanchor
+    -- firing mid-proc doesn't flash the border back to its base color.
+    if fd._activeBorderOn and EllesmereUI.SetBorderStyleColor then
+        local fcA = _ecmeFC[frame]
+        local sidA, bkA = fcA and fcA.spellID, fcA and fcA.barKey
+        local ss = sidA and ResolveSpellSettings(frame, sidA, ns.GetBarSpellData(bkA))
+        local abR = (ss and ss.activeBorderR) or 1
+        local abG = (ss and ss.activeBorderG) or 0.776
+        local abB = (ss and ss.activeBorderB) or 0.376
+        local abA = (ss and ss.activeBorderA) or 1
+        EllesmereUI.SetBorderStyleColor(fd.borderFrame, abR, abG, abB, abA)
+    end
+    -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
+    fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
+    if fd.glowOverlay then fd.glowOverlay:SetFrameLevel(baseLvl + 16) end
+    if fd.textOverlay then fd.textOverlay:SetFrameLevel(baseLvl + 23) end
+
+    if fd.decorated then return fd end
     fd.decorated = true
 
     -- A HOSTED buff's frame is a Blizzard buff-viewer frame reparented onto a
@@ -1442,35 +1499,24 @@ local function DecorateFrame(frame, barData)
     -- Per-icon active state hooks installed lazily during CollectAndReanchor,
     -- ONLY for spells with custom active state settings.
 
-    if not fd.bg then
-        local bg = frame:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
-            barData.bgB or 0.08, barData.bgA or 0.6)
-        fd.bg = bg
-    end
-
-    -- Frame levels are relative to the icon's own level so that icons
-    -- with higher base levels (Blizzard increments +1 per icon) never
-    -- render their content above a neighbor's border or text.
-    local baseLvl = frame:GetFrameLevel()
-
+    -- glowOverlay/textOverlay structural creation stays one-time; their frame
+    -- levels are (re)applied unconditionally near the top of this function.
     if not fd.glowOverlay then
         local go = CreateFrame("Frame", nil, frame)
         go:SetAllPoints(frame)
         go:SetAlpha(0)
         go:EnableMouse(false)
         fd.glowOverlay = go
+        go:SetFrameLevel(baseLvl + 16)
     end
-    fd.glowOverlay:SetFrameLevel(baseLvl + 16)
 
     if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
         txo:EnableMouse(false)
         fd.textOverlay = txo
+        txo:SetFrameLevel(baseLvl + 23)
     end
-    fd.textOverlay:SetFrameLevel(baseLvl + 23)
 
     if not fd.keybindText then
         local kt = fd.textOverlay:CreateFontString(nil, "OVERLAY")
@@ -1502,22 +1548,6 @@ local function DecorateFrame(frame, barData)
             end
         end)
     end
-
-    if not fd.borderFrame then
-        local bf = CreateFrame("Frame", nil, frame)
-        bf:SetAllPoints(frame)
-        fd.borderFrame = bf
-        local textureKey = barData.borderTexture or "solid"
-        EllesmereUI.ApplyBorderStyle(bf,
-            barData.borderSize or 1,
-            barData.borderR or 0, barData.borderG or 0,
-            barData.borderB or 0, barData.borderA or 1,
-            textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
-            barData.borderTextureShiftX, barData.borderTextureShiftY,
-            "cdm", barData.borderThickness or "thin")
-    end
-    -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
-    fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
 
     fd.procGlowActive = false
 
