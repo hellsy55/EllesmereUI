@@ -49,6 +49,7 @@ EllesmereUI.lua
 EllesmereUI_BlizzardParty.lua
 EllesmereUI_Kick.lua
 EllesmereUI_Widgets.lua
+EllesmereUI_GlobalSearch.lua
 EllesmereUI_Visibility.lua
 EllesmereUI_Presets.lua
 EllesmereUI_Profiles.lua

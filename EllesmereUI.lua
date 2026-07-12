@@ -1371,6 +1371,7 @@ EllesmereUI._sidebarGroupButtons = {}
 local activeModule, activePage
 local _lastPagePerModule = {}
 local modules = {}
+EllesmereUI._modules = modules -- read-only alias so other files (e.g. global search) can iterate registered modules
 local scrollTarget = 0
 local isSmoothing = false
 local smoothFrame
@@ -1388,6 +1389,21 @@ end
 EllesmereUI.RegisterWidgetRefresh = RegisterWidgetRefresh
 local function ClearWidgetRefreshList()
     for i = 1, #_widgetRefreshList do _widgetRefreshList[i] = nil end
+end
+
+-- Snapshot + restore the live refresh registry around off-screen widget
+-- construction (e.g. a search-index pre-build pass) so building a page
+-- nobody's looking at can never leak its widgets' refresh closures into
+-- the currently-displayed page's list.
+function EllesmereUI._SnapshotAndClearWidgetRefreshList()
+    local snap = {}
+    for i = 1, #_widgetRefreshList do snap[i] = _widgetRefreshList[i] end
+    ClearWidgetRefreshList()
+    return snap
+end
+function EllesmereUI._RestoreWidgetRefreshList(snap)
+    ClearWidgetRefreshList()
+    for i = 1, #snap do _widgetRefreshList[i] = snap[i] end
 end
 
 -- Hide all children/regions of a frame without orphaning them
@@ -6254,6 +6270,7 @@ local function CreateMainFrame()
     --  Click area  (1300x946, centred)
     -----------------------------------------------------------------------
     clickArea = CreateFrame("Frame", "EllesmereUIClickArea", mainFrame)
+    EllesmereUI._clickArea = clickArea
     clickArea:SetSize(CLICK_W, CLICK_H)
     clickArea:SetPoint("CENTER", mainFrame, "CENTER", 0, 0)
     clickArea:SetFrameLevel(mainFrame:GetFrameLevel() + 1)
@@ -8796,8 +8813,33 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
         end
     end
 
-    -- Hide non-matching orphans
-    for _, o in ipairs(orphans) do o:Hide() end
+    -- Orphans are, by construction, always the LEADING widgets on a page --
+    -- created before that page's first SectionHeader call, so _currentSection
+    -- is still nil when TagOptionRow tags them. Match them the same way
+    -- section members are matched below, instead of hiding all of them
+    -- unconditionally: a query that only matches an orphan (e.g. a page's
+    -- lead "Activate X" button, before any SectionHeader) would otherwise
+    -- leave the whole page empty -- nothing to show, nothing to un-hide.
+    local visibleOrphans = {}
+    for _, o in ipairs(orphans) do
+        local label = GetSearchLabel(o)
+        local matched = label ~= "" and label:lower():find(queryLower, 1, true)
+        if not matched then
+            for _, rgn in ipairs({ o._leftRegion, o._midRegion, o._rightRegion }) do
+                if rgn then
+                    local ddText = GetDropdownValueText(rgn)
+                    if ddText and ddText:lower():find(queryLower, 1, true) then
+                        matched = true; break
+                    end
+                end
+            end
+        end
+        if matched then
+            visibleOrphans[#visibleOrphans + 1] = o
+        else
+            o:Hide()
+        end
+    end
 
     -- Build per-slot highlight targets and count totals to decide if we suppress
     -- highlights (when every visible slot is highlighted, none should glow).
@@ -8853,6 +8895,39 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
         end
     end
 
+    -- Same slot/highlight accounting as above, for visible orphans -- they
+    -- already passed the match check to be in visibleOrphans, so (unlike
+    -- section members) there's no separate "section matched" bypass to OR in.
+    for _, o in ipairs(visibleOrphans) do
+        if not o._isSpacer then
+            local slots = {}
+            if o._leftRegion then slots[#slots + 1] = { region = o._leftRegion,  label = o._leftRegion._slotLabel  or "" } end
+            if o._midRegion  then slots[#slots + 1] = { region = o._midRegion,   label = o._midRegion._slotLabel   or "" } end
+            if o._rightRegion then slots[#slots + 1] = { region = o._rightRegion, label = o._rightRegion._slotLabel or "" } end
+
+            if #slots > 0 then
+                for _, s in ipairs(slots) do
+                    if s.label ~= "" then
+                        totalSlots = totalSlots + 1
+                        local slotMatch = s.label:lower():find(queryLower, 1, true)
+                        if not slotMatch then
+                            local ddText = GetDropdownValueText(s.region)
+                            if ddText then slotMatch = ddText:lower():find(queryLower, 1, true) end
+                        end
+                        if slotMatch then
+                            highlightedSlots = highlightedSlots + 1
+                            highlightTargets[#highlightTargets + 1] = s.region
+                        end
+                    end
+                end
+            else
+                totalSlots = totalSlots + 1
+                highlightedSlots = highlightedSlots + 1
+                highlightTargets[#highlightTargets + 1] = o
+            end
+        end
+    end
+
     -- If every visible slot is highlighted, suppress all highlights
     local suppressHighlights = (highlightedSlots >= totalSlots)
 
@@ -8867,6 +8942,38 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     -- Re-anchor visible items sequentially from top
     local startY = -6
     local y = startY
+
+    -- Matching orphans lead the page (they're always positioned before the
+    -- first section in the source layout), so place and highlight them
+    -- first, then let the sections loop below continue from the same y.
+    for _, o in ipairs(visibleOrphans) do
+        if o._isSpacer then
+            o:Hide()
+        else
+            local ox = o._origAnchor and o._origAnchor[4] or CONTENT_PAD
+            o:ClearAllPoints()
+            PanelPP.Point(o, "TOPLEFT", cached.wrapper, "TOPLEFT", ox, y)
+            o:Show()
+
+            if not suppressHighlights and not skipHighlights then
+                if o._leftRegion and hlSet[o._leftRegion] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o._leftRegion)
+                end
+                if o._midRegion and hlSet[o._midRegion] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o._midRegion)
+                end
+                if o._rightRegion and hlSet[o._rightRegion] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o._rightRegion)
+                end
+                if not o._leftRegion and hlSet[o] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o)
+                end
+            end
+
+            y = y - o:GetHeight()
+        end
+    end
+
     for _, vs in ipairs(visibleSections) do
         local sec = vs.sec
         local hdrX = sec.header._origAnchor and sec.header._origAnchor[4] or CONTENT_PAD
@@ -9119,6 +9226,7 @@ end
 -- Page cache: maps "moduleName::pageName" -> { wrapper, totalH, headerBuilder }
 -- On revisit, we show the cached wrapper and refresh widget values instead of rebuilding.
 _pageCache = {}
+EllesmereUI._pageCache = _pageCache
 local _activePageWrapper  -- the currently-visible wrapper frame
 
 -- Invalidate all cached pages (called on profile reset, module reload, etc.)
@@ -9298,7 +9406,12 @@ function EllesmereUI:SelectPage(pageName)
         if config.buildPage then
             local startY = -6
 
+            EllesmereUI._buildingModule = activeModule
+            EllesmereUI._buildingPage = pageName
             totalH = config.buildPage(pageName, wrapper, startY) or 600
+            EllesmereUI._buildingModule = nil
+            EllesmereUI._buildingPage = nil
+            EllesmereUI._buildingSelector = nil
             contentFrame:SetHeight(totalH + 30)
         end
 
@@ -9395,7 +9508,12 @@ function EllesmereUI:RefreshPage(force)
     local totalH = 0
     if config.buildPage then
         local startY = -6
+        EllesmereUI._buildingModule = activeModule
+        EllesmereUI._buildingPage = activePage
         totalH = config.buildPage(activePage, wrapper, startY) or 600
+        EllesmereUI._buildingModule = nil
+        EllesmereUI._buildingPage = nil
+        EllesmereUI._buildingSelector = nil
         contentFrame:SetHeight(totalH + 30)
     end
 

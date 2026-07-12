@@ -1752,11 +1752,21 @@ initFrame:SetScript("OnEvent", function(self)
         searchTerms = "damage meters dps hps healing interrupts dispels spell history",
         pages       = { "Damage Meters", PAGE_SH },
         buildPage   = function(pageName, p, yOffset)
-            ns._optionsOpen = true
-            if ns.ShowSATimerPreview and Cfg("standaloneTimer") then ns.ShowSATimerPreview() end
-            if ns.ApplySpellHistory then ns.ApplySpellHistory() end
-            for _, w in ipairs(ns._windows or {}) do
-                if w.frame then w.frame:SetAlpha(1); w.frame:EnableMouse(true); w.frame:Show() end
+            -- This unconditionally forces every real damage-meter window
+            -- (ns._windows, parented to UIParent) and the standalone timer
+            -- preview live and mouse-interactive on screen -- not scoped to
+            -- `p`/the hidden pre-build wrapper at all. During an off-screen
+            -- search pre-build this would pop the player's real meter windows
+            -- onto the screen with no interaction. Skip it; BuildPage/
+            -- BuildSpellHistoryPage build purely onto `p`, so still index
+            -- normally during the hidden pass.
+            if not EllesmereUI._prebuilding then
+                ns._optionsOpen = true
+                if ns.ShowSATimerPreview and Cfg("standaloneTimer") then ns.ShowSATimerPreview() end
+                if ns.ApplySpellHistory then ns.ApplySpellHistory() end
+                for _, w in ipairs(ns._windows or {}) do
+                    if w.frame then w.frame:SetAlpha(1); w.frame:EnableMouse(true); w.frame:Show() end
+                end
             end
             if pageName == PAGE_SH then
                 return BuildSpellHistoryPage(pageName, p, yOffset)
