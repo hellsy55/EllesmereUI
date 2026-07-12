@@ -10231,6 +10231,11 @@ local function DoClose()
         _G.EllesmereUIQuestTracker.UpdateVisibility()
     end
 
+    -- Re-check Dragon Riding's real visibility (it force-shows while unlocked
+    -- so it can be edited off-mount; without this it stays stuck visible
+    -- after exiting Unlock Mode if the player dismounted while unlocked).
+    if _G._EDR_UpdateVisibility then pcall(_G._EDR_UpdateVisibility) end
+
     if not unlockFrame then return end
 
     unlockFrame:SetScript("OnUpdate", nil)
@@ -11572,6 +11577,12 @@ local function SuspendForCombat()
     isUnlocked = false
     EllesmereUI._unlockActive = false
     EllesmereUI._unlockModeActive = false
+
+    -- Re-check Dragon Riding's real visibility (it force-shows while
+    -- _unlockActive is true so it can be edited off-mount; must run AFTER
+    -- _unlockActive is cleared above, or UpdateVisibility() still hits that
+    -- force-show branch and this call is a no-op).
+    if _G._EDR_UpdateVisibility then pcall(_G._EDR_UpdateVisibility) end
 
     if unlockFrame then
         unlockFrame:SetScript("OnUpdate", nil)
