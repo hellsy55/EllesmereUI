@@ -2730,7 +2730,10 @@ end
 function EllesmereUI.SpecOverrides_BuildListPage(parent, startY)
     local W = EllesmereUI.Widgets
     local y = startY
-    PruneOrphanEntries()
+    -- Skip during a hidden search pre-build: this page is only ever indexed
+    -- for its static labels, and pruning mutates saved profile data, which a
+    -- read-only indexing pass shouldn't do as a side effect.
+    if not EllesmereUI._prebuilding then PruneOrphanEntries() end
     local store = GetStore()
     local groups = GetGroups() or {}
     local us = GetUnlockStore()

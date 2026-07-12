@@ -6575,6 +6575,23 @@ initFrame:SetScript("OnEvent", function(self)
         description = "General options for all EllesmereUI addons.",
         pages       = globalPages,
         buildPage   = function(pageName, parent, yOffset)
+            -- CleanupProfilesRoot hides/nils the LIVE EllesmereUI._profilesRoot,
+            -- not anything scoped to this call's pageName. During an off-screen
+            -- search pre-build, pageName cycles through PAGE_GENERAL/PAGE_COLORS
+            -- regardless of what the player is really looking at, so this would
+            -- otherwise hide the player's real Profiles page out from under them
+            -- if it happened to be open. This module's config.pages never
+            -- includes PAGE_PROFILES, so pre-build never needs to build it here.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_GENERAL then
+                    return BuildGeneralPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_COLORS then
+                    return BuildColorsPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_WHATSNEW then
+                    return EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
+                end
+                return
+            end
             -- Clean up profiles root when switching to a non-Profiles tab
             if pageName ~= PAGE_PROFILES then
                 CleanupProfilesRoot()
@@ -6685,6 +6702,23 @@ initFrame:SetScript("OnEvent", function(self)
         description = "Import, export, and switch EllesmereUI profiles and presets.",
         pages       = { PAGE_PROFILES, PAGE_SPECOV },
         buildPage   = function(pageName, parent, yOffset)
+            -- BuildProfilesPage bypasses `parent` entirely and builds directly
+            -- onto the live, shared EllesmereUI._scrollFrame -- and, before it
+            -- even gets there, unconditionally checks whether the active
+            -- profile matches the player's current spec and, if not, can call
+            -- SwitchProfile/RefreshAllAddons and pop a "Reload Required"
+            -- confirmation. None of that is safe to trigger from a hidden
+            -- indexing pass. Skip PAGE_PROFILES here; it gets indexed normally
+            -- the first time the player actually visits it.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_SPECOV then
+                    if EllesmereUI.SpecOverrides_BuildListPage then
+                        return EllesmereUI.SpecOverrides_BuildListPage(parent, yOffset)
+                    end
+                    return 200
+                end
+                return
+            end
             if pageName == PAGE_SPECOV then
                 CleanupProfilesRoot()
                 if EllesmereUI.SpecOverrides_BuildListPage then

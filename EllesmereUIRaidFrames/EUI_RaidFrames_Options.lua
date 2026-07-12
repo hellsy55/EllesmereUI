@@ -6763,6 +6763,38 @@ initFrame:SetScript("OnEvent", function(self)
         pages       = { PAGE_MAIN, PAGE_DEBUFFS, PAGE_PARTY, PAGE_BUFFS, PAGE_CLICKCAST },
         searchTerms = rfSearchTerms,
         buildPage   = function(pageName, parent, yOffset)
+            -- All of the cleanup/preview logic below acts on live, real state
+            -- (the buff-manager/click-cast roots, and the raid/party preview
+            -- overlays over the player's actual frames) keyed only on the
+            -- pageName this particular call happens to build -- not on
+            -- whether the player is really looking at this module at all.
+            -- During an off-screen search pre-build, pageName cycles through
+            -- every page in this module's `pages` regardless of what's really
+            -- on screen, so none of it may run here.
+            --
+            -- PAGE_BUFFS / PAGE_CLICKCAST go further: their builders
+            -- (BuildBuffManagerPage -> ns.BM_BuildPage, ns.CC_BuildPage)
+            -- bypass the given `parent` entirely and build directly onto the
+            -- live, shared EllesmereUI._scrollFrame, so building them here
+            -- would inject real, visible UI onto whatever the player is
+            -- actually looking at. Skip them; they're indexed normally the
+            -- first time the player visits them live.
+            --
+            -- _partyCtx (read by SGet/SSet/SVal inside getValue/setValue
+            -- closures) is deliberately left untouched here: this hidden
+            -- pass's widgets and their closures are discarded with the
+            -- wrapper and never invoked again, so only the live path needs
+            -- it to be correct.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_MAIN then
+                    return BuildMainPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_PARTY then
+                    return BuildPartyPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_DEBUFFS then
+                    return BuildDebuffsPage(pageName, parent, yOffset)
+                end
+                return
+            end
             -- Clean up Buff Manager root when switching away
             if pageName ~= PAGE_BUFFS and ns._bmRoot then
                 ns._bmRoot:Hide()
@@ -6829,6 +6861,27 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end,
         onPageCacheRestore = function(pageName)
+            -- Mirror buildPage's unconditional root cleanup (see above): this
+            -- fires instead of buildPage whenever the target page was already
+            -- cached, so without this, switching away from Buffs/HoverCast to
+            -- an already-cached page (e.g. Party) never hid ns._bmRoot/
+            -- ns._ccRoot -- both are built onto the shared live scroll frame,
+            -- not a per-page wrapper, so they stayed stuck on screen over
+            -- whatever page was cache-restored next.
+            if pageName ~= PAGE_BUFFS and ns._bmRoot then
+                ns._bmRoot:Hide()
+                ns._bmRoot:SetParent(nil)
+                ns._bmRoot = nil
+            end
+            if pageName ~= PAGE_CLICKCAST and ns._ccRoot then
+                if ns._ccGridPopup then ns._ccGridPopup:Hide(); ns._ccGridPopup = nil end
+                if ns._ccSpecPopup then ns._ccSpecPopup:Hide(); ns._ccSpecPopup = nil end
+                if ns._ccQBPopup then ns._ccQBPopup:Hide(); ns._ccQBPopup = nil end
+                if ns._ccSpellStrip then ns._ccSpellStrip:Hide(); ns._ccSpellStrip:SetParent(nil); ns._ccSpellStrip = nil end
+                ns._ccRoot:Hide()
+                ns._ccRoot:SetParent(nil)
+                ns._ccRoot = nil
+            end
             if pageName == PAGE_MAIN or pageName == PAGE_DEBUFFS then
                 local mode = db.profile.previewMode or "overlay"
                 -- Keep real party frames hidden under the preview (skip restore) so

@@ -417,7 +417,7 @@ local RB_COLOURS = {
 local ShowWidgetTooltip, HideWidgetTooltip
 
 -- Search metadata: tag a row frame so the inline search can find it
-local function TagOptionRow(frame, parent, labelText)
+local function TagOptionRow(frame, parent, labelText, tooltipText)
     frame._isOptionRow = true
     frame._labelText = labelText
     -- Bilingual search: store the localized label only when it differs from the
@@ -426,6 +426,16 @@ local function TagOptionRow(frame, parent, labelText)
     local _loc = EllesmereUI.L(labelText)
     if _loc ~= labelText then frame._labelTextLoc = _loc end
     frame._sectionHeader = parent._currentSection
+    -- Global search index hook: no-op until EllesmereUI_GlobalSearch.lua (optional,
+    -- loaded later) defines this, so this line is safe even if that file is absent.
+    if EllesmereUI._RegisterSearchEntry then
+        local sectionName = frame._sectionHeader and frame._sectionHeader._sectionName
+        -- Some pages show entirely different content depending on an internal
+        -- selector (which CDM bar / action bar / unit is currently picked via
+        -- its own dropdown) -- see EllesmereUI._buildingSelector for details.
+        local sel = EllesmereUI._buildingSelector
+        EllesmereUI._RegisterSearchEntry(labelText, frame._labelTextLoc, tooltipText, EllesmereUI._buildingModule, EllesmereUI._buildingPage, sectionName, sel and sel.setter, sel and sel.key)
+    end
 end
 
 -- Global disabled-widget tooltip: "This option requires ___ to be enabled"
@@ -2097,6 +2107,13 @@ function WidgetFactory:SectionHeader(parent, text, yOffset)
     if _snLoc ~= text then frame._sectionNameLoc = _snLoc end
     parent._currentSection = frame
 
+    -- Global search index hook: see TagOptionRow for details; no-op if the
+    -- optional EllesmereUI_GlobalSearch.lua file isn't loaded.
+    if EllesmereUI._RegisterSearchEntry then
+        local sel = EllesmereUI._buildingSelector
+        EllesmereUI._RegisterSearchEntry(text, frame._sectionNameLoc, nil, EllesmereUI._buildingModule, EllesmereUI._buildingPage, text, sel and sel.setter, sel and sel.key)
+    end
+
     return frame, 40
 end
 
@@ -2241,7 +2258,7 @@ function WidgetFactory:Toggle(parent, text, yOffset, getValue, setValue, tooltip
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
 
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)    local label = MakeFont(frame, 14, nil, TEXT_WHITE.r, TEXT_WHITE.g, TEXT_WHITE.b)
+    TagOptionRow(frame, parent, text, tooltip)    local label = MakeFont(frame, 14, nil, TEXT_WHITE.r, TEXT_WHITE.g, TEXT_WHITE.b)
     label:SetPoint("LEFT", frame, "LEFT", 20, 0)
     label:SetText(EllesmereUI.L(text))
 
@@ -2266,7 +2283,7 @@ function WidgetFactory:Slider(parent, text, yOffset, minVal, maxVal, step, getVa
     PP.Size(frame, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)
+    TagOptionRow(frame, parent, text, tooltip)
     local label = MakeFont(frame, 14, nil, TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B)
     PP.Point(label, "LEFT", frame, "LEFT", 20, 0)
     label:SetText(EllesmereUI.L(text))
@@ -2286,7 +2303,7 @@ function WidgetFactory:Dropdown(parent, text, yOffset, values, getValue, setValu
     PP.Size(frame, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)
+    TagOptionRow(frame, parent, text, tooltip)
     local label = MakeFont(frame, 14, nil, TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B)
     label:SetAlpha(1)
     PP.Point(label, "LEFT", frame, "LEFT", 20, 0)
@@ -2322,7 +2339,7 @@ function WidgetFactory:Checkbox(parent, text, yOffset, getValue, setValue, toolt
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
 
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)
+    TagOptionRow(frame, parent, text, tooltip)
 
     local btn = CreateFrame("Button", nil, frame)
     PP.Size(btn, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)

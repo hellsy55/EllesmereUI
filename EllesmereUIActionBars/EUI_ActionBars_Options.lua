@@ -4359,6 +4359,13 @@ initFrame:SetScript("OnEvent", function(self)
         -- Consume any pending bar selection from Element Options navigation.
         if EllesmereUI._consumePendingActionBarSelect then EllesmereUI._consumePendingActionBarSelect() end
 
+        -- Tag every option registered while building this page with the
+        -- currently-selected bar, so a global-search jump to a bar-specific
+        -- setting can restore this exact bar selection first via
+        -- EllesmereUI._setActionBarKey -- see EUI_CooldownManager_Options.lua's
+        -- matching EllesmereUI._buildingSelector comment for the full reasoning.
+        EllesmereUI._buildingSelector = { setter = EllesmereUI._setActionBarKey, key = SelectedKey() }
+
         -- Show edit overlay for the currently selected bar
         ShowEditOverlay(SelectedKey())
 
@@ -5147,6 +5154,21 @@ initFrame:SetScript("OnEvent", function(self)
         description = "Configure visuals and behavior for your action bars.",
         pages       = { PAGE_DISPLAY, PAGE_MENUBAGSXP, PAGE_ANIMATIONS },
         buildPage   = function(pageName, parent, yOffset)
+            -- BuildBarDisplayPage calls ShowEditOverlay() unconditionally at
+            -- build time, which creates/shows a real overlay frame
+            -- (EllesmereEAB_EditOverlay, parented to UIParent) over the
+            -- player's live action bars -- not just on user interaction.
+            -- Building this page during a hidden search pre-build would flash
+            -- that overlay onto the live screen, so skip PAGE_DISPLAY here;
+            -- it's indexed normally the first time the player visits it.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_MENUBAGSXP then
+                    return BuildMenuBagsXPPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_ANIMATIONS then
+                    return BuildAnimationsPage(pageName, parent, yOffset)
+                end
+                return
+            end
             if pageName ~= PAGE_DISPLAY then
                 HideEditOverlay()
             end

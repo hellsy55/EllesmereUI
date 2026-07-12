@@ -1411,7 +1411,16 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Live-update preview icons when the action bar pages (stance shift,
         -- dragonriding, mount/dismount, vehicle, etc.)
-        do
+        --
+        -- Skipped during a hidden search pre-build: this listener is cleaned
+        -- up via parent:HookScript("OnHide", ...), which depends on the
+        -- pre-build wrapper's OnHide actually firing when hidden -- not
+        -- guaranteed, since the wrapper is parented under an already-hidden
+        -- frame and never becomes effectively visible in between. If it
+        -- doesn't fire, this listener (and the RefreshPage(true) it queues
+        -- on every action-bar-page/mount change) would leak for the rest of
+        -- the session. There's nothing to preview during indexing anyway.
+        if not EllesmereUI._prebuilding then
             local pageListener = CreateFrame("Frame")
             local pagePending = false
             pageListener:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
@@ -14177,6 +14186,14 @@ initFrame:SetScript("OnEvent", function(self)
         local barData = bars[selectedCDMBarIndex]
         if not barData then return math.abs(yOffset) end
 
+        -- Tag every option registered while building this page with the
+        -- currently-selected bar, so a global-search jump to a bar-specific
+        -- setting (e.g. HoverCast/FocusKick-only options) can restore this
+        -- exact bar selection first via EllesmereUI._setCDMBar -- otherwise
+        -- the matched row wouldn't exist under whatever bar happens to be
+        -- selected when the player jumps there.
+        EllesmereUI._buildingSelector = { setter = EllesmereUI._setCDMBar, key = barData.key }
+
         -- Capture the key so closures can always look up the CURRENT bar data
         -- from the profile, avoiding stale-reference bugs when the bars array
         -- is reordered or the page is rebuilt.
@@ -14803,7 +14820,14 @@ initFrame:SetScript("OnEvent", function(self)
         EllesmereUI:SetContentHeader(_cdmHeaderBuilder)
 
         -- Refresh preview icons on mount/dismount (skyriding swaps action bar icons)
-        do
+        --
+        -- Skipped during a hidden search pre-build: same reasoning as the
+        -- pageListener above in BuildBarGlowsPage -- its OnHide-based cleanup
+        -- isn't guaranteed to fire for a wrapper that's never effectively
+        -- visible, which would otherwise leak this listener (and the
+        -- RefreshPage(true) it triggers on every mount/dismount) for the
+        -- rest of the session.
+        if not EllesmereUI._prebuilding then
             local mountListener = CreateFrame("Frame")
             mountListener:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
             mountListener:SetScript("OnEvent", function()
@@ -17301,6 +17325,30 @@ initFrame:SetScript("OnEvent", function(self)
         disabledPages = {},
         disabledPageTooltips = {},
         buildPage   = function(pageName, parent, yOffset)
+            -- ns._tbbPlaceholderMode / ns._cdmBarsPageOpen reflect whatever page
+            -- the player is REALLY looking at, not the pageName this particular
+            -- call happens to be building. During an off-screen search pre-build,
+            -- pageName cycles through all three pages regardless of the player's
+            -- actual page, so the "switched away" cleanup below (buff-bar
+            -- injection/removal, placeholder toggling, the settings tip) would
+            -- otherwise fire against whatever the player is really seeing. Only
+            -- the requested page's content needs to be built here for indexing.
+            --
+            -- PAGE_BUFF_BARS is skipped entirely (not dispatched through): its
+            -- builder unconditionally calls UpdateTBBPlaceholder() at its tail,
+            -- which fetches each REAL tracked-buff-bar frame via
+            -- ns.GetTBBFrame(i) (not scoped to `parent`) and forces it
+            -- :Show() with an unlock-mode placeholder attached -- building it
+            -- here would pop the player's live buff bars onto the screen. It's
+            -- indexed normally the first time the player visits it live.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_CDM_BARS then
+                    return BuildCDMBarsPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_BAR_GLOWS then
+                    return BuildBarGlowsPage(pageName, parent, yOffset)
+                end
+                return
+            end
             -- Clear TBB placeholders when switching to any non-Tracking Bars page
             if pageName ~= PAGE_BUFF_BARS and ns._tbbPlaceholderMode then
                 ns._tbbPlaceholderMode = false
@@ -17337,6 +17385,41 @@ initFrame:SetScript("OnEvent", function(self)
             end
             -- Tracking Bars has no content header (popout preview instead)
             return nil
+        end,
+        -- CDM Bars content is gated on whichever bar is currently selected
+        -- (e.g. FocusKick's "Nameplate Anchor"/"Focus Text Reminders" only
+        -- render while barData.key == "focuskick"), and the default selected
+        -- bar is whatever's first in the player's list -- almost never
+        -- FocusKick. Without this, a hidden pre-build only ever sees that one
+        -- default bar's options, so every other bar's unique settings stay
+        -- unsearchable until the player opens the dropdown and picks them
+        -- live. Build once per distinct bar *shape* (cooldowns/utility/buffs/
+        -- custom_buff/focuskick), not once per literal bar instance -- a
+        -- player can have several custom bars of the same shape with
+        -- identical available options, so indexing more than one of a shape
+        -- would just be a wasted rebuild.
+        getPrebuildVariants = function(pageName)
+            if pageName ~= PAGE_CDM_BARS then return nil end
+            local p = DB()
+            local bars = p and p.cdmBars and p.cdmBars.bars
+            if not bars or #bars == 0 then return nil end
+            local seenShapes = {}
+            local keys = {}
+            for _, b in ipairs(bars) do
+                local shape = (b.key == "focuskick") and "focuskick" or b.barType
+                if shape and not seenShapes[shape] then
+                    seenShapes[shape] = true
+                    keys[#keys + 1] = b.key
+                end
+            end
+            if selectedCDMBarIndex < 1 then selectedCDMBarIndex = 1 end
+            if selectedCDMBarIndex > #bars then selectedCDMBarIndex = #bars end
+            local currentBar = bars[selectedCDMBarIndex]
+            return {
+                setter = EllesmereUI._setCDMBar,
+                keys = keys,
+                currentKey = currentBar and currentBar.key,
+            }
         end,
         onPageCacheRestore = function(pageName)
             -- Same flag management as buildPage

@@ -10683,6 +10683,13 @@ initFrame:SetScript("OnEvent", function(self)
         -- Consume any pending unit selection from Element Options navigation
         if EllesmereUI._consumePendingUnitSelect then EllesmereUI._consumePendingUnitSelect() end
 
+        -- Tag every option registered while building this page with the
+        -- currently-selected unit, so a global-search jump to a unit-specific
+        -- setting can restore this exact unit selection first via
+        -- EllesmereUI._setUnitFrameUnit -- see EUI_CooldownManager_Options.lua's
+        -- matching EllesmereUI._buildingSelector comment for the full reasoning.
+        EllesmereUI._buildingSelector = { setter = EllesmereUI._setUnitFrameUnit, key = selectedUnit }
+
         local W = EllesmereUI.Widgets
         local y = yOffset
         local _, h
@@ -13536,6 +13543,14 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildMiniPage(pageName, parent, yOffset)
         -- Consume any pending mini selection from Element Options navigation
         if EllesmereUI._consumePendingMiniSelect then EllesmereUI._consumePendingMiniSelect() end
+
+        -- Tag every option registered while building this page with the
+        -- currently-selected mini unit, so a global-search jump to a
+        -- unit-specific setting can restore this exact selection first via
+        -- EllesmereUI._setMiniUnit -- see EUI_CooldownManager_Options.lua's
+        -- matching EllesmereUI._buildingSelector comment for the full reasoning.
+        EllesmereUI._buildingSelector = { setter = EllesmereUI._setMiniUnit, key = selectedMiniUnit }
+
         local W = EllesmereUI.Widgets
         local y = yOffset
         local _, h
@@ -14141,6 +14156,20 @@ initFrame:SetScript("OnEvent", function(self)
                 return ns._bossHeaderBuilder
             elseif pageName == PAGE_MINI then
                 return _miniHeaderBuilder
+            end
+            return nil
+        end,
+        -- Main/Mini Frames content is gated on whichever unit is currently
+        -- selected, and the default is always "player"/"targettarget" -- so a
+        -- hidden pre-build that only ever builds the default leaves the other
+        -- units' settings unsearchable until the player picks them live. Both
+        -- unit lists are small and fixed, so build once per unit rather than
+        -- collapsing to representative shapes.
+        getPrebuildVariants = function(pageName)
+            if pageName == PAGE_DISPLAY then
+                return { setter = EllesmereUI._setUnitFrameUnit, keys = unitOrder, currentKey = selectedUnit }
+            elseif pageName == PAGE_MINI then
+                return { setter = EllesmereUI._setMiniUnit, keys = miniUnitOrder, currentKey = selectedMiniUnit }
             end
             return nil
         end,
