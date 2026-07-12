@@ -5644,6 +5644,10 @@ local function BuildVisibilityString(info, s, visOverride)
     local key = info.key
     local vis = visOverride or s.barVisibility or "always"
 
+    if info.isStance and (GetNumShapeshiftForms() or 0) == 0 then
+        return "hide" -- classes/specs with no forms have no stance bar to show
+    end
+
     -- Build visibility-option hide clauses that can be expressed as macro
     -- conditionals. These run inside the secure state driver so they work
     -- even in combat without taint.
@@ -6936,7 +6940,6 @@ local function UpdateFlipbook(btn)
 end
 
 -- Resolve the spellID for a button.
--- GetActionInfo for direct spells, GetMacroSpell fallback for macros.
 -- Stored on _procState to avoid adding a top-level local (200 limit).
 _procState.GetButtonSpellID = function(btn)
     local slot = GetButtonActionSlot(btn)
@@ -6947,8 +6950,16 @@ _procState.GetButtonSpellID = function(btn)
     elseif actionType == "macro" then
         if subType == "spell" then
             return id
-        else
-            return (GetMacroSpell(id))
+        elseif subType == "item" then
+            return nil
+        end
+        local macroName = GetActionText(slot)
+        local macroIndex = macroName and GetMacroIndexByName(macroName)
+        if macroIndex and macroIndex > 0 then
+            if GetMacroItem and GetMacroItem(macroIndex) then
+                return nil
+            end
+            return GetMacroSpell(macroIndex)
         end
     end
     return nil
@@ -9384,6 +9395,7 @@ function EAB:FinishSetup()
         C_Timer_After(0, function()
             _gridState.spellsPending = false
             LayoutBar("StanceBar")
+            self:RefreshRuntimeVisibility() -- form count may have changed; re-eval stance bar show/hide
             for _, info in ipairs(BAR_CONFIG) do
                 self:ApplyAlwaysShowButtons(info.key)
             end
