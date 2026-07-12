@@ -955,6 +955,19 @@ function ns.BM_CreateIndicators(button, health, d, PP)
             f._borderFrame = bdr
         end
 
+        -- Carrier frame above the cooldown swipe/border for the stack count
+        -- (mirrors the custom-indicator pool's _textCarrier/_count above).
+        local textCarrier = CreateFrame("Frame", nil, f)
+        textCarrier:SetAllPoints()
+        textCarrier:SetFrameLevel(f:GetFrameLevel() + 5)
+        f._textCarrier = textCarrier
+
+        local countFS = textCarrier:CreateFontString(nil, "OVERLAY")
+        countFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 1, -1)
+        EllesmereUI.ApplyIconTextFont(countFS, fontPathS, 8, "raidFrames")
+        countFS:SetTextColor(1, 1, 1)
+        f._count = countFS
+
         simplePool[i] = f
     end
     d.bmSimpleIcons = simplePool
@@ -1645,6 +1658,27 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
                     icon._borderFrame:Show()
                 else
                     icon._borderFrame:Hide()
+                end
+            end
+
+            -- Stack count (secret-safe via Blizzard API; mirrors the custom-
+            -- indicator system's stack text).
+            if icon._count then
+                if bs.showStacks and C_UnitAuras.GetAuraApplicationDisplayCount and iid then
+                    local stackText = C_UnitAuras.GetAuraApplicationDisplayCount(unit, iid, 2, 99)
+                    if stackText then
+                        local sc = bs.stacksTextColor or { r = 1, g = 1, b = 1 }
+                        EllesmereUI.ApplyIconTextFont(icon._count, fp, bs.stacksTextSize or 8, "raidFrames")
+                        icon._count:SetTextColor(sc.r, sc.g, sc.b)
+                        icon._count:ClearAllPoints()
+                        icon._count:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",
+                            bs.stacksOffsetX or -1, bs.stacksOffsetY or 2)
+                        icon._count:SetText(stackText)
+                    else
+                        icon._count:SetText("")
+                    end
+                else
+                    icon._count:SetText("")
                 end
             end
 
@@ -3126,6 +3160,9 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
                     PP.CreateBorder(b, 0, 0, 0, 1, 1)
                     icon._borderFrame = b
                 end
+                local countFS = icon:CreateFontString(nil, "OVERLAY")
+                countFS:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -1, 1)
+                icon._count = countFS
                 previewIcons[i] = icon
             end
             icon:SetSize(sz, sz)
@@ -3164,6 +3201,21 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
                     end
                 else
                     cd:Hide()
+                end
+            end
+            -- Stack count preview (fake example count so the color/size/offset
+            -- controls have something visible to preview against).
+            if icon._count then
+                if bs.showStacks then
+                    local sc = bs.stacksTextColor or { r = 1, g = 1, b = 1 }
+                    EllesmereUI.ApplyIconTextFont(icon._count, fontPath, bs.stacksTextSize or 8, "raidFrames")
+                    icon._count:SetTextColor(sc.r, sc.g, sc.b)
+                    icon._count:ClearAllPoints()
+                    icon._count:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",
+                        bs.stacksOffsetX or -1, bs.stacksOffsetY or 2)
+                    icon._count:SetText("3")
+                else
+                    icon._count:SetText("")
                 end
             end
             icon:Show()
@@ -3518,6 +3570,46 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                       get=function() return BVal("durTextOffsetX", 0) end, set=function(v) BSet("durTextOffsetX", v) end },
                     { type="slider", label="Offset Y", min=-20, max=20, step=1,
                       get=function() return BVal("durTextOffsetY", 0) end, set=function(v) BSet("durTextOffsetY", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
+
+        -- Row 5: Show Stacks (+ swatch + cog)
+        local row5
+        row5, hh = W:DualRow(optsFrame, sy,
+            { type="toggle", text="Show Stacks",
+              disabled=BuffsOff, disabledTooltip="Show Buffs",
+              getValue=function() return BVal("showStacks", true) end,
+              setValue=function(v) BSet("showStacks", v) end },
+            { type="label", text="" });  sy = sy - hh
+        do
+            local rgn = row5._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(rgn, row5:GetFrameLevel() + 3,
+                function() local c = bs.stacksTextColor or { r=1, g=1, b=1 }; return c.r, c.g, c.b, 1 end,
+                function(r, g, b) bs.stacksTextColor = { r=r, g=g, b=b }; BApply() end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Stacks Text",
+                rows = {
+                    { type="slider", label="Text Size", min=6, max=26, step=1,
+                      get=function() return BVal("stacksTextSize", 8) end, set=function(v) BSet("stacksTextSize", v) end },
+                    { type="slider", label="Offset X", min=-20, max=20, step=1,
+                      get=function() return BVal("stacksOffsetX", -1) end, set=function(v) BSet("stacksOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-20, max=20, step=1,
+                      get=function() return BVal("stacksOffsetY", 2) end, set=function(v) BSet("stacksOffsetY", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)

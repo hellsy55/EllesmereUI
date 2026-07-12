@@ -686,6 +686,11 @@ local defaults = {
             durTextSize     = 8,
             durTextOffsetX  = 0,
             durTextOffsetY  = 0,
+            showStacks      = true,
+            stacksTextColor = { r = 1, g = 1, b = 1 },
+            stacksTextSize  = 8,
+            stacksOffsetX   = -1,
+            stacksOffsetY   = 2,
         },
 
         debuffSize       = 18,
