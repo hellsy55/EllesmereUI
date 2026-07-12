@@ -1651,6 +1651,7 @@ local function DecorateFrame(frame, barData)
                 if ss2 and ss2.chargeHideCdText then ns._cdmAnyChargeHideCdText = true end
                 if ss2 and ss2.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                 if ss2 and ss2.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                if ss2 and (tonumber(ss2.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
                     -- Hide Active State: force black swipe, track active flag.
@@ -1806,12 +1807,11 @@ local function DecorateFrame(frame, barData)
                 if ns._cdmAnyHideCDSwipe then
                     local ssH = ns._ResolveCdmSS(frame)
                     local hideSw = ssH and ssH.hideCDSwipe
-                    if not hideSw and ns.GetCustomActiveState then
+                    if not hideSw and ns.GetEffectiveCustomActiveState then
                         local fcH = _ecmeFC[frame]
                         local sidH = fcH and fcH.spellID
                         if sidH then
-                            local casKey = (ns.ResolveCustomActiveKey and ns.ResolveCustomActiveKey(sidH)) or sidH
-                            local casH = ns.GetCustomActiveState(casKey)
+                            local casH = ns.GetEffectiveCustomActiveState(sidH)
                             hideSw = casH and casH.hideCDSwipe
                         end
                     end
@@ -3150,10 +3150,12 @@ local function ProcessPresetCooldowns()
                         local forceCount = sdF and sdF.customSpellForceCount and sdF.customSpellForceCount[sid]
                         if forceCount then
                             if not f._castCountText then
-                                local ccf = f:CreateFontString(nil, "OVERLAY")
-                                EllesmereUI.ApplyIconTextFont(ccf, GetCDMFont(), 11, "cdm")
-                                ccf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 2)
-                                f._castCountText = ccf
+                                f._castCountText = f:CreateFontString(nil, "OVERLAY")
+                                -- Match the bar's native stack/charge text
+                                -- styling (font, size, color, anchor, X/Y
+                                -- offset); RefreshCDMIconAppearance keeps it
+                                -- in sync afterwards.
+                                ns.StyleCustomChargeText(f, bkF)
                             end
                             local chargeInfo = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
                             local n = (chargeInfo and C_Spell.GetSpellDisplayCount and C_Spell.GetSpellDisplayCount(sid))
@@ -3843,42 +3845,20 @@ local function CollectAndReanchor()
                                 else
                                     f._cooldown:Clear()
                                 end
-                                -- Custom Active State Decimals (buff bars): the
-                                -- custom buff's own cast-timer duration is hardcoded
-                                -- (sd.spellDurations), so decimals apply to ITS
-                                -- countdown -- buffs have no active-state overlay.
-                                -- OFF BY DEFAULT = zero cost: the faDecimals gate is
-                                -- checked FIRST, so the ResolveSpellSettings + showCD
-                                -- work is skipped entirely when disabled; the else's
-                                -- Detach no-ops unless we previously attached.
-                                if ns.DecimalCountdown then
-                                    if isActive and bd.faDecimals then
-                                        -- nil frame: the frame's CDM context isn't set
-                                        -- up yet here, and a custom buff is an exact id
-                                        -- (no variant), so the direct family-store hit
-                                        -- resolves without it (matches PlayPresetBuffGainSound).
-                                        local ssB = ns.ResolveSpellSettings
-                                            and ns.ResolveSpellSettings(nil, sid, sdInj, injKey)
-                                        local showCDb = bd.showCooldownText
-                                        if ssB and ssB.showCooldownText ~= nil then showCDb = ssB.showCooldownText end
-                                        if showCDb then
-                                            ns.DecimalCountdown.Attach(f._cooldown, timer.start, timer.duration,
-                                                bd.faDecimalsThreshold or 5,
-                                                function(fs)
-                                                    if ns.StyleOverlayDecimalText then
-                                                        ns.StyleOverlayDecimalText(fs, bd, ssB, f:GetScale())
-                                                    end
-                                                end,
-                                                { on = bd.faDecimalsColorEnabled, r = bd.faDecimalsColorR,
-                                                  g = bd.faDecimalsColorG, b = bd.faDecimalsColorB })
-                                        else
-                                            ns.DecimalCountdown.Detach(f._cooldown, false)
-                                        end
-                                    else
-                                        -- Nothing to resolve; only restores Blizzard's
-                                        -- numbers if this frame was previously attached.
-                                        ns.DecimalCountdown.Detach(f._cooldown, true)
-                                    end
+                                -- Per-spell Threshold Text (buff bars): attach the
+                                -- engine countdown formatter so the custom buff's
+                                -- cast-timer countdown shows decimals / a color
+                                -- change below its Threshold Seconds. Gated = zero
+                                -- cost when unused; the apply helper only touches
+                                -- widgets it manages. nil frame: the frame's CDM
+                                -- context isn't set up yet here, and a custom buff
+                                -- is an exact id (no variant), so the direct
+                                -- family-store hit resolves without it (matches
+                                -- PlayPresetBuffGainSound).
+                                if ns._cdmAnyThresholdText and ns.ApplyThresholdFormatter then
+                                    local ssB = ns.ResolveThresholdTextSettings
+                                        and ns.ResolveThresholdTextSettings(nil, sid, sdInj, injKey)
+                                    ns.ApplyThresholdFormatter(f._cooldown, ssB)
                                 end
                                 f:Show()
                                 f.layoutIndex = 5000 + idx
@@ -4001,6 +3981,7 @@ local function CollectAndReanchor()
     ---------------------------------------------------------------------------
     --  PHASE 2: Process BUFF bars (existing flow, plus injected custom frames)
     ---------------------------------------------------------------------------
+    if ns.ReconcileBuffDisplayOrder then ns.ReconcileBuffDisplayOrder() end
     for barKey, list in pairs(barLists) do
         local barData = barDataByKey[barKey]
         if barData and barData.enabled and barData.barType ~= "custom_buff" then
@@ -4080,22 +4061,12 @@ local function CollectAndReanchor()
                 end
                 if buffOrder and next(buffOrder) then
                     for _, entry in ipairs(list) do
-                        local okey
-                        if isDefaultBuffs then
-                            -- Stable key: cooldownID when present (active frame or
-                            -- placeholder), else the custom spellID.
-                            local cd = entry.frame and entry.frame.cooldownID
-                            if type(cd) == "number" then okey = buffOrder["c" .. cd] end
-                            if not okey and entry.spellID then okey = buffOrder["s" .. entry.spellID] end
-                        else
-                            -- Extra bars: match by DISPLAYED id (canon), mirroring the
-                            -- per-icon settings resolver; fall back to entry ids.
-                            local ef = entry.frame
-                            local canon = ef and ns.GetCanonicalSpellIDForFrame
-                                and ns.GetCanonicalSpellIDForFrame(ef)
-                            okey = (canon and buffOrder[canon])
-                                or (entry.spellID and buffOrder[entry.spellID])
-                                or (entry.baseSpellID and buffOrder[entry.baseSpellID])
+                        local okey = ns.ResolveBuffDisplaySortIndex
+                            and ns.ResolveBuffDisplaySortIndex(entry, buffOrder, isDefaultBuffs)
+                        if not okey and isDefaultBuffs then
+                            -- Transient spillover (Blizzard layoutIndex glitch / re-talent
+                            -- gap): sort among misses by layoutIndex, not after every hit.
+                            okey = 50000 + (entry.layoutIndex or 0)
                         end
                         entry.sortOrder = okey or 99999
                     end
@@ -6303,8 +6274,20 @@ do
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
             return id
-        elseif actionType == "macro" and id then
-            if subType == "spell" then return id else return GetMacroSpell(id) end
+        elseif actionType == "macro" then
+            if subType == "spell" then
+                return id
+            elseif subType == "item" then
+                return nil
+            end
+            local macroName = GetActionText(slot)
+            local macroIndex = macroName and GetMacroIndexByName(macroName)
+            if macroIndex and macroIndex > 0 then
+                if GetMacroItem and GetMacroItem(macroIndex) then
+                    return nil
+                end
+                return GetMacroSpell(macroIndex)
+            end
         end
         return nil
     end

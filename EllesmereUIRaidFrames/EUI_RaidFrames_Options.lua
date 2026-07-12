@@ -2885,8 +2885,9 @@ initFrame:SetScript("OnEvent", function(self)
             fill     = "Fill Overlay",
             full     = "Full Overlay",
             gradient = "Gradient Overlay",
+            gradient_sharp = "Gradient Sharp",
         }
-        local dispelOverlayOrder = { "none", "fill", "full", "gradient" }
+        local dispelOverlayOrder = { "none", "fill", "full", "gradient", "gradient_sharp" }
 
         -- Row 1: Dispel Overlay | Overlay Opacity
         _, h = W:DualRow(parent, y,
@@ -3035,6 +3036,10 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Dispellable Debuff Location",
                 rows = {
+                    -- 0 = match the main Debuff Size (the pre-existing behavior).
+                    { type="slider", label="Icon Size", min=0, max=40, step=1,
+                      get=function() return SVal("dispellableDebuffSize", 0) end,
+                      set=function(v) SSet("dispellableDebuffSize", v) end },
                     { type="dropdown", label="Growth Direction", values=dispGrowValues, order=dispGrowOrder,
                       get=function() return SVal("dispellableDebuffGrowDirection", "RIGHT") end,
                       set=function(v) SSet("dispellableDebuffGrowDirection", v) end },
@@ -3937,6 +3942,16 @@ initFrame:SetScript("OnEvent", function(self)
               order={ "always", "outOfCombat", "outOfBossCombat", "never" },
               getValue=function() return CurTooltipMode() end,
               setValue=function(v) SSet("tooltipMode", v) end });  y = y - h
+
+        -- Buff/HoT aura-icon tooltips (Buff Manager). Off by default -- matches the
+        -- long-standing behavior where buff icons showed no tooltip; opt in here.
+        -- When shown, the aura tip still follows the "Show Raid Frames Tooltip"
+        -- combat-visibility mode above (mode governs when, this governs whether).
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Buff Tooltips",
+              tooltip="Hide the tooltip when hovering a buff/HoT icon on a raid or party frame.",
+              getValue=function() return SVal("buffHideTooltips", true) end,
+              setValue=function(v) SSet("buffHideTooltips", v); if ns.ReloadFrames then ns.ReloadFrames() end end });  y = y - h
 
         -- Hide Blizzard Party Panel. Shares the exact same global setting and
         -- apply function as the QoL module's toggle (EllesmereUIDB.hideBlizzardPartyFrame

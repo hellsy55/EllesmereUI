@@ -78,9 +78,11 @@ local defaults = {
             -- false -> hover/topLeft.
             coordsMode     = "always",
             coordsPosition = "topLeft",
+            coordsScale    = 1.0,
             -- FPS/MS readout (Text section); options mirror the QoL FPS counter
             showFPS           = false,
             fpsTextSize       = 12,
+            fpsScale          = 1.0,
             fpsShowLocalMS    = true,
             fpsShowWorldMS    = false,
             fpsUseAccent      = false,  -- description text: accent vs custom fpsColor
@@ -4707,6 +4709,8 @@ local function ApplyMinimap()
     local cpy = p and p.coordsBelowOffsetY or 0
     coordFrame:ClearAllPoints()
     coordFrame:SetPoint(cpAnchor[1], minimap, cpAnchor[2], cpAnchor[3] + cpx, cpAnchor[4] + cpy)
+    coordFrame:SetScale(p and p.coordsScale or 1.0)
+    _G._EBS_CoordFrame = coordFrame
     if not coordTicker then
         coordTicker = CreateFrame("Frame")  -- kept for Show/Hide API
         coordTicker._ticker = nil
@@ -4869,6 +4873,8 @@ local function ApplyMinimap()
         fpsBg:ClearAllPoints()
         fpsBg:SetPoint(fAnchor[1], minimap, fAnchor[2],
             fAnchor[3] + (p.fpsOffsetX or 0), fAnchor[4] + (p.fpsOffsetY or 0))
+        fpsBg:SetScale(p.fpsScale or 1.0)
+        _G._EBS_FpsBg = fpsBg
         -- Mouse only while a hover tooltip is assigned, so the readout never
         -- blocks map clicks otherwise
         fpsBg:EnableMouse((p.fpsHoverTooltip or "none") ~= "none")
@@ -5184,26 +5190,38 @@ do
                 btn:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -1, y)
                 btn:SetHeight(BUTTON_H)
 
+                -- 12.1: "/click <name>" macro transport (the 12.1 "click"
+                -- secure action crashes on a Blizzard typo, SecureTemplates
+                -- :564; MicroButtons are globally named so the macro reaches
+                -- them directly). 12.0 keeps the proven click transport.
+                local secureType = EllesmereUI.IS_121 and "macro" or "click"
                 if microRef then
-                    btn:SetAttribute("*clickbutton1", microRef)
+                    if EllesmereUI.IS_121 then
+                        btn:SetAttribute("*macrotext1", "/click " .. item.microButton)
+                    else
+                        btn:SetAttribute("*clickbutton1", microRef)
+                    end
                 end
                 btn:SetAttribute("useOnKeyDown", false)
-                btn:SetAttribute("*type1", "click")
+                btn:SetAttribute("*type1", secureType)
                 btn:EnableMouse(true)
                 btn:RegisterForClicks("AnyUp")
 
                 -- Activate secure click from the restricted secure environment.
                 -- Without this, addon-set attributes are not trusted.
+                -- The restore branch MUST match the transport set above --
+                -- restoring a mismatched type silently reverts the 12.1
+                -- macro transport on the first combat exit.
                 RegisterStateDriver(btn, "combatlock", "[combat] combat; nocombat")
-                btn:SetAttribute("_onstate-combatlock", [[
+                btn:SetAttribute("_onstate-combatlock", ([[
                     if newstate == 'combat' then
                         self:SetAttribute('*type1', nil)
                         self:EnableMouse(false)
                     else
-                        self:SetAttribute('*type1', 'click')
+                        self:SetAttribute('*type1', '%s')
                         self:EnableMouse(true)
                     end
-                ]])
+                ]]):format(secureType))
 
                 local hl = btn:CreateTexture(nil, "HIGHLIGHT")
                 hl:SetAllPoints()
