@@ -198,6 +198,16 @@ function UpdateVisibility()
     end
 end
 
+-- Re-check real visibility when Unlock Mode exits. UpdateVisibility()
+-- force-shows the HUD while EllesmereUI._unlockActive is true (so it can be
+-- edited even off-mount), but nothing previously re-ran it on exit, so
+-- dismounting during Unlock Mode left it stuck visible until an unrelated
+-- mount/dismount happened to call UpdateVisibility() again. Called from
+-- EUI_UnlockMode.lua's exit path, matching the Quest Tracker's same pattern.
+_G._EDR_UpdateVisibility = function()
+    UpdateVisibility()
+end
+
 -------------------------------------------------------------------------------
 --  OnUpdate
 -------------------------------------------------------------------------------
