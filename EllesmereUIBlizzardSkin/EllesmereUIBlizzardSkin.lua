@@ -1778,6 +1778,13 @@ do
         return IsShiftKeyDown()
     end
 
+    -- Exposed so modules with their own tooltip suppression (e.g. the raid/party
+    -- frames, whose OnEnter hides tips per its own combat mode) can let the same
+    -- peek modifier reveal their tips through their normal hover path.
+    function EllesmereUI._tooltipPeekHeld()
+        return ShowModifierHeld()
+    end
+
     -- Shared decision: should GameTooltip be suppressed right now given the
     -- user's "Show Tooltips" mode + combat state? Exposed on EllesmereUI so the
     -- cursor-anchor hook can honor it too (otherwise the cursor re-anchor would
@@ -1811,9 +1818,12 @@ do
         hooksecurefunc("GameTooltip_SetDefaultAnchor", HideTooltipByMode)
     end
 
-    -- Live peek: pressing the modifier while already hovering reveals the tip;
-    -- releasing it hides it again. (Hover-then-hold already works via the
-    -- SetDefaultAnchor hook above.)
+    -- Live peek: pressing the modifier while already hovering reveals the tip
+    -- for the current frame; releasing it hides it again. Moving onto other
+    -- frames while the key stays held reveals each in turn through the normal
+    -- hover path -- suppression is lifted while held (globally via
+    -- _tooltipSuppressedByMode, and per-module via _tooltipPeekHeld, which the
+    -- raid/party frames honor in their own OnEnter).
     local function KeyMatchesModifier(key, mod)
         return (mod == "shift"   and (key == "LSHIFT" or key == "RSHIFT"))
             or (mod == "control" and (key == "LCTRL"  or key == "RCTRL"))
@@ -1859,8 +1869,6 @@ do
     modWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
     modWatcher:SetScript("OnEvent", function(_, _event, key, down)
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
-        local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
-        if mode == "always" then return end
         local mod = (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none"
         if mod == "none" or not KeyMatchesModifier(key, mod) then return end
         if down == 1 then
