@@ -98,6 +98,21 @@ local DRAG_HEADERS = {
     ["WorldMapFrame"]    = "WorldMapTitleButton",
 }
 
+-- Blizzard windows that normally dock beside CharacterFrame (Item Upgrade,
+-- Transmog, Item Socketing, Merchant -- covers vendors like the Crest
+-- Exchange -- plus Friends, Guild/Communities, and Professions, which
+-- normally sit to CharacterFrame's left with CharacterFrame staying put).
+-- See the docking hook in HookFrame for why and how.
+local DOCKING_COMPANIONS = {
+    ItemUpgradeFrame = true,
+    TransmogFrame = true,
+    ItemSocketingFrame = true,
+    MerchantFrame = true,
+    FriendsFrame = true,
+    CommunitiesFrame = true,
+    ProfessionsFrame = true,
+}
+
 -------------------------------------------------------------------------------
 --  Position helpers
 -------------------------------------------------------------------------------
@@ -516,11 +531,64 @@ local function HookFrame(frame, name)
         tempScale[frame] = nil
     end)
 
+    -- Item Upgrade / Transmog / Item Socketing / Merchant (covers vendors
+    -- like the Crest Exchange) dock beside CharacterFrame. Blizzard's own
+    -- docking math assumes CharacterFrame sits at its default screen
+    -- position; once Shifter has CharacterFrame pinned somewhere else that
+    -- math falls apart and the companion ends up wherever Blizzard's now-
+    -- wrong calculation put it -- frequently right on top of CharacterFrame's
+    -- pinned spot, and since CharacterFrame's skin forces it to "HIGH"
+    -- strata while these default to "MEDIUM", it then renders buried
+    -- underneath. Docks left by default (matching Blizzard's normal layout),
+    -- falling back to whichever side actually has room -- otherwise
+    -- SetClampedToScreen just snaps it back onto CharacterFrame regardless of
+    -- which side we pick. Only kicks in when the companion has no pin of its
+    -- own; an explicit Shift+drag on the companion wins over auto-docking.
+    local ShouldDock, DockToCharacterFrame
+    if DOCKING_COMPANIONS[name] then
+        local defaultStrata = frame:GetFrameStrata()
+        ShouldDock = function()
+            if tempPos[frame] or GetSavedPos(name) then return false end
+            local cf = _G.CharacterFrame
+            return cf ~= nil and cf:IsShown() and (tempPos[cf] or GetSavedPos("CharacterFrame")) ~= nil
+        end
+        DockToCharacterFrame = function()
+            local cf = _G.CharacterFrame
+            local margin = 4
+            local w = frame:GetWidth() or 0
+            local leftRoom = cf:GetLeft() or 0
+            local rightRoom = (GetScreenWidth() or 0) - (cf:GetRight() or 0)
+            ffd._shIgnoreSP = true
+            frame:ClearAllPoints()
+            if leftRoom >= w + margin or leftRoom >= rightRoom then
+                frame:SetPoint("TOPRIGHT", cf, "TOPLEFT", -margin, 0)
+            else
+                frame:SetPoint("TOPLEFT", cf, "TOPRIGHT", margin, 0)
+            end
+            ffd._shIgnoreSP = false
+        end
+        frame:HookScript("OnHide", function()
+            frame:SetFrameStrata(defaultStrata)
+        end)
+        frame:HookScript("OnShow", function()
+            if not IsEnabled() then return end
+            if ShouldDock() then
+                frame:SetFrameStrata("DIALOG")
+                DockToCharacterFrame()
+                frame:Raise()
+            end
+        end)
+    end
+
     hooksecurefunc(frame, "SetPoint", function()
         if not IsEnabled() then return end
         if ffd._shIgnoreSP then return end
         if secureDrag.frame == frame then return end  -- don't fight an active drag
         if InCombatLockdown() and frame:IsProtected() then return end
+        if DockToCharacterFrame and ShouldDock() then
+            DockToCharacterFrame()
+            return
+        end
         if tempPos[frame] or GetSavedPos(name) then
             ApplyPosition(frame, name)
         end
