@@ -1652,9 +1652,9 @@ local function CreateTrackedBuffBarFrame(parent, idx)
 
     -- Text overlay: parented to wrapFrame (not bar) so bar's SetClipsChildren
     -- doesn't chop text when font size exceeds bar height. Level sits ABOVE the
-    -- border (set to bar +5 in ApplySettings) and the pandemic glow (wrapFrame
-    -- +6) so the timer/name/stacks text renders on top of the border instead of
-    -- beneath it. Keyed off bar (like the border) so the two track together.
+    -- border (bar +5 in ApplySettings, whose PP strips draw at +6) so the
+    -- timer/name/stacks text renders on top of the border instead of beneath it.
+    -- Keyed off bar (like the border) so the two track together.
     local textOverlay = CreateFrame("Frame", nil, wrapFrame)
     textOverlay:SetAllPoints(bar)
     textOverlay:SetFrameLevel(bar:GetFrameLevel() + 6)
@@ -1701,10 +1701,12 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     bdrContainer:Hide()
     wrapFrame._barBorder = bdrContainer
 
-    -- Pandemic glow overlay
+    -- Pandemic glow overlay. Sits above the border, whose PP strips draw at +6
+    -- (border frame +5, plus the +1 the strip container adds), so a thick border
+    -- can't bury the edge-hugging glow.
     local panGlow = CreateFrame("Frame", nil, wrapFrame)
     panGlow:SetAllPoints(wrapFrame)
-    panGlow:SetFrameLevel(wrapFrame:GetFrameLevel() + 6)
+    panGlow:SetFrameLevel(wrapFrame:GetFrameLevel() + 7)
     panGlow:SetAlpha(0)
     panGlow:EnableMouse(false)
     wrapFrame._pandemicGlowOverlay = panGlow
@@ -2721,28 +2723,13 @@ end
 --- Called when the bar is in the pandemic window (caller checks the threshold).
 --- Alpha is driven by the caller from the tick (smooth fade based on remaining%).
 local function UpdatePandemic(bar, cfg)
-    -- Glow target: icon overlay if icon shown, else bar overlay
-    local glowTarget
-    if bar._icon and bar._icon:IsShown() then
-        if not bar._icon._pandemicOverlay then
-            local ov = CreateFrame("Frame", nil, bar._icon)
-            ov:SetAllPoints(bar._icon)
-            ov:SetFrameLevel(bar._icon:GetFrameLevel() + 2)
-            ov:SetAlpha(0)
-            ov:EnableMouse(false)
-            bar._icon._pandemicOverlay = ov
-        end
-        glowTarget = bar._icon._pandemicOverlay
-    else
-        glowTarget = bar._pandemicGlowOverlay
-    end
+    -- Glow always wraps the whole bar. The overlay covers the entire wrapFrame
+    -- footprint, so an enabled icon is included rather than glowed on its own.
+    local glowTarget = bar._pandemicGlowOverlay
 
     local style = cfg.pandemicGlowStyle or 1
-    -- Bars (no icon): only pixel glow (1) and autocast (4) render on rectangles
-    -- Icons: all styles allowed
-    if not (bar._icon and bar._icon:IsShown()) then
-        if style ~= 1 and style ~= 4 then style = 1 end
-    end
+    -- Only pixel glow (1) and autocast (4) render on the bar rectangle
+    if style ~= 1 and style ~= 4 then style = 1 end
 
     -- Start/restart glow on style or target change
     if not bar._pandemicGlowActive or bar._pandemicGlowStyleIdx ~= style
@@ -3266,16 +3253,20 @@ function ns.UpdateTrackedBuffBarTimers()
                 end
             end
 
-            -- Blizzard viewer bind-miss fallback. The buff-bar viewer sometimes
-            -- fails to bind a freshly applied aura to its frame (observed live:
-            -- Avenging Wrath aura up, frame's auraInstanceID never set, IsActive
-            -- stuck false until ANOTHER bar's activation forces a viewer
-            -- refresh). When the assigned frame reads inactive but the player
-            -- demonstrably carries the aura (known-spellID player-aura query,
-            -- no scanning), drive the bar from the aura data directly. Reads
-            -- only; our own frames only -- never pokes the Blizzard frame.
+            -- Blizzard viewer bind-miss / not-tracked-at-all fallback. Covers
+            -- two cases: (1) the buff-bar viewer fails to bind a freshly
+            -- applied aura to its frame (observed live: Avenging Wrath aura
+            -- up, frame's auraInstanceID never set, IsActive stuck false
+            -- until ANOTHER bar's activation forces a viewer refresh), and
+            -- (2) the spell has NO presence in any Blizzard CooldownViewer
+            -- category at all (blzChild permanently nil -- e.g. Essence of
+            -- the Blood Queen, a hero-talent proc buff Blizzard's CDM never
+            -- registers). Either way, when the player demonstrably carries
+            -- the aura (known-spellID player-aura query, no scanning), drive
+            -- the bar from the aura data directly. Reads only; our own
+            -- frames only -- never pokes the Blizzard frame.
             local fbAura
-            if not isActive and blzChild and not cfg.spellIDs
+            if not isActive and not cfg.spellIDs
                and cfg.spellID and cfg.spellID > 0
                and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
                 fbAura = C_UnitAuras.GetPlayerAuraBySpellID(cfg.spellID)

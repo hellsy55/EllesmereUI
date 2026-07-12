@@ -699,19 +699,20 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     end
     local routedBar = nil
     do
-        if info.spellID and info.spellID > 0 then
-            routedBar = RVV(divertMap, info.spellID)
-        end
-        if not routedBar and info.overrideSpellID and info.overrideSpellID > 0
-           and info.overrideSpellID ~= info.spellID then
+        -- No raw `> 0` / `~=` comparisons on info.spellID/overrideSpellID here:
+        -- on an active CDM viewer frame these can be secret numbers (per
+        -- EllesmereUICdmSpellPicker.lua's _IsUsableSID comment), and comparing
+        -- a secret value directly taints execution. RVV (ResolveVariantValue)
+        -- already gates its input through _IsUsableSID internally, so just
+        -- feed it the raw fields and let it reject anything unusable.
+        routedBar = RVV(divertMap, info.spellID)
+        if not routedBar then
             routedBar = RVV(divertMap, info.overrideSpellID)
         end
         if not routedBar and info.linkedSpellIDs then
             for _, lid in ipairs(info.linkedSpellIDs) do
-                if type(lid) == "number" and lid > 0 then
-                    routedBar = RVV(divertMap, lid)
-                    if routedBar then break end
-                end
+                routedBar = RVV(divertMap, lid)
+                if routedBar then break end
             end
         end
     end
@@ -3981,6 +3982,7 @@ local function CollectAndReanchor()
     ---------------------------------------------------------------------------
     --  PHASE 2: Process BUFF bars (existing flow, plus injected custom frames)
     ---------------------------------------------------------------------------
+    if ns.ReconcileBuffDisplayOrder then ns.ReconcileBuffDisplayOrder() end
     for barKey, list in pairs(barLists) do
         local barData = barDataByKey[barKey]
         if barData and barData.enabled and barData.barType ~= "custom_buff" then
@@ -4060,22 +4062,12 @@ local function CollectAndReanchor()
                 end
                 if buffOrder and next(buffOrder) then
                     for _, entry in ipairs(list) do
-                        local okey
-                        if isDefaultBuffs then
-                            -- Stable key: cooldownID when present (active frame or
-                            -- placeholder), else the custom spellID.
-                            local cd = entry.frame and entry.frame.cooldownID
-                            if type(cd) == "number" then okey = buffOrder["c" .. cd] end
-                            if not okey and entry.spellID then okey = buffOrder["s" .. entry.spellID] end
-                        else
-                            -- Extra bars: match by DISPLAYED id (canon), mirroring the
-                            -- per-icon settings resolver; fall back to entry ids.
-                            local ef = entry.frame
-                            local canon = ef and ns.GetCanonicalSpellIDForFrame
-                                and ns.GetCanonicalSpellIDForFrame(ef)
-                            okey = (canon and buffOrder[canon])
-                                or (entry.spellID and buffOrder[entry.spellID])
-                                or (entry.baseSpellID and buffOrder[entry.baseSpellID])
+                        local okey = ns.ResolveBuffDisplaySortIndex
+                            and ns.ResolveBuffDisplaySortIndex(entry, buffOrder, isDefaultBuffs)
+                        if not okey and isDefaultBuffs then
+                            -- Transient spillover (Blizzard layoutIndex glitch / re-talent
+                            -- gap): sort among misses by layoutIndex, not after every hit.
+                            okey = 50000 + (entry.layoutIndex or 0)
                         end
                         entry.sortOrder = okey or 99999
                     end
@@ -6283,8 +6275,20 @@ do
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
             return id
-        elseif actionType == "macro" and id then
-            if subType == "spell" then return id else return GetMacroSpell(id) end
+        elseif actionType == "macro" then
+            if subType == "spell" then
+                return id
+            elseif subType == "item" then
+                return nil
+            end
+            local macroName = GetActionText(slot)
+            local macroIndex = macroName and GetMacroIndexByName(macroName)
+            if macroIndex and macroIndex > 0 then
+                if GetMacroItem and GetMacroItem(macroIndex) then
+                    return nil
+                end
+                return GetMacroSpell(macroIndex)
+            end
         end
         return nil
     end
