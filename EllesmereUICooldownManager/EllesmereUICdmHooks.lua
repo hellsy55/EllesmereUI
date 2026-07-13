@@ -5182,7 +5182,7 @@ local function PlayPresetBuffLossSound(sd, sid, now)
 end
 
 local function UpdateCustomBuffBars()
-    -- if CooldownViewerSettings and CooldownViewerSettings:IsShown() then return end
+    if not ECME then return end
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars or not p.cdmBars.bars then return end
     local LayoutCDMBar = ns.LayoutCDMBar
