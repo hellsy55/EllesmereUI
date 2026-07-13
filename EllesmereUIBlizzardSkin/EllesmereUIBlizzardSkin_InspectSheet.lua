@@ -996,6 +996,104 @@ local function SkinInspectSheet()
 
 end
 
+-- Stock Blizzard opens an Inspect window docked beside an already-open
+-- Character sheet (own sheet stays put). That pairing is only applied when
+-- Inspect first shows while CharacterFrame is already visible; if
+-- CharacterFrame opens/moves afterward the two are never re-paired, so
+-- InspectFrame is left wherever it was (its own default, centered position)
+-- and the two end up stacked on top of each other -- and since InspectFrame's
+-- live 3D model is never actually hidden, it bleeds through as a black
+-- silhouette. Re-run this docking any time either frame's shown state or
+-- position changes so the pairing always holds, matching stock behaviour
+-- regardless of open order.
+local DOCK_MARGIN = 4
+
+-- An explicit Shifter Shift-drag pin on InspectFrame must win over auto-dock
+-- (matches the "explicit pin wins" rule EllesmereUIQoL_Shifter.lua already
+-- applies to every other companion window it docks) -- otherwise Shifter's
+-- own SetPoint hook would immediately snap InspectFrame back to the saved
+-- pin right after we anchor it, so the two would fight every time either
+-- frame shows or moves.
+local function InspectFrameIsUserPinned()
+    return EllesmereUIDB and EllesmereUIDB.shifterPositions
+        and EllesmereUIDB.shifterPositions["InspectFrame"] ~= nil
+end
+
+local function DockInspectFrame()
+    local frame = InspectFrame
+    local cf = _G.CharacterFrame
+    if not frame or not cf then return end
+    if not frame:IsShown() or not cf:IsShown() then return end
+    if InspectFrameIsUserPinned() then return end
+
+    -- Pick whichever side actually has room instead of always docking left --
+    -- a CharacterFrame pinned near the left screen edge would otherwise push
+    -- InspectFrame off-screen, where SetClampedToScreen snaps it back on top
+    -- of CharacterFrame and reproduces the exact overlap this is fixing.
+    -- Same scale-safe, screen-absolute math as Shifter's DockToCharacterFrame.
+    local cs  = cf:GetEffectiveScale() or 1
+    local es  = frame:GetEffectiveScale() or 1
+    local ues = UIParent:GetEffectiveScale() or 1
+    local wAbs = (frame:GetWidth() or 0) * es
+    local leftRoom  = (cf:GetLeft() or 0) * cs
+    local rightRoom = (GetScreenWidth() or 0) * ues - (cf:GetRight() or 0) * cs
+    local dockLeft = leftRoom >= wAbs + DOCK_MARGIN * es or leftRoom >= rightRoom
+
+    frame:ClearAllPoints()
+    if dockLeft then
+        frame:SetPoint("TOPRIGHT", cf, "TOPLEFT", -DOCK_MARGIN, 0)
+    else
+        frame:SetPoint("TOPLEFT", cf, "TOPRIGHT", DOCK_MARGIN, 0)
+    end
+end
+
+-- Blizzard's native anchor for InspectFrame, captured before we ever dock it
+-- (see CaptureDefaultInspectPoint below) so a stale dock anchor can be
+-- reverted once CharacterFrame is no longer around to dock beside.
+local _defaultInspectPoint
+
+local function CaptureDefaultInspectPoint()
+    if _defaultInspectPoint or not InspectFrame then return end
+    local point, relativeTo, relativePoint, x, y = InspectFrame:GetPoint(1)
+    if point then
+        _defaultInspectPoint = { point, relativeTo, relativePoint, x, y }
+    end
+end
+
+-- Without this, closing CharacterFrame while Inspect stays open leaves
+-- InspectFrame anchored to CharacterFrame's last on-screen position -- it
+-- only moves again once CharacterFrame's own OnShow/SetPoint next fires, so
+-- in between it can sit at a spot with no visible reference frame left.
+local function RestoreDefaultInspectPoint()
+    if not _defaultInspectPoint or not InspectFrame then return end
+    if InspectFrameIsUserPinned() then return end
+    InspectFrame:ClearAllPoints()
+    InspectFrame:SetPoint(unpack(_defaultInspectPoint))
+end
+
+-- The dock above keeps the two side by side, but if they end up overlapping
+-- anyway (a manual drag of InspectFrame on top of CharacterFrame, or any
+-- other case the dock doesn't catch), CharacterFrame must win the z-order --
+-- otherwise InspectFrame's live 3D model bleeds through it. Both default to
+-- Blizzard's "HIGH" strata, so bump CharacterFrame one tier up to "DIALOG"
+-- (the same tier EllesmereUIQoL_Shifter.lua already uses to keep a window
+-- from being buried under a HIGH-strata CharacterFrame) while Inspect is
+-- also open -- strata beats frame level, so no click-to-front Raise() on
+-- InspectFrame can out-order it -- and revert the moment Inspect closes so
+-- other DIALOG-strata popups (StaticPopup, dropdown menus) aren't disturbed
+-- the rest of the time.
+local function EnforceCharacterFramePriority()
+    local cf = _G.CharacterFrame
+    if not cf then return end
+    if InspectFrame and InspectFrame:IsShown() and cf:IsShown() then
+        if cf:GetFrameStrata() ~= "DIALOG" then
+            cf:SetFrameStrata("DIALOG")
+        end
+    elseif cf:GetFrameStrata() == "DIALOG" then
+        cf:SetFrameStrata("HIGH")
+    end
+end
+
 -- Main function to apply themed inspect sheet
 local function ApplyThemedInspectSheet()
     if EllesmereUIDB and EllesmereUIDB.themedInspectSheet == false then
@@ -1050,9 +1148,15 @@ if EllesmereUI then
         if _inspHooked or not InspectFrame then return end
         _inspHooked = true
 
+        -- Capture Blizzard's native anchor now, before DockInspectFrame ever
+        -- runs, so RestoreDefaultInspectPoint has a real fallback later.
+        CaptureDefaultInspectPoint()
+
         InspectFrame:HookScript("OnShow", function()
             skinned = false
             ApplyThemedInspectSheet()
+            DockInspectFrame()
+            EnforceCharacterFramePriority()
             C_Timer.After(0.1, function()
                 if not InspectFrame or not InspectFrame:IsShown() then return end
                 if EllesmereUI._refreshInspectItemLevelVisibility then
@@ -1069,7 +1173,28 @@ if EllesmereUI then
 
         InspectFrame:HookScript("OnHide", function()
             skinned = false
+            EnforceCharacterFramePriority()
         end)
+
+        -- CharacterFrame is core UI, not load-on-demand, so it already
+        -- exists here. Re-dock whenever it (re)shows -- covers the order
+        -- Inspect opened first, own sheet opened after -- and whenever it
+        -- moves while Inspect is already open (e.g. a Shifter-pinned
+        -- CharacterFrame), so the pairing tracks it live.
+        if _G.CharacterFrame then
+            _G.CharacterFrame:HookScript("OnShow", function()
+                DockInspectFrame()
+                EnforceCharacterFramePriority()
+            end)
+            hooksecurefunc(_G.CharacterFrame, "SetPoint", DockInspectFrame)
+            -- CharacterFrame closing while Inspect stays open leaves it
+            -- docked to a frame that's no longer there to dock beside.
+            _G.CharacterFrame:HookScript("OnHide", function()
+                if InspectFrame and InspectFrame:IsShown() then
+                    RestoreDefaultInspectPoint()
+                end
+            end)
+        end
 
         local nineSliceHiddenFrame = CreateFrame("Frame")
         nineSliceHiddenFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
