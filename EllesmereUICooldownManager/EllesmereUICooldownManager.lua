@@ -7959,9 +7959,16 @@ local function UpdateRotationHighlights()
             for _, icon in ipairs(icons) do
                 local ifc = _ecmeFC[icon]
                 local sid = ifc and ifc.spellID
-                if sid and sid == suggestedSpell and icon:IsShown() then
-                    _rotShow(icon)
-                    newSet[icon] = true
+                if sid and icon:IsShown() then
+                    local match = (sid == suggestedSpell)
+                    if not match and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                        local ovr = C_SpellBook.FindSpellOverrideByID(sid)
+                        match = ovr and ovr == suggestedSpell
+                    end
+                    if match then
+                        _rotShow(icon)
+                        newSet[icon] = true
+                    end
                 end
             end
         end
