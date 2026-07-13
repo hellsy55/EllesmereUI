@@ -7732,6 +7732,12 @@ local function UpdateKeybinds()
             -- ElvUI/Bartender do for every button via LibActionButton.
             local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[info.key]
             local barHasCustomPaging = (bs and bs.paging and next(bs.paging) ~= nil) and true or false
+            if not barHasCustomPaging and info.key == "MainBar" then
+                local _, cls = UnitClass("player")
+                if cls == "DRUID" or cls == "ROGUE" then
+                    barHasCustomPaging = true
+                end
+            end
             for i, btn in ipairs(btns) do
                 if btn then
                     local cmd = prefix .. i
