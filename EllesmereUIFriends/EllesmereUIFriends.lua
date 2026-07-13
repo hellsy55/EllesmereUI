@@ -3242,7 +3242,9 @@ function EBS:OnInitialize()
         proxy.SetAlpha   = function(_, a2) if FriendsFrame then FriendsFrame:SetAlpha(a2) end end
         EllesmereUI.RegisterMouseoverTarget(proxy, function()
             local p2 = EBS.db and EBS.db.profile and EBS.db.profile.friends
-            return p2 and p2.enabled and p2.visibility == "mouseover"
+            if not (p2 and p2.enabled) then return false end
+            -- Hover-gated sets only reveal while their conditions pass
+            return EllesmereUI.VisWantsMouseover(p2, "visibility")
         end)
     end
 end

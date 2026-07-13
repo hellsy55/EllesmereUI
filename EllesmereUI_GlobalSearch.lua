@@ -18,7 +18,11 @@ local _seenKeys = {}
 -- Registered by TagOptionRow / SectionHeader as each option row / section
 -- header is built during normal navigation, and by the one-time pre-build
 -- pass below for pages nobody has opened yet this session.
-function EllesmereUI._RegisterSearchEntry(label, labelLoc, tooltip, moduleFolder, page, sectionName, selectorSetter, selectorKey)
+function EllesmereUI._RegisterSearchEntry(label, labelLoc, tooltip, moduleFolder, page, sectionName, selectorSetter, selectorKey, isSection)
+    -- Opt-out for whole UI regions: a builder sets this around widget
+    -- construction it wants excluded from the search entirely (e.g. the QoL
+    -- Macro Factory, whose rows must never be indexed or deep-linked).
+    if EllesmereUI._searchIndexSuppress then return end
     -- Composite labels (DualRow/TripleRow with an empty slot) can come in as
     -- whitespace only (e.g. a single joining space with nothing on either
     -- side) -- trim before the emptiness check so those don't register as
@@ -43,6 +47,9 @@ function EllesmereUI._RegisterSearchEntry(label, labelLoc, tooltip, moduleFolder
         -- find and highlight instead of silently not matching.
         selectorSetter = selectorSetter,
         selectorKey = selectorKey,
+        -- True for SectionHeader registrations: results render these as
+        -- "Section: Title Case" destinations instead of option rows.
+        isSection = isSection,
     }
 end
 
@@ -76,11 +83,12 @@ local function FuzzyScore(haystack, needle)
 
     -- Reject overly sparse matches. Without this, a long enough haystack
     -- makes almost any needle findable as SOME subsequence somewhere in it
-    -- (e.g. "interrupt" spuriously matching an unrelated 50-character
-    -- concatenated row label) -- that's noise, not a real fuzzy match.
-    -- Short needles (abbreviations like "aoc") get more slack via the +6.
+    -- (e.g. "combat" scattering across "Consumables Talent" in a coarse
+    -- module+page label) -- that's noise, not a real fuzzy match. Flat +8
+    -- slack keeps short abbreviations ("aoc" over "Auto Open Containers")
+    -- alive while capping how far a longer word may scatter.
     local span = lastMatch - firstMatch + 1
-    if span > nLen * 2 + 6 then return nil end
+    if span > nLen + 8 then return nil end
 
     return (score * 100) / span -- density: tighter matches for the same needle score higher
 end
@@ -140,24 +148,155 @@ local function BuildCoarseCandidates()
     end
 end
 
+-- Module-name filter: "raid frames border style" should search "border
+-- style" WITHIN Raid Frames, not fuzzy-match the whole phrase everywhere.
+-- Lazily built alias list (module titles + sidebar display names, both
+-- localized), longest alias first so "raid frames" can never lose to a
+-- shorter overlapping alias. Only a FULL alias at the START of the query
+-- (followed by more words) activates the filter -- single overlapping words
+-- ("raid" also appears in other modules' option labels) never do.
+local _moduleAliases
+
+local function BuildModuleAliases()
+    _moduleAliases = {}
+    local seen = {}
+    local function Add(alias, folder)
+        if not alias then return end
+        alias = alias:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        if alias == "" then return end
+        local key = alias .. "\1" .. folder
+        if seen[key] then return end
+        seen[key] = true
+        _moduleAliases[#_moduleAliases + 1] = { alias = alias, folder = folder }
+    end
+    for folder, config in pairs(EllesmereUI._modules or {}) do
+        Add(config.title and EllesmereUI.L(config.title), folder)
+    end
+    if EllesmereUI.ADDON_ROSTER then
+        for _, entry in ipairs(EllesmereUI.ADDON_ROSTER) do
+            if EllesmereUI._modules and EllesmereUI._modules[entry.folder] then
+                Add(entry.display and EllesmereUI.L(entry.display), entry.folder)
+            end
+        end
+    end
+    -- Hand-curated shorthands on top of the titles/display names, matching
+    -- how players actually abbreviate the modules. Folders that never
+    -- registered a module simply don't get their shorthands.
+    local EXTRA_ALIASES = {
+        EllesmereUIMythicTimer     = { "m+ timer", "m+" },
+        EllesmereUICooldownManager = { "cdm" },
+    }
+    for folder, list in pairs(EXTRA_ALIASES) do
+        if EllesmereUI._modules and EllesmereUI._modules[folder] then
+            for _, a in ipairs(list) do Add(a, folder) end
+        end
+    end
+    table.sort(_moduleAliases, function(a, b) return #a.alias > #b.alias end)
+end
+
 local function SearchIndex(query, maxResults)
     maxResults = maxResults or 30
     local needle = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
     if needle == "" then return {} end
     if not _coarseCandidates then BuildCoarseCandidates() end
-    local scored = {}
-    for _, entry in ipairs(_searchIndex) do
-        local score = ScoreEntry(entry, needle)
-        if score then
-            scored[#scored + 1] = { entry = entry, score = score }
+    if not _moduleAliases then BuildModuleAliases() end
+
+    -- Detect a module name ANYWHERE in the query (whole words only, longest
+    -- alias first) and split it off as an ADDITIVE boost: "raid frames
+    -- border style" and "border style raid frames" both surface "border
+    -- style" within Raid Frames on top of the plain full-query results
+    -- (merged below -- never replacing them).
+    local filterSet, subNeedle
+    for _, m in ipairs(_moduleAliases) do
+        local a = m.alias
+        local s, e = needle:find(a, 1, true)
+        while s do
+            local beforeOk = s == 1 or needle:sub(s - 1, s - 1) == " "
+            local afterOk = e == #needle or needle:sub(e + 1, e + 1) == " "
+            if beforeOk and afterOk then
+                filterSet = { [m.folder] = true }
+                subNeedle = (needle:sub(1, s - 1) .. " " .. needle:sub(e + 1))
+                    :gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+                break
+            end
+            s, e = needle:find(a, s + 1, true)
+        end
+        if filterSet then break end
+    end
+
+    -- Progressive variant: while a module name is still being TYPED, the
+    -- trailing word(s) act as a module-name PREFIX -- "border style r"
+    -- (then "ra", "raid f", ...) already narrows to every module whose name
+    -- starts that way, engaging the filter long before the full name is
+    -- typed. Longest trailing chunk wins; all prefix-matching modules are
+    -- searched as a union, so ambiguity ("r") just means a wider net.
+    if not filterSet then
+        local words = {}
+        for w in needle:gmatch("%S+") do words[#words + 1] = w end
+        for i = 1, #words do
+            local chunk = table.concat(words, " ", i, #words)
+            local set
+            for _, m in ipairs(_moduleAliases) do
+                if m.alias:sub(1, #chunk) == chunk then
+                    set = set or {}
+                    set[m.folder] = true
+                end
+            end
+            if set then
+                filterSet = set
+                subNeedle = i > 1 and table.concat(words, " ", 1, i - 1) or ""
+                break
+            end
         end
     end
-    for _, entry in ipairs(_coarseCandidates) do
-        local score = ScoreEntry(entry, needle)
-        if score then
-            scored[#scored + 1] = { entry = entry, score = score }
+
+    -- One scoring pass over both indexes. With a module filter active, only
+    -- those modules' entries are considered, matched against the remainder
+    -- of the query; a BARE module name (or name prefix) lists pages.
+    local function ScorePass(folderSet, n)
+        local scored = {}
+        local function Consider(list)
+            for _, entry in ipairs(list) do
+                if not folderSet or folderSet[entry.module] then
+                    if n == "" then
+                        if entry.kind == "page" then
+                            scored[#scored + 1] = { entry = entry, score = 1 }
+                        end
+                    else
+                        local s = ScoreEntry(entry, n)
+                        if s then scored[#scored + 1] = { entry = entry, score = s } end
+                    end
+                end
+            end
+        end
+        Consider(_searchIndex)
+        Consider(_coarseCandidates)
+        return scored
+    end
+
+    -- ADDITIVE module filter: the plain full-query pass ALWAYS runs, and a
+    -- detected module name layers its remainder-scoped hits ON TOP (boosted
+    -- above plain hits so the targeted interpretation ranks first). The
+    -- filter must never REMOVE cross-module matches: typing "hide b"
+    -- (trailing "b" = a Bags/Blizz UI prefix) must not drop QoL's "Hide
+    -- Blizzard Party Panel", which still matches the plain query.
+    local scored = ScorePass(nil, needle)
+    if filterSet then
+        local seenEntries = {}
+        for _, sc in ipairs(scored) do seenEntries[sc.entry] = sc end
+        for _, sc in ipairs(ScorePass(filterSet, subNeedle)) do
+            local boosted = sc.score + 20000
+            local existing = seenEntries[sc.entry]
+            if existing then
+                if boosted > existing.score then existing.score = boosted end
+            else
+                sc.score = boosted
+                seenEntries[sc.entry] = sc
+                scored[#scored + 1] = sc
+            end
         end
     end
+
     table.sort(scored, function(a, b) return a.score > b.score end)
     local out = {}
     for i = 1, math.min(maxResults, #scored) do out[i] = scored[i].entry end
@@ -217,7 +356,13 @@ local function PrebuildOnce(config, folder, page, selectorSetter, selectorKey)
     -- info) directly during construction, not only inside getValue closures.
     -- pcall so one module's edge case can never block indexing the rest; any
     -- such page simply falls back to being indexed by live navigation instead.
-    pcall(config.buildPage, page, wrapper, -6)
+    -- Surfaced in dev mode so a genuinely broken builder is not silently
+    -- swallowed forever by the indexing pass.
+    local ok, err = pcall(config.buildPage, page, wrapper, -6)
+    if not ok and EllesmereUI.IsDevModeActive and EllesmereUI.IsDevModeActive() then
+        print("|cffff6060EUI GlobalSearch:|r prebuild failed for "
+            .. tostring(folder) .. "::" .. tostring(page) .. ": " .. tostring(err))
+    end
     if refreshSnap then EllesmereUI._RestoreWidgetRefreshList(refreshSnap) end
 
     -- Some buildPage implementations register cleanup (event listeners, etc.)
@@ -237,46 +382,46 @@ local function PrebuildOnce(config, folder, page, selectorSetter, selectorKey)
     EllesmereUI._prebuilding = nil
 end
 
-local function PrebuildModulePage(config, folder, page)
+-- One staggered tick = ONE hidden page build. Selector variants are expanded
+-- into separate jobs at list-build time (not looped synchronously inside a
+-- single tick) because the variant pages are the suite's heaviest -- building
+-- the Unit Frames Display page once per unit in one frame is a visible hitch.
+local function PrebuildJob(job)
+    local config = job.config
     if not config.buildPage then return end
     -- Re-check (not just at job-list-build time): the staggered pass runs
     -- over several seconds, so the player may have visited and cached this
     -- exact page live in the meantime -- rebuilding it hidden would be a
-    -- redundant, wasted build.
-    local cacheKey = folder .. "::" .. page
-    if EllesmereUI._pageCache and EllesmereUI._pageCache[cacheKey] then return end
-
-    local savedMethods = {}
-    for _, name in ipairs(_CONTENT_HEADER_METHODS) do
-        savedMethods[name] = EllesmereUI[name]
-        EllesmereUI[name] = function() end
-    end
-
-    -- Pages whose content depends on an internal selector (CDM bar type,
-    -- action bar key, unit) can expose getPrebuildVariants to have this pass
-    -- build once per selector value instead of just once at whatever value
-    -- happens to be default -- otherwise settings gated behind a non-default
-    -- value are never indexed until the player picks that value themselves.
-    local variants = config.getPrebuildVariants and config.getPrebuildVariants(page)
-    if variants and variants.keys and #variants.keys > 0 then
-        for _, key in ipairs(variants.keys) do
-            PrebuildOnce(config, folder, page, variants.setter, key)
+    -- redundant, wasted build. The selector restore still runs: the live
+    -- visit happened at whatever selection the player made themselves, but
+    -- an EARLIER variant job may have left the module's selector moved.
+    local cacheKey = job.folder .. "::" .. job.page
+    if not (EllesmereUI._pageCache and EllesmereUI._pageCache[cacheKey]) then
+        local savedMethods = {}
+        for _, name in ipairs(_CONTENT_HEADER_METHODS) do
+            savedMethods[name] = EllesmereUI[name]
+            EllesmereUI[name] = function() end
         end
-        -- Restore whatever the player actually had selected so a later live
-        -- visit to this page isn't left showing the last-built variant.
-        if variants.setter and variants.currentKey then
-            variants.setter(variants.currentKey)
+        PrebuildOnce(config, job.folder, job.page, job.selectorSetter, job.selectorKey)
+        for _, name in ipairs(_CONTENT_HEADER_METHODS) do
+            EllesmereUI[name] = savedMethods[name]
         end
-    else
-        PrebuildOnce(config, folder, page)
     end
-
-    for _, name in ipairs(_CONTENT_HEADER_METHODS) do
-        EllesmereUI[name] = savedMethods[name]
+    -- Set on the LAST variant job of a page: restore whatever the player
+    -- actually had selected so a later live visit isn't left showing the
+    -- last-built variant.
+    if job.restoreSetter and job.restoreKey then
+        job.restoreSetter(job.restoreKey)
     end
 end
 
-local function RunPrebuildPass()
+-- Deliberately NOT run at login: building every options page costs real CPU
+-- and permanent frame memory (WoW frames are never freed), so only users who
+-- actually use the search should ever pay it. The first non-empty query in
+-- the search box triggers this pass (see RunSearch in EnsureSearchUI); coarse
+-- module/page results need no build and show immediately, and onComplete
+-- re-runs the query so late-indexed rows appear without retyping.
+local function RunPrebuildPass(onComplete)
     if _prebuildDone then return end
     _prebuildDone = true
 
@@ -291,34 +436,63 @@ local function RunPrebuildPass()
                 -- cache-restore could pick up instead of the live ones.
                 local cacheKey = folder .. "::" .. page
                 if not (EllesmereUI._pageCache and EllesmereUI._pageCache[cacheKey]) then
-                    jobs[#jobs + 1] = { folder = folder, page = page, config = config }
+                    -- Selector-driven pages (CDM bar / unit dropdowns) expand
+                    -- to one job PER variant so each tick stays one build; the
+                    -- last variant job carries the restore of the player's
+                    -- own selection.
+                    local variants = config.getPrebuildVariants and config.getPrebuildVariants(page)
+                    if variants and variants.keys and #variants.keys > 0 then
+                        for k, key in ipairs(variants.keys) do
+                            local job = {
+                                folder = folder, page = page, config = config,
+                                selectorSetter = variants.setter, selectorKey = key,
+                            }
+                            if k == #variants.keys and variants.setter and variants.currentKey then
+                                job.restoreSetter = variants.setter
+                                job.restoreKey = variants.currentKey
+                            end
+                            jobs[#jobs + 1] = job
+                        end
+                    else
+                        jobs[#jobs + 1] = { folder = folder, page = page, config = config }
+                    end
                 end
             end
         end
     end
 
     local i = 0
+    local combatWait
     local function StepJob()
+        -- A full page build is a multi-millisecond main-thread hit; never do
+        -- that during combat. Pause the pass and resume once combat ends.
+        if InCombatLockdown() then
+            if not combatWait then
+                combatWait = CreateFrame("Frame")
+                combatWait:SetScript("OnEvent", function(self)
+                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    C_Timer.After(0.05, StepJob)
+                end)
+            end
+            combatWait:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
         i = i + 1
         local job = jobs[i]
-        if not job then return end
-        PrebuildModulePage(job.config, job.folder, job.page)
-        if jobs[i + 1] then
-            C_Timer.After(0.05, StepJob)
+        if not job then
+            if onComplete then onComplete() end
+            return
         end
+        PrebuildJob(job)
+        C_Timer.After(0.05, StepJob)
     end
-    if jobs[1] then StepJob() end
-end
-
-do
-    local f = CreateFrame("Frame")
-    f:RegisterEvent("PLAYER_LOGIN")
-    f:SetScript("OnEvent", function(self)
-        self:UnregisterEvent("PLAYER_LOGIN")
-        -- Delay a few seconds past login so other addons/systems settle
-        -- before we start building hidden option pages.
-        C_Timer.After(5, RunPrebuildPass)
-    end)
+    if jobs[1] then
+        -- Next frame, not synchronously: the trigger is a keystroke handler
+        -- and the first page build should not lag the typing.
+        C_Timer.After(0, StepJob)
+    elseif onComplete then
+        onComplete()
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -335,6 +509,7 @@ local _searchUIBuilt = false
 local popup, resultRows
 
 local RESULT_ROW_H = 34
+local RESULT_ROW_GAP = 4   -- breathing room between result rows
 local MAX_VISIBLE_RESULTS = 12
 
 local function GetModuleDisplayName(folder)
@@ -348,24 +523,9 @@ local function GetModuleDisplayName(folder)
     return folder
 end
 
--- Category lookup: reverse-map each module folder to its ADDON_GROUPS label
--- (e.g. "Core Addons") so results can show the full sidebar breadcrumb.
--- Read lazily (not at file load) since standalone builds rewrite
--- ADDON_GROUPS' membership during EllesmereUI.lua's own load sequence --
--- by the time a search actually runs, that rewrite has long since settled.
-local _categoryByFolder
-
-local function GetCategoryLabel(folder)
-    if not _categoryByFolder then
-        _categoryByFolder = {}
-        for _, group in ipairs(EllesmereUI.ADDON_GROUPS or {}) do
-            for _, memberFolder in ipairs(group.members) do
-                _categoryByFolder[memberFolder] = EllesmereUI.L(group.label)
-            end
-        end
-    end
-    return _categoryByFolder[folder]
-end
+-- Breadcrumb separator: the house right-arrow glyph rendered inline in the
+-- sub text (module -> page), sized to sit with the 10pt breadcrumb font.
+local BREADCRUMB_ARROW = " |TInterface\\AddOns\\EllesmereUI\\media\\icons\\eui-arrow-right.png:12:12|t "
 
 local function JoinBreadcrumb(...)
     local parts = {}
@@ -373,7 +533,17 @@ local function JoinBreadcrumb(...)
         local v = select(i, ...)
         if v and v ~= "" then parts[#parts + 1] = v end
     end
-    return table.concat(parts, "  |  ")
+    return table.concat(parts, BREADCRUMB_ARROW)
+end
+
+-- Section headers are ALL CAPS in the option pages ("GLOBAL OPTIONS");
+-- results display them as Title Case ("Global Options"). ASCII-only word
+-- matching: non-Latin localized names pass through unchanged, which is the
+-- safe outcome. Display-only -- the index keeps the raw name for matching.
+local function TitleCaseSection(s)
+    return (s:lower():gsub("(%a)([%w']*)", function(first, rest)
+        return first:upper() .. rest
+    end))
 end
 
 local function JumpToResult(entry, sidebarSearchBox)
@@ -420,11 +590,10 @@ local function EnsureSearchUI()
 
     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-    local GS_GREEN = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.63 }
 
     -- Results popup, anchored below the existing sidebar search box.
     popup = CreateFrame("Frame", nil, clickArea)
-    popup:SetSize(380, MAX_VISIBLE_RESULTS * RESULT_ROW_H + 8)
+    popup:SetSize(380, MAX_VISIBLE_RESULTS * (RESULT_ROW_H + RESULT_ROW_GAP) - RESULT_ROW_GAP + 8)
     popup:SetPoint("TOPLEFT", sidebarSearchBox, "BOTTOMLEFT", 0, -4)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(220)
@@ -443,8 +612,8 @@ local function EnsureSearchUI()
     for i = 1, MAX_VISIBLE_RESULTS do
         local row = CreateFrame("Button", nil, resultsFrame)
         row:SetHeight(RESULT_ROW_H)
-        row:SetPoint("TOPLEFT", resultsFrame, "TOPLEFT", 1, -(i - 1) * RESULT_ROW_H)
-        row:SetPoint("TOPRIGHT", resultsFrame, "TOPRIGHT", -1, -(i - 1) * RESULT_ROW_H)
+        row:SetPoint("TOPLEFT", resultsFrame, "TOPLEFT", 1, -(i - 1) * (RESULT_ROW_H + RESULT_ROW_GAP))
+        row:SetPoint("TOPRIGHT", resultsFrame, "TOPRIGHT", -1, -(i - 1) * (RESULT_ROW_H + RESULT_ROW_GAP))
 
         local hl = row:CreateTexture(nil, "ARTWORK")
         hl:SetAllPoints()
@@ -452,18 +621,18 @@ local function EnsureSearchUI()
 
         local lbl = row:CreateFontString(nil, "OVERLAY")
         if EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(lbl, true) end
-        lbl:SetFont(fontPath, 12, "")
+        lbl:SetFont(fontPath, 14, "")
         lbl:SetTextColor(0.85, 0.85, 0.88, 1)
-        lbl:SetPoint("LEFT", row, "LEFT", 8, 7)
-        lbl:SetPoint("RIGHT", row, "RIGHT", -8, 7)
+        lbl:SetPoint("LEFT", row, "LEFT", 8, 8)
+        lbl:SetPoint("RIGHT", row, "RIGHT", -8, 8)
         lbl:SetJustifyH("LEFT")
         lbl:SetWordWrap(false)
 
         local sub = row:CreateFontString(nil, "OVERLAY")
         if EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(sub, true) end
-        sub:SetFont(fontPath, 10, "")
-        sub:SetTextColor(GS_GREEN.r, GS_GREEN.g, GS_GREEN.b, 0.85)
-        sub:SetPoint("LEFT", row, "LEFT", 8, -8)
+        sub:SetFont(fontPath, 12, "")
+        sub:SetTextColor(1, 1, 1, 0.45)
+        sub:SetPoint("LEFT", row, "LEFT", 8, -9)
         sub:SetJustifyH("LEFT")
 
         row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.08) end)
@@ -475,22 +644,44 @@ local function EnsureSearchUI()
         resultRows[i] = row
     end
 
-    local function RunSearch()
+    local RunSearch
+    RunSearch = function()
         local query = sidebarSearchBox:GetText()
+        -- First real use of the box is the feature's opt-in: kick the
+        -- one-time staggered index pass now, off the login path entirely.
+        -- Coarse module/page results show immediately; when the pass
+        -- finishes, re-run the query so newly indexed rows appear without
+        -- retyping.
+        if query ~= "" and not _prebuildDone then
+            RunPrebuildPass(function()
+                if sidebarSearchBox:GetText() ~= "" then RunSearch() end
+            end)
+        end
         local results = SearchIndex(query, MAX_VISIBLE_RESULTS)
+        -- Accent-colored "Page:"/"Section:" prefixes. Hex is computed per
+        -- search, so a live accent change is picked up on the next keystroke.
+        local EG = EllesmereUI.ELLESMERE_GREEN
+        local accentHex = EG and string.format("|cff%02x%02x%02x",
+            math.floor(EG.r * 255 + 0.5), math.floor(EG.g * 255 + 0.5),
+            math.floor(EG.b * 255 + 0.5)) or "|cffffffff"
         for i, row in ipairs(resultRows) do
             local entry = results[i]
             if entry then
                 if entry.kind == "page" then
-                    -- Coarse whole-page result -- marked with a leading ">"
-                    -- (plain ASCII, safe across every locale font this addon
-                    -- supports) so it reads as "go to this page", not a
-                    -- specific option on it.
-                    row._label:SetText("> " .. entry.displayLabel)
-                    row._sub:SetText(JoinBreadcrumb(GetCategoryLabel(entry.module), entry.moduleLabel))
+                    -- Coarse whole-page result: prefixed like sections so it
+                    -- reads as "go to this page", not a specific option on it.
+                    row._label:SetText(accentHex .. EllesmereUI.L("Page") .. ":|r " .. entry.displayLabel)
+                    row._sub:SetText(entry.moduleLabel)
+                elseif entry.isSection then
+                    local name = TitleCaseSection(entry.label)
+                    if entry.labelLoc then
+                        name = name .. "  (" .. TitleCaseSection(entry.labelLoc) .. ")"
+                    end
+                    row._label:SetText(accentHex .. EllesmereUI.L("Section") .. ":|r " .. name)
+                    row._sub:SetText(JoinBreadcrumb(GetModuleDisplayName(entry.module), EllesmereUI.L(entry.page)))
                 else
                     row._label:SetText(entry.labelLoc and (entry.label .. "  (" .. entry.labelLoc .. ")") or entry.label)
-                    row._sub:SetText(JoinBreadcrumb(GetCategoryLabel(entry.module), GetModuleDisplayName(entry.module), EllesmereUI.L(entry.page)))
+                    row._sub:SetText(JoinBreadcrumb(GetModuleDisplayName(entry.module), EllesmereUI.L(entry.page)))
                 end
                 row:SetScript("OnClick", function() JumpToResult(entry, sidebarSearchBox) end)
                 row:Show()
@@ -499,7 +690,8 @@ local function EnsureSearchUI()
             end
         end
         if #results > 0 then
-            popup:SetHeight(math.min(#results, MAX_VISIBLE_RESULTS) * RESULT_ROW_H + 8)
+            local n = math.min(#results, MAX_VISIBLE_RESULTS)
+            popup:SetHeight(n * (RESULT_ROW_H + RESULT_ROW_GAP) - RESULT_ROW_GAP + 8)
             popup:Show()
         else
             popup:Hide()
@@ -514,12 +706,19 @@ local function EnsureSearchUI()
         if results[1] then JumpToResult(results[1], self) end
     end)
 
-    popup:SetScript("OnUpdate", function()
-        if popup:IsShown() and not popup:IsMouseOver() and not sidebarSearchBox:IsMouseOver()
-           and IsMouseButtonDown("LeftButton") then
+    -- Click-anywhere-else closes the results: a global mouse-down listener
+    -- registered only while the popup is shown (the same pattern as the
+    -- dropdown widgets) -- non-blocking, world clicks pass through, and no
+    -- per-frame OnUpdate work. Row clicks fire on mouse UP, and the DOWN
+    -- lands while the cursor is over the popup, so results stay clickable.
+    local clickOff = CreateFrame("Frame")
+    clickOff:SetScript("OnEvent", function()
+        if not popup:IsMouseOver() and not sidebarSearchBox:IsMouseOver() then
             popup:Hide()
         end
     end)
+    popup:SetScript("OnShow", function() clickOff:RegisterEvent("GLOBAL_MOUSE_DOWN") end)
+    popup:SetScript("OnHide", function() clickOff:UnregisterEvent("GLOBAL_MOUSE_DOWN") end)
 end
 
 -------------------------------------------------------------------------------

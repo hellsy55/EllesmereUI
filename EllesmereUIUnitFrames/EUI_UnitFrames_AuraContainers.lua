@@ -414,6 +414,11 @@ local function BuildStyle(unit, base, s)
         stackOffX = s[p .. "StackTextOffsetX"] or 0,
         stackOffY = s[p .. "StackTextOffsetY"] or 0,
         cancelButtons = (unit == "player" and isBuff) and "RightButtonUp" or nil,
+        -- Dispel-type border recolor (per-unit debuffDispelBorder): the engine
+        -- shows the ring only on typed (dispellable) debuffs and picks the
+        -- dispel color itself -- the user palette cannot apply under secrecy
+        -- (same documented delta as the RF debuff border).
+        dispelBorder = (not isBuff and s.debuffDispelBorder) and true or nil,
         applyExtra = ApplyUFText,
     }
 end

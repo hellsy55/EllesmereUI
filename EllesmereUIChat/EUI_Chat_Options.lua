@@ -87,22 +87,16 @@ initFrame:SetScript("OnEvent", function(self)
         -- -- DISPLAY -----------------------------------------------------------
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
-        -- Row 1: Visibility | Visibility Options
-        local chatVisValues = {}
-        local chatVisOrder = {}
-        for _, key in ipairs(EllesmereUI.VIS_ORDER) do
-            if key ~= "mouseover" then
-                chatVisValues[key] = EllesmereUI.VIS_VALUES[key]
-                chatVisOrder[#chatVisOrder + 1] = key
-            end
-        end
+        -- Row 1: Visibility | Visibility Options (checklist; no mouseover
+        -- for chat frames, matching the old filtered dropdown)
         local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Visibility",
-              values = chatVisValues,
-              order  = chatVisOrder,
-              getValue=function() return Cfg("visibility") or "always" end,
-              setValue=function(v) Set("visibility", v); if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end; RefreshAll() end },
+        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+            { getStore = DB, legacyKey = "visibility",
+              caps = { partyIncludesRaid = false, noMouseover = true, luaDragonriding = true },
+              onChanged = function()
+                  if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+                  RefreshAll()
+              end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,

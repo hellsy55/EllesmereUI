@@ -75,10 +75,24 @@ local function StripRealm(fullName)
     return fullName:match("^([^%-]+)") or fullName
 end
 
--- Resolve class color for a player name (checks group units, then guild roster)
-local function GetClassColorForName(name)
-    local short = StripRealm(name)
-    -- Check group units
+-- Class-color lookup for popup rows, built ONCE per popup rebuild: a single
+-- pass over the guild roster plus the group units, keyed by short name.
+-- Rows then resolve their color with one table read. (A per-row linear roster
+-- scan multiplies into millions of GetGuildRosterInfo calls per rebuild in a
+-- large guild and was the source of rare multi-second frame freezes.)
+local function BuildClassColorMap()
+    local map = {}
+    -- Guild roster first so group/player entries below win on name collisions
+    if IsInGuild() and GetNumGuildMembers then
+        local total = GetNumGuildMembers()
+        for i = 1, total do
+            local gName, _, _, _, _, _, _, _, _, _, classFile = GetGuildRosterInfo(i)
+            if gName and classFile then
+                local gShort = Ambiguate and Ambiguate(gName, "short") or gName:match("^([^%-]+)")
+                if gShort then map[gShort] = classFile end
+            end
+        end
+    end
     local prefix, count
     if IsInRaid() then prefix, count = "raid", GetNumGroupMembers()
     elseif IsInGroup() then prefix, count = "party", GetNumGroupMembers() - 1
@@ -87,31 +101,18 @@ local function GetClassColorForName(name)
         for i = 1, count do
             local unit = prefix .. i
             local uName = UnitName(unit)
-            if uName and uName == short then
+            if uName then
                 local _, classFile = UnitClass(unit)
-                if classFile then return RAID_CLASS_COLORS[classFile] end
+                if classFile then map[uName] = classFile end
             end
         end
     end
-    -- Check player
-    if UnitName("player") == short then
+    local myName = UnitName("player")
+    if myName then
         local _, classFile = UnitClass("player")
-        if classFile then return RAID_CLASS_COLORS[classFile] end
+        if classFile then map[myName] = classFile end
     end
-    -- Check guild roster
-    if IsInGuild() and GetNumGuildMembers then
-        local total = GetNumGuildMembers()
-        for i = 1, total do
-            local gName, _, _, _, _, _, _, _, _, _, classFile = GetGuildRosterInfo(i)
-            if gName then
-                local gShort = Ambiguate and Ambiguate(gName, "short") or gName:match("^([^%-]+)")
-                if gShort == short and classFile then
-                    return RAID_CLASS_COLORS[classFile]
-                end
-            end
-        end
-    end
-    return nil
+    return map
 end
 
 local function GetMyKeystone()
@@ -391,11 +392,13 @@ local function ApplyRowFontSize(r)
     r._levelFS:SetFont(font, sz, flags)
 end
 
-local function PopulateRow(r, e)
+local function PopulateRow(r, e, ccMap)
     ApplyRowFontSize(r)
     r._nameFS:SetText(StripRealm(e.name)); r._nameFS:SetWidth(80)
-    local cc = GetClassColorForName(e.name)
-    if not cc and e.classFile then cc = RAID_CLASS_COLORS[e.classFile] end
+    -- Cheap paths first: the entry's own classFile, then the per-rebuild map
+    local cf = e.classFile
+    if not cf and ccMap then cf = ccMap[StripRealm(e.name)] end
+    local cc = cf and RAID_CLASS_COLORS[cf]
     if cc then r._nameFS:SetTextColor(cc.r, cc.g, cc.b, 1)
     else r._nameFS:SetTextColor(1, 1, 1, 0.85) end
     r._ratingFS:SetText(e.rating and e.rating > 0 and tostring(e.rating) or "")
@@ -468,6 +471,22 @@ ShowKeystonePopup = function()
         return a.name < b.name
     end)
 
+    -- One class-color pass for the whole rebuild, and only when some entry
+    -- actually lacks a stored classFile (guild data arrives without one)
+    local ccMap
+    do
+        local needMap = false
+        for _, e in ipairs(partyEntries) do
+            if not e.classFile then needMap = true; break end
+        end
+        if not needMap then
+            for _, e in ipairs(guildEntries) do
+                if not e.classFile then needMap = true; break end
+            end
+        end
+        if needMap then ccMap = BuildClassColorMap() end
+    end
+
     -- Hide all pooled frames
     for i = 1, #rowFrames do rowFrames[i]:Hide() end
     for i = 1, #secHeaders do secHeaders[i]:Hide() end
@@ -501,7 +520,7 @@ ShowKeystonePopup = function()
         for _, e in ipairs(partyEntries) do
             rowIdx = rowIdx + 1
             local r = AcquireRow(rowIdx)
-            PopulateRow(r, e)
+            PopulateRow(r, e, ccMap)
             r:ClearAllPoints()
             r:SetPoint("TOPLEFT", body, "TOPLEFT", 0, curY)
             r:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, curY)
@@ -537,7 +556,7 @@ ShowKeystonePopup = function()
         for _, e in ipairs(guildEntries) do
             rowIdx = rowIdx + 1
             local r = AcquireRow(rowIdx)
-            PopulateRow(r, e)
+            PopulateRow(r, e, ccMap)
             r:ClearAllPoints()
             r:SetPoint("TOPLEFT", body, "TOPLEFT", 0, curY)
             r:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, curY)
@@ -558,8 +577,18 @@ ShowKeystonePopup = function()
     p:Show()
 end
 
+-- Debounced: incoming keystone data can arrive as a burst (a /keys request
+-- solicits a reply from every online guild member running the lib), and each
+-- rebuild re-lays-out every row. Coalesce bursts into one rebuild per 0.2s.
+local refreshQueued = false
 local function RefreshPopupIfOpen()
-    if popup and popup:IsShown() then ShowKeystonePopup() end
+    if not (popup and popup:IsShown()) then return end
+    if refreshQueued then return end
+    refreshQueued = true
+    C_Timer.After(0.2, function()
+        refreshQueued = false
+        if popup and popup:IsShown() then ShowKeystonePopup() end
+    end)
 end
 _G._EUI_RefreshKeystonePopup = RefreshPopupIfOpen
 
@@ -568,14 +597,21 @@ _G._EUI_RefreshKeystonePopup = RefreshPopupIfOpen
 --  Receives keystone data from any player running BigWigs/DBM (or any addon
 --  that embeds LibKeystone). No manual comm handling needed.
 -------------------------------------------------------------------------------
+-- Registered only when the popup feature is enabled: the toggle is
+-- reload-gated (see options), so the load-time flag is authoritative and a
+-- disabled popup pays nothing per incoming keystone message.
 local lksCallbackTable = {}
-if LibKeystone then
-    LibKeystone.Register(lksCallbackTable, function(keyLevel, keyMapID, playerRating, playerName, channel)
-        if not playerName then return end
-        local tbl = (channel == "GUILD") and guildKeys or partyKeys
-        tbl[playerName] = { dungeon = keyMapID, keyLevel = keyLevel, rating = playerRating }
-        RefreshPopupIfOpen()
-    end)
+do
+    local cfg = EllesmereUIDB and EllesmereUIDB.keystonePopup
+    local enabled = not cfg or cfg.enabled ~= false
+    if LibKeystone and enabled then
+        LibKeystone.Register(lksCallbackTable, function(keyLevel, keyMapID, playerRating, playerName, channel)
+            if not playerName then return end
+            local tbl = (channel == "GUILD") and guildKeys or partyKeys
+            tbl[playerName] = { dungeon = keyMapID, keyLevel = keyLevel, rating = playerRating }
+            RefreshPopupIfOpen()
+        end)
+    end
 end
 
 -------------------------------------------------------------------------------

@@ -530,6 +530,7 @@ local function HookFrame(frame, name)
     end)
 
     frame:HookScript("OnHide", function()
+        if not IsEnabled() then return end
         if secureDrag.frame == frame then StopSecureDrag() end
         tempPos[frame] = nil
         tempScale[frame] = nil
@@ -552,6 +553,10 @@ local function HookFrame(frame, name)
     if DOCKING_COMPANIONS[name] then
         local defaultStrata = frame:GetFrameStrata()
         ShouldDock = function()
+            -- Protected frames (PVEFrame) still dock -- but position-only,
+            -- through the SecureSetPoint branch below; their strata/Raise
+            -- touches are skipped in the OnShow/OnHide hooks (insecure writes
+            -- taint a protected tree -- the PVEFrame SetMovable incident).
             if tempPos[frame] or GetSavedPos(name) then return false end
             local cf = _G.CharacterFrame
             return cf ~= nil and cf:IsShown() and (tempPos[cf] or GetSavedPos("CharacterFrame")) ~= nil
@@ -559,33 +564,40 @@ local function HookFrame(frame, name)
         DockToCharacterFrame = function()
             local cf = _G.CharacterFrame
             local margin = 4
-            local w = frame:GetWidth() or 0
-            local leftRoom = cf:GetLeft() or 0
-            local rightRoom = (GetScreenWidth() or 0) - (cf:GetRight() or 0)
-            local dockLeft = leftRoom >= w + margin or leftRoom >= rightRoom
+            -- Compare available room in SCREEN-ABSOLUTE units. cf's edges
+            -- are in CF's effective-scale space and this frame's width is in
+            -- its own; raw mixing picks the wrong side (and mis-places the
+            -- protected dock below) the moment either frame is
+            -- Shifter-scaled -- which is the headline scenario here.
+            local cs = cf:GetEffectiveScale() or 1
+            local es = frame:GetEffectiveScale() or 1
+            local ues = UIParent:GetEffectiveScale() or 1
+            local wAbs = (frame:GetWidth() or 0) * es
+            local leftRoom = (cf:GetLeft() or 0) * cs
+            local rightRoom = (GetScreenWidth() or 0) * ues - (cf:GetRight() or 0) * cs
+            local dockLeft = leftRoom >= wAbs + margin * es or leftRoom >= rightRoom
             if frame:IsProtected() then
                 -- Plain SetPoint on a protected frame (e.g. PVEFrame) taints
                 -- it -- same reason SecureSetPoint exists for saved/dragged
                 -- positions above. SecureSetPoint only anchors relative to
-                -- UIParent, so convert the target screen position into a
-                -- UIParent-CENTER-relative offset the same way CaptureCenter
-                -- does for scale-safe repositioning elsewhere in this file.
+                -- UIParent, so convert the dock target into a UIParent-CENTER
+                -- offset, with every coordinate normalized through its own
+                -- frame's effective scale (screen-absolute space) before
+                -- dividing back into this frame's units.
                 if InCombatLockdown() then return end
-                local h = frame:GetHeight() or 0
-                local targetCenterX
+                local hAbs = (frame:GetHeight() or 0) * es
+                local absCenterX
                 if dockLeft then
-                    targetCenterX = (cf:GetLeft() or 0) - margin - w / 2
+                    absCenterX = leftRoom - margin * es - wAbs / 2
                 else
-                    targetCenterX = (cf:GetRight() or 0) + margin + w / 2
+                    absCenterX = (cf:GetRight() or 0) * cs + margin * es + wAbs / 2
                 end
-                local targetCenterY = (cf:GetTop() or 0) - h / 2
+                local absCenterY = (cf:GetTop() or 0) * cs - hAbs / 2
                 local ucx, ucy = UIParent:GetCenter()
-                local es = frame:GetEffectiveScale()
-                local ues = UIParent:GetEffectiveScale()
-                if ucx and es and es > 0 then
-                    local offsetX = (targetCenterX * es - ucx * ues) / es
-                    local offsetY = (targetCenterY * es - ucy * ues) / es
-                    SecureSetPoint(frame, "CENTER", "CENTER", offsetX, offsetY)
+                if ucx and es > 0 then
+                    SecureSetPoint(frame, "CENTER", "CENTER",
+                        (absCenterX - ucx * ues) / es,
+                        (absCenterY - ucy * ues) / es)
                 end
             else
                 ffd._shIgnoreSP = true
@@ -599,14 +611,21 @@ local function HookFrame(frame, name)
             end
         end
         frame:HookScript("OnHide", function()
-            frame:SetFrameStrata(defaultStrata)
+            -- Strata writes are INSECURE: on a protected frame (PVEFrame)
+            -- they taint its whole tree, exactly like the SetMovable call
+            -- that caused the original secret-value incident. Skip them.
+            if not frame:IsProtected() then frame:SetFrameStrata(defaultStrata) end
         end)
         frame:HookScript("OnShow", function()
             if not IsEnabled() then return end
             if ShouldDock() then
-                frame:SetFrameStrata("DIALOG")
+                -- The strata raise only matters when the companion OVERLAPS
+                -- CharacterFrame -- a docked frame no longer does. Protected
+                -- frames therefore get position-only docking; strata and
+                -- Raise are insecure writes that would taint their tree.
+                if not frame:IsProtected() then frame:SetFrameStrata("DIALOG") end
                 DockToCharacterFrame()
-                frame:Raise()
+                if not frame:IsProtected() then frame:Raise() end
             end
         end)
     elseif name ~= "CharacterFrame" then
@@ -616,14 +635,17 @@ local function HookFrame(frame, name)
         -- beside CharacterFrame (unlike DOCKING_COMPANIONS, this never
         -- touches position, just strata). Applies generically to every other
         -- Shifter-hooked frame so newly discovered cases don't need a
-        -- hardcoded entry. Never calls SetPoint, so this is safe even for a
-        -- protected frame if one ever lands in this bucket.
+        -- hardcoded entry. Protected frames are skipped: SetFrameStrata and
+        -- Raise are still INSECURE writes, and on a protected frame they
+        -- taint its whole tree (the PVEFrame SetMovable incident) -- those
+        -- stay at Blizzard strata, possibly buried but never tainted.
         local defaultStrata = frame:GetFrameStrata()
         frame:HookScript("OnHide", function()
-            frame:SetFrameStrata(defaultStrata)
+            if not frame:IsProtected() then frame:SetFrameStrata(defaultStrata) end
         end)
         frame:HookScript("OnShow", function()
             if not IsEnabled() then return end
+            if frame:IsProtected() then return end
             local cf = _G.CharacterFrame
             if cf and cf:IsShown() and (tempPos[cf] or GetSavedPos("CharacterFrame")) then
                 frame:SetFrameStrata("DIALOG")
@@ -912,6 +934,15 @@ end)
 -- Exposed for the options toggle (mid-session enable without /reload)
 function EllesmereUI._InitShifter()
     InitShifter()
+end
+
+-- Exposed for the options toggle (mid-session disable). Stops the modifier
+-- key listener and parks the wheel overlay; re-enable re-runs InitShifter,
+-- which registers the event again. Frame hooks are irreversible and stay
+-- installed, but every hook body bails first-line while disabled.
+function EllesmereUI._ShutdownShifter()
+    eventFrame:UnregisterEvent("MODIFIER_STATE_CHANGED")
+    UpdateWheelOverlay()
 end
 
 -- Exposed for the options reset button (positions AND zoom)

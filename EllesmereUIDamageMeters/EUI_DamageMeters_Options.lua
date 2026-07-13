@@ -82,19 +82,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
         -- Visibility | Visibility Options
-        local dmVisValues = {}
-        local dmVisOrder = {}
-        for _, key in ipairs(EllesmereUI.VIS_ORDER) do
-            dmVisValues[key] = EllesmereUI.VIS_VALUES[key]
-            dmVisOrder[#dmVisOrder + 1] = key
-        end
         local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Visibility",
-              values = dmVisValues,
-              order  = dmVisOrder,
-              getValue=function() return Cfg("visibility") or "always" end,
-              setValue=function(v) Set("visibility", v); if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end end },
+        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+            { getStore = DB, legacyKey = "visibility",
+              caps = { partyIncludesRaid = false, luaDragonriding = true },
+              onChanged = function()
+                  if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end
+              end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,

@@ -1586,10 +1586,13 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(UpdateRcwInlinesDisabled)
         end
 
-        -- Wire up click mappings for preview hit overlays
+        -- Wire up click mappings for preview hit overlays. Both display-level
+        -- targets are row2 -- the first DISPLAY row, which also hosts the Show
+        -- Text toggle. (These previously pointed at names that were never
+        -- assigned, so the nil-target guard silently swallowed the clicks.)
         wipe(_eabrClickMappings)
-        _eabrClickMappings.display = { section = displaySection, target = displayFirstRow }
-        _eabrClickMappings.showText = { section = displaySection, target = showTextRow }
+        _eabrClickMappings.display = { section = displaySection, target = row2 }
+        _eabrClickMappings.showText = { section = displaySection, target = row2 }
         _eabrClickMappings.raidbuff = { section = raidBufHdr, target = raidBufFirstRow }
         _eabrClickMappings.aura = { section = auraHdr, target = auraFirstRow }
         _eabrClickMappings.consumable = { section = consumHdr, target = consumFirstRow }

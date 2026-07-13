@@ -5179,9 +5179,21 @@ local function ShouldShowSecondary()
     local sp = _G._ERB_ResolveSecondaryCfg()
     -- Check visibility options first
     if EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(sp) then return false end
+    -- Multi-select / dragonriding path (nil = legacy single mode below)
+    if EllesmereUI and EllesmereUI.EvalVisibilityExtended then
+        local st = ERB._visState
+        if not st then st = {}; ERB._visState = st end
+        local inRaid = IsInRaid and IsInRaid() or false
+        st.inCombat = isInCombat
+        st.inRaid = inRaid
+        st.inParty = not inRaid and (IsInGroup and IsInGroup() or false)
+        local ext = EllesmereUI.EvalVisibilityExtended(sp, "visibility", st, EllesmereUI.VIS_CAPS_INCLUSIVE)
+        if ext ~= nil then return ext end
+    end
     local vis = sp.visibility
     if vis == "always" then return true end
     if vis == "never" then return false end
+    if vis == "mouseover" then return "mouseover" end
     if vis == "combat" or vis == "in_combat" then return isInCombat end
     if vis == "out_of_combat" then return not isInCombat end
     if vis == "target" then return UnitExists("target") and UnitCanAttack("player", "target") end
@@ -5199,9 +5211,21 @@ end
 local function ShouldShowBar(barProfile)
     -- Check visibility options first
     if EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(barProfile) then return false end
+    -- Multi-select / dragonriding path (nil = legacy single mode below)
+    if EllesmereUI and EllesmereUI.EvalVisibilityExtended then
+        local st = ERB._visState
+        if not st then st = {}; ERB._visState = st end
+        local inRaid = IsInRaid and IsInRaid() or false
+        st.inCombat = isInCombat
+        st.inRaid = inRaid
+        st.inParty = not inRaid and (IsInGroup and IsInGroup() or false)
+        local ext = EllesmereUI.EvalVisibilityExtended(barProfile, "visibility", st, EllesmereUI.VIS_CAPS_INCLUSIVE)
+        if ext ~= nil then return ext end
+    end
     local vis = barProfile.visibility or "always"
     if vis == "always" then return true end
     if vis == "never" then return false end
+    if vis == "mouseover" then return "mouseover" end
     if vis == "combat" or vis == "in_combat" then return isInCombat end
     if vis == "out_of_combat" then return not isInCombat end
     if vis == "target" then return UnitExists("target") and UnitCanAttack("player", "target") end
@@ -5225,10 +5249,17 @@ local function UpdateVisibility()
 
     local inVehicle = ERB._inVehicle
 
+    -- Hover-eligibility flags for the shared mouseover poll: a bar whose
+    -- evaluation lands on "mouseover" stays hidden here and is revealed by
+    -- the poll proxies (registered at setup) while the cursor is over it.
+    ERB._moEligible = ERB._moEligible or {}
+
     -- Health bar visibility
     if healthBar then
         local hp = _G._ERB_ResolveHealthCfg()
-        if hp and hp.enabled and not IsSpecDisabled(hp) and ShouldShowBar(hp) and not inVehicle then
+        local vis = hp and hp.enabled and not IsSpecDisabled(hp) and not inVehicle and ShouldShowBar(hp)
+        ERB._moEligible.health = (vis == "mouseover")
+        if vis == true then
             healthBar:Show()
             EllesmereUI.SetElementVisibility(healthBar, true)
             healthBar:SetAlpha(ns.ResolveBarAlpha(hp))
@@ -5244,7 +5275,9 @@ local function UpdateVisibility()
         -- Also check cachedPrimary: specs without a primary power (e.g. BM/MM Hunter)
         -- should hide the power bar even if enabled in settings
         local hidePower = sp and sp.hidePowerIfResource and cachedSecondary
-        if not hidePower and pp and pp.enabled ~= false and not IsSpecDisabled(pp) and cachedPrimary and ShouldShowBar(pp) and not inVehicle then
+        local vis = not hidePower and pp and pp.enabled ~= false and not IsSpecDisabled(pp) and cachedPrimary and not inVehicle and ShouldShowBar(pp)
+        ERB._moEligible.primary = (vis == "mouseover")
+        if vis == true then
             primaryBar:Show()
             EllesmereUI.SetElementVisibility(primaryBar, true)
             primaryBar:SetAlpha(ns.ResolveBarAlpha(pp))
@@ -5256,7 +5289,9 @@ local function UpdateVisibility()
     -- Secondary resource visibility + ooc alpha
     if secondaryFrame then
         local sp = _G._ERB_ResolveSecondaryCfg()
-        if sp and sp.enabled ~= false and not IsSpecDisabled(sp) and cachedSecondary and ShouldShowSecondary() and not inVehicle then
+        local vis = sp and sp.enabled ~= false and not IsSpecDisabled(sp) and cachedSecondary and not inVehicle and ShouldShowSecondary()
+        ERB._moEligible.secondary = (vis == "mouseover")
+        if vis == true then
             secondaryFrame:Show()
             EllesmereUI.SetElementVisibility(secondaryFrame, true)
             secondaryFrame:SetAlpha(ns.ResolveBarAlpha(sp))
@@ -5480,15 +5515,18 @@ local function OnUpdate(self, dt)
     -- poll when buff coloring is on: a secret proc (Essence Burst) may fire no
     -- UNIT_AURA and the Cooldown Viewer state can change without one, so we must
     -- re-evaluate to recolor the bar as the buff comes and goes.
-    if cachedSecondary then
-        local poll = cachedSecondary.type == "custom" or cachedSecondary.type == "bar"
-        if not poll then
-            poll = SecondaryTracksBuff(_G._ERB_ResolveSecondaryCfg())
-        end
-        if poll then
-            _runeThrottle = _runeThrottle + dt  -- reuse the rune throttle counter
-            if _runeThrottle >= 0.1 then
-                _runeThrottle = 0
+    -- The buff-tracking check walks thresholdSpecs, so it runs inside the 0.1s
+    -- tick (not per frame) -- only the counter accumulates at frame rate. The
+    -- rune/essence blocks above share this counter and already poll their own
+    -- full updates (buff recolor included), so they are excluded here to keep
+    -- their cadence intact.
+    if cachedSecondary and cachedSecondary.type ~= "runes"
+       and not (_essenceNextTick and cachedSecondary.power == PT.ESSENCE) then
+        _runeThrottle = _runeThrottle + dt  -- reuse the rune throttle counter
+        if _runeThrottle >= 0.1 then
+            _runeThrottle = 0
+            if cachedSecondary.type == "custom" or cachedSecondary.type == "bar"
+               or SecondaryTracksBuff(_G._ERB_ResolveSecondaryCfg()) then
                 UpdateSecondaryResource()
             end
         end
@@ -7391,7 +7429,8 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "PLAYER_TARGET_CHANGED" then
         UpdateVisibility()
-    elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_CAN_GLIDE_CHANGED" then
+    elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_CAN_GLIDE_CHANGED"
+        or event == "PLAYER_IS_GLIDING_CHANGED" then
         UpdateVisibility()
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         -- Re-check secondary max power: UnitPowerMax can change across zone
@@ -7690,6 +7729,48 @@ function ERB:OnEnable()
     -- Visibility option events
     eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
     eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
+    -- Airborne edge for the dragonriding visibility modes (probed at load
+    -- in EllesmereUI_Visibility.lua; absent = the checklist items lock)
+    if EllesmereUI._hasGlidingEvent then
+        eventFrame:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
+    end
+
+    -- Mouseover hover-reveal: one proxy per bar registered with the shared
+    -- poll. Plain tables (Quest Tracker precedent) so the poll never calls
+    -- EnableMouse/Show on the real bars -- a mouse-enabled bar would steal
+    -- mouseover focus from frames beneath it. Eligibility comes from the
+    -- flags UpdateVisibility maintains, so hover only reveals a bar whose
+    -- evaluation currently lands on "mouseover".
+    if EllesmereUI.RegisterMouseoverTarget then
+        local function RegisterBarHover(barKey, frameGetter)
+            local proxy = {}
+            proxy.GetRect = function()
+                local f = frameGetter()
+                if f then return f:GetRect() end
+                return nil
+            end
+            proxy.GetEffectiveScale = function()
+                local f = frameGetter()
+                return f and f:GetEffectiveScale() or 1
+            end
+            proxy.SetAlpha = function() end
+            proxy.EnableMouse = function() end
+            proxy.Show = function()
+                local f = frameGetter()
+                if f then EllesmereUI.SetElementVisibility(f, true) end
+            end
+            proxy.Hide = function()
+                local f = frameGetter()
+                if f then EllesmereUI.SetElementVisibility(f, false) end
+            end
+            EllesmereUI.RegisterMouseoverTarget(proxy, function()
+                return ERB._moEligible and ERB._moEligible[barKey] or false
+            end)
+        end
+        RegisterBarHover("health", function() return healthBar end)
+        RegisterBarHover("primary", function() return primaryBar end)
+        RegisterBarHover("secondary", function() return secondaryFrame end)
+    end
     eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
     eventFrame:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", "player")

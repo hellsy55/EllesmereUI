@@ -1078,6 +1078,15 @@ local function SyncPresentBuffOrderToBlizzard(order, present, entries)
     return synced
 end
 
+--- Dirty flag gating the reconcile in the hot reanchor path: the tracked
+--- CATALOG (viewer pool incl. inactive + diversions) only changes on rebuilds
+--- and repopulate, not when buffs merely appear/disappear -- so combat
+--- reanchors skip the full enumeration/sorts. Set true wherever composition
+--- can change (FullCDMRebuild wrapper, RepopulateFromBlizzard); an unreconciled
+--- newcomer still renders correctly via the layoutIndex spillover fallback
+--- until the next rebuild. Starts true for the login seed pass.
+ns._cdmBuffOrderDirty = true
+
 --- Keep stored buffDisplayOrder across talent/spec gaps, seed on first stable
 --- pass, and insert newly-tracked buffs by Blizzard layoutIndex (not at tail).
 function ns.ReconcileBuffDisplayOrder()
@@ -1166,6 +1175,13 @@ function ns.ResolveBuffDisplaySortIndex(entry, buffOrder, isDefaultBuffs)
     if isDefaultBuffs then
         local cd = entry.frame and entry.frame.cooldownID
         local sid = entry.spellID
+        -- Steady state: the stable key matches directly -- O(1), zero
+        -- allocations. The variant scan below walks every stored key and can
+        -- call GetCooldownViewerCooldownInfo (allocates) per miss, so it is
+        -- reserved for genuine talent-gap frames whose cooldownID drifted.
+        local stable = BuffDisplayStableKey(sid, cd)
+        local direct = stable and buffOrder[stable]
+        if direct then return direct end
         for key, idx in pairs(buffOrder) do
             if BuffOrderKeyMatchesEntry(key, sid, cd, entry.frame) then return idx end
         end
@@ -1732,6 +1748,12 @@ function ns.RemoveCDMBar(key)
             cdmBarIcons[key] = nil
             p.cdmBarPositions[key] = nil
             table.remove(p.cdmBars.bars, i)
+            -- Bar deletion shifts every later bar's array index: captured
+            -- override paths into cdmBars.bars would now point at the WRONG
+            -- bars. Drop them all (users re-capture) -- honest beats corrupt.
+            if EllesmereUI.SpecOverrides_OnCDMBarsRestructured then
+                EllesmereUI.SpecOverrides_OnCDMBarsRestructured()
+            end
 
             -- Custom bar deletion: free all spells (don't ghost them). Delete
             -- the bar's spell data from every spec of the ACTIVE profile only.

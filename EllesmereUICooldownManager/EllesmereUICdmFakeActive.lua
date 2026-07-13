@@ -836,6 +836,13 @@ end
 -- Re-arm on every CDM full rebuild, kept out of the (large) rebuild function.
 local _origFullCDMRebuild = ns.FullCDMRebuild
 ns.FullCDMRebuild = function(reason)
+    -- Rebuilds read transient cooldown states while re-rendering; open the
+    -- sound settle window first so re-primes can't false-arm ready sounds.
+    if ns._cdmBumpSoundSettle then ns._cdmBumpSoundSettle() end
+    -- Rebuilds are also the moments the tracked buff catalog can change
+    -- (talents/spec/settings) -- let the next reanchor reconcile the buff
+    -- display order.
+    ns._cdmBuffOrderDirty = true
     if _origFullCDMRebuild then _origFullCDMRebuild(reason) end
     ns.FakeActive_Rearm()
 end

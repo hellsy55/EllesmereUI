@@ -117,19 +117,9 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
           setValue = function(v)
               TeleCfg().enabled = v
               EllesmereUI:RefreshPage()
-              if v then
-                  -- Enabling registers events and builds the popup at login.
-                  EllesmereUI:ShowConfirmPopup({
-                      title = "Reload Required",
-                      message = "Enabling the LFG Reminder requires a reload to take effect.",
-                      confirmText = "Reload",
-                      cancelText = "Later",
-                      onConfirm = function() ReloadUI() end,
-                  })
-              elseif _G._EUI_HideTeleportPrompt then
-                  -- Disabling is immediate: hide any shown popup now.
-                  _G._EUI_HideTeleportPrompt()
-              end
+              -- Applies live in both directions: enable builds the popup and
+              -- registers events, disable hides and unregisters.
+              if _G._EUI_ApplyTeleportPrompt then _G._EUI_ApplyTeleportPrompt() end
           end },
         { type    = "slider",
           text    = "Window Scale",

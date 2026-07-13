@@ -1170,9 +1170,11 @@ initFrame:SetScript("OnEvent", function(self)
         s.combatShowEnabled = (v == "in_combat")
     end
 
-    local function CopyVisibilitySettings(dst, src)
+    local function CopyVisibilitySettings(dst, src, dstKey)
         if VisibilityCompat then
-            VisibilityCompat.Copy(dst, src)
+            -- Pet Bar structurally ignores group modes: strip them from a
+            -- copied multi-selection so its stored set stays honest.
+            VisibilityCompat.Copy(dst, src, dstKey == "PetBar")
             return
         end
 
@@ -1209,17 +1211,23 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Shared visibility row: left vis dropdown + right "Visibility Options" checkbox dropdown
         local function BuildVisRow(barKey, leftLabel, disabledFn, disTip)
-            local visRow, visH = W:DualRow(parent, y,
-                { type="dropdown", text=leftLabel,
-                  values=EllesmereUI.VIS_VALUES, order=EllesmereUI.VIS_ORDER,
-                  disabled=disabledFn, disabledTooltip=disTip, rawTooltip=disTip and true or nil,
-                  getValue=function() return GetVisibilityKey(EAB.db.profile.bars[barKey]) end,
-                  setValue=function(v)
-                      ApplyVisibilityKey(EAB.db.profile.bars[barKey], v)
+            local visRow, visH = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+                { getStore = function()
+                      local s = EAB.db.profile.bars[barKey]
+                      -- Normalize first: extra-bar defaults may carry only
+                      -- the legacy booleans with no barVisibility key yet.
+                      if s then GetVisibilityKey(s) end
+                      return s
+                  end,
+                  legacyKey = "barVisibility",
+                  label = leftLabel,
+                  caps = { partyIncludesRaid = true, luaDragonriding = true },
+                  applyScalarFn = function(s, mode) ApplyVisibilityKey(s, mode) end,
+                  disabledFn = disabledFn, disabledTooltip = disTip, rawTooltip = disTip and true or nil,
+                  onChanged = function()
                       EAB:RefreshRuntimeVisibility()
                       EAB:RefreshMouseover()
                       EAB:ApplyCombatVisibility()
-                      EllesmereUI:RefreshPage()
                   end },
                 { type="dropdown", text="Visibility Options",
                   values={ __placeholder = "..." }, order={ "__placeholder" },
@@ -1612,22 +1620,40 @@ initFrame:SetScript("OnEvent", function(self)
                 _visBlizzDis = function() return EAB.db.profile.useBlizzardDataBars end
             end
 
+            -- Pet Bar structurally cannot express group modes: lock them
+            -- with an explanation instead of offering silent no-ops.
+            local visCaps = { partyIncludesRaid = true }
+            if SelectedKey() == "PetBar" then
+                visCaps.noGroupModes = true
+                visCaps.lockedTooltips = {
+                    in_raid  = "The Pet Bar cannot use group-based visibility.",
+                    in_party = "The Pet Bar cannot use group-based visibility.",
+                    solo     = "The Pet Bar cannot use group-based visibility.",
+                }
+            end
+            -- Data bars evaluate in Lua (non-secure), so their dragonriding
+            -- items depend on the gliding edge event; the secure bars'
+            -- drivers re-evaluate natively and never lock.
+            if IsDataBar() then visCaps.luaDragonriding = true end
+
             local visRow1
-            visRow1, h = W:DualRow(parent, y,
-                { type="dropdown", text="Visibility",
-                  values=EllesmereUI.VIS_VALUES_AB, order=EllesmereUI.VIS_ORDER_AB,
-                  disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil, rawTooltip=true,
-                  getValue=function()
-                      return GetVisibilityKey(SB())
+            visRow1, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+                { getStore = function()
+                      local s = SB()
+                      GetVisibilityKey(s)
+                      return s
                   end,
-                  setValue=function(v)
-                      ApplyVisibilityKey(SB(), v)
+                  legacyKey = "barVisibility",
+                  caps = visCaps,
+                  applyScalarFn = function(s, mode) ApplyVisibilityKey(s, mode) end,
+                  disabledFn = _visBlizzDis, disabledTooltip = _visBlizzDis and _VIS_BLIZZ_TIP or nil,
+                  rawTooltip = true,
+                  onChanged = function()
                       if EAB.ClearVisToggleOverride then EAB:ClearVisToggleOverride(SelectedKey()) end
                       if EAB.RebuildVisToggleBindings then EAB:RebuildVisToggleBindings() end
                       EAB:RefreshRuntimeVisibility()
                       EAB:RefreshMouseover()
                       EAB:ApplyCombatVisibility()
-                      EllesmereUI:RefreshPage()
                   end },
                 { type="dropdown", text="Visibility Options",
                   values={ __placeholder = "..." }, order={ "__placeholder" },
@@ -1663,7 +1689,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local src = SB()
                         for _, key in ipairs(GROUP_BAR_ORDER) do
                             local dst = EAB.db.profile.bars[key]
-                            CopyVisibilitySettings(dst, src)
+                            CopyVisibilitySettings(dst, src, key)
                         end
                         EAB:RefreshRuntimeVisibility()
                         EAB:RefreshMouseover()
@@ -1671,9 +1697,9 @@ initFrame:SetScript("OnEvent", function(self)
                         EllesmereUI:RefreshPage()
                     end,
                     isSynced = function()
-                        local v = SB().barVisibility or "always"
+                        local src = SB()
                         for _, key in ipairs(GROUP_BAR_ORDER) do
-                            if (EAB.db.profile.bars[key].barVisibility or "always") ~= v then return false end
+                            if not EllesmereUI.VisSelectionEquals(src, "barVisibility", EAB.db.profile.bars[key], "barVisibility") then return false end
                         end
                         return true
                     end,
@@ -1686,7 +1712,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local src = SB()
                             for _, key in ipairs(checkedKeys) do
                                 local dst = EAB.db.profile.bars[key]
-                                CopyVisibilitySettings(dst, src)
+                                CopyVisibilitySettings(dst, src, key)
                             end
                             EAB:RefreshRuntimeVisibility()
                             EAB:RefreshMouseover()

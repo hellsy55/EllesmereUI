@@ -3036,7 +3036,7 @@ local function RegisterUnlockElements()
             end,
             linkedDimensions = true,
             setWidth = function(_, newW)
-                if not EllesmereUI._unlockActive then return end
+                if not EllesmereUI._unlockActive and not EllesmereUI._unlockLayerApplying then return end
                 local p = db.profile.display
                 local spacing = p.iconSpacing or 8
                 local count = max(#activeIcons, 2)
@@ -3046,7 +3046,7 @@ local function RegisterUnlockElements()
                 if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
             end,
             setHeight = function(_, newH)
-                if not EllesmereUI._unlockActive then return end
+                if not EllesmereUI._unlockActive and not EllesmereUI._unlockLayerApplying then return end
                 local p = db.profile.display
                 local textH = 0
                 if p.showText then
