@@ -1507,36 +1507,60 @@ local function DecorateFrame(frame, barData)
     fd.bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
         barData.bgB or 0.08, barData.bgA or 0.6)
 
-    if not fd.borderFrame then
-        local bf = CreateFrame("Frame", nil, frame)
-        bf:SetAllPoints(frame)
-        fd.borderFrame = bf
-    end
-    local textureKey = barData.borderTexture or "solid"
-    EllesmereUI.ApplyBorderStyle(fd.borderFrame,
-        barData.borderSize or 1,
-        barData.borderR or 0, barData.borderG or 0,
-        barData.borderB or 0, barData.borderA or 1,
-        textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
-        barData.borderTextureShiftX, barData.borderTextureShiftY,
-        "cdm", barData.borderThickness or "thin")
-    -- ApplyBorderStyle above always paints the bar's BASE color. If this
-    -- spell's active-state tint is currently engaged (ns.ApplyActiveOverlays
-    -- drives fd._activeBorderOn independently of DecorateFrame, via Blizzard's
-    -- own SetSwipeColor callback), re-assert it immediately so a reanchor
-    -- firing mid-proc doesn't flash the border back to its base color.
-    if fd._activeBorderOn and EllesmereUI.SetBorderStyleColor then
-        local fcA = _ecmeFC[frame]
-        local sidA, bkA = fcA and fcA.spellID, fcA and fcA.barKey
-        local ss = sidA and ResolveSpellSettings(frame, sidA, ns.GetBarSpellData(bkA))
-        local abR = (ss and ss.activeBorderR) or 1
-        local abG = (ss and ss.activeBorderG) or 0.776
-        local abB = (ss and ss.activeBorderB) or 0.376
-        local abA = (ss and ss.activeBorderA) or 1
-        EllesmereUI.SetBorderStyleColor(fd.borderFrame, abR, abG, abB, abA)
+    -- Custom-shape bars own their border: ApplyShapeToCDMIcon draws the ring
+    -- on the shapeBorder texture and hides the square border. Re-applying the
+    -- square style here would force it back on top of the shaped icon on every
+    -- reanchor whose icon set did NOT change (no shape re-apply follows those
+    -- passes), so keep it hidden instead. Newly (re)claimed frames always land
+    -- in an iconsChanged refresh, which re-applies the shape with current
+    -- settings. The active-state tint on shaped icons rides shapeBorder
+    -- (ApplyActiveOverlays), never the square border, so both re-asserts below
+    -- are square-only.
+    local shapeKey = barData.iconShape
+    if shapeKey and shapeKey ~= "none" and shapeKey ~= "cropped" then
+        if fd.borderFrame then
+            EllesmereUI.PP.HideBorder(fd.borderFrame)
+            local bdFrame = EllesmereUI._bdBorderData and EllesmereUI._bdBorderData[fd.borderFrame]
+            if bdFrame then bdFrame:Hide() end
+        end
+    else
+        if not fd.borderFrame then
+            local bf = CreateFrame("Frame", nil, frame)
+            bf:SetAllPoints(frame)
+            fd.borderFrame = bf
+        end
+        local brdR, brdG, brdB = barData.borderR or 0, barData.borderG or 0, barData.borderB or 0
+        if barData.borderClassColor then
+            local cc = _playerClass and RAID_CLASS_COLORS[_playerClass]
+            if cc then brdR, brdG, brdB = cc.r, cc.g, cc.b end
+        end
+        local textureKey = barData.borderTexture or "solid"
+        EllesmereUI.ApplyBorderStyle(fd.borderFrame,
+            barData.borderSize or 1,
+            brdR, brdG, brdB, barData.borderA or 1,
+            textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
+            barData.borderTextureShiftX, barData.borderTextureShiftY,
+            "cdm", barData.borderThickness or "thin")
+        -- ApplyBorderStyle above always paints the bar's BASE color. If this
+        -- spell's active-state tint is currently engaged (ns.ApplyActiveOverlays
+        -- drives fd._activeBorderOn independently of DecorateFrame, via Blizzard's
+        -- own SetSwipeColor callback), re-assert it immediately so a reanchor
+        -- firing mid-proc doesn't flash the border back to its base color.
+        if fd._activeBorderOn and EllesmereUI.SetBorderStyleColor then
+            local fcA = _ecmeFC[frame]
+            local sidA, bkA = fcA and fcA.spellID, fcA and fcA.barKey
+            local ss = sidA and ResolveSpellSettings(frame, sidA, ns.GetBarSpellData(bkA))
+            local abR = (ss and ss.activeBorderR) or 1
+            local abG = (ss and ss.activeBorderG) or 0.776
+            local abB = (ss and ss.activeBorderB) or 0.376
+            local abA = (ss and ss.activeBorderA) or 1
+            EllesmereUI.SetBorderStyleColor(fd.borderFrame, abR, abG, abB, abA)
+        end
     end
     -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
-    fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
+    if fd.borderFrame then
+        fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
+    end
     if fd.glowOverlay then fd.glowOverlay:SetFrameLevel(baseLvl + 16) end
     if fd.textOverlay then fd.textOverlay:SetFrameLevel(baseLvl + 23) end
 

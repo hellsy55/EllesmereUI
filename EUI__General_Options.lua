@@ -406,7 +406,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.4.4",
+        version = "8.4.5",
         heroes = {
             {
                 module = "Profiles & Presets",

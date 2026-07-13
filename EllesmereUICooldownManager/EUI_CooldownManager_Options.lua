@@ -13247,17 +13247,42 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     if dragMode == "swap" then
                         if insertIdx ~= dragIdx then
-                            if isDefBuffs then ns.SwapBuffDisplayOrder(dragIdx, insertIdx)
-                            else ns.SwapTrackedSpells(bd.key, BuffDataIdx(dragIdx), BuffDataIdx(insertIdx)) end
-                            didChange = true
+                            if isDefBuffs then
+                                -- Slot -> stable-key translation: buffDisplayOrder
+                                -- keeps absent (talent-gapped) keys in place, so
+                                -- slot indices cannot address it directly.
+                                local sk = pf._buffSlotKeys
+                                if sk and ns.SwapBuffDisplayKeys
+                                   and ns.SwapBuffDisplayKeys(sk[dragIdx], sk[insertIdx]) then
+                                    didChange = true
+                                end
+                            else
+                                ns.SwapTrackedSpells(bd.key, BuffDataIdx(dragIdx), BuffDataIdx(insertIdx))
+                                didChange = true
+                            end
                         end
                     else
                         local toIdx = insertIdx
                         if toIdx > dragIdx then toIdx = toIdx - 1 end
                         if toIdx ~= dragIdx then
-                            if isDefBuffs then ns.MoveBuffDisplayOrder(dragIdx, toIdx)
-                            else ns.MoveTrackedSpell(bd.key, BuffDataIdx(dragIdx), BuffDataIdx(toIdx)) end
-                            didChange = true
+                            if isDefBuffs then
+                                local sk = pf._buffSlotKeys
+                                if sk and ns.MoveBuffDisplayKey then
+                                    -- Final rendered position toIdx = insert before
+                                    -- the key at toIdx among the OTHER rendered keys
+                                    -- (nil past the end = append after everything).
+                                    local rk, n = {}, 0
+                                    for i = 1, #sk do
+                                        if i ~= dragIdx then n = n + 1; rk[n] = sk[i] end
+                                    end
+                                    if ns.MoveBuffDisplayKey(sk[dragIdx], rk[toIdx]) then
+                                        didChange = true
+                                    end
+                                end
+                            else
+                                ns.MoveTrackedSpell(bd.key, BuffDataIdx(dragIdx), BuffDataIdx(toIdx))
+                                didChange = true
+                            end
                         end
                     end
 
@@ -13338,11 +13363,11 @@ initFrame:SetScript("OnEvent", function(self)
                 local sdDrag = ns.GetBarSpellData(bd.key)
                 local si = self._slotIdx
                 if bd.key == "buffs" then
-                    -- Default bar: order lives in buffDisplayOrder (seeded on drop).
-                    -- A slot is draggable if it shows a spell (_previewSpellID set)
-                    -- or already maps to a stored order entry.
-                    local order = sdDrag and sdDrag.buffDisplayOrder
-                    if not self._previewSpellID and not (order and order[si]) then return end
+                    -- Default bar: a slot is draggable if it renders a buff
+                    -- (_previewSpellID / a rendered stable key). buffDisplayOrder
+                    -- is NOT indexed by slot -- it keeps absent keys in place.
+                    if not self._previewSpellID
+                       and not (pf._buffSlotKeys and pf._buffSlotKeys[si]) then return end
                 else
                     local t = sdDrag and sdDrag.assignedSpells or {}
                     local di = BuffDataIdx(si)
@@ -13398,7 +13423,9 @@ initFrame:SetScript("OnEvent", function(self)
                     if tBd then
                         local sdT = ns.GetBarSpellData(tBd.key)
                         if tBd.key == "buffs" then
-                            if sdT and sdT.buffDisplayOrder then tCount = #sdT.buffDisplayOrder end
+                            -- Rendered slot count, NOT #buffDisplayOrder: the stored
+                            -- order keeps absent keys and can exceed what is shown.
+                            if pf._buffSlotKeys then tCount = #pf._buffSlotKeys end
                         elseif sdT and sdT.assignedSpells then
                             tCount = #sdT.assignedSpells
                         end
@@ -13670,6 +13697,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- stable spellID, never the live aura GetSpellID (secret/variant-drift).
             local trackedCd
             pf._buffDispGroups = nil
+            pf._buffSlotKeys = nil
             if bd.key == "buffs" then
                 if ns.ReconcileBuffDisplayOrder then ns.ReconcileBuffDisplayOrder() end
                 local entries = ns.CollectDefaultBuffTrackEntries
@@ -13686,13 +13714,19 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     for _, e in ipairs(entries) do finalKeys[#finalKeys + 1] = e.key end
                 end
+                -- Rendered slot i <-> stable key map for the drag/reorder code:
+                -- absent (talent-gapped) keys stay in buffDisplayOrder but render
+                -- no slot, so slot indices cannot address the array directly.
+                local slotKeys = {}
                 for _, key in ipairs(finalKeys) do
                     local e = byKey[key]
                     if e then
                         tracked[#tracked + 1] = e.sid
                         trackedCd[#tracked] = e.cdID
+                        slotKeys[#tracked] = key
                     end
                 end
+                pf._buffSlotKeys = slotKeys
                 local snap = {}
                 for i = 1, #finalKeys do snap[i] = finalKeys[i] end
                 pf._buffTrackedOrder = snap

@@ -358,6 +358,19 @@ function ns.RemoveSpellFromBar(barKey, spellID)
             if primaryID == removed then sd.customSpellGroups[variantID] = nil end
         end
     end
+    -- Default buffs bar: scrub the removed custom buff's stable order key.
+    -- Absent keys are otherwise kept forever as gaps (the talent-swap feature),
+    -- but a user-removed custom buff never returns to fill its gap -- and the
+    -- accumulated orphans desync the preview's rendered slots from the array.
+    -- Blizzard-tracked buffs key as "c"..cooldownID and are unaffected.
+    if barKey == "buffs" and type(removed) == "number" and removed > 0
+       and type(sd.buffDisplayOrder) == "table" then
+        local t = sd.buffDisplayOrder
+        local skey = "s" .. removed
+        for i = #t, 1, -1 do
+            if t[i] == skey then table.remove(t, i) end
+        end
+    end
     -- Hosted-buff bookkeeping. Removing the MARKER (or a legacy plain entry
     -- that represents the buff: flag set, no marker in the list) un-hosts the
     -- buff. Without this, the flag is orphaned and the options self-heal
@@ -1203,38 +1216,56 @@ end
 --- array of STABLE keys ("c"..cooldownID for Blizzard buffs, "s"..spellID for
 --- customs) that only the sort + preview + drag read -- routing never touches it.
 --- cooldownID is used (not the canonical spellID) because a buff's canonical id
---- flips between ability/aura form across active<->inactive. The array is always
---- the full visible set (seeded + reconciled by the options preview build), so
---- reorders are plain index ops with no zero-padding and no route-map rebuild.
-function ns.SwapBuffDisplayOrder(idx1, idx2)
-    local sd = ns.GetBarSpellData("buffs")
-    local t = sd and sd.buffDisplayOrder
-    if not t then return false end
-    if idx1 < 1 or idx2 < 1 or idx1 > #t or idx2 > #t then return false end
-    t[idx1], t[idx2] = t[idx2], t[idx1]
+--- flips between ability/aura form across active<->inactive.
+---
+--- KEY-BASED, not index-based: the stored array keeps ABSENT keys in their
+--- slots (talent-gapped buffs reclaim their position on return), while the
+--- preview renders only PRESENT keys -- so a preview slot index does not map
+--- 1:1 onto the array whenever any gap precedes it. Callers pass the stable
+--- keys of the rendered slots (pf._buffSlotKeys); positions are resolved
+--- against the live array at call time.
+local function BuffOrderIndexOf(t, key)
+    for i = 1, #t do
+        if t[i] == key then return i end
+    end
+    return nil
+end
+
+local function FinishBuffOrderWrite(sd)
     sd._buffDisplayOrderUserModified = true
     ns._spellOrderDirty = true
     local frame = cdmBarFrames["buffs"]
     if frame then frame._blizzCache = nil end
     if ns.QueueReanchor then ns.QueueReanchor() end
+end
+
+function ns.SwapBuffDisplayKeys(key1, key2)
+    if not key1 or not key2 or key1 == key2 then return false end
+    local sd = ns.GetBarSpellData("buffs")
+    local t = sd and sd.buffDisplayOrder
+    if not t then return false end
+    local i1, i2 = BuffOrderIndexOf(t, key1), BuffOrderIndexOf(t, key2)
+    if not i1 or not i2 then return false end
+    t[i1], t[i2] = t[i2], t[i1]
+    FinishBuffOrderWrite(sd)
     return true
 end
 
-function ns.MoveBuffDisplayOrder(fromIdx, toIdx)
-    if fromIdx == toIdx then return false end
+--- Move dragKey so it renders immediately before beforeKey; nil beforeKey
+--- appends after everything (drop past the last rendered slot).
+function ns.MoveBuffDisplayKey(dragKey, beforeKey)
+    if not dragKey or dragKey == beforeKey then return false end
     local sd = ns.GetBarSpellData("buffs")
     local t = sd and sd.buffDisplayOrder
     if not t then return false end
-    if fromIdx < 1 or fromIdx > #t then return false end
-    if toIdx < 1 then toIdx = 1 end
-    if toIdx > #t then toIdx = #t end
-    local val = table.remove(t, fromIdx)
-    table.insert(t, toIdx, val)
-    sd._buffDisplayOrderUserModified = true
-    ns._spellOrderDirty = true
-    local frame = cdmBarFrames["buffs"]
-    if frame then frame._blizzCache = nil end
-    if ns.QueueReanchor then ns.QueueReanchor() end
+    local from = BuffOrderIndexOf(t, dragKey)
+    if not from then return false end
+    local val = table.remove(t, from)
+    local to
+    if beforeKey then to = BuffOrderIndexOf(t, beforeKey) end
+    if not to then to = #t + 1 end
+    table.insert(t, to, val)
+    FinishBuffOrderWrite(sd)
     return true
 end
 
