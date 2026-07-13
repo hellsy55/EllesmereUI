@@ -82,19 +82,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
         -- Visibility | Visibility Options
-        local dmVisValues = {}
-        local dmVisOrder = {}
-        for _, key in ipairs(EllesmereUI.VIS_ORDER) do
-            dmVisValues[key] = EllesmereUI.VIS_VALUES[key]
-            dmVisOrder[#dmVisOrder + 1] = key
-        end
         local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Visibility",
-              values = dmVisValues,
-              order  = dmVisOrder,
-              getValue=function() return Cfg("visibility") or "always" end,
-              setValue=function(v) Set("visibility", v); if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end end },
+        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+            { getStore = DB, legacyKey = "visibility",
+              caps = { partyIncludesRaid = false, luaDragonriding = true },
+              onChanged = function()
+                  if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end
+              end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
@@ -1752,11 +1746,21 @@ initFrame:SetScript("OnEvent", function(self)
         searchTerms = "damage meters dps hps healing interrupts dispels spell history",
         pages       = { "Damage Meters", PAGE_SH },
         buildPage   = function(pageName, p, yOffset)
-            ns._optionsOpen = true
-            if ns.ShowSATimerPreview and Cfg("standaloneTimer") then ns.ShowSATimerPreview() end
-            if ns.ApplySpellHistory then ns.ApplySpellHistory() end
-            for _, w in ipairs(ns._windows or {}) do
-                if w.frame then w.frame:SetAlpha(1); w.frame:EnableMouse(true); w.frame:Show() end
+            -- This unconditionally forces every real damage-meter window
+            -- (ns._windows, parented to UIParent) and the standalone timer
+            -- preview live and mouse-interactive on screen -- not scoped to
+            -- `p`/the hidden pre-build wrapper at all. During an off-screen
+            -- search pre-build this would pop the player's real meter windows
+            -- onto the screen with no interaction. Skip it; BuildPage/
+            -- BuildSpellHistoryPage build purely onto `p`, so still index
+            -- normally during the hidden pass.
+            if not EllesmereUI._prebuilding then
+                ns._optionsOpen = true
+                if ns.ShowSATimerPreview and Cfg("standaloneTimer") then ns.ShowSATimerPreview() end
+                if ns.ApplySpellHistory then ns.ApplySpellHistory() end
+                for _, w in ipairs(ns._windows or {}) do
+                    if w.frame then w.frame:SetAlpha(1); w.frame:EnableMouse(true); w.frame:Show() end
+                end
             end
             if pageName == PAGE_SH then
                 return BuildSpellHistoryPage(pageName, p, yOffset)

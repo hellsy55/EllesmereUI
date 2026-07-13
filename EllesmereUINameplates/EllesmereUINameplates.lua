@@ -137,7 +137,7 @@ function ns._appendDisplayPresetKeys(t)
         "buffDurationTextSize", "buffDurationTextX", "buffDurationTextY", "buffDurationTextColor",
         "ccDurationTextSize", "ccDurationTextX", "ccDurationTextY", "ccDurationTextColor",
         "buffTextSize", "buffTextColor", "ccTextSize", "ccTextColor",
-        "raidMarkerPos", "classificationSlot",
+        "raidMarkerPos", "classificationSlot", "classificationShowInInstances",
         "castNameSize", "castNameColor", "castTargetSize", "castTargetClassColor", "castTargetColor",
         "showCastTimer", "castTimerSize", "castTimerColor", "targetScale",
         "castNameSide", "castTargetSide", "castTimerSide",
@@ -194,6 +194,12 @@ local defaults = {
     -- Mini Coloring M+ Only: on = restrict the Mini Enemies color to 5-man
     -- dungeons; off = apply it everywhere (default; see GetReactionColor).
     miniColoringMPlusOnly = false,
+    -- Open World Basic Coloring (inline cog on Enemy Types): off by default.
+    -- On: outside instances, the mob-type special colors (Mini Enemies,
+    -- Spell Casters, Mini-Bosses, Bosses) collapse into the single flat
+    -- owBasicColor; Neutral keeps its own color (see GetReactionColor).
+    owBasicColoring = false,
+    owBasicColor = { r = 0.800, g = 0.137, b = 0.137 },
     darkenEnemiesOOC = true,
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
@@ -338,6 +344,9 @@ local defaults = {
     raidMarkerPos = "topright",
     raidMarkerSize = 24,
     classificationSlot = "topleft",
+    -- Rare/Quest Indicator "Show In Instances" (slot cog): lifts the
+    -- open-world-only gates in UpdateClassification + IsQuestMob.
+    classificationShowInInstances = false,
     rareEliteIconSize = 20,
     castBarHeight = 17,
     castBarOffsetY = 0,
@@ -4522,6 +4531,10 @@ local function RefreshThreatCache()
     -- instanceType "party"; excludes raids/delves/open world). Cached here so the
     -- per-plate color path costs one field read, not a GetInstanceInfo call.
     ns._inDungeon = (instanceType == "party")
+    -- Any-instance flag for Open World Basic Coloring (dungeons, raids, delves,
+    -- scenarios, arenas, battlegrounds all count as instanced; only true open
+    -- world is "none").
+    ns._inInstance = (instanceType ~= nil and instanceType ~= "none")
     if difficultyID == 0
     or (C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap()) then
         _inThreatContent = false
@@ -4566,10 +4579,17 @@ end
 local function IsQuestMob(unit)
     if not C_TooltipInfo or not QUEST_LINE_TYPES then return false end
     if questMobCache[unit] ~= nil then return questMobCache[unit] end
-    -- Skip inside instances quest mobs are open-world only
+    -- Quest mobs are open-world only, unless the indicator's "Show In
+    -- Instances" opt-in lifts the gate (safe: every tooltip-line read below
+    -- is pcall'd and escape values are issecretvalue-verified, so instanced
+    -- combat cannot leak or error on secret text).
     if InRealInstancedContent() then
-        questMobCache[unit] = false
-        return false
+        local show = p and p.classificationShowInInstances
+        if show == nil then show = defaults.classificationShowInInstances end
+        if not show then
+            questMobCache[unit] = false
+            return false
+        end
     end
     local info = C_TooltipInfo.GetUnit(unit)
     if not info then
@@ -4817,14 +4837,26 @@ local function GetReactionColor(unit)
     -- still returned at their own priority steps (7, 8, 10b) further down.
     local inCombat = UnitAffectingCombat(unit)
     local classification = UnitClassification(unit)
+    -- Open World Basic Coloring (inline cog on Enemy Types): outside instances,
+    -- collapse the mob-type special colors (Mini Enemies, Spell Casters,
+    -- Mini-Bosses, Bosses) into the single flat owBasicColor at the enemy
+    -- fallback (step 11). Neutral is unaffected: outside dungeons it already
+    -- returned at step 5. Off by default -- when off (or in any instance)
+    -- every step below behaves exactly as before.
+    local owBasic = false
+    if not ns._inInstance then
+        owBasic = defaults.owBasicColoring
+        if db.owBasicColoring ~= nil then owBasic = db.owBasicColoring end
+    end
     -- Mini Enemies color scope: restricted to 5-man dungeons when "Mini Coloring
     -- M+ Only" is on (default), applied everywhere when it is off.
     local miniMPlusOnly = defaults.miniColoringMPlusOnly
     if db.miniColoringMPlusOnly ~= nil then miniMPlusOnly = db.miniColoringMPlusOnly end
-    local miniColorScope = ns._inDungeon or not miniMPlusOnly
+    local miniColorScope = not owBasic and (ns._inDungeon or not miniMPlusOnly)
     local _isBossUnit = false  -- deferred: boss color is applied at step 10b
     local _isMiniBoss = false
-    if classification == "elite" or classification == "worldboss" or classification == "rareelite" then
+    if not owBasic
+       and (classification == "elite" or classification == "worldboss" or classification == "rareelite") then
         -- Effective level (handles level scaling / Chromie time), not raw level.
         local level = UnitEffectiveLevel(unit)
         local playerLevel = UnitEffectiveLevel("player")
@@ -4848,7 +4880,7 @@ local function GetReactionColor(unit)
         end
     end
     local unitClass = UnitClassBase and UnitClassBase(unit)
-    local _isCaster = (unitClass == "PALADIN")
+    local _isCaster = not owBasic and (unitClass == "PALADIN")
     -- DPS/healer No Aggro override state (mirrors the tank has-aggro overrides at
     -- 6b). Each override independently promotes the No Aggro color above a single
     -- mob-type step (mini-boss step 7, caster step 8). Only active for a non-tank
@@ -4997,8 +5029,10 @@ local function GetReactionColor(unit)
     if isNeutral then
         return ResolveNeutralColor(unit)
     end
-    -- 11. Fallback: enemy in combat / out of combat
-    local eic = _C("enemyInCombat")
+    -- 11. Fallback: enemy in combat / out of combat. With Open World Basic
+    -- Coloring active, every mob-type special above was suppressed, so all
+    -- hostile mobs land here and share the flat "All Enemies" color.
+    local eic = _C(owBasic and "owBasicColor" or "enemyInCombat")
     return MaybeDarken(eic.r, eic.g, eic.b, inCombat)
 end
 local hookedUFs = {}
@@ -6310,6 +6344,13 @@ function NameplateFrame:UpdateClassification()
     local slot = GetClassificationSlot()
     local _, iType = GetInstanceInfo()
     local inInstance = (iType == "party" or iType == "raid" or iType == "pvp" or iType == "arena")
+    if inInstance then
+        -- "Show In Instances" (slot cog on the Rare/Quest Indicator) lifts
+        -- the open-world-only gate.
+        local show = p and p.classificationShowInInstances
+        if show == nil then show = defaults.classificationShowInInstances end
+        if show then inInstance = false end
+    end
     if slot == "none" or inInstance then
         self.classFrame:Hide()
         self:UpdateNameWidth()

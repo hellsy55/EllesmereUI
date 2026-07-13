@@ -1371,6 +1371,7 @@ EllesmereUI._sidebarGroupButtons = {}
 local activeModule, activePage
 local _lastPagePerModule = {}
 local modules = {}
+EllesmereUI._modules = modules -- read-only alias so other files (e.g. global search) can iterate registered modules
 local scrollTarget = 0
 local isSmoothing = false
 local smoothFrame
@@ -1388,6 +1389,21 @@ end
 EllesmereUI.RegisterWidgetRefresh = RegisterWidgetRefresh
 local function ClearWidgetRefreshList()
     for i = 1, #_widgetRefreshList do _widgetRefreshList[i] = nil end
+end
+
+-- Snapshot + restore the live refresh registry around off-screen widget
+-- construction (e.g. a search-index pre-build pass) so building a page
+-- nobody's looking at can never leak its widgets' refresh closures into
+-- the currently-displayed page's list.
+function EllesmereUI._SnapshotAndClearWidgetRefreshList()
+    local snap = {}
+    for i = 1, #_widgetRefreshList do snap[i] = _widgetRefreshList[i] end
+    ClearWidgetRefreshList()
+    return snap
+end
+function EllesmereUI._RestoreWidgetRefreshList(snap)
+    ClearWidgetRefreshList()
+    for i = 1, #snap do _widgetRefreshList[i] = snap[i] end
 end
 
 -- Hide all children/regions of a frame without orphaning them
@@ -1867,6 +1883,21 @@ do
             if _G._ERB_Apply then _G._ERB_Apply() end
             if _G._EAB_Apply then _G._EAB_Apply() end
             if _G._ECME_Apply then _G._ECME_Apply() end
+            -- Re-sync width/height matches (e.g. Dragon Riding's Width Match
+            -- to Cooldowns) against the new pixel grid. This is EllesmereUI's
+            -- own scale setter -- it calls UIParent:SetScale() directly, which
+            -- does NOT fire Blizzard's UI_SCALE_CHANGED (that's tied to the
+            -- CVar system), so a listener on that event never catches this
+            -- path. Debounced the same way: the Options slider can call this
+            -- repeatedly while being dragged, and re-matching on every single
+            -- call was itself causing a non-converging feedback loop.
+            if EllesmereUI.ApplyAllWidthHeightMatches then
+                if PP._scaleMatchDebounce then PP._scaleMatchDebounce:Cancel() end
+                PP._scaleMatchDebounce = C_Timer.NewTimer(0.3, function()
+                    PP._scaleMatchDebounce = nil
+                    EllesmereUI.ApplyAllWidthHeightMatches()
+                end)
+            end
         end
     end
 
@@ -3110,7 +3141,7 @@ end
 EllesmereUI.DEFAULT_DARK_MODE = {
     fillR = 0x11/255, fillG = 0x11/255, fillB = 0x11/255, fillA = 0.90,
     bgR   = 0x4f/255, bgG   = 0x4f/255, bgB   = 0x4f/255, bgA   = 1.0,
-    classDarken = 0, powerDarken = 0, resourceDarken = 0,
+    classDarken = 0, powerDarken = 0, resourceDarken = 0, powerBgDarken = 0,
 }
 
 -- The active profile's dark-mode table (lazily created, may be sparse -- callers
@@ -3159,6 +3190,7 @@ end
 EllesmereUI._colorCache = { class = {}, power = {}, classResource = {}, resource = {} }
 EllesmereUI._colorCacheDirty = true
 EllesmereUI._COLOR_WHITE = { r = 1, g = 1, b = 1 }
+EllesmereUI._powerBgDarkenFactor = 1
 
 function EllesmereUI.InvalidateColorCache()
     EllesmereUI._colorCacheDirty = true
@@ -3192,6 +3224,11 @@ function EllesmereUI._RebuildColorCache()
     EllesmereUI._BuildColorPalette(cache.power,          EllesmereUI.DEFAULT_POWER_COLORS,          cc and cc.power,          dm and dm.powerDarken)
     EllesmereUI._BuildColorPalette(cache.classResource,  EllesmereUI.DEFAULT_CLASS_RESOURCE_COLORS, cc and cc.classResource,  dm and dm.resourceDarken)
     EllesmereUI._BuildColorPalette(cache.resource,       EllesmereUI.DEFAULT_RESOURCE_COLORS,       cc and cc.resource,       dm and dm.resourceDarken)
+    -- BG Power Color Darken: extra blacken for power-COLORED bar backgrounds,
+    -- kept as a multiplier (not a palette) so it stacks on top of whatever
+    -- power color a consumer resolved (cache, engine alt color, fallback).
+    local bgd = (dm and dm.powerBgDarken) or 0
+    EllesmereUI._powerBgDarkenFactor = bgd > 0 and math.max(0, 1 - bgd / 100) or 1
     EllesmereUI._colorCacheDirty = false
 end
 
@@ -3753,6 +3790,14 @@ end
 function EllesmereUI.GetPowerColor(powerKey)
     if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
     return EllesmereUI._colorCache.power[powerKey]
+end
+
+-- Multiplier (0-1) for power-COLORED bar backgrounds (Dark Mode's "BG Power
+-- Color Darken"). Consumers multiply their already-resolved power color by
+-- this, so it stacks with Power Color Darken. 1 = identity (slider at 0).
+function EllesmereUI.GetPowerBgDarkenFactor()
+    if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
+    return EllesmereUI._powerBgDarkenFactor
 end
 
 -- Get resource color (cached, darken baked in). Returns nil for unknown keys.
@@ -4741,6 +4786,10 @@ function EllesmereUI.MakeUnlockElement(opts)
         linkedKeys    = opts.linkedKeys,
         noResize          = opts.noResize,
         linkedDimensions  = opts.linkedDimensions,
+        -- noInitHook: self-positioning element -- the centralized init loop
+        -- and the resize notification must not re-apply its stored position
+        -- (see ApplySavedPositions / NotifyElementResized in EUI_UnlockMode).
+        noInitHook        = opts.noInitHook,
         noAnchorTarget    = opts.noAnchorTarget,
         noAnchorTo        = opts.noAnchorTo,
         -- allowMatchSource: show the width/height MATCH buttons even when resize is
@@ -6239,6 +6288,7 @@ local function CreateMainFrame()
     --  Click area  (1300x946, centred)
     -----------------------------------------------------------------------
     clickArea = CreateFrame("Frame", "EllesmereUIClickArea", mainFrame)
+    EllesmereUI._clickArea = clickArea
     clickArea:SetSize(CLICK_W, CLICK_H)
     clickArea:SetPoint("CENTER", mainFrame, "CENTER", 0, 0)
     clickArea:SetFrameLevel(mainFrame:GetFrameLevel() + 1)
@@ -6391,6 +6441,17 @@ local function CreateMainFrame()
         end)
 
         EllesmereUI._unlockSidebarBtn = btn
+
+        -- One-time tutorial tip: a small play badge that opens the Unlock
+        -- Mode video guide, retiring forever once clicked. The VideoGuides
+        -- engine owns all gating (per-account seen map + the Enable Tutorial
+        -- Tips setting); nil-guarded for standalone builds.
+        if EllesmereUI.VideoGuides and EllesmereUI.VideoGuides.AttachTip then
+            EllesmereUI.VideoGuides.AttachTip(btn, "unlock_mode", {
+                tooltip = "Video Guide: Unlock Mode",
+                x = -12,
+            })
+        end
     end
 
     -------------------------------------------------------------------
@@ -6447,6 +6508,12 @@ local function CreateMainFrame()
         local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
         hlTex:SetAllPoints()
         btn:SetScript("OnEnter", function(self)
+            if self._ovLocked then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "This module can't be overridden. Exit the override editing session to open it.")
+                end
+                return
+            end
             hlTex:SetAlpha(0.06)
             if activeModule ~= self._folder then
                 self._hoverGlow:Show()
@@ -6455,6 +6522,8 @@ local function CreateMainFrame()
             end
         end)
         btn:SetScript("OnLeave", function(self)
+            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            if self._ovLocked then return end
             hlTex:SetAlpha(0)
             self._hoverGlow:Hide()
             self._hoverIndicator:Hide()
@@ -6463,6 +6532,7 @@ local function CreateMainFrame()
             end
         end)
         btn:SetScript("OnClick", function(self)
+            if self._ovLocked then return end
             if modules[self._folder] then
                 EllesmereUI:SelectModule(self._folder)
             end
@@ -6517,6 +6587,12 @@ local function CreateMainFrame()
         local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
         hlTex:SetAllPoints()
         btn:SetScript("OnEnter", function(self)
+            if self._ovLocked then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "This module can't be overridden. Exit the override editing session to open it.")
+                end
+                return
+            end
             hlTex:SetAlpha(0.06)
             if activeModule ~= self._folder then
                 self._hoverGlow:Show()
@@ -6525,6 +6601,8 @@ local function CreateMainFrame()
             end
         end)
         btn:SetScript("OnLeave", function(self)
+            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            if self._ovLocked then return end
             hlTex:SetAlpha(0)
             self._hoverGlow:Hide()
             self._hoverIndicator:Hide()
@@ -6533,10 +6611,55 @@ local function CreateMainFrame()
             end
         end)
         btn:SetScript("OnClick", function(self)
+            if self._ovLocked then return end
+            -- Opening Patch Notes consumes the new-patch reminder dot; it
+            -- re-arms only on the next version increase.
+            if EllesmereUIDB and EllesmereUIDB.patchDotPending then
+                EllesmereUIDB.patchDotPending = nil
+                if EllesmereUI._UpdatePatchDot then EllesmereUI._UpdatePatchDot() end
+            end
             if modules[self._folder] then
                 EllesmereUI:SelectModule(self._folder)
             end
         end)
+
+        -- Pulsing "new patch" reminder dot: shows while patchDotPending is
+        -- raised (version-increase stamp near EllesmereUI.VERSION) and the
+        -- user has not opted out via the Patch Notes page checkbox
+        -- (patchDotDisabled). Built lazily on first need.
+        local dot
+        EllesmereUI._UpdatePatchDot = function()
+            local show = EllesmereUIDB and EllesmereUIDB.patchDotPending
+                and not EllesmereUIDB.patchDotDisabled and true or false
+            if not dot then
+                if not show then return end
+                dot = CreateFrame("Frame", nil, btn)
+                dot:SetFrameLevel(btn:GetFrameLevel() + 5)
+                dot:SetSize(9, 9)
+                dot:SetPoint("RIGHT", btn, "RIGHT", -14, 0)
+                local t = dot:CreateTexture(nil, "OVERLAY")
+                t:SetAllPoints()
+                t:SetColorTexture(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
+                -- Round: run the solid color through the portrait circle mask.
+                local mask = dot:CreateMaskTexture()
+                mask:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",
+                    "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                mask:SetAllPoints(t)
+                t:AddMaskTexture(mask)
+                local ag = dot:CreateAnimationGroup()
+                ag:SetLooping("REPEAT")
+                local a1 = ag:CreateAnimation("Alpha")
+                a1:SetFromAlpha(1); a1:SetToAlpha(0.35)
+                a1:SetDuration(0.7); a1:SetOrder(1); a1:SetSmoothing("IN_OUT")
+                local a2 = ag:CreateAnimation("Alpha")
+                a2:SetFromAlpha(0.35); a2:SetToAlpha(1)
+                a2:SetDuration(0.7); a2:SetOrder(2); a2:SetSmoothing("IN_OUT")
+                dot._ag = ag
+            end
+            dot:SetShown(show)
+            if show then dot._ag:Play() else dot._ag:Stop() end
+        end
+        EllesmereUI._UpdatePatchDot()
 
         sidebarButtons["_EUIPatchNotes"] = btn
         EllesmereUI._patchNotesSidebarBtn = btn
@@ -6588,6 +6711,12 @@ local function CreateMainFrame()
         local hlTex = SolidTex(btn, "HIGHLIGHT", 1, 1, 1, 0)
         hlTex:SetAllPoints()
         btn:SetScript("OnEnter", function(self)
+            if self._ovLocked then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "This module can't be overridden. Exit the override editing session to open it.")
+                end
+                return
+            end
             hlTex:SetAlpha(0.06)
             if activeModule ~= self._folder then
                 self._hoverGlow:Show()
@@ -6596,6 +6725,8 @@ local function CreateMainFrame()
             end
         end)
         btn:SetScript("OnLeave", function(self)
+            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            if self._ovLocked then return end
             hlTex:SetAlpha(0)
             self._hoverGlow:Hide()
             self._hoverIndicator:Hide()
@@ -6604,6 +6735,7 @@ local function CreateMainFrame()
             end
         end)
         btn:SetScript("OnClick", function(self)
+            if self._ovLocked then return end
             if modules[self._folder] then
                 EllesmereUI:SelectModule(self._folder)
             end
@@ -6685,9 +6817,10 @@ local function CreateMainFrame()
             sbClearBtn:Show()
         end
         EllesmereUI._sidebarSearchText = text
-        if EllesmereUI._applySidebarSearch then
-            EllesmereUI._applySidebarSearch(text)
-        end
+        -- Deliberately NO sidebar filtering here anymore: hiding addon rows
+        -- while typing was replaced by the global search results popup
+        -- (EllesmereUI_GlobalSearch.lua), which lists matches without
+        -- reshuffling the nav underneath it.
     end)
 
     -- Addon scroll area sits below the search bar
@@ -6963,6 +7096,20 @@ local function CreateMainFrame()
         label:SetText(EllesmereUI.L(info.display))
         btn._label = label
 
+        -- One-time tutorial tip on the Cooldown Manager row: a play badge in
+        -- the indent gutter left of the label that opens the CDM tips video
+        -- guide, retiring forever once clicked. The VideoGuides engine owns
+        -- all gating (per-account seen map + the Enable Tutorial Tips
+        -- setting); nil-guarded for standalone builds.
+        if info.folder == "EllesmereUICooldownManager"
+            and EllesmereUI.VideoGuides and EllesmereUI.VideoGuides.AttachTip then
+            EllesmereUI.VideoGuides.AttachTip(btn, "cooldown_manager", {
+                tooltip = "Video Guide: Cooldown Manager",
+                point = "RIGHT", relPoint = "LEFT",
+                x = CHILD_INDENT_X - 6,
+            })
+        end
+
         -- Download icon (shown for uninstalled addons)
         local dlIcon = btn:CreateTexture(nil, "ARTWORK")
         dlIcon:SetSize(18, 18)
@@ -7170,6 +7317,12 @@ local function CreateMainFrame()
                 end
                 return
             end
+            if self._ovLocked then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(self, "This module can't be overridden. Exit the override editing session to open it.")
+                end
+                return
+            end
             if self._notEnabled then return end
             hlTex:SetAlpha(0.06)
             if activeModule ~= self._folder then
@@ -7186,6 +7339,7 @@ local function CreateMainFrame()
             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             if self._comingSoon then return end
             if self._maintenance then return end
+            if self._ovLocked then return end
             if self._notEnabled then return end
             hlTex:SetAlpha(0)
             self._hoverGlow:Hide()
@@ -7201,6 +7355,7 @@ local function CreateMainFrame()
         btn:SetScript("OnClick", function(self)
             if self._comingSoon then return end
             if self._maintenance then return end
+            if self._ovLocked then return end
             if self._notEnabled then return end
             if self._loaded and modules[self._folder] then
                 EllesmereUI:SelectModule(self._folder)
@@ -7236,6 +7391,38 @@ local function CreateMainFrame()
         end
     end
     EllesmereUI._sidebarButtons = sidebarButtons
+    -- Lock/unlock excluded modules while an override editing session is
+    -- active: their settings can't be captured, so navigating to them
+    -- mid-session only invites confusion. Grays the row and blocks clicks;
+    -- called from the session enter/exit paths in EllesmereUI_SpecOverrides.
+    EllesmereUI.RefreshSidebarOverrideLocks = function()
+        local active = EllesmereUI.SpecOverrides_EditSessionActive
+            and EllesmereUI.SpecOverrides_EditSessionActive() or false
+        for folder, btn in pairs(sidebarButtons) do
+            local lock = (active and EllesmereUI.SpecOverrides_ModuleExcluded
+                and EllesmereUI.SpecOverrides_ModuleExcluded(folder)) or false
+            if lock then
+                -- Re-assert UNCONDITIONALLY: RefreshSidebarStates recolors
+                -- every row by loaded state on module switches and would
+                -- otherwise wash the lock out (it calls back into here).
+                btn._ovLocked = true
+                btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
+                if btn._icon then
+                    btn._icon:SetDesaturated(true)
+                    btn._icon:SetAlpha(0.35)
+                end
+            elseif btn._ovLocked then
+                btn._ovLocked = nil
+                if btn._loaded then
+                    btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
+                    if btn._icon then
+                        btn._icon:SetDesaturated(false)
+                        btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
+                    end
+                end
+            end
+        end
+    end
     -- Refresh all sync icons (called from global settings toggle)
     EllesmereUI._refreshAllSyncIcons = function()
         for _, btn in pairs(sidebarButtons) do
@@ -8411,6 +8598,8 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
             EllesmereUI.SpecOverrides_SetupButton(soBtn)
             tabBar._specOvBtn = soBtn
         end
+        -- (Conditional Overrides has no toolbar button of its own: its cards
+        -- render as a second section inside the spec button's popup.)
     end
     tabBar._searchFrame:Show()
     -- Clear search text when tabs are rebuilt (module switch)
@@ -8781,8 +8970,33 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
         end
     end
 
-    -- Hide non-matching orphans
-    for _, o in ipairs(orphans) do o:Hide() end
+    -- Orphans are, by construction, always the LEADING widgets on a page --
+    -- created before that page's first SectionHeader call, so _currentSection
+    -- is still nil when TagOptionRow tags them. Match them the same way
+    -- section members are matched below, instead of hiding all of them
+    -- unconditionally: a query that only matches an orphan (e.g. a page's
+    -- lead "Activate X" button, before any SectionHeader) would otherwise
+    -- leave the whole page empty -- nothing to show, nothing to un-hide.
+    local visibleOrphans = {}
+    for _, o in ipairs(orphans) do
+        local label = GetSearchLabel(o)
+        local matched = label ~= "" and label:lower():find(queryLower, 1, true)
+        if not matched then
+            for _, rgn in ipairs({ o._leftRegion, o._midRegion, o._rightRegion }) do
+                if rgn then
+                    local ddText = GetDropdownValueText(rgn)
+                    if ddText and ddText:lower():find(queryLower, 1, true) then
+                        matched = true; break
+                    end
+                end
+            end
+        end
+        if matched then
+            visibleOrphans[#visibleOrphans + 1] = o
+        else
+            o:Hide()
+        end
+    end
 
     -- Build per-slot highlight targets and count totals to decide if we suppress
     -- highlights (when every visible slot is highlighted, none should glow).
@@ -8838,6 +9052,39 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
         end
     end
 
+    -- Same slot/highlight accounting as above, for visible orphans -- they
+    -- already passed the match check to be in visibleOrphans, so (unlike
+    -- section members) there's no separate "section matched" bypass to OR in.
+    for _, o in ipairs(visibleOrphans) do
+        if not o._isSpacer then
+            local slots = {}
+            if o._leftRegion then slots[#slots + 1] = { region = o._leftRegion,  label = o._leftRegion._slotLabel  or "" } end
+            if o._midRegion  then slots[#slots + 1] = { region = o._midRegion,   label = o._midRegion._slotLabel   or "" } end
+            if o._rightRegion then slots[#slots + 1] = { region = o._rightRegion, label = o._rightRegion._slotLabel or "" } end
+
+            if #slots > 0 then
+                for _, s in ipairs(slots) do
+                    if s.label ~= "" then
+                        totalSlots = totalSlots + 1
+                        local slotMatch = s.label:lower():find(queryLower, 1, true)
+                        if not slotMatch then
+                            local ddText = GetDropdownValueText(s.region)
+                            if ddText then slotMatch = ddText:lower():find(queryLower, 1, true) end
+                        end
+                        if slotMatch then
+                            highlightedSlots = highlightedSlots + 1
+                            highlightTargets[#highlightTargets + 1] = s.region
+                        end
+                    end
+                end
+            else
+                totalSlots = totalSlots + 1
+                highlightedSlots = highlightedSlots + 1
+                highlightTargets[#highlightTargets + 1] = o
+            end
+        end
+    end
+
     -- If every visible slot is highlighted, suppress all highlights
     local suppressHighlights = (highlightedSlots >= totalSlots)
 
@@ -8852,6 +9099,38 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     -- Re-anchor visible items sequentially from top
     local startY = -6
     local y = startY
+
+    -- Matching orphans lead the page (they're always positioned before the
+    -- first section in the source layout), so place and highlight them
+    -- first, then let the sections loop below continue from the same y.
+    for _, o in ipairs(visibleOrphans) do
+        if o._isSpacer then
+            o:Hide()
+        else
+            local ox = o._origAnchor and o._origAnchor[4] or CONTENT_PAD
+            o:ClearAllPoints()
+            PanelPP.Point(o, "TOPLEFT", cached.wrapper, "TOPLEFT", ox, y)
+            o:Show()
+
+            if not suppressHighlights and not skipHighlights then
+                if o._leftRegion and hlSet[o._leftRegion] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o._leftRegion)
+                end
+                if o._midRegion and hlSet[o._midRegion] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o._midRegion)
+                end
+                if o._rightRegion and hlSet[o._rightRegion] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o._rightRegion)
+                end
+                if not o._leftRegion and hlSet[o] then
+                    local hl = GetSearchHighlight(); PlaySearchHighlight(hl, o)
+                end
+            end
+
+            y = y - o:GetHeight()
+        end
+    end
+
     for _, vs in ipairs(visibleSections) do
         local sec = vs.sec
         local hdrX = sec.header._origAnchor and sec.header._origAnchor[4] or CONTENT_PAD
@@ -9104,6 +9383,7 @@ end
 -- Page cache: maps "moduleName::pageName" -> { wrapper, totalH, headerBuilder }
 -- On revisit, we show the cached wrapper and refresh widget values instead of rebuilding.
 _pageCache = {}
+EllesmereUI._pageCache = _pageCache
 local _activePageWrapper  -- the currently-visible wrapper frame
 
 -- Invalidate all cached pages (called on profile reset, module reload, etc.)
@@ -9147,6 +9427,15 @@ function EllesmereUI:InvalidateModulePageCache(moduleName)
 end
 
 function EllesmereUI:SelectPage(pageName)
+    -- Excluded pages (e.g. CDM's Bar Glows / Tracking Bars) are locked
+    -- while an override editing session is active: their systems keep
+    -- their own per-spec storage and never join the override capture.
+    if EllesmereUI.SpecOverrides_EditSessionActive
+       and EllesmereUI.SpecOverrides_EditSessionActive()
+       and EllesmereUI.SpecOverrides_PageExcluded
+       and EllesmereUI.SpecOverrides_PageExcluded(activeModule, pageName) then
+        return
+    end
     if not activeModule or not modules[activeModule] then return end
     if pageName == activePage then return end
 
@@ -9283,7 +9572,12 @@ function EllesmereUI:SelectPage(pageName)
         if config.buildPage then
             local startY = -6
 
+            EllesmereUI._buildingModule = activeModule
+            EllesmereUI._buildingPage = pageName
             totalH = config.buildPage(pageName, wrapper, startY) or 600
+            EllesmereUI._buildingModule = nil
+            EllesmereUI._buildingPage = nil
+            EllesmereUI._buildingSelector = nil
             contentFrame:SetHeight(totalH + 30)
         end
 
@@ -9380,7 +9674,12 @@ function EllesmereUI:RefreshPage(force)
     local totalH = 0
     if config.buildPage then
         local startY = -6
+        EllesmereUI._buildingModule = activeModule
+        EllesmereUI._buildingPage = activePage
         totalH = config.buildPage(activePage, wrapper, startY) or 600
+        EllesmereUI._buildingModule = nil
+        EllesmereUI._buildingPage = nil
+        EllesmereUI._buildingSelector = nil
         contentFrame:SetHeight(totalH + 30)
     end
 
@@ -9438,6 +9737,15 @@ end
 function EllesmereUI:SelectModule(folderName)
     if not modules[folderName] then return end
     if folderName == activeModule then return end
+    -- Excluded modules are locked while an override editing session is
+    -- active; blocking at the choke point covers every navigation path
+    -- (sidebar, list rows, links), not just the grayed buttons.
+    if EllesmereUI.SpecOverrides_EditSessionActive
+       and EllesmereUI.SpecOverrides_EditSessionActive()
+       and EllesmereUI.SpecOverrides_ModuleExcluded
+       and EllesmereUI.SpecOverrides_ModuleExcluded(folderName) then
+        return
+    end
 
     -- Re-sync pixel perfect mult on every addon switch
     if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
@@ -9704,10 +10012,15 @@ local function RefreshSidebarStates()
         end
     end
 
-    -- Re-apply the active sidebar search filter so it survives refreshes.
-    local sbText = EllesmereUI._sidebarSearchText
-    if sbText and sbText ~= "" and EllesmereUI._applySidebarSearch then
-        EllesmereUI._applySidebarSearch(sbText)
+    -- (Sidebar search no longer filters the addon rows -- the global search
+    -- results popup replaced that behavior -- so there is no filter state to
+    -- re-apply across refreshes anymore.)
+
+    -- Re-assert override-session locks LAST: the recolor loop above paints
+    -- by loaded state and would otherwise wash out locked rows on every
+    -- module/page switch.
+    if EllesmereUI.RefreshSidebarOverrideLocks then
+        EllesmereUI.RefreshSidebarOverrideLocks()
     end
 end
 
@@ -9889,11 +10202,30 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.4.2"
+EllesmereUI.VERSION = "8.4.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
 _G._EUI_AddonVersions[EUI_HOST_ADDON] = EllesmereUI.VERSION
+
+-- Version-increase detection: stamp the account's last-seen version at login
+-- and raise the Patch Notes reminder dot when it changed. The dot clears
+-- when the Patch Notes row is clicked and stays cleared until the NEXT
+-- version change. First-ever login (no prior stamp) never raises it.
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_LOGIN")
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        local prev = EllesmereUIDB.lastLoginVersion
+        if prev and prev ~= EllesmereUI.VERSION then
+            EllesmereUIDB.patchDotPending = true
+        end
+        EllesmereUIDB.lastLoginVersion = EllesmereUI.VERSION
+        if EllesmereUI._UpdatePatchDot then EllesmereUI._UpdatePatchDot() end
+    end)
+end
 
 -- Version mismatch check (shared across all Ellesmere addons)
 do
@@ -10148,10 +10480,11 @@ end
 -- the user closes it (with no reload needed).
 C_Timer.After(2, function()
     if EllesmereUIDB and EllesmereUIDB.firstInstallPopupShown then
-        -- Defer while either intro popup is still pending/open; each runs the
-        -- conflict check itself when dismissed (EllesmereUI_RaidFramesPopup /
-        -- EllesmereUI_PatchNotesPopup).
-        if EllesmereUI._raidFramesIntroPending or EllesmereUI._patchNotesIntroPending then return end
+        -- Defer while any intro popup is still pending/open; each runs the
+        -- conflict check itself when dismissed (RaidFrames / PatchNotes /
+        -- WindowSkins / SpecOverrides popup files).
+        if EllesmereUI._raidFramesIntroPending or EllesmereUI._patchNotesIntroPending
+           or EllesmereUI._windowSkinsIntroPending or EllesmereUI._specOvIntroPending then return end
         if EllesmereUI._RunConflictCheck then EllesmereUI._RunConflictCheck() end
     end
 end)
@@ -11198,11 +11531,11 @@ EllesmereUI.VIS_VALUES = {
 }
 EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
--- Action Bars variant: adds "When Dragonriding". Only the SECURE action
--- bars (1-8, stance, pet) can express it as [advflyable,mounted,flying] in their
--- state driver, which re-evaluates the flying transition in real time. The
--- non-secure bars (Micro/Bag/XP/Rep) and other modules can't catch the takeoff
--- event, so they don't expose this option.
+-- Action Bars variant: adds "When Dragonriding". The secure action bars
+-- (1-8, stance, pet) express it as [advflyable,flying] in their state
+-- driver, which re-evaluates the flying transition in real time. Lua-side
+-- modules catch the same transition via the gliding edge events registered
+-- in EllesmereUI_Visibility.lua (gated on EllesmereUI._hasGlidingEvent).
 EllesmereUI.VIS_VALUES_AB = {
     never      = "Never",
     always     = "Always",
@@ -11230,6 +11563,11 @@ EllesmereUI.VIS_VALUES_CDM = {
 EllesmereUI.VIS_ORDER_CDM = { "never", "always", "in_combat", "out_of_combat", "---", "in_raid", "in_party", "solo" }
 
 -- Checkbox dropdown 2: Visibility Options (keys match DB fields)
+-- NOTE: VIS_OPT_ITEMS_RESOURCE_BARS below is a load-time COPY of this list
+-- (plus its own extra entries). Items added here appear there automatically,
+-- but only because the copy loop runs after this table -- keep the copy loop
+-- directly below, and update its visHideMounted insert anchor if that key is
+-- ever renamed.
 EllesmereUI.VIS_OPT_ITEMS = {
     { key = "visOnlyInstances",    label = "Only Show in Instances" },
     { key = "visHideHousing",      label = "Hide in Housing" },
@@ -11240,6 +11578,8 @@ EllesmereUI.VIS_OPT_ITEMS = {
       tooltip = "This bar will only show if you have an enemy targeted" },
 }
 
+-- Resource Bars variant: same items plus skyriding (kept out of the global
+-- list so other modules don't grow an option their code never evaluates).
 EllesmereUI.VIS_OPT_ITEMS_RESOURCE_BARS = {}
 for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
     EllesmereUI.VIS_OPT_ITEMS_RESOURCE_BARS[#EllesmereUI.VIS_OPT_ITEMS_RESOURCE_BARS + 1] = item
@@ -11275,8 +11615,20 @@ function EllesmereUI.IsPlayerMountedLike()
     -- Only druids have mount-like shapeshift forms.
     if _playerClass ~= "DRUID" then return false end
 
-    -- Aura check: the Travel Form buff is present on the player whenever
-    -- the druid is shifted, regardless of ground/swim/fly subform.
+    -- Engine form category first: ground Travel and Mount Form report 3,
+    -- Aquatic 4, Flight 27. Spell-agnostic, so it keeps working when the
+    -- form aura's spell ID drifts across patches (Flight Form stopped
+    -- matching the aura list below). No collision with combat forms
+    -- (Cat 1, Bear 5, Moonkin 31).
+    if GetShapeshiftFormID then
+        local formID = GetShapeshiftFormID()
+        if formID == 3 or formID == 4 or formID == 27 then
+            return true
+        end
+    end
+
+    -- Aura fallback: the Travel Form buff is present on the player
+    -- whenever the druid is shifted, regardless of ground/swim/fly subform.
     if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
         for i = 1, #DRUID_MOUNT_FORM_SPELLS do
             if C_UnitAuras.GetPlayerAuraBySpellID(DRUID_MOUNT_FORM_SPELLS[i]) then
@@ -11371,26 +11723,16 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
     if mode == "in_party" then return state.inParty or state.inRaid end
     if mode == "solo" then return not state.inRaid and not state.inParty end
     if mode == "show_dragonriding" then
-        -- Mirrors the secure-macro [advflyable,mounted,flying]: show only while
-        -- flying on a glide-capable (skyriding) mount. IsMounted/IsFlying are
-        -- combat-safe and non-tainting; GetGlidingInfo's 2nd return (canGlide)
-        -- is the advanced-flyable flag.
-        if not (IsMounted and IsMounted() and IsFlying and IsFlying()) then return false end
-        if C_PlayerInfo and C_PlayerInfo.GetGlidingInfo then
-            local _, canGlide = C_PlayerInfo.GetGlidingInfo()
-            return canGlide == true
-        end
-        return true
+        -- Approximates the secure-macro [advflyable,flying] driver: show only
+        -- while airborne on a glide-capable (skyriding) mount. The shared
+        -- predicate lives in EllesmereUI_Visibility.lua and is also used by
+        -- the multi-select visibility engine.
+        return (EllesmereUI.IsAirborneSkyriding and EllesmereUI.IsAirborneSkyriding()) or false
     end
     if mode == "show_not_dragonriding" then
-        -- Exact inverse of show_dragonriding: show whenever NOT flying on a
-        -- glide-capable (skyriding) mount.
-        if not (IsMounted and IsMounted() and IsFlying and IsFlying()) then return true end
-        if C_PlayerInfo and C_PlayerInfo.GetGlidingInfo then
-            local _, canGlide = C_PlayerInfo.GetGlidingInfo()
-            return canGlide ~= true
-        end
-        return false
+        -- Exact inverse of show_dragonriding: show whenever NOT airborne on
+        -- a glide-capable (skyriding) mount.
+        return not (EllesmereUI.IsAirborneSkyriding and EllesmereUI.IsAirborneSkyriding())
     end
     -- "always" and "mouseover" both return true (mouseover handled separately)
     return true

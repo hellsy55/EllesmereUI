@@ -273,8 +273,17 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
-        if EllesmereUI.BuildMacroFactory then
+        -- The Macro Factory is deliberately NOT part of the global search.
+        -- Its builder arms live machinery at build time (a session event
+        -- frame that rewrites the player's real EUI_* macros on bag/spec
+        -- events), so the hidden search pre-build must never run it, and its
+        -- rows are kept out of the search index so results can never point
+        -- into it (the index would otherwise deep-link to rows whose page
+        -- state the factory manages itself).
+        if EllesmereUI.BuildMacroFactory and not EllesmereUI._prebuilding then
+            EllesmereUI._searchIndexSuppress = true
             local mfH = EllesmereUI.BuildMacroFactory(parent, y, PP)
+            EllesmereUI._searchIndexSuppress = nil
             y = y - mfH
         end
 
@@ -372,6 +381,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.quickLoot = v
+                  if EllesmereUI._applyQuickLoot then EllesmereUI._applyQuickLoot() end
               end },
             { type="toggle", text="Auto-Fill Delete Confirmation",
               tooltip="Automatically types DELETE when throwing away a valuable item. Also allows you to press enter to accept the deletion.",
@@ -1196,6 +1206,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.repairWarning = v
+                if EllesmereUI._syncDurWarnEvents then EllesmereUI._syncDurWarnEvents() end
                 if not v and EllesmereUI._durWarnHidePreview then
                     EllesmereUI._durWarnHidePreview()
                 end
@@ -2073,6 +2084,9 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.instanceResetAnnounce = v
+                  if EllesmereUI._applyInstanceResetAnnounce then
+                      EllesmereUI._applyInstanceResetAnnounce()
+                  end
               end }
         );  y = y - h
 
@@ -2163,6 +2177,9 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.autoOpenContainers = v
+                  if EllesmereUI._applyAutoOpenContainers then
+                      EllesmereUI._applyAutoOpenContainers()
+                  end
                   EllesmereUI:RefreshPage()
               end }
         );  y = y - h
@@ -2300,6 +2317,11 @@ initFrame:SetScript("OnEvent", function(self)
             if EllesmereUI._applyHideTransforms then EllesmereUI._applyHideTransforms() end
             if EllesmereUI._applyQuickSignup then EllesmereUI._applyQuickSignup() end
             if EllesmereUI._applyPersistSignupNote then EllesmereUI._applyPersistSignupNote() end
+            if EllesmereUI._applyQuickLoot then EllesmereUI._applyQuickLoot() end
+            if EllesmereUI._applyInstanceResetAnnounce then EllesmereUI._applyInstanceResetAnnounce() end
+            if EllesmereUI._applyAutoOpenContainers then EllesmereUI._applyAutoOpenContainers() end
+            if EllesmereUI._ShutdownShifter then EllesmereUI._ShutdownShifter() end
+            if _G._EUI_AutoLogging_Check then _G._EUI_AutoLogging_Check() end
             EllesmereUI:InvalidatePageCache()
         end,
     })

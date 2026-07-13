@@ -254,6 +254,58 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     PP.Point(hint, "TOP", parent, "TOP", 0, y)
     hint:SetJustifyH("CENTER")
     hint:SetText("Click any new feature to go directly to the setting")
+
+    -- Top-left: "New Patch Reminder Dot" opt-out for the pulsing sidebar dot
+    -- that appears when the account's version increases (see the Patch Notes
+    -- button in EllesmereUI.lua). Small free-form checkbox on the hint line.
+    do
+        local BOX = 14
+        local row = CreateFrame("Button", nil, parent)
+        row:SetFrameLevel(parent:GetFrameLevel() + 2)
+        local box = CreateFrame("Frame", nil, row)
+        PP.Size(box, BOX, BOX)
+        PP.Point(box, "LEFT", row, "LEFT", 0, 0)
+        local boxBg = box:CreateTexture(nil, "BACKGROUND")
+        boxBg:SetAllPoints()
+        boxBg:SetColorTexture(0.075, 0.113, 0.141, 1)
+        local boxBrd = MakeBorder(box, 1, 1, 1, 0.25, PP)
+        local check = box:CreateTexture(nil, "ARTWORK")
+        PP.Point(check, "TOPLEFT", box, "TOPLEFT", 3, -3)
+        PP.Point(check, "BOTTOMRIGHT", box, "BOTTOMRIGHT", -3, 3)
+        check:SetColorTexture(EG.r, EG.g, EG.b, 1)
+        local lbl = MakeFont(row, 12, nil, 1, 1, 1, 0.5)
+        PP.Point(lbl, "LEFT", box, "RIGHT", 7, 0)
+        lbl:SetText(EllesmereUI.L("New Patch Reminder Dot"))
+        row:SetSize(BOX + 10 + (lbl:GetStringWidth() or 130), 20)
+        PP.Point(row, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y + 2)
+        local function Paint()
+            local on = not (EllesmereUIDB and EllesmereUIDB.patchDotDisabled)
+            check:SetShown(on)
+            if on then
+                boxBrd:SetColor(EG.r, EG.g, EG.b, 0.85)
+            else
+                boxBrd:SetColor(1, 1, 1, 0.25)
+            end
+        end
+        Paint()
+        row:SetScript("OnClick", function()
+            if not EllesmereUIDB then EllesmereUIDB = {} end
+            EllesmereUIDB.patchDotDisabled = (not EllesmereUIDB.patchDotDisabled) and true or nil
+            Paint()
+            if EllesmereUI._UpdatePatchDot then EllesmereUI._UpdatePatchDot() end
+        end)
+        row:SetScript("OnEnter", function(self)
+            lbl:SetAlpha(0.85)
+            if EllesmereUI.ShowWidgetTooltip then
+                EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Show a pulsing dot on the Patch Notes button whenever EllesmereUI updates to a new version."))
+            end
+        end)
+        row:SetScript("OnLeave", function()
+            lbl:SetAlpha(0.5)
+            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+        end)
+    end
+
     y = y - math.ceil(hint:GetStringHeight() or 14) - 20
 
     -- Cap the page to the newest patches (max 10). Older entries may remain in
@@ -353,6 +405,325 @@ end
 --  EllesmereUI:NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "8.4.5",
+        heroes = {
+            {
+                module = "Profiles & Presets",
+                title  = "Settings Overrides",
+                desc   = "Change any setting for a group of specs (all your tanks, your healers...) or based on a condition: Dungeon, Raid, Arena, Battleground, Solo, or an out-of-combat keybind toggle. Click the class glyph next to the search bar, pick who or when, and everything you change applies only there.",
+                nav    = { module = "_EUIProfiles", page = "Spec Overrides" },
+            },
+            {
+                title  = "Modular Visibility",
+                desc   = "Every Visibility dropdown is now a checklist. Combine conditions - In Combat while In a Raid, only When Dragonriding, and more - and add Mouseover to reveal on hover only while they pass. Both Dragonriding options are now available for every module.",
+                nav    = { module = "EllesmereUIActionBars", page = "Bar Display", section = "VISIBILITY", highlight = "Visibility" },
+            },
+            {
+                title  = "PTR Ready - One Version for Both",
+                desc   = "EllesmereUI now ships as a single version that runs on both live retail and the Midnight 12.1 PTR. Install once, play anywhere - the same addon loads on either client, with full support for the PTR's reworked aura system. No separate PTR build to download or keep in sync.",
+            },
+            {
+                module = "Character Sheet",
+                title  = "Socket Panel",
+                desc   = "Gem sockets from your equipped gear now line the bottom of the character sheet. Click a socket to see every socketable gem in your bags with its stats, and click a gem to socket it instantly - no Blizzard socketing window needed.",
+                nav    = { module = "EllesmereUIBlizzardSkin", page = "Blizzard Window Skins", section = "CORE OPTIONS", highlight = "Socket Panel" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Player Private Auras",
+                desc   = "Boss-mechanic icons (private auras) can now show directly on your player frame. Opt-in per-slot icons with size and position controls, so you see your assignment the instant it lands - no more hunting Blizzard's floating icons mid-pull.",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "PRIVATE AURAS", highlight = "Enable Private Auras",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Cooldown Manager",
+                title  = "Global Tracking Bar Groups",
+                desc   = "Tracking bar groups can now be Global: build the group once and its bars, layout and position follow you across every spec, instead of rebuilding the same setup thirteen times.",
+                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars" },
+            },
+        },
+        features = {
+            {
+                module = "Action Bars",
+                title  = "Icon Order",
+                desc   = "Start buttons from any corner, or reverse the order",
+                nav    = { module = "EllesmereUIActionBars", page = "Bar Display", section = "LAYOUT", highlight = "Icon Order" },
+            },
+            {
+                module = "Aura & Buff Reminders",
+                title  = "Text Anchor",
+                desc   = "Place the label above, on, or beside the icon",
+                nav    = { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "DISPLAY", highlight = "Show Text" },
+            },
+            {
+                module = "Aura & Buff Reminders",
+                title  = "Mana Warning Settings",
+                desc   = "Toggle, recolor, resize and preview the ready-check warning",
+                nav    = { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Ready Check Mana Warning" },
+            },
+            {
+                module = "Cooldown Manager",
+                title  = "Threshold Text",
+                desc   = "Per-spell decimal countdown and color below a threshold",
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars" },
+            },
+            {
+                module = "General",
+                title  = "Icon Zoom",
+                desc   = "Crop icon borders: Bags, Character Sheet, Damage Meters, Unit Frames",
+                nav    = { module = "EllesmereUIBags", page = "Bags", section = "DISPLAY", highlight = "Icon Zoom" },
+            },
+            {
+                module = "General",
+                title  = "Tutorial Tips & Video Guides",
+                desc   = "Help badges on key features open a video guide popup",
+                nav    = { module = "_EUIGlobal", page = "General", section = "DISPLAY", highlight = "Enable Tutorial Tips" },
+            },
+            {
+                module = "General",
+                title  = "New Patch Reminder Dot",
+                desc   = "A dot on Patch Notes whenever your version increases",
+            },
+            {
+                module = "Minimap",
+                title  = "Readout Scale Sliders",
+                desc   = "Resize the Coordinates and FPS/MS text independently",
+                nav    = { module = "EllesmereUIMinimap", page = "Minimap", section = "TEXT", highlight = "Show Coordinates" },
+            },
+            {
+                module = "Nameplates",
+                title  = "Rare/Quest Icon In Instances",
+                desc   = "New toggle lifts the open-world-only restriction",
+                nav    = { module = "EllesmereUINameplates", page = "Display", section = "CORE POSITIONS" },
+            },
+            {
+                module = "Nameplates",
+                title  = "Open World Basic Coloring",
+                desc   = "One flat enemy color outside instances",
+                nav    = { module = "EllesmereUINameplates", page = "Colors", section = "ENEMY COLORS", highlight = "Enemy Types" },
+            },
+            {
+                module = "Raid Frames",
+                title  = "Buff Threshold Sounds",
+                desc   = "Play a sound when a tracked buff hits its threshold",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Buff Manager" },
+            },
+            {
+                module = "Raid Frames",
+                title  = "Incoming Resurrection Icon",
+                desc   = "See queued rezzes on dead players",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "INDICATORS", highlight = "Ready Check / Summon / Rez" },
+            },
+            {
+                module = "Raid Frames",
+                title  = "Buff Hover Tooltips",
+                desc   = "Optional aura tooltips on Buff Manager icons",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "EXTRAS", highlight = "Show Raid Frames Tooltip" },
+            },
+            {
+                module = "Raid Frames",
+                title  = "Show Text Above Icons",
+                desc   = "Render name and health text above aura icons",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "TEXT DISPLAY", highlight = "Name Size" },
+            },
+            {
+                module = "Raid Frames",
+                title  = "Dispellable Debuff Icon Size",
+                desc   = "Independent size for split-location dispellables",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "DISPELS", highlight = "Dispellable Debuff Location" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Buff Colors",
+                desc   = "Recolor the Class Resource bar while chosen buffs are active",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "CLASS RESOURCE BAR", highlight = "Threshold & Hash Lines" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Per-Spec Setup Moved to Spec Overrides",
+                desc   = "Advanced mode retired; setups migrate automatically",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "BAR DISPLAY" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Recolor Text Instead Of Bar",
+                desc   = "Threshold colors can target the text",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "HEALTH BAR", highlight = "Health Text" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Bar Text Anchor",
+                desc   = "Pin bar text left, center, or right",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "HEALTH BAR", highlight = "Health Text" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Stagger Full %",
+                desc   = "Set where the Brewmaster bar reads as full",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "CLASS RESOURCE BAR", highlight = "Threshold & Hash Lines" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Hide Bar Text per Druid Form",
+                desc   = "Independent text visibility per form",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "HEALTH BAR", highlight = "Health Text" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Hide when Dragonriding",
+                desc   = "New visibility option",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "BAR DISPLAY", highlight = "Visibility Options" },
+            },
+            {
+                module = "Unit & Resource Bars",
+                title  = "Out of Combat Fade",
+                desc   = "Fade frames and bars to a chosen alpha out of combat",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "DISPLAY", highlight = "Visibility",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Frame Source",
+                desc   = "Render each frame as EllesmereUI or Blizzard's default",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "DISPLAY", highlight = "Visibility",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Apply All Settings To",
+                desc   = "Copy one frame's settings to another in one click",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Target Combat Indicator",
+                desc   = "The combat indicator can now show on the target frame",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "EXTRAS", highlight = "Combat Indicator",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end
+                        EllesmereUI._pendingUnitSelect = "target"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Name Truncation",
+                desc   = "Length limit and optional ellipsis on name text",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "HEALTH BAR", highlight = "Left Text",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                        EllesmereUI._pendingUnitSelect = "player"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Aura Duration Format",
+                desc   = "New countdown styles for player buff text",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Blizzard Aura Frames", section = "PLAYER BUFFS & DEBUFFS", highlight = "Show Text" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Dispel Type Borders",
+                desc   = "Recolor debuff borders by dispel type",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "BUFFS AND DEBUFFS", highlight = "Debuff Display",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end
+                        EllesmereUI._pendingUnitSelect = "target"
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Boss Frame Absorbs",
+                desc   = "Absorb shields on Boss frames",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "ABSORBS", highlight = "Absorb Style",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end
+                        EllesmereUI._pendingUnitSelect = "target"
+                    end },
+            },
+            {
+                module = "Unlock Mode",
+                title  = "Fallback Anchors",
+                desc   = "Anchored elements land safely when their target is missing",
+            },
+            {
+                module = "Tooltips",
+                title  = "Peek Modifier",
+                desc   = "Hold Shift/Ctrl/Alt to reveal hidden tooltips on hover",
+                nav    = { module = "EllesmereUIBlizzardSkin", page = "Tooltips, Menus & Popups", section = "BLIZZARD TOOLTIP", highlight = "Show Tooltips" },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Vehicle ability cooldowns now show their swipe and timer immediately, instead of only after mouseover or entering combat." },
+            { module = "Action Bars", text = "The Stance Bar now stays hidden for classes with no shapeshift forms." },
+            { module = "Action Bars", text = "Custom keybind text color no longer reverts to white after target or combat changes." },
+            { module = "Action Bars & Cooldown Manager", text = "Item macros no longer trigger a false spell proc glow." },
+            { module = "Aura & Buff Reminders", text = "Clicking preview elements now jumps to the right settings section." },
+            { module = "Bags", text = "The currency footer now grows with your tracked currencies instead of clipping." },
+            { module = "Bags", text = "Collapsing the sidebar no longer drifts a right-anchored bag window." },
+            { module = "Character Sheet", text = "Collapsed stat sections now stay collapsed after switching specs, and spec-restricted stats no longer flash back when expanding a section." },
+            { module = "Character Sheet", text = "The item level tooltip's better-items list no longer misses cloaks, weapons, caster off-hands or slow-loading items, and now checks the reagent bag too." },
+            { module = "Cooldown Manager", text = "Fixed icons from another spec lingering on bars after spec swaps or shapeshifting." },
+            { module = "Cooldown Manager", text = "Per-trinket settings now follow the equipped trinket across swaps." },
+            { module = "Cooldown Manager", text = "The default Buff Bar's custom order survives respecs and \"Repopulate from Blizzard\"." },
+            { module = "Cooldown Manager", text = "Essence of the Blood Queen and similar untracked procs now appear on buff bars." },
+            { module = "Cooldown Manager", text = "Pandemic glow now wraps the whole tracking bar instead of clipping under borders." },
+            { module = "Cooldown Manager", text = "Tracking bar icons now always match Blizzard's resolved icon (e.g. Roll the Bones)." },
+            { module = "Cooldown Manager", text = "Demonic Healthstone is no longer treated as unusable in combat." },
+            { module = "Cooldown Manager", text = "CD Ready sound no longer false-triggers on loading screens or bar rebuilds." },
+            { module = "Cooldown Manager", text = "Swiftmend brightness now applies reliably and its toggle works without a reload." },
+            { module = "Cooldown Manager", text = "FocusKick info text now matches the Show on Target setting." },
+            { module = "Cooldown Manager", text = "Tracking bar previews no longer linger after closing the options." },
+            { module = "Cooldown Manager", text = "Charge text on custom spells now follows the bar's font and position settings." },
+            { module = "Cooldown Manager", text = "Border style and background color now apply consistently across every icon on the Essential and Utility bars." },
+            { module = "Crafting Orders", text = "The Place Order / My Orders tabs now show which one is active." },
+            { module = "Dragon Riding", text = "The bar's height can now be adjusted from the Unlock Mode cog, and its width is no longer stuck above 96px." },
+            { module = "Dragon Riding", text = "Fixed extra spacing between the charge pips and the Whirling Surge icon at certain UI scales." },
+            { module = "Dragon Riding", text = "The HUD no longer stays stuck on screen after exiting Unlock Mode while dismounted." },
+            { module = "General", text = "11 new alert sounds (Cat Meow, Kaching, Wilhelm, Warning Siren and more) in every sound picker." },
+            { module = "General", text = "Hide when Mounted now counts druid Travel, Flight and Aquatic forms." },
+            { module = "Group Finder", text = "Fixed errors clicking role and filter checkboxes in Premade Groups." },
+            { module = "Mail", text = "The Send Mail attachment slot now reliably shows the attached item's icon." },
+            { module = "Nameplates", text = "Fixed the Rare/Quest indicator not anchoring in the Bottom slot." },
+            { module = "Nameplates", text = "Fixed border edges flickering or vanishing when plates rescale." },
+            { module = "Profiles & Presets", text = "Spec pickers gained Check Tanks / Healers / DPS quick-select links." },
+            { module = "Quality of Life", text = "Fixed a multi-second freeze opening /keys in large guilds." },
+            { module = "Quality of Life", text = "Quick Loot, Auto Open Containers, LFG Reminder, Low Durability Warning and Shifter now apply instantly without a reload." },
+            { module = "Quality of Life", text = "Train All no longer skips still-affordable trainer skills." },
+            { module = "Quality of Life", text = "The secondary-stats display now refreshes on gear changes." },
+            { module = "Quality of Life", text = "FPS counter labels now resize with the Text Size slider." },
+            { module = "Quality of Life", text = "Fixed the wrong icon on the Ursol's Vortex cursor macro." },
+            { module = "Quality of Life", text = "Item Upgrade, Transmog, sockets, vendors and other companion windows now dock beside a Shifter-moved Character window instead of hiding underneath it." },
+            { module = "Quest Tracker", text = "Fixed tracked quests overlapping after focusing a quest or changing fonts." },
+            { module = "Quests", text = "Fixed dark, unreadable text in quest dialogue and reward descriptions." },
+            { module = "Raid Frames", text = "Buff Manager Simple Setup now shows buff stack counts, with a new Show Stacks toggle plus color, size and offset controls." },
+            { module = "Raid Frames", text = "Hover and target highlights no longer cover name text or icons." },
+            { module = "Raid Frames", text = "Fixed frames sizing for a too-small raid right after zoning in." },
+            { module = "Raid Frames", text = "Fixed custom size-tier layouts drifting from their saved position." },
+            { module = "Resource Bars", text = "Soul Fragments now respect Surrender to the Void's higher fragment cap." },
+            { module = "Tooltips", text = "Show Mount now marks whether you've collected the mount." },
+            { module = "Unit & Raid Frames", text = "New Gradient Sharp dispel overlay style." },
+            { module = "Unit Frames", text = "The pet frame's Class Colored fill now works." },
+            { module = "Unit Frames", text = "Fixed blank name/health/power text after a cold login." },
+            { module = "Unit Frames", text = "Fixed a detached power bar rendering behind the frame border." },
+            { module = "Unit Frames", text = "Frames hidden by visibility conditions no longer absorb mouse clicks." },
+            { module = "Unit Frames", text = "Fixed the 3D portrait staying visible on its own while the rest of the frame was hidden." },
+            { module = "Unit Frames", text = "Pet, Target-of-Target and Focus Target now follow their parent frame's visibility." },
+        },
+    },
     {
         version = "8.4.1",
         heroes = {
@@ -1120,44 +1491,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Unit Frames", text = "The Boss frame preview now matches a real boss frame's coloring, including Dark Mode and custom fill colors." },
         },
     },
-    {
-        version = "8.3.2",
-        heroes = {
-            {
-                module = "CDM",
-                title = "Track Any Item by ID",
-                desc  = "Cooldown Manager's add menu gains a Custom Item ID option so you can track any item by its item ID, with its own icon, cooldown swipe, and bag count. Works on cooldown, utility, and buff bars.",
-                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars",
-                    preSelect = function()
-                        if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("cooldowns") end
-                    end },
-            },
-        },
-        features = {
-            {
-                module = "Unit Frames",
-                title = "Power-Colored Bar Background",
-                desc  = "The power bar background can now follow your power type color (blue for mana, yellow for energy, and so on), matching the power-colored fill. Available on main frames and boss frames.",
-                nav   = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "POWER BAR", highlight = "Bar Background",
-                    preSelect = function()
-                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
-                        EllesmereUI._pendingUnitSelect = "player"
-                    end },
-            },
-            {
-                module = "Quality of Life",
-                title = "Hide Error Messages",
-                desc  = "A new toggle hides most red error spam such as \"Not enough rage\" or \"Ability is not ready yet\", while still showing important alerts like a full bag or full quest log.",
-                nav   = { module = "EllesmereUIQoL", page = "Quality of Life", section = "GENERAL", highlight = "Hide Error Messages" },
-            },
-        },
-        fixes = {
-            { module = "CDM", text = "Each assigned bar-button buff glow gains an \"Only In Combat\" toggle so the glow only lights up while you are in combat." },
-            { module = "CDM", text = "The active-state overlay on tracked icons such as Ebon Might now keeps custom icon shapes, recolors the correct border, and matches your duration-text font instead of drawing a plain square. Glow and border edits also apply live while the buff is active." },
-            { module = "Unit Frames", text = "Boss frame health and power bars now use the same separate Fill Color and Bar Background controls with inline class, custom, and power color swatches as the main frames." },
-            { module = "Auras, Buffs & Consumables", text = "Fixed the Hearty Flora Frenzy food reminder using the wrong item ID, so it now tracks correctly." },
-        },
-    },
 }
 
 
@@ -1773,7 +2106,18 @@ initFrame:SetScript("OnEvent", function(self)
                       if EllesmereUIDB then EllesmereUIDB.displayLocale = v end
                       LanguageReload()
                   end },
-                { type="label", text="" });  y = y - h
+                { type="toggle", text="Enable Tutorial Tips",
+                  tooltip="Show one-time video guide badges next to new or complex features. Each badge disappears forever once clicked.",
+                  getValue=function()
+                      return not (EllesmereUIDB and EllesmereUIDB.tutorialTipsDisabled)
+                  end,
+                  setValue=function(v)
+                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                      EllesmereUIDB.tutorialTipsDisabled = (not v) and true or nil
+                      if EllesmereUI.VideoGuides and EllesmereUI.VideoGuides.RefreshTips then
+                          EllesmereUI.VideoGuides.RefreshTips()
+                      end
+                  end });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -3263,7 +3607,7 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI.RefreshDarkMode()
                   end });  y = y - h
 
-            -- Row 4: Resource Color Darken | (blank)
+            -- Row 4: Resource Color Darken | BG Power Color Darken
             _, h = W:DualRow(parent, y,
                 { type = "slider", text = "Resource Color Darken",
                   min = 0, max = 100, step = 5,
@@ -3273,7 +3617,14 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI.GetDarkModeDB().resourceDarken = v
                       EllesmereUI.RefreshDarkMode()
                   end },
-                { type = "label", text = "" });  y = y - h
+                { type = "slider", text = "BG Power Color Darken",
+                  min = 0, max = 100, step = 5,
+                  tooltip = "Blackens power-colored Power Bar backgrounds (Unit Frames and Raid Frames) by this amount, on top of Power Color Darken.",
+                  getValue = function() return EllesmereUI.GetDarkModeDB().powerBgDarken or 0 end,
+                  setValue = function(v)
+                      EllesmereUI.GetDarkModeDB().powerBgDarken = v
+                      EllesmereUI.RefreshDarkMode()
+                  end });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -4691,6 +5042,15 @@ initFrame:SetScript("OnEvent", function(self)
                     filteredPayload.data.fonts        = nil
                     filteredPayload.data.customColors = nil
                     filteredPayload.data.euiAccent    = nil
+                    -- Overrides are per-module (they ride with their addon):
+                    -- the exporter's cross-module unlock layout forks never
+                    -- come along on a subset import, and the marker tells the
+                    -- store merge to keep the recipient's forks and partition
+                    -- value entries by imported folder (see
+                    -- SpecOverrides_MergeImportedStores).
+                    filteredPayload.data.specUnlockOverrides = nil
+                    filteredPayload.data.condUnlockOverrides = nil
+                    filteredPayload.data.partialImport = true
                 end
 
                 local function commit()
@@ -6575,6 +6935,23 @@ initFrame:SetScript("OnEvent", function(self)
         description = "General options for all EllesmereUI addons.",
         pages       = globalPages,
         buildPage   = function(pageName, parent, yOffset)
+            -- CleanupProfilesRoot hides/nils the LIVE EllesmereUI._profilesRoot,
+            -- not anything scoped to this call's pageName. During an off-screen
+            -- search pre-build, pageName cycles through PAGE_GENERAL/PAGE_COLORS
+            -- regardless of what the player is really looking at, so this would
+            -- otherwise hide the player's real Profiles page out from under them
+            -- if it happened to be open. This module's config.pages never
+            -- includes PAGE_PROFILES, so pre-build never needs to build it here.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_GENERAL then
+                    return BuildGeneralPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_COLORS then
+                    return BuildColorsPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_WHATSNEW then
+                    return EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
+                end
+                return
+            end
             -- Clean up profiles root when switching to a non-Profiles tab
             if pageName ~= PAGE_PROFILES then
                 CleanupProfilesRoot()
@@ -6680,11 +7057,29 @@ initFrame:SetScript("OnEvent", function(self)
     -- Second tab: the Spec Overrides management list (built by
     -- EllesmereUI_SpecOverrides.lua).
     local PAGE_SPECOV = "Spec Overrides"
+    local PAGE_CONDOV = "Conditional Overrides"
     EllesmereUI:RegisterModule(PROFILES_KEY, {
         title       = "Profiles & Presets",
         description = "Import, export, and switch EllesmereUI profiles and presets.",
-        pages       = { PAGE_PROFILES, PAGE_SPECOV },
+        pages       = { PAGE_PROFILES, PAGE_SPECOV, PAGE_CONDOV },
         buildPage   = function(pageName, parent, yOffset)
+            -- BuildProfilesPage bypasses `parent` entirely and builds directly
+            -- onto the live, shared EllesmereUI._scrollFrame -- and, before it
+            -- even gets there, unconditionally checks whether the active
+            -- profile matches the player's current spec and, if not, can call
+            -- SwitchProfile/RefreshAllAddons and pop a "Reload Required"
+            -- confirmation. None of that is safe to trigger from a hidden
+            -- indexing pass. Skip PAGE_PROFILES here; it gets indexed normally
+            -- the first time the player actually visits it.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_SPECOV then
+                    if EllesmereUI.SpecOverrides_BuildListPage then
+                        return EllesmereUI.SpecOverrides_BuildListPage(parent, yOffset)
+                    end
+                    return 200
+                end
+                return
+            end
             if pageName == PAGE_SPECOV then
                 CleanupProfilesRoot()
                 if EllesmereUI.SpecOverrides_BuildListPage then
@@ -6692,15 +7087,22 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 return 200
             end
+            if pageName == PAGE_CONDOV then
+                CleanupProfilesRoot()
+                if EllesmereUI.Conditions_BuildListPage then
+                    return EllesmereUI.Conditions_BuildListPage(parent, yOffset)
+                end
+                return 200
+            end
             return BuildProfilesPage(pageName, parent, yOffset)
         end,
         onPageCacheRestore = function(pageName)
-            if pageName == PAGE_SPECOV then
+            if pageName == PAGE_SPECOV or pageName == PAGE_CONDOV then
                 CleanupProfilesRoot()
                 -- The override list changes while the page is cached; rebuild.
                 C_Timer.After(0, function()
                     if EllesmereUI:GetActiveModule() == PROFILES_KEY
-                       and EllesmereUI:GetActivePage() == PAGE_SPECOV then
+                       and EllesmereUI:GetActivePage() == pageName then
                         EllesmereUI:RefreshPage(true)
                     end
                 end)

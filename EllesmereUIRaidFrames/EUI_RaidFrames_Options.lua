@@ -1908,9 +1908,32 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Show Power Bar For",
               getValue=function() return SVal("powerBgDarkness", 70) end,
               setValue=function(v) SSet("powerBgDarkness", v) end });  y = y - h
-        -- Inline swatch for power bg color
+        -- Inline swatches for power bg: Custom + Power Colored pair. Clicking
+        -- either toggles powerBgPowerColored; the inactive one dims (mirrors the
+        -- health bar background picker).
         do
             local rgn = pwBgRow._rightRegion
+            -- Power-colored background swatch (player's power color; not editable).
+            local bgPwrSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, pwBgRow:GetFrameLevel() + 3,
+                function()
+                    local _, pToken = UnitPowerType("player")
+                    local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                    local f = EllesmereUI.GetPowerBgDarkenFactor()
+                    if info then return info.r * f, info.g * f, info.b * f, 1 end
+                    return 0, 0.5 * f, f, 1
+                end,
+                function() end, false, 20)
+            bgPwrSwatch:SetScript("OnClick", function()
+                SSet("powerBgPowerColored", true)
+                EllesmereUI:RefreshPage()
+            end)
+            bgPwrSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgPwrSwatch, "Power Colored Background") end)
+            bgPwrSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            bgPwrSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = bgPwrSwatch
+
+            -- Custom background color swatch.
             local bgSwatch = EllesmereUI.BuildColorSwatch(
                 rgn, pwBgRow:GetFrameLevel() + 3,
                 function()
@@ -1922,8 +1945,27 @@ initFrame:SetScript("OnEvent", function(self)
                     SWrite("powerBgColor", { r=r, g=g, b=b })
                     ReloadAndUpdate()
                 end, false, 20)
+            bgSwatch._eabOrigClick = bgSwatch:GetScript("OnClick")
+            bgSwatch:SetScript("OnClick", function(self)
+                if SVal("powerBgPowerColored", false) then
+                    SSet("powerBgPowerColored", false)
+                    EllesmereUI:RefreshPage()
+                    return
+                end
+                if self._eabOrigClick then self._eabOrigClick(self) end
+            end)
+            bgSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSwatch, "Custom Colored Background") end)
+            bgSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgSwatch
+
+            local function UpdatePwBgSwatchVis()
+                local pwrOn = SVal("powerBgPowerColored", false)
+                bgSwatch:SetAlpha(pwrOn and 0.3 or 1)
+                bgPwrSwatch:SetAlpha(pwrOn and 1 or 0.3)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdatePwBgSwatchVis)
+            UpdatePwBgSwatchVis()
         end
 
         -- (Show Power Bar For moved to Row 1 above)
@@ -1995,15 +2037,20 @@ initFrame:SetScript("OnEvent", function(self)
                       return SVal("nameColorMode", "class") == "accent" and 1 or 0.3
                   end },
               } });  y = y - h
-        -- Cog for name character-count cap (lives on the Name Size slider).
+        -- Cog for name character-count cap + text stacking (lives on the Name
+        -- Size slider).
         do
             local rgn = row._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Name Length",
+                title = "Name Text",
                 rows = {
                     { type="slider", label="Max Characters (0=off)", min=0, max=30, step=1,
                       get=function() return SVal("nameMaxLength", 15) end,
                       set=function(v) SSet("nameMaxLength", v) end },
+                    { type="toggle", label="Show Above Icons",
+                      tooltip="Render the name and health text above buff and debuff icons.",
+                      get=function() return SVal("nameTextAboveIcons", false) end,
+                      set=function(v) SSet("nameTextAboveIcons", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
@@ -3942,16 +3989,33 @@ initFrame:SetScript("OnEvent", function(self)
               order={ "always", "outOfCombat", "outOfBossCombat", "never" },
               getValue=function() return CurTooltipMode() end,
               setValue=function(v) SSet("tooltipMode", v) end });  y = y - h
-
-        -- Buff/HoT aura-icon tooltips (Buff Manager). Off by default -- matches the
-        -- long-standing behavior where buff icons showed no tooltip; opt in here.
-        -- When shown, the aura tip still follows the "Show Raid Frames Tooltip"
-        -- combat-visibility mode above (mode governs when, this governs whether).
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Buff Tooltips",
-              tooltip="Hide the tooltip when hovering a buff/HoT icon on a raid or party frame.",
-              getValue=function() return SVal("buffHideTooltips", true) end,
-              setValue=function(v) SSet("buffHideTooltips", v); if ns.ReloadFrames then ns.ReloadFrames() end end });  y = y - h
+        -- Cog: buff/HoT aura-icon tooltips (Buff Manager). Hidden by default --
+        -- matches the long-standing behavior where buff icons showed no tooltip;
+        -- opt in here. When shown, the aura tip still follows the tooltip mode
+        -- on this dropdown (mode governs when, this governs whether).
+        do
+            local rgn = row._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Tooltip Settings",
+                rows = {
+                    { type="toggle", label="Hide Buff Tooltips",
+                      tooltip="Hide the tooltip when hovering a buff/HoT icon on a raid or party frame.",
+                      get=function() return SVal("buffHideTooltips", true) end,
+                      set=function(v) SSet("buffHideTooltips", v); if ns.ReloadFrames then ns.ReloadFrames() end end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
 
         -- Hide Blizzard Party Panel. Shares the exact same global setting and
         -- apply function as the QoL module's toggle (EllesmereUIDB.hideBlizzardPartyFrame
@@ -4040,11 +4104,11 @@ initFrame:SetScript("OnEvent", function(self)
                               return ov and ov[tier] and ov[tier].width or SVal("frameWidth", 72)
                           end,
                           setValue=function(v)
-                              if not db.profile.raidSizeOverrides then db.profile.raidSizeOverrides = {} end
-                              if not db.profile.raidSizeOverrides[tier] then
-                                  db.profile.raidSizeOverrides[tier] = { width = v, height = db.profile.frameHeight or 60 }
+                              local ovs = ns._EnsureRaidSizeOverrides()
+                              if not ovs[tier] then
+                                  ovs[tier] = { width = v, height = db.profile.frameHeight or 60 }
                               else
-                                  db.profile.raidSizeOverrides[tier].width = v
+                                  ovs[tier].width = v
                               end
                               if ns._sizePreviewTier == tier and ns._ShowSizePreview then
                                   ns._ShowSizePreview(tier)
@@ -4066,11 +4130,11 @@ initFrame:SetScript("OnEvent", function(self)
                               return ov and ov[tier] and ov[tier].height or SVal("frameHeight", 46)
                           end,
                           setValue=function(v)
-                              if not db.profile.raidSizeOverrides then db.profile.raidSizeOverrides = {} end
-                              if not db.profile.raidSizeOverrides[tier] then
-                                  db.profile.raidSizeOverrides[tier] = { width = db.profile.frameWidth or 125, height = v }
+                              local ovs = ns._EnsureRaidSizeOverrides()
+                              if not ovs[tier] then
+                                  ovs[tier] = { width = db.profile.frameWidth or 125, height = v }
                               else
-                                  db.profile.raidSizeOverrides[tier].height = v
+                                  ovs[tier].height = v
                               end
                               if ns._sizePreviewTier == tier and ns._ShowSizePreview then
                                   ns._ShowSizePreview(tier)
@@ -4166,9 +4230,17 @@ initFrame:SetScript("OnEvent", function(self)
                                 ns._sizePreviewTier = nil
                                 if ns._HideSizePreview then ns._HideSizePreview() end
                             end
-                            if db.profile.raidSizeOverrides then
-                                db.profile.raidSizeOverrides[tier] = nil
-                                if not next(db.profile.raidSizeOverrides) then
+                            local ovs = db.profile.raidSizeOverrides
+                            if ovs then
+                                ovs[tier] = nil
+                                -- Conversion markers (_topLeftAnchored /
+                                -- _cornerAnchored) always remain in the
+                                -- table; only tier TABLES count as content.
+                                local anyTier = false
+                                for _, o in pairs(ovs) do
+                                    if type(o) == "table" then anyTier = true; break end
+                                end
+                                if not anyTier then
                                     db.profile.raidSizeOverrides = nil
                                 end
                             end
@@ -4181,18 +4253,18 @@ initFrame:SetScript("OnEvent", function(self)
                     do
                         local rgn = sizeRow._leftRegion
                         local function EnsureTierOv()
-                            if not db.profile.raidSizeOverrides then db.profile.raidSizeOverrides = {} end
-                            if not db.profile.raidSizeOverrides[tier] then
-                                db.profile.raidSizeOverrides[tier] = { width = db.profile.frameWidth or 125, height = db.profile.frameHeight or 60 }
+                            local ovs = ns._EnsureRaidSizeOverrides()
+                            if not ovs[tier] then
+                                ovs[tier] = { width = db.profile.frameWidth or 125, height = db.profile.frameHeight or 60 }
                             end
-                            return db.profile.raidSizeOverrides[tier]
+                            return ovs[tier]
                         end
                         local function TierGrowthChanged()
-                            if ns._sizePreviewTier == tier and ns._ShowSizePreview then
-                                ns._ShowSizePreview(tier)
-                            else
-                                ReloadAndUpdate()
-                            end
+                            -- Resync BOTH representations: ReloadAndUpdate
+                            -- reloads the live frames (incl. the growth-corner
+                            -- anchor) and re-shows the active size preview
+                            -- itself, so the two can never diverge.
+                            ReloadAndUpdate()
                         end
                         local _, cogShow = EllesmereUI.BuildCogPopup({
                             title = EllesmereUI.Lf("%1$s Options", tierLabel),
@@ -4241,10 +4313,12 @@ initFrame:SetScript("OnEvent", function(self)
                                   end,
                                   set=function(v)
                                       EnsureTierOv().offsetX = v
+                                      -- Update BOTH: live frames (cheap corner
+                                      -- re-anchor, per tick) and the size
+                                      -- preview when it shows this tier.
+                                      if ns._ApplyTierOffset then ns._ApplyTierOffset() end
                                       if ns._sizePreviewTier == tier and ns._ShowSizePreview then
                                           ns._ShowSizePreview(tier)
-                                      elseif ns._ApplyTierOffset then
-                                          ns._ApplyTierOffset()
                                       end
                                   end },
                                 { type="slider", label="Y Offset", min=-200, max=200, step=1,
@@ -4254,10 +4328,12 @@ initFrame:SetScript("OnEvent", function(self)
                                   end,
                                   set=function(v)
                                       EnsureTierOv().offsetY = v
+                                      -- Update BOTH: live frames (cheap corner
+                                      -- re-anchor, per tick) and the size
+                                      -- preview when it shows this tier.
+                                      if ns._ApplyTierOffset then ns._ApplyTierOffset() end
                                       if ns._sizePreviewTier == tier and ns._ShowSizePreview then
                                           ns._ShowSizePreview(tier)
-                                      elseif ns._ApplyTierOffset then
-                                          ns._ApplyTierOffset()
                                       end
                                   end },
                             },
@@ -4309,11 +4385,9 @@ initFrame:SetScript("OnEvent", function(self)
                       setValue=function(v)
                           local tier = tonumber(v)
                           if not tier then return end
-                          if not db.profile.raidSizeOverrides then
-                              db.profile.raidSizeOverrides = {}
-                          end
+                          local ovs = ns._EnsureRaidSizeOverrides()
                           -- Copy current 20 man size as starting point
-                          db.profile.raidSizeOverrides[tier] = {
+                          ovs[tier] = {
                               width = db.profile.frameWidth or 125,
                               height = db.profile.frameHeight or 60,
                           }
@@ -6763,6 +6837,38 @@ initFrame:SetScript("OnEvent", function(self)
         pages       = { PAGE_MAIN, PAGE_DEBUFFS, PAGE_PARTY, PAGE_BUFFS, PAGE_CLICKCAST },
         searchTerms = rfSearchTerms,
         buildPage   = function(pageName, parent, yOffset)
+            -- All of the cleanup/preview logic below acts on live, real state
+            -- (the buff-manager/click-cast roots, and the raid/party preview
+            -- overlays over the player's actual frames) keyed only on the
+            -- pageName this particular call happens to build -- not on
+            -- whether the player is really looking at this module at all.
+            -- During an off-screen search pre-build, pageName cycles through
+            -- every page in this module's `pages` regardless of what's really
+            -- on screen, so none of it may run here.
+            --
+            -- PAGE_BUFFS / PAGE_CLICKCAST go further: their builders
+            -- (BuildBuffManagerPage -> ns.BM_BuildPage, ns.CC_BuildPage)
+            -- bypass the given `parent` entirely and build directly onto the
+            -- live, shared EllesmereUI._scrollFrame, so building them here
+            -- would inject real, visible UI onto whatever the player is
+            -- actually looking at. Skip them; they're indexed normally the
+            -- first time the player visits them live.
+            --
+            -- _partyCtx (read by SGet/SSet/SVal inside getValue/setValue
+            -- closures) is deliberately left untouched here: this hidden
+            -- pass's widgets and their closures are discarded with the
+            -- wrapper and never invoked again, so only the live path needs
+            -- it to be correct.
+            if EllesmereUI._prebuilding then
+                if pageName == PAGE_MAIN then
+                    return BuildMainPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_PARTY then
+                    return BuildPartyPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_DEBUFFS then
+                    return BuildDebuffsPage(pageName, parent, yOffset)
+                end
+                return
+            end
             -- Clean up Buff Manager root when switching away
             if pageName ~= PAGE_BUFFS and ns._bmRoot then
                 ns._bmRoot:Hide()
@@ -6829,6 +6935,27 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end,
         onPageCacheRestore = function(pageName)
+            -- Mirror buildPage's unconditional root cleanup (see above): this
+            -- fires instead of buildPage whenever the target page was already
+            -- cached, so without this, switching away from Buffs/HoverCast to
+            -- an already-cached page (e.g. Party) never hid ns._bmRoot/
+            -- ns._ccRoot -- both are built onto the shared live scroll frame,
+            -- not a per-page wrapper, so they stayed stuck on screen over
+            -- whatever page was cache-restored next.
+            if pageName ~= PAGE_BUFFS and ns._bmRoot then
+                ns._bmRoot:Hide()
+                ns._bmRoot:SetParent(nil)
+                ns._bmRoot = nil
+            end
+            if pageName ~= PAGE_CLICKCAST and ns._ccRoot then
+                if ns._ccGridPopup then ns._ccGridPopup:Hide(); ns._ccGridPopup = nil end
+                if ns._ccSpecPopup then ns._ccSpecPopup:Hide(); ns._ccSpecPopup = nil end
+                if ns._ccQBPopup then ns._ccQBPopup:Hide(); ns._ccQBPopup = nil end
+                if ns._ccSpellStrip then ns._ccSpellStrip:Hide(); ns._ccSpellStrip:SetParent(nil); ns._ccSpellStrip = nil end
+                ns._ccRoot:Hide()
+                ns._ccRoot:SetParent(nil)
+                ns._ccRoot = nil
+            end
             if pageName == PAGE_MAIN or pageName == PAGE_DEBUFFS then
                 local mode = db.profile.previewMode or "overlay"
                 -- Keep real party frames hidden under the preview (skip restore) so

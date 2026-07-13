@@ -100,6 +100,52 @@ local function NPHeight(kind, size)
     return size, false
 end
 
+-- Legacy settings resolution for aura text -- the EXACT fallback chains
+-- ApplyAppearance uses (per-kind key -> shared legacy aura* key -> defaults),
+-- so 12.0 and 12.1 render identical text for any profile state.
+-- kindKey = "debuff" | "buff" | "cc".
+local function ProfOnly(key)
+    local prof = ns.NP_GetProfile and ns.NP_GetProfile()
+    return prof and prof[key]
+end
+local function Dflt(key)
+    local d = ns.NP_GetDefaults and ns.NP_GetDefaults()
+    return d and d[key]
+end
+local function AuraDurCfg(kindKey)
+    return {
+        size = ProfOnly(kindKey .. "DurationTextSize") or ProfOnly("auraDurationTextSize")
+            or Dflt("auraDurationTextSize") or 11,
+        x = ProfOnly(kindKey .. "DurationTextX") or ProfOnly("auraDurationTextX")
+            or Dflt("auraDurationTextX") or 0,
+        y = ProfOnly(kindKey .. "DurationTextY") or ProfOnly("auraDurationTextY")
+            or Dflt("auraDurationTextY") or 0,
+        color = ProfOnly(kindKey .. "DurationTextColor") or ProfOnly("auraDurationTextColor")
+            or Dflt("auraDurationTextColor") or { r = 1, g = 1, b = 1 },
+        pos = ProfOnly(kindKey .. "TimerPosition") or ProfOnly("auraTextPosition")
+            or Dflt(kindKey .. "TimerPosition") or "topleft",
+    }
+end
+local function StackCfg()
+    return {
+        size = PVal("auraStackTextSize") or 11,
+        color = PVal("auraStackTextColor") or { r = 1, g = 1, b = 1 },
+        x = PVal("auraStackTextX") or 0,
+        y = PVal("auraStackTextY") or 0,
+        pos = PVal("auraStackTextPosition") or "bottomright",
+    }
+end
+
+-- Position -> corner/nudge/justify, mirroring the legacy ApplyTimerPosition /
+-- ApplyStackPosition mapping exactly (same baked edge nudges, user X/Y on top).
+local TEXT_POS = {
+    center      = { point = "CENTER",      nx = 0,  ny = 0,  justify = "CENTER" },
+    topright    = { point = "TOPRIGHT",    nx = 3,  ny = 4,  justify = "RIGHT" },
+    bottomleft  = { point = "BOTTOMLEFT",  nx = -3, ny = -4, justify = "LEFT" },
+    bottomright = { point = "BOTTOMRIGHT", nx = 3,  ny = -4, justify = "RIGHT" },
+    topleft     = { point = "TOPLEFT",     nx = -3, ny = 4,  justify = "LEFT" },
+}
+
 -- Text pass shared by the three styles; anchors/sizes carried per style.
 local function ApplyNPText(button, d, style)
     if button.SetMouseMotionEnabled then
@@ -118,10 +164,11 @@ local function ApplyNPText(button, d, style)
         end
         local c = style.durColor
         d.duration:SetTextColor(c and c.r or 1, c and c.g or 1, c and c.b or 1)
+        local m = TEXT_POS[style.durPos] or TEXT_POS.topleft
         d.duration:ClearAllPoints()
-        d.duration:SetPoint(style.durPoint or "CENTER", button, style.durPoint or "CENTER",
-            style.durOffX or 0, style.durOffY or 0)
-        d.duration:SetJustifyH(style.durJustify or "CENTER")
+        d.duration:SetPoint(m.point, button, m.point,
+            m.nx + (style.durOffX or 0), m.ny + (style.durOffY or 0))
+        d.duration:SetJustifyH(m.justify)
         d.duration:SetShown(not style.hideDurationText)
     end
     if d.stack then
@@ -131,9 +178,13 @@ local function ApplyNPText(button, d, style)
             d.npStackFont = fontKey
             EllesmereUI.ApplyIconTextFont(d.stack, path, style.stackSize or 11, "nameplates")
         end
+        local sc = style.stackColor
+        d.stack:SetTextColor(sc and sc.r or 1, sc and sc.g or 1, sc and sc.b or 1)
+        local m = TEXT_POS[style.stackPos] or TEXT_POS.bottomright
         d.stack:ClearAllPoints()
-        d.stack:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", style.stackOffX or 1, style.stackOffY or 1)
-        d.stack:SetJustifyH("RIGHT")
+        d.stack:SetPoint(m.point, button, m.point,
+            m.nx + (style.stackOffX or 0), m.ny + (style.stackOffY or 0))
+        d.stack:SetJustifyH(m.justify)
     end
 end
 
@@ -242,11 +293,12 @@ end
 local function BuildNPStyle(kind)
     local size = NPSize(kind)
     local height, cropped = NPHeight(kind, size)
-    local dtc
-    if ns.GetDebuffTextColor then
-        local r, g, b = ns.GetDebuffTextColor()
-        dtc = { r = r, g = g, b = b }
-    end
+    -- User text settings, resolved through the legacy fallback chains, so
+    -- every Duration/Stacks option (size, color, position, X/Y) renders
+    -- exactly like the 12.0 aura pools.
+    local kindKey = (kind == "debuffs" and "debuff") or (kind == "buffs" and "buff") or "cc"
+    local dur = AuraDurCfg(kindKey)
+    local stk = StackCfg()
     local style = {
         width = size,
         height = height,
@@ -256,22 +308,24 @@ local function BuildNPStyle(kind)
         noDefaultFonts = true,
         noTooltips = true,
         applyExtra = ApplyNPText,
+        durSize = dur.size,
+        durColor = dur.color,
+        durPos = dur.pos,
+        durOffX = dur.x,
+        durOffY = dur.y,
+        -- "None" is the duration text's show/hide switch (legacy semantics:
+        -- position dropdown "None" = hidden).
+        hideDurationText = (dur.pos == "none"),
+        -- CC icons never render stacks (legacy parity); the shared Aura
+        -- Stacks position "None" hides them everywhere else.
+        showStacks = (kind ~= "cc") and (stk.pos ~= "none"),
+        stackSize = stk.size,
+        stackColor = stk.color,
+        stackPos = stk.pos,
+        stackOffX = stk.x,
+        stackOffY = stk.y,
     }
-    if kind == "debuffs" then
-        style.durSize = 11
-        style.durColor = dtc
-        style.durPoint = "TOPLEFT"
-        style.durOffX, style.durOffY = -3, 4
-        style.durJustify = "LEFT"
-        style.showStacks = true
-        style.stackSize = 11
-        style.stackOffX, style.stackOffY = 1, 1
-    elseif kind == "buffs" then
-        style.durSize = 12
-        style.durPoint = "CENTER"
-        style.showStacks = true
-        style.stackSize = 9
-        style.stackOffX, style.stackOffY = 2, -2
+    if kind == "buffs" then
         style.purgeGlow = PurgeGlowActive()
         style.purgeStyle = (ns.GetDispelGlowStyle and ns.GetDispelGlowStyle()) or 2
         -- Type-color option removed (per-aura type is unreadable under
@@ -280,10 +334,6 @@ local function BuildNPStyle(kind)
             style.purgeR, style.purgeG, style.purgeB = ns.GetDispelGlowColor(nil)
         end
         style.applyExtra = ApplyNPBuffExtra
-    else -- cc
-        style.durSize = 12
-        style.durPoint = "CENTER"
-        style.showStacks = false
     end
     return style
 end
@@ -841,8 +891,11 @@ local npFP = {}
 local function StyleFPFor(kind)
     local size = NPSize(kind)
     local height = NPHeight(kind, size)
-    local dr, dg, db2 = 1, 1, 1
-    if kind == "debuffs" and ns.GetDebuffTextColor then dr, dg, db2 = ns.GetDebuffTextColor() end
+    -- Text settings feed BuildNPStyle, so every input must flip this
+    -- fingerprint or a live change never restyles the engine buttons.
+    local kindKey = (kind == "debuffs" and "debuff") or (kind == "buffs" and "buff") or "cc"
+    local dur = AuraDurCfg(kindKey)
+    local stk = StackCfg()
     local purge = "-"
     if kind == "buffs" and ns.GetDispelGlow then
         local pr, pg, pb = 0, 0, 0
@@ -851,7 +904,9 @@ local function StyleFPFor(kind)
         end
         purge = FP(PurgeGlowActive(), ns.GetDispelGlowStyle and ns.GetDispelGlowStyle() or 2, pr, pg, pb)
     end
-    return FP(kind, size, height, dr, dg, db2, purge,
+    local durFP = FP(dur.size, dur.x, dur.y, dur.pos, dur.color.r, dur.color.g, dur.color.b)
+    local stkFP = FP(stk.size, stk.x, stk.y, stk.pos, stk.color.r, stk.color.g, stk.color.b)
+    return FP(kind, size, height, durFP, stkFP, purge,
         EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates") or "")
 end
 

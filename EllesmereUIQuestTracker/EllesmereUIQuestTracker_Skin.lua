@@ -179,26 +179,47 @@ end
 -- rebuilds the tracker's secure quest-item action buttons; if combat is
 -- active when the tick fires, retry once on PLAYER_REGEN_ENABLED instead of
 -- silently dropping the request.
+--
+-- TAINT-LOG VERIFIED 2026-07-10 (taintLog 1, empty log): the exact deferred +
+-- combat-gated shape here -- relayout trigger, immediately enter combat, use
+-- a quest-item button -- leaves no blocking taint on the current client. That
+-- verification covers ONLY this shape: the retry listener is one-shot (it
+-- unregisters on fire and re-arms per deferral) so Update() never runs more
+-- often than requested, and the SYNCHRONOUS case in the QoL SplashFrame fix
+-- remains forbidden. Do not widen this pattern without re-verifying.
 local _relayoutPending = false
 local _relayoutRetryFrame = nil
 local function DoTrackerRelayout()
     if InCombatLockdown() then
         if not _relayoutRetryFrame then
             _relayoutRetryFrame = CreateFrame("Frame")
-            _relayoutRetryFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
             if not EQT._eventFrames then EQT._eventFrames = {} end
             if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
             local idx = #EQT._eventFrames + 1
             EQT._eventFrames[idx] = _relayoutRetryFrame
             EQT._eventRegistrations[idx] = {"PLAYER_REGEN_ENABLED"}
-            _relayoutRetryFrame:SetScript("OnEvent", function()
+            _relayoutRetryFrame:SetScript("OnEvent", function(self)
+                -- One-shot: without this, every combat end for the rest of the
+                -- session would run a full tracker Update nobody asked for.
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
                 if EQT.ForceTrackerRelayout then EQT.ForceTrackerRelayout() end
             end)
         end
+        _relayoutRetryFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         return
     end
     local otf = _G.ObjectiveTrackerFrame
     if otf and otf.Update then
+        -- 12.1: Blizzard's scenario layout probes player auras during Update
+        -- (ShouldShowMawBuffs -> GetAuraDataByIndex), and aura APIs hard-error
+        -- when auras are secret and the caller is tainted -- which our forced
+        -- Update() is. Probe the same access first and skip the relayout while
+        -- secret; the tracker relayouts naturally on Blizzard's next update.
+        if EllesmereUI and EllesmereUI.IS_121
+           and C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+            local ok = pcall(C_UnitAuras.GetAuraDataByIndex, "player", 1, "HELPFUL")
+            if not ok then return end
+        end
         otf:Update()
     end
 end

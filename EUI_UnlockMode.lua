@@ -43,6 +43,12 @@ if not EllesmereUI.RegisterUnlockElements then
             self._unlockRegisteredElements[elem.key] = elem
         end
         self._unlockRegistrationDirty = true
+        -- Spec-override unlock layers hold deferred writes for elements that
+        -- register late/conditionally (party/raid containers, CDM bars). A
+        -- fresh registration is the event that makes them applicable.
+        if EllesmereUI.SpecOverrides_UnlockPokeFlush then
+            EllesmereUI.SpecOverrides_UnlockPokeFlush()
+        end
     end
 end
 
@@ -443,9 +449,9 @@ local snapshotSizes = {}      -- original sizes captured when unlock mode opens
 local snapshotWidthMatch = {} -- original width match DB captured when unlock mode opens
 local snapshotHeightMatch = {} -- original height match DB captured when unlock mode opens
 local snapshotGrowDirs = {}   -- original growth directions captured when unlock mode opens
--- Spec-override mover marks live at EllesmereUI._unlockRefreshSpecOvMarks and
--- the save routing at EllesmereUI._unlockRouteSpecOvSave (namespace fields,
--- not locals: the deferred-init function is at Lua 5.1's 200-local cap).
+-- The spec-override banner refresh lives at EllesmereUI._unlockRefreshSpecOvMarks
+-- (a namespace field, not a local: the deferred-init function is at Lua 5.1's
+-- 200-local cap). Layer banking is a wholesale harvest at CommitPositions.
 local hasChanges = false      -- true if user dragged anything this session
 local snapHighlightKey = nil   -- barKey of mover currently showing snap highlight border
 local snapHighlightAnim = nil  -- OnUpdate frame for the pulsing border
@@ -956,6 +962,15 @@ end
 -------------------------------------------------------------------------------
 --  Public API: query width/height match state from any addon
 -------------------------------------------------------------------------------
+-- Live frame size + effective scale for any unlock element, by key. Used by
+-- the spec-override size companions' match-residue test (frame reads only;
+-- must never touch module config resolvers).
+function EllesmereUI._unlockFrameSize(key)
+    local f = GetBarFrame(key)
+    if not f then return nil end
+    return f:GetWidth(), f:GetHeight(), f:GetEffectiveScale()
+end
+
 function EllesmereUI.GetWidthMatchTarget(barKey)
     local db = MatchH.GetWidthMatchDB()
     return db and db[barKey] or nil
@@ -1111,13 +1126,14 @@ local function ValidateStoredLinks()
     if not EllesmereUIDB then return end
     local elems = EllesmereUI._unlockRegisteredElements
 
-    -- Links written by an applied unlock spec-override are never pruned for
-    -- a missing endpoint: the element may only exist for the override's
-    -- spec/profile, and pruning here would destroy per-spec data the next
-    -- apply expects to restore over.
-    local appliedFn = EllesmereUI.SpecOverrides_UnlockApplied
-    local function OverrideProtected(childKey)
-        return appliedFn and appliedFn(childKey) or false
+    -- While a spec-override unlock LAYER is live, links are never pruned for
+    -- a missing endpoint: elements may exist only for some of the layer's
+    -- specs, and the transition harvest would bank the prune into the layer,
+    -- destroying data the other specs expect. Baseline sessions prune as
+    -- normal.
+    local activeFn = EllesmereUI.SpecOverrides_UnlockActive
+    local function OverrideProtected()
+        return (activeFn and activeFn() ~= nil) and true or false
     end
 
     -- Tracking Bar keys are spec-scoped: the registry only ever holds the
@@ -1391,12 +1407,8 @@ do
         savedEdge.tgtR = tR
         savedEdge.tgtT = tT
         savedEdge.tgtB = tB
-        -- Applied unlock spec-override: persist the blessed baseline into the
-        -- owning override entry so it survives the next spec swap instead of
-        -- being discarded and re-blessed every time.
-        if EllesmereUI.SpecOverrides_UnlockWriteBackPos then
-            EllesmereUI.SpecOverrides_UnlockWriteBackPos(childKey, savedEdge)
-        end
+        -- (Blessed baselines need no override write-back: the layer harvest
+        -- banks the live stores wholesale at every spec/profile transition.)
     end
 
     function EllesmereUI._MigrateAnchorFollowBaselines()
@@ -1572,15 +1584,25 @@ function EllesmereUI.NotifyElementResized(key)
         else
             -- Unanchored: re-apply stored CENTER position
             local elem = registeredElements[key]
-            local pos
-            if elem and elem.loadPosition then
-                pos = elem.loadPosition(key)
+            if elem and elem.noInitHook then
+                -- Self-positioning element (noInitHook): the stored CENTER
+                -- was captured under whatever footprint was live at save
+                -- time, and re-applying it here clobbers the element's own
+                -- scheme (e.g. the raid container's per-tier growth-corner
+                -- anchor). Delegate to its own position authority instead --
+                -- which also re-derives the pinned corner after a resize.
+                if elem.applyPosition then pcall(elem.applyPosition, key) end
             else
-                local db = GetPositionDB()
-                pos = db and db[key]
-            end
-            if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
-                ApplyCenterPosition(key, pos)
+                local pos
+                if elem and elem.loadPosition then
+                    pos = elem.loadPosition(key)
+                else
+                    local db = GetPositionDB()
+                    pos = db and db[key]
+                end
+                if pos and pos.point == "CENTER" and pos.relPoint == "CENTER" then
+                    ApplyCenterPosition(key, pos)
+                end
             end
         end
     end
@@ -1727,6 +1749,47 @@ local function ApplyAllWidthHeightMatches()
     ApplyMatchesInDependencyOrder(MatchH.GetWidthMatchDB(), MatchH.ApplyWidthMatch)
     -- Height matches (dependency-sorted)
     ApplyMatchesInDependencyOrder(MatchH.GetHeightMatchDB(), MatchH.ApplyHeightMatch)
+end
+
+-- Re-sync every active width/height match when the global UI Scale changes.
+-- ApplyWidthMatch/ApplyHeightMatch convert the target's size into the
+-- source's coordinate space via GetEffectiveScale() ratio -- correct at the
+-- moment they run, but nothing previously re-ran that conversion after a UI
+-- Scale change, so a source/target pair whose frames don't scale identically
+-- (e.g. a custom element parented to UIParent matched against a Blizzard
+-- Edit Mode frame with its own independent scale) is left using the OLD
+-- scale ratio until something UNRELATED happens to trigger a re-match. This
+-- produced reports of "extra spacing" on Dragon Riding's Width Match to
+-- Cooldowns that only went away when changing something else forced a
+-- re-application. A short delay lets every frame's GetEffectiveScale()
+-- finish propagating through the hierarchy before recomputing.
+-- Debounced to a quiet period rather than a fixed delay from the first
+-- event: a live-preview UI Scale slider can fire this event many times per
+-- second while being dragged, and re-running the match pass on every single
+-- firing (each one capturing a different, still-transient scale) was itself
+-- causing a non-converging feedback loop -- the re-applied width feeding
+-- into the next SetSize, which re-fires the resize-propagation chain, which
+-- re-applies again with a slightly different value, repeating indefinitely.
+-- Cancelling and rescheduling on every event means the pass only actually
+-- runs once scale changes stop arriving for a moment.
+-- Shares its debounce timer (on EllesmereUI.PP) with the other UI-Scale
+-- trigger in EllesmereUI.lua's PP.SetUIScale, rather than keeping an
+-- independent local timer: whether UIParent:SetScale() also raises this
+-- event is not something we could verify statically, so if it does, this
+-- listener cancels/replaces PP.SetUIScale's own pending timer (or vice
+-- versa) instead of both firing a full match pass back to back.
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("UI_SCALE_CHANGED")
+    f:SetScript("OnEvent", function()
+        local PPu = EllesmereUI and EllesmereUI.PP
+        if not PPu then return end
+        if PPu._scaleMatchDebounce then PPu._scaleMatchDebounce:Cancel() end
+        PPu._scaleMatchDebounce = C_Timer.NewTimer(0.3, function()
+            PPu._scaleMatchDebounce = nil
+            ApplyAllWidthHeightMatches()
+        end)
+    end)
 end
 
 -------------------------------------------------------------------------------
@@ -2527,6 +2590,72 @@ do
     end
 end
 
+-- Captures the growth-edge pin for an anchored custom-growth bar from LIVE
+-- geometry: which target reference edge the fixed growth edge hangs off
+-- (refX/refY = LEFT|RIGHT|TOP|BOTTOM|CENTER) and its offset from that edge
+-- (edgeOffX/edgeOffY). Movement-free by construction -- the pin reproduces
+-- the bar's current on-screen position exactly. refFor records the grow
+-- direction the pin was captured for, so legacy anchors (no pin yet) and
+-- grow-direction changes recapture automatically on the next apply.
+-- Reference choice: a side on the growth axis pins to that side's target
+-- edge (honoring the growth-edge extent override); a perpendicular side
+-- pins to the near edge, chosen once by which half of the target the fixed
+-- edge sits in, so runtime straddling can never flip it.
+EllesmereUI._unlockCaptureGrowPin = function(childKey, ai, side)
+    if not ai or not ai.target then return false end
+    local childBar = GetBarFrame(childKey)
+    local targetBar = GetBarFrame(ai.target)
+    if not childBar or not targetBar then return false end
+    if not (childBar:GetLeft() and targetBar:GetLeft()) then return false end
+    local growDir = GetBarGrowDirActual(childKey)
+    if not growDir or growDir == "CENTER" then return false end
+    local uiS = UIParent:GetEffectiveScale()
+    local cS = childBar:GetEffectiveScale()
+    local tS = targetBar:GetEffectiveScale()
+    local snapF = (EllesmereUI.PP and EllesmereUI.PP.Snap)
+        or function(v) return math.floor(v + 0.5) end
+    local tL = (targetBar:GetLeft() or 0) * tS / uiS
+    local tR = (targetBar:GetRight() or 0) * tS / uiS
+    local tT = (targetBar:GetTop() or 0) * tS / uiS
+    local tB = (targetBar:GetBottom() or 0) * tS / uiS
+    if EllesmereUI._GetAnchorTargetExtent then
+        local ext = EllesmereUI._GetAnchorTargetExtent(ai.target, side)
+        if ext then
+            if side == "TOP" then tT = ext
+            elseif side == "BOTTOM" then tB = ext
+            elseif side == "LEFT" then tL = ext
+            elseif side == "RIGHT" then tR = ext
+            end
+        end
+    end
+    local tCX, tCY = (tL + tR) / 2, (tT + tB) / 2
+    if growDir == "LEFT" or growDir == "RIGHT" then
+        local fixedX = ((growDir == "RIGHT") and childBar:GetLeft()
+            or childBar:GetRight()) * cS / uiS
+        local refX
+        if side == "LEFT" then refX = "LEFT"
+        elseif side == "RIGHT" then refX = "RIGHT"
+        else refX = (fixedX < tCX) and "LEFT" or "RIGHT" end
+        local refVal = (refX == "LEFT" and tL) or (refX == "RIGHT" and tR) or tCX
+        ai.refX = refX
+        ai.edgeOffX = snapF(fixedX - refVal)
+        ai.refY, ai.edgeOffY = nil, nil
+    else
+        local fixedY = ((growDir == "UP") and childBar:GetBottom()
+            or childBar:GetTop()) * cS / uiS
+        local refY
+        if side == "TOP" then refY = "TOP"
+        elseif side == "BOTTOM" then refY = "BOTTOM"
+        else refY = (fixedY < tCY) and "BOTTOM" or "TOP" end
+        local refVal = (refY == "TOP" and tT) or (refY == "BOTTOM" and tB) or tCY
+        ai.refY = refY
+        ai.edgeOffY = snapF(fixedY - refVal)
+        ai.refX, ai.edgeOffX = nil, nil
+    end
+    ai.refFor = growDir
+    return true
+end
+
 ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCascade)
     local childBar = GetBarFrame(childKey)
     local targetBar = GetBarFrame(targetKey)
@@ -2679,6 +2808,49 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
     local isCdmOrAB = childKey:sub(1, 4) == "CDM_"
         or (EllesmereUI._abBarKeys and EllesmereUI._abBarKeys[childKey])
     local isCDM = childKey:sub(1, 4) == "CDM_"
+
+    -- Unified growth-edge pin (anchored custom-growth bars): the bar's fixed
+    -- growth edge holds a stored offset from a LIVE target reference edge --
+    -- one formula for login, cascade, save and revert, with no saved-edge
+    -- duality, no follow baselines, and no mode flags. Engages only once the
+    -- anchor's offsets exist (a fresh anchor's first apply still side-snaps
+    -- and the follow-up batch apply captures the pin from the placed
+    -- position). Legacy anchors and grow-direction changes recapture lazily
+    -- and movement-free from the bar's current position; while frames lack
+    -- bounds the legacy pin below still applies, so early-login frames
+    -- degrade gracefully.
+    local growPinned = false
+    if isCdmOrAB and ai and ai.target and ai.offsetX ~= nil and ai.offsetY ~= nil then
+        local gd = GetBarGrowDirActual(childKey)
+        if gd and gd ~= "CENTER" then
+            -- Lazy capture ONLY at provable quiescence: the settle pass (the
+            -- same moment the session-baseline and bless captures trust) or
+            -- inside an unlock session (geometry settled and user-visible).
+            -- CDM bars populate icons asynchronously at login; capturing
+            -- mid-population froze a transient half-icon edge creep into the
+            -- pin. Until capture, the legacy pin below serves the apply.
+            if ai.refFor ~= gd and EllesmereUI._unlockCaptureGrowPin
+               and (EllesmereUI._settleReapplyInProgress or isUnlocked) then
+                EllesmereUI._unlockCaptureGrowPin(childKey, ai, side)
+            end
+            if ai.refFor == gd then
+                if gd == "LEFT" or gd == "RIGHT" then
+                    local refVal = (ai.refX == "LEFT" and tL)
+                        or (ai.refX == "RIGHT" and tR) or tCX
+                    local fixedX = refVal + (ai.edgeOffX or 0)
+                    cx = (gd == "RIGHT") and (fixedX + cW / 2) or (fixedX - cW / 2)
+                    cdmEdgeAnchor = (gd == "RIGHT") and "LEFT" or "RIGHT"
+                else
+                    local refVal = (ai.refY == "TOP" and tT)
+                        or (ai.refY == "BOTTOM" and tB) or tCY
+                    local fixedY = refVal + (ai.edgeOffY or 0)
+                    cy = (gd == "UP") and (fixedY + cH / 2) or (fixedY - cH / 2)
+                    cdmEdgeAnchor = (gd == "UP") and "BOTTOM" or "TOP"
+                end
+                growPinned = true
+            end
+        end
+    end
     -- The edge-anchor / edge-preservation path is normally suppressed in unlock
     -- mode so movers capture the user's live (center-based) drag positions. The
     -- _reapplyForceEdgePreserve flag is a narrow exception: the shift-unapply
@@ -2687,7 +2859,8 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
     -- fixed growth edge -- without this, those bars paint centered for the whole
     -- unlock session. The flag is set only around that one reapply, so manual
     -- drag/drop positioning is unaffected.
-    if isCdmOrAB and (not isUnlocked or EllesmereUI._reapplyForceEdgePreserve)
+    if not growPinned and isCdmOrAB
+       and (not isUnlocked or EllesmereUI._reapplyForceEdgePreserve)
        and (isCDM or childKey == "StanceBar" or not EllesmereUI._applyingSavedPositions) then
         local growDir = GetBarGrowDirActual(childKey)
         if growDir and growDir ~= "CENTER" then
@@ -3505,11 +3678,8 @@ EllesmereUI.ResyncAnchorOffsets = function()
             end
         end
     end
-    -- Mirror freshly-resolved offsets into applied unlock spec-overrides so
-    -- stored anchor entries never go stale against legitimate offset upkeep.
-    if EllesmereUI.SpecOverrides_UnlockSyncAnchorOffsets then
-        EllesmereUI.SpecOverrides_UnlockSyncAnchorOffsets()
-    end
+    -- (Offset drift needs no override mirror: the layer harvest banks the
+    -- live stores wholesale at every spec/profile transition.)
     wipe(pendingPositions)
 end
 
@@ -3747,7 +3917,13 @@ SaveBarPosition = function(barKey, point, relPoint, x, y)
     -- Registered element?
     local elem = registeredElements[barKey]
     if elem and elem.savePosition then
-        elem.savePosition(barKey, cp, crp, cx, cy)
+        -- Also hand over the PRE-conversion anchor point: when it is not
+        -- already CENTER/CENTER, ConvertToCenterPos derived cx/cy from the
+        -- element's LIVE bounds, and elements whose stored position uses a
+        -- different footprint convention (the raid container's size tiers)
+        -- rebase the value in their savePosition. Elements that ignore the
+        -- extra args are unaffected.
+        elem.savePosition(barKey, cp, crp, cx, cy, point, relPoint)
         return
     end
     -- Action bar fallback
@@ -3876,7 +4052,13 @@ local function ApplySavedPositions()
             -- by the init loop: any hook or SetPoint on ChatFrame1 taints
             -- FCF_OpenTemporaryWindow's secure chain.
             if elem.noInitHook then
-                -- skip applyPosition, MigrateAndApplyPosition, HookFrameSizeChanged
+                -- Self-positioning element: skip applyPosition and the
+                -- MigrateAndApplyPosition override entirely. The
+                -- HookFrameSizeChanged below STILL runs (dependents anchored
+                -- to this element need resize/anchor propagation; chat is
+                -- excluded inside HookFrameSizeChanged itself), and
+                -- NotifyElementResized delegates position re-apply back to
+                -- elem.applyPosition for noInitHook elements.
             elseif true then
             -- Let addon initialize/build (e.g. CDM's BuildAllCDMBars)
             -- Skip protected frames during combat to avoid ADDON_ACTION_BLOCKED
@@ -5039,6 +5221,9 @@ local function NudgeMover(dx, dy, targetMover, skipCollapse)
         -- the target frame — applying those to UIParent teleports the bar.
         ai.offsetX = (ai.offsetX or 0) + dx
         ai.offsetY = (ai.offsetY or 0) + dy
+        -- The growth-edge pin rides the same nudge on its axis.
+        if ai.edgeOffX ~= nil then ai.edgeOffX = ai.edgeOffX + dx end
+        if ai.edgeOffY ~= nil then ai.edgeOffY = ai.edgeOffY + dy end
         ApplyAnchorPosition(m._barKey, ai.target, ai.side)
         -- Capture the bar's resulting position so CommitPositions saves the real
         -- (nudged) location. ApplyAnchorPosition always anchors the bar to
@@ -7098,6 +7283,12 @@ local function CreateMover(barKey)
                     end
                 end
             end
+            -- Growth bars: recapture the growth-edge pin from the dropped
+            -- position (the user may have carried the bar to the other
+            -- corner, which can change the reference edge).
+            if EllesmereUI._unlockCaptureGrowPin then
+                EllesmereUI._unlockCaptureGrowPin(self._barKey, ai, ai.side)
+            end
         end
 
         -- Anchor chain: propagate recursively down the chain
@@ -8268,79 +8459,6 @@ local function CreateMover(barKey)
             yOff = yOff - 9
         end
 
-        -- Remove Spec Override: shown only when this element carries an
-        -- unlock override for the active edit context (the special group, or
-        -- the current spec's owning group). Reverts the element to the shared
-        -- baseline layout immediately.
-        do
-            local ovGroup
-            local special = EllesmereUI._specialUnlockGroup
-            if special then
-                if EllesmereUI.SpecOverrides_UnlockGroupOwns
-                   and EllesmereUI.SpecOverrides_UnlockGroupOwns(barKey, special.id) then
-                    ovGroup = special
-                end
-            elseif EllesmereUI.SpecOverrides_UnlockOwner
-               and EllesmereUI.SpecOverrides_CurrentSpec then
-                ovGroup = EllesmereUI.SpecOverrides_UnlockOwner(
-                    barKey, EllesmereUI.SpecOverrides_CurrentSpec())
-            end
-            if ovGroup then
-                local remItem = CreateFrame("Button", nil, cogMenu)
-                remItem:SetHeight(ITEM_H)
-                remItem:SetPoint("TOPLEFT", cogMenu, "TOPLEFT", 1, yOff)
-                remItem:SetPoint("TOPRIGHT", cogMenu, "TOPRIGHT", -1, yOff)
-                remItem:SetFrameLevel(cogMenu:GetFrameLevel() + 2)
-                remItem:RegisterForClicks("AnyUp")
-                local remHl = remItem:CreateTexture(nil, "ARTWORK")
-                remHl:SetAllPoints()
-                remHl:SetColorTexture(1, 1, 1, 0)
-                local remLbl = remItem:CreateFontString(nil, "OVERLAY")
-                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(remLbl, true) end
-                remLbl:SetFont(FONT_PATH, 11, "")
-                remLbl:SetTextColor(0.9, 0.3, 0.3, 0.9)
-                remLbl:SetJustifyH("LEFT")
-                remLbl:SetPoint("LEFT", remItem, "LEFT", 10, 0)
-                remLbl:SetText(EllesmereUI.L("Remove Spec Override"))
-                remItem:SetScript("OnEnter", function()
-                    remHl:SetColorTexture(1, 1, 1, 0.08)
-                    remLbl:SetTextColor(1, 0.4, 0.4, 1)
-                end)
-                remItem:SetScript("OnLeave", function()
-                    remHl:SetColorTexture(1, 1, 1, 0)
-                    remLbl:SetTextColor(0.9, 0.3, 0.3, 0.9)
-                end)
-                local gid = ovGroup.id
-                local gName = ovGroup.name or "?"
-                remItem:SetScript("OnClick", function()
-                    CloseCogMenu()
-                    EllesmereUI:ShowConfirmPopup({
-                        title = EllesmereUI.L("Remove Spec Override"),
-                        message = string.format(
-                            EllesmereUI.L("Revert this element to the shared layout? The '%s' specs lose their custom layout for it."),
-                            gName),
-                        confirmText = EllesmereUI.L("Remove"),
-                        cancelText = EllesmereUI.L("Cancel"),
-                        onConfirm = function()
-                            if EllesmereUI.SpecOverrides_RemoveUnlockOverride then
-                                EllesmereUI.SpecOverrides_RemoveUnlockOverride(barKey, gid)
-                            end
-                        end,
-                    })
-                end)
-                yOff = yOff - ITEM_H
-
-                local remDiv = cogMenu:CreateTexture(nil, "ARTWORK")
-                local remDivPx = PP and PP.mult or 1
-                remDiv:SetHeight(remDivPx)
-                if remDiv.SetSnapToPixelGrid then remDiv:SetSnapToPixelGrid(false); remDiv:SetTexelSnappingBias(0) end
-                remDiv:SetColorTexture(1, 1, 1, 0.10)
-                remDiv:SetPoint("TOPLEFT", cogMenu, "TOPLEFT", 1, yOff - 4)
-                remDiv:SetPoint("TOPRIGHT", cogMenu, "TOPRIGHT", -1, yOff - 4)
-                yOff = yOff - 9
-            end
-        end
-
         -- Width / Height input fields (only for resizable elements)
         -- CDM bars skip width/height here; size is driven by icon count/size in the options panel
         local isCDMBar = barKey:sub(1, 4) == "CDM_"
@@ -8454,7 +8572,12 @@ local function CreateMover(barKey)
                 return box
             end
 
-            if not isCDMBar then
+            -- Special override sessions never offer the direct size inputs:
+            -- element size is not an override aspect (only the wm/hm size
+            -- companions are), so a resize here would write the SHARED
+            -- module setting mid-session while looking like a per-group
+            -- edit. Users resize from the options panel instead.
+            if not isCDMBar and not EllesmereUI._specialUnlockGroup then
                 wBox = MakeSizeRow("Width",  curW)
                 hBox = MakeSizeRow("Height", curH)
             end
@@ -9505,12 +9628,20 @@ local function SnapshotPositions()
         end
     end
 
-    -- Snapshot anchor data so we can revert on discard
+    -- Snapshot anchor data so we can revert on discard (includes the
+    -- growth-edge pin fields; losing them on cancel would force a lazy
+    -- recapture from whatever position the session left the bar at)
     wipe(snapshotAnchors)
     local anchorDB = GetAnchorDB()
     if anchorDB then
         for childKey, info in pairs(anchorDB) do
-            snapshotAnchors[childKey] = { target = info.target, side = info.side, offsetX = info.offsetX, offsetY = info.offsetY }
+            snapshotAnchors[childKey] = {
+                target = info.target, side = info.side,
+                offsetX = info.offsetX, offsetY = info.offsetY,
+                refX = info.refX, refY = info.refY,
+                edgeOffX = info.edgeOffX, edgeOffY = info.edgeOffY,
+                refFor = info.refFor,
+            }
         end
     end
 
@@ -9544,7 +9675,11 @@ local function SnapshotPositions()
     local cdmBars = cdm and cdm.db and cdm.db.profile and cdm.db.profile.cdmBars
     if cdmBars and cdmBars.bars then
         for _, bar in ipairs(cdmBars.bars) do
-            snapshotGrowDirs["CDM_" .. bar.key] = bar.growDirection or false
+            -- bar.key guard: ghost bars (keyless skeletons from stale
+            -- override writes) have nothing to snapshot.
+            if bar.key then
+                snapshotGrowDirs["CDM_" .. bar.key] = bar.growDirection or false
+            end
         end
     end
     local eab = EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
@@ -9557,6 +9692,30 @@ local function SnapshotPositions()
             end
         end
     end
+
+    -- Raw pre-session position entries for CDM/AB bars: verbatim saved edges
+    -- including the tgt* follow baselines. The snapshotPositions entries above
+    -- are center-converted and LOSSY for edge-preserving grow bars (a restored
+    -- CENTER-format saved edge cannot pin, so the bar would stay wherever it
+    -- currently sits). Spec-override baseline capture prefers these raw
+    -- copies. Namespace table: this body sits inside the deferred-init
+    -- closure, which is at Lua 5.1's 200-local cap.
+    local rawSnap = {}
+    EllesmereUI._unlockSnapRawPos = rawSnap
+    local cdmPos = cdm and cdm.db and cdm.db.profile and cdm.db.profile.cdmBarPositions
+    if cdmPos and cdmBars and cdmBars.bars then
+        for _, bar in ipairs(cdmBars.bars) do
+            local e = cdmPos[bar.key]
+            if e then rawSnap["CDM_" .. bar.key] = CopyTable(e) end
+        end
+    end
+    local abPos = GetPositionDB()
+    if abPos and EllesmereUI._abBarKeys then
+        for bk in pairs(EllesmereUI._abBarKeys) do
+            local e = abPos[bk]
+            if e then rawSnap[bk] = CopyTable(e) end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -9567,34 +9726,6 @@ end
 --  session (owned by a spec-sharing group, or a blocked subsystem).
 -------------------------------------------------------------------------------
 do
-    local function EnsureSpecOvLock(m)
-        if m._specOvLock then return m._specOvLock end
-        local host = CreateFrame("Frame", nil, m)
-        host:SetAllPoints()
-        host:SetFrameLevel(m:GetFrameLevel() + 40)
-        if PP and PP.CreateBorder then
-            PP.CreateBorder(host, 0.9, 0.2, 0.2, 0.9, 1, "OVERLAY", 7)
-        end
-        local blocker = CreateFrame("Button", nil, host)
-        blocker:SetAllPoints()
-        blocker:SetFrameLevel(m:GetFrameLevel() + 45)
-        blocker:EnableMouse(true)
-        local tint = blocker:CreateTexture(nil, "OVERLAY")
-        tint:SetAllPoints()
-        tint:SetColorTexture(0.9, 0.2, 0.2, 0.05)
-        blocker:SetScript("OnEnter", function(self)
-            if self._tipText and EllesmereUI.ShowWidgetTooltip then
-                EllesmereUI.ShowWidgetTooltip(self, self._tipText)
-            end
-        end)
-        blocker:SetScript("OnLeave", function()
-            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
-        end)
-        host._blocker = blocker
-        m._specOvLock = host
-        return host
-    end
-
     local specOvBanner
     local function UpdateSpecOvBanner()
         local g = EllesmereUI._specialUnlockGroup
@@ -9624,300 +9755,17 @@ do
         specOvBanner:Show()
     end
 
+    -- Layer model: a custom unlock mode is a whole-layout fork, so there are
+    -- no per-element gold marks or conflict locks anymore -- the gold frame
+    -- variant and this banner carry the state. The refresh keeps the banner
+    -- current and hides stale per-element markers on pooled movers.
     EllesmereUI._unlockRefreshSpecOvMarks = function()
         UpdateSpecOvBanner()
-        local ownerFn = EllesmereUI.SpecOverrides_UnlockOwner
-        local special = EllesmereUI._specialUnlockGroup
-        local curSpec = EllesmereUI.SpecOverrides_CurrentSpec
-            and EllesmereUI.SpecOverrides_CurrentSpec() or nil
-        for barKey, m in pairs(movers) do
-            local gold, lockTip
-            if special then
-                if EllesmereUI.SpecOverrides_UnlockGroupOwns
-                   and EllesmereUI.SpecOverrides_UnlockGroupOwns(barKey, special.id) then
-                    gold = true
-                end
-                -- Blocked subsystems: tracking bars are spec-scoped natively
-                -- (TBB_) or globally shared (TBBG_); neither joins the
-                -- override system.
-                if barKey:sub(1, 5) == "TBBG_" or barKey:sub(1, 4) == "TBB_" then
-                    lockTip = EllesmereUI.L("Not spec-customizable")
-                elseif EllesmereUI.SpecOverrides_UnlockConflictGroup then
-                    local og = EllesmereUI.SpecOverrides_UnlockConflictGroup(barKey, special)
-                    if og then
-                        lockTip = string.format(
-                            EllesmereUI.L("Already customized by the group '%s'"), og.name or "?")
-                    end
-                end
-            elseif curSpec and ownerFn then
-                gold = ownerFn(barKey, curSpec) ~= nil
-            end
-            if gold and not m._specOvBrd then
-                local gc = EllesmereUI._SPECOV_GOLD
-                local host = CreateFrame("Frame", nil, m)
-                host:SetAllPoints()
-                host:SetFrameLevel(m:GetFrameLevel() + 35)
-                if PP and PP.CreateBorder then
-                    -- 2px (1px thicker than the standard mover border) so the
-                    -- override marker stands out over the accent border.
-                    PP.CreateBorder(host, gc and gc[1] or 0.78, gc and gc[2] or 0.65,
-                        gc and gc[3] or 0.35, 0.9, 2, "OVERLAY", 7)
-                else
-                    EllesmereUI.MakeBorder(host, gc and gc[1] or 0.78, gc and gc[2] or 0.65,
-                        gc and gc[3] or 0.35, 0.9)
-                end
-                m._specOvBrd = host
-            end
-            if m._specOvBrd then m._specOvBrd:SetShown(gold and true or false) end
-            if lockTip then
-                local host = EnsureSpecOvLock(m)
-                host._blocker._tipText = lockTip
-                host:Show()
-            elseif m._specOvLock then
-                m._specOvLock:Hide()
-            end
+        for _, m in pairs(movers) do
+            if m._specOvBrd then m._specOvBrd:Hide() end
+            if m._specOvLock then m._specOvLock:Hide() end
         end
     end
-end
-
---- Element-scoped reapply after an in-session override removal: re-seat the
---- element from its freshly-restored stores, re-run matches + anchors like
---- the post-save flow, and fold the restored state into the session
---- snapshots so a later Cancel keeps the removal instead of resurrecting the
---- old override values into the live stores.
-function EllesmereUI._unlockAfterSpecOvRemove(elementKey)
-    local elem = registeredElements[elementKey]
-    if elem and elem.applyPosition then
-        pcall(elem.applyPosition, elementKey)
-    elseif elem and elem.loadPosition then
-        local p = elem.loadPosition(elementKey)
-        if p then pcall(ApplyCenterPosition, elementKey, p) end
-    else
-        local db = GetPositionDB()
-        local pos = db and db[elementKey]
-        if pos then pcall(ApplyCenterPosition, elementKey, pos) end
-    end
-    if EllesmereUI.ApplyAllWidthHeightMatches then pcall(EllesmereUI.ApplyAllWidthHeightMatches) end
-    EllesmereUI._reapplyForceEdgePreserve = true
-    if EllesmereUI.ReapplyAllUnlockAnchorsForced then pcall(EllesmereUI.ReapplyAllUnlockAnchorsForced) end
-    EllesmereUI._reapplyForceEdgePreserve = false
-    -- Re-baseline the session transaction for this element.
-    pendingPositions[elementKey] = nil
-    local adb = GetAnchorDB()
-    local ai = adb and adb[elementKey]
-    snapshotAnchors[elementKey] = ai and { target = ai.target, side = ai.side,
-        offsetX = ai.offsetX, offsetY = ai.offsetY } or nil
-    local wmDB = MatchH.GetWidthMatchDB()
-    snapshotWidthMatch[elementKey] = wmDB and wmDB[elementKey] or nil
-    local hmDB = MatchH.GetHeightMatchDB()
-    snapshotHeightMatch[elementKey] = hmDB and hmDB[elementKey] or nil
-    if snapshotGrowDirs[elementKey] ~= nil then
-        local gd
-        if elementKey:sub(1, 4) == "CDM_" then
-            local raw = elementKey:sub(5)
-            local a = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
-            local bars = a and a.db and a.db.profile and a.db.profile.cdmBars
-            if bars and bars.bars then
-                for _, bar in ipairs(bars.bars) do
-                    if bar.key == raw then gd = bar.growDirection; break end
-                end
-            end
-        else
-            local a = EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
-            local cfg = a and a.db and a.db.profile and a.db.profile.bars
-                and a.db.profile.bars[elementKey]
-            gd = cfg and cfg.growDirection
-        end
-        snapshotGrowDirs[elementKey] = gd or false
-    end
-    if elem and elem.loadPosition then
-        local p = elem.loadPosition(elementKey)
-        if p then
-            snapshotPositions[elementKey] = { point = p.point,
-                relPoint = p.relPoint or p.point, x = p.x, y = p.y }
-        end
-    else
-        local db = GetPositionDB()
-        local pos = db and db[elementKey]
-        if pos then
-            snapshotPositions[elementKey] = { point = pos.point,
-                relPoint = pos.relPoint, x = pos.x, y = pos.y }
-        end
-    end
-    local m = movers[elementKey]
-    if m and m.Sync then pcall(m.Sync, m) end
-    if EllesmereUI._unlockRefreshSpecOvMarks then EllesmereUI._unlockRefreshSpecOvMarks() end
-end
-
--- Save & Exit routing: diffs the live stores against the session snapshots
--- (positions ride pendingPositions) and routes each touched element's touched
--- aspects into the owning group's unlock override, or mirrors them into the
--- shared-baseline shadow when no group owns the element for this spec.
--- Diff-at-save catches every mutation path without per-site bookkeeping.
-function EllesmereUI._unlockRouteSpecOvSave()
-    local bank = EllesmereUI.SpecOverrides_UnlockBank
-    local NILS = EllesmereUI.SPECOV_NIL
-    if not bank or not NILS then return end
-    local special = EllesmereUI._specialUnlockGroup
-    local curSpec = EllesmereUI.SpecOverrides_CurrentSpec
-        and EllesmereUI.SpecOverrides_CurrentSpec() or nil
-    if not special and not curSpec then return end
-
-    local anchorDB = GetAnchorDB() or {}
-    local wmDB = MatchH.GetWidthMatchDB() or {}
-    local hmDB = MatchH.GetHeightMatchDB() or {}
-
-    local function LiveGrow(key)
-        if key:sub(1, 4) == "CDM_" then
-            local raw = key:sub(5)
-            local a = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
-            local bars = a and a.db and a.db.profile and a.db.profile.cdmBars
-            if bars and bars.bars then
-                for _, bar in ipairs(bars.bars) do
-                    if bar.key == raw then return bar.growDirection end
-                end
-            end
-            return nil
-        end
-        local a = EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
-        local cfg = a and a.db and a.db.profile and a.db.profile.bars
-            and a.db.profile.bars[key]
-        return cfg and cfg.growDirection or nil
-    end
-
-    local function LivePosEntry(key)
-        if key:sub(1, 4) == "CDM_" then
-            local a = EllesmereUI.Lite.GetAddon("EllesmereUICooldownManager", true)
-            local t = a and a.db and a.db.profile and a.db.profile.cdmBarPositions
-            local e = t and t[key:sub(5)]
-            return e and CopyTable(e) or nil
-        end
-        -- Action bars before the registered-element branch: their entries
-        -- are raw saved edges (plus tgt* baselines) copied verbatim, never
-        -- read back through the center-converting loadPosition.
-        if EllesmereUI._abBarKeys and EllesmereUI._abBarKeys[key] then
-            local db = GetPositionDB()
-            local e = db and db[key]
-            return e and CopyTable(e) or nil
-        end
-        local elem = registeredElements[key]
-        if elem and elem.loadPosition then
-            local p = elem.loadPosition(key)
-            if p then
-                return { point = p.point, relPoint = p.relPoint or p.point, x = p.x, y = p.y }
-            end
-            return nil
-        end
-        local db = GetPositionDB()
-        local e = db and db[key]
-        return e and CopyTable(e) or nil
-    end
-
-    local function AnchorsDiffer(a, b)
-        if not a and not b then return false end
-        if not a or not b then return true end
-        return a.target ~= b.target or a.side ~= b.side
-            or a.offsetX ~= b.offsetX or a.offsetY ~= b.offsetY
-    end
-
-    -- Collect touched elements per aspect.
-    local touched = {}
-    local function Touch(key, aspect, val)
-        local t = touched[key]
-        if not t then t = {}; touched[key] = t end
-        t[aspect] = val
-    end
-    for key, pos in pairs(pendingPositions) do
-        Touch(key, "pos", pos == "RESET" and "RESET" or true)
-    end
-    for key in pairs(anchorDB) do
-        if AnchorsDiffer(anchorDB[key], snapshotAnchors[key]) then Touch(key, "anchor", true) end
-    end
-    for key in pairs(snapshotAnchors) do
-        if not anchorDB[key] then Touch(key, "anchor", true) end
-    end
-    for key in pairs(wmDB) do
-        if wmDB[key] ~= snapshotWidthMatch[key] then Touch(key, "wm", true) end
-    end
-    for key in pairs(snapshotWidthMatch) do
-        if not wmDB[key] then Touch(key, "wm", true) end
-    end
-    for key in pairs(hmDB) do
-        if hmDB[key] ~= snapshotHeightMatch[key] then Touch(key, "hm", true) end
-    end
-    for key in pairs(snapshotHeightMatch) do
-        if not hmDB[key] then Touch(key, "hm", true) end
-    end
-    for key, snapGrow in pairs(snapshotGrowDirs) do
-        local live = LiveGrow(key) or false
-        if live ~= snapGrow then Touch(key, "grow", true) end
-    end
-
-    for key, t in pairs(touched) do
-        -- Blocked subsystems always take the baseline path untouched.
-        local blocked = key:sub(1, 5) == "TBBG_" or key:sub(1, 4) == "TBB_"
-        local grp
-        if not blocked then
-            if special then
-                -- Conflict-locked elements cannot be edited; anything that
-                -- still diffs (indirect writes) stays baseline-routed.
-                local conflict = EllesmereUI.SpecOverrides_UnlockConflictGroup
-                    and EllesmereUI.SpecOverrides_UnlockConflictGroup(key, special)
-                if not conflict then grp = special end
-            elseif curSpec and EllesmereUI.SpecOverrides_UnlockOwner then
-                grp = EllesmereUI.SpecOverrides_UnlockOwner(key, curSpec)
-            end
-        end
-
-        local aspects, baseVals = {}, {}
-        if t.pos then
-            if t.pos == "RESET" then
-                aspects.pos = NILS
-            else
-                aspects.pos = LivePosEntry(key)
-            end
-            local snap = snapshotPositions[key]
-            if snap and not snap._fromLiveFrame then
-                baseVals.pos = { point = snap.point, relPoint = snap.relPoint or snap.point,
-                                 x = snap.x, y = snap.y }
-            else
-                baseVals.pos = NILS
-            end
-        end
-        if t.anchor then
-            local ai = anchorDB[key]
-            aspects.anchor = ai and { target = ai.target, side = ai.side,
-                offsetX = ai.offsetX, offsetY = ai.offsetY } or NILS
-            local sa = snapshotAnchors[key]
-            baseVals.anchor = sa and { target = sa.target, side = sa.side,
-                offsetX = sa.offsetX, offsetY = sa.offsetY } or NILS
-        end
-        if t.wm then
-            aspects.wm = wmDB[key] or NILS
-            baseVals.wm = snapshotWidthMatch[key] or NILS
-        end
-        if t.hm then
-            aspects.hm = hmDB[key] or NILS
-            baseVals.hm = snapshotHeightMatch[key] or NILS
-        end
-        if t.grow then
-            aspects.grow = LiveGrow(key) or NILS
-            local sg = snapshotGrowDirs[key]
-            baseVals.grow = (sg and sg ~= false) and sg or NILS
-        end
-        -- A dragged element whose live position could not be resolved leaves
-        -- aspects.pos nil (never bank a coordless override entry).
-
-        if next(aspects) then
-            if grp then
-                bank(key, grp.id, aspects, baseVals)
-            elseif EllesmereUI.SpecOverrides_UnlockMirrorBaseline then
-                EllesmereUI.SpecOverrides_UnlockMirrorBaseline(key, aspects)
-            end
-        end
-    end
-
-    if EllesmereUI._unlockRefreshSpecOvMarks then EllesmereUI._unlockRefreshSpecOvMarks() end
 end
 
 -- Commit pending positions to SavedVariables
@@ -9931,6 +9779,23 @@ local function CommitPositions()
         else
             local elem = registeredElements[barKey]
             local pt, rpt, px, py = pos.point, pos.relPoint, pos.x, pos.y
+            -- Anchor-cascade marker: ApplyAnchorPosition repositioned this bar
+            -- during the session (e.g. its anchor target was dragged) but the
+            -- entry carries no coords. The open-time snapshot below is STALE
+            -- for it: saving that would pair a pre-move growth edge with the
+            -- post-move target baselines savePos captures, and the bar snaps
+            -- to the stale edge on save. Resolve from the bar's LIVE bounds
+            -- instead -- ConvertToCenterPos prefers them and returns the exact
+            -- CENTER/CENTER convention SaveBarPosition expects. Bars a cascade
+            -- reapplied without actually moving resolve to the same position
+            -- the snapshot holds, so nothing changes for them.
+            if elem and not pt and pos._anchored then
+                local liveBar = GetBarFrame(barKey)
+                if liveBar and liveBar:GetLeft() and liveBar:GetRight()
+                   and liveBar:GetTop() and liveBar:GetBottom() then
+                    pt, rpt, px, py = ConvertToCenterPos(barKey, "TOPLEFT", "TOPLEFT", 0, 0)
+                end
+            end
             -- If position wasn't dragged, fill from snapshot
             if elem and not pt then
                 local snap = snapshotPositions[barKey]
@@ -9997,19 +9862,38 @@ local function CommitPositions()
         local activeName = pdb.activeProfile or "Default"
         local profileData = pdb.profiles and pdb.profiles[activeName]
         if profileData then
-            profileData.unlockLayout = {
+            local snap = {
                 anchors       = CopyTable(EllesmereUIDB.unlockAnchors     or {}),
                 widthMatch    = CopyTable(EllesmereUIDB.unlockWidthMatch  or {}),
                 heightMatch   = CopyTable(EllesmereUIDB.unlockHeightMatch or {}),
                 phantomBounds = CopyTable(EllesmereUIDB.phantomBounds     or {}),
             }
+            -- While a spec-override unlock LAYER is live, the profile
+            -- snapshot must carry the shared BASELINE links, not the live
+            -- (group-valued) globals; the stored baseline layout provides
+            -- them. When the baseline itself is live, live is the source.
+            if EllesmereUI.SpecOverrides_UnlockBaselineLinks then
+                local ba, bw, bh = EllesmereUI.SpecOverrides_UnlockBaselineLinks()
+                if ba then
+                    snap.anchors     = CopyTable(ba)
+                    snap.widthMatch  = CopyTable(bw)
+                    snap.heightMatch = CopyTable(bh)
+                end
+            end
+            profileData.unlockLayout = snap
         end
     end
 
-    -- Route this session's edits into unlock spec-overrides (special-group
-    -- capture, or per-element owner routing in a normal session). Runs last
-    -- so it reads the final committed stores.
-    pcall(EllesmereUI._unlockRouteSpecOvSave)
+    -- Bank the freshly-saved live layout into its owning spec-override
+    -- layer (the active group layer, else the stored baseline). Wholesale
+    -- harvest -- no per-aspect routing exists anymore.
+    if EllesmereUI.SpecOverrides_HarvestUnlockLayout then
+        local okH, errH = pcall(EllesmereUI.SpecOverrides_HarvestUnlockLayout)
+        if not okH then
+            print("|cffff6060[EllesmereUI]|r Unlock layer harvest failed: "
+                .. tostring(errH))
+        end
+    end
 end
 
 -- Revert bars to their snapshot positions (discard all pending changes)
@@ -10023,8 +9907,16 @@ local function RevertPositions()
     if db then
         for barKey, _ in pairs(pendingPositions) do
             if not registeredElements[barKey] then
+                -- Prefer the verbatim pre-session entry (saved edge PLUS the
+                -- tgt* follow baselines): the coordinate-only snapshot would
+                -- strip the baselines from grow bars on every cancel, costing
+                -- a bless cycle before target-follow works again.
+                local rawSnap = EllesmereUI._unlockSnapRawPos
+                    and EllesmereUI._unlockSnapRawPos[barKey]
                 local snap = snapshotPositions[barKey]
-                if snap then
+                if rawSnap then
+                    db[barKey] = CopyTable(rawSnap)
+                elseif snap then
                     db[barKey] = { point = snap.point, relPoint = snap.relPoint, x = snap.x, y = snap.y }
                 else
                     db[barKey] = nil
@@ -10062,7 +9954,13 @@ local function RevertPositions()
         end
         wipe(anchorDB)
         for childKey, info in pairs(snapshotAnchors) do
-            anchorDB[childKey] = { target = info.target, side = info.side, offsetX = info.offsetX, offsetY = info.offsetY }
+            anchorDB[childKey] = {
+                target = info.target, side = info.side,
+                offsetX = info.offsetX, offsetY = info.offsetY,
+                refX = info.refX, refY = info.refY,
+                edgeOffX = info.edgeOffX, edgeOffY = info.edgeOffY,
+                refFor = info.refFor,
+            }
         end
         if liveFallbacks then
             for childKey, fb in pairs(liveFallbacks) do
@@ -10153,13 +10051,22 @@ local function RevertPositions()
         end
     end
 
-    -- 7) Reapply anchor positions for anchored elements
+    -- 7) Reapply anchor positions for anchored elements. Force edge
+    -- preservation across the pass: this runs while isUnlocked is still
+    -- true, and without the flag ApplyAnchorPosition skips its absolute
+    -- saved-edge branch and places anchored custom-growth bars (StanceBar,
+    -- CDM grow bars) from their center offsets + live width instead of the
+    -- just-restored saved edge -- the bar visibly snaps off its reverted
+    -- position. Mirrors the CommitPositions save-path fix; each apply is
+    -- pcall-wrapped so the flag can never leak.
     if anchorDB then
+        EllesmereUI._reapplyForceEdgePreserve = true
         for childKey, info in pairs(anchorDB) do
             if info.target and GetBarFrame(childKey) and GetBarFrame(info.target) then
-                ApplyAnchorPosition(childKey, info.target, info.side)
+                pcall(ApplyAnchorPosition, childKey, info.target, info.side)
             end
         end
+        EllesmereUI._reapplyForceEdgePreserve = false
     end
 end
 
@@ -10230,6 +10137,11 @@ local function DoClose()
     if _G.EllesmereUIQuestTracker and _G.EllesmereUIQuestTracker.UpdateVisibility then
         _G.EllesmereUIQuestTracker.UpdateVisibility()
     end
+
+    -- Re-check Dragon Riding's real visibility (it force-shows while unlocked
+    -- so it can be edited off-mount; without this it stays stuck visible
+    -- after exiting Unlock Mode if the player dismounted while unlocked).
+    if _G._EDR_UpdateVisibility then pcall(_G._EDR_UpdateVisibility) end
 
     if not unlockFrame then return end
 
@@ -10822,6 +10734,27 @@ function ns.OpenUnlockMode()
     if InCombatLockdown() then
         print("|cffff6060[EllesmereUI]|r Cannot enter Unlock Mode during combat.")
         return
+    end
+    -- Permanent gold variant: when the current spec's owning group has a
+    -- custom unlock layout (the ACTIVE layer), every unlock session on this
+    -- spec edits that layer -- so every session shows the special visuals
+    -- (gold frame/banner, size inputs hidden). Derived here, not at the
+    -- card button: opening unlock any way at all gets the right identity.
+    do
+        local activeGid = EllesmereUI.SpecOverrides_UnlockActive
+            and EllesmereUI.SpecOverrides_UnlockActive() or nil
+        local g
+        if type(activeGid) == "string" then
+            -- Conditional layer live ("cond:<gid>"): same gold identity, the
+            -- banner shows the conditional group's name.
+            local cid = tonumber(activeGid:match("^cond:(%d+)$"))
+            g = cid and EllesmereUI.Conditions_GroupById
+                and EllesmereUI.Conditions_GroupById(cid) or nil
+        elseif activeGid then
+            g = EllesmereUI.SpecOverrides_GroupById
+                and EllesmereUI.SpecOverrides_GroupById(activeGid) or nil
+        end
+        EllesmereUI._specialUnlockGroup = g
     end
     -- Disable expandIfNoResource before _unlockActive is set so the
     -- Rebuild inside runs in normal gameplay state and the power bar
@@ -11573,6 +11506,12 @@ local function SuspendForCombat()
     EllesmereUI._unlockActive = false
     EllesmereUI._unlockModeActive = false
 
+    -- Re-check Dragon Riding's real visibility (it force-shows while
+    -- _unlockActive is true so it can be edited off-mount; must run AFTER
+    -- _unlockActive is cleared above, or UpdateVisibility() still hits that
+    -- force-show branch and this call is a no-op).
+    if _G._EDR_UpdateVisibility then pcall(_G._EDR_UpdateVisibility) end
+
     if unlockFrame then
         unlockFrame:SetScript("OnUpdate", nil)
         unlockFrame:Hide()
@@ -11607,6 +11546,14 @@ local function ResumeAfterCombat()
     EllesmereUI._unlockActive = true
     EllesmereUI._unlockModeActive = true
     if EllesmereUI._RefreshFallbackGhosts then EllesmereUI._RefreshFallbackGhosts() end
+
+    -- Re-check Dragon Riding's visibility now that _unlockActive is true
+    -- again: SuspendForCombat's re-check hid the HUD for a dismounted
+    -- player, and without this mirror call the force-show branch never
+    -- re-evaluates on resume -- the element would stay invisible (and
+    -- uneditable) for the rest of the unlock session until a mount or
+    -- dismount happened to re-run UpdateVisibility.
+    if _G._EDR_UpdateVisibility then pcall(_G._EDR_UpdateVisibility) end
 
     -- Re-hide objective tracker
     local objTracker = _G.ObjectiveTrackerFrame

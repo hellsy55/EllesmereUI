@@ -1498,7 +1498,14 @@ local function SkinCharacterSheet()
     iLvlUpdateFrame:SetScript("OnEvent", function(_, event, unit)
         if event == "UNIT_INVENTORY_CHANGED" and unit ~= "player" then return end
         if event == "GET_ITEM_INFO_RECEIVED" then
-            QueueBetterItemsRefresh()
+            -- Gate on the sheet being open BEFORE queueing: this event fires
+            -- in large bursts during normal play (bags, loot, mail, other
+            -- addons' scans), and the queue's cancel-and-recreate timer dance
+            -- allocates on every call -- the shown-check inside the timer
+            -- alone would still pay that churn with the sheet closed.
+            if frame and frame:IsShown() then
+                QueueBetterItemsRefresh()
+            end
             return
         end
         if not (frame and frame:IsShown()) then return end

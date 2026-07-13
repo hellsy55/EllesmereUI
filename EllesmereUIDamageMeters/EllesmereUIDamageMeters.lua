@@ -4242,7 +4242,12 @@ local function CreateDMWindow(winIdx)
 
     if EUI.RegisterVisibilityUpdater then EUI.RegisterVisibilityUpdater(W.UpdateVisibility) end
     if EUI.RegisterMouseoverTarget then
-        EUI.RegisterMouseoverTarget(frame, function() local c = DB(); return c and c.visibility == "mouseover" end)
+        -- Hover-gated sets only reveal while their conditions pass; a
+        -- legacy single "mouseover" behaves exactly as before.
+        EUI.RegisterMouseoverTarget(frame, function()
+            local c = DB()
+            return c ~= nil and EUI.VisWantsMouseover(c, "visibility")
+        end)
     end
 
 

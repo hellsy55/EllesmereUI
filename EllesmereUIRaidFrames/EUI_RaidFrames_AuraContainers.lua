@@ -1184,6 +1184,16 @@ local function ApplyBmIconExtra(button, dd, style)
     BmRebindDurationCurve(button, dd, style)
 end
 
+-- Buff/HoT tooltip gate (profile-root "Hide Buff Tooltips" toggle, default
+-- hidden). Engine aura buttons render their own tooltip when mouse motion is
+-- on -- and unlike the legacy path it shows the real aura even while secret.
+-- Mirrors the legacy pools' BM_SetTipTarget gating; effect slots (healthcolor/
+-- border) stay motion-off always since they overlay the health bar.
+local function BmTipsOff()
+    local p = ns.db and ns.db.profile
+    return not p or p.buffHideTooltips ~= false
+end
+
 local function BuildBmIconStyle(ind, iscale, size)
     local br, bg, bb = BmColor(ind.indBorderColor, 0, 0, 0)
     local hideIcon = ind.hideIcon == true
@@ -1211,7 +1221,7 @@ local function BuildBmIconStyle(ind, iscale, size)
         stackOffY = ind.stacksOffsetY or 2,
         alpha = (ind.iconOpacity or 100) / 100,
         levelOffset = BM_FRAMELVL[ind.frameLevel or "medium"] or 13,
-        noTooltips = true,
+        noTooltips = BmTipsOff(),
         applyExtra = ApplyBmIconExtra,
     }
 end
@@ -1255,6 +1265,15 @@ end
 
 local function BmApplyBar(button, dd, style)
     if not dd.bar then return end
+    -- Bars have no ApplyRFDebuffText pass, so the tooltip motion gate is
+    -- applied here (same change-guard as the shared applier).
+    if button.SetMouseMotionEnabled then
+        local motion = not style.noTooltips
+        if dd.rfMotion ~= motion then
+            dd.rfMotion = motion
+            button:SetMouseMotionEnabled(motion)
+        end
+    end
     local ind = style.ind
     local r, g, b = BmColor(ind.color, 12 / 255, 210 / 255, 157 / 255)
     dd.bar:GetStatusBarTexture():SetVertexColor(r, g, b, (ind.barColorOpacity or 100) / 100)
@@ -1278,8 +1297,10 @@ local function BmApplyEffect(button, dd, style)
 end
 
 -- Bare-slot extraInits: region creation only (once per slot button); all
--- styling flows through the apply passes above. Indicators are always
--- mouse-transparent, like the legacy pools.
+-- styling flows through the apply passes above. Squares/bars start
+-- mouse-transparent and the apply passes re-drive motion per the buff
+-- tooltip setting; effect slots stay transparent always (they overlay the
+-- health bar / unit button).
 local function BmSquareInit(button, dd, style, ind, health)
     if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(false) end
     dd.tex = button:CreateTexture(nil, "ARTWORK")
@@ -1391,12 +1412,13 @@ local function BuildBmStyleFor(kind, ind, iscale, size, spellID)
             stackColor = ind.stacksTextColor,
             stackOffX = ind.stacksOffsetX or -1,
             stackOffY = ind.stacksOffsetY or 2,
-            noTooltips = true,
+            noTooltips = BmTipsOff(),
             applyExtra = BmApplySquare,
         }
     end
     if kind == "bar" then
-        return { width = 1, height = 1, noRegions = true, ind = ind, applyExtra = BmApplyBar }
+        return { width = 1, height = 1, noRegions = true, ind = ind,
+            noTooltips = BmTipsOff(), applyExtra = BmApplyBar }
     end
     return { width = 1, height = 1, noRegions = true, ind = ind, applyExtra = BmApplyEffect }
 end
@@ -1543,23 +1565,25 @@ local bmStyleFP = {}
 local bmOwnFP = {}
 
 local function BmVisualKey(kind, ind, size, font, spellID)
+    -- BmTipsOff joins every interactive kind's key so the "Hide Buff
+    -- Tooltips" toggle restyles (the fingerprint guards skip otherwise).
     if kind == "icon" then
         return FP(font, size, ind.iconOpacity, ind.hideIcon, ind.indBorderSize, CK(ind.indBorderColor),
             ind.showDuration, ind.showDurationText, ind.durationTextSize, CK(ind.durationTextColor),
             ind.durationTextOffsetX, ind.durationTextOffsetY, ind.thresholdEnabled, ind.threshold,
             CK(ind.thresholdColor), ind.showStacks, ind.stacksTextSize, CK(ind.stacksTextColor),
-            ind.stacksOffsetX, ind.stacksOffsetY, ind.frameLevel)
+            ind.stacksOffsetX, ind.stacksOffsetY, ind.frameLevel, BmTipsOff())
     end
     if kind == "square" then
         return FP(font, size, CK(BmSquareColor(ind, spellID)), ind.showDuration, ind.indBorderSize,
             CK(ind.indBorderColor), ind.frameLevel, ind.showDurationText, ind.durationTextSize,
             CK(ind.durationTextColor), ind.durationTextOffsetX, ind.durationTextOffsetY,
             ind.thresholdEnabled, ind.threshold, CK(ind.thresholdColor), ind.showStacks,
-            ind.stacksTextSize, CK(ind.stacksTextColor), ind.stacksOffsetX, ind.stacksOffsetY)
+            ind.stacksTextSize, CK(ind.stacksTextColor), ind.stacksOffsetX, ind.stacksOffsetY, BmTipsOff())
     end
     if kind == "bar" then
         return FP(CK(ind.color), ind.barColorOpacity, ind.reverseFill,
-            CK(ind.barBgColor), ind.barBgOpacity, ind.frameLevel)
+            CK(ind.barBgColor), ind.barBgOpacity, ind.frameLevel, BmTipsOff())
     end
     return FP(ind.type, CK(ind.color), ind.opacity, ind.borderWidth, ind.borderOpacity)
 end
@@ -1687,7 +1711,8 @@ end
 
 local function BmSimpleStyleFP(bs, font, iscale)
     return FP(font, iscale, bs.size, bs.iconZoom, bs.borderSize, CK(bs.borderColor), bs.showSwipe,
-        bs.showDurText, bs.durTextSize, CK(bs.durTextColor), bs.durTextOffsetX, bs.durTextOffsetY)
+        bs.showDurText, bs.durTextSize, CK(bs.durTextColor), bs.durTextOffsetX, bs.durTextOffsetY,
+        BmTipsOff())
 end
 
 local function BmSimpleGeoFP(bs, iscale)
@@ -1722,7 +1747,7 @@ local function BuildBmSimpleStyle(bs, iscale)
         durOffX = bs.durTextOffsetX,
         durOffY = bs.durTextOffsetY,
         showStacks = false, -- the legacy grid has no stack text
-        noTooltips = true,
+        noTooltips = BmTipsOff(),
         applyExtra = ApplyBmSimpleExtra,
     }
 end

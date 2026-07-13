@@ -223,6 +223,7 @@ qolFrame:SetScript("OnEvent", function(self)
                         if #_pendingOpens > 0 and not InCombatLockdown() then
                             local function OpenNext(idx)
                                 if idx > #_pendingOpens then wipe(_pendingOpens); return end
+                                if not IsEnabled() then wipe(_pendingOpens); return end
                                 if InCombatLockdown() then wipe(_pendingOpens); return end
                                 local item = _pendingOpens[idx]
                                 local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
@@ -264,20 +265,32 @@ qolFrame:SetScript("OnEvent", function(self)
             end
         end)
 
-        -- Start incremental scan 2s after login
-        C_Timer.After(2, function()
-            if not IsEnabled() then return end
-            _scanBag = BACKPACK_CONTAINER
-            _scanSlot = 1
-            wipe(_pendingOpens)
-            scanFrame:Show()
-        end)
-
         -- After cache is built, BAG_UPDATE_DELAYED only checks changed slots
         local containerFrame = CreateFrame("Frame")
-        if EllesmereUIDB and EllesmereUIDB.autoOpenContainers == true then
-            containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+
+        -- Live apply: registers the bag listener and (until the cache exists)
+        -- runs the incremental scan; disable unregisters and stops any
+        -- in-progress scan. Called at login and from the options toggle, so
+        -- enabling mid-session works without a reload.
+        EllesmereUI._applyAutoOpenContainers = function()
+            if IsEnabled() then
+                containerFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+                if not _cacheBuilt then
+                    _scanBag = BACKPACK_CONTAINER
+                    _scanSlot = 1
+                    wipe(_pendingOpens)
+                    scanFrame:Show()
+                end
+            else
+                containerFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
+                scanFrame:Hide()
+            end
         end
+
+        -- Initial kick 2s after login (bags need a moment to settle)
+        C_Timer.After(2, function()
+            if IsEnabled() then EllesmereUI._applyAutoOpenContainers() end
+        end)
         containerFrame:SetScript("OnEvent", function()
             if not _cacheBuilt then return end
             if not IsEnabled() then return end
@@ -300,6 +313,7 @@ qolFrame:SetScript("OnEvent", function(self)
             if #toOpen == 0 then return end
             local function OpenNext(idx)
                 if idx > #toOpen then return end
+                if not IsEnabled() then return end
                 if InCombatLockdown() then return end
                 local item = toOpen[idx]
                 local info2 = C_Container.GetContainerItemInfo(item.bag, item.slot)
@@ -423,7 +437,10 @@ qolFrame:SetScript("OnEvent", function(self)
             trainBtn:SetScript("OnClick", function()
                 local wallet = GetMoney and GetMoney() or 0
                 local slots  = FreeProfessionSlots()
-                for i = 1, GetNumTrainerServices() do
+                -- Descending: if a purchase removes its entry and reindexes
+                -- the list, only higher (already visited) indices shift, so
+                -- no still-trainable skill is skipped.
+                for i = GetNumTrainerServices(), 1, -1 do
                     local ok, cost, takesProfSlot = SkillIsAffordable(i, wallet, slots)
                     if ok then
                         BuyTrainerService(i)
@@ -549,19 +566,31 @@ qolFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Quick Loot
+    --  Frame is created lazily on first enable; LOOT_READY registers and
+    --  unregisters with the toggle so it applies live and costs zero when off.
     ---------------------------------------------------------------------------
-    if EllesmereUIDB and EllesmereUIDB.quickLoot then
-        local lootFrame = CreateFrame("Frame")
-        lootFrame:RegisterEvent("LOOT_READY")
-        lootFrame:SetScript("OnEvent", function()
-            if IsShiftKeyDown() then return end
-            for i = 1, GetNumLootItems() do
-                local index = i
-                C_Timer.After(0.05 * index, function()
-                    LootSlot(index)
-                end)
+    do
+        local lootFrame
+        EllesmereUI._applyQuickLoot = function()
+            if EllesmereUIDB and EllesmereUIDB.quickLoot then
+                if not lootFrame then
+                    lootFrame = CreateFrame("Frame")
+                    lootFrame:SetScript("OnEvent", function()
+                        if IsShiftKeyDown() then return end
+                        for i = 1, GetNumLootItems() do
+                            local index = i
+                            C_Timer.After(0.05 * index, function()
+                                LootSlot(index)
+                            end)
+                        end
+                    end)
+                end
+                lootFrame:RegisterEvent("LOOT_READY")
+            elseif lootFrame then
+                lootFrame:UnregisterEvent("LOOT_READY")
             end
-        end)
+        end
+        EllesmereUI._applyQuickLoot()
     end
 
     ---------------------------------------------------------------------------
@@ -926,7 +955,6 @@ qolFrame:SetScript("OnEvent", function(self)
         local resetFailPending = false
 
         local resetAnnounceFrame = CreateFrame("Frame")
-        resetAnnounceFrame:RegisterEvent("CHAT_MSG_SYSTEM")
         resetAnnounceFrame:SetScript("OnEvent", function(self, event, msg)
             if not (EllesmereUIDB and EllesmereUIDB.instanceResetAnnounce) then return end
 
@@ -962,6 +990,17 @@ qolFrame:SetScript("OnEvent", function(self)
                 end)
             end
         end)
+
+        -- CHAT_MSG_SYSTEM fires for all system chat, so it is registered only
+        -- while the option is on (options toggle re-applies live).
+        EllesmereUI._applyInstanceResetAnnounce = function()
+            if EllesmereUIDB and EllesmereUIDB.instanceResetAnnounce then
+                resetAnnounceFrame:RegisterEvent("CHAT_MSG_SYSTEM")
+            else
+                resetAnnounceFrame:UnregisterEvent("CHAT_MSG_SYSTEM")
+            end
+        end
+        EllesmereUI._applyInstanceResetAnnounce()
     end
 
     ---------------------------------------------------------------------------
@@ -1093,6 +1132,13 @@ do
     local statsFrame, statsText
     local format = string.format
 
+    -- Secret-safe percent text: stat getters can return secret numbers in
+    -- restricted content, and string.format errors on a secret value.
+    local function PctText(v)
+        if v == nil or issecretvalue(v) then return "?" end
+        return format("%.2f%%", v)
+    end
+
     local function UpdateSecondaryStats()
         if not statsFrame or not statsFrame:IsShown() then return end
         if not statsFrame._classHex then
@@ -1120,13 +1166,19 @@ do
         local mastery = GetMasteryEffect()
         local versRating = GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0
         local versBase = GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE) or 0
-        local vers = (issecretvalue(versRating) or issecretvalue(versBase)) and versRating or (versRating + versBase)
+        -- Arithmetic on a secret errors; show the rating alone in that case
+        local vers
+        if issecretvalue(versRating) or issecretvalue(versBase) then
+            vers = versRating
+        else
+            vers = versRating + versBase
+        end
 
         local txt =
-            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Crit"), crit) .. "\n" ..
-            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Haste"), haste) .. "\n" ..
-            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Mastery"), mastery) .. "\n" ..
-            format("|cff%s%s:|r  |cffffffff%.2f%%|r", labelHex, EllesmereUI.L("Vers"), vers)
+            format("|cff%s%s:|r  |cffffffff%s|r", labelHex, EllesmereUI.L("Crit"), PctText(crit)) .. "\n" ..
+            format("|cff%s%s:|r  |cffffffff%s|r", labelHex, EllesmereUI.L("Haste"), PctText(haste)) .. "\n" ..
+            format("|cff%s%s:|r  |cffffffff%s|r", labelHex, EllesmereUI.L("Mastery"), PctText(mastery)) .. "\n" ..
+            format("|cff%s%s:|r  |cffffffff%s|r", labelHex, EllesmereUI.L("Vers"), PctText(vers))
 
         if EllesmereUI.QoLExtrasGet("showTertiaryStats") then
             local tc = EllesmereUI.QoLExtrasGet("tertiaryStatsColor")
@@ -1142,9 +1194,9 @@ do
             local avoidance = GetAvoidance()
             local speed = GetSpeed()
             txt = txt .. "\n" ..
-                format("|cff%s%s:|r  |cffffffff%.2f%%|r", tertHex, EllesmereUI.L("Leech"), leech) .. "\n" ..
-                format("|cff%s%s:|r  |cffffffff%.2f%%|r", tertHex, EllesmereUI.L("Avoidance"), avoidance) .. "\n" ..
-                format("|cff%s%s:|r  |cffffffff%.2f%%|r", tertHex, EllesmereUI.L("Speed"), speed)
+                format("|cff%s%s:|r  |cffffffff%s|r", tertHex, EllesmereUI.L("Leech"), PctText(leech)) .. "\n" ..
+                format("|cff%s%s:|r  |cffffffff%s|r", tertHex, EllesmereUI.L("Avoidance"), PctText(avoidance)) .. "\n" ..
+                format("|cff%s%s:|r  |cffffffff%s|r", tertHex, EllesmereUI.L("Speed"), PctText(speed))
         end
 
         statsText:SetText(txt)
@@ -1190,17 +1242,26 @@ do
             if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
             statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag("extras"))
         end
+        -- Unit-scoped events filter at the engine (player only); in a raid a
+        -- plain RegisterEvent would deliver every member's stat changes.
         for _, ev in ipairs({
-            "UNIT_STATS", "COMBAT_RATING_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
-            "UNIT_ATTACK_POWER", "UNIT_RANGED_ATTACK_POWER", "UNIT_SPELL_HASTE",
+            "UNIT_STATS", "UNIT_ATTACK_POWER", "UNIT_RANGED_ATTACK_POWER",
+            "UNIT_SPELL_HASTE",
+        }) do
+            statsFrame:RegisterUnitEvent(ev, "player")
+        end
+        for _, ev in ipairs({
+            "COMBAT_RATING_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
             "MASTERY_UPDATE", "SPELL_POWER_CHANGED", "PLAYER_DAMAGE_DONE_MODS",
             "PLAYER_SPECIALIZATION_CHANGED", "PLAYER_ENTERING_WORLD",
         }) do
             statsFrame:RegisterEvent(ev)
         end
         local _statsPending = false
-        statsFrame:SetScript("OnEvent", function(_, _, unit)
-            if unit and unit ~= "player" then return end
+        -- No runtime unit filter needed: the unit events are engine-filtered
+        -- to the player above (the old `unit ~= "player"` check also wrongly
+        -- swallowed PLAYER_EQUIPMENT_CHANGED, whose first arg is a slot id).
+        statsFrame:SetScript("OnEvent", function()
             if _statsPending then return end
             _statsPending = true
             C_Timer.After(0.5, function()
@@ -1274,12 +1335,14 @@ do
         local fsWorldLbl = MakeFS(LABEL_SIZE)
         fpsFrame._divWorld = divWorld
         fpsFrame._textWorld = fsWorldVal
+        fpsFrame._lblWorld = fsWorldLbl
 
         local divLocal = MakeDivider()
         local fsLocalVal = MakeFS(FONT_SIZE)
         local fsLocalLbl = MakeFS(LABEL_SIZE)
         fpsFrame._divLocal = divLocal
         fpsFrame._textLocal = fsLocalVal
+        fpsFrame._lblLocal = fsLocalLbl
 
         local function UpdateFPS(self)
             local c = EllesmereUI.QoLExtrasGet("fpsColor")
@@ -1611,12 +1674,6 @@ do
     end
 
     local repairWarnFrame = CreateFrame("Frame", nil, UIParent)
-    if not (EllesmereUIDB and EllesmereUIDB.repairWarning == false) then
-        repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-        repairWarnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        repairWarnFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
-    end
 
     local function CheckDurabilityAndShow()
         if not EllesmereUIDB then return end
@@ -1650,6 +1707,23 @@ do
         end
         CheckDurabilityAndShow()
     end)
+
+    -- Events registered only while the warning is enabled; the options toggle
+    -- re-syncs live so re-enabling mid-session works without a reload. On
+    -- enable, one immediate check surfaces an already-low item.
+    EllesmereUI._syncDurWarnEvents = function()
+        if EllesmereUIDB and EllesmereUIDB.repairWarning == false then
+            repairWarnFrame:UnregisterAllEvents()
+            if durWarnOverlay then durWarnOverlay:Hide() end
+        else
+            repairWarnFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+            repairWarnFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+            repairWarnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+            repairWarnFrame:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+            CheckDurabilityAndShow()
+        end
+    end
+    EllesmereUI._syncDurWarnEvents()
 end
 
 -------------------------------------------------------------------------------
@@ -1966,15 +2040,47 @@ do
         Thick  = { width = 3, length = 40 },
     }
 
+    -- Re-evaluates visibility on combat / zone transitions and refreshes the
+    -- cached melee spell on spec changes. Events are registered only while the
+    -- crosshair is enabled: with the size set to "None" nothing fires here.
+    -- On the off->on transition the cutoff range is re-read directly to catch
+    -- spec changes that happened while unregistered.
+    local visWatch = CreateFrame("Frame")
+    local visWatchRegistered = false
+    visWatch:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" or event == "TRAIT_CONFIG_UPDATED" then
+            RefreshCrosshairCutoffRange()
+        end
+        -- _applyCrosshair self-guards: nil DB -> returns, "None" -> hides,
+        -- and runs the one-time migration once the profile DB is ready.
+        if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
+    end)
+    local function SyncVisWatch(want)
+        if want == visWatchRegistered then return end
+        visWatchRegistered = want
+        if want then
+            visWatch:RegisterEvent("PLAYER_REGEN_DISABLED")
+            visWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
+            visWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+            visWatch:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+            visWatch:RegisterEvent("TRAIT_CONFIG_UPDATED")
+            RefreshCrosshairCutoffRange()
+        else
+            visWatch:UnregisterAllEvents()
+        end
+    end
+
     EllesmereUI._applyCrosshair = function()
         local PP = EllesmereUI.PP
         -- Effective reads (profile override -> global root -> inline default)
         local G = CrosshairGet
         local size = G("crosshairSize") or "None"
         if size == "None" then
+            SyncVisWatch(false)
             if crosshairFrame then crosshairFrame:Hide() end
             return
         end
+        SyncVisWatch(true)
 
         CreateCrosshair()
 
@@ -2048,25 +2154,6 @@ do
             show = IsInInstance() and inCombat
         end
         if show then crosshairFrame:Show() else crosshairFrame:Hide() end
-    end
-
-    -- Re-evaluate visibility on combat / zone transitions, and refresh the
-    -- cached melee spell when the spec changes.
-    do
-        local visWatch = CreateFrame("Frame")
-        visWatch:RegisterEvent("PLAYER_REGEN_DISABLED")
-        visWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
-        visWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
-        visWatch:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-        visWatch:RegisterEvent("TRAIT_CONFIG_UPDATED")
-        visWatch:SetScript("OnEvent", function(_, event)
-            if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_ENTERING_WORLD" or event == "TRAIT_CONFIG_UPDATED" then
-                RefreshCrosshairCutoffRange()
-            end
-            -- _applyCrosshair self-guards: nil DB -> returns, "None" -> hides,
-            -- and runs the one-time migration once the profile DB is ready.
-            if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
-        end)
     end
 
     C_Timer.After(1, function()
@@ -2537,23 +2624,47 @@ do
     -- file can build the same dropdown.
     local _SOUNDS_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
     local GROUP_DEATH_SOUND_PATHS = {
-        ["none"]     = nil,
-        ["airhorn"]  = _SOUNDS_DIR .. "AirHorn.ogg",
-        ["banana"]   = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
-        ["bikehorn"] = _SOUNDS_DIR .. "BikeHorn.ogg",
-        ["boxing"]   = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
-        ["water"]    = _SOUNDS_DIR .. "WaterDrop.ogg",
+        ["none"]      = nil,
+        ["airhorn"]   = _SOUNDS_DIR .. "AirHorn.ogg",
+        ["banana"]    = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
+        ["bikehorn"]  = _SOUNDS_DIR .. "BikeHorn.ogg",
+        ["bite"]      = _SOUNDS_DIR .. "Bite.ogg",
+        ["boxing"]    = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
+        ["catmeow"]   = _SOUNDS_DIR .. "CatMeow.ogg",
+        ["catmeow2"]  = _SOUNDS_DIR .. "CatMeow2.ogg",
+        ["gunshot"]   = _SOUNDS_DIR .. "FrontalsGunshot.wav",
+        ["glass"]     = _SOUNDS_DIR .. "Glass.mp3",
+        ["kaching"]   = _SOUNDS_DIR .. "Kaching.ogg",
+        ["phone"]     = _SOUNDS_DIR .. "Phone.ogg",
+        ["robotblip"] = _SOUNDS_DIR .. "RobotBlip.ogg",
+        ["sonar"]     = _SOUNDS_DIR .. "Sonar.ogg",
+        ["siren"]     = _SOUNDS_DIR .. "WarningSiren.ogg",
+        ["water"]     = _SOUNDS_DIR .. "WaterDrop.ogg",
+        ["wilhelm"]   = _SOUNDS_DIR .. "Wilhelm.ogg",
     }
     local GROUP_DEATH_SOUND_NAMES = {
-        ["none"]     = "None",
-        ["airhorn"]  = "Air Horn",
-        ["banana"]   = "Banana Peel Slip",
-        ["bikehorn"] = "Bike Horn",
-        ["boxing"]   = "Boxing Arena",
-        ["water"]    = "Water Drop",
+        ["none"]      = "None",
+        ["airhorn"]   = "Air Horn",
+        ["banana"]    = "Banana Peel Slip",
+        ["bikehorn"]  = "Bike Horn",
+        ["bite"]      = "Bite",
+        ["boxing"]    = "Boxing Arena",
+        ["catmeow"]   = "Cat Meow",
+        ["catmeow2"]  = "Cat Meow 2",
+        ["gunshot"]   = "Frontals Gunshot",
+        ["glass"]     = "Glass",
+        ["kaching"]   = "Kaching",
+        ["phone"]     = "Phone",
+        ["robotblip"] = "Robot Blip",
+        ["sonar"]     = "Sonar",
+        ["siren"]     = "Warning Siren",
+        ["water"]     = "Water Drop",
+        ["wilhelm"]   = "Wilhelm",
     }
     local GROUP_DEATH_SOUND_ORDER = {
-        "none", "airhorn", "banana", "bikehorn", "boxing", "water",
+        "none", "airhorn", "banana", "bikehorn", "bite", "boxing", "catmeow",
+        "catmeow2", "gunshot", "glass", "kaching", "phone", "robotblip", "sonar",
+        "siren", "water", "wilhelm",
     }
     -- SharedMedia sounds are appended at PLAYER_LOGIN (see the boot frame at the
     -- end of this block), NOT here: this do-block runs at addon load, before

@@ -6268,7 +6268,6 @@ initFrame:SetScript("OnEvent", function(self)
 				-- resources where it applies (continuous bars + Guardian Ironfur).
 				----------------------------------------------------------------
 				local textInsteadRow = DRow("Recolor Text Instead Of Bar", ROWH)
-				-- local TI_TIP2 = "When threshold or multi-band coloring triggers, tint the resource TEXT with the threshold color and leave the bar fill at its normal color. Applies to the whole bar (all spec cards). Requires Resource Text to be shown."
 				local textInsteadToggle, _, textInsteadSnap = EllesmereUI.BuildToggleControl(
 					textInsteadRow, DLVL + 4,
 					function() local ent = CurEntry(); return ent and ent.thresholdTextInstead or false end,
@@ -6279,8 +6278,6 @@ initFrame:SetScript("OnEvent", function(self)
 				textInsteadToggle:SetPoint("RIGHT", textInsteadRow, "RIGHT", 0, 0)
 				textInsteadRow._toggle = textInsteadToggle
 				textInsteadRow._snap = textInsteadSnap
-				-- textInsteadToggle:HookScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L(TI_TIP2)) end)
-				textInsteadToggle:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 				-- Disable overlay: Vengeance soul fragments + Prot Ignore Pain bar are secret,
 				-- so recoloring text can't work there (toggled per-entry in RefreshDetail).
 				local TI_BLOCK_TIP = "Not available for this spec: Vengeance soul fragments and the Protection Ignore Pain bar use secret values that can't be read into a text color, so recoloring the text would have no effect."
@@ -7108,8 +7105,13 @@ initFrame:SetScript("OnEvent", function(self)
 
         EllesmereUI:SetContentHeader(_previewHeaderBuilder)
 
-        -- Populate click mappings for preview hit overlays
-        wipe(_clickMappings)
+        -- Populate click mappings for preview hit overlays. _clickMappings is
+        -- ONE module-shared table read by the LIVE preview header's clicks --
+        -- a hidden search pre-build of this page must not wipe it out from
+        -- under whichever ERB page the player is actually viewing.
+        if not EllesmereUI._prebuilding then
+            wipe(_clickMappings)
+        end
 
         -- The Simple | Advanced sub-menu was retired: per-spec editing now
         -- lives in the shared Spec Overrides system (spec groups + editing-as).
@@ -7122,22 +7124,37 @@ initFrame:SetScript("OnEvent", function(self)
         generalSection, h = W:SectionHeader(parent, "BAR DISPLAY", y);  y = y - h
 
         -- Row 1: Visibility | Visibility Options (checkbox dropdown)
+        -- One control drives all three bars: the scalar and the multi-select
+        -- set are written to health/primary/secondary in lockstep; reads come
+        -- from secondary (the representative table).
+        local function ApplyVisScalarAll(_, mode)
+            local p = DB(); if not p then return end
+            p.secondary.visibility = mode
+            p.health.visibility = mode
+            p.primary.visibility = mode
+        end
+        local function MirrorVisModes()
+            local p = DB(); if not p then return end
+            local src = p.secondary.visibilityModes
+            if src then
+                local c1, c2 = {}, {}
+                for k in pairs(src) do c1[k] = true; c2[k] = true end
+                p.health.visibilityModes = c1
+                p.primary.visibilityModes = c2
+            else
+                p.health.visibilityModes = nil
+                p.primary.visibilityModes = nil
+            end
+        end
         local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Visibility",
-              values = EllesmereUI.VIS_VALUES,
-              order = EllesmereUI.VIS_ORDER,
-              getValue = function()
-                  local p = DB(); if not p then return "always" end
-                  return p.secondary.visibility or "always"
-              end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.secondary.visibility = v
-                  p.health.visibility = v
-                  p.primary.visibility = v
+        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+            { getStore = function() local p = DB(); return p and p.secondary end,
+              legacyKey = "visibility",
+              caps = { partyIncludesRaid = true, luaDragonriding = true },
+              applyScalarFn = ApplyVisScalarAll,
+              onChanged = function()
+                  MirrorVisModes()
                   Refresh()
-                  EllesmereUI:RefreshPage()
               end },
             { type = "dropdown", text = "Visibility Options",
               values = { __placeholder = "..." }, order = { "__placeholder" },
@@ -7529,9 +7546,13 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 16);  y = y - h
 
-        -- Wire up click mappings for preview hit overlays
-        _clickMappings.classResource = { section = classSection, target = classEnableRow }
-        _clickMappings.countText = { section = classSection, target = classColorRow }
+        -- Wire up click mappings for preview hit overlays (never from a
+        -- hidden pre-build: the shared live table would end up pointing at
+        -- off-screen rows).
+        if not EllesmereUI._prebuilding then
+            _clickMappings.classResource = { section = classSection, target = classEnableRow }
+            _clickMappings.countText = { section = classSection, target = classColorRow }
+        end
 
 		-- local thresholdPage = CreateFrame("Frame", nil, root)
         -- thresholdPage:SetAllPoints(root)
@@ -7975,8 +7996,11 @@ initFrame:SetScript("OnEvent", function(self)
         ShuffleCastBarIcons()
         EllesmereUI:SetContentHeader(_castBarPreviewBuilder)
 
-        -- Wipe click mappings (shared with display page)
-        wipe(_clickMappings)
+        -- Wipe click mappings (shared with display page; never from a hidden
+        -- pre-build -- see the matching guard in BuildBarDisplayPage)
+        if not EllesmereUI._prebuilding then
+            wipe(_clickMappings)
+        end
 
         -- Re-append SharedMedia textures for cast bar (catches lazy-registered SM packs)
         if EllesmereUI.AppendSharedMediaTextures then
@@ -8798,11 +8822,15 @@ initFrame:SetScript("OnEvent", function(self)
             "Latency Overlay"
         )
 
-        -- Wire up click mappings for cast bar preview hit overlays
-        _clickMappings.castBar       = { section = castSection, target = classSizeRow }
-        _clickMappings.castIcon      = { section = castSection, target = castEnableRow, slotSide = "right" }
-        _clickMappings.castSpellText = { section = displaySection, target = textRow, slotSide = "left" }
-        _clickMappings.castTimer     = { section = displaySection, target = textRow, slotSide = "right" }
+        -- Wire up click mappings for cast bar preview hit overlays (never
+        -- from a hidden pre-build: the shared live table would end up
+        -- pointing at off-screen rows).
+        if not EllesmereUI._prebuilding then
+            _clickMappings.castBar       = { section = castSection, target = classSizeRow }
+            _clickMappings.castIcon      = { section = castSection, target = castEnableRow, slotSide = "right" }
+            _clickMappings.castSpellText = { section = displaySection, target = textRow, slotSide = "left" }
+            _clickMappings.castTimer     = { section = displaySection, target = textRow, slotSide = "right" }
+        end
 
         return math.abs(y)
     end
@@ -8820,7 +8848,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- No custom preview header for totem bar
         EllesmereUI:HideContentHeader()
 
-        wipe(_clickMappings)
+        -- Shared live table; never wiped from a hidden pre-build (see the
+        -- matching guard in BuildBarDisplayPage).
+        if not EllesmereUI._prebuilding then
+            wipe(_clickMappings)
+        end
 
         local function RefreshTotem()
             if _G._ERB_Apply then _G._ERB_Apply() end

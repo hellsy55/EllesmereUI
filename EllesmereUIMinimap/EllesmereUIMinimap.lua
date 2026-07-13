@@ -4094,7 +4094,27 @@ local function ApplyMinimap()
         if minimap.SetFixedFrameStrata then minimap:SetFixedFrameStrata(true) end
         if minimap.SetFixedFrameLevel then minimap:SetFixedFrameLevel(true) end
     end
-    minimap:Show()
+    -- Visibility-aware terminal: an unconditional Show() here force-showed
+    -- the minimap for a frame on EVERY rebuild (visible blink for users with
+    -- visibility "never"/mouseover -- e.g. settings-override transitions run
+    -- this as the module refresher), with the corrective Hide only arriving
+    -- via the deferred visibility sweep. Render the profile's visibility
+    -- directly instead.
+    do
+        local vis = EllesmereUI.EvalVisibility and p and EllesmereUI.EvalVisibility(p)
+        if not EllesmereUI.EvalVisibility or vis == true then
+            minimap:SetAlpha(1)
+            minimap:Show()
+        elseif vis == "mouseover" then
+            minimap:SetAlpha(0)
+            minimap:Show()
+        elseif vis then
+            minimap:SetAlpha(1)
+            minimap:Show()
+        else
+            minimap:Hide()
+        end
+    end
 
     -- Middle-click interceptor: prevent minimap ping on middle-click,
     -- route middle-click to our micro menu instead.
@@ -5339,7 +5359,12 @@ function EBS:OnInitialize()
     -- Called when toggling btnBackgrounds or ungrouping a button.
     local function FullRebuildMinimap()
         wipe(flyoutSavedRegions)
-        ApplyMinimap()
+        -- ApplyAll, not bare ApplyMinimap: visibility runs through the shared
+        -- EllesmereUI visibility dispatcher and only re-evaluates on request.
+        -- Without it, a visibility change applied programmatically (settings
+        -- override transitions use this as the module refresher) updates the
+        -- stored setting but the minimap never actually hides/shows.
+        ApplyAll()
     end
 
     -- Global bridge for options <-> main communication
@@ -5354,7 +5379,10 @@ function EBS:OnInitialize()
     if EllesmereUI.RegisterMouseoverTarget and Minimap then
         EllesmereUI.RegisterMouseoverTarget(Minimap, function()
             local p = EBS.db and EBS.db.profile and EBS.db.profile.minimap
-            return p and p.enabled and p.visibility == "mouseover"
+            if not (p and p.enabled) then return false end
+            -- Hover-gated sets only reveal while their conditions pass;
+            -- a legacy single "mouseover" behaves exactly as before.
+            return EllesmereUI.VisWantsMouseover(p, "visibility")
         end)
     end
 end

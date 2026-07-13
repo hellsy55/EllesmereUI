@@ -111,12 +111,10 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 1: Visibility | Visibility Options
         local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES,
-              order  = EllesmereUI.VIS_ORDER,
-              getValue=function() return Cfg("visibility") or "always" end,
-              setValue=function(v) Set("visibility", v); RefreshAll() end },
+        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+            { getStore = DB, legacyKey = "visibility",
+              caps = { partyIncludesRaid = false, luaDragonriding = true },
+              onChanged = function() RefreshAll() end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,

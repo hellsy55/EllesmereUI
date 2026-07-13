@@ -104,6 +104,8 @@ _G._EUI_BuildShifterPage = function(pageName, parent, yOffset)
               EllesmereUIDB.shifterEnabled = v
               if v and EllesmereUI._InitShifter then
                   EllesmereUI._InitShifter()
+              elseif not v and EllesmereUI._ShutdownShifter then
+                  EllesmereUI._ShutdownShifter()
               end
           end },
         { type = "dropdown", text = "Reset Specific Window",

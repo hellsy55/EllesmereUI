@@ -344,7 +344,21 @@ local function SkinCheckbox(cb)
     wash:Hide()
     local hovering = false
     local function updState()
-        local checked = cb:GetChecked() and true or false
+        local checked = cb:GetChecked()
+        if issecretvalue(checked) then
+            -- LFGList apply-phase data can make the checked state SECRET, and
+            -- boolean-testing it throws. Bind the tick straight off the secret
+            -- via the boolean-accepting alpha setter; the wash tracks hover
+            -- only while the state is unreadable.
+            if tick.SetAlphaFromBoolean then
+                tick:Show()
+                tick:SetAlphaFromBoolean(checked, 1, 0)
+            end
+            wash:SetShown(hovering)
+            return
+        end
+        checked = checked and true or false
+        tick:SetAlpha(1)
         tick:SetShown(checked)
         wash:SetShown(hovering or checked)
     end
@@ -706,7 +720,12 @@ local function ResolveRailSelection(getBtn, captured, holder)
     if captured ~= nil then return captured end
     for i = 1, 4 do
         local b = getBtn(i)
-        if b and b.GetChecked and b:GetChecked() then return i end
+        if b and b.GetChecked then
+            local c = b:GetChecked()
+            -- Secret checked state is unreadable; fall through to the next
+            -- signal in the cascade instead of boolean-testing it.
+            if not issecretvalue(c) and c then return i end
+        end
     end
     local glowSel, glowCount = nil, 0
     for i = 1, 4 do
@@ -1235,11 +1254,19 @@ end
 
 local function SaveAppRoles(dialog)
     if not (RememberRolesOn() and dialog and EllesmereUIDB) then return end
-    local function chk(btn) return (btn and btn.CheckButton and btn.CheckButton:GetChecked()) and true or false end
+    local function chk(btn)
+        local c = btn and btn.CheckButton and btn.CheckButton:GetChecked()
+        if issecretvalue(c) then return nil end
+        return c and true or false
+    end
+    local tank, healer, damager = chk(dialog.TankButton), chk(dialog.HealerButton), chk(dialog.DamagerButton)
+    -- Any secret checked state means we cannot read what the user picked;
+    -- keep the previous save rather than writing wrong roles.
+    if tank == nil or healer == nil or damager == nil then return end
     EllesmereUIDB.lfgSavedRoles = {
-        tank    = chk(dialog.TankButton),
-        healer  = chk(dialog.HealerButton),
-        damager = chk(dialog.DamagerButton),
+        tank    = tank,
+        healer  = healer,
+        damager = damager,
     }
 end
 

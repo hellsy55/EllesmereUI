@@ -364,6 +364,7 @@ end
 local function FadeSpellItemsIn(frame, depth)
     depth = depth or 0
     if not frame or depth > 10 or not frame.GetChildren or frame:IsForbidden() then return end
+    if depth > 0 and WSkin.IsForeignFrame(frame) then return end
     if frame.Backplate and frame.Button then FadeSpellItem(frame) end
     for i = 1, select("#", frame:GetChildren()) do
         FadeSpellItemsIn(select(i, frame:GetChildren()), depth + 1)
@@ -376,6 +377,7 @@ end
 local function DimTalentArt(host, depth)
     depth = depth or 0
     if not host or depth > 2 or not host.GetRegions or host:IsForbidden() then return end
+    if depth > 0 and WSkin.IsForeignFrame(host) then return end
     for i = 1, select("#", host:GetRegions()) do
         local r = select(i, host:GetRegions())
         if r and r.IsObjectType and r:IsObjectType("Texture") and r:GetDrawLayer() == "BACKGROUND" then
@@ -727,6 +729,7 @@ local function FadeEJArt(frame, depth)
     depth = depth or 0
     if not frame or depth > 11 or not frame.GetRegions or frame:IsForbidden() then return end
     if WSkin.IsArtExempt(frame) then return end
+    if depth > 0 and WSkin.IsForeignFrame(frame) then return end
     local mybg = FFD[frame] and FFD[frame].bg
     for i = 1, select("#", frame:GetRegions()) do
         local r = select(i, frame:GetRegions())
@@ -791,12 +794,14 @@ local function WhitenTextIn(frame, depth)
     if frame.GetChildren then
         for i = 1, select("#", frame:GetChildren()) do
             local c = select(i, frame:GetChildren())
-            if c and c.GetObjectType and c:GetObjectType() == "SimpleHTML" and c.SetTextColor then
-                for _, el in ipairs({ "P", "H1", "H2", "H3" }) do
-                    pcall(c.SetTextColor, c, el, 1, 1, 1)
+            if c and not WSkin.IsForeignFrame(c, frame) then
+                if c.GetObjectType and c:GetObjectType() == "SimpleHTML" and c.SetTextColor then
+                    for _, el in ipairs({ "P", "H1", "H2", "H3" }) do
+                        pcall(c.SetTextColor, c, el, 1, 1, 1)
+                    end
                 end
+                WhitenTextIn(c, depth + 1)
             end
-            WhitenTextIn(c, depth + 1)
         end
     end
 end
@@ -1005,10 +1010,12 @@ local function FlattenBossButtons(frame, depth)
     if not frame or depth > 8 or frame:IsForbidden() or not frame.GetChildren then return end
     for i = 1, select("#", frame:GetChildren()) do
         local c = select(i, frame:GetChildren())
-        if c and c.creature and (c.text or c.name) and c.GetObjectType and c:GetObjectType() == "Button" then
-            SkinBossButton(c)
+        if c and not WSkin.IsForeignFrame(c, frame) then
+            if c.creature and (c.text or c.name) and c.GetObjectType and c:GetObjectType() == "Button" then
+                SkinBossButton(c)
+            end
+            FlattenBossButtons(c, depth + 1)
         end
-        FlattenBossButtons(c, depth + 1)
     end
 end
 
@@ -1068,10 +1075,12 @@ local function FlattenInstanceButtons(frame, depth)
     if not frame or depth > 8 or frame:IsForbidden() or not frame.GetChildren then return end
     for i = 1, select("#", frame:GetChildren()) do
         local c = select(i, frame:GetChildren())
-        if c and c.bgImage and c.name and c.GetObjectType and c:GetObjectType() == "Button" then
-            SkinInstanceButton(c)
+        if c and not WSkin.IsForeignFrame(c, frame) then
+            if c.bgImage and c.name and c.GetObjectType and c:GetObjectType() == "Button" then
+                SkinInstanceButton(c)
+            end
+            FlattenInstanceButtons(c, depth + 1)
         end
-        FlattenInstanceButtons(c, depth + 1)
     end
 end
 
@@ -1193,10 +1202,12 @@ local function FlattenLootRows(frame, depth)
     if not frame or depth > 8 or frame:IsForbidden() or not frame.GetChildren then return end
     for i = 1, select("#", frame:GetChildren()) do
         local c = select(i, frame:GetChildren())
-        if c and c.bossTexture and c.slot and c.GetObjectType and c:GetObjectType() == "Button" then
-            SkinLootRow(c)
+        if c and not WSkin.IsForeignFrame(c, frame) then
+            if c.bossTexture and c.slot and c.GetObjectType and c:GetObjectType() == "Button" then
+                SkinLootRow(c)
+            end
+            FlattenLootRows(c, depth + 1)
         end
-        FlattenLootRows(c, depth + 1)
     end
 end
 
@@ -1245,7 +1256,7 @@ local function SkinAbilityHeaders(frame, depth)
     if not frame or depth > 9 or frame:IsForbidden() or not frame.GetChildren then return end
     for i = 1, select("#", frame:GetChildren()) do
         local c = select(i, frame:GetChildren())
-        if c then
+        if c and not WSkin.IsForeignFrame(c, frame) then
             if c.descriptionBG and c.descriptionBG.SetAlpha then c.descriptionBG:SetAlpha(0) end
             if c.descriptionBGBottom and c.descriptionBGBottom.SetAlpha then c.descriptionBGBottom:SetAlpha(0) end
             -- Description line bullets -> the round status orb (first cell of
@@ -2225,7 +2236,7 @@ local function Skin_ProfessionsBook()
         if depth > 3 or not host.GetChildren then return end
         for i = 1, select("#", host:GetChildren()) do
             local c = select(i, host:GetChildren())
-            if c and c.GetObjectType and c:GetObjectType() == "Button" then
+            if c and not WSkin.IsForeignFrame(c, host) and c.GetObjectType and c:GetObjectType() == "Button" then
                 if not GetFFD(c).moved then
                     local nt = c.GetNormalTexture and c:GetNormalTexture()
                     local hay = nt and WSkin.TexHay(nt)
@@ -3576,7 +3587,8 @@ local function Skin_Guild()
         TreatClose(_G[n .. "CloseButton"])
         for i = 1, select("#", gl:GetChildren()) do
             local ch = select(i, gl:GetChildren())
-            if ch and ch.GetObjectType and ch:GetObjectType() == "Button" then
+            if ch and not WSkin.IsForeignFrame(ch, gl)
+               and ch.GetObjectType and ch:GetObjectType() == "Button" then
                 TreatClose(ch)
             end
         end
@@ -4042,6 +4054,7 @@ end
 local function AchWhiteTextsIn(host, depth)
     depth = depth or 0
     if not host or depth > 5 or host:IsForbidden() then return end
+    if depth > 0 and WSkin.IsForeignFrame(host) then return end
     AchWhiteTexts(host)
     if not host.GetChildren then return end
     for i = 1, select("#", host:GetChildren()) do
@@ -4408,7 +4421,7 @@ local function Skin_Achievements()
             if sub then
                 for i = 1, select("#", sub:GetChildren()) do
                     local c = select(i, sub:GetChildren())
-                    if c and c.NineSlice then
+                    if c and c.NineSlice and not WSkin.IsForeignFrame(c, sub) then
                         WSkin.FadeNineSlice(c.NineSlice)
                         WSkin.FadeRegions(c)
                         WSkin.Register(c, true)
@@ -4989,10 +5002,13 @@ local function Skin_Mail()
             if a.SetItemButtonTexture and not d.texHook then
                 d.texHook = true
                 hooksecurefunc(a, "SetItemButtonTexture", function(self, texture)
+                    -- Our themed background is a direct region of this button;
+                    -- the sweeps below must never fade it or the slot loses its
+                    -- backdrop the first time an item is set or cleared.
                     if not texture then
                         for j = 1, select("#", self:GetRegions()) do
                             local r = select(j, self:GetRegions())
-                            if r and r:IsObjectType("Texture") then
+                            if r and r ~= d.bg and r:IsObjectType("Texture") then
                                 r:SetAlpha(0)
                             end
                         end
@@ -5000,7 +5016,7 @@ local function Skin_Mail()
                     end
                     for j = 1, select("#", self:GetRegions()) do
                         local r = select(j, self:GetRegions())
-                        if r and r:IsObjectType("Texture") then
+                        if r and r ~= d.bg and r:IsObjectType("Texture") then
                             local match = (r.GetTexture and r:GetTexture() == texture) or (r.GetAtlas and r:GetAtlas() == texture)
                             if match then
                                 r:SetAlpha(1)

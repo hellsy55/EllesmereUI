@@ -420,6 +420,116 @@ end
 -- flat table is left in place as a dormant backup for one release; nothing
 -- reads it after seeding. NOTE: this is the spellAssignments.specProfiles store,
 -- NOT the unrelated EllesmereUIDB.specProfiles spec-to-profile auto-switch map.
+-- Spec Overrides fresh start (2026-07-11): the unlock override backend was
+-- rewritten from per-aspect diffs to whole-layout LAYERS, and the value/group
+-- stores accumulated tester-era data shaped for the old model. User-directed
+-- full wipe: groups, value entries, and unlock overrides all reset.
+--
+-- The RB Advanced migration's output lives in these same tables, so a
+-- profile that already ran it must be RE-ARMED before the wipe: the source
+-- data is restored from rb.advancedSpecsBackup and the run flag cleared, so
+-- Resource Bars' init re-creates its spec override cards into the clean
+-- store on this same login. Re-running MergeThresholds on the already-merged
+-- Simple list converges (first-run inserts serve only that spec, so the
+-- strip pass removes them before identical copies are re-inserted).
+do
+    local function RearmRBAdvancedMigration(prof)
+        local rb = prof and prof.addons and prof.addons.EllesmereUIResourceBars
+        if type(rb) ~= "table" or not rb._rbAdvMigrated then return end
+        local backup = rb.advancedSpecsBackup
+        if type(backup) == "table" then
+            rb.advancedSpecs = backup.advancedSpecs
+            if type(backup.disabledSpecs) == "table" then
+                for secKey, ds in pairs(backup.disabledSpecs) do
+                    if type(rb[secKey]) == "table" then
+                        rb[secKey].disabledSpecs = ds
+                    end
+                end
+            end
+            rb.advancedSpecsBackup = nil
+        end
+        rb._rbAdvMigrated = nil
+    end
+
+    EllesmereUI.RegisterMigration({
+        id          = "spec_overrides_fresh_start_v1",
+        scope       = "profile",
+        description = "Wipe all spec override data (groups, value entries, unlock overrides) for the layer-model fresh start.",
+        body        = function(ctx)
+            local prof = ctx.profile
+            if not prof then return end
+            RearmRBAdvancedMigration(prof)
+            prof.specOverrideGroups = nil
+            prof.specOverrides = nil
+            prof.specUnlockOverrides = nil
+        end,
+    })
+
+    -- Recovery for profiles that ran an early fresh-start build WITHOUT the
+    -- re-arm above: their RB-migrated cards were wiped, but the source data
+    -- still sits untouched in rb.advancedSpecsBackup. Re-arm those profiles
+    -- once so Resource Bars' init re-creates the cards. No-ops everywhere
+    -- else: on a first login where both migrations are pending, the fixed
+    -- fresh start has already cleared the RB flag before this runs (and the
+    -- reverse order would converge to the same state anyway).
+    --
+    -- Guard: a profile whose FIRST login with the RB migration happened on a
+    -- fresh-start build got its cards created AFTER the wipe (early runner
+    -- precedes RB init), so they still exist -- re-arming there would append
+    -- duplicates. Only re-arm when the store holds no RB-module entries.
+    EllesmereUI.RegisterMigration({
+        id          = "rb_adv_remigrate_after_wipe_v1",
+        scope       = "profile",
+        description = "Re-run the RB Advanced migration for profiles whose migrated spec override cards were wiped by the fresh start.",
+        body        = function(ctx)
+            local prof = ctx.profile
+            if not prof then return end
+            if type(prof.specOverrides) == "table" then
+                for _, e in ipairs(prof.specOverrides) do
+                    if type(e) == "table" and e.module == "EllesmereUIResourceBars" then
+                        return
+                    end
+                end
+            end
+            RearmRBAdvancedMigration(prof)
+        end,
+    })
+end
+
+-- CDM bar captures recorded before the numeric-segment path walkers existed
+-- banked NIL sentinels for every value (the reads missed the numeric bars[i]
+-- keys entirely); applying them through the FIXED walkers would null out
+-- live CDM bar settings on the next spec swap. The broken window was a
+-- tester build measured in hours -- drop every CDM-bars capture from both
+-- override stores; users re-capture with working walkers.
+EllesmereUI.RegisterMigration({
+    id          = "cdm_bars_capture_reset_v1",
+    scope       = "profile",
+    description = "Drop corrupt CDM bar captures recorded by the pre-numeric-walker override builds.",
+    body        = function(ctx)
+        local prof = ctx.profile
+        if not prof then return end
+        local PREFIX = "EllesmereUICooldownManager\31cdmBars\30bars\30"
+        local function sweep(store)
+            if type(store) ~= "table" then return end
+            for i = #store, 1, -1 do
+                local e = store[i]
+                local def = type(e) == "table" and e.values and e.values.default
+                if type(def) == "table" then
+                    for fkey in pairs(def) do
+                        if type(fkey) == "string" and fkey:sub(1, #PREFIX) == PREFIX then
+                            table.remove(store, i)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        sweep(prof.specOverrides)
+        sweep(prof.condOverrides)
+    end,
+})
+
 EllesmereUI.RegisterMigration({
     id          = "cdm_per_profile_spell_store_v1",
     scope       = "global",
@@ -2283,6 +2393,40 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "uf_boss_simple_text_seed_v1",
+    scope       = "profile",
+    description = "Seed boss simple-display cooldown-text show/size from customized regular keys so old profiles keep their text settings under the default-on Simple Display.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        local b = type(uf) == "table" and uf.boss
+        if type(b) ~= "table" then return end
+        -- Simple Debuff Display defaults ON ("left"), and while it is on the
+        -- renderer reads the simple* text keys -- which DeepMergeDefaults
+        -- fills with false/14 on a profile predating them. A customized
+        -- regular debuff/buff text size stays stored but is never read, so
+        -- the user sees hidden text (or 14) instead of their size. Seed the
+        -- simple keys from the regular ones BEFORE the merge masks them.
+        -- The regular defaults (10 / false) act as the "was it customized"
+        -- sentinels; StripDefaults nils default-equal values at logout, so a
+        -- stored value is always a genuine customization.
+        if b.simpleDebuffCooldownTextSize == nil
+            and type(b.debuffCooldownTextSize) == "number" and b.debuffCooldownTextSize ~= 10 then
+            b.simpleDebuffCooldownTextSize = b.debuffCooldownTextSize
+        end
+        if b.simpleDebuffShowCooldownText == nil and b.debuffShowCooldownText == true then
+            b.simpleDebuffShowCooldownText = true
+        end
+        if b.simpleBuffCooldownTextSize == nil
+            and type(b.buffCooldownTextSize) == "number" and b.buffCooldownTextSize ~= 10 then
+            b.simpleBuffCooldownTextSize = b.buffCooldownTextSize
+        end
+        if b.simpleBuffShowCooldownText == nil and b.buffShowCooldownText == true then
+            b.simpleBuffShowCooldownText = true
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "charsheet_default_enabled_v1",
     scope       = "global",
     description = "Preserve disabled default for existing users when flipping themedCharacterSheet to default-on.",
@@ -3377,6 +3521,36 @@ EllesmereUI.RegisterMigration({
                 EllesmereUI.MigrateCdmThresholdText(cdm, sp)
             end
         end
+    end,
+})
+
+-- The default buffs bar's displayed order (sd.buffDisplayOrder) is auto-resynced
+-- to Blizzard's current viewer order by ReconcileBuffDisplayOrder unless
+-- sd._buffDisplayOrderUserModified is set. The flag arrived together with the
+-- live-path reconcile and is only ever written by the options drag-reorder --
+-- but before the flag existed, buffDisplayOrder itself was created exclusively
+-- by a manual drag, so every pre-existing stable-key array IS a user's
+-- hand-arranged order. Stamp the flag so the first live reconcile after
+-- updating preserves that order instead of re-sorting it to Blizzard order.
+-- Numeric-format legacy arrays are skipped: the reconcile (and the old options
+-- build before it) discards that format outright, so there is no order a stamp
+-- could preserve. Shared with profile import so orders exported from older
+-- builds keep their protection.
+function EllesmereUI.MigrateCdmBuffOrderUserFlag(specProf)
+    local bs = type(specProf) == "table" and type(specProf.barSpells) == "table"
+        and specProf.barSpells.buffs
+    if type(bs) ~= "table" then return end
+    if type(bs.buffDisplayOrder) == "table" and type(bs.buffDisplayOrder[1]) == "string" then
+        bs._buffDisplayOrderUserModified = true
+    end
+end
+
+EllesmereUI.RegisterMigration({
+    id          = "cdm_buff_order_user_flag_v1",
+    scope       = "specProfile",
+    description = "Protect pre-existing manually-arranged Tracked Buffs orders from the live-path Blizzard-order resync by stamping _buffDisplayOrderUserModified on every stable-key buffDisplayOrder.",
+    body = function(ctx)
+        EllesmereUI.MigrateCdmBuffOrderUserFlag(ctx.specProfile)
     end,
 })
 

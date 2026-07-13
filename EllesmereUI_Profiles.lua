@@ -688,6 +688,20 @@ local function RepointAllDBs(profileName)
         EllesmereUIDB.unlockWidthMatch  = DeepCopy(ul.widthMatch   or {})
         EllesmereUIDB.unlockHeightMatch = DeepCopy(ul.heightMatch  or {})
         EllesmereUIDB.phantomBounds     = DeepCopy(ul.phantomBounds or {})
+        -- unlockLayout snapshots always carry BASELINE links (CommitPositions
+        -- sources them from the stored baseline layout while a group layer is
+        -- live), so live now holds the baseline: reset the incoming profile's
+        -- active-layer pointer to match. SpecOverrides_ApplyUnlock re-applies
+        -- the right group layer for the incoming spec right after.
+        if EllesmereUI.SpecOverrides_UnlockResetActive then
+            EllesmereUI.SpecOverrides_UnlockResetActive(profileData)
+        end
+        -- Buff Manager forks have NO baseline snapshot restore (the RF addon
+        -- profile is the live data and travels with the blob), so their
+        -- pointer stays consistent -- only orphan pointers are healed.
+        if EllesmereUI.SpecOverrides_BmResetActive then
+            EllesmereUI.SpecOverrides_BmResetActive(profileData)
+        end
     end
     -- Seed castbar anchor defaults ONLY on brand-new profiles (no unlockLayout
     -- yet). Re-seeding every load would clobber a user's deliberate un-anchor
@@ -876,8 +890,23 @@ function EllesmereUI.SnapshotAllAddons()
             data.specOverrideGroups = DeepCopy(prof.specOverrideGroups)
             data.specOverrideNextId = prof.specOverrideNextId
         end
+        if prof and type(prof.condOverrideGroups) == "table" and #prof.condOverrideGroups > 0 then
+            data.condOverrideGroups = DeepCopy(prof.condOverrideGroups)
+        end
+        if prof and type(prof.condOverrides) == "table" and #prof.condOverrides > 0 then
+            data.condOverrides = DeepCopy(prof.condOverrides)
+        end
+        if prof and type(prof.condUnlockOverrides) == "table" then
+            data.condUnlockOverrides = DeepCopy(prof.condUnlockOverrides)
+        end
         if prof and type(prof.specUnlockOverrides) == "table" then
             data.specUnlockOverrides = DeepCopy(prof.specUnlockOverrides)
+        end
+        if prof and type(prof.condBmOverrides) == "table" then
+            data.condBmOverrides = DeepCopy(prof.condBmOverrides)
+        end
+        if prof and type(prof.specBmOverrides) == "table" then
+            data.specBmOverrides = DeepCopy(prof.specBmOverrides)
         end
     end
     -- Include unlock mode layout data (anchors, size matches)
@@ -948,6 +977,16 @@ end
 function EllesmereUI.ApplyProfileData(profileData)
     if not profileData or not profileData.addons then return end
 
+    -- Any open editing-as session (spec group / conditional / Default view)
+    -- must close BEFORE the live tables are wiped and refilled: the exits
+    -- bank against the outgoing store, and the post-apply establish
+    -- (Conditions_MarkStale + Recheck) refuses to run under a live session,
+    -- which would strand the incoming profile un-overlaid ("bricked") until
+    -- the next zone change.
+    if EllesmereUI.SpecOverrides_CloseEditSessions then
+        EllesmereUI.SpecOverrides_CloseEditSessions()
+    end
+
     -- Build a folder -> db lookup from the Lite registry
     local dbByFolder = {}
     if EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry then
@@ -978,6 +1017,30 @@ function EllesmereUI.ApplyProfileData(profileData)
                 if entry.folder == "EllesmereUIUnitFrames" and type(profile.totPet) == "table" then
                     if profile.targettarget == nil then profile.targettarget = DeepCopy(profile.totPet) end
                     if profile.focustarget  == nil then profile.focustarget  = DeepCopy(profile.totPet) end
+                end
+                -- Old-profile imports carry customized boss regular text keys
+                -- but no simple* twins. Simple Debuff Display defaults ON and
+                -- reads the simple* keys, which DeepMergeDefaults fills with
+                -- false/14, orphaning the user's stored sizes. The seed
+                -- migration (uf_boss_simple_text_seed_v1) is SKIPPED for
+                -- imported profiles (inherited migration flags), so
+                -- forward-copy here BEFORE the merge masks the nil keys.
+                if entry.folder == "EllesmereUIUnitFrames" and type(profile.boss) == "table" then
+                    local b = profile.boss
+                    if b.simpleDebuffCooldownTextSize == nil
+                        and type(b.debuffCooldownTextSize) == "number" and b.debuffCooldownTextSize ~= 10 then
+                        b.simpleDebuffCooldownTextSize = b.debuffCooldownTextSize
+                    end
+                    if b.simpleDebuffShowCooldownText == nil and b.debuffShowCooldownText == true then
+                        b.simpleDebuffShowCooldownText = true
+                    end
+                    if b.simpleBuffCooldownTextSize == nil
+                        and type(b.buffCooldownTextSize) == "number" and b.buffCooldownTextSize ~= 10 then
+                        b.simpleBuffCooldownTextSize = b.buffCooldownTextSize
+                    end
+                    if b.simpleBuffShowCooldownText == nil and b.buffShowCooldownText == true then
+                        b.simpleBuffShowCooldownText = true
+                    end
                 end
                 -- Pre-MultiBag imports carry the legacy bagDefaultOneBag boolean
                 -- but no bagDefaultBagType. The conversion migration is SKIPPED for
@@ -1110,6 +1173,9 @@ function EllesmereUI.RefreshAllAddons()
     -- Spec Overrides: write the current spec's override values into the live
     -- profile FIRST, so every module refresh below picks them up. This makes
     -- profile swaps and imports override-correct without their own pass.
+    -- (The import-time default re-bank runs SYNCHRONOUSLY inside
+    -- ImportProfile, never from here: by the time any RefreshAllAddons fires,
+    -- overlays may already be live and re-banking would poison defaults.)
     if EllesmereUI.SpecOverrides_ApplyValues then
         EllesmereUI.SpecOverrides_ApplyValues()
     end
@@ -1225,6 +1291,13 @@ function EllesmereUI.RefreshAllAddons()
     if EllesmereUI.IsShown and EllesmereUI:IsShown() and EllesmereUI.RefreshPage then
         EllesmereUI:RefreshPage(true)
     end
+    -- Conditional overrides: a profile apply swaps every store wholesale, so
+    -- the engine's applied pointer refers to the OLD profile's groups. Reset
+    -- it and re-establish the overlay against the incoming profile.
+    if EllesmereUI.Conditions_MarkStale then
+        EllesmereUI.Conditions_MarkStale()
+        EllesmereUI.Conditions_Recheck()
+    end
     -- If CDM is loaded, it calls OnSpecSwitchComplete from ProcessSpecChange
     -- after its SPELLS_CHANGED rebuild finishes. If CDM is NOT loaded,
     -- complete immediately since there's nothing to wait for.
@@ -1255,6 +1328,12 @@ function EllesmereUI.OnSpecSwitchComplete()
     end
     if EllesmereUI.ResyncAnchorOffsets then
         EllesmereUI.ResyncAnchorOffsets()
+    end
+    -- A conditional establish/flip that found the spec pipeline mid-flight
+    -- deferred itself (the transition handler returns false while busy).
+    -- The pipeline is settled now -- resolve it. No-op when nothing changed.
+    if EllesmereUI.Conditions_Recheck then
+        EllesmereUI.Conditions_Recheck()
     end
 end
 
@@ -1963,13 +2042,13 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if imported.fonts then merged.fonts = DeepCopy(imported.fonts) end
         if imported.customColors then merged.customColors = DeepCopy(imported.customColors) end
         if imported.darkMode then merged.darkMode = DeepCopy(imported.darkMode) end
-        if imported.specOverrides then merged.specOverrides = DeepCopy(imported.specOverrides) end
-        if imported.specOverrideGroups then
-            merged.specOverrideGroups = DeepCopy(imported.specOverrideGroups)
-            merged.specOverrideNextId = imported.specOverrideNextId
-        end
-        if imported.specUnlockOverrides then
-            merged.specUnlockOverrides = DeepCopy(imported.specUnlockOverrides)
+        -- Override stores: union-merge with incoming priority, the fork drop
+        -- rules, and a post-apply default re-baseline (kept stores' defaults
+        -- are stale against the imported values -- restoring them when an
+        -- override deactivates would overwrite the imported profile's own
+        -- settings). Full semantics in SpecOverrides_MergeImportedStores.
+        if EllesmereUI.SpecOverrides_MergeImportedStores then
+            EllesmereUI.SpecOverrides_MergeImportedStores(merged, imported)
         end
         -- Layout: the new profile's unlockLayout is the active profile's CURRENT
         -- layout, with the imported relationships merged in PER MODULE.
@@ -2061,6 +2140,13 @@ function EllesmereUI.ImportProfile(importStr, profileName)
                     -- relocate old-format imports the same way (idempotent).
                     if EllesmereUI.MigrateCdmHostedBuffSettings then
                         EllesmereUI.MigrateCdmHostedBuffSettings(specProf)
+                    end
+                    -- Strings exported before _buffDisplayOrderUserModified
+                    -- existed carry a drag-arranged buffDisplayOrder without
+                    -- the flag; stamp it or the first live reconcile resyncs
+                    -- the imported order to Blizzard order (idempotent).
+                    if EllesmereUI.MigrateCdmBuffOrderUserFlag then
+                        EllesmereUI.MigrateCdmBuffOrderUserFlag(specProf)
                     end
                 end
             end
@@ -2163,6 +2249,24 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if EllesmereUI.MigrateRBAdvancedProfile then
             EllesmereUI.MigrateRBAdvancedProfile(db.profiles[profileName])
         end
+        -- Re-bank override DEFAULTS from the freshly-applied imported values,
+        -- synchronously: it must land BEFORE SpecOverrides_Apply writes the
+        -- overlays back over live, and before the caller's ReloadUI (which
+        -- would destroy any deferred in-memory flag -- post-reload, login
+        -- overlays land before the first full refresh, so there is no clean
+        -- window after this one). Scoped to the folders the string actually
+        -- carried: non-imported folders keep the base profile's live tables,
+        -- which can hold ACTIVE override values that must never become
+        -- defaults.
+        if EllesmereUI.SpecOverrides_RebaselineDefaults then
+            local importedFolders = {}
+            if payload.data and payload.data.addons then
+                for folder in pairs(payload.data.addons) do importedFolders[folder] = true end
+            end
+            if next(importedFolders) then
+                EllesmereUI.SpecOverrides_RebaselineDefaults(importedFolders)
+            end
+        end
         -- Spec Overrides: apply the imported profile's stored values for the
         -- current spec on top of the just-applied addon data.
         if EllesmereUI.SpecOverrides_Apply then
@@ -2206,8 +2310,35 @@ function EllesmereUI.ImportProfile(importStr, profileName)
             merged.specOverrideGroups = DeepCopy(payload.data.specOverrideGroups)
             merged.specOverrideNextId = payload.data.specOverrideNextId
         end
+        if payload.data.condOverrideGroups then merged.condOverrideGroups = DeepCopy(payload.data.condOverrideGroups) end
+        if payload.data.condOverrides then merged.condOverrides = DeepCopy(payload.data.condOverrides) end
+        if payload.data.condUnlockOverrides then merged.condUnlockOverrides = DeepCopy(payload.data.condUnlockOverrides) end
         if payload.data.specUnlockOverrides then
             merged.specUnlockOverrides = DeepCopy(payload.data.specUnlockOverrides)
+        end
+        if payload.data.condBmOverrides then merged.condBmOverrides = DeepCopy(payload.data.condBmOverrides) end
+        if payload.data.specBmOverrides then
+            merged.specBmOverrides = DeepCopy(payload.data.specBmOverrides)
+        end
+        -- Kept override stores survive a partial import by design (the base
+        -- profile continues), but BM forks are Raid Frames-scoped: drop kept
+        -- ones when the payload replaces RF settings they were built against.
+        -- UN-PARKING NOTE: this branch only STORES the profile (never
+        -- activates it), so it must NOT call SpecOverrides_RebaselineDefaults
+        -- here -- that re-banks the ACTIVE profile's stores. When this branch
+        -- is revived, run the re-bank synchronously at activation time,
+        -- scoped to payload.data.addons folders (mirror the full-import call
+        -- after ApplyProfileData). Never a deferred flag: the import flow
+        -- ends in ReloadUI, which destroys in-memory state.
+        do
+            local folders = {}
+            if payload.data and payload.data.addons then
+                for folder in pairs(payload.data.addons) do folders[folder] = true end
+            end
+            if folders["EllesmereUIRaidFrames"] then
+                if not payload.data.specBmOverrides then merged.specBmOverrides = nil end
+                if not payload.data.condBmOverrides then merged.condBmOverrides = nil end
+            end
         end
         -- Resource Bars: migrate legacy Advanced data from old export strings.
         if EllesmereUI.MigrateRBAdvancedProfile then
@@ -2283,6 +2414,13 @@ end
 function EllesmereUI.SaveCurrentAsProfile(name)
     local db = GetProfilesDB()
     local current = db.activeProfile or "Default"
+    -- Freshen the override stores from live before snapshotting (same as the
+    -- export path): the whole-profile DeepCopy below carries every override
+    -- store with it, and without this bank the current spec's most recent
+    -- override edits could lag one harvest boundary behind.
+    if EllesmereUI.SpecOverrides_HarvestCurrent then
+        EllesmereUI.SpecOverrides_HarvestCurrent()
+    end
     local src = db.profiles[current]
 
     -- Count existing profiles BEFORE adding the new one
@@ -2428,6 +2566,13 @@ end
 function EllesmereUI.SwitchProfile(name)
     local db = GetProfilesDB()
     if not db.profiles[name] then return end
+
+    -- Close any editing-as session against the OUTGOING profile first (the
+    -- exits bank their edits), so the harvest below runs unguarded and the
+    -- post-switch establish never finds a live session.
+    if EllesmereUI.SpecOverrides_CloseEditSessions then
+        EllesmereUI.SpecOverrides_CloseEditSessions()
+    end
 
     -- Spec Overrides: sync the current spec's stored values with any live
     -- edits before leaving the outgoing profile (suppressed while a spec

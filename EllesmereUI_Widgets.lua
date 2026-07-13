@@ -416,8 +416,32 @@ local RB_COLOURS = {
 -- Forward declarations (defined after the Widget Factory section)
 local ShowWidgetTooltip, HideWidgetTooltip
 
--- Search metadata: tag a row frame so the inline search can find it
-local function TagOptionRow(frame, parent, labelText)
+-- Global search index registration for ONE setting. Single-setting rows go
+-- through TagOptionRow below; multi-slot rows (DualRow, TripleRow, offset
+-- rows, wide button rows) call this once per slot so every search result is
+-- exactly one setting -- never a concatenated row label. No-op until the
+-- optional EllesmereUI_GlobalSearch.lua defines _RegisterSearchEntry.
+local function IndexSlotForSearch(parent, labelText, tooltipText)
+    if not EllesmereUI._RegisterSearchEntry then return end
+    if not labelText or labelText == "" then return end
+    local sectionName = parent._currentSection and parent._currentSection._sectionName
+    local loc = EllesmereUI.L(labelText)
+    -- Some pages show entirely different content depending on an internal
+    -- selector (which CDM bar / action bar / unit is currently picked via
+    -- its own dropdown) -- see EllesmereUI._buildingSelector for details.
+    local sel = EllesmereUI._buildingSelector
+    EllesmereUI._RegisterSearchEntry(labelText, loc ~= labelText and loc or nil,
+        type(tooltipText) == "string" and tooltipText or nil,
+        EllesmereUI._buildingModule, EllesmereUI._buildingPage, sectionName,
+        sel and sel.setter, sel and sel.key)
+end
+
+-- Search metadata: tag a row frame so the inline search can find it. The
+-- combined multi-slot label stays on the FRAME (the inline page search
+-- matches whole rows, then narrows highlights to slots); multiSlot=true
+-- skips the global-index registration here because the caller indexes each
+-- slot individually via IndexSlotForSearch.
+local function TagOptionRow(frame, parent, labelText, tooltipText, multiSlot)
     frame._isOptionRow = true
     frame._labelText = labelText
     -- Bilingual search: store the localized label only when it differs from the
@@ -426,6 +450,9 @@ local function TagOptionRow(frame, parent, labelText)
     local _loc = EllesmereUI.L(labelText)
     if _loc ~= labelText then frame._labelTextLoc = _loc end
     frame._sectionHeader = parent._currentSection
+    if not multiSlot then
+        IndexSlotForSearch(parent, labelText, tooltipText)
+    end
 end
 
 -- Global disabled-widget tooltip: "This option requires ___ to be enabled"
@@ -2097,6 +2124,15 @@ function WidgetFactory:SectionHeader(parent, text, yOffset)
     if _snLoc ~= text then frame._sectionNameLoc = _snLoc end
     parent._currentSection = frame
 
+    -- Global search index hook: see TagOptionRow for details; no-op if the
+    -- optional EllesmereUI_GlobalSearch.lua file isn't loaded. The trailing
+    -- true marks this entry as a SECTION so results render it as one
+    -- ("Section: Title Case") instead of as an option row.
+    if EllesmereUI._RegisterSearchEntry then
+        local sel = EllesmereUI._buildingSelector
+        EllesmereUI._RegisterSearchEntry(text, frame._sectionNameLoc, nil, EllesmereUI._buildingModule, EllesmereUI._buildingPage, text, sel and sel.setter, sel and sel.key, true)
+    end
+
     return frame, 40
 end
 
@@ -2241,7 +2277,7 @@ function WidgetFactory:Toggle(parent, text, yOffset, getValue, setValue, tooltip
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
 
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)    local label = MakeFont(frame, 14, nil, TEXT_WHITE.r, TEXT_WHITE.g, TEXT_WHITE.b)
+    TagOptionRow(frame, parent, text, tooltip)    local label = MakeFont(frame, 14, nil, TEXT_WHITE.r, TEXT_WHITE.g, TEXT_WHITE.b)
     label:SetPoint("LEFT", frame, "LEFT", 20, 0)
     label:SetText(EllesmereUI.L(text))
 
@@ -2266,7 +2302,7 @@ function WidgetFactory:Slider(parent, text, yOffset, minVal, maxVal, step, getVa
     PP.Size(frame, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)
+    TagOptionRow(frame, parent, text, tooltip)
     local label = MakeFont(frame, 14, nil, TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B)
     PP.Point(label, "LEFT", frame, "LEFT", 20, 0)
     label:SetText(EllesmereUI.L(text))
@@ -2286,7 +2322,7 @@ function WidgetFactory:Dropdown(parent, text, yOffset, values, getValue, setValu
     PP.Size(frame, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)
+    TagOptionRow(frame, parent, text, tooltip)
     local label = MakeFont(frame, 14, nil, TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B)
     label:SetAlpha(1)
     PP.Point(label, "LEFT", frame, "LEFT", 20, 0)
@@ -2322,7 +2358,7 @@ function WidgetFactory:Checkbox(parent, text, yOffset, getValue, setValue, toolt
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
 
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, text)
+    TagOptionRow(frame, parent, text, tooltip)
 
     local btn = CreateFrame("Button", nil, frame)
     PP.Size(btn, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
@@ -3290,10 +3326,13 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     if not rightCfg then frame._skipRowDivider = true end
     RowBg(frame, parent)
-    -- Search metadata: combine both labels
+    -- Search metadata: combined label on the frame (inline page search),
+    -- one global-index entry per slot (each slot is its own setting).
     local dualLabel = (leftCfg and leftCfg.text or "")
     if rightCfg and rightCfg.text then dualLabel = dualLabel .. " " .. rightCfg.text end
-    TagOptionRow(frame, parent, dualLabel)
+    TagOptionRow(frame, parent, dualLabel, nil, true)
+    IndexSlotForSearch(parent, leftCfg and leftCfg.text, leftCfg and leftCfg.tooltip)
+    IndexSlotForSearch(parent, rightCfg and rightCfg.text, rightCfg and rightCfg.tooltip)
 
     -- Half regions (invisible, just for anchoring)
     local fullWidth = not rightCfg
@@ -3735,9 +3774,13 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     frame._skipRowDivider = true
     RowBg(frame, parent)
-    -- Search metadata: combine all labels
+    -- Search metadata: combined label on the frame (inline page search),
+    -- one global-index entry per slot (each slot is its own setting).
     local triLabel = (leftCfg and leftCfg.text or "") .. " " .. (midCfg and midCfg.text or "") .. " " .. (rightCfg and rightCfg.text or "")
-    TagOptionRow(frame, parent, triLabel)
+    TagOptionRow(frame, parent, triLabel, nil, true)
+    IndexSlotForSearch(parent, leftCfg and leftCfg.text, leftCfg and leftCfg.tooltip)
+    IndexSlotForSearch(parent, midCfg and midCfg.text, midCfg and midCfg.tooltip)
+    IndexSlotForSearch(parent, rightCfg and rightCfg.text, rightCfg and rightCfg.tooltip)
 
     -- Custom or default 44% / 28% / 28% split
     local leftW  = math.floor(totalW * ((splits and splits[1]) or 0.44))
@@ -4148,7 +4191,10 @@ function WidgetFactory:DropdownWithOffsets(parent, yOffset, dropdownCfg, xSlider
     PP.Size(frame, totalW, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
     RowBg(frame, parent)
-    TagOptionRow(frame, parent, (dropdownCfg and dropdownCfg.text or "") .. " " .. (xSliderCfg and xSliderCfg.text or "") .. " " .. (ySliderCfg and ySliderCfg.text or ""))
+    TagOptionRow(frame, parent, (dropdownCfg and dropdownCfg.text or "") .. " " .. (xSliderCfg and xSliderCfg.text or "") .. " " .. (ySliderCfg and ySliderCfg.text or ""), nil, true)
+    IndexSlotForSearch(parent, dropdownCfg and dropdownCfg.text, dropdownCfg and dropdownCfg.tooltip)
+    IndexSlotForSearch(parent, xSliderCfg and xSliderCfg.text, xSliderCfg and xSliderCfg.tooltip)
+    IndexSlotForSearch(parent, ySliderCfg and ySliderCfg.text, ySliderCfg and ySliderCfg.tooltip)
 
     local halfW = math.floor(totalW / 2)
 
@@ -4261,7 +4307,9 @@ function WidgetFactory:WideDualButton(parent, text1, text2, yOffset, onClick1, o
     local frame = CreateFrame("Frame", nil, parent)
     PP.Size(frame, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
-    TagOptionRow(frame, parent, (text1 or "") .. " " .. (text2 or ""))
+    TagOptionRow(frame, parent, (text1 or "") .. " " .. (text2 or ""), nil, true)
+    IndexSlotForSearch(parent, text1)
+    IndexSlotForSearch(parent, text2)
     local halfGap = DUAL_GAP / 2
     for i, info in ipairs({{text1, -(btnWidth/2 + halfGap), onClick1}, {text2, (btnWidth/2 + halfGap), onClick2}}) do
         local btn = CreateFrame("Button", nil, frame)
@@ -4285,7 +4333,10 @@ function WidgetFactory:WideTripleButton(parent, text1, text2, text3, yOffset, on
     local frame = CreateFrame("Frame", nil, parent)
     PP.Size(frame, parent:GetWidth() - CONTENT_PAD * 2, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
-    TagOptionRow(frame, parent, (text1 or "") .. " " .. (text2 or "") .. " " .. (text3 or ""))
+    TagOptionRow(frame, parent, (text1 or "") .. " " .. (text2 or "") .. " " .. (text3 or ""), nil, true)
+    IndexSlotForSearch(parent, text1)
+    IndexSlotForSearch(parent, text2)
+    IndexSlotForSearch(parent, text3)
     local gap = DUAL_GAP
     local offsets = { -(btnWidth + gap), 0, (btnWidth + gap) }
     for i, info in ipairs({ {text1, onClick1}, {text2, onClick2}, {text3, onClick3} }) do
@@ -4351,7 +4402,10 @@ function WidgetFactory:TripleDropdown(parent, configs, yOffset)
     local frameW = parent:GetWidth() - CONTENT_PAD * 2
     PP.Size(frame, frameW, ROW_H)
     PP.Point(frame, "TOPLEFT", parent, "TOPLEFT", CONTENT_PAD, yOffset)
-    TagOptionRow(frame, parent, (configs[1] and configs[1][1] or "") .. " " .. (configs[2] and configs[2][1] or "") .. " " .. (configs[3] and configs[3][1] or ""))
+    TagOptionRow(frame, parent, (configs[1] and configs[1][1] or "") .. " " .. (configs[2] and configs[2][1] or "") .. " " .. (configs[3] and configs[3][1] or ""), nil, true)
+    IndexSlotForSearch(parent, configs[1] and configs[1][1])
+    IndexSlotForSearch(parent, configs[2] and configs[2][1])
+    IndexSlotForSearch(parent, configs[3] and configs[3][1])
     local totalW = DD_W * 3 + TRIPLE_GAP * 2
     local startX = (frameW - totalW) / 2
     for idx, cfg in ipairs(configs) do
@@ -6717,9 +6771,11 @@ end  -- end deferred init
 --  Reusable across CDM, Action Bars, Resource Bars, Unit Frames.
 --  items = EllesmereUI.VIS_OPT_ITEMS (or a subset)
 --  getFn(key) -> bool, setFn(key, bool)
+--  onMenuClosed (optional) fires once each time the open menu hides --
+--  callers that defer page rebuilds while the menu is open flush there.
 --  Returns: ddBtn, refreshFn
 -------------------------------------------------------------------------------
-function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, getFn, setFn, onChanged, maxVisibleItems, searchable, closeButton)
+function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, getFn, setFn, onChanged, maxVisibleItems, searchable, closeButton, onMenuClosed)
     local PP = EllesmereUI.PP or EllesmereUI.PanelPP
     local ddBtn = CreateFrame("Button", nil, parentFrame)
     PP.Size(ddBtn, ddW, 30)
@@ -6921,6 +6977,15 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 hdrLine:SetPoint("LEFT", hdrLbl, "RIGHT", 6, 0)
                 hdrLine:SetPoint("RIGHT", hdr, "RIGHT", -10, 0)
                 hdrLine:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+                if item.tooltip then
+                    hdr:EnableMouse(true)
+                    hdr:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(hdr, item.tooltip)
+                    end)
+                    hdr:SetScript("OnLeave", function()
+                        EllesmereUI.HideWidgetTooltip()
+                    end)
+                end
                 _allRows[#_allRows + 1] = { frame = hdr, isHeader = true, label = item.label, height = hdrH }
                 yOff = yOff - hdrH
             elseif item.isAction then
@@ -6968,6 +7033,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     for _, r in ipairs(_allRows) do
                         if r.frame._updateCheck then r.frame._updateCheck() end
                         if r.frame._updateActionLabel then r.frame._updateActionLabel() end
+                        if r.frame._updateLocked then r.frame._updateLocked() end
                     end
                     UpdateLabel()
                 end)
@@ -7026,6 +7092,17 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             UpdateCheck()
             row._updateCheck = UpdateCheck
             row:SetScript("OnEnter", function()
+                if row._isLocked then
+                    -- Locked rows keep the gray look (no highlight); if the
+                    -- item explains its lock, show that instead of the
+                    -- normal tooltip.
+                    local lt = item.lockedTooltip
+                    if type(lt) == "function" then lt = lt() end
+                    if lt then
+                        EllesmereUI.ShowWidgetTooltip(row, lt)
+                    end
+                    return
+                end
                 lbl:SetTextColor(1, 1, 1, 1)
                 hl:SetColorTexture(1, 1, 1, 0.04)
                 if item.tooltip then
@@ -7033,6 +7110,12 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 end
             end)
             row:SetScript("OnLeave", function()
+                if row._isLocked then
+                    if item.lockedTooltip then
+                        EllesmereUI.HideWidgetTooltip()
+                    end
+                    return
+                end
                 lbl:SetTextColor(0.75, 0.75, 0.75, 1)
                 hl:SetColorTexture(1, 1, 1, 0)
                 if item.tooltip then
@@ -7041,12 +7124,13 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             end)
             local function UpdateLocked()
                 local isLocked = item.locked or (item.lockedFn and item.lockedFn())
+                -- Mouse stays enabled so locked rows can explain themselves
+                -- on hover; clicks are guarded independently in OnClick.
+                row._isLocked = isLocked and true or false
                 if isLocked then
                     lbl:SetTextColor(0.4, 0.4, 0.4, 0.5)
-                    row:EnableMouse(false)
                 else
                     lbl:SetTextColor(0.75, 0.75, 0.75, 1)
-                    row:EnableMouse(true)
                 end
             end
             row._updateLocked = UpdateLocked
@@ -7057,20 +7141,25 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 UpdateLabel()
                 -- Refresh checkbox visuals + dynamic action labels, so items
                 -- whose checked state depends on others (e.g. "Always" in
-                -- crosshair) update live.
+                -- crosshair) update live. Locked visuals refresh too, so rows
+                -- whose lockedFn depends on the current selection never show
+                -- a stale gray/active state.
                 for _, r in ipairs(_allRows) do
                     if r.frame._updateCheck then r.frame._updateCheck() end
                     if r.frame._updateActionLabel then r.frame._updateActionLabel() end
+                    if r.frame._updateLocked then r.frame._updateLocked() end
                 end
                 if onChanged then
                     -- Anchor menu to absolute screen position BEFORE callback
-                    -- so the page rebuild (which destroys ddBtn) can't shift us
-                    local mScale = menu:GetEffectiveScale()
-                    local uiScale = UIParent:GetEffectiveScale()
+                    -- so a page rebuild (which destroys ddBtn) can't shift us.
+                    -- GetCenter and SetPoint offsets are both in the menu's
+                    -- own coordinate space, so the values pass through
+                    -- unscaled -- scaling them by effective-scale ratios made
+                    -- the menu creep toward the bottom-left on every click
+                    -- when the options panel scale differs from UIParent's.
                     local cx, cy = menu:GetCenter()
                     menu:ClearAllPoints()
-                    menu:SetPoint("CENTER", UIParent, "BOTTOMLEFT",
-                        cx * mScale / uiScale, cy * mScale / uiScale)
+                    menu:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx, cy)
                     onChanged()
                 end
             end)
@@ -7248,6 +7337,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             else
                 ApplyNormal()
             end
+            if onMenuClosed then onMenuClosed() end
         end)
     end
 
@@ -7263,6 +7353,235 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         end
     end
     return ddBtn, RefreshAll
+end
+
+-------------------------------------------------------------------------------
+--  Shared Visibility Mode Checklist Row
+--  The single-select Visibility dropdown as a multi-select checklist backed
+--  by the shared engine in EllesmereUI_Visibility.lua. One checked item is
+--  stored and evaluated exactly like the legacy single mode; multiple
+--  checked conditions store a set in `visibilityModes`.
+--
+--  opts = {
+--      getStore      = fn -> settings table (required)
+--      legacyKey     = "visibility" | "barVisibility" (required)
+--      caps          = { partyIncludesRaid, noMouseover, noGroupModes,
+--                        luaDragonriding, lockedTooltips = { key = text } }
+--      applyScalarFn = optional fn(store, mode) running the module's scalar
+--                      write side effects (Action Bars ApplyMode, Unit
+--                      Frames side-effect chain, ...)
+--      onChanged     = fn called after every selection write (the module's
+--                      refresh chain; the row calls RefreshPage itself)
+--      label / width / tooltip / disabledFn / disabledTooltip / rawTooltip
+--                    = row-level passthroughs matching the old dropdown row
+--  }
+--  rightCfg: DualRow right-slot config (defaults to an empty label).
+--  Returns row, height -- same contract as W:DualRow.
+-------------------------------------------------------------------------------
+
+EllesmereUI.VIS_MODE_ITEMS = {
+    { key = "never",     label = "Never" },
+    { key = "always",    label = "Always" },
+    { isHeader = true, label = "Combine Conditions",
+      tooltip = "Conditions of the same kind are OR'd together; different kinds must all match. Mouseover combines as a hover gate." },
+    { key = "mouseover", label = "Mouseover",
+      tooltip = "Combines with conditions: shows on hover only while they pass." },
+    { key = "in_combat",     label = "In Combat" },
+    { key = "out_of_combat", label = "Out of Combat" },
+    { key = "show_dragonriding",     label = "When Dragonriding",
+      tooltip = "Only while airborne on a skyriding mount." },
+    { key = "show_not_dragonriding", label = "When Not Dragonriding",
+      tooltip = "Whenever not airborne on a skyriding mount." },
+    { key = "in_raid",  label = "In Raid Group" },
+    { key = "in_party", label = "In Party" },
+    { key = "solo",     label = "Solo" },
+}
+
+function EllesmereUI.BuildVisibilityModeRow(W, parent, y, opts, rightCfg)
+    local PP = EllesmereUI.PP
+    local caps = opts.caps or {}
+    local legacyKey = opts.legacyKey or "visibility"
+
+    local row, h = W:DualRow(parent, y,
+        { type = "dropdown", text = opts.label or "Visibility",
+          values = { __placeholder = "..." }, order = { "__placeholder" },
+          tooltip = opts.tooltip,
+          disabled = opts.disabledFn,
+          disabledTooltip = opts.disabledTooltip,
+          rawTooltip = opts.rawTooltip,
+          getValue = function() return "__placeholder" end,
+          setValue = function() end },
+        rightCfg or { type = "label", text = "" })
+
+    -- Per-module item list from the master list
+    local items = {}
+    local listed = {}
+    for _, def in ipairs(EllesmereUI.VIS_MODE_ITEMS) do
+        if def.isHeader then
+            items[#items + 1] = def
+        elseif not (def.key == "mouseover" and caps.noMouseover) then
+            local item = { key = def.key, label = def.label, tooltip = def.tooltip }
+            if caps.noGroupModes and (def.key == "in_raid" or def.key == "in_party" or def.key == "solo") then
+                item.locked = true
+                item.lockedTooltip = (caps.lockedTooltips and caps.lockedTooltips[def.key])
+                    or "This element cannot use group-based visibility."
+            end
+            if caps.luaDragonriding and (def.key == "show_dragonriding" or def.key == "show_not_dragonriding") then
+                item.lockedFn = function() return not EllesmereUI._hasGlidingEvent end
+                item.lockedTooltip = "Requires a client with gliding events."
+            end
+            items[#items + 1] = item
+            listed[def.key] = true
+        end
+    end
+
+    -- Legacy-orphan rule: a stored scalar not covered by this module's list
+    -- (an old alias like "combat", or a value the list omits) renders as a
+    -- checked item only while it is the current value; picking anything
+    -- else removes it on the page rebuild.
+    do
+        local store = opts.getStore()
+        if store then
+            local sel, isMulti = EllesmereUI.GetVisibilitySelection(store, legacyKey)
+            if not isMulti then
+                local cur = next(sel)
+                if cur and not listed[cur] then
+                    local lbl = cur
+                    for _, def in ipairs(EllesmereUI.VIS_MODE_ITEMS) do
+                        if def.key == cur then lbl = def.label; break end
+                    end
+                    items[#items + 1] = { key = cur, label = lbl }
+                end
+            end
+        end
+    end
+
+    local function GetChecked(k)
+        local store = opts.getStore()
+        if not store then return k == "always" end
+        local sel = EllesmereUI.GetVisibilitySelection(store, legacyKey)
+        return sel[k] == true
+    end
+
+    -- The module refresh chain runs on every click so changes apply live,
+    -- but the page REBUILD is deferred to menu close: rebuilding under the
+    -- open menu destroys the button it is anchored to, and the point of a
+    -- checklist is checking several conditions in one visit. Terminal picks
+    -- (Never/Always, legacy orphans) close the menu themselves, which
+    -- flushes the rebuild immediately.
+    --
+    -- Everything runs from setFn: the widget's optional onChanged callback
+    -- is deliberately NOT used, because passing it activates the widget's
+    -- absolute-screen re-anchor (meant for callers that rebuild the page
+    -- mid-click). This menu keeps its normal button anchor, so it behaves
+    -- exactly like every other checkbox dropdown, including following the
+    -- options window when it is moved.
+    local cbDD, cbDDRefresh
+    local pendingRefresh = false
+
+    local function AfterChange(closeMenu)
+        if opts.onChanged then opts.onChanged() end
+        pendingRefresh = true
+        if closeMenu and cbDD and cbDD._ddMenu then
+            cbDD._ddMenu:Hide()
+        end
+    end
+
+    local function SetChecked(k, checked)
+        local store = opts.getStore()
+        if not store then return end
+        local sel = EllesmereUI.GetVisibilitySelection(store, legacyKey)
+        if checked then
+            if EllesmereUI.VIS_COMBINABLE_KEYS[k] then
+                -- Conditions and Mouseover combine with each other; only
+                -- Never/Always/orphans get cleared.
+                for key in pairs(sel) do
+                    if not EllesmereUI.VIS_COMBINABLE_KEYS[key] then sel[key] = nil end
+                end
+                sel[k] = true
+            elseif k == "never" or k == "always" then
+                -- Never/Always are exclusive, and terminal: picking one
+                -- closes the menu like a normal single-select dropdown.
+                for key in pairs(sel) do sel[key] = nil end
+                sel[k] = true
+                EllesmereUI.SetVisibilitySelection(store, legacyKey, sel, opts.applyScalarFn)
+                AfterChange(true)
+                return
+            else
+                -- Legacy-orphan re-checked while its row is still visible:
+                -- restore it as the raw scalar and clear any stale set.
+                if opts.applyScalarFn then
+                    opts.applyScalarFn(store, k)
+                else
+                    store[legacyKey] = k
+                end
+                store.visibilityModes = nil
+                AfterChange(true)
+                return
+            end
+        else
+            sel[k] = nil
+            -- Never-empty invariant: unchecking the last item means Always
+            if not next(sel) then sel.always = true end
+        end
+        EllesmereUI.SetVisibilitySelection(store, legacyKey, sel, opts.applyScalarFn)
+        AfterChange(false)
+    end
+
+    local function OnMenuClosed()
+        if pendingRefresh then
+            pendingRefresh = false
+            EllesmereUI:RefreshPage(opts.refreshPageArg)
+        end
+    end
+
+    local leftRgn = row._leftRegion
+    if leftRgn._control then leftRgn._control:Hide() end
+    cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+        leftRgn, opts.width or 210, leftRgn:GetFrameLevel() + 2,
+        items, GetChecked, SetChecked, nil, nil, nil, nil, OnMenuClosed)
+    PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+    leftRgn._control = cbDD
+    leftRgn._lastInline = nil
+    EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+
+    -- Spec Overrides capture overlay: expose the scalar view of the setting
+    -- (a captured multi applies as its representative single mode).
+    leftRgn._captureCfg = {
+        type = "dropdown", text = opts.label or "Visibility",
+        getValue = function()
+            local s = opts.getStore()
+            return s and (s[legacyKey] or "always") or "always"
+        end,
+        setValue = function(v)
+            local s = opts.getStore()
+            if not s then return end
+            if EllesmereUI.VIS_CONDITION_KEYS[v] or v == "never" or v == "always" or v == "mouseover" then
+                local one = {}
+                one[v] = true
+                EllesmereUI.SetVisibilitySelection(s, legacyKey, one, opts.applyScalarFn)
+            else
+                if opts.applyScalarFn then opts.applyScalarFn(s, v) else s[legacyKey] = v end
+                s.visibilityModes = nil
+            end
+            if opts.onChanged then opts.onChanged() end
+        end,
+    }
+
+    -- Row-level disabled state (e.g. Action Bars data bars in Blizzard
+    -- mode): gray and lock the checklist button; the label tooltip is
+    -- handled by the DualRow config passthrough above.
+    if opts.disabledFn then
+        local function ApplyChecklistDisabled()
+            local off = opts.disabledFn()
+            cbDD:SetAlpha(off and 0.3 or 1)
+            cbDD:EnableMouse(not off)
+        end
+        EllesmereUI.RegisterWidgetRefresh(ApplyChecklistDisabled)
+        ApplyChecklistDisabled()
+    end
+
+    return row, h
 end
 
 -------------------------------------------------------------------------------

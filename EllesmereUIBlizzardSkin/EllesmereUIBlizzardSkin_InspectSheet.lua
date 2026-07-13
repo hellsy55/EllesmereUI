@@ -477,12 +477,15 @@ local function SkinInspectSheet()
         end
     end
 
-    -- Hide PVP Frame background elements
+    -- Hide PVP Frame background elements. Frames other addons parent in here
+    -- are theirs to draw (see WSkin.IsForeignFrame).
+    local IsForeign = ns.WSkin and ns.WSkin.IsForeignFrame
     if InspectPVPFrame then
         local numChildren = InspectPVPFrame:GetNumChildren()
         for i = 1, numChildren do
             local child = select(i, InspectPVPFrame:GetChildren())
-            if child and not child:GetName() then
+            if child and not child:GetName()
+               and not (IsForeign and IsForeign(child, InspectPVPFrame)) then
                 child:Hide()
             end
         end
@@ -493,7 +496,8 @@ local function SkinInspectSheet()
         local numChildren = InspectGuildFrame:GetNumChildren()
         for i = 1, numChildren do
             local child = select(i, InspectGuildFrame:GetChildren())
-            if child and not child:GetName() then
+            if child and not child:GetName()
+               and not (IsForeign and IsForeign(child, InspectGuildFrame)) then
                 child:Hide()
             end
         end
@@ -503,7 +507,8 @@ local function SkinInspectSheet()
     local numChildren = frame:GetNumChildren()
     for i = 1, numChildren do
         local child = select(i, frame:GetChildren())
-        if child and not child:GetName() and child:GetObjectType() == "Frame" then
+        if child and not child:GetName() and child:GetObjectType() == "Frame"
+           and not (IsForeign and IsForeign(child, frame)) then
             -- Only hide if it's not one of our known frames and not the TitleFrame or title parent
             local isTitleFrame = (frame.TitleFrame and child == frame.TitleFrame)
             local isTitleParent = (_G.inspectFrameTitleText and child == _G.inspectFrameTitleText:GetParent())
@@ -601,14 +606,17 @@ local function SkinInspectSheet()
             btn:Show()
         end
 
-        -- Suppress other unnamed buttons in InspectPaperDollItemsFrame
+        -- Suppress other unnamed buttons in InspectPaperDollItemsFrame.
+        -- Never touch buttons other addons parent in here (theirs to run).
         local paperDollItemsFrame = InspectPaperDollItemsFrame
         if paperDollItemsFrame then
+            local IsForeignBtn = ns.WSkin and ns.WSkin.IsForeignFrame
             local talentsBtn = paperDollItemsFrame.InspectTalents
             for i = 1, paperDollItemsFrame:GetNumChildren() do
                 local child = select(i, paperDollItemsFrame:GetChildren())
                 if child and child:GetObjectType() == "Button" and not child:GetName()
-                   and child ~= talentsBtn then
+                   and child ~= talentsBtn
+                   and not (IsForeignBtn and IsForeignBtn(child, paperDollItemsFrame)) then
                     child:SetAlpha(0)
                     child:EnableMouse(false)
                 end

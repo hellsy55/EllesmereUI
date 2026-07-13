@@ -1659,6 +1659,11 @@ local function ProcessSpecChange(newSpecKey)
     -- via RefreshAllAddons. We're about to do a full talent_reconcile
     -- rebuild which is strictly stronger.
     ns._specChangeJustRan = true
+    -- Time-box stamp for the justRan consume in _ECME_Apply: the
+    -- suppression is only honored while the spec change is recent, so a
+    -- flag left armed by a path that never consumed it fails OPEN (an
+    -- extra rebuild) instead of silently eating a needed one.
+    ns._specChangeAt = GetTime()
 
     ns._pendingApplyOnReanchor = true
 
@@ -2825,6 +2830,11 @@ local function EnforceCooldownViewerEditModeSettings()
     -- Show a forced (non-dismissable) reload popup (suppressed when called
     -- from ReapplyEditModePolicy -- caller shows its own dismissable prompt)
     if _suppressPolicyPopup then return end
+    -- First install: the Welcome picker is pending/open and ALWAYS ends in
+    -- its own forced ReloadUI, which applies the layout we just saved. A
+    -- second forced popup here would stomp the picker and wreck the very
+    -- first thing a new user sees -- stay silent and ride that reload.
+    if EllesmereUI and EllesmereUI._firstInstallPending then return end
     C_Timer.After(0, function()
         if not EllesmereUI or not EllesmereUI.ShowConfirmPopup then
             ReloadUI()
@@ -4274,11 +4284,16 @@ LayoutCDMBar = function(barKey)
         local oldH = frame:GetHeight() or 0
         -- Pre-resize center in UIParent space, captured BEFORE SetSize (an
         -- edge-pointed frame moves its center when resized). The anchor offset
-        -- upkeep below validates against it.
+        -- upkeep below validates against it. Only captured when the upkeep can
+        -- actually run (bar has an unlockAnchors entry): measuring a bar whose
+        -- rect derives from a restricted tree hard-errors (FocusKick anchored
+        -- to a nameplate in a locked instance), and such bars have no entry.
+        -- pcall covers the residual case; an unknown center skips the upkeep.
         local oldCX, oldCY
-        do
-            local c1, c2 = frame:GetCenter()
-            if c1 and c2 then
+        if EllesmereUIDB and EllesmereUIDB.unlockAnchors
+           and EllesmereUIDB.unlockAnchors[unlockKey] then
+            local ok, c1, c2 = pcall(frame.GetCenter, frame)
+            if ok and c1 and c2 then
                 local r = frame:GetEffectiveScale() / UIParent:GetEffectiveScale()
                 oldCX, oldCY = c1 * r, c2 * r
             end
@@ -5762,23 +5777,47 @@ ns.EnsureFocusKickProxy = EnsureFocusKickProxy
 -- appended at runtime via EllesmereUI.AppendSharedMediaSounds.
 local _SOUNDS_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
 local FOCUSKICK_SOUND_PATHS = {
-    ["none"]     = nil,
-    ["airhorn"]  = _SOUNDS_DIR .. "AirHorn.ogg",
-    ["banana"]   = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
-    ["bikehorn"] = _SOUNDS_DIR .. "BikeHorn.ogg",
-    ["boxing"]   = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
-    ["water"]    = _SOUNDS_DIR .. "WaterDrop.ogg",
+    ["none"]      = nil,
+    ["airhorn"]   = _SOUNDS_DIR .. "AirHorn.ogg",
+    ["banana"]    = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
+    ["bikehorn"]  = _SOUNDS_DIR .. "BikeHorn.ogg",
+    ["bite"]      = _SOUNDS_DIR .. "Bite.ogg",
+    ["boxing"]    = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
+    ["catmeow"]   = _SOUNDS_DIR .. "CatMeow.ogg",
+    ["catmeow2"]  = _SOUNDS_DIR .. "CatMeow2.ogg",
+    ["gunshot"]   = _SOUNDS_DIR .. "FrontalsGunshot.wav",
+    ["glass"]     = _SOUNDS_DIR .. "Glass.mp3",
+    ["kaching"]   = _SOUNDS_DIR .. "Kaching.ogg",
+    ["phone"]     = _SOUNDS_DIR .. "Phone.ogg",
+    ["robotblip"] = _SOUNDS_DIR .. "RobotBlip.ogg",
+    ["sonar"]     = _SOUNDS_DIR .. "Sonar.ogg",
+    ["siren"]     = _SOUNDS_DIR .. "WarningSiren.ogg",
+    ["water"]     = _SOUNDS_DIR .. "WaterDrop.ogg",
+    ["wilhelm"]   = _SOUNDS_DIR .. "Wilhelm.ogg",
 }
 local FOCUSKICK_SOUND_NAMES = {
-    ["none"]     = "None",
-    ["airhorn"]  = "Air Horn",
-    ["banana"]   = "Banana Peel Slip",
-    ["bikehorn"] = "Bike Horn",
-    ["boxing"]   = "Boxing Arena",
-    ["water"]    = "Water Drop",
+    ["none"]      = "None",
+    ["airhorn"]   = "Air Horn",
+    ["banana"]    = "Banana Peel Slip",
+    ["bikehorn"]  = "Bike Horn",
+    ["bite"]      = "Bite",
+    ["boxing"]    = "Boxing Arena",
+    ["catmeow"]   = "Cat Meow",
+    ["catmeow2"]  = "Cat Meow 2",
+    ["gunshot"]   = "Frontals Gunshot",
+    ["glass"]     = "Glass",
+    ["kaching"]   = "Kaching",
+    ["phone"]     = "Phone",
+    ["robotblip"] = "Robot Blip",
+    ["sonar"]     = "Sonar",
+    ["siren"]     = "Warning Siren",
+    ["water"]     = "Water Drop",
+    ["wilhelm"]   = "Wilhelm",
 }
 local FOCUSKICK_SOUND_ORDER = {
-    "none", "airhorn", "banana", "bikehorn", "boxing", "water",
+    "none", "airhorn", "banana", "bikehorn", "bite", "boxing", "catmeow",
+    "catmeow2", "gunshot", "glass", "kaching", "phone", "robotblip", "sonar",
+    "siren", "water", "wilhelm",
 }
 ns.FOCUSKICK_SOUND_PATHS = FOCUSKICK_SOUND_PATHS
 ns.FOCUSKICK_SOUND_NAMES = FOCUSKICK_SOUND_NAMES
@@ -6290,6 +6329,9 @@ _CDMApplyVisibility = function()
     local inRaid = IsInRaid and IsInRaid() or false
     local inParty = not inRaid and (IsInGroup and IsInGroup() or false)
 
+    -- One state table per pass for the multi-select visibility engine
+    local visState = { inCombat = inCombat, inRaid = inRaid, inParty = inParty }
+
     local unlockActive = EllesmereUI._unlockActive
 
     for _, barData in ipairs(p.cdmBars.bars) do
@@ -6316,13 +6358,20 @@ _CDMApplyVisibility = function()
             local vis = barData.barVisibility or "always"
             local shouldHide = false
 
+            -- Multi-select / dragonriding path: non-nil owns the mode step
+            -- (priority 3); the legacy single-mode chain below is untouched.
+            local visExt = EllesmereUI.EvalVisibilityExtended
+                and EllesmereUI.EvalVisibilityExtended(barData, "barVisibility", visState, EllesmereUI.VIS_CAPS_INCLUSIVE)
+
             -- Priority 1: vehicle always hides
             if inVehicle then
                 shouldHide = true
             -- Priority 2: visibility options (checkbox dropdown)
             elseif EllesmereUI.CheckVisibilityOptions(barData) then
                 shouldHide = true
-            -- Priority 3: visibility mode dropdown
+            -- Priority 3: visibility mode (multi-select or dragonriding scalar)
+            elseif visExt ~= nil then
+                shouldHide = not visExt
             elseif vis == "never" then
                 shouldHide = true
             elseif vis == "in_combat" then
@@ -6715,6 +6764,22 @@ BuildAllCDMBars = function()
 
     local p = ECME.db.profile
 
+    -- Heal ghost bar entries: an override write to a numeric bar path whose
+    -- bar no longer existed (profile import, or a deleted bar with a stored
+    -- override still referencing its index) used to auto-create a skeleton
+    -- table (e.g. { barVisibility = "always" }) with no key. Every keyed
+    -- consumer (spell data, racial normalize, unlock snapshots) then errors
+    -- on the nil key. The override writer no longer fabricates numeric
+    -- containers; this prunes profiles that already carry ghosts.
+    if type(p.cdmBars.bars) == "table" then
+        for i = #p.cdmBars.bars, 1, -1 do
+            local bd = p.cdmBars.bars[i]
+            if type(bd) ~= "table" or not bd.key then
+                table.remove(p.cdmBars.bars, i)
+            end
+        end
+    end
+
     if not p.cdmBars.enabled then
         -- Restore Blizzard CDM if we're disabled
         RestoreBlizzardCDM()
@@ -6908,7 +6973,9 @@ function ns.NormalizeRacialAssignments()
     for _, b in ipairs(p.cdmBars.bars) do
         local isBuff = (b.barType == "custom_buff")
             or (ns.IsBarBuffFamily and ns.IsBarBuffFamily(b))
-        if not isBuff then
+        -- b.key guard: a ghost bar (keyless skeleton from a stale override
+        -- write) would index barSpells with nil and error.
+        if not isBuff and b.key then
             local sd = ns.GetBarSpellData(b.key)
             if sd and sd.assignedSpells then lists[#lists + 1] = sd.assignedSpells end
         end
@@ -7293,6 +7360,7 @@ function ns.RepopulateFromBlizzard()
         buffSD._buffDisplayOrderUserModified = nil
     end
     ns._spellOrderDirty = true
+    ns._cdmBuffOrderDirty = true  -- re-seed from Blizzard order on next reanchor
 
     -- (Site #10 re-snapshot deleted: under the new model, "repopulate from
     -- Blizzard" is just "wipe diversions and let the route map's spillover
@@ -7488,6 +7556,30 @@ RegisterCDMUnlockElements = function()
                     ECME.db.profile.cdmBarPositions[key] = nil
                 end,
                 applyPos = function()
+                    -- While the authoritative reanchor pass is still pending
+                    -- (login window, or the instant inside a spec-swap
+                    -- reconcile) the CDM pipeline owns layout and applies
+                    -- saved positions itself; a rebuild here only races it
+                    -- against a still-churning engine pool. The flag is
+                    -- consumed deterministically by CollectAndReanchor.
+                    if ns._pendingApplyOnReanchor then return end
+                    -- Mid-transition guard: when the live spec key disagrees
+                    -- with the cached key, a rebuild here can only construct
+                    -- the OLD spec's layout against the NEW spec's already-
+                    -- repopulating engine pool (the pre-swap window before
+                    -- SPELLS_CHANGED lands). The talent_reconcile that
+                    -- follows is the only correct builder for that state.
+                    local liveKey = ComputeLiveSpecKey()
+                    if liveKey and liveKey ~= _cachedSpecKey then return end
+                    -- Same-burst coalescing: position passes (ApplySavedPositions
+                    -- et al) call EVERY CDM element's applyPosition back-to-back,
+                    -- and each call rebuilt ALL bars -- an 11+ deep same-frame
+                    -- rebuild storm. The first call rebuilds synchronously
+                    -- (Save & Exit's sequencing depends on that); the rest of
+                    -- the burst no-ops until the next frame.
+                    if ns._applyPosCoalesced then return end
+                    ns._applyPosCoalesced = true
+                    C_Timer.After(0, function() ns._applyPosCoalesced = nil end)
                     BuildAllCDMBars()
                 end,
                 isAnchored = function()
@@ -7555,6 +7647,14 @@ function ECME:OnInitialize()
             ns._skipNextApplyRebuild = false
         elseif ns._specChangeJustRan then
             ns._specChangeJustRan = false
+            -- The flag suppresses the profile system's follow-up rebuild
+            -- right after a spec change -- but same-profile swaps never run
+            -- that follow-up, leaving the flag armed until some LATER apply
+            -- consumed it and silently skipped a rebuild the caller needed.
+            -- Only honor the suppression while the spec change is recent.
+            if not (ns._specChangeAt and (GetTime() - ns._specChangeAt) < 3) then
+                ns.FullCDMRebuild("apply")
+            end
         else
             ns.FullCDMRebuild("apply")
         end
@@ -8070,6 +8170,13 @@ eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+-- Dragonriding visibility modes: capability edge (mount/dismount/zone) plus
+-- the airborne edge (takeoff/landing while staying mounted; probed at load
+-- in EllesmereUI_Visibility.lua -- absent = the checklist items lock).
+eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
+if EllesmereUI._hasGlidingEvent then
+    eventFrame:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
+end
 -- Druid travel/flight/aquatic form needs an explicit re-check for the
 -- visHideMounted option. PLAYER_MOUNT_DISPLAY_CHANGED only fires for real
 -- mounts, and the viewer hooks rebuild icon content on shapeshift but
@@ -8225,10 +8332,14 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         _CDMApplyVisibility()
         return
     end
-    if event == "PLAYER_MOUNT_DISPLAY_CHANGED" then
+    if event == "PLAYER_MOUNT_DISPLAY_CHANGED"
+        or event == "PLAYER_CAN_GLIDE_CHANGED"
+        or event == "PLAYER_IS_GLIDING_CHANGED" then
         -- Defer to a clean execution context: the event handler chain can
         -- carry taint from other addons, which propagates into LayoutCDMBar
         -- when a bar transitions from hidden to visible (visHideMounted).
+        -- The dragonriding edges take the same deferred path for the same
+        -- reason (mid-flight unhide runs LayoutCDMBar).
         C_Timer.After(0, _CDMApplyVisibility)
         return
     end
@@ -8311,12 +8422,25 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     end
     if event == "SPELLS_CHANGED" then
         CheckSpecChange()
-        if not ns._spellsReadyForApply then
-            ns._spellsReadyForApply = true
-            if ns._pendingApplyOnReanchor and ns.QueueReanchor then
-                ns.QueueReanchor()
-            end
-        end
+        ns._spellsReadyForApply = true
+        -- Engine spell data changed (spec-swap churn tail, druid form swap,
+        -- talent/spell overrides). The variant-expanded diversion maps and
+        -- the memoized cdID->bar routes were derived from the PREVIOUS
+        -- spell state; a route resolved mid-churn against transitional
+        -- cooldown info is cached until the next map rebuild and pins a
+        -- ghosted/custom spell onto the wrong visible bar. Re-derive from
+        -- current truth and re-claim -- the LAST fire of any churn burst
+        -- always leaves the final state correct, with no settle timers.
+        -- (CheckSpecChange's reconcile also rebuilds the map, but a
+        -- same-key fire means the data changed again after that rebuild.)
+        if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+        -- The tracked-buff catalog can change in the same churn, and the
+        -- login-pass reconcile may have consumed its dirty flag against a
+        -- still-empty viewer pool (the flag is cleared before the call and
+        -- an empty catalog no-ops). Re-arm so the queued reanchor
+        -- reconciles the buff display order against the populated catalog.
+        ns._cdmBuffOrderDirty = true
+        if ns.QueueReanchor then ns.QueueReanchor() end
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then
@@ -8423,14 +8547,14 @@ SlashCmdList.CDMDBG = function()
             if count > 0 then
                 local preview = {}
                 local fcCache = ns._ecmeFC
-                for i = 1, math.min(count, 6) do
+                for i = 1, count do
                     local icon = icons[i]
                     local fc = fcCache and fcCache[icon]
                     local sid = (fc and fc.spellID) or 0
                     local name = sid and sid > 0 and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid) or "?"
-                    preview[i] = tostring(sid) .. ":" .. tostring(name)
+                    local vis = (icon and icon.IsShown and icon:IsShown()) and "" or "(hidden)"
+                    preview[i] = tostring(sid) .. ":" .. tostring(name) .. vis
                 end
-                if count > 6 then preview[#preview + 1] = "..." end
                 P(string.format("[%s] %d icons  %s%s%s", barKey, count, DIM, table.concat(preview, ", "), OFF))
             end
         end
@@ -8448,11 +8572,28 @@ SlashCmdList.CDMDBG = function()
         end
     end
 
-    -- 5. Raw frame walk: for each frame in Essential and Utility, dump
-    --    cdID, GetSpellID, info.spellID, info.overrideSpellID, canonical
+    -- 5. Raw frame walk: for each frame in Essential/Utility/Buff pools, dump
+    --    cdID, GetSpellID, info.spellID, info.overrideSpellID, canonical,
+    --    plus the stale-frame verdict fields: whether the cdID is in the
+    --    engine's CURRENT learned cooldown set, whether the frame still
+    --    carries cooldownInfo (the IsFrameIncluded trigger for hidden
+    --    frames), and which bar our claim cache has it on.
     P(ACCENT .. "--- Raw viewer pool walk ---" .. OFF)
     local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-    for _, vName in ipairs({ "EssentialCooldownViewer", "UtilityCooldownViewer" }) do
+    -- Engine truth for the CURRENT spec/form state: the union of every
+    -- category's learned cooldownIDs. A pool frame whose cdID is NOT in
+    -- this set is a leftover from a previous spec/form state.
+    local learnedSet = {}
+    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+       and Enum and Enum.CooldownViewerCategory then
+        for _, cat in pairs(Enum.CooldownViewerCategory) do
+            local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, false)
+            if ok and type(ids) == "table" then
+                for _, id in ipairs(ids) do learnedSet[id] = true end
+            end
+        end
+    end
+    for _, vName in ipairs({ "EssentialCooldownViewer", "UtilityCooldownViewer", "BuffIconCooldownViewer" }) do
         local v = _G[vName]
         local count = 0
         if v and v.itemFramePool and v.itemFramePool.EnumerateActive then
@@ -8470,10 +8611,29 @@ SlashCmdList.CDMDBG = function()
                 end
                 local canonical = ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(frame) or nil
                 local canonName = canonical and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(canonical) or "?"
-                P(string.format("  [%s#%d] cdID=%s frameSID=%s info.sID=%s info.ovrSID=%s canon=%s (%s) shown=%s",
+                local fc = ns._ecmeFC and ns._ecmeFC[frame]
+                -- Render state: effective alpha (secret-guarded) + what the
+                -- frame's first point anchors to (our bar container name via
+                -- reverse lookup, else the region's own name).
+                local alpha = frame:GetAlpha()
+                if issecretvalue and issecretvalue(alpha) then alpha = -1 end
+                local _, relTo = frame:GetPoint(1)
+                local relName = nil
+                if relTo then
+                    for bk2, bf2 in pairs(cdmBarFrames) do
+                        if bf2 == relTo then relName = "EUIbar:" .. bk2 break end
+                    end
+                    if not relName then
+                        relName = (relTo.GetName and relTo:GetName()) or "?"
+                    end
+                end
+                P(string.format("  [%s#%d] cdID=%s frameSID=%s info.sID=%s info.ovrSID=%s canon=%s (%s) shown=%s cdInfo=%s inSet=%s bar=%s alpha=%.2f ptTo=%s",
                     vName, count, tostring(cdID), tostring(frameSid),
                     tostring(infoSpellID), tostring(infoOverride),
-                    tostring(canonical), tostring(canonName), tostring(frame:IsShown())))
+                    tostring(canonical), tostring(canonName), tostring(frame:IsShown()),
+                    tostring(frame.cooldownInfo ~= nil),
+                    tostring(cdID ~= nil and learnedSet[cdID] == true),
+                    tostring(fc and fc.barKey), alpha, tostring(relName)))
             end
         end
         P(string.format("[%s] active count: %d", vName, count))

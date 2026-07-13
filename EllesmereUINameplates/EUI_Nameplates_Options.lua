@@ -113,6 +113,10 @@ initFrame:SetScript("OnEvent", function(self)
         for _, plate in pairs(plates) do
             plate:UpdateAuras()
         end
+        -- 12.1 aura containers own the aura rows there (the plate loop above
+        -- only drives the legacy pools); the container reload is fingerprint-
+        -- guarded, so redundant calls cost next to nothing. nil on 12.0.
+        if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
     end
 
     local function RefreshAllFonts()
@@ -2878,7 +2882,14 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return DBVal("maxDebuffs") or defaults.maxDebuffs end,
               setValue=function(v)
                 DB().maxDebuffs = v
-                -- Show reload popup once after slider drag ends (debounced)
+                -- 12.1 containers raise/lower the group's frame cap live
+                -- (SetAuraGroupMaxFrameCount inside the reload's cfg pass).
+                if ns.NPC_ReloadAll then
+                    ns.NPC_ReloadAll()
+                    return
+                end
+                -- Legacy pools are sized at plate creation: show the reload
+                -- popup once after the slider drag ends (debounced).
                 if v ~= maxDbfOriginal then
                     if maxDbfPendingPopup then maxDbfPendingPopup:Cancel() end
                     maxDbfPendingPopup = C_Timer.NewTimer(0.5, function()
@@ -3356,16 +3367,12 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return DBVal("showAllEnemyBuffs") or false end,
               setValue=function(v)
                 DB().showAllEnemyBuffs = v
+                -- Applies live: RefreshAllAuras drives the container reload,
+                -- whose cfg pass replaces the buff group's candidate filters
+                -- and whose style/purge passes re-evaluate the dispel glow.
                 RefreshAllAuras()
                 UpdatePreview()
                 C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
-                EllesmereUI:ShowConfirmPopup({
-                    title = "Reload Required",
-                    message = "Changing Show All Enemy Buffs requires a UI reload to take effect.",
-                    confirmText = "Reload Now",
-                    cancelText = "Later",
-                    onConfirm = function() ReloadUI() end,
-                })
               end }
         else
             dispelRightWidget = { type="toggle", text="Use Dispel Type Color",
@@ -4067,6 +4074,10 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
+            -- 12.1 aura containers render the text through the style pass
+            -- instead of the legacy frames above (fingerprint-guarded; nil
+            -- on 12.0).
+            if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
         end
 
         -- Shared helper: apply a stack-count position to live plates for one aura type
@@ -4106,6 +4117,9 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
+            -- 12.1 aura containers: stacks render through the style pass
+            -- (fingerprint-guarded; nil on 12.0).
+            if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
         end
 
         local atFallback = DBVal("auraTextPosition") or defaults.auraTextPosition
@@ -4861,19 +4875,33 @@ initFrame:SetScript("OnEvent", function(self)
                 -- the backend keys and behaviour are identical to the old buttons.
                 pf._growthValues = {}   -- key -> label
                 pf._growthOrder  = {}   -- ordered keys
-                local GROW_DD_W = POPUP_W - SLIDER_LEFT - SIDE_PAD
+                -- Standard cog-popup dropdown sizing (matches BuildCogPopup's
+                -- dropdown rows): 130px wide, rendered 10% smaller, right-aligned
+                -- at layout time -- not the old full-content-width control.
+                local GROW_DD_W = 130
+                local GROW_DD_SCALE = 0.9
+                pf._GROW_DD_SCALE = GROW_DD_SCALE
                 local gDD = EllesmereUI.BuildDropdownControl(pf, GROW_DD_W, pf:GetFrameLevel() + 6,
                     pf._growthValues, pf._growthOrder,
                     function() return pf._growthGet and pf._growthGet() or "" end,
                     function(v) if pf._growthSet then pf._growthSet(v) end end)
-                gDD:SetHeight(GROWTH_ROW_H)
+                gDD:SetScale(GROW_DD_SCALE)
+                -- The lazily-created menu parents to UIParent (scale 1); sync it
+                -- to the shrunk control the first time it opens.
+                gDD:HookScript("OnClick", function(self)
+                    if self._ddMenu and not self._ddMenu._npCogScaled then
+                        self._ddMenu:SetScale(GROW_DD_SCALE)
+                        self._ddMenu._npCogScaled = true
+                    end
+                end)
                 gDD:Hide()
                 pf._gDD = gDD
 
-                -- Optional toggle row. Shares the 4th-row slot (G_ROW_Y) with the
-                -- Grow row; the two are mutually exclusive in current usage (Grow
-                -- belongs to Core Position cogs, the toggle to Core Text Position
-                -- cogs). Wired per-invocation via pf._toggleGet / pf._toggleSet.
+                -- Optional toggle row. Anchored at layout time: it takes the
+                -- 4th-row slot (G_ROW_Y) when the cog has no Grow row, and
+                -- stacks BELOW Grow when both are present (Rare/Quest Indicator
+                -- on a topleft/topright slot: Grow + Show In Instances). Wired
+                -- per-invocation via pf._toggleGet / pf._toggleSet.
                 local tLabel = MakeFont(pf, 12, nil, 1, 1, 1)
                 tLabel:SetAlpha(0.6)
                 tLabel:SetPoint("LEFT", pf, "TOPLEFT", SIDE_PAD, G_ROW_Y - GROWTH_ROW_H / 2)
@@ -5206,43 +5234,49 @@ initFrame:SetScript("OnEvent", function(self)
                 for i, r in ipairs(seq) do
                     anchorRow(r[1], r[2], r[3], rowY(i))
                 end
-                -- Growth / toggle occupy the row directly after the data rows.
+                -- Growth / toggle rows sit directly after the data rows. They
+                -- historically shared one row (mutually exclusive), but a cog
+                -- can now pass BOTH (Rare/Quest Indicator on a topleft/right
+                -- slot: Grow + Show In Instances) -- the toggle then takes the
+                -- row BELOW Grow.
                 local nextY = rowY(#seq + 1)
                 p._gLabel:ClearAllPoints()
                 p._gLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, nextY - GRH / 2)
                 if p._gDD then
+                    -- Right-aligned like standard cog dropdowns. Offsets divided
+                    -- by the control's scale so the scaled frame still lands
+                    -- flush-right and vertically centered on the row.
+                    local ds = p._GROW_DD_SCALE or 1
                     p._gDD:ClearAllPoints()
-                    p._gDD:SetPoint("LEFT", p, "TOPLEFT", SLEFT, nextY - GRH / 2)
+                    p._gDD:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD / ds, (nextY - GRH / 2) / ds)
                 end
+                local toggleY = hasGrowth and rowY(#seq + 2) or nextY
                 p._tLabel:ClearAllPoints()
-                p._tLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, nextY - GRH / 2)
+                p._tLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, toggleY - GRH / 2)
                 p._tToggle:ClearAllPoints()
-                p._tToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, nextY - GRH / 2)
-                -- Cropped Icons sits in its own row: below Grow/toggle when one
-                -- is present, otherwise directly after the data rows.
-                local cropRowIndex = #seq + 1
-                if hasGrowth or hasToggle then cropRowIndex = #seq + 2 end
-                local cropY = rowY(cropRowIndex)
+                p._tToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, toggleY - GRH / 2)
+                -- Rows consumed by the Grow/toggle band (0, 1 or 2).
+                local extraRows = (hasGrowth and 1 or 0) + (hasToggle and 1 or 0)
+                -- Cropped Icons sits in its own row below the Grow/toggle band,
+                -- otherwise directly after the data rows.
+                local cropY = rowY(#seq + 1 + extraRows)
                 p._cropLabel:ClearAllPoints()
                 p._cropLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, cropY - GRH / 2)
                 p._cropToggle:ClearAllPoints()
                 p._cropToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, cropY - GRH / 2)
-                -- Wrap sits in its own row, like Cropped Icons: below the generic
-                -- toggle / Grow row when one is present, else after the data rows.
+                -- Wrap sits in its own row, like Cropped Icons: below the
+                -- Grow/toggle band when present, else after the data rows.
                 -- (No cog uses both Wrap and Cropped Icons, so they never collide.)
-                local wrapRowIndex = #seq + 1
-                if hasGrowth or hasToggle then wrapRowIndex = #seq + 2 end
-                local wrapY = rowY(wrapRowIndex)
+                local wrapY = rowY(#seq + 1 + extraRows)
                 p._wrapLabel:ClearAllPoints()
                 p._wrapLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, wrapY - GRH / 2)
                 p._wrapToggle:ClearAllPoints()
                 p._wrapToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, wrapY - GRH / 2)
-                -- Raise Strata sits in its own row, below Grow/toggle and below
-                -- Cropped Icons when those are present. Core Position cogs never
-                -- use Wrap or Width %, so it never collides with those.
+                -- Raise Strata sits in its own row, below the Grow/toggle band
+                -- and below Cropped Icons when those are present. Core Position
+                -- cogs never use Wrap or Width %, so it never collides with those.
                 if hasRaiseStrata then
-                    local rsRowIndex = #seq + 1
-                    if hasGrowth or hasToggle then rsRowIndex = rsRowIndex + 1 end
+                    local rsRowIndex = #seq + 1 + extraRows
                     if hasCrop or hasWrap then rsRowIndex = rsRowIndex + 1 end
                     local rsY = rowY(rsRowIndex)
                     p._rsLabel:ClearAllPoints()
@@ -5250,12 +5284,11 @@ initFrame:SetScript("OnEvent", function(self)
                     p._rsToggle:ClearAllPoints()
                     p._rsToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, rsY - GRH / 2)
                 end
-                -- Width % is the very last row, one below Wrap (and below Grow /
-                -- toggle / Cropped Icons when those are present). It stays a slider
-                -- row, so anchorRow handles its label + track + value box.
+                -- Width % is the very last row, one below Wrap (and below the
+                -- Grow/toggle band / Cropped Icons when those are present). It
+                -- stays a slider row, so anchorRow handles label + track + box.
                 if hasWidth then
-                    local widthRowIndex = #seq + 1
-                    if hasGrowth or hasToggle then widthRowIndex = widthRowIndex + 1 end
+                    local widthRowIndex = #seq + 1 + extraRows
                     if hasCrop or hasWrap then widthRowIndex = widthRowIndex + 1 end
                     anchorRow(p._wLabel, p._wTrack, p._wValBox, rowY(widthRowIndex))
                 end
@@ -5282,7 +5315,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasWidth   then h = h + gap + rowH end
                 if hasSpacing then h = h + gap + rowH end
                 if hasGrowth then h = h + gap + p._GROWTH_ROW_H end
-                -- Grow and toggle are mutually exclusive and share the same slot.
+                -- Toggle gets its own row (stacks below Grow when both present).
                 if hasToggle then h = h + gap + p._GROWTH_ROW_H end
                 -- Cropped Icons always occupies its own extra row.
                 if hasCrop then h = h + gap + p._GROWTH_ROW_H end
@@ -5394,6 +5427,20 @@ initFrame:SetScript("OnEvent", function(self)
                 if cropKey then
                     opts.cropGet = function() return DBVal(cropKey) or defaults[cropKey] end
                     opts.cropSet = function(v) DB()[cropKey] = v; RefreshAllSlots(); UpdatePreview() end
+                end
+                -- Rare/Quest Indicator: "Show In Instances" lifts the
+                -- open-world-only gates (UpdateClassification render gate +
+                -- IsQuestMob's tooltip-scan gate). RefreshQuestObjective wipes
+                -- the quest-mob caches AND re-runs UpdateClassification on
+                -- every plate, so the toggle applies immediately both ways.
+                if element == "classification" then
+                    opts.toggleLabel = "Show In Instances"
+                    opts.toggleGet = function() return DBVal("classificationShowInInstances") == true end
+                    opts.toggleSet = function(v)
+                        DB().classificationShowInInstances = v and true or false
+                        if ns.RefreshQuestObjective then ns.RefreshQuestObjective() end
+                        UpdatePreview()
+                    end
                 end
                 -- Raise Strata: bumps whatever element occupies this slot one
                 -- strata level up so it renders above the rest of the plate.
@@ -7273,6 +7320,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                 end
+                if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end -- 12.1 containers
                 UpdatePreview()
             end
             local asSwatch, asUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, asColorGet, asColorSet, nil, 20)
@@ -7298,6 +7346,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end
                         end
+                        if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end -- 12.1 containers
                         UpdatePreview()
                       end },
                     { type="slider", label="X", min=-20, max=20, step=1,
@@ -8633,6 +8682,53 @@ initFrame:SetScript("OnEvent", function(self)
             local off = isQuestOff()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
+        end
+
+        -- Inline cog on the "Enemy Types" region: Open World Basic Coloring.
+        -- On: outside instances, Mini Enemies / Spell Casters / Mini-Bosses /
+        -- Bosses all use the single flat "All Enemies" color below; Neutral
+        -- keeps its own color. Off (default): no effect on coloring anywhere.
+        do
+            local leftRgn = enemyTypesRow._leftRegion
+            local isOWOff = function()
+                local v = DBVal("owBasicColoring")
+                if v == nil then return not defaults.owBasicColoring end
+                return not v
+            end
+            local _, owCogShow = EllesmereUI.BuildCogPopup({
+                title = "Enemy Colors",
+                rows = {
+                    { type="toggle", label="Open World Basic Coloring",
+                      get=function()
+                        local v = DBVal("owBasicColoring")
+                        if v == nil then return defaults.owBasicColoring end
+                        return v
+                      end,
+                      set=function(v)
+                        DB().owBasicColoring = v
+                        RefreshAllPlates()
+                      end },
+                    { type="colorpicker", label="All Enemies",
+                      get=function() return DBColor("owBasicColor") end,
+                      set=function(r, g, b)
+                        DB().owBasicColor = { r = r, g = g, b = b }
+                        RefreshAllPlates()
+                      end,
+                      disabled=isOWOff,
+                      disabledTooltip="Open World Basic Coloring" },
+                },
+            })
+            local owCogBtn = CreateFrame("Button", nil, leftRgn)
+            owCogBtn:SetSize(26, 26)
+            owCogBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
+            leftRgn._lastInline = owCogBtn
+            owCogBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            owCogBtn:SetAlpha(0.4)
+            local owCogTex = owCogBtn:CreateTexture(nil, "OVERLAY")
+            owCogTex:SetAllPoints(); owCogTex:SetTexture(EllesmereUI.COGS_ICON)
+            owCogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            owCogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            owCogBtn:SetScript("OnClick", function(s) owCogShow(s) end)
         end
 
         -- Neutral & Mini Enemies | Darken Enemies Out of Combat

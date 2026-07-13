@@ -481,8 +481,9 @@ function EQT.InitVisibility()
         EllesmereUI.RegisterMouseoverTarget(moProxy, function()
             if ShouldAutoHide() then return false end
             if _eqtSuppressed then return false end
-            local cfg = EQT.DB()
-            return cfg.visibility == "mouseover"
+            -- Hover-gated sets only reveal while their conditions pass; a
+            -- legacy single "mouseover" behaves exactly as before.
+            return EllesmereUI.VisWantsMouseover(EQT.DB(), "visibility")
         end)
     end
 

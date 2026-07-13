@@ -1161,13 +1161,23 @@ initFrame:SetScript("OnEvent", function(self)
             local function _pvShortName(raw)
                 if not prefix then return raw end
                 local maxLen = s[prefix .. "ShortNameLength"] or 0
-                if maxLen <= 0 or #raw <= maxLen then return raw end
+                if maxLen <= 0 then return raw end
                 local useEllipsis = s[prefix .. "ShortNameEllipsis"] ~= false
-                if useEllipsis then
-                    return raw:sub(1, maxLen) .. "..."
-                else
-                    return raw:sub(1, maxLen)
+                -- Mirror the live eui-name tag exactly: truncate by UTF-8
+                -- codepoints on a character boundary, never by bytes.
+                local i, chars = 1, 0
+                local len = #raw
+                while i <= len do
+                    if chars == maxLen then
+                        local cut = raw:sub(1, i - 1)
+                        if useEllipsis then return cut .. "..." end
+                        return cut
+                    end
+                    local b = raw:byte(i)
+                    i = i + ((b >= 240 and 4) or (b >= 224 and 3) or (b >= 192 and 2) or 1)
+                    chars = chars + 1
                 end
+                return raw
             end
             if content == "name" then
                 return _pvShortName(_pvName())
@@ -1378,7 +1388,8 @@ initFrame:SetScript("OnEvent", function(self)
             if settings.powerBgPowerColored then
                 local _, pbToken = UnitPowerType("player")
                 local pbInfo = EllesmereUI.GetPowerColor(pbToken or "MANA")
-                pbR, pbG, pbB = pbInfo.r, pbInfo.g, pbInfo.b
+                local pbF = EllesmereUI.GetPowerBgDarkenFactor()
+                pbR, pbG, pbB = pbInfo.r * pbF, pbInfo.g * pbF, pbInfo.b * pbF
             elseif customPBg then
                 pbR, pbG, pbB = customPBg.r, customPBg.g, customPBg.b
             else
@@ -2445,7 +2456,8 @@ initFrame:SetScript("OnEvent", function(self)
                 if s.powerBgPowerColored then
                     local _, pbToken = UnitPowerType("player")
                     local pbInfo = EllesmereUI.GetPowerColor(pbToken or "MANA")
-                    pvPbR, pvPbG, pvPbB = pbInfo.r, pbInfo.g, pbInfo.b
+                    local pbF = EllesmereUI.GetPowerBgDarkenFactor()
+                    pvPbR, pvPbG, pvPbB = pbInfo.r * pbF, pbInfo.g * pbF, pbInfo.b * pbF
                 elseif cpBg then pvPbR, pvPbG, pvPbB = cpBg.r, cpBg.g, cpBg.b
                 else pvPbR, pvPbG, pvPbB = 17/255, 17/255, 17/255 end
                 if pf._powerFill then
@@ -3782,13 +3794,13 @@ initFrame:SetScript("OnEvent", function(self)
         healAbsorbBarHeight   = { player=true, target=true, focus=true },
         healAbsorbBarColor    = { player=true, target=true, focus=true },
         showBuffs            = { player=true, target=true, focus=true },
-        combatIndicatorStyle   = { player=true },
-        combatIndicatorColor   = { player=true },
-        combatIndicatorCustomColor = { player=true },
-        combatIndicatorPosition = { player=true },
-        combatIndicatorSize    = { player=true },
-        combatIndicatorX       = { player=true },
-        combatIndicatorY       = { player=true },
+        combatIndicatorStyle   = { player=true, target=true },
+        combatIndicatorColor   = { player=true, target=true },
+        combatIndicatorCustomColor = { player=true, target=true },
+        combatIndicatorPosition = { player=true, target=true },
+        combatIndicatorSize    = { player=true, target=true },
+        combatIndicatorX       = { player=true, target=true },
+        combatIndicatorY       = { player=true, target=true },
         leaderIndicatorEnabled = { player=true, target=true },
         leaderIndicatorSize    = { player=true, target=true },
         leaderIndicatorPosition= { player=true, target=true },
@@ -3854,36 +3866,223 @@ initFrame:SetScript("OnEvent", function(self)
         return y - 54
     end
 
-    -- "Frame Source" row (dropdown on the left). rightCfg fills the right slot
-    -- (mini/boss pass Show Portrait when on the EUI source; otherwise the slot is
-    -- empty). onBeforeSet(v) runs before the write -- boss uses it to stop the
-    -- live preview. Returns row, height.
-    local function BuildFrameSourceRow(Ww, pp, yy, unitKey, onBeforeSet, rightCfg, noBlizzard, tooltip)
-        -- Target-of-target / focus-target only offer "Blizzard Default" when their
-        -- parent target/focus frame is itself Blizzard's (see ns.GetUnitFrameSource);
-        -- otherwise noBlizzard drops the option and `tooltip` explains why.
-        local values = noBlizzard and { eui="EllesmereUI", hidden="Hidden" }
-            or { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" }
-        local order = noBlizzard and { "eui", "hidden" } or { "eui", "blizzard", "hidden" }
-        return Ww:DualRow(pp, yy,
-            { type="dropdown", text="Frame Source", tooltip=tooltip,
-              values = values,
-              order = order,
-              getValue=function() return ns.GetUnitFrameSource(unitKey) end,
-              setValue=function(v)
-                if onBeforeSet then onBeforeSet(v) end
-                ns.SetUnitFrameSource(unitKey, v)
-                ReloadAndUpdate()
-                EllesmereUI:RefreshPage(true)
-                EllesmereUI:ShowConfirmPopup({
-                    title = "Reload Required",
-                    message = "Changing the frame source requires a UI reload to take effect.",
-                    confirmText = "Reload Now",
-                    cancelText = "Later",
-                    onConfirm = function() ReloadUI() end,
-                })
+    -- After a visibility/enable change makes a unit visible again (or hides a
+    -- Blizzard-sourced one), the change may not be applyable live: a unit whose
+    -- source was Blizzard/Hidden at login has no spawned EUI frame this session
+    -- (and Blizzard's frame can't be torn down live), so prompt for a /reload.
+    -- unitKeys: list of unit keys; "boss" checks the boss1 frame.
+    local function PromptReloadIfUnspawned(unitKeys)
+        local f = ns.frames
+        if not f then return end
+        local missing = false
+        for _, u in ipairs(unitKeys) do
+            local spawned = (u == "boss") and f.boss1 or f[u]
+            if not spawned then missing = true; break end
+        end
+        if not missing then return end
+        EllesmereUI:ShowConfirmPopup({
+            title = "Reload Required",
+            message = "This frame's source changes require a UI reload to take effect.",
+            confirmText = "Reload Now",
+            cancelText = "Later",
+            onConfirm = function() ReloadUI() end,
+        })
+    end
+
+    -- Inline "Frame Source" cog: a small cog next to a unit's Visibility
+    -- dropdown / Enable toggle opening a popup with one dropdown -- EllesmereUI
+    -- (our skinned frame) or Blizzard Default (leave Blizzard's frame alone).
+    -- Hiding stays on the host widget itself (Visibility "Never Show" / the
+    -- Enable toggle), so "Hidden" is not duplicated here; the stored style is
+    -- kept while hidden and resumes when the frame is re-enabled.
+    -- opts: tooltip (row tooltip), disabled/disabledTooltip (row disable, used
+    -- by ToT/FoT parent gating), onBeforeSet(v) (boss stops its live preview).
+    local function AttachFrameSourceCog(rgn, unitKey, opts)
+        opts = opts or {}
+        local function StoredStyle()
+            local fs = db.profile.frameSource and db.profile.frameSource[unitKey]
+            return fs == "blizzard" and "blizzard" or "eui"
+        end
+        local fsShow  -- forward decl: set() below closes the popup through it
+        local _
+        local rows = {
+            { type = "dropdown", label = "Frame Source",
+              values = { eui = "EllesmereUI", blizzard = "Blizzard Default" },
+              order = { "eui", "blizzard" },
+              tooltip = opts.tooltip,
+              disabled = opts.disabled,
+              disabledTooltip = opts.disabledTooltip,
+              get = StoredStyle,
+              set = function(v)
+                  if v == StoredStyle() then return end
+                  if opts.onBeforeSet then opts.onBeforeSet(v) end
+                  -- Also re-enables a hidden frame (picking a style means
+                  -- wanting to see it); see ns.SetUnitFrameSource.
+                  ns.SetUnitFrameSource(unitKey, v)
+                  if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                  ReloadAndUpdate()
+                  EllesmereUI:RefreshPage(true)
+                  -- Close the cog popup before the reload prompt: the page
+                  -- under it was just rebuilt, so leaving it open would show
+                  -- stale rows floating behind the dialog.
+                  if fsShow and fsShow._popupFrame and fsShow._popupFrame:IsShown() then
+                      fsShow._popupFrame:Hide()
+                  end
+                  EllesmereUI:ShowConfirmPopup({
+                      title = "Reload Required",
+                      message = "Changing the frame source requires a UI reload to take effect.",
+                      confirmText = "Reload Now",
+                      cancelText = "Later",
+                      onConfirm = function() ReloadUI() end,
+                  })
               end },
-            rightCfg or { type="spacer" })
+        }
+        -- Callers can fold additional rows into the same popup (the main
+        -- Visibility row hosts the Out of Combat fade here, so the row
+        -- carries ONE cog instead of two).
+        if opts.extraRows then
+            for _, r in ipairs(opts.extraRows) do rows[#rows + 1] = r end
+        end
+        _, fsShow = EllesmereUI.BuildCogPopup({
+            title = opts.title or "Frame Source", bgAlpha = 1,
+            frameStrata = "FULLSCREEN_DIALOG", frameLevel = 500,
+            rows = rows,
+        })
+        local cogBtn = CreateFrame("Button", nil, rgn)
+        cogBtn:SetSize(26, 26)
+        cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = cogBtn
+        cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+        cogBtn:SetAlpha(0.4)
+        local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+        cogTex:SetAllPoints()
+        cogTex:SetTexture(EllesmereUI.COGS_ICON)
+        cogBtn:SetScript("OnEnter", function(self)
+            self:SetAlpha(0.7)
+            EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L(opts.cogTooltip or "Frame Source"))
+        end)
+        cogBtn:SetScript("OnLeave", function(self)
+            self:SetAlpha(0.4)
+            EllesmereUI.HideWidgetTooltip()
+        end)
+        cogBtn:SetScript("OnClick", function(self) fsShow(self) end)
+        return cogBtn
+    end
+
+    ---------------------------------------------------------------------------
+    --  "Apply All Settings To" -- bulk copy between frames of the same group
+    ---------------------------------------------------------------------------
+    -- Copies every setting shared by the whole group from the source unit's
+    -- profile table to the chosen unit's. A key is shared unless UNIT_SUPPORTS
+    -- limits it to a subset of the group, or it exists in some group units'
+    -- defaults but not all of them (unit-exclusive keys like the player-only
+    -- private auras or the player vs target/focus castbar key split). The
+    -- union of source and destination keys is copied, so overrides unset on
+    -- the source are also cleared on the destination. Frame positions and
+    -- enable state live outside the per-unit tables (db.profile.positions /
+    -- db.profile.enabledFrames) and are never touched.
+    -- Exception: a copy between target and focus evaluates sharedness against
+    -- just that pair, so the cast bar section they share (which player lacks)
+    -- transfers between them. Copies involving player keep the full-group
+    -- rule, so cast bar settings never cross to or from player.
+    local MINI_GROUP_ORDER = { "targettarget", "focustarget", "pet" }
+    local TARGET_FOCUS_PAIR = { "target", "focus" }
+    local function IsGroupSharedKey(key, groupUnits)
+        -- Visibility mode stays with the frame: it pairs with
+        -- db.profile.enabledFrames (never copied), and copying one without
+        -- the other would desync them. Underscore keys are runtime memos
+        -- (e.g. _preHiddenBarVisibility), not settings.
+        if type(key) ~= "string" then return false end
+        if key == "barVisibility" or key:sub(1, 1) == "_" then return false end
+        local sup = UNIT_SUPPORTS[key]
+        if sup then
+            for _, u in ipairs(groupUnits) do
+                if not sup[u] then return false end
+            end
+        end
+        local defs = db._profileDefaults or {}
+        local inAny, inAll = false, true
+        for _, u in ipairs(groupUnits) do
+            local d = defs[u]
+            if d and d[key] ~= nil then inAny = true else inAll = false end
+        end
+        if inAny and not inAll then return false end
+        return true
+    end
+    local function CopyAllGroupSettings(srcUnit, dstUnit, groupUnits)
+        if (srcUnit == "target" or srcUnit == "focus")
+            and (dstUnit == "target" or dstUnit == "focus") then
+            groupUnits = TARGET_FOCUS_PAIR
+        end
+        local src = UNIT_DB_MAP[srcUnit]()
+        local dst = UNIT_DB_MAP[dstUnit]()
+        local keys = {}
+        for k in pairs(src) do keys[k] = true end
+        for k in pairs(dst) do keys[k] = true end
+        for k in pairs(keys) do
+            if IsGroupSharedKey(k, groupUnits) then
+                local v = src[k]
+                if type(v) == "table" then
+                    dst[k] = EllesmereUI.Lite.DeepCopy(v)
+                else
+                    dst[k] = v
+                end
+            end
+        end
+        ReloadAndUpdate()
+        EllesmereUI:RefreshPage(true)
+    end
+    -- Centered one-line label + action dropdown at the top of a unit's
+    -- settings list: lists the other frames of the group and copies to the
+    -- chosen one after a confirm popup. getValue always returns the
+    -- placeholder so the dropdown stores nothing; the registered widget
+    -- refresh snaps the label back to the placeholder after each pick.
+    local function BuildApplyAllRow(parent, y, groupUnits, srcUnit)
+        local ddValues = { [""] = "Choose Frame..." }
+        local ddOrder = {}
+        for _, key in ipairs(groupUnits) do
+            if key ~= srcUnit then
+                ddValues[key] = SHORT_LABELS[key] or key
+                ddOrder[#ddOrder + 1] = key
+            end
+        end
+
+        local ROW_H = 50
+        local contentPad = EllesmereUI.CONTENT_PAD or 45
+        local row = CreateFrame("Frame", nil, parent)
+        PP.Size(row, parent:GetWidth() - contentPad * 2, ROW_H)
+        PP.Point(row, "TOPLEFT", parent, "TOPLEFT", contentPad, y)
+
+        local label = EllesmereUI.MakeFont(row, 14, nil, 1, 1, 1)
+        label:SetText(EllesmereUI.L("Apply All Settings To"))
+        label:SetTextColor(1, 1, 1, 0.6)
+
+        local DD_W, GAP = 180, 12
+        local ddBtn = EllesmereUI.BuildDropdownControl(
+            row, DD_W, row:GetFrameLevel() + 2,
+            ddValues, ddOrder,
+            function() return "" end,
+            function(dstUnit)
+                if dstUnit == "" then return end
+                EllesmereUI:ShowConfirmPopup({
+                    title   = "Apply All Settings",
+                    message = EllesmereUI.Lf("Copy all shared settings from %1$s to %2$s?",
+                        SHORT_LABELS[srcUnit] or srcUnit, SHORT_LABELS[dstUnit] or dstUnit),
+                    disclaimer = "This overwrites the chosen frame's current settings. Frame position, visibility, and enable state are not changed.",
+                    confirmText = "Apply",
+                    cancelText  = "Cancel",
+                    onConfirm = function() CopyAllGroupSettings(srcUnit, dstUnit, groupUnits) end,
+                })
+            end)
+        ddBtn._ttText = "Copy every shared setting from this frame to another frame in this group."
+        EllesmereUI.RegisterWidgetRefresh(function() ddBtn._refreshLabel() end)
+
+        -- Center the label + dropdown pair as one line
+        local totalW = label:GetStringWidth() + GAP + DD_W
+        label:SetPoint("LEFT", row, "CENTER", -totalW / 2, 0)
+        ddBtn:SetPoint("LEFT", label, "RIGHT", GAP, 0)
+
+        return row, ROW_H
     end
 
     local function BuildSharedSettings(parent, y)
@@ -3943,13 +4142,16 @@ initFrame:SetScript("OnEvent", function(self)
             end
             return "Applies to: " .. table.concat(names, ", ")
         end
-        -- Dim a row region and add tooltip when no checked unit supports the setting
-        local function SApplySupport(region, key)
-            if not SVisible(key) then
+        -- Dim a row region and add tooltip when no checked unit supports the
+        -- setting. unsupportedTip (optional) is shown over the dimmed row when
+        -- the current unit doesn't support the key.
+        local function SApplySupport(region, key, unsupportedTip)
+            local visible = SVisible(key)
+            if not visible then
                 region:SetAlpha(0.35)
                 if region._control and region._control.Disable then region._control:Disable() end
             end
-            local tip = SSupportTooltip(key)
+            local tip = SSupportTooltip(key) or (not visible and unsupportedTip) or nil
             if tip then
                 local function MakeSupportHit(anchor)
                     if not anchor then return end
@@ -3996,6 +4198,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         parent._showRowDivider = true
 
+        row, h = BuildApplyAllRow(parent, y, GROUP_UNIT_ORDER, selectedUnit); y = y - h
+
         -------------------------------------------------------------------
         --  DISPLAY
         -------------------------------------------------------------------
@@ -4021,74 +4225,136 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 0: Frame Source -- EllesmereUI skin / Blizzard default / hidden.
-        -- Placed first so the disable overlay can cover every setting below it
-        -- while this selector stays usable. Switching source needs a /reload
-        -- (oUF permanently disables the Blizzard frame at spawn, and secure
-        -- frames can't be created/torn down in combat).
-        local fsRow
-        fsRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Frame Source",
-              values = { eui="EllesmereUI", blizzard="Blizzard Default", hidden="Hidden" },
-              order = { "eui", "blizzard", "hidden" },
-              getValue = function() return ns.GetUnitFrameSource(selectedUnit) end,
-              setValue = function(v)
-                  ns.SetUnitFrameSource(selectedUnit, v)
-                  if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-                  ReloadAndUpdate()
-                  EllesmereUI:RefreshPage(true)
-                  EllesmereUI:ShowConfirmPopup({
-                      title = "Reload Required",
-                      message = "Changing the frame source requires a UI reload to take effect.",
-                      confirmText = "Reload Now",
-                      cancelText = "Later",
-                      onConfirm = function() ReloadUI() end,
-                  })
-              end },
-            { type="spacer" });  y = y - h
-
-        -- If this unit isn't on the EllesmereUI frame, the settings below are
-        -- inapplicable (its EUI frame isn't spawned) -- show a short notice
-        -- instead of the full settings list.
-        if ns.GetUnitFrameSource(selectedUnit) ~= "eui" then
-            return BuildInactiveNotice(parent, y, ns.GetUnitFrameSource(selectedUnit))
-        end
-
         -- Row 1: Visibility | Visibility Options (checkbox dropdown)
+        -- Group-axis pass check for the legacy showInRaid/showInParty/showSolo
+        -- trio: only the group items constrain it (unconstrained = true), so
+        -- ToggleFrame's group gating stays consistent with a multi-selection.
+        local function GroupAxisPasses(vm, inRaid, inParty)
+            local g1, g2, g3 = vm.in_raid, vm.in_party, vm.solo
+            if not (g1 or g2 or g3) or (g1 and g2 and g3) then return true end
+            if g1 and inRaid then return true end
+            if g2 and (inParty or inRaid) then return true end
+            if g3 and not inRaid and not inParty then return true end
+            return false
+        end
+        -- Keeps the boolean trio in sync with the effective selection. The
+        -- legacy branch mirrors the old dropdown chain exactly (including
+        -- leaving the trio untouched for in_combat/out_of_combat/mouseover).
+        local function SyncUnitVisBooleans(s)
+            local vm = s.visibilityModes
+            if type(vm) == "table" and next(vm) then
+                s.showInRaid  = GroupAxisPasses(vm, true, false)
+                s.showInParty = GroupAxisPasses(vm, false, true)
+                s.showSolo    = GroupAxisPasses(vm, false, false)
+                return
+            end
+            local v = s.barVisibility or "always"
+            if v == "always" then
+                s.showInRaid = true; s.showInParty = true; s.showSolo = true
+            elseif v == "never" then
+                s.showInRaid = false; s.showInParty = false; s.showSolo = false
+            elseif v == "in_raid" then
+                s.showInRaid = true; s.showInParty = false; s.showSolo = false
+            elseif v == "in_party" then
+                s.showInRaid = true; s.showInParty = true; s.showSolo = false
+            elseif v == "solo" then
+                s.showInRaid = false; s.showInParty = false; s.showSolo = true
+            end
+        end
         local visRow
-        visRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Visibility",
-              values = EllesmereUI.VIS_VALUES,
-              order = EllesmereUI.VIS_ORDER,
-              getValue=function() return UNIT_DB_MAP[selectedUnit]().barVisibility or "always" end,
-              setValue=function(v)
-                  UNIT_DB_MAP[selectedUnit]().barVisibility = v
-                  -- Keep the frame source consistent so the Visibility and Frame
-                  -- Source dropdowns can't disagree: "never" == Hidden; any
-                  -- visible mode implies the EllesmereUI frame (clearing a stale
-                  -- Blizzard/hidden source rather than resurrecting it later).
-                  ns.SetUnitFrameSource(selectedUnit, (v == "never") and "hidden" or "eui")
-                  -- Keep boolean keys in sync for safety
+        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+            { getStore = function() return UNIT_DB_MAP[selectedUnit]() end,
+              legacyKey = "barVisibility",
+              caps = { partyIncludesRaid = true, luaDragonriding = true },
+              refreshPageArg = true,
+              -- Visibility owns only the hidden/not-hidden axis: "never"
+              -- disables the frame; any visible mode re-enables it. The
+              -- EUI/Blizzard style choice (frameSource, set via the inline
+              -- cog) is left intact so it resumes when re-enabled.
+              applyScalarFn = function(s, mode)
+                  s.barVisibility = mode
+                  db.profile.enabledFrames[selectedUnit] = (mode ~= "never")
+              end,
+              onChanged = function()
                   local s = UNIT_DB_MAP[selectedUnit]()
-                  if v == "always" then
-                      s.showInRaid = true; s.showInParty = true; s.showSolo = true
-                  elseif v == "never" then
-                      s.showInRaid = false; s.showInParty = false; s.showSolo = false
-                  elseif v == "in_raid" then
-                      s.showInRaid = true; s.showInParty = false; s.showSolo = false
-                  elseif v == "in_party" then
-                      s.showInRaid = true; s.showInParty = true; s.showSolo = false
-                  elseif v == "solo" then
-                      s.showInRaid = false; s.showInParty = false; s.showSolo = true
-                  end
+                  SyncUnitVisBooleans(s)
                   if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
                   ReloadAndUpdate()
-                  EllesmereUI:RefreshPage()
+                  -- Un-hiding a frame whose EUI frame isn't spawned this session
+                  -- (source was Blizzard/Hidden at login) needs a /reload.
+                  if (s.barVisibility or "always") ~= "never" then PromptReloadIfUnspawned({ selectedUnit }) end
               end },
             { type="dropdown", text="Visibility Options",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end,
               setValue=function() end });  y = y - h
+
+        -- Inline cog on Visibility: ONE combined popup hosting this unit's
+        -- Frame Source dropdown (EllesmereUI / Blizzard Default) and the Out
+        -- of Combat fade. Hiding stays on the Visibility dropdown itself
+        -- ("Never Show"). The fade dims the whole frame to a chosen alpha
+        -- while out of combat (100 = no fade); applied via
+        -- ns.ResolveFrameAlpha inside UpdateFrameVisibility, so it reacts to
+        -- combat on the existing regen path. Reuses the CDM fade's strings
+        -- ("Fade Out of Combat" / "Out of Combat Alpha") so the terminology
+        -- stays consistent across modules.
+        -- Fade rows only join for the EllesmereUI source (the fade drives
+        -- the EUI frame; a Blizzard-sourced page kept just the Frame Source
+        -- picker before the merge, and still does).
+        local _visSrcIsEui = ns.GetUnitFrameSource(selectedUnit) == "eui"
+        AttachFrameSourceCog(visRow._leftRegion, selectedUnit, {
+            title = _visSrcIsEui and "Frame Source & Fade" or "Frame Source",
+            cogTooltip = _visSrcIsEui and "Frame Source & Fade" or "Frame Source",
+            extraRows = _visSrcIsEui and {
+                { type = "toggle", label = "Fade Out of Combat",
+                  tooltip = "Fades the entire frame (portrait, health and power bars, text) while out of combat.",
+                  get = function() return SVal("oocFadeEnabled", false) == true end,
+                  set = function(v)
+                      SSet("oocFadeEnabled", v)
+                      if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                  end },
+                { type = "slider", label = "Out of Combat Alpha", min = 0, max = 100, step = 1,
+                  disabled = function() return not SVal("oocFadeEnabled", false) end,
+                  disabledTooltip = "Enable Fade Out of Combat first",
+                  get = function() return math.floor((SVal("oocAlpha", 0.5)) * 100 + 0.5) end,
+                  set = function(v)
+                      SSet("oocAlpha", v / 100)
+                      if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
+                  end },
+            },
+        })
+
+        -- When this unit isn't on the EllesmereUI frame there is nothing below
+        -- to configure (its EUI frame isn't spawned): keep the Visibility row
+        -- (it hosts the Frame Source cog; in the hidden state its "Never Show"
+        -- is also the way back), grey it for the Blizzard source, and show the
+        -- one-line notice in place of the settings.
+        do
+            local srcNow = ns.GetUnitFrameSource(selectedUnit)
+            if srcNow ~= "eui" then
+                local rightRgn = visRow._rightRegion
+                if rightRgn._control then rightRgn._control:Hide() end
+                if srcNow == "blizzard" then
+                    -- Visibility modes only drive the EUI frame -- block the
+                    -- dropdown (the cog stays live to switch back).
+                    local ctl = visRow._leftRegion._control
+                    if visRow._leftRegion._label then visRow._leftRegion._label:SetAlpha(0.3) end
+                    local dis = CreateFrame("Frame", nil, visRow)
+                    dis:SetPoint("TOPLEFT", ctl, "TOPLEFT", -2, 2)
+                    dis:SetPoint("BOTTOMRIGHT", ctl, "BOTTOMRIGHT", 2, -2)
+                    dis:SetFrameLevel(visRow:GetFrameLevel() + 10)
+                    dis:EnableMouse(true)
+                    local disTex = dis:CreateTexture(nil, "OVERLAY")
+                    disTex:SetAllPoints()
+                    disTex:SetColorTexture(0.06, 0.08, 0.10, 0.7)
+                    dis:SetScript("OnEnter", function(self)
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("the Frame Source to be EllesmereUI"))
+                    end)
+                    dis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                end
+                return BuildInactiveNotice(parent, y, srcNow)
+            end
+        end
 
         -- Replace the dummy right dropdown with our checkbox dropdown
         do
@@ -4110,27 +4376,39 @@ initFrame:SetScript("OnEvent", function(self)
             RegisterWidgetRefresh(cbDDRefresh)
         end
 
-        -- Sync icon on Visibility (left)
+        -- Sync icon on Visibility (left) -- set-aware so multi-selections
+        -- compare and copy correctly, running each target unit's scalar side
+        -- effects (enabledFrames) and boolean-trio derivation.
         do
             local rgn = visRow._leftRegion
+            local function CopyVisToUnit(key)
+                local src = UNIT_DB_MAP[selectedUnit]()
+                local dst = UNIT_DB_MAP[key]()
+                if dst == src then return end
+                EllesmereUI.VisCopySelection(dst, src, "barVisibility", nil, function(t, mode)
+                    t.barVisibility = mode
+                    db.profile.enabledFrames[key] = (mode ~= "never")
+                end)
+                SyncUnitVisBooleans(dst)
+            end
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Visibility to all Frames",
                 isSynced = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
+                    local src = UNIT_DB_MAP[selectedUnit]()
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        if (UNIT_DB_MAP[key]().barVisibility or "always") ~= v then return false end
+                        if not EllesmereUI.VisSelectionEquals(src, "barVisibility", UNIT_DB_MAP[key](), "barVisibility") then return false end
                     end
                     return true
                 end,
                 onClick = function()
-                    local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
                     for _, key in ipairs(GROUP_UNIT_ORDER) do
-                        UNIT_DB_MAP[key]().barVisibility = v
-                        ns.SetUnitFrameSource(key, (v == "never") and "hidden" or "eui")
+                        CopyVisToUnit(key)
                     end
                     if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
+                    local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
+                    if v ~= "never" then PromptReloadIfUnspawned(GROUP_UNIT_ORDER) end
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
@@ -4138,47 +4416,16 @@ initFrame:SetScript("OnEvent", function(self)
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
-                        local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
                         for _, key in ipairs(checkedKeys) do
-                            UNIT_DB_MAP[key]().barVisibility = v
-                            ns.SetUnitFrameSource(key, (v == "never") and "hidden" or "eui")
+                            CopyVisToUnit(key)
                         end
                         if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
+                        local v = UNIT_DB_MAP[selectedUnit]().barVisibility or "always"
+                        if v ~= "never" then PromptReloadIfUnspawned(checkedKeys) end
                     end,
                 },
             })
-        end
-
-        -- Out of Combat Alpha: inline cog on the Visibility row (left region,
-        -- next to the Visibility dropdown/sync). Fades the whole unit frame to a
-        -- chosen alpha while out of combat (100 = no fade; full alpha in combat).
-        -- Off by default. Applied via ns.ResolveFrameAlpha inside
-        -- UpdateFrameVisibility, so it reacts to combat on the existing regen path.
-        -- Reuses the CDM fade's strings ("Fade Out of Combat" / "Out of Combat
-        -- Alpha") so the terminology stays consistent across modules.
-        do
-            local rgn = visRow._leftRegion
-            local _, oocCogShow = EllesmereUI.BuildCogPopup({
-                title = "Out of Combat Alpha",
-                rows = {
-                    { type = "toggle", label = "Fade Out of Combat",
-                      tooltip = "Fades the entire frame (portrait, health and power bars, text) while out of combat.",
-                      get = function() return SVal("oocFadeEnabled", false) == true end,
-                      set = function(v)
-                          SSet("oocFadeEnabled", v)
-                          if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-                      end },
-                    { type = "slider", label = "Out of Combat Alpha", min = 0, max = 100, step = 1,
-                      disabled = function() return not SVal("oocFadeEnabled", false) end,
-                      get = function() return math.floor((SVal("oocAlpha", 0.5)) * 100 + 0.5) end,
-                      set = function(v)
-                          SSet("oocAlpha", v / 100)
-                          if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
-                      end },
-                },
-            })
-            MakeCogBtn(rgn, oocCogShow)
         end
 
         -- Sync icon on Visibility Options (right)
@@ -5734,7 +5981,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.leftTextX, d.leftTextY = src.leftTextX, src.leftTextY
                         d.leftTextShortNameLength = src.leftTextShortNameLength
                         d.leftTextShortNameEllipsis = src.leftTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -5758,7 +6004,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.leftTextX or 0) ~= (src.leftTextX or 0) then return false end
                         if (d.leftTextY or 0) ~= (src.leftTextY or 0) then return false end
                         if (d.leftTextShortNameLength or 0) ~= (src.leftTextShortNameLength or 0) then return false end
-
                         if (d.leftTextShortNameEllipsis == false) ~= (src.leftTextShortNameEllipsis == false) then return false end
                     end
                     return true
@@ -5885,7 +6130,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.rightTextX, d.rightTextY = src.rightTextX, src.rightTextY
                         d.rightTextShortNameLength = src.rightTextShortNameLength
                         d.rightTextShortNameEllipsis = src.rightTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -5909,7 +6153,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.rightTextX or 0) ~= (src.rightTextX or 0) then return false end
                         if (d.rightTextY or 0) ~= (src.rightTextY or 0) then return false end
                         if (d.rightTextShortNameLength or 0) ~= (src.rightTextShortNameLength or 0) then return false end
-
                         if (d.rightTextShortNameEllipsis == false) ~= (src.rightTextShortNameEllipsis == false) then return false end
                     end
                     return true
@@ -6050,7 +6293,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.centerTextX, d.centerTextY = src.centerTextX, src.centerTextY
                         d.centerTextShortNameLength = src.centerTextShortNameLength
                         d.centerTextShortNameEllipsis = src.centerTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -6074,7 +6316,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.centerTextX or 0) ~= (src.centerTextX or 0) then return false end
                         if (d.centerTextY or 0) ~= (src.centerTextY or 0) then return false end
                         if (d.centerTextShortNameLength or 0) ~= (src.centerTextShortNameLength or 0) then return false end
-
                         if (d.centerTextShortNameEllipsis == false) ~= (src.centerTextShortNameEllipsis == false) then return false end
                     end
                     return true
@@ -6203,7 +6444,6 @@ initFrame:SetScript("OnEvent", function(self)
                         d.extraTextAlign = src.extraTextAlign
                         d.extraTextShortNameLength = src.extraTextShortNameLength
                         d.extraTextShortNameEllipsis = src.extraTextShortNameEllipsis
-
                     end
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
@@ -6228,7 +6468,6 @@ initFrame:SetScript("OnEvent", function(self)
                         if (d.extraTextY or 0) ~= (src.extraTextY or 0) then return false end
                         if (d.extraTextAlign or "left") ~= (src.extraTextAlign or "left") then return false end
                         if (d.extraTextShortNameLength or 0) ~= (src.extraTextShortNameLength or 0) then return false end
-
                         if (d.extraTextShortNameEllipsis == false) ~= (src.extraTextShortNameEllipsis == false) then return false end
                     end
                     return true
@@ -6668,7 +6907,8 @@ initFrame:SetScript("OnEvent", function(self)
             local bgPwrGet = function()
                 local _, pToken = UnitPowerType("player")
                 local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-                return info.r, info.g, info.b
+                local f = EllesmereUI.GetPowerBgDarkenFactor()
+                return info.r * f, info.g * f, info.b * f
             end
             local bgPwrSw, bgPwrUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgPwrGet, function() end, false, 20)
             bgPwrSw._eabOrigClick = bgPwrSw:GetScript("OnClick")
@@ -9505,6 +9745,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Icon Zoom", min=0, max=0.20, step=0.01,
                       get=function() return SValSupported("debuffIconZoom", 0.07) end,
                       set=function(v) SSetSupported("debuffIconZoom", v) end },
+                    { type="toggle", label="Dispel Type Borders",
+                      get=function() return SValSupported("debuffDispelBorder", false) end,
+                      set=function(v) SSetSupported("debuffDispelBorder", v) end },
                 },
             })
             MakeCogBtn(leftRgn, debuffCogShow, nil, nil, DebuffDisabled)
@@ -9808,6 +10051,115 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetScript("OnClick", function(self) opShow(self) end)
             end
         end
+
+        -------------------------------------------------------------------
+        --  PRIVATE AURAS (player frame only)
+        -------------------------------------------------------------------
+        if selectedUnit == "player" then
+        _, h = W:Spacer(parent, y, 20); y = y - h
+        _, h = W:SectionHeader(parent, "PRIVATE AURAS", y); y = y - h
+
+        local function PrivGet(key, default)
+            local p = db.profile.player
+            local v = p and p[key]
+            if v ~= nil then return v end
+            return default
+        end
+        local function PrivSet(key, v)
+            db.profile.player[key] = v
+            ReloadAndUpdate()
+        end
+
+        local paPosValues = {
+            none        = "None",
+            topleft     = "Top Left",
+            top         = "Top",
+            topright    = "Top Right",
+            left        = "Left",
+            center      = "Center",
+            right       = "Right",
+            bottomleft  = "Bottom Left",
+            bottom      = "Bottom",
+            bottomright = "Bottom Right",
+        }
+        local paPosOrder = { "none", "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
+        local paGrowValues = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
+        local paGrowOrder = { "RIGHT", "LEFT", "UP", "DOWN" }
+
+        local function GetDefaultPaGrow(pos)
+            if pos == "right" or pos == "topright" or pos == "bottomright" then return "LEFT" end
+            if pos == "left" or pos == "topleft" or pos == "bottomleft" then return "RIGHT" end
+            if pos == "top" then return "DOWN" end
+            if pos == "bottom" then return "UP" end
+            return "RIGHT"
+        end
+
+        -- Row 1: Enable Private Auras | Position (+ cog X/Y)
+        local paRow1
+        paRow1, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Private Auras",
+              tooltip="Show Blizzard's private boss-mechanic aura icons on the player frame.",
+              getValue=function() return PrivGet("paEnabled", false) end,
+              setValue=function(v) PrivSet("paEnabled", v) end },
+            { type="dropdown", text="Position", values=paPosValues, order=paPosOrder,
+              getValue=function() return PrivGet("paPosition", "center") end,
+              setValue=function(v)
+                  PrivSet("paPosition", v)
+                  PrivSet("paGrowDirection", GetDefaultPaGrow(v))
+                  EllesmereUI:RefreshPage()
+              end });  y = y - h
+        -- Cog for position offset X/Y
+        do
+            local rgn = paRow1._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Private Aura Offset",
+                rows = {
+                    { type="slider", label="Offset X", min=-50, max=50, step=1,
+                      get=function() return PrivGet("paOffsetX", 0) end,
+                      set=function(v) PrivSet("paOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                      get=function() return PrivGet("paOffsetY", 0) end,
+                      set=function(v) PrivSet("paOffsetY", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
+
+        -- Row 2: Growth Direction | Icon Size
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Growth Direction", values=paGrowValues, order=paGrowOrder,
+              getValue=function() return PrivGet("paGrowDirection", "RIGHT") end,
+              setValue=function(v) PrivSet("paGrowDirection", v) end },
+            { type="slider", text="Icon Size", min=10, max=40, step=1,
+              getValue=function() return PrivGet("paSize", 20) end,
+              setValue=function(v) PrivSet("paSize", v) end });  y = y - h
+
+        -- Row 3: Spacing | Show Countdown Text
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Spacing", min=-1, max=10, step=1,
+              getValue=function() return PrivGet("paSpacing", 0) end,
+              setValue=function(v) PrivSet("paSpacing", v) end },
+            { type="toggle", text="Show Countdown Text",
+              getValue=function() return PrivGet("paShowCountdown", false) end,
+              setValue=function(v) PrivSet("paShowCountdown", v) end });  y = y - h
+
+        -- Row 4: Hide Tooltips | (blank)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Tooltips",
+              getValue=function() return PrivGet("paHideTooltip", true) end,
+              setValue=function(v) PrivSet("paHideTooltip", v) end },
+            { type="label", text="" });  y = y - h
+        end -- selectedUnit == "player" (private auras)
 
         _, h = W:Spacer(parent, y, 20); y = y - h
 
@@ -10303,7 +10655,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
         sharedAddRow1, h = W:DualRow(parent, y,
             { type="dropdown", text="Combat Indicator", values=combatIndValues, order=combatIndOrder,
-              getValue=function() return SValSupported("combatIndicatorStyle", "class") end,
+              -- Target ships disabled ("none"): opt-in, no change for existing users.
+              getValue=function() return SValSupported("combatIndicatorStyle", selectedUnit == "player" and "class" or "none") end,
               setValue=function(v) SSetSupported("combatIndicatorStyle", v); ReloadAndUpdate(); UpdatePreview() end },
             { type = "multiSwatch", text = "Enemy Colors",
               swatches = {
@@ -10312,28 +10665,30 @@ initFrame:SetScript("OnEvent", function(self)
                   enemySwatch("friendly", 5,   0.29, 0.68, 0.30, "Friendly NPC"),
                   enemySwatch("tapped",   nil, 0.6,  0.6,  0.6,  "Tapped"),
               } });  y = y - h
-        SApplySupport(sharedAddRow1._leftRegion, "combatIndicatorStyle")
-        -- Sync icon: Combat Indicator
-        do
+        SApplySupport(sharedAddRow1._leftRegion, "combatIndicatorStyle",
+            "The Combat Indicator is not available for the Focus frame.")
+        -- Sync icon: Combat Indicator (player + target only -- focus has none)
+        if SVisible("combatIndicatorStyle") then
             local rgn = sharedAddRow1._leftRegion
+            local ciSyncUnits = { "player", "target" }
             EllesmereUI.BuildSyncIcon({
                 region  = rgn,
                 tooltip = "Apply Combat Indicator Style to all Frames",
                 onClick = function()
                     local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
+                    for _, key in ipairs(ciSyncUnits) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
                 isSynced = function()
                     local v = UNIT_DB_MAP[selectedUnit]().combatIndicatorStyle or "class"
-                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                    for _, key in ipairs(ciSyncUnits) do
                         if (UNIT_DB_MAP[key]().combatIndicatorStyle or "class") ~= v then return false end
                     end
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
-                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementKeys   = ciSyncUnits,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return selectedUnit end,
                     onApply       = function(checkedKeys)
@@ -10346,7 +10701,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Eyeball toggle + cog + swatch on combat indicator dropdown
-        do
+        -- (player + target only -- the focus row is dimmed with a tooltip)
+        if SVisible("combatIndicatorStyle") then
             local ciRgn = sharedAddRow1._leftRegion
             local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
             local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"
@@ -10682,6 +11038,13 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildFrameDisplayPage(pageName, parent, yOffset)
         -- Consume any pending unit selection from Element Options navigation
         if EllesmereUI._consumePendingUnitSelect then EllesmereUI._consumePendingUnitSelect() end
+
+        -- Tag every option registered while building this page with the
+        -- currently-selected unit, so a global-search jump to a unit-specific
+        -- setting can restore this exact unit selection first via
+        -- EllesmereUI._setUnitFrameUnit -- see EUI_CooldownManager_Options.lua's
+        -- matching EllesmereUI._buildingSelector comment for the full reasoning.
+        EllesmereUI._buildingSelector = { setter = EllesmereUI._setUnitFrameUnit, key = selectedUnit }
 
         local W = EllesmereUI.Widgets
         local y = yOffset
@@ -11840,7 +12203,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local bgPwrGet = function()
                     local _, pToken = UnitPowerType("player")
                     local info = EllesmereUI.GetPowerColor(pToken or "MANA")
-                    return info.r, info.g, info.b
+                    local f = EllesmereUI.GetPowerBgDarkenFactor()
+                    return info.r * f, info.g * f, info.b * f
                 end
                 local bgPwrSw, bgPwrUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgPwrGet, function() end, false, 20)
                 bgPwrSw._eabOrigClick = bgPwrSw:GetScript("OnClick")
@@ -12131,47 +12495,46 @@ initFrame:SetScript("OnEvent", function(self)
         local enableText = (unitKey == "focustarget") and "Enable Focus Target" or "Enable Target of Target"
         local _, h
 
+        _, h = BuildApplyAllRow(parent, y, MINI_GROUP_ORDER, unitKey); y = y - h
+
         local portraitRow
         local function enableRow(Ww, pp, yy)
-            -- Frame Source on its own row (like player/target); Show Portrait sits
-            -- flush on the next row, only on the EllesmereUI source. For
-            -- Blizzard/hidden the row is Frame Source alone + the notice below.
             local isEUI = ns.GetUnitFrameSource(unitKey) == "eui"
-            -- "Blizzard Default" only makes sense when the parent target/focus is
-            -- itself on Blizzard's frame (its native child target-of-target is then
-            -- alive); otherwise offer only EllesmereUI / Hidden and explain why.
+            -- The Frame Source cog's "Blizzard Default" only makes sense when the
+            -- parent target/focus frame is itself on Blizzard's frame (its native
+            -- child target-of-target is then alive; see ns.GetUnitFrameSource);
+            -- the cog's dropdown is blocked otherwise with an explanation.
             local parentLabel = (unitKey == "focustarget") and "Focus" or "Target"
+            local parentKey = (unitKey == "focustarget") and "focus" or "target"
             local childName = (unitKey == "focustarget") and "focus-target" or "target-of-target"
-            local parentIsBlizzard = ns.GetUnitFrameSource(parentLabel:lower()) == "blizzard"
-            -- Parent is Blizzard -> "Blizzard Default" is offered here; briefly warn that the
-            -- native child can't be hidden in combat (see SuppressBlizzardChildFrame for why).
-            -- Parent isn't Blizzard -> the option is dropped; explain why instead.
-            local srcTip
-            if parentIsBlizzard then
-                srcTip = "Due to Blizzard API restrictions, Blizzard's native " .. childName
-                    .. " can't be hidden in combat and will show the whole time you are in combat. Recommended: match the "
-                    .. parentLabel .. " frame's source -- both Blizzard Default, or both EllesmereUI."
-            else
-                srcTip = "\"Blizzard Default\" is only available when the " .. parentLabel
-                    .. " frame's source is set to Blizzard Default -- the " .. childName
-                    .. " then comes from Blizzard's " .. parentLabel:lower() .. " frame."
-            end
-            local row, h = BuildFrameSourceRow(Ww, pp, yy, unitKey, nil, nil, not parentIsBlizzard, srcTip)
-            local total = h
+            portraitRow, h = Ww:DualRow(pp, yy,
+                { type="toggle", text=enableText,
+                  getValue=function() return db.profile.enabledFrames[unitKey] ~= false end,
+                  setValue=function(v)
+                    db.profile.enabledFrames[unitKey] = v
+                    ReloadAndUpdate()
+                    EllesmereUI:RefreshPage(true)
+                    PromptReloadIfUnspawned({ unitKey })
+                  end },
+                isEUI and { type="toggle", text="Show Portrait",
+                  getValue=function() return settingsTable.showPortrait ~= false end,
+                  setValue=function(v)
+                    settingsTable.showPortrait = v
+                    ReloadAndUpdate()
+                  end } or { type="label", text="" })
             if isEUI then
-                local ph
-                portraitRow, ph = Ww:DualRow(pp, yy - h,
-                    { type="toggle", text="Show Portrait",
-                      getValue=function() return settingsTable.showPortrait ~= false end,
-                      setValue=function(v)
-                        settingsTable.showPortrait = v
-                        ReloadAndUpdate()
-                      end },
-                    { type="spacer" })
-                AttachPortraitSideCog(portraitRow._leftRegion, settingsTable)
-                total = total + ph
+                AttachPortraitSideCog(portraitRow._rightRegion, settingsTable)
             end
-            return row, total
+            AttachFrameSourceCog(portraitRow._leftRegion, unitKey, {
+                tooltip = "Due to Blizzard API restrictions, Blizzard's native " .. childName
+                    .. " can't be hidden in combat and will show the whole time you are in combat. Recommended: match the "
+                    .. parentLabel .. " frame's source -- both Blizzard Default, or both EllesmereUI.",
+                disabled = function() return ns.GetUnitFrameSource(parentKey) ~= "blizzard" end,
+                disabledTooltip = "\"Blizzard Default\" is only available when the " .. parentLabel
+                    .. " frame's source is set to Blizzard Default -- the " .. childName
+                    .. " then comes from Blizzard's " .. parentKey .. " frame.",
+            })
+            return portraitRow, h
         end
 
         local displayHeader, sizeRow, textHeader, textRow
@@ -12180,7 +12543,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
             healthBar  = { section = displayHeader,  target = sizeRow },
-            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "left" },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
         }
@@ -12191,25 +12554,31 @@ initFrame:SetScript("OnEvent", function(self)
     BuildPetOptions = function(W, parent, y)
         local _, h
 
+        _, h = BuildApplyAllRow(parent, y, MINI_GROUP_ORDER, "pet"); y = y - h
+
         local portraitRow
         local function enableRow(Ww, pp, yy)
             local isEUI = ns.GetUnitFrameSource("pet") == "eui"
-            local row, h = BuildFrameSourceRow(Ww, pp, yy, "pet")
-            local total = h
+            portraitRow, h = Ww:DualRow(pp, yy,
+                { type="toggle", text="Enable Pet Frame",
+                  getValue=function() return db.profile.enabledFrames.pet ~= false end,
+                  setValue=function(v)
+                    db.profile.enabledFrames.pet = v
+                    ReloadAndUpdate()
+                    EllesmereUI:RefreshPage(true)
+                    PromptReloadIfUnspawned({ "pet" })
+                  end },
+                isEUI and { type="toggle", text="Show Portrait",
+                  getValue=function() return db.profile.pet.showPortrait ~= false end,
+                  setValue=function(v)
+                    db.profile.pet.showPortrait = v
+                    ReloadAndUpdate()
+                  end } or { type="label", text="" })
             if isEUI then
-                local ph
-                portraitRow, ph = Ww:DualRow(pp, yy - h,
-                    { type="toggle", text="Show Portrait",
-                      getValue=function() return db.profile.pet.showPortrait ~= false end,
-                      setValue=function(v)
-                        db.profile.pet.showPortrait = v
-                        ReloadAndUpdate()
-                      end },
-                    { type="spacer" })
-                AttachPortraitSideCog(portraitRow._leftRegion, db.profile.pet)
-                total = total + ph
+                AttachPortraitSideCog(portraitRow._rightRegion, db.profile.pet)
             end
-            return row, total
+            AttachFrameSourceCog(portraitRow._leftRegion, "pet")
+            return portraitRow, h
         end
 
         local displayHeader, sizeRow, textHeader, textRow
@@ -12218,7 +12587,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Store click targets for hover highlight system
         parent._ufClickTargets = {
             healthBar  = { section = displayHeader,  target = sizeRow },
-            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "left" },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
         }
@@ -12275,29 +12644,42 @@ initFrame:SetScript("OnEvent", function(self)
         local portraitRow, growthRow, simpleRow, simpleBuffRow, bossAuraRow, bossAuraHeader, bossCastHeader, castMainRow
         local function enableRow(Ww, pp, yy)
             local isEUI = ns.GetUnitFrameSource("boss") == "eui"
-            local row, h = BuildFrameSourceRow(Ww, pp, yy, "boss", function(v)
-                -- Force-stop the in-game preview when boss frames are no longer
-                -- EUI-owned; it rides on the real boss frames and renders broken.
-                if v ~= "eui" and ns._bossPreviewActive and ns.SetBossPreview then
-                    ns.SetBossPreview(false)
-                end
-            end)
-            local total = h
-            -- Frame Source on its own row; Show Portrait then the boss stack layout
-            -- sit flush below, all only for the EUI boss frames.
+            local eh
+            portraitRow, eh = Ww:DualRow(pp, yy,
+                { type="toggle", text="Enable Boss Frames",
+                  getValue=function() return db.profile.enabledFrames.boss ~= false end,
+                  setValue=function(v)
+                    db.profile.enabledFrames.boss = v
+                    -- Force-stop the in-game preview when disabling boss frames;
+                    -- it rides on the now-disabled frames and renders broken.
+                    if not v and ns._bossPreviewActive and ns.SetBossPreview then
+                        ns.SetBossPreview(false)
+                    end
+                    ReloadAndUpdate()
+                    EllesmereUI:RefreshPage(true)
+                    PromptReloadIfUnspawned({ "boss" })
+                  end },
+                isEUI and { type="toggle", text="Show Portrait",
+                  getValue=function() return db.profile.boss.showPortrait ~= false end,
+                  setValue=function(v)
+                    db.profile.boss.showPortrait = v
+                    ReloadAndUpdate()
+                  end } or { type="label", text="" })
             if isEUI then
-                local ph
-                portraitRow, ph = Ww:DualRow(pp, yy - h,
-                    { type="toggle", text="Show Portrait",
-                      getValue=function() return db.profile.boss.showPortrait ~= false end,
-                      setValue=function(v)
-                        db.profile.boss.showPortrait = v
-                        ReloadAndUpdate()
-                      end },
-                    { type="spacer" })
-                AttachPortraitSideCog(portraitRow._leftRegion, db.profile.boss)
-                total = total + ph
-                local castRow, ch = Ww:DualRow(pp, yy - total,
+                AttachPortraitSideCog(portraitRow._rightRegion, db.profile.boss)
+            end
+            AttachFrameSourceCog(portraitRow._leftRegion, "boss", {
+                onBeforeSet = function(v)
+                    -- Force-stop the in-game preview when boss frames are no longer
+                    -- EUI-owned; it rides on the real boss frames and renders broken.
+                    if v ~= "eui" and ns._bossPreviewActive and ns.SetBossPreview then
+                        ns.SetBossPreview(false)
+                    end
+                end,
+            })
+            local total = eh
+            if isEUI then
+                local castRow, ch = Ww:DualRow(pp, yy - eh,
                     { type="dropdown", text="Stack Direction", values={ up="Up", down="Down" }, order={ "up", "down" },
                       getValue=function() return db.profile.boss.bossStackDirection or "down" end,
                       setValue=function(v) db.profile.boss.bossStackDirection = v; ReloadAndUpdate() end },
@@ -12306,7 +12688,7 @@ initFrame:SetScript("OnEvent", function(self)
                       setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
                 total = total + ch
             end
-            return row, total
+            return portraitRow, total
         end
 
         local function bossAfterSize(Ww, pp, yy)
@@ -13481,7 +13863,7 @@ initFrame:SetScript("OnEvent", function(self)
             healthBar  = { section = textHeader or displayHeader,  target = sizeRow,  slotSide = "left" },
             powerBar   = { section = parent._powerHeaderFrame or displayHeader,  target = parent._powerHeightRow,  slotSide = "left" },
             powerBarText = { section = parent._powerHeaderFrame or displayHeader,  target = parent._powerTextRow,  slotSide = "left" },
-            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "left" },
+            portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
             nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
             -- Cast bar -> Cast Bar Height; spell icon -> Show Cast Icon. Both live
@@ -13536,6 +13918,14 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildMiniPage(pageName, parent, yOffset)
         -- Consume any pending mini selection from Element Options navigation
         if EllesmereUI._consumePendingMiniSelect then EllesmereUI._consumePendingMiniSelect() end
+
+        -- Tag every option registered while building this page with the
+        -- currently-selected mini unit, so a global-search jump to a
+        -- unit-specific setting can restore this exact selection first via
+        -- EllesmereUI._setMiniUnit -- see EUI_CooldownManager_Options.lua's
+        -- matching EllesmereUI._buildingSelector comment for the full reasoning.
+        EllesmereUI._buildingSelector = { setter = EllesmereUI._setMiniUnit, key = selectedMiniUnit }
+
         local W = EllesmereUI.Widgets
         local y = yOffset
         local _, h
@@ -13948,7 +14338,7 @@ initFrame:SetScript("OnEvent", function(self)
     local ufSearchTerms = {}
     for _, label in pairs(unitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
     for _, label in pairs(miniUnitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
-    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs", "icon zoom" }
+    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs", "icon zoom", "private auras" }
     for _, t in ipairs(_paTerms) do ufSearchTerms[#ufSearchTerms + 1] = t end
 
     -- Rebuild preview when spec changes (class resource pips may appear/disappear)
@@ -14041,10 +14431,10 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
 
-        -- Row 2: Show Text | Text Size
-        _, h = W:DualRow(parent, y,
+        -- Row 2: Show Text | Text Size (+ inline Duration Format cog)
+        local paRow2
+        paRow2, h = W:DualRow(parent, y,
             { type = "toggle", text = "Show Text",
-              tooltip = "Show duration and stack count text on buff and debuff icons.",
               getValue = function() return PAGet("showText") ~= false end,
               setValue = function(v) PASet("showText", v) end },
             { type = "slider", text = "Text Size", min = 6, max = 24, step = 1,
@@ -14052,20 +14442,37 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) PASet("textSize", v) end }
         );  y = y - h
 
-        _, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Duration Format",
-              tooltip = "How aura duration text is written. All styles except Blizzard Default are short and locale-independent, so they never overflow the icon.",
-              values = {
-                  blizzard = { text = "Blizzard Default (2 min)" },
-                  compact  = { text = "Standard (5m / 32)" },
-                  colon    = { text = "Colon (5:32)" },
-                  seconds  = { text = "Seconds (152)" },
-              },
-              order = { "blizzard", "compact", "colon", "seconds" },
-              getValue = function() return PAGet("durationFormat") or "blizzard" end,
-              setValue = function(v) PASet("durationFormat", v) end },
-            nil
-        );  y = y - h
+        -- Inline cog: Duration Format (next to "Text Size").
+        do
+            local rgn = paRow2._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Duration Format",
+                rows = {
+                    { type = "dropdown", label = "Format",
+                      values = {
+                          blizzard = { text = "Blizzard Default (2 min)" },
+                          compact  = { text = "Standard (5m / 32)" },
+                          colon    = { text = "Colon (5:32)" },
+                          seconds  = { text = "Seconds (152)" },
+                      },
+                      order = { "blizzard", "compact", "colon", "seconds" },
+                      get = function() return PAGet("durationFormat") or "blizzard" end,
+                      set = function(v) PASet("durationFormat", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
 
         -- Row 3: Border Size (+ inline color swatch) | (empty)
         do
@@ -14141,6 +14548,20 @@ initFrame:SetScript("OnEvent", function(self)
                 return ns._bossHeaderBuilder
             elseif pageName == PAGE_MINI then
                 return _miniHeaderBuilder
+            end
+            return nil
+        end,
+        -- Main/Mini Frames content is gated on whichever unit is currently
+        -- selected, and the default is always "player"/"targettarget" -- so a
+        -- hidden pre-build that only ever builds the default leaves the other
+        -- units' settings unsearchable until the player picks them live. Both
+        -- unit lists are small and fixed, so build once per unit rather than
+        -- collapsing to representative shapes.
+        getPrebuildVariants = function(pageName)
+            if pageName == PAGE_DISPLAY then
+                return { setter = EllesmereUI._setUnitFrameUnit, keys = unitOrder, currentKey = selectedUnit }
+            elseif pageName == PAGE_MINI then
+                return { setter = EllesmereUI._setMiniUnit, keys = miniUnitOrder, currentKey = selectedMiniUnit }
             end
             return nil
         end,

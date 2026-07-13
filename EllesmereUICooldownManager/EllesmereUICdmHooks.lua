@@ -673,6 +673,17 @@ end
 --- viewer pool the frame was enumerated from -- this is the user-visible
 --- ground truth, not the static category API. It also tells us which
 --- family to consult (buffs -> _divertedSpellsBuff, otherwise CD).
+
+-- Plain readable positive number, without ever inspecting a secret (type()
+-- and issecretvalue read only the tags). Mirrors _IsUsableSID in
+-- EllesmereUICdmSpellPicker.lua; used below to tell a real "no diversion"
+-- answer apart from a blind lookup whose every id field was secret.
+local function CdidIDReadable(id)
+    if type(id) ~= "number" then return false end
+    if issecretvalue and issecretvalue(id) then return false end
+    return id > 0
+end
+
 local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     if not cdID then return viewerDefaultBar end
     local cached = _cdidRouteMap[cdID]
@@ -714,6 +725,23 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
                 routedBar = RVV(divertMap, lid)
                 if routedBar then break end
             end
+        end
+    end
+
+    if not routedBar then
+        -- No diversion found. Only trust (and cache) that answer if at least
+        -- one id field was actually readable: with every id secret (active
+        -- viewer frame in combat) the lookup above was blind, and caching the
+        -- fallback would pin the wrong bar until the next RebuildSpellRouteMap
+        -- -- the same reasoning as the uncached info-not-ready return above.
+        local sawReadable = CdidIDReadable(info.spellID) or CdidIDReadable(info.overrideSpellID)
+        if not sawReadable and info.linkedSpellIDs then
+            for _, lid in ipairs(info.linkedSpellIDs) do
+                if CdidIDReadable(lid) then sawReadable = true; break end
+            end
+        end
+        if not sawReadable then
+            return viewerDefaultBar
         end
     end
 
@@ -1079,6 +1107,15 @@ do
         return loadingActive or GetTime() < settleUntil
     end
 
+    -- Full CDM rebuilds (spec/talent swaps, settings changes) re-render every
+    -- icon while the cooldown/charge APIs are briefly transient, exactly like
+    -- a zone boundary -- callers open the same settle window so the re-prime
+    -- can't false-arm a batch of ready sounds. Longest window wins.
+    function ns._cdmBumpSoundSettle(sec)
+        local u = GetTime() + (sec or SETTLE_SECONDS)
+        if u > settleUntil then settleUntil = u end
+    end
+
     local gate = CreateFrame("Frame")
     gate:RegisterEvent("LOADING_SCREEN_ENABLED")
     gate:RegisterEvent("LOADING_SCREEN_DISABLED")
@@ -1107,6 +1144,12 @@ SlashCmdList.CDMREADYDBG = function()
     print("|cff0cd29f[CDReady]|r debug " .. (ns._cdReadySoundDebug and "ON" or "OFF"))
 end
 
+-- Reject armed->ready spans shorter than this: a real cooldown arms the moment
+-- the spell is used, so a sub-GCD-length arm can only be a transient misread
+-- (GCD tail / charge race). Costs the sound on real cooldowns under ~1.6s,
+-- which CDM tracking barely has.
+local CD_READY_MIN_ARM = 1.6
+
 -- Is the spell READY right now? Charge spells: only at MAX charges (recharge not
 -- running). Non-charge: not on a real (non-GCD) cooldown. liveSid = resolved override.
 local function CdReadyIsReady(liveSid)
@@ -1122,7 +1165,8 @@ end
 -- WatchCdReadySoundIfEnabled set). Arms while not ready, plays + disarms on the ready
 -- edge. Deferred one frame and re-confirmed so a charge/GCD-tail race that momentarily
 -- reads ready can't false-fire. Self-gates zero-cost on the feature flag.
-local function EvalCdReadySound(frame, fd)
+-- primeOnly (the DecorateFrame prime): arm state only, never reaches the play path.
+local function EvalCdReadySound(frame, fd, primeOnly)
     if not ns._cdmAnyCdReadySound then return end
     if not fd then return end
     if fd._isProcessingOverride then return end
@@ -1135,24 +1179,27 @@ local function EvalCdReadySound(frame, fd)
     local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
     local key = ss2 and ss2.cdReadySoundKey
     if not key or key == "none" then fd._cdReadyArmed = false; return end
+    if ns._cdmSoundSuppressed() then
+        -- Loading screen / login / rebuild settle: cooldown reads are transient
+        -- across the boundary, so anything armed (or arming) now is suspect --
+        -- gate the ARM, not just the fire, and clear stale arms. A spell
+        -- genuinely on cooldown re-arms from its ongoing cooldown on the next
+        -- SPELL_UPDATE_COOLDOWN after the window, so no real edge is lost.
+        fd._cdReadyArmed = false
+        return
+    end
     local liveSid = sid2
     if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
         liveSid = C_SpellBook.FindSpellOverrideByID(sid2) or sid2
     end
     if not CdReadyIsReady(liveSid) then
         -- On cooldown (or a charge spell below max): arm.
+        if not fd._cdReadyArmed then fd._cdReadyArmedAt = GetTime() end
         fd._cdReadyArmed = true
         fd._cdReadyArmedSid = sid2
-    elseif fd._cdReadyArmed then
+    elseif fd._cdReadyArmed and not primeOnly then
         if fd._cdReadyArmedSid ~= sid2 then
             -- Spell on this frame changed since arming (spec/talent swap); stale arm.
-            fd._cdReadyArmed = false
-            return
-        end
-        if ns._cdmSoundSuppressed() then
-            -- Loading screen / login settle: this ready edge is almost always a
-            -- zone-transition artifact, not a real cooldown finishing. Drop it
-            -- silently so it fires neither now nor when the window ends.
             fd._cdReadyArmed = false
             return
         end
@@ -1177,6 +1224,12 @@ local function EvalCdReadySound(frame, fd)
                 end
                 if not CdReadyIsReady(livep) then return end  -- not ready (race) -> stay armed
                 if ns._cdmSoundSuppressed() then fd._cdReadyArmed = false; return end  -- a load began mid-defer
+                -- Sub-GCD arm span = transient misread, not a real cooldown ending.
+                local armedAt = fd._cdReadyArmedAt
+                if not armedAt or (GetTime() - armedAt) < CD_READY_MIN_ARM then
+                    fd._cdReadyArmed = false
+                    return
+                end
                 fd._cdReadyArmed = false
                 if ns._cdReadySoundDebug then
                     local nm = (C_Spell.GetSpellName and C_Spell.GetSpellName(livep)) or "?"
@@ -1224,7 +1277,7 @@ function ns.WatchCdReadySoundIfEnabled(frame)
             end)
             ns._cdReadySoundEventFrame = ef
         end
-        EvalCdReadySound(frame, fd)  -- prime the arm state (no play unless already armed)
+        EvalCdReadySound(frame, fd, true)  -- prime the arm state only; never plays here
     elseif ns._cdReadySoundWatch[frame] then
         ns._cdReadySoundWatch[frame] = nil
     end
@@ -1359,13 +1412,165 @@ function ns.WatchChargeCdTextIfEnabled(frame)
 end
 
 -------------------------------------------------------------------------------
+--  Swiftmend brightness: Blizzard dims the icon via SetVertexColor when
+--  Efflorescence / HoTs drop. Hook the icon texture once to force bright.
+--  Recursion guard only -- never compare incoming args (secret values).
+--  Retried on EVERY DecorateFrame call (not just the first decoration):
+--  spell-ID resolution can miss on the frame's very first pass (cooldownID
+--  not yet assigned), and the decorated-flag early return used to make that
+--  miss permanent. Non-Druids skip on the cached class check; already-hooked
+--  frames skip on one flag read, so the retry is effectively free.
+-------------------------------------------------------------------------------
+local SWIFTMEND_SID = 18562
+local _smHookedIcons = {}
+local function SwiftmendEnabled()
+    return not EllesmereUIDB or EllesmereUIDB.brightenSwiftmend ~= false
+end
+local function TryHookSwiftmend(frame, fd)
+    if not _isDruid or fd._smVCHooked then return end
+    local iconWidget = fd.tex
+    if not iconWidget then return end
+    local dispSID, baseSID = ResolveFrameSpellID(frame)
+    if dispSID and issecretvalue(dispSID) then dispSID = nil end
+    if baseSID and issecretvalue(baseSID) then baseSID = nil end
+    if baseSID ~= SWIFTMEND_SID and dispSID ~= SWIFTMEND_SID then return end
+    fd._smVCHooked = true
+    _smHookedIcons[#_smHookedIcons + 1] = iconWidget
+    local smGuard = false
+    hooksecurefunc(iconWidget, "SetVertexColor", function()
+        if smGuard then return end
+        if not SwiftmendEnabled() then return end
+        smGuard = true
+        iconWidget:SetVertexColor(1, 1, 1)
+        smGuard = false
+    end)
+    if SwiftmendEnabled() then iconWidget:SetVertexColor(1, 1, 1) end
+end
+
+-- Temporary diagnostic for the "keep Swiftmend bright" report: dumps every
+-- CDM frame currently resolving to Swiftmend plus its hook state.
+SLASH_CDMSMDBG1 = "/cdmsmdbg"
+SlashCmdList.CDMSMDBG = function()
+    local n, hookedN = 0, 0
+    for frame, fd in pairs(hookFrameData) do
+        local dispSID, baseSID = ResolveFrameSpellID(frame)
+        if dispSID and issecretvalue(dispSID) then dispSID = nil end
+        if baseSID and issecretvalue(baseSID) then baseSID = nil end
+        if dispSID == SWIFTMEND_SID or baseSID == SWIFTMEND_SID then
+            n = n + 1
+            if fd._smVCHooked then hookedN = hookedN + 1 end
+            local col = "?"
+            local tex = fd.tex
+            if tex and tex.GetVertexColor then
+                local r, g, b = tex:GetVertexColor()
+                if r and not issecretvalue(r) then
+                    col = string.format("%.2f %.2f %.2f", r, g, b)
+                end
+            end
+            print(("|cff0cd29f[SMDBG]|r sid=%s/%s hooked=%s vc=%s shown=%s"):format(
+                tostring(dispSID), tostring(baseSID), tostring(fd._smVCHooked or false),
+                col, tostring(frame:IsShown())))
+        end
+    end
+    print(("|cff0cd29f[SMDBG]|r swiftmend frames=%d hooked=%d druid=%s enabled=%s"):format(
+        n, hookedN, tostring(_isDruid), tostring(SwiftmendEnabled())))
+end
+
+-------------------------------------------------------------------------------
 --  DecorateFrame
 --  Add our visual overlays to a CDM frame (one-time per frame).
 -------------------------------------------------------------------------------
 local function DecorateFrame(frame, barData)
     local fd = hookFrameData[frame]
-    if fd and fd.decorated then return fd end
     if not fd then fd = {}; hookFrameData[frame] = fd end
+
+    -- Border + background must track the CURRENT bar's settings on every
+    -- call, not just the first: Blizzard recycles a shared pool of icon
+    -- frames across bars/spells, so a physical frame already decorated
+    -- under a different bar's (or an older) style must still pick up this
+    -- bar's current settings whenever it's (re)claimed. For hooked default
+    -- bars (Essential/Utility), this DecorateFrame call from
+    -- CollectAndReanchor is the ONLY re-style path -- RefreshCDMIconAppearance,
+    -- which otherwise keeps custom bars current, is skipped for those bars.
+    -- Structural frame/texture creation stays one-time via the fd.borderFrame /
+    -- fd.bg guards; only the styling calls below are unconditional. Frame
+    -- levels are relative to the icon's own live level (not a value cached at
+    -- first decoration) so a pooled frame reclaimed at a different base level
+    -- stays correctly layered against its own border/glow/text overlays.
+    local baseLvl = frame:GetFrameLevel()
+
+    if not fd.bg then
+        local bg = frame:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        fd.bg = bg
+    end
+    fd.bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
+        barData.bgB or 0.08, barData.bgA or 0.6)
+
+    -- Custom-shape bars own their border: ApplyShapeToCDMIcon draws the ring
+    -- on the shapeBorder texture and hides the square border. Re-applying the
+    -- square style here would force it back on top of the shaped icon on every
+    -- reanchor whose icon set did NOT change (no shape re-apply follows those
+    -- passes), so keep it hidden instead. Newly (re)claimed frames always land
+    -- in an iconsChanged refresh, which re-applies the shape with current
+    -- settings. The active-state tint on shaped icons rides shapeBorder
+    -- (ApplyActiveOverlays), never the square border, so both re-asserts below
+    -- are square-only.
+    local shapeKey = barData.iconShape
+    if shapeKey and shapeKey ~= "none" and shapeKey ~= "cropped" then
+        if fd.borderFrame then
+            EllesmereUI.PP.HideBorder(fd.borderFrame)
+            local bdFrame = EllesmereUI._bdBorderData and EllesmereUI._bdBorderData[fd.borderFrame]
+            if bdFrame then bdFrame:Hide() end
+        end
+    else
+        if not fd.borderFrame then
+            local bf = CreateFrame("Frame", nil, frame)
+            bf:SetAllPoints(frame)
+            fd.borderFrame = bf
+        end
+        local brdR, brdG, brdB = barData.borderR or 0, barData.borderG or 0, barData.borderB or 0
+        if barData.borderClassColor then
+            local cc = _playerClass and RAID_CLASS_COLORS[_playerClass]
+            if cc then brdR, brdG, brdB = cc.r, cc.g, cc.b end
+        end
+        local textureKey = barData.borderTexture or "solid"
+        EllesmereUI.ApplyBorderStyle(fd.borderFrame,
+            barData.borderSize or 1,
+            brdR, brdG, brdB, barData.borderA or 1,
+            textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
+            barData.borderTextureShiftX, barData.borderTextureShiftY,
+            "cdm", barData.borderThickness or "thin")
+        -- ApplyBorderStyle above always paints the bar's BASE color. If this
+        -- spell's active-state tint is currently engaged (ns.ApplyActiveOverlays
+        -- drives fd._activeBorderOn independently of DecorateFrame, via Blizzard's
+        -- own SetSwipeColor callback), re-assert it immediately so a reanchor
+        -- firing mid-proc doesn't flash the border back to its base color.
+        if fd._activeBorderOn and EllesmereUI.SetBorderStyleColor then
+            local fcA = _ecmeFC[frame]
+            local sidA, bkA = fcA and fcA.spellID, fcA and fcA.barKey
+            local ss = sidA and ResolveSpellSettings(frame, sidA, ns.GetBarSpellData(bkA))
+            local abR = (ss and ss.activeBorderR) or 1
+            local abG = (ss and ss.activeBorderG) or 0.776
+            local abB = (ss and ss.activeBorderB) or 0.376
+            local abA = (ss and ss.activeBorderA) or 1
+            EllesmereUI.SetBorderStyleColor(fd.borderFrame, abR, abG, abB, abA)
+        end
+    end
+    -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
+    if fd.borderFrame then
+        fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
+    end
+    if fd.glowOverlay then fd.glowOverlay:SetFrameLevel(baseLvl + 16) end
+    if fd.textOverlay then fd.textOverlay:SetFrameLevel(baseLvl + 23) end
+
+    if fd.decorated then
+        -- Late retry (see TryHookSwiftmend's helper comment): the unconditional
+        -- style block above already ran; only the one-time decoration below is
+        -- skipped for already-decorated frames.
+        TryHookSwiftmend(frame, fd)
+        return fd
+    end
     fd.decorated = true
 
     -- A HOSTED buff's frame is a Blizzard buff-viewer frame reparented onto a
@@ -1383,24 +1588,9 @@ local function DecorateFrame(frame, barData)
     fd.tex = iconWidget
     fd.cooldown = frame.Cooldown
 
-    -- Swiftmend brightness: Blizzard dims the icon via SetVertexColor when
-    -- Efflorescence / HoTs drop. Hook the texture once per frame to force
-    -- bright. Recursion guard only -- never compare incoming args (secret values).
-    -- Class check is cached at file scope so non-Druids skip entirely.
-    if iconWidget and not fd._smVCHooked and _isDruid then
-        local _, baseSID = ResolveFrameSpellID(frame)
-        if baseSID == 18562 then
-            fd._smVCHooked = true
-            local smGuard = false
-            hooksecurefunc(iconWidget, "SetVertexColor", function()
-                if smGuard then return end
-                smGuard = true
-                iconWidget:SetVertexColor(1, 1, 1)
-                smGuard = false
-            end)
-            iconWidget:SetVertexColor(1, 1, 1)
-        end
-    end
+    -- Swiftmend brightness (druid only; also retried from the decorated
+    -- early-return above in case resolution misses on this first pass).
+    TryHookSwiftmend(frame, fd)
 
     HideBlizzardDecorations(frame)
 
@@ -1426,6 +1616,24 @@ local function DecorateFrame(frame, barData)
                 -- flash at the viewer's position before CollectAndReanchor claims it.
                 if fd.decorated then
                     frame:SetAlpha(0)
+                    -- Re-park CD/utility frames offscreen (buff pools stay
+                    -- hands-off): alpha alone cannot keep an unclaimed frame
+                    -- invisible -- the engine re-raises item alpha through
+                    -- paths no SetAlpha hook can see (SetAlphaFromBoolean,
+                    -- alpha animations) whenever cooldown/aura state changes
+                    -- (e.g. druid form swaps). Position enforcement is immune
+                    -- to every alpha path. A later re-claim SetPoints the
+                    -- frame absolutely, so recovery is total.
+                    -- TOPLEFT keyword deliberately matches LayoutCDMBar's claim
+                    -- SetPoint (which does not ClearAllPoints): same-keyword
+                    -- SetPoint REPLACES the park point; a different keyword
+                    -- would accumulate as a second conflicting anchor.
+                    if not fd._isBuffViewerFrame and not fd._parkGuard then
+                        fd._parkGuard = true
+                        frame:ClearAllPoints()
+                        frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+                        fd._parkGuard = nil
+                    end
                 end
                 return
             end
@@ -1442,35 +1650,24 @@ local function DecorateFrame(frame, barData)
     -- Per-icon active state hooks installed lazily during CollectAndReanchor,
     -- ONLY for spells with custom active state settings.
 
-    if not fd.bg then
-        local bg = frame:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
-            barData.bgB or 0.08, barData.bgA or 0.6)
-        fd.bg = bg
-    end
-
-    -- Frame levels are relative to the icon's own level so that icons
-    -- with higher base levels (Blizzard increments +1 per icon) never
-    -- render their content above a neighbor's border or text.
-    local baseLvl = frame:GetFrameLevel()
-
+    -- glowOverlay/textOverlay structural creation stays one-time; their frame
+    -- levels are (re)applied unconditionally near the top of this function.
     if not fd.glowOverlay then
         local go = CreateFrame("Frame", nil, frame)
         go:SetAllPoints(frame)
         go:SetAlpha(0)
         go:EnableMouse(false)
         fd.glowOverlay = go
+        go:SetFrameLevel(baseLvl + 16)
     end
-    fd.glowOverlay:SetFrameLevel(baseLvl + 16)
 
     if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
         txo:EnableMouse(false)
         fd.textOverlay = txo
+        txo:SetFrameLevel(baseLvl + 23)
     end
-    fd.textOverlay:SetFrameLevel(baseLvl + 23)
 
     if not fd.keybindText then
         local kt = fd.textOverlay:CreateFontString(nil, "OVERLAY")
@@ -1502,22 +1699,6 @@ local function DecorateFrame(frame, barData)
             end
         end)
     end
-
-    if not fd.borderFrame then
-        local bf = CreateFrame("Frame", nil, frame)
-        bf:SetAllPoints(frame)
-        fd.borderFrame = bf
-        local textureKey = barData.borderTexture or "solid"
-        EllesmereUI.ApplyBorderStyle(bf,
-            barData.borderSize or 1,
-            barData.borderR or 0, barData.borderG or 0,
-            barData.borderB or 0, barData.borderA or 1,
-            textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
-            barData.borderTextureShiftX, barData.borderTextureShiftY,
-            "cdm", barData.borderThickness or "thin")
-    end
-    -- "Show Behind": +13 draws the border in front of the icon, level-1 behind it.
-    fd.borderFrame:SetFrameLevel(barData.borderBehind and math.max(0, baseLvl - 1) or (baseLvl + 13))
 
     fd.procGlowActive = false
 
@@ -3982,7 +4163,13 @@ local function CollectAndReanchor()
     ---------------------------------------------------------------------------
     --  PHASE 2: Process BUFF bars (existing flow, plus injected custom frames)
     ---------------------------------------------------------------------------
-    if ns.ReconcileBuffDisplayOrder then ns.ReconcileBuffDisplayOrder() end
+    -- Composition-gated: reanchors fire constantly in combat as buffs come and
+    -- go, but the tracked catalog only changes on rebuilds -- skip the full
+    -- reconcile (viewer enumeration + sorts) unless something marked it dirty.
+    if ns._cdmBuffOrderDirty and ns.ReconcileBuffDisplayOrder then
+        ns._cdmBuffOrderDirty = nil
+        ns.ReconcileBuffDisplayOrder()
+    end
     for barKey, list in pairs(barLists) do
         local barData = barDataByKey[barKey]
         if barData and barData.enabled and barData.barType ~= "custom_buff" then
@@ -4942,13 +5129,31 @@ local function CollectAndReanchor()
                 end
             else
                 -- CD/utility frame: unclaimed (unrouted or ghost-bar routed).
-                -- Alpha-hide only -- never ClearAllPoints/Hide on Blizzard
+                -- Alpha-hide AND park offscreen -- never Hide on Blizzard
                 -- pool frames. Hiding a pool frame signals Blizzard that the
                 -- pool is stale, which triggers a full viewer rebuild. Spells
                 -- that continuously transform (e.g. Lightsmith Holy Armaments)
                 -- cause Blizzard to rebuild every tick; if we Hide here, we
                 -- amplify that into an infinite rebuild loop.
+                --
+                -- The park matters as much as the alpha: a frame that was
+                -- claimed by the PREVIOUS spec still holds its points on that
+                -- spec's bar (e.g. a druid-wide spell assigned on Resto but
+                -- ghosted on Guardian), and the engine re-raises item alpha
+                -- through paths no hook can see (SetAlphaFromBoolean, alpha
+                -- animations) on cooldown/aura state changes such as form
+                -- swaps -- resurrecting the icon pinned to the old bar. Parked
+                -- offscreen (immediately re-pointed, so the rect stays valid),
+                -- every alpha path is harmless. The SetPoint hook re-parks it
+                -- if Blizzard's layout moves it while unclaimed; a re-claim
+                -- SetPoints absolutely, so recovery is total.
                 frame:SetAlpha(0)
+                -- TOPLEFT keyword matches LayoutCDMBar's claim SetPoint (no
+                -- ClearAllPoints there): same keyword = clean replacement.
+                if efd then efd._parkGuard = true end
+                frame:ClearAllPoints()
+                frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+                if efd then efd._parkGuard = nil end
                 if frame.Cooldown and frame.Cooldown.SetDrawSwipe then
                     frame.Cooldown:SetDrawSwipe(false)
                 end
@@ -6076,9 +6281,16 @@ function ns.SetupEditModeLock()
     end
 end
 
--- Swiftmend Brightness Fix (CDM): handled inside DecorateFrame via
--- ResolveFrameSpellID. No external scan needed.
-_G._ECDM_ScanSwiftmend = nil
+-- Swiftmend Brightness Fix (CDM): hooks install via TryHookSwiftmend during
+-- DecorateFrame. The scan hook only re-brightens already-hooked icons so the
+-- General Settings toggle takes effect immediately when switched on (the
+-- SetVertexColor hook reads the toggle live for everything after that).
+_G._ECDM_ScanSwiftmend = function()
+    if not SwiftmendEnabled() then return end
+    for i = 1, #_smHookedIcons do
+        _smHookedIcons[i]:SetVertexColor(1, 1, 1)
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Mirror Key Presses  (per-bar: barData.pressMirror -- set in CDM Bars > Extras)

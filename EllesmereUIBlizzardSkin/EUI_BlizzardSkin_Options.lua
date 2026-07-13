@@ -393,6 +393,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipShowMode = v
+                  EllesmereUI:RefreshPage()  -- update the Use Modifier cog disabled state
               end },
             -- Front-end duplicate of the toggle in Global Settings > Developer;
             -- same EllesmereUIDB.showSpellID key read by the tooltip logic in
@@ -459,6 +460,61 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateSidModState)
             UpdateSidModState()
+        end
+
+        -- "Use Modifier" cog on Show Tooltips (left region): while the chosen
+        -- modifier is held, suppression is lifted so a hidden tooltip can be
+        -- read on hover (e.g. peeking a spell in combat). Disabled (blocked +
+        -- dimmed) when the reskin is off or the mode is "Always" (nothing hides).
+        do
+            local leftRgn = ttModeRow._leftRegion
+            local function showModOff()
+                if ttReskinOff() then return true end
+                return ((EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always") == "always"
+            end
+            local _, showModShow = EllesmereUI.BuildCogPopup({
+                title = "Show Tooltips",
+                rows = {
+                    { type="dropdown", label="Peek Modifier",
+                      values={ none="None", shift="Shift", control="Control", alt="Alt" },
+                      order={ "none", "shift", "control", "alt" },
+                      get=function() return (EllesmereUIDB and EllesmereUIDB.tooltipShowModifier) or "none" end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.tooltipShowModifier = v
+                      end },
+                },
+            })
+            local showModBtn = CreateFrame("Button", nil, leftRgn)
+            showModBtn:SetSize(26, 26)
+            showModBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -9, 0)
+            leftRgn._lastInline = showModBtn
+            showModBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+            showModBtn:SetAlpha(showModOff() and 0.15 or 0.4)
+            local showModTex = showModBtn:CreateTexture(nil, "OVERLAY")
+            showModTex:SetAllPoints()
+            showModTex:SetTexture(EllesmereUI.COGS_ICON)
+            showModBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            showModBtn:SetScript("OnLeave", function(self) self:SetAlpha(showModOff() and 0.15 or 0.4) end)
+            showModBtn:SetScript("OnClick", function(self) showModShow(self) end)
+
+            local showModBlock = CreateFrame("Frame", nil, showModBtn)
+            showModBlock:SetAllPoints()
+            showModBlock:SetFrameLevel(showModBtn:GetFrameLevel() + 10)
+            showModBlock:EnableMouse(true)
+            showModBlock:SetScript("OnEnter", function()
+                local msg = ttReskinOff() and EllesmereUI.DisabledTooltip("Reskin Tooltip")
+                    or "This option requires Show Tooltips to be set to hide tooltips"
+                EllesmereUI.ShowWidgetTooltip(showModBtn, msg)
+            end)
+            showModBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function UpdateShowModState()
+                local off = showModOff()
+                showModBtn:SetAlpha(off and 0.15 or 0.4)
+                if off then showModBlock:Show() else showModBlock:Hide() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateShowModState)
+            UpdateShowModState()
         end
 
         -- Border: size slider with an inline colour + opacity swatch. Part of the
@@ -747,6 +803,27 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
         AttachDisabledOverlay(coreRow2)
 
+        local socketRow
+        socketRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Socket Panel",
+              tooltip="Show a panel of equipped-gear sockets on the character sheet; click a socket to gem it.",
+              getValue=function() return EllesmereUIDB and EllesmereUIDB.charSheetSocketPanel ~= false end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.charSheetSocketPanel = v
+                  if EllesmereUI._refreshCharSheetSocketPanel then EllesmereUI._refreshCharSheetSocketPanel() end
+              end },
+            { type="slider", text="Icon Zoom", min=0, max=0.20, step=0.01,
+              tooltip="Crops the border of the equipment-slot item icons on the character and inspect sheets. 0 shows the full icon. Only affects the themed character sheet.",
+              getValue=function() return (EllesmereUIDB and EllesmereUIDB.charSheetIconZoom) or 0.07 end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.charSheetIconZoom = v
+                  if EllesmereUI._refreshCharSheetIconZoom then EllesmereUI._refreshCharSheetIconZoom() end
+              end }
+        );  y = y - h
+        AttachDisabledOverlay(socketRow)
+
         local enchGemRow
         enchGemRow, h = W:DualRow(parent, y,
             { type="toggle", text="Enchants",
@@ -827,14 +904,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.flyoutItemLevels = v
               end },
-            { type="slider", text="Icon Zoom", min=0, max=0.20, step=0.01,
-              tooltip="Crops the border of the equipment-slot item icons on the character and inspect sheets. 0 shows the full icon. Only affects the themed character sheet.",
-              getValue=function() return (EllesmereUIDB and EllesmereUIDB.charSheetIconZoom) or 0.07 end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.charSheetIconZoom = v
-                  if EllesmereUI._refreshCharSheetIconZoom then EllesmereUI._refreshCharSheetIconZoom() end
-              end }
+            { type="label", text="" }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 10);  y = y - h
@@ -1582,11 +1652,25 @@ initFrame:SetScript("OnEvent", function(self)
         local cardTop = y
         local brd  -- whole-card border, created with the bg below (hover closure)
 
+        -- Explicit size + single TOPLEFT anchor (the widget contract): inline
+        -- search re-anchors and restores direct children through their FIRST
+        -- point only, so a frame that gets its width from a second point
+        -- collapses to zero width the first time a search is cleared.
+        local cardW = parent:GetWidth() - (EllesmereUI.CONTENT_PAD - WS_CARD_INSET) * 2
         local hdr = CreateFrame("Button", nil, parent)
-        hdr:SetHeight(WS_HEADER_H)
+        PP.Size(hdr, cardW, WS_HEADER_H)
         PP.Point(hdr, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD - WS_CARD_INSET, y)
-        PP.Point(hdr, "TOPRIGHT", parent, "TOPRIGHT", -(EllesmereUI.CONTENT_PAD - WS_CARD_INSET), y)
         hdr:SetFrameLevel(parent:GetFrameLevel() + 3)
+
+        -- Search metadata: the header acts as its own section, so searching a
+        -- window's title or description returns the card (style dropdown and
+        -- all) as a result. Deep links are unaffected: they match the exact
+        -- section names created inside buildContent, never this joined string.
+        local searchName = win.title .. " " .. (win.desc or "")
+        hdr._isSectionHeader = true
+        hdr._sectionName = searchName
+        local searchNameLoc = L(win.title) .. " " .. L(win.desc or "")
+        if searchNameLoc ~= searchName then hdr._sectionNameLoc = searchNameLoc end
 
         -- Hover wash (transparent when idle; the card bg below provides the fill)
         local hbg = EllesmereUI.SolidTex(hdr, "BACKGROUND", 0, 0, 0, 0)
@@ -1711,11 +1795,16 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - 8
         end
 
-        -- Card background + border spanning the header and any expanded content
-        local bg = CreateFrame("Frame", nil, parent)
+        -- Card background + border spanning the header and any expanded content.
+        -- Child of the header, NOT the page wrapper: the inline search walks
+        -- direct wrapper children, and as a header child the bg is never
+        -- collected as a row, follows the header wherever the search re-flows
+        -- it, and hides/shows with it for free. Explicitly sized because the
+        -- header's own rect is the only anchor left.
+        local bg = CreateFrame("Frame", nil, hdr)
         bg:SetFrameLevel(parent:GetFrameLevel())
-        PP.Point(bg, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD - WS_CARD_INSET, cardTop)
-        PP.Point(bg, "BOTTOMRIGHT", parent, "TOPRIGHT", -(EllesmereUI.CONTENT_PAD - WS_CARD_INSET), y)
+        PP.Size(bg, cardW, cardTop - y)
+        PP.Point(bg, "TOPLEFT", hdr, "TOPLEFT", 0, 0)
         local fill = EllesmereUI.SolidTex(bg, "BACKGROUND", 0.06, 0.08, 0.10, 0.5)
         fill:SetAllPoints()
         brd = EllesmereUI.MakeBorder(bg, 1, 1, 1, expanded and 0.16 or 0.12, PP)
@@ -1745,8 +1834,14 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 14);  y = y - h
 
-        local intro = EllesmereUI.MakeFont(parent, 13, nil, 1, 1, 1, 0.5)
-        PP.Point(intro, "TOP", parent, "TOP", 0, y)
+        -- Hosted on a sized frame (not a raw region on the wrapper) so the
+        -- inline search hides it while filtering and restores it on clear;
+        -- regions are invisible to the search and would float over results.
+        local introHost = CreateFrame("Frame", nil, parent)
+        PP.Size(introHost, parent:GetWidth() - EllesmereUI.CONTENT_PAD * 2, 20)
+        PP.Point(introHost, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y)
+        local intro = EllesmereUI.MakeFont(introHost, 13, nil, 1, 1, 1, 0.5)
+        PP.Point(intro, "TOP", introHost, "TOP", 0, 0)
         intro:SetText(L("Pick a style for all reskinned Blizzard windows."))
         y = y - 28
 

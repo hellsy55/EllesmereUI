@@ -823,7 +823,7 @@ local BMSIMPLE_CAP   = 10  -- max buffs the Simple Setup grid can show per butto
 
 -- Hover tooltips for BuffManager aura icons/bars. Mirrors the Debuff Display
 -- tooltip pattern (see EllesmereUIRaidFrames StyleButton): OnEnter renders the
--- aura by its instance ID, which is secret-safe — it works for fingerprinted
+-- aura by its instance ID, which is secret-safe -- it works for fingerprinted
 -- secret auras too (Blizzard renders the real name we can't read). Mouse is
 -- enabled only when the buff "Hide Tooltips" setting is off; motion and clicks
 -- propagate to the parent button so click-casting keeps working underneath.
@@ -1269,19 +1269,118 @@ local function GetThresholdAlphaCurve(thresholdSec)
     return curve
 end
 
--- [element] = { unit, iid, curve, apply }; apply(element, colorResult)
+-- Threshold sound cue -- rides the same ticker as the recolor, but unlike the
+-- visual path it needs a plain Lua comparison, so it reads the aura timing
+-- directly and skips silently whenever that timing is secret (private auras).
+-- The cue therefore only fires for auras with readable timing. 12.0 only for
+-- now; the 12.1 threshold section is inert pending engine bindings.
+local THRESHOLD_SOUND_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
+local _thresholdSoundPaths, _thresholdSoundNames, _thresholdSoundOrder
+-- Built lazily so SharedMedia sounds registered by other addons at login are
+-- included; shared by the ticker (playback) and the options page (dropdown).
+local function GetThresholdSoundTables()
+    if _thresholdSoundPaths then
+        return _thresholdSoundPaths, _thresholdSoundNames, _thresholdSoundOrder
+    end
+    _thresholdSoundPaths = {
+        ["airhorn"]   = THRESHOLD_SOUND_DIR .. "AirHorn.ogg",
+        ["banana"]    = THRESHOLD_SOUND_DIR .. "BananaPeelSlip.ogg",
+        ["bikehorn"]  = THRESHOLD_SOUND_DIR .. "BikeHorn.ogg",
+        ["bite"]      = THRESHOLD_SOUND_DIR .. "Bite.ogg",
+        ["boxing"]    = THRESHOLD_SOUND_DIR .. "BoxingArenaSound.ogg",
+        ["catmeow"]   = THRESHOLD_SOUND_DIR .. "CatMeow.ogg",
+        ["catmeow2"]  = THRESHOLD_SOUND_DIR .. "CatMeow2.ogg",
+        ["gunshot"]   = THRESHOLD_SOUND_DIR .. "FrontalsGunshot.wav",
+        ["glass"]     = THRESHOLD_SOUND_DIR .. "Glass.mp3",
+        ["kaching"]   = THRESHOLD_SOUND_DIR .. "Kaching.ogg",
+        ["phone"]     = THRESHOLD_SOUND_DIR .. "Phone.ogg",
+        ["robotblip"] = THRESHOLD_SOUND_DIR .. "RobotBlip.ogg",
+        ["sonar"]     = THRESHOLD_SOUND_DIR .. "Sonar.ogg",
+        ["siren"]     = THRESHOLD_SOUND_DIR .. "WarningSiren.ogg",
+        ["water"]     = THRESHOLD_SOUND_DIR .. "WaterDrop.ogg",
+        ["wilhelm"]   = THRESHOLD_SOUND_DIR .. "Wilhelm.ogg",
+    }
+    _thresholdSoundNames = {
+        ["none"]      = "None",
+        ["airhorn"]   = "Air Horn",
+        ["banana"]    = "Banana Peel Slip",
+        ["bikehorn"]  = "Bike Horn",
+        ["bite"]      = "Bite",
+        ["boxing"]    = "Boxing Arena",
+        ["catmeow"]   = "Cat Meow",
+        ["catmeow2"]  = "Cat Meow 2",
+        ["gunshot"]   = "Frontals Gunshot",
+        ["glass"]     = "Glass",
+        ["kaching"]   = "Kaching",
+        ["phone"]     = "Phone",
+        ["robotblip"] = "Robot Blip",
+        ["sonar"]     = "Sonar",
+        ["siren"]     = "Warning Siren",
+        ["water"]     = "Water Drop",
+        ["wilhelm"]   = "Wilhelm",
+    }
+    _thresholdSoundOrder = {
+        "none", "airhorn", "banana", "bikehorn", "bite", "boxing", "catmeow",
+        "catmeow2", "gunshot", "glass", "kaching", "phone", "robotblip", "sonar",
+        "siren", "water", "wilhelm",
+    }
+    if EllesmereUI.AppendSharedMediaSounds then
+        EllesmereUI.AppendSharedMediaSounds(
+            _thresholdSoundPaths, _thresholdSoundNames, _thresholdSoundOrder)
+    end
+    return _thresholdSoundPaths, _thresholdSoundNames, _thresholdSoundOrder
+end
+
+-- One shared throttle so a raid-wide expiry wave plays a single cue, not one
+-- sound per frame that crossed the threshold in the same wave.
+local _thresholdSoundLast = 0
+local function PlayThresholdSound(key)
+    local now = GetTime()
+    if (now - _thresholdSoundLast) < 2 then return end
+    local paths = GetThresholdSoundTables()
+    local path = paths[key]
+    if path then
+        _thresholdSoundLast = now
+        PlaySoundFile(path, "Master")
+    end
+end
+
+-- [element] = { unit, iid, curve, apply, ind }; apply(element, colorResult)
 local thresholdRegistry = {}
 local thresholdTicker = CreateFrame("Frame")
 thresholdTicker:Hide()
 local thresholdElapsed = 0
 local function EvalThreshold(element, e)
-    if not C_UnitAuras_GetAuraDuration then return end
-    local durObj = C_UnitAuras_GetAuraDuration(e.unit, e.iid)
-    if durObj and durObj.EvaluateRemainingDuration then
-        -- pcall: the API can throw on a stale/invalid duration object mid-recycle.
-        local ok, result = pcall(durObj.EvaluateRemainingDuration, durObj, e.curve)
-        if ok and result and result.GetRGBA then
-            e.apply(element, result)   -- result channels may be secret; never read here
+    -- Visual recolor: skipped for sound-only registrations (no curve/apply).
+    if C_UnitAuras_GetAuraDuration and e.curve and e.apply then
+        local durObj = C_UnitAuras_GetAuraDuration(e.unit, e.iid)
+        if durObj and durObj.EvaluateRemainingDuration then
+            -- pcall: the API can throw on a stale/invalid duration object mid-recycle.
+            local ok, result = pcall(durObj.EvaluateRemainingDuration, durObj, e.curve)
+            if ok and result and result.GetRGBA then
+                e.apply(element, result)   -- result channels may be secret; never read here
+            end
+        end
+    end
+    -- Sound cue: plain-Lua edge detect, guarded so a secret value never enters
+    -- a comparison -- if the timing is secret this whole block is a silent skip
+    -- (visuals above keep working; they never needed the value). Rising-edge
+    -- flag per element so each crossing fires once; refresh above the threshold
+    -- re-arms it.
+    local ind = e.ind
+    local sKey = ind and ind.thresholdSound
+    if sKey and sKey ~= "none" and not EllesmereUI.IS_121 then
+        local aura = C_UnitAuras.GetAuraDataByAuraInstanceID(e.unit, e.iid)
+        local exp = aura and aura.expirationTime
+        if exp and not issecretvalue(exp) then
+            if (exp - GetTime()) <= (ind.threshold or 3) then
+                if not e.soundFired then
+                    e.soundFired = true
+                    PlayThresholdSound(sKey)
+                end
+            else
+                e.soundFired = nil
+            end
         end
     end
 end
@@ -1301,16 +1400,50 @@ thresholdTicker:SetScript("OnUpdate", function(_, dt)
     if not any then thresholdTicker:Hide() end
 end)
 
-local function RegisterThreshold(element, unit, iid, curve, apply)
+local function RegisterThreshold(element, unit, iid, curve, apply, ind)
     local e = thresholdRegistry[element]
     if not e then e = {}; thresholdRegistry[element] = e end
-    e.unit, e.iid, e.curve, e.apply = unit, iid, curve, apply
+    -- New aura instance -> re-arm the sound edge flag (a reapplied buff is a
+    -- fresh crossing); same instance keeps it so re-registers never double-fire.
+    if e.iid ~= iid then e.soundFired = nil end
+    e.unit, e.iid, e.curve, e.apply, e.ind = unit, iid, curve, apply, ind
     thresholdTicker:Show()
     EvalThreshold(element, e)   -- immediate, so we never flash the normal color for a tick
 end
 
 local function UnregisterThreshold(element)
     thresholdRegistry[element] = nil
+end
+
+-- Temporary diagnostic for the threshold sound: /rfthsdbg snapshots every
+-- registered threshold element's sound-decision inputs as of right now.
+SLASH_RFTHSDBG1 = "/rfthsdbg"
+SlashCmdList.RFTHSDBG = function()
+    local now = GetTime()
+    local n = 0
+    for element, e in pairs(thresholdRegistry) do
+        n = n + 1
+        local ind = e.ind
+        local sKey = (ind and (ind.thresholdSound or "unset")) or "NIL-IND"
+        local expInfo, remInfo = "no-aura", "?"
+        local aura = C_UnitAuras.GetAuraDataByAuraInstanceID(e.unit, e.iid)
+        if aura then
+            local exp = aura.expirationTime
+            if exp == nil then expInfo = "nil-exp"
+            elseif issecretvalue(exp) then expInfo = "SECRET"
+            else
+                expInfo = "ok"
+                remInfo = string.format("%.1f", exp - now)
+            end
+        end
+        print(("|cff0cd29f[THSND]|r unit=%s iid=%s key=%s exp=%s rem=%s thr=%s fired=%s shown=%s"):format(
+            tostring(e.unit), tostring(e.iid), tostring(sKey), expInfo, remInfo,
+            tostring(ind and (ind.threshold or 3) or "?"), tostring(e.soundFired or false),
+            tostring(element.IsShown and element:IsShown() or false)))
+    end
+    print(("|cff0cd29f[THSND]|r entries=%d IS_121=%s tickerShown=%s throttleAgo=%.1f"):format(
+        n, tostring(EllesmereUI.IS_121 or false), tostring(thresholdTicker:IsShown()),
+        now - _thresholdSoundLast))
 end
 
 -- Per-type apply helpers. All push the (possibly secret) curve color straight
@@ -2014,7 +2147,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                 c.r, c.g, c.b, (ind.barColorOpacity or 100) / 100,
                                 tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
                             if curve then
-                                RegisterThreshold(bar, unit, iid, curve, ApplyBarThresholdColor)
+                                RegisterThreshold(bar, unit, iid, curve, ApplyBarThresholdColor, ind)
                             else
                                 UnregisterThreshold(bar)
                             end
@@ -2143,16 +2276,27 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                             do
                                 local tiid = aura.auraInstanceID
                                 if textThresholdMode then
-                                    -- Clear any prior texture registration; the text block
-                                    -- below re-registers against the duration text.
-                                    UnregisterThreshold(f)
+                                    -- Icon type: the expiring recolor targets the duration
+                                    -- text, registered in the text block below -- but ONLY
+                                    -- when duration text is shown. Seed a sound-only
+                                    -- registration (no curve/apply) here so the threshold
+                                    -- sound also works for glow-only / no-text setups; the
+                                    -- text block upgrades this entry with the recolor curve
+                                    -- when it runs. Registering fresh either way clears any
+                                    -- stale prior curve, matching the old Unregister.
+                                    if ind.thresholdEnabled and tiid and not issecretvalue(tiid)
+                                       and ind.thresholdSound and ind.thresholdSound ~= "none" then
+                                        RegisterThreshold(f, unit, tiid, nil, nil, ind)
+                                    else
+                                        UnregisterThreshold(f)
+                                    end
                                 elseif ind.thresholdEnabled and tiid and not issecretvalue(tiid) then
                                     local tc = ind.thresholdColor or { r=1, g=0.2, b=0.2 }
                                     local curve = GetThresholdColorCurve(
                                         ind.threshold or 3, ncR, ncG, ncB, ncA,
                                         tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
                                     if curve then
-                                        RegisterThreshold(f, unit, tiid, curve, ApplyTexThresholdColor)
+                                        RegisterThreshold(f, unit, tiid, curve, ApplyTexThresholdColor, ind)
                                     else
                                         UnregisterThreshold(f)
                                     end
@@ -2315,7 +2459,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                                                         ind.threshold or 3, tc.r, tc.g, tc.b, 1,
                                                         thc.r, thc.g, thc.b, (ind.thresholdColorOpacity or 100) / 100)
                                                     if curve then
-                                                        RegisterThreshold(f, unit, tiid, curve, ApplyDurTextThresholdColor)
+                                                        RegisterThreshold(f, unit, tiid, curve, ApplyDurTextThresholdColor, ind)
                                                     end
                                                 end
                                             end
@@ -2371,7 +2515,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                             curve = GetThresholdColorCurve(ind.threshold or 3,
                                 c.r, c.g, c.b, op, tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
                         end
-                        if curve then RegisterThreshold(d.bmHCOverlay, unit, presentIid, curve, ApplyOverlayThresholdColor)
+                        if curve then RegisterThreshold(d.bmHCOverlay, unit, presentIid, curve, ApplyOverlayThresholdColor, ind)
                         else UnregisterThreshold(d.bmHCOverlay) end
                     end
                 elseif indType == "border" then
@@ -2387,7 +2531,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                             curve = GetThresholdColorCurve(ind.threshold or 3,
                                 c.r, c.g, c.b, op, tc.r, tc.g, tc.b, (ind.thresholdColorOpacity or 100) / 100)
                         end
-                        if curve then RegisterThreshold(d.bmEffectBorder, unit, presentIid, curve, ApplyBorderThresholdColor)
+                        if curve then RegisterThreshold(d.bmEffectBorder, unit, presentIid, curve, ApplyBorderThresholdColor, ind)
                         else UnregisterThreshold(d.bmEffectBorder) end
                     end
                 elseif indType == "framealpha" then
@@ -3032,8 +3176,9 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
         else power:SetStatusBarColor(0, 0.5, 1, 1) end
         local pwBg = power:CreateTexture(nil, "BACKGROUND")
         pwBg:SetAllPoints()
-        local pbc = s.powerBgColor or { r=0, g=0, b=0 }
-        pwBg:SetColorTexture(pbc.r, pbc.g, pbc.b, (s.powerBgDarkness or 70) / 100)
+        local pbc = (s.powerBgPowerColored and pInfo) or s.powerBgColor or { r=0, g=0, b=0 }
+        local pbF = (s.powerBgPowerColored and pInfo) and EllesmereUI.GetPowerBgDarkenFactor() or 1
+        pwBg:SetColorTexture(pbc.r * pbF, pbc.g * pbF, pbc.b * pbF, (s.powerBgDarkness or 70) / 100)
         if PP and s.powerBorderStyle and s.powerBorderStyle ~= "none" then
             local pbSize = s.powerBorderSize or 1
             if pbSize > 0 then
@@ -3066,8 +3211,12 @@ function ns.BM_BuildSimplePreview(parent, s, fontPath, PP, centerX, topY)
         end
     end
 
-    -- Name text
-    local nameFS = health:CreateFontString(nil, "OVERLAY")
+    -- Name text. Hosted on a carrier in the live text band (ns.LVL_TEXT) so
+    -- the name draws above the +8 main border, exactly like real frames.
+    local nameCarrier = CreateFrame("Frame", nil, pvFrame)
+    nameCarrier:SetAllPoints(pvFrame)
+    nameCarrier:SetFrameLevel(pvFrame:GetFrameLevel() + (ns.LVL_TEXT or 12))
+    local nameFS = nameCarrier:CreateFontString(nil, "OVERLAY")
     local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameFS, outline == "" and (not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames"))) end
     nameFS:SetFont(fontPath, s.nameSize or 10, outline)
@@ -3302,6 +3451,11 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
     if not W then return 0 end
     local db = ns.db
     if not db then return 0 end
+    -- Override-session gate: heals a stale Buff Manager layer FIRST (so the
+    -- page content below renders the edited group's fork) and reports the
+    -- full-page overlay to build at the end. nil = normal WYSIWYG page.
+    local bmOverlayState = EllesmereUI.SpecOverrides_BmPagePrelude
+        and EllesmereUI.SpecOverrides_BmPagePrelude() or nil
     local PP = EllesmereUI.PanelPP
 
     -- Auto-detect spec on first open
@@ -3378,6 +3532,70 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
     if ns._addNewPopup then ns._addNewPopup:Hide() end
     ns._bmRoot = outerRoot
 
+    -- Override-session full-page overlay (state decided by the prelude at
+    -- the top). "activate" offers to fork a custom Buff Manager for the
+    -- edited override group; "info" explains why editing here is blocked
+    -- (edits would land in whatever layer is actually live and be banked
+    -- to the wrong owner at the next harvest). Built BEFORE the page
+    -- content on purpose: the Simple Setup branch returns early and must
+    -- still be covered. High frame level keeps it above everything built
+    -- below; child of outerRoot so every teardown path destroys it.
+    if bmOverlayState then
+        local st = bmOverlayState
+        local ov = CreateFrame("Frame", nil, outerRoot)
+        ov:SetAllPoints(outerRoot)
+        ov:SetFrameLevel(outerRoot:GetFrameLevel() + 60)
+        ov:EnableMouse(true)
+        ov._searchIgnore = true
+        local bg = ov:CreateTexture(nil, "OVERLAY")
+        bg:SetAllPoints()
+        bg:SetColorTexture(13/255, 17/255, 25/255, 0.98)
+        local title = ov:CreateFontString(nil, "OVERLAY")
+        title:SetFont(fontPath, 15, "")
+        title:SetPoint("CENTER", ov, "CENTER", 0, 60)
+        title:SetTextColor(1, 1, 1, 0.9)
+        title:SetText(EllesmereUI.L("Custom Buff Manager"))
+        local body = ov:CreateFontString(nil, "OVERLAY")
+        body:SetFont(fontPath, 13, "")
+        body:SetPoint("TOP", title, "BOTTOM", 0, -14)
+        body:SetWidth(floor(parentW * 0.7))
+        body:SetJustifyH("CENTER")
+        body:SetTextColor(1, 1, 1, 0.56)
+        body:SetText(st.text or "")
+        local sub
+        if st.sub then
+            sub = ov:CreateFontString(nil, "OVERLAY")
+            sub:SetFont(fontPath, 12, "")
+            sub:SetPoint("TOP", body, "BOTTOM", 0, -8)
+            sub:SetWidth(floor(parentW * 0.7))
+            sub:SetJustifyH("CENTER")
+            sub:SetTextColor(1, 1, 1, 0.45)
+            sub:SetText(st.sub)
+        end
+        if st.mode == "activate" then
+            local btn = CreateFrame("Button", nil, ov)
+            btn:SetSize(240, 28)
+            btn:SetPoint("TOP", sub or body, "BOTTOM", 0, -22)
+            EllesmereUI.SolidTex(btn, "BACKGROUND", 0.10, 0.10, 0.11, 0.9)
+            local brd = EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.22)
+            local lbl = EllesmereUI.MakeFont(btn, 12, nil, 1, 1, 1, 0.85)
+            lbl:SetPoint("CENTER")
+            lbl:SetText(EllesmereUI.L("Activate Custom Buff Manager"))
+            local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.83, b = 0.62 }
+            btn:SetScript("OnEnter", function()
+                if brd and brd.SetColor then brd:SetColor(eg.r, eg.g, eg.b, 0.9) end
+            end)
+            btn:SetScript("OnLeave", function()
+                if brd and brd.SetColor then brd:SetColor(1, 1, 1, 0.22) end
+            end)
+            btn:SetScript("OnClick", function()
+                if EllesmereUI.SpecOverrides_ActivateBm then
+                    EllesmereUI.SpecOverrides_ActivateBm(st.kind, st.gid)
+                end
+            end)
+        end
+    end
+
     -------------------------------------------------------------------
     --  BUFF DISPLAY MODE HEADER (always visible)
     --  Segmented toggle swaps between the full custom buff manager and a
@@ -3446,6 +3664,25 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     EllesmereUI:RefreshPage(true)
                 end)
             end
+        end
+
+        -- Centered active-override indicator: everything on this page edits
+        -- THAT group's custom Buff Manager, not the default one.
+        local ovName = EllesmereUI.SpecOverrides_BmActiveInfo
+            and EllesmereUI.SpecOverrides_BmActiveInfo()
+        if ovName then
+            local ovTop = card:CreateFontString(nil, "OVERLAY")
+            ovTop:SetFont(fontPath, 11, "")
+            ovTop:SetPoint("CENTER", card, "CENTER", 0, 10)
+            ovTop:SetText(EllesmereUI.L("Override Active:"))
+            ovTop:SetTextColor(1, 1, 1, 0.6)
+            local ovBottom = card:CreateFontString(nil, "OVERLAY")
+            ovBottom:SetFont(fontPath, 13, "")
+            ovBottom:SetPoint("CENTER", card, "CENTER", 0, -7)
+            ovBottom:SetText(ovName)
+            local ar, ag, ab = 1, 0.82, 0.30
+            if EllesmereUI.GetAccentColor then ar, ag, ab = EllesmereUI.GetAccentColor() end
+            ovBottom:SetTextColor(ar, ag, ab, 1)
         end
     end
 
@@ -4418,8 +4655,9 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             end
             local pwBg = power:CreateTexture(nil, "BACKGROUND")
             pwBg:SetAllPoints()
-            local pbc = s.powerBgColor or { r=0, g=0, b=0 }
-            pwBg:SetColorTexture(pbc.r, pbc.g, pbc.b, (s.powerBgDarkness or 70) / 100)
+            local pbc = (s.powerBgPowerColored and pInfo) or s.powerBgColor or { r=0, g=0, b=0 }
+            local pbF = (s.powerBgPowerColored and pInfo) and EllesmereUI.GetPowerBgDarkenFactor() or 1
+            pwBg:SetColorTexture(pbc.r * pbF, pbc.g * pbF, pbc.b * pbF, (s.powerBgDarkness or 70) / 100)
 
             -- Power border
             if PP and s.powerBorderStyle and s.powerBorderStyle ~= "none" then
@@ -4454,8 +4692,13 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             end
         end
 
-        -- Name text (real sizes, SetScale handles the magnification)
-        local nameFS = health:CreateFontString(nil, "OVERLAY")
+        -- Name text (real sizes, SetScale handles the magnification).
+        -- Hosted on a carrier in the live text band (ns.LVL_TEXT) so the name
+        -- draws above the +8 main border, exactly like real frames.
+        local nameCarrier = CreateFrame("Frame", nil, pvFrame)
+        nameCarrier:SetAllPoints(pvFrame)
+        nameCarrier:SetFrameLevel(pvFrame:GetFrameLevel() + (ns.LVL_TEXT or 12))
+        local nameFS = nameCarrier:CreateFontString(nil, "OVERLAY")
         local outline = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
         if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(nameFS, outline == "" and (not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow("raidFrames"))) end
         nameFS:SetFont(fontPath, s.nameSize or 10, outline)
@@ -4962,6 +5205,43 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                       setValue=function(v) ind.thresholdColorOpacity = v; ReloadAndUpdate() end })
             end
 
+            -- Threshold Sound dropdown config (built once, placed below):
+            -- plays once when the buff crosses the threshold. Shallow-copy the
+            -- runtime name table so _menuOpts (preview icon) doesn't pollute
+            -- the shared tables. Icon indicators seat it beside Icon Glow
+            -- (row 3 slot 2); other types give it its own row.
+            local soundCfg
+            do
+                local sPaths, sNames, sOrder = GetThresholdSoundTables()
+                local soundValues = {}
+                for k, v in pairs(sNames) do soundValues[k] = v end
+                soundValues._menuOpts = {
+                    itemHeight = 26,
+                    maxTextWidthPct = 0.8,
+                    searchable = true,
+                    iconAtlas = function(key)
+                        if key == "none" then return nil end
+                        if not sPaths[key] then return nil end
+                        return "common-icon-sound"
+                    end,
+                    iconPressedAtlas = function(key)
+                        if key == "none" then return nil end
+                        return "common-icon-sound-pressed"
+                    end,
+                    iconOnClick = function(key)
+                        local path = sPaths[key]
+                        if path then PlaySoundFile(path, "Master") end
+                    end,
+                    iconTooltip = function() return "Preview Sound" end,
+                }
+                soundCfg = { type="dropdown", text="Threshold Sound",
+                    values=soundValues, order=sOrder,
+                    tooltip="Only works for Blizzard's whitelisted healer spell IDs (non-private auras).",
+                    disabled=thOff, disabledTooltip="Enable Threshold",
+                    getValue=function() return ind.thresholdSound or "none" end,
+                    setValue=function(v) ind.thresholdSound = v; ReloadAndUpdate() end }
+            end
+
             -- Icon Glow (icon indicator only): a glow that plays while the buff
             -- is within the threshold window. Replicates CDM's Buff Glow control
             -- (style dropdown + inline class/custom color swatches).
@@ -4983,7 +5263,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                       disabled=thOff, disabledTooltip="Enable Threshold",
                       getValue=function() return ind.iconGlowType or 0 end,
                       setValue=function(v) ind.iconGlowType = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
-                    { type="label", text="" })
+                    soundCfg)
                 -- Inline class + custom color swatches, left of the dropdown.
                 do
                     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
@@ -5045,6 +5325,12 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     EllesmereUI.RegisterWidgetRefresh(function() updateGlowSwatch(); updateClassSwatch(); UpdateGlowState() end)
                     UpdateGlowState()
                 end
+            end
+
+            -- Non-icon types: Threshold Sound gets its own row (odd last item,
+            -- so the blank right slot is allowed).
+            if indType ~= "icon" then
+                SettingsRow(soundCfg, { type="label", text="" })
             end
 
             -- 12.1: no engine binding for threshold recolors/glows yet; the
