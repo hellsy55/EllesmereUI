@@ -3321,19 +3321,81 @@ local function Skin_Guild()
         local cdStock = capturePts(cd2)
         local boxWide = boxStock and widePts(boxStock, 23, 20)
         local cdWide = cdStock and widePts(cdStock, 23, 23)
+        -- EXPERIMENT: also widen `ml` (MemberList) itself at the source,
+        -- since Blizzard's own row-sizing below (SetWidth(GetMemberList()
+        -- :GetWidth())) reads ml's width directly. RefreshLayout only ever
+        -- gives `ml` a single positional anchor (not a LEFT+RIGHT pair like
+        -- box2/cd2), so it's resized with a plain SetWidth rather than the
+        -- capturePts/widePts anchor-nudge technique above. This is additive,
+        -- not a replacement for the per-row SetWidth override below: if
+        -- Blizzard's own layout starts producing correctly-sized rows from
+        -- this alone, the per-row override becomes a harmless no-op; if not,
+        -- it still runs and keeps rows correct either way.
+        local mlStockWidth = ml:GetWidth()
+        local mlWideWidth = mlStockWidth + 23 + 20
+        -- Every roster row is sized by Blizzard to MemberList's own width
+        -- (CommunitiesMemberListEntryMixin:SetExpanded -> SetWidth(GetMemberList()
+        -- :GetWidth())), a frame this pass never touches -- only its ScrollBox
+        -- and ColumnDisplay children get widened above. Left alone, rows stay
+        -- stock width while the header grows, so each row's GuildInfo text
+        -- (RIGHT-anchored to the row, -4) sits in a box that ends well short of
+        -- the widened header -- the Achievement Points / M+ Rating value renders
+        -- under the Note column instead of the far-right stat column. Re-stamp
+        -- every live row to the ScrollBox's actual current width so it always
+        -- matches. GuildInfo is also LEFT-justified in that box by default, so
+        -- widening it alone never moves the visible text -- center it and nudge
+        -- it left while the roster is showing, and put both back to Blizzard's
+        -- stock LEFT/20/-4 layout when it's not, since MemberList/ScrollBox is
+        -- shared with the Chat tab's narrower names column and a row must not
+        -- stay stranded in the roster's styling after the swap.
+        local GUILD_INFO_NUDGE = 20
+        local function ApplyRowLayout(row)
+            if not row then return end
+            if row.SetWidth then row:SetWidth(box2:GetWidth()) end
+            local gi = row.GuildInfo
+            if gi and row.Note and gi.SetJustifyH and gi.ClearAllPoints then
+                gi:ClearAllPoints()
+                if cd2:IsShown() then
+                    gi:SetJustifyH("CENTER")
+                    gi:SetPoint("LEFT", row.Note, "RIGHT", 20 - GUILD_INFO_NUDGE, 0)
+                    gi:SetPoint("RIGHT", row, "RIGHT", -4 - GUILD_INFO_NUDGE, 0)
+                else
+                    gi:SetJustifyH("LEFT")
+                    gi:SetPoint("LEFT", row.Note, "RIGHT", 20, 0)
+                    gi:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+                end
+            end
+        end
+        -- Same uninitialized-ScrollBox guard used for the AH summary/rail rows
+        -- elsewhere in this file: ForEachFrame errors inside Blizzard's code
+        -- if the view doesn't exist yet (e.g. this pass runs at ADDON_LOADED,
+        -- before the roster has ever been shown).
+        local function SyncRowWidths()
+            if box2.ForEachFrame and box2.GetView and box2:GetView() then
+                pcall(box2.ForEachFrame, box2, ApplyRowLayout)
+            end
+        end
+        hooksecurefunc(box2, "Update", WSkin.Debounce(SyncRowWidths))
         cd2:HookScript("OnShow", function()
             applyPts(box2, boxWide)
             applyPts(cd2, cdWide)
+            ml:SetWidth(mlWideWidth)
+            SyncRowWidths()
         end)
         cd2:HookScript("OnHide", function()
             applyPts(box2, boxStock)
+            ml:SetWidth(mlStockWidth)
+            SyncRowWidths()
         end)
         if cd2:IsShown() then
             applyPts(box2, boxWide)
             applyPts(cd2, cdWide)
+            ml:SetWidth(mlWideWidth)
         else
             applyPts(box2, boxStock)
+            ml:SetWidth(mlStockWidth)
         end
+        SyncRowWidths()
     end
 
     -- Chat view's names-column scrollbar sits 5px right (one-shot, every
