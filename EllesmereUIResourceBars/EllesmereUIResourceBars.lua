@@ -6288,7 +6288,9 @@ OnCastStart = function()
     castBarFrame._spellName = name
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
     castBarFrame._nameText:SetText(name)
-    castBarFrame._bar:SetValue(0)
+    local castDur = endTimeMS - startTimeMS
+    local initProgress = (castDur > 0) and ((GetTime() - startTimeMS / 1000) / (castDur / 1000)) or 0
+    castBarFrame._bar:SetValue(min(max(initProgress, 0), 1))
 
     -- Hide empower pips
     if castBarFrame._pips then
@@ -6343,7 +6345,9 @@ OnChannelStart = function()
     castBarFrame._spellName = name
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
     castBarFrame._nameText:SetText(name)
-    castBarFrame._bar:SetValue(1)
+    local chanDur = endTimeMS - startTimeMS
+    local initProgress = (chanDur > 0) and ((endTimeMS / 1000 - GetTime()) / (chanDur / 1000)) or 1
+    castBarFrame._bar:SetValue(min(max(initProgress, 0), 1))
 
     -- Hide empower pips
     if castBarFrame._pips then
@@ -6501,7 +6505,9 @@ OnEmpowerStart = function()
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
     HideLatencyOverlay()
     castBarFrame._nameText:SetText(name)
-    castBarFrame._bar:SetValue(0)
+    local empDur = endTimeMS - startTimeMS
+    local empProgress = (empDur > 0) and ((GetTime() - startTimeMS / 1000) / (empDur / 1000)) or 0
+    castBarFrame._bar:SetValue(min(max(empProgress, 0), 1))
     HideChannelTicks()
 
     -- Icon
