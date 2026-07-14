@@ -1216,7 +1216,7 @@ local function SkinCharacterSheet()
             for slotIndex = 1, bagSize do
                 local itemLink = C_Container.GetContainerItemLink(bagSlot, slotIndex)
                 if itemLink then
-                    local itemName, _, itemRarity, _, _, itemType, _, _, equipSlot, itemIcon = GetItemInfo(itemLink)
+                    local itemName, _, itemRarity, _, _, _, _, _, equipSlot, itemIcon = GetItemInfo(itemLink)
                     -- GetItemInfo's cached itemLevel can be wrong for a
                     -- specific item instance (e.g. an upgrade-track piece) --
                     -- prefer the ItemLocation API (exact per-item level, no
@@ -1231,13 +1231,19 @@ local function SkinCharacterSheet()
                     end
                     itemLevel = tonumber(itemLevel) or tonumber(C_Item.GetDetailedItemLevelInfo(itemLink))
 
-                    -- Only show Weapon and Armor items
-                    if itemLevel and itemName and (itemType == "Weapon" or itemType == "Armor") and equipSlot then
+                    -- Only show Weapon and Armor items. itemType/itemSubType from
+                    -- GetItemInfo are localized display strings (e.g. "Arma" on a
+                    -- Spanish client), so comparing them against English literals
+                    -- silently filtered out every item on non-English clients.
+                    -- classID/subclassID from GetItemInfoInstant are locale-
+                    -- independent numeric IDs (Enum.ItemClass.Weapon = 2,
+                    -- Enum.ItemClass.Armor = 4) and safe to compare directly.
+                    -- GetItemInfoInstant returns:
+                    -- 1 itemID, 2 itemType, 3 itemSubType, 4 itemEquipLoc,
+                    -- 5 iconFileID, 6 classID, 7 subClassID
+                    local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemLink)
+                    if itemLevel and itemName and (classID == Enum.ItemClass.Weapon or classID == Enum.ItemClass.Armor) and equipSlot then
                         -- Spec-aware usability filter (skip shields on Ret, etc.)
-                        -- GetItemInfoInstant returns:
-                        -- 1 itemID, 2 itemType, 3 itemSubType, 4 itemEquipLoc,
-                        -- 5 iconFileID, 6 classID, 7 subClassID
-                        local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemLink)
                         if not IsItemUsableBySpec(itemLink, equipSlot, classID, subclassID) then
                             -- skip: not usable by current spec
                         else
