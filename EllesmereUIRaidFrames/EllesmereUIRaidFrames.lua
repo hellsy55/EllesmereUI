@@ -688,6 +688,7 @@ local defaults = {
         -- simple buff grid (all of the active spec's tracked buffs, in a grid).
         bmSimple = {
             showBuffs       = true,
+            ownOnly         = true,
             maxBuffs        = 8,
             iconsPerRow     = 4,
             position        = "topright",
