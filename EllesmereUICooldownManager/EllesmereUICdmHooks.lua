@@ -2038,6 +2038,60 @@ local function DecorateFrame(frame, barData)
                     fd._isProcessingOverride = false
                 end)
             end
+            -- Non-charge cooldown re-assert. Blizzard's CooldownViewer zeroes the
+            -- cooldown widget for some spells partway through their REAL cooldown
+            -- and never re-pushes it -- notably DH placement sigils (Flame / Misery
+            -- / Silence), whose widget is cleared when the sigil activates (~1s in)
+            -- even though GetSpellCooldown reports the full 30s cooldown still
+            -- running, leaving the icon with no swipe for the rest of the CD.
+            -- (Sigil of Spite is unaffected: its widget is never cleared early.)
+            -- Charge spells are handled by the charge re-arm below; this covers the
+            -- non-charge case. Gated tightly so it acts ONLY on the exact failure --
+            -- widget cleared to ~0 while a genuine non-GCD cooldown is live -- and
+            -- never fights a GCD swipe or aura-display time (both non-zero).
+            local function ReAssertRealCooldown()
+                if fd._isProcessingOverride then return end
+                if fd._isBuffViewerFrame then return end
+                -- Charge spells: owned by the charge re-arm path.
+                if type(frame.HasVisualDataSource_Charges) == "function"
+                   and frame:HasVisualDataSource_Charges() then return end
+                if not (C_Spell and C_Spell.GetSpellCooldown
+                        and C_Spell.GetSpellCooldownDuration) then return end
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                if not sid2 then return end
+                local effID = sid2
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                    if ovr and ovr > 0 and ovr ~= sid2 then effID = ovr end
+                end
+                -- Only re-assert for a genuine, non-GCD cooldown still running.
+                -- isActive / isOnGCD are clean bools (read bare elsewhere).
+                local cdInfo = C_Spell.GetSpellCooldown(effID) or C_Spell.GetSpellCooldown(sid2)
+                if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
+                -- Don't fight a widget that already shows a real cooldown, a GCD, or
+                -- aura-display time -- act only when it is cleared to ~0.
+                -- GetCooldownDuration is a clean number here; guard defensively.
+                if cd.GetCooldownDuration then
+                    local ok, curDur = pcall(cd.GetCooldownDuration, cd)
+                    if ok and curDur and not (issecretvalue and issecretvalue(curDur))
+                       and curDur > 100 then return end
+                end
+                local durObj = C_Spell.GetSpellCooldownDuration(effID)
+                    or C_Spell.GetSpellCooldownDuration(sid2)
+                if not durObj then return end
+                fd._isProcessingOverride = true
+                if cd.SetUseAuraDisplayTime then cd:SetUseAuraDisplayTime(false) end
+                cd:SetCooldownFromDurationObject(durObj)
+                -- Only the geometry was wiped -- Blizzard's clear leaves the draw-
+                -- swipe flag on -- so re-arming the duration restores the visible
+                -- swipe. Deliberately NOT forcing SetDrawSwipe(true): doing so under
+                -- the _isProcessingOverride guard would bypass the per-spell "Hide
+                -- CD Swipe" enforcement and make the swipe reappear against the
+                -- user's setting.
+                fd._isProcessingOverride = false
+            end
+
             -- Charge-spell recharge swipe restore.
             -- The swipe is rendered from the widget's armed duration, NOT from
             -- the SetDrawSwipe flag (the flag only gates an existing swipe). When
@@ -2046,7 +2100,7 @@ local function DecorateFrame(frame, barData)
             -- wipes the armed duration. Our SetDrawSwipe(true) brute-force then
             -- has no geometry to draw, so the still-valid recharge swipe vanishes.
             -- Re-arm from the charge recharge duration so the swipe stays visible.
-            -- Charge spells only; non-charge / buff / custom frames early-out.
+            -- Charge spells only; a non-charge frame routes to the re-assert above.
             hooksecurefunc(cd, "Clear", function()
                 if fd._isProcessingOverride then return end
                 -- HasVisualDataSource_Charges is a clean bool and exists only on
@@ -2054,7 +2108,7 @@ local function DecorateFrame(frame, barData)
                 -- own custom (trinket/racial/item) frames and aura buff frames.
                 local hasCharges = type(frame.HasVisualDataSource_Charges) == "function"
                     and frame:HasVisualDataSource_Charges()
-                if not hasCharges then return end
+                if not hasCharges then ReAssertRealCooldown(); return end
                 local fc2 = _ecmeFC[frame]
                 local sid2 = fc2 and fc2.spellID
                 if not sid2 or not C_Spell or not C_Spell.GetSpellCooldown
@@ -2171,6 +2225,11 @@ local function DecorateFrame(frame, barData)
             end
             if cd.SetCooldownFromDurationObject then
                 hooksecurefunc(cd, "SetCooldownFromDurationObject", ReArmChargeRecharge)
+                -- Also catch the placement-sigil case where Blizzard clears the
+                -- widget via a zero-duration SetCooldownFromDurationObject rather
+                -- than Clear(). ReAssertRealCooldown's own guard blocks recursion
+                -- and its ~0 duration gate makes this a no-op for normal pushes.
+                hooksecurefunc(cd, "SetCooldownFromDurationObject", ReAssertRealCooldown)
             end
             if cd.SetUseAuraDisplayTime then
                 hooksecurefunc(cd, "SetUseAuraDisplayTime", ReArmChargeRecharge)
