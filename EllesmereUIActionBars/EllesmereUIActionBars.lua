@@ -5907,8 +5907,8 @@ function EAB:ApplyExtraBarVisibility()
             -- state is "hide" during pet battle, "show" otherwise
             local shouldHide = (state == "hide")
             for _, info in ipairs(EXTRA_BARS) do
-                if info.noManagedVisibility or info.blizzOwnedVisibility then
-                    -- skip: Blizzard handles pet battle visibility for these
+                if info.noManagedVisibility then
+                    -- skip
                 else
                 local key = info.key
                 local s = EAB.db and EAB.db.profile.bars[key]
