@@ -5056,7 +5056,6 @@ function EUI_Bags:RefreshInventory()
     -- 5. Render grid into scroll child
     local _t0GridSetup = ProfBegin("GridSetup")
     for _, btn in pairs(itemSlots) do
-        btn:GetParent():Hide()
         if btn.ProfessionQualityOverlay then btn.ProfessionQualityOverlay:SetAlpha(0) end
         if btn.IconOverlay then btn.IconOverlay:SetAlpha(0); btn.IconOverlay:Hide() end
         if btn.IconOverlay2 then btn.IconOverlay2:SetAlpha(0); btn.IconOverlay2:Hide() end
@@ -6077,6 +6076,12 @@ function EUI_Bags:RefreshInventory()
             local gridRows = math.ceil(totalItems / columns)
             curY = curY - (gridRows * (SLOT_SIZE + SPACING))
         end
+    end
+
+    -- Hide slots that were not rendered this pass
+    for i = slotIdx + 1, #itemSlots do
+        local btn = itemSlots[i]
+        if btn then btn:GetParent():Hide() end
     end
 
     -- Set scroll child height to content height
