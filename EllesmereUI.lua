@@ -7173,7 +7173,8 @@ local function CreateMainFrame()
                 end
             end)
             pwrBtn:SetScript("OnLeave", function(self)
-                self._tex:SetVertexColor(1, 1, 1, 1)
+                local enabled = IsAddonLoaded(self._folder)
+                self._tex:SetVertexColor(1, 1, 1, enabled and 1 or 0.5)
                 if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             end)
             pwrBtn:SetScript("OnClick", function(self)
