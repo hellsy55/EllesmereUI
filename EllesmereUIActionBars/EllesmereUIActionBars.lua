@@ -8779,7 +8779,33 @@ function EAB:OnInitialize()
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
                     local s = bars[info.key]
-                    if btns and s and not s.showRankIcon then
+                    if btns and s and s.showRankIcon then
+                        -- Feature ON: Blizzard does NOT refresh the quality
+                        -- overlay when an item is swapped in place (rank 1 ->
+                        -- rank 2 potion in the same slot), so it keeps showing
+                        -- the previous item's rank until a hover forces the
+                        -- button's own update. Re-run that update here so the
+                        -- rank tracks the new item immediately.
+                        for _, btn in ipairs(btns) do
+                            -- Rank icons only apply to items, so only run the
+                            -- (item-info-querying) refresh on item slots -- an
+                            -- ACTIONBAR_SLOT_CHANGED storm from mouseover-macros
+                            -- re-resolving fires in combat, and this must not
+                            -- do a quality lookup on every spell button per
+                            -- frame. A non-item slot (spell swapped in, or the
+                            -- slot cleared) just gets any lingering rank hidden.
+                            local action = btn:GetAttribute("action") or 0
+                            if action > 0 and GetActionInfo
+                               and GetActionInfo(action) == "item" then
+                                if btn.UpdateProfessionQuality then
+                                    btn:UpdateProfessionQuality()
+                                end
+                            else
+                                local ov = btn.ProfessionQualityOverlayFrame
+                                if ov and ov:IsShown() then ov:SetShown(false) end
+                            end
+                        end
+                    elseif btns and s and not s.showRankIcon then
                         for _, btn in ipairs(btns) do
                             local ov = btn.ProfessionQualityOverlayFrame
                             if ov and ov:IsShown() then
