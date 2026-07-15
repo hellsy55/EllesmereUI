@@ -1229,6 +1229,14 @@ local function ApplyBarPosition(id)
         return
     end
 
+    -- Full-screen length: pin BOTH ends to UIParent so the ENGINE keeps the
+    -- bar exactly full through every resolution/UI-scale change -- a
+    -- computed-width snapshot goes stale whenever it is taken before the
+    -- final screen metrics land (field-reported as not-full bars). Only the
+    -- cross-axis coordinate is computed below; the explicit SetSize from
+    -- ApplyBar remains as a fallback if anything ever strips the anchors
+    -- (the anchor rect overrides it while both points are set).
+
     -- Full-screen length and/or edge snap: compute the final center
     -- ANALYTICALLY and anchor once. Never read GetCenter here -- when the
     -- size or orientation changed earlier in this same apply, GetCenter
@@ -1261,7 +1269,17 @@ local function ApplyBarPosition(id)
             cy = uh - bh / 2
         end
     end
-    bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx, cy)
+    if full then
+        if vertical then
+            bar:SetPoint("TOP", UIParent, "TOPLEFT", cx, 0)
+            bar:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", cx, 0)
+        else
+            bar:SetPoint("LEFT", UIParent, "BOTTOMLEFT", 0, cy)
+            bar:SetPoint("RIGHT", UIParent, "BOTTOMRIGHT", 0, cy)
+        end
+    else
+        bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx, cy)
+    end
 end
 
 local function EnsureSlot(rec, blockCfg)
@@ -1506,6 +1524,10 @@ function ns.ApplyBar(id)
         rec.bar:EnableMouse(false)
         rec.bar:SetClampedToScreen(true)
         rec.bar._edbBorder = PP.CreateBorder(rec.bar, 0, 0, 0, 0.8, 1, "OVERLAY", 7)
+        -- Anchor-driven size changes (full-length bars stretching with the
+        -- screen) re-solve the block layout; RequestLayout coalesces and
+        -- the combat gate defers protected bars to regen.
+        rec.bar:HookScript("OnSizeChanged", function() ns.RequestLayout(id) end)
         rec.ctx = MakeBarCtx(id)
         rec.ctx.frame = rec.bar
         live[id] = rec
@@ -2404,6 +2426,16 @@ function WB:OnEnable()
     if not profile then return end
     for i = 1, #profile.bars do
         ns.ApplyBar(profile.bars[i].id)
+    end
+    -- Mid-combat /reload: lockdown has NOT re-engaged during this early
+    -- login window (the same trick the suite uses to position elements
+    -- during the load screen), but RequestLayout's next-frame timer fires
+    -- AFTER it does -- the protected-bar gate would then freeze bars whose
+    -- slots were never placed (field report: blank bar until regen). Lay
+    -- out synchronously NOW while geometry is still legal; the queued
+    -- pass coalesces into a harmless re-run.
+    for i = 1, #profile.bars do
+        ApplyLayout(profile.bars[i].id)
     end
     ns.RegisterAllUnlockElements()
     -- Zero-bars case: ApplyBar never ran, so recompute the gates once here.

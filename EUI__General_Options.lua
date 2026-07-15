@@ -406,7 +406,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.4.6",
+        version = "8.4.7",
         heroes = {
             {
                 title  = "Data Bars",

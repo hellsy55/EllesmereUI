@@ -2898,7 +2898,7 @@ local mmButtonDefs = {
     { key = 'char',    binding = 'TOGGLECHARACTER0',  label = CHARACTER_BUTTON },
     -- Single combined button: PlayerSpellsMicroButton opens the merged
     -- Spec / Talents / Spellbook (and professions) frame.
-    { key = 'spell',   binding = 'TOGGLESPELLBOOK',   label = 'Spec / Spellbook / Professions', special = true },
+    { key = 'spell',   binding = 'TOGGLESPELLBOOK',   label = 'Spec / Talents / Spellbook', special = true },
     { key = 'ach',     binding = 'TOGGLEACHIEVEMENT', label = ACHIEVEMENTS },
     { key = 'quest',   binding = 'TOGGLEQUESTLOG',    label = QUEST_LOG },
     { key = 'lfg',     binding = 'TOGGLEGROUPFINDER', label = DUNGEONS_BUTTON },
