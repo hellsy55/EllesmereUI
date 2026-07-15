@@ -1209,6 +1209,28 @@ local function SkinCharacterSheet()
     _ComputeBetterInventoryItems = function()
         local betterItems = {}
 
+        -- A two-handed main-hand weapon (2H melee, staff, or a two-handed
+        -- ranged weapon) leaves the off-hand slot (17) intentionally empty, so
+        -- GetEquippedItemLevel(17) returns 0 and ANY off-hand / holdable /
+        -- shield / one-hander in the bags reads as "better than nothing" --
+        -- even one hundreds of ilvls lower. Suppress slot-17 comparisons then:
+        -- the off-hand can't be filled without giving up the two-hander, so a
+        -- lone off-hand piece isn't a straightforward upgrade. Only applies
+        -- while the off-hand is actually empty (Fury Titan's Grip keeps a real
+        -- item there, which compares normally).
+        local offHandBlocked = false
+        do
+            local mhLink = GetInventoryItemLink("player", 16)
+            if mhLink and GetInventoryItemLink("player", 17) == nil then
+                local _, _, _, mhEquipLoc = GetItemInfoInstant(mhLink)
+                if mhEquipLoc == "INVTYPE_2HWEAPON"
+                    or mhEquipLoc == "INVTYPE_RANGED"
+                    or mhEquipLoc == "INVTYPE_RANGEDRIGHT" then
+                    offHandBlocked = true
+                end
+            end
+        end
+
         -- Check all bag slots (0 = backpack, 1-4 = bag slots, 5 = reagent
         -- bag -- included since it can hold any item, not just reagents).
         for bagSlot = 0, 5 do
@@ -1255,10 +1277,14 @@ local function SkinCharacterSheet()
 
                                 -- Check if item is better than ANY of its possible slots
                                 for _, slot in ipairs(compareSlots) do
-                                    local equippedLevel = GetEquippedItemLevel(slot)
-                                    if itemLevel > equippedLevel then
-                                        isBetter = true
-                                        break
+                                    -- Skip the empty off-hand slot behind a 2H weapon
+                                    -- (see offHandBlocked above).
+                                    if not (offHandBlocked and slot == 17) then
+                                        local equippedLevel = GetEquippedItemLevel(slot)
+                                        if itemLevel > equippedLevel then
+                                            isBetter = true
+                                            break
+                                        end
                                     end
                                 end
 
