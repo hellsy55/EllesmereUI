@@ -8252,20 +8252,8 @@ initFrame:SetScript("OnEvent", function(self)
                             if not ctx then return end
                             local val = ctx.valueOf and ctx.valueOf()
                             local keys = ctx.keys or {}
-                            -- On an EXCLUDED spell the flyout sits on the bar's own value,
-                            -- so Apply to Bar / All Specs here means "rejoin the bar" -- the
-                            -- same as Include This Spell. Do that instead of re-applying the
-                            -- value already on the bar (which would just toggle it off).
-                            if AB.KeysBarApplied(keys) and AB.SpellHasOwn(keys) then
-                                AB.IncludeSpell(keys)
-                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
-                                if ns.QueueReanchor then ns.QueueReanchor() end
-                                if ctx.refresh then ctx.refresh() end
-                                if s._updateActive then s._updateActive() end
-                                return
-                            end
-                            -- Simulate the write once: drives the toggle-off check
-                            -- and the replace warning below.
+                            -- Simulate the write once: drives the rejoin match test,
+                            -- the toggle-off check, and the replace warning below.
                             local temp = {}
                             if ctx.write then ctx.write(temp, val) end
                             local scopeT
@@ -8283,6 +8271,25 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                                 if own ~= nil then scopeActive = true end
                                 if own ~= temp[k] then valuesMatch = false end
+                            end
+                            -- On an EXCLUDED spell the flyout sits on the bar's own value,
+                            -- so Apply to Bar / All Specs here means "rejoin the bar" -- the
+                            -- same as Include This Spell. Do that instead of re-applying the
+                            -- value already on the bar (which would just toggle it off).
+                            -- For a scalar popup value (Threshold Seconds) the flyout item is
+                            -- a fixed identifier, not the bar's number, so "sits on the bar's
+                            -- value" is only true when the entered number actually matches
+                            -- this scope's value -- rejoin then (keeps the bar apply for other
+                            -- spells); otherwise fall through and push the new number, which
+                            -- rejoining would silently discard.
+                            if AB.KeysBarApplied(keys) and AB.SpellHasOwn(keys)
+                               and (not ctx.scalarApply or (scopeActive and valuesMatch)) then
+                                AB.IncludeSpell(keys)
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                if ns.QueueReanchor then ns.QueueReanchor() end
+                                if ctx.refresh then ctx.refresh() end
+                                if s._updateActive then s._updateActive() end
+                                return
                             end
                             -- Toggle OFF: clicking a scope that already holds this
                             -- exact value un-applies it. Binary toggles un-apply on
@@ -8746,7 +8753,13 @@ initFrame:SetScript("OnEvent", function(self)
                                     -- tracks the bar's value, never the spell's override). Settings
                                     -- with no bar apply show it on everything. "+ " toggles are never
                                     -- OR, so they keep it.
-                                    local suppressStrip = canApply and not (isChargeToggle or isActiveBorder or isFnToggle)
+                                    -- A scalar popup value (Threshold Seconds) has only one
+                                    -- item, so "the bar's value differs from this item" is
+                                    -- meaningless -- never suppress it, or Apply-to-Bar
+                                    -- vanishes the moment the entered number differs from the
+                                    -- bar's.
+                                    local suppressStrip = canApply and not item.scalarApply
+                                        and not (isChargeToggle or isActiveBorder or isFnToggle)
                                         and AB.KeysBarApplied(applyKeys) and not itemIsBarApplied()
                                     if suppressStrip then
                                         if menu._applyStrip then menu._applyStrip:Hide() end
@@ -8754,6 +8767,7 @@ initFrame:SetScript("OnEvent", function(self)
                                         AB.ShowApplyStripFor(si, {
                                             keys  = applyKeys,
                                             write = applyWrite,
+                                            scalarApply = item.scalarApply,
                                             isToggle = isChargeToggle or isActiveBorder or isFnToggle,
                                             -- Toggles: "Apply to Bar" ENABLES the feature
                                             -- on the bar (apply true). Disabling is the
@@ -9162,6 +9176,15 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         local TT_ITEMS = {
                             { val = "seconds", label = "Threshold Seconds",
+                              -- Scalar popup value (not a discrete flyout choice): the
+                              -- number lives in the store, entered via a popup, and
+                              -- applyWrite pushes the spell's current seconds live. The
+                              -- Apply-to-Bar strip must treat it as "always push my
+                              -- value", never as a discrete value item -- otherwise the
+                              -- rejoin shortcut discards the entered number and the
+                              -- suppress-strip rule hides the strip whenever the bar's
+                              -- number differs (see scalarApply guards below).
+                              scalarApply = true,
                               dynamicLabel = function()
                                   local base = EllesmereUI.L("Threshold Seconds")
                                   local s = armedSeconds()
