@@ -5634,6 +5634,8 @@ local function ProcessReanchorQueue(self)
     reanchorDirty = false
     _lastReanchorTime = now
     CollectAndReanchor()
+    -- Reapply visibility: newly collected icons may be at alpha 0.
+    if ns.CDMApplyVisibility then ns.CDMApplyVisibility() end
 end
 
 -------------------------------------------------------------------------------
