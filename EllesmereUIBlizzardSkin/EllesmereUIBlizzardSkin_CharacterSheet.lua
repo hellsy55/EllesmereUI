@@ -342,9 +342,9 @@ local function PreSkinCharacterSheet()
     hooksecurefunc(frame, "SetWidth", UpdateBgTexCoords)
     hooksecurefunc(frame, "SetHeight", UpdateBgTexCoords)
     UpdateBgTexCoords()
-    if EllesmereUI and EllesmereUI.PanelPP then
-        EllesmereUI.PanelPP.CreateBorder(frame, 0.2, 0.2, 0.2, 1, 1, "OVERLAY", 7)
-    end
+    -- Standard window-reskin border (the AdventureMap_TopBorder atlas texture),
+    -- matching every other skinned Blizzard window. Replaces the old 1px line.
+    if ns.WSkin and ns.WSkin.AtlasBorder then ns.WSkin.AtlasBorder(frame) end
     -- Window-style system: lets the Modern flat backdrop live-swap in for the
     -- atlas when the user picks Modern for the Character Sheet window.
     if ns.WSkin and ns.WSkin.AdoptShell then

@@ -2247,7 +2247,15 @@ end
 -- diagonal stays continuous across the fill/background split; the clip frames
 -- still window the filled vs empty portions. (Previously stripe overlays used a
 -- fixed 200px width, which left bars wider than 200 uncovered on the right.)
-local function ApplyOverlayGeometry(fillT, bgT, health)
+-- Stripes additionally CROP via texcoord to the bar's share of the pattern's
+-- native 200px span, so the diagonal density stays pixel-identical to the old
+-- fixed-200px look on every bar up to 200 wide. Wider bars stretch the full
+-- pattern (that region was simply blank before the full-width fix, so there is
+-- no legacy look to preserve there). Width comes from settings
+-- (GetHealthBarWidth), never from measuring the plate subtree (12.1 restricted
+-- regions forbid reads there).
+local STRIPE_NATIVE_W = 200
+local function ApplyOverlayGeometry(fillT, bgT, health, isStripe)
     fillT:ClearAllPoints(); bgT:ClearAllPoints()
     fillT:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
     fillT:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
@@ -2255,6 +2263,13 @@ local function ApplyOverlayGeometry(fillT, bgT, health)
     bgT:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
     bgT:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
     bgT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
+    local u = 1
+    if isStripe then
+        u = GetHealthBarWidth() / STRIPE_NATIVE_W
+        if u > 1 then u = 1 end
+    end
+    fillT:SetTexCoord(0, u, 0, 1)
+    bgT:SetTexCoord(0, u, 0, 1)
 end
 
 -- Alpha for the empty (background) portion of an overlay. The per-state "Full
@@ -2306,6 +2321,9 @@ local function EnsureFocusOverlay(plate)
     plate.focusOverlayBg:SetTexture(STRIPE_TEX)
     plate.focusOverlayBg:SetAlpha(OverlayBgAlpha(p and p.focusOverlayFullBgAlpha, overlayAlpha))
     plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    -- Creation-time texcoord for the STRIPE_TEX default (the state-gated apply
+    -- re-runs this with the actual texture kind).
+    ApplyOverlayGeometry(plate.focusOverlayFill, plate.focusOverlayBg, plate.health, true)
     plate.focusClipBg:Hide()
 end
 
@@ -2403,6 +2421,9 @@ ns.EnsureHoverOverlay = function(plate)
     plate.hoverOverlayBg:SetTexture(STRIPE_TEX)
     plate.hoverOverlayBg:SetAlpha(OverlayBgAlpha(p and p.hoverOverlayFullBgAlpha, overlayAlpha))
     plate.hoverOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    -- Creation-time texcoord for the STRIPE_TEX default (the state-gated apply
+    -- re-runs this with the actual texture kind).
+    ApplyOverlayGeometry(plate.hoverOverlayFill, plate.hoverOverlayBg, plate.health, true)
     plate.hoverClipBg:Hide()
 end
 
@@ -2447,6 +2468,9 @@ ns.EnsureTargetOverlay = function(plate)
     plate.targetOverlayBg:SetTexture(STRIPE_TEX)
     plate.targetOverlayBg:SetAlpha(OverlayBgAlpha(p and p.targetOverlayFullBgAlpha, overlayAlpha))
     plate.targetOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
+    -- Creation-time texcoord for the STRIPE_TEX default (the state-gated apply
+    -- re-runs this with the actual texture kind).
+    ApplyOverlayGeometry(plate.targetOverlayFill, plate.targetOverlayBg, plate.health, true)
     plate.targetClipBg:Hide()
 end
 
@@ -3415,7 +3439,7 @@ function ns.ShowHoverEffect(plate)
             plate._ovHoverTex, plate._ovHoverAlpha = texPath, ha
             plate._ovHoverBgAlpha = bgAlpha
             plate._ovHoverR, plate._ovHoverG, plate._ovHoverB = hc.r, hc.g, hc.b
-            ApplyOverlayGeometry(plate.hoverOverlayFill, plate.hoverOverlayBg, plate.health)
+            ApplyOverlayGeometry(plate.hoverOverlayFill, plate.hoverOverlayBg, plate.health, ns.OVERLAY_STRIPE_KEYS[hoverTex] == true)
             plate.hoverOverlayFill:SetTexture(texPath)
             plate.hoverOverlayFill:SetAlpha(ha)
             plate.hoverOverlayFill:SetVertexColor(hc.r, hc.g, hc.b)
@@ -5390,6 +5414,10 @@ function NameplateFrame:ApplyAppearance()
     self.health:SetPoint("CENTER", self, "CENTER", 0, GetNameplateYOffset())
     self.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
     self.absorb:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
+    -- Width may have changed: clear the overlay state gates so the next
+    -- overlay apply re-runs geometry (the stripe texcoord crop is derived
+    -- from the settings width, and the gates never watch width).
+    self._ovTgtTex, self._ovFocTex, self._ovHoverTex = nil, nil, nil
     ns.LayoutCastBar(self, ns.GetHealthBarWidth(), castH)
     ns.LayoutCastIcon(self, castH)
     local showIcon = GetShowCastIcon()
@@ -6263,7 +6291,7 @@ function NameplateFrame:UpdateHealthColor()
             self._ovFocTex, self._ovFocAlpha = texPath, overlayAlpha
             self._ovFocBgAlpha = bgAlpha
             self._ovFocR, self._ovFocG, self._ovFocB = oc.r, oc.g, oc.b
-            ApplyOverlayGeometry(self.focusOverlayFill, self.focusOverlayBg, self.health)
+            ApplyOverlayGeometry(self.focusOverlayFill, self.focusOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[focusTex] == true)
             self.focusOverlayFill:SetTexture(texPath)
             self.focusOverlayFill:SetAlpha(overlayAlpha)
             self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
@@ -6304,7 +6332,7 @@ function NameplateFrame:UpdateHealthColor()
             self._ovTgtTex, self._ovTgtAlpha = texPath, overlayAlpha
             self._ovTgtBgAlpha = bgAlpha
             self._ovTgtR, self._ovTgtG, self._ovTgtB = oc.r, oc.g, oc.b
-            ApplyOverlayGeometry(self.targetOverlayFill, self.targetOverlayBg, self.health)
+            ApplyOverlayGeometry(self.targetOverlayFill, self.targetOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[targetTex] == true)
             self.targetOverlayFill:SetTexture(texPath)
             self.targetOverlayFill:SetAlpha(overlayAlpha)
             self.targetOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)

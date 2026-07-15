@@ -2051,7 +2051,9 @@ local function DecorateFrame(frame, barData)
             -- never fights a GCD swipe or aura-display time (both non-zero).
             local function ReAssertRealCooldown()
                 if fd._isProcessingOverride then return end
-                if fd._isBuffViewerFrame then return end
+                -- Always-Show placeholders deliberately keep their widget cleared
+                -- (never arm a 0-duration swipe); never re-assert onto one.
+                if fd._isBuffViewerFrame or frame._isPlaceholderFrame then return end
                 -- Charge spells: owned by the charge re-arm path.
                 if type(frame.HasVisualDataSource_Charges) == "function"
                    and frame:HasVisualDataSource_Charges() then return end
@@ -2070,12 +2072,16 @@ local function DecorateFrame(frame, barData)
                 local cdInfo = C_Spell.GetSpellCooldown(effID) or C_Spell.GetSpellCooldown(sid2)
                 if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
                 -- Don't fight a widget that already shows a real cooldown, a GCD, or
-                -- aura-display time -- act only when it is cleared to ~0.
-                -- GetCooldownDuration is a clean number here; guard defensively.
+                -- aura-display time -- act only when it is cleared to ~0. The secret
+                -- check MUST run before any truthiness/comparison on the value (a
+                -- secret errors on either); when the widget's duration is secret we
+                -- cannot prove it was cleared, so fail closed and leave it alone
+                -- (the sigil failure moment reads a clean 0, so the fix still runs).
                 if cd.GetCooldownDuration then
                     local ok, curDur = pcall(cd.GetCooldownDuration, cd)
-                    if ok and curDur and not (issecretvalue and issecretvalue(curDur))
-                       and curDur > 100 then return end
+                    if not ok then return end
+                    if issecretvalue and issecretvalue(curDur) then return end
+                    if curDur and curDur > 100 then return end
                 end
                 local durObj = C_Spell.GetSpellCooldownDuration(effID)
                     or C_Spell.GetSpellCooldownDuration(sid2)

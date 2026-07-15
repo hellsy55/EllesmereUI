@@ -312,11 +312,17 @@ qolFrame:SetScript("OnEvent", function(self)
         C_Timer.After(2, function()
             if IsEnabled() then EllesmereUI._applyAutoOpenContainers() end
         end)
-        local function ScanAndOpen()
+        -- skipMerchantGate: the MERCHANT_CLOSED re-run fires before Blizzard's
+        -- MerchantFrame finishes hiding, so its entry check would still read
+        -- "merchant open" and bail. That run skips only THIS gate -- actual
+        -- safety comes from the chain's 0.5s pre-open delay plus the per-open
+        -- MerchantOpen() re-check in OpenNext (by which time the frame has
+        -- hidden, or a genuinely re-opened merchant correctly aborts).
+        local function ScanAndOpen(skipMerchantGate)
             if not _cacheBuilt then return end
             if not IsEnabled() then return end
             if InCombatLockdown() then return end
-            if MerchantOpen() then return end
+            if not skipMerchantGate and MerchantOpen() then return end
             local toOpen = {}
             for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
                 for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -365,13 +371,10 @@ qolFrame:SetScript("OnEvent", function(self)
         end
 
         containerFrame:SetScript("OnEvent", function(_, event)
-            -- MERCHANT_CLOSED can fire before the frame finishes hiding, so give
-            -- it a moment before ScanAndOpen re-checks MerchantOpen().
-            if event == "MERCHANT_CLOSED" then
-                C_Timer.After(0.3, ScanAndOpen)
-            else
-                ScanAndOpen()
-            end
+            -- MERCHANT_CLOSED: the interaction is over but the frame may not
+            -- have hidden yet -- skip the entry gate (see ScanAndOpen note)
+            -- instead of settling on a timer.
+            ScanAndOpen(event == "MERCHANT_CLOSED")
         end)
     end
 
@@ -2456,12 +2459,22 @@ do
             HideButtonsUnder((select(i, ...)))
         end
     end
+    -- Some Blizzard frame trees refuse GetChildren from insecure code with a
+    -- usage error (house editor list rows do). This walk runs inside a
+    -- ShowUIPanel hooksecurefunc, so an uncaught error propagates into the
+    -- panel's caller and aborts the rest of its flow (e.g. the house
+    -- editor's OnActiveModeChanged). pcall per node: a refusing frame only
+    -- skips its own subtree; siblings still get scanned. ScanFrame is
+    -- hoisted so the pcall allocates nothing per node.
+    local function ScanFrame(root)
+        ScanChildren(root:GetChildren())
+    end
     function HideButtonsUnder(root)
         if not root then return end
         local fp = GetFingerprint()
         if not fp then return end
         if root.ShowTooltip == fp then HideButton(root) end
-        if root.GetChildren then ScanChildren(root:GetChildren()) end
+        if root.GetChildren then pcall(ScanFrame, root) end
     end
 
     -- One-time full walk (no allocation, never on a timer) to catch panels that

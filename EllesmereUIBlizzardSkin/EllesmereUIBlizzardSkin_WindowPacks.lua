@@ -3321,16 +3321,15 @@ local function Skin_Guild()
         local cdStock = capturePts(cd2)
         local boxWide = boxStock and widePts(boxStock, 23, 20)
         local cdWide = cdStock and widePts(cdStock, 23, 23)
-        -- EXPERIMENT: also widen `ml` (MemberList) itself at the source,
-        -- since Blizzard's own row-sizing below (SetWidth(GetMemberList()
-        -- :GetWidth())) reads ml's width directly. RefreshLayout only ever
-        -- gives `ml` a single positional anchor (not a LEFT+RIGHT pair like
-        -- box2/cd2), so it's resized with a plain SetWidth rather than the
-        -- capturePts/widePts anchor-nudge technique above. This is additive,
-        -- not a replacement for the per-row SetWidth override below: if
-        -- Blizzard's own layout starts producing correctly-sized rows from
-        -- this alone, the per-row override becomes a harmless no-op; if not,
-        -- it still runs and keeps rows correct either way.
+        -- Also widen `ml` (MemberList) itself at the source, since Blizzard's
+        -- own row-sizing below (SetWidth(GetMemberList():GetWidth())) reads
+        -- ml's width directly. RefreshLayout only ever gives `ml` a single
+        -- positional anchor (not a LEFT+RIGHT pair like box2/cd2), so it's
+        -- resized with a plain SetWidth rather than the capturePts/widePts
+        -- anchor-nudge technique above. This works alongside the per-row
+        -- SetWidth override below, not instead of it: the two are
+        -- belt-and-braces, so rows stay correctly sized whether Blizzard's
+        -- layout picks up the widened ml on its own or not.
         local mlStockWidth = ml:GetWidth()
         local mlWideWidth = mlStockWidth + 23 + 20
         -- Every roster row is sized by Blizzard to MemberList's own width
@@ -7686,20 +7685,27 @@ local function UpdateMerchantItemLevels()
     if not f then return end
     local show = EllesmereUIDB and EllesmereUIDB.merchantShowItemLevel == true
     local onSellTab = (f.selectedTab or 1) == 1
+    local render = show and onSellTab and f:IsVisible()
     for i = 1, 12 do
         local btn = _G["MerchantItem" .. i .. "ItemButton"]
         if btn then
-            local fs = btn.EUIMerchantILvl
-            if not fs then
-                fs = btn:CreateFontString(nil, "OVERLAY", nil, 7)
-                fs:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
-                local path = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
-                local flag = (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE"
-                fs:SetFont(path, 12, flag)
-                btn.EUIMerchantILvl = fs
-            end
-            fs:SetText("")
-            if show and onSellTab and f:IsVisible() then
+            -- FontString ref lives in the engine FFD, never on Blizzard's
+            -- button table. Read without creating so the disabled path costs
+            -- one weak-table lookup per slot.
+            local fd = FFD[btn]
+            local fs = fd and fd.merchantILvl
+            if not render then
+                if fs then fs:SetText("") end
+            else
+                if not fs then
+                    fs = btn:CreateFontString(nil, "OVERLAY", nil, 7)
+                    fs:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+                    local path = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath()) or "Fonts\\FRIZQT__.TTF"
+                    local flag = (EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE"
+                    fs:SetFont(path, 12, flag)
+                    GetFFD(btn).merchantILvl = fs
+                end
+                fs:SetText("")
                 local index = btn:GetID()
                 local link = index and index > 0 and GetMerchantItemLink(index)
                 if link then
@@ -7724,7 +7730,6 @@ local function UpdateMerchantItemLevels()
         end
     end
 end
-EllesmereUI._Merchant_RefreshItemLevels = UpdateMerchantItemLevels
 
 local _merchantILvlHooked = false
 local function EnsureMerchantILvlHook()
@@ -7735,17 +7740,45 @@ local function EnsureMerchantILvlHook()
     end
 end
 
+-- The MerchantFrame_Update hook is what renders the item levels; it installs
+-- once the toggle is on and stays (cheap: MerchantFrame_Update only fires
+-- while a merchant is up, and the updater no-ops when the toggle is off). It
+-- must NOT be gated on MerchantFrame:IsVisible(): MERCHANT_SHOW fires before
+-- Blizzard shows the frame, so IsVisible() is false there and the hook would
+-- never install. GET_ITEM_INFO_RECEIVED fires on every item-cache resolve
+-- suite-wide, so it is registered ONLY while a merchant is actually open
+-- (tracked by an explicit flag, not visibility) AND the toggle is on.
 local mILvlBoot = CreateFrame("Frame")
-mILvlBoot:RegisterEvent("PLAYER_LOGIN")
-mILvlBoot:RegisterEvent("MERCHANT_SHOW")
-mILvlBoot:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-mILvlBoot:SetScript("OnEvent", function(_, event)
-    if event == "GET_ITEM_INFO_RECEIVED"
-       and not (_G.MerchantFrame and _G.MerchantFrame:IsVisible()) then
-        return
+local _merchantOpen = false
+local function SyncMerchantILvlEvents()
+    local on = EllesmereUIDB and EllesmereUIDB.merchantShowItemLevel == true
+    if on then EnsureMerchantILvlHook() end
+    if on and _merchantOpen then
+        mILvlBoot:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    else
+        mILvlBoot:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
     end
-    EnsureMerchantILvlHook()
+end
+
+-- Options toggle entry point: re-sync listeners, then render or clear.
+EllesmereUI._Merchant_RefreshItemLevels = function()
+    SyncMerchantILvlEvents()
     UpdateMerchantItemLevels()
+end
+
+mILvlBoot:RegisterEvent("MERCHANT_SHOW")
+mILvlBoot:RegisterEvent("MERCHANT_CLOSED")
+mILvlBoot:SetScript("OnEvent", function(_, event)
+    if event == "MERCHANT_SHOW" then
+        _merchantOpen = true
+        SyncMerchantILvlEvents()
+        UpdateMerchantItemLevels()
+    elseif event == "MERCHANT_CLOSED" then
+        _merchantOpen = false
+        SyncMerchantILvlEvents()
+    else -- GET_ITEM_INFO_RECEIVED: an item's data resolved while shopping
+        UpdateMerchantItemLevels()
+    end
 end)
 
 -------------------------------------------------------------------------------

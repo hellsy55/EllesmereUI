@@ -2423,6 +2423,7 @@ initFrame:SetScript("OnEvent", function(self)
             barCfg.spellIDs       = nil
             barCfg.popularKey     = nil
             barCfg.glowBased      = nil
+            barCfg.trackType      = nil
             barCfg.customDuration = dur
             -- Manually-entered id: no live frame to read the base from. Clear any
             -- stale base; MatchFrameToConfig self-heals it if/when talented.
@@ -2479,7 +2480,7 @@ initFrame:SetScript("OnEvent", function(self)
         local mH = 4
 
         -- "Custom Buff ID" entry at the top
-        local isCustomSelected = barCfg.spellID and barCfg.spellID > 0 and not barCfg.popularKey and not barCfg.spellIDs
+        local isCustomSelected = barCfg.spellID and barCfg.spellID > 0 and not barCfg.popularKey and not barCfg.spellIDs and barCfg.trackType ~= "cooldown"
         local csItem = CreateFrame("Button", nil, inner)
         csItem:SetHeight(ITEM_H)
         csItem:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -2558,6 +2559,7 @@ initFrame:SetScript("OnEvent", function(self)
                 barCfg.customDuration = entry.customDuration
                 barCfg.spellID        = entry.spellIDs and entry.spellIDs[1] or 0
                 barCfg.baseSpellID    = nil
+                barCfg.trackType      = nil
                 barCfg.name           = entry.name
                 Refresh()
                 ns.BuildTrackedBuffBars()
@@ -2591,6 +2593,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Check if spell is already on another Tracking Bar
             local usedOnBar = ns.SpellUsedOnAnyOtherTBB and ns.SpellUsedOnAnyOtherTBB(sp.spellID, nil)
             local isSelected = not barCfg.popularKey and not barCfg.spellIDs
+                             and barCfg.trackType ~= "cooldown"
                              and barCfg.spellID and barCfg.spellID > 0 and barCfg.spellID == sp.spellID
             local item = CreateFrame("Button", nil, inner)
             item:SetHeight(ITEM_H)
@@ -2662,6 +2665,7 @@ initFrame:SetScript("OnEvent", function(self)
                 barCfg.popularKey     = nil
                 barCfg.glowBased      = nil
                 barCfg.customDuration = nil
+                barCfg.trackType      = nil
                 barCfg.name           = sp.name
                 -- Capture the BASE spell id for hero-talent override spells so
                 -- the bar keeps tracking after the talent is removed. When the
@@ -2683,6 +2687,121 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         for _, sp in ipairs(trackedBars) do MakeSpellItem(sp) end
+
+        -- "Cooldowns" section: pick a spell COOLDOWN to track instead of a
+        -- buff (cfg.trackType = "cooldown"). Sourced from the Essential +
+        -- Utility pools plus the settings catalog. Skipped entirely when the
+        -- list is empty so the picker stays identical to before.
+        local cdSpells = ns.GetCDMSpellsForBar and ns.GetCDMSpellsForBar("cooldowns") or {}
+        if #cdSpells > 0 then
+            local cdDiv = inner:CreateTexture(nil, "ARTWORK")
+            cdDiv:SetHeight(1); cdDiv:SetColorTexture(1, 1, 1, 0.10)
+            cdDiv:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH - 4)
+            cdDiv:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH - 4)
+            mH = mH + 9
+
+            local cdHdr = inner:CreateFontString(nil, "OVERLAY")
+            cdHdr:SetFont(FONT_PATH, 10, GetCDMOptOutline())
+            cdHdr:SetTextColor(1, 1, 1, 0.5)
+            cdHdr:SetPoint("TOPLEFT", inner, "TOPLEFT", 10, -mH - 5)
+            cdHdr:SetText(EllesmereUI.L("Cooldowns"))
+            mH = mH + 20
+
+            local function MakeCooldownItem(sp)
+                -- Gray-out check is scoped to OTHER cooldown-tracking bars:
+                -- a buff bar for the same spell never blocks this pick.
+                local usedOnBar = ns.SpellUsedOnAnyOtherTBB and ns.SpellUsedOnAnyOtherTBB(sp.spellID, nil, "cooldown")
+                local isSelected = barCfg.trackType == "cooldown"
+                                 and not barCfg.popularKey and not barCfg.spellIDs
+                                 and barCfg.spellID and barCfg.spellID > 0 and barCfg.spellID == sp.spellID
+                local item = CreateFrame("Button", nil, inner)
+                item:SetHeight(ITEM_H)
+                item:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
+                item:SetPoint("TOPRIGHT", inner, "TOPRIGHT", -1, -mH)
+                item:SetFrameLevel(menu:GetFrameLevel() + 2)
+
+                local ico = item:CreateTexture(nil, "ARTWORK")
+                local icoSz = ITEM_H - 4
+                ico:SetSize(icoSz, icoSz)
+                ico:SetPoint("RIGHT", item, "RIGHT", -6, 0)
+                if sp.icon then ico:SetTexture(sp.icon) end
+                ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+                local baseR = isSelected and 1 or tDimR
+                local baseG = isSelected and 1 or tDimG
+                local baseB = isSelected and 1 or tDimB
+                local baseA = isSelected and 1 or tDimA
+
+                local lbl = item:CreateFontString(nil, "OVERLAY")
+                lbl:SetFont(FONT_PATH, 11, GetCDMOptOutline())
+                lbl:SetPoint("LEFT", 8, 0)
+                lbl:SetPoint("RIGHT", ico, "LEFT", -4, 0)
+                lbl:SetJustifyH("LEFT")
+                lbl:SetWordWrap(false); lbl:SetMaxLines(1)
+                lbl:SetText(EllesmereUI.L(sp.name))
+                lbl:SetTextColor(baseR, baseG, baseB, baseA)
+
+                local hl = item:CreateTexture(nil, "ARTWORK", nil, -1)
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, isSelected and 0.12 or 0)
+
+                -- Gray out if already used on another cooldown-tracking bar
+                if usedOnBar and not isSelected then
+                    lbl:SetTextColor(tDimR, tDimG, tDimB, tDimA * 0.4)
+                    ico:SetDesaturated(true); ico:SetAlpha(0.4)
+                    item:SetScript("OnEnter", function()
+                        EllesmereUI.ShowWidgetTooltip(item, EllesmereUI.Lf("Already assigned to %s", EllesmereUI.L(usedOnBar)))
+                        hl:SetColorTexture(1, 1, 1, hlA * 0.3); hl:SetAlpha(1)
+                    end)
+                    item:SetScript("OnLeave", function()
+                        EllesmereUI.HideWidgetTooltip()
+                        hl:SetAlpha(0)
+                    end)
+                    mH = mH + ITEM_H
+                    return
+                end
+
+                -- Untalented catalog spells stay clickable but render
+                -- desaturated with a hint, matching the buff rows above.
+                local notLearned = (sp.isKnown == false)
+                if notLearned then ico:SetDesaturated(true); ico:SetAlpha(0.5) end
+                item:SetScript("OnEnter", function()
+                    lbl:SetTextColor(1,1,1,1); hl:SetColorTexture(1,1,1,hlA)
+                    if notLearned then EllesmereUI.ShowWidgetTooltip(item, EllesmereUI.L("Not currently talented")) end
+                end)
+                item:SetScript("OnLeave", function()
+                    lbl:SetTextColor(baseR, baseG, baseB, baseA)
+                    hl:SetColorTexture(1, 1, 1, isSelected and 0.12 or 0)
+                    if notLearned then EllesmereUI.HideWidgetTooltip() end
+                end)
+                item:SetScript("OnClick", function()
+                    if notLearned then EllesmereUI.HideWidgetTooltip() end
+                    menu:Hide()
+                    barCfg.spellID        = sp.spellID
+                    barCfg.spellIDs       = nil
+                    barCfg.popularKey     = nil
+                    barCfg.glowBased      = nil
+                    barCfg.customDuration = nil
+                    barCfg.trackType      = "cooldown"
+                    barCfg.name           = sp.name
+                    -- Capture the BASE spell id for hero-talent override spells
+                    -- so the bar keeps tracking after the talent is removed.
+                    barCfg.baseSpellID = nil
+                    if sp.cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                        local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(sp.cdID)
+                        if info and info.spellID and info.spellID > 0 and info.spellID ~= sp.spellID then
+                            barCfg.baseSpellID = info.spellID
+                        end
+                    end
+                    Refresh()
+                    ns.BuildTrackedBuffBars()
+                    if onChanged then onChanged() end
+                end)
+                mH = mH + ITEM_H
+            end
+
+            for _, sp in ipairs(cdSpells) do MakeCooldownItem(sp) end
+        end
 
         -- "Missing Spells?" footer: centered, accent-colored prompt that opens
         -- Blizzard's CDM and closes EUI options, matching the CD/utility picker.
@@ -4724,6 +4843,44 @@ initFrame:SetScript("OnEvent", function(self)
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
             })
+        end
+
+        -- Smooth Bars: PROFILE-wide checkbox dropdown (all bars, all specs
+        -- -- deliberately NOT per bar or per spec). Buffs = buff mirrors +
+        -- self-timed presets; Cooldowns = cooldown-tracking bars. Read by
+        -- the tick each pass, so changes apply instantly with no rebuild.
+        local SMOOTH_ITEMS = {
+            { key = "buffs",     label = "Buffs" },
+            { key = "cooldowns", label = "Cooldowns" },
+        }
+        local SMOOTH_DEFAULT = { buffs = true, cooldowns = false }
+        local smoothRow
+        smoothRow, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Smooth Bars",
+              tooltip = "Eases bar movement instead of snapping. Affects all Tracking Bars of that type, in every spec of this profile.",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end },
+            { type = "label", text = "" });  y = y - h
+        do
+            local rgn = smoothRow._leftRegion
+            if rgn._control then rgn._control:Hide() end
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rgn, 210, rgn:GetFrameLevel() + 2,
+                SMOOTH_ITEMS,
+                function(k)
+                    local s = ns.GetTBBSmoothSettings and ns.GetTBBSmoothSettings()
+                    if not s or s[k] == nil then return SMOOTH_DEFAULT[k] end
+                    return s[k] == true
+                end,
+                function(k, v)
+                    local s = ns.GetTBBSmoothSettings and ns.GetTBBSmoothSettings()
+                    if s then s[k] = v and true or false end
+                end)
+            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            rgn._control = cbDD
+            rgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
         -------------------------------------------------------------------

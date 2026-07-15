@@ -1825,7 +1825,6 @@ L["Widens the clickable hitbox of enemy nameplates. 100% = matches bar width. In
 L["Changing Max Debuffs requires a UI reload to take effect."] = "'최대 약화 효과 개수' 변경은 UI 리로드 후 적용됩니다."
 -- add Nameplates Format (이름표 포맷)
 L["%1$s Slot Settings"] = "%s 슬롯 설정"   -- core concats slotLabel.." Slot Settings" ("Top Slot Settings") -> needs %s key so reverse-format compiles and re-translates the "Top" capture; %1$s/exact = dead key (본체가 slotLabel.." Slot Settings" 영문 concat, %s 키라야 역포맷으로 "Top" 캡처 재번역, %1$s/exact면 죽은 키)
-L["%1%s Text Settings"] = "%s 글자 설정"   -- text gear: slotLabel.." Settings" ("Top Text Settings") -> re-translates "Top" capture; no overlap with "Slot Settings" pattern (텍스트 톱니: slotLabel.." Settings", "Top" 캡처 재번역, "Slot Settings" 패턴과 미겹침)
 L["Level %d"] = "%d레벨"
 
 -- == add UnitFrames (유닛 프레임) ==============================================
@@ -1853,6 +1852,7 @@ L["Center Text Settings"] = "중앙 글자 설정"
 L["Class Icon Settings"] = "직업 아이콘 설정"
 L["Class Resource Position"] = "직업 자원 위치"
 L["Class Theme"] = "직업 테마"
+L["Colon (5:32)"] = "콜론 (5:32)"
 L["Combat Indicator Settings"] = "전투 표시기 설정"
 L["Current HP Only"] = "현재 생명력만"
 L["Current HP | Percent"] = "현재 생명력 | 백분율"
@@ -1913,6 +1913,7 @@ L["Raid Marker Size"] = "공격대 징표 크기"
 L["Raise Cast Bar Strata (All)"] = "시전 바 프레임 우선순위 높이기 (전체)"
 L["Right Text Settings"] = "오른쪽 글자 설정"
 L["Rounded Square"] = "둥근 네모"
+L["Seconds (152)"] = "초 (152)"
 L["Shape Border"] = "모양 테두리"
 L["Shape Border Settings"] = "모양 테두리 설정"
 L["Show % Decimal"] = "% 소수점 표시"
@@ -1935,6 +1936,7 @@ L["Stack Position"] = "중첩 위치"
 L["Stack Size"] = "중첩 크기"
 L["Stack X"] = "중첩 가로 위치"
 L["Stack Y"] = "중첩 세로 위치"
+L["Standard (5m / 32)"] = "표준 (5m / 32)"
 L["Strata"] = "프레임 우선순위"
 L["Target Cast Bar"] = "대상 시전 바"
 L["Target of Target"] = "대상의 대상"

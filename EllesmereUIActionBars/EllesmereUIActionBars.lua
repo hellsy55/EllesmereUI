@@ -1686,6 +1686,30 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- plus blocked SetAttribute from UpdatePressAndHoldAction in combat.
         -- No-op on 12.0, where the event is never self-registered.
         btn:UnregisterEvent("ACTIONBAR_SLOT_CHANGED")
+        -- The template OnLoad also registered this button with Blizzard's
+        -- ActionBarButtonEventsFrame broadcaster. That tinsert ran under OUR
+        -- execution, so the stored entry is a tainted value: while the
+        -- broadcaster is re-enabled for the vehicle/extra button (see
+        -- ApplyBroadcaster), its dispatch loop reads the entry and the
+        -- button's whole mixin OnEvent runs tainted -- blocked SetAttribute
+        -- from UpdatePressAndHoldAction (ACTIONBAR_SLOT_CHANGED) and secret
+        -- SetCooldown rejections (ACTIONBAR_UPDATE_COOLDOWN) in combat.
+        -- UnregisterEvent cannot stop that path (it calls OnEvent directly),
+        -- and wrapping btn.OnEvent would be worse: the template wires
+        -- <OnEvent method="OnEvent"/>, so the engine's per-button dispatch
+        -- resolves the method at fire time -- a replacement function of ours
+        -- is a tainted value and would taint EVERY per-button event dispatch
+        -- (per-button cooldown updates only work because they start secure).
+        -- Instead, remove our entry from the broadcaster's list: nil it out
+        -- in place (never tremove -- shifting would rewrite later
+        -- Blizzard-owned entries as tainted values). The button loses
+        -- nothing: every event it needs is self-registered
+        -- (BUTTON_EVENT_LISTS) or handled by the central dispatcher.
+        if ActionBarButtonEventsFrame and type(ActionBarButtonEventsFrame.frames) == "table" then
+            for k, f in pairs(ActionBarButtonEventsFrame.frames) do
+                if f == btn then ActionBarButtonEventsFrame.frames[k] = nil end
+            end
+        end
         -- When the pickup modifier is held (shift-click to move abilities),
         -- temporarily disable useOnKeyDown so the action doesn't fire on
         -- mouse down. The pickup happens before the up event, so the
@@ -6746,7 +6770,10 @@ local PUSHED_TYPES = {
 
 do
 local function _setupBorderEdges(btn, storeKey, driverTex)
-    local edges = btn[storeKey]
+    -- Edge state lives in EFD, never on the button table: StanceBar/PetBar
+    -- flow through here with BLIZZARD-owned buttons (StanceButton/
+    -- PetActionButton), which must never receive custom keys.
+    local edges = EFD(btn)[storeKey]
     if not edges then
         edges = {}
         for j = 1, 4 do
@@ -6755,7 +6782,7 @@ local function _setupBorderEdges(btn, storeKey, driverTex)
             t:Hide()
             edges[j] = t
         end
-        btn[storeKey] = edges
+        EFD(btn)[storeKey] = edges
         if driverTex then
             hooksecurefunc(driverTex, "Show", function()
                 if not edges._active then return end
@@ -6785,7 +6812,7 @@ local function _applyBorderEdges(edges, btn, brdSize, cr, cg, cb)
 end
 
 local function _hideBorderEdges(btn, storeKey)
-    local edges = btn[storeKey]
+    local edges = EFD(btn)[storeKey]
     if not edges then return end
     edges._active = false
     for j = 1, 4 do edges[j]:Hide() end
@@ -6966,14 +6993,14 @@ function EAB:ApplyHighlightTextures()
                         btn.HighlightTexture:SetAlpha(0)
                         local edges = ns._setupBorderEdges(btn, "_highlightBorder")
                         ns._applyBorderEdges(edges, btn, brdSize, cr, cg, cb)
-                        if not btn._hlBorderHooked then
-                            btn._hlBorderHooked = true
+                        if not EFD(btn).hlBorderHooked then
+                            EFD(btn).hlBorderHooked = true
                             btn:HookScript("OnEnter", function(self)
-                                local be = self._highlightBorder
+                                local be = EFD(self)._highlightBorder
                                 if be and be._active then for j = 1, 4 do be[j]:Show() end end
                             end)
                             btn:HookScript("OnLeave", function(self)
-                                local be = self._highlightBorder
+                                local be = EFD(self)._highlightBorder
                                 if be then for j = 1, 4 do be[j]:Hide() end end
                             end)
                         end
@@ -7801,6 +7828,16 @@ local _eabBindOwner = CreateFrame("Frame", "EAB_BindOwner", UIParent)
 -- actually changes.
 local function UpdateKeybinds()
     if InCombatLockdown() then return false end
+    -- While the house editor is active our override bindings are cleared so
+    -- Blizzard's housing hotkeys work (see Housing Editor Keybind Clearing).
+    -- The editor registers its OWN override bindings after ours are cleared,
+    -- and that registration fires UPDATE_BINDINGS -- which routes right back
+    -- here. Without this guard the rebuild re-applied all ~200 of our
+    -- overrides on top of the editor's, stomping the housing hotkeys until
+    -- the editor re-applied them on the next mode change. Rebuild resumes on
+    -- editor close (housingCleared reset -> UpdateKeybinds; sigValid stays
+    -- false while cleared, so that rebuild is never skipped).
+    if _bindState.housingCleared then return false end
     -- Pass 1: compute per-button routing signature (k1, k2, useClick, isPH)
     -- and compare against the last applied build.
     local sig = _bindState.sig
