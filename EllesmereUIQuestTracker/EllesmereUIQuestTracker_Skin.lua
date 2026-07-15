@@ -754,26 +754,15 @@ local function HookBlockLineMethods(block)
         block.HeaderButton:HookScript("OnLeave", reassertTitle)
     end
 
-    -- Left-click on a quest block also super-tracks it (in addition to
-    -- Blizzard's default click behavior). HookScript preserves the
-    -- default handler and just adds our side-effect.
-    local function superTrackOnClick(self, button)
-        if button ~= "LeftButton" then return end
-        local qID = self.id
-        if type(qID) ~= "number" then return end
-        if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
-            C_SuperTrack.SetSuperTrackedQuestID(qID)
-        end
-    end
-    -- Only hook the HeaderButton (title-text area), NOT the whole block.
-    -- Hooking block:OnMouseUp eats clicks meant for the quest item button
-    -- and LFG eyeball that sit inside the block's hit region, breaking
-    -- the user's ability to actually use quest items.
-    if block.HeaderButton and block.HeaderButton.HookScript then
-        block.HeaderButton:HookScript("OnClick", function(self, button)
-            superTrackOnClick(block, button)
-        end)
-    end
+    -- REMOVED: an OnClick post-hook here used to call
+    -- C_SuperTrack.SetSuperTrackedQuestID(block.id) so a left-click also
+    -- super-tracked the quest. Setting the super-track from addon (tainted)
+    -- execution taints Blizzard's world-map super-track / AreaPOI refresh,
+    -- surfacing later as a blocked Frame:SetPropagateMouseClicks() when the map
+    -- builds POI pins (ADDON_ACTION_BLOCKED via QuestMapFrame_ShowQuestDetails).
+    -- Blizzard's native block click already super-tracks the quest securely, so
+    -- the hook was redundant; the focus highlight still follows the super-track
+    -- via the SUPER_TRACKING_CHANGED handler.
 
     -- AddObjective / SetStringText hooks REMOVED (session 68 perf audit).
     -- SkinBlock already styles all fontstrings via GetRegions() walk +
