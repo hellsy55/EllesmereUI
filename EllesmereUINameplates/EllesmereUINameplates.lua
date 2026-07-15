@@ -1525,10 +1525,12 @@ local function StartPandemicGlow(slot, slotSize)
     if not pg then
         local wrapper = CreateFrame("Frame", nil, slot)
         wrapper:SetAllPoints()
-        -- Sit just above the border (slot+1) so the glow renders beneath the
-        -- cooldown countdown text (slot.cd at +2) and stack count (+3) instead
-        -- of covering them.
-        wrapper:SetFrameLevel(slot:GetFrameLevel() + 1)
+        -- Sit ABOVE the cooldown frame (slot.cd at +2) so the duration swipe
+        -- can't render on top of the pandemic border and dim it. Matches the
+        -- dispel glow (slot+5); the glow is an edge border, so it doesn't
+        -- meaningfully obscure the corner countdown / stack numbers. (At the old
+        -- slot+1 the swipe drew over the glow, making it hard to see.)
+        wrapper:SetFrameLevel(slot:GetFrameLevel() + 5)
         local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
         flipTex:SetPoint("CENTER")
         local animGroup = flipTex:CreateAnimationGroup()
