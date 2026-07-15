@@ -296,8 +296,10 @@ end
 -- drop every capture in the subtree (users re-capture; honest beats
 -- silently applying one bar's override onto another).
 local CDM_BARS_PREFIX = "EllesmereUICooldownManager\31cdmBars\30bars\30"
+local RAID_SIZE_OV_PREFIX = "EllesmereUIRaidFrames\31raidSizeOverrides\30"
 local function NumAllowedFKey(fkey)
     return fkey:sub(1, #CDM_BARS_PREFIX) == CDM_BARS_PREFIX
+        or fkey:sub(1, #RAID_SIZE_OV_PREFIX) == RAID_SIZE_OV_PREFIX
 end
 
 function EllesmereUI.SpecOverrides_OnCDMBarsRestructured()
