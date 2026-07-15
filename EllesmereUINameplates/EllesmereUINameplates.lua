@@ -2239,23 +2239,20 @@ function ns.ResolveOverlayTexPath(key)
     return nil
 end
 
--- Stripe overlays keep their fixed 200px, left-anchored pattern (continuous
--- diagonal across the fill/background split). Bar textures instead fill the full
--- bar width so they render like a normal bar fill; the clip frames still window
--- the filled vs empty portions.
-local function ApplyOverlayGeometry(fillT, bgT, health, isStripe)
+-- Both overlays span the full bar width (anchored LEFT+RIGHT to the health bar)
+-- so the pattern always covers the whole bar and follows Health Bar Width
+-- changes automatically. Fill and bg share the identical geometry, so a stripe's
+-- diagonal stays continuous across the fill/background split; the clip frames
+-- still window the filled vs empty portions. (Previously stripe overlays used a
+-- fixed 200px width, which left bars wider than 200 uncovered on the right.)
+local function ApplyOverlayGeometry(fillT, bgT, health)
     fillT:ClearAllPoints(); bgT:ClearAllPoints()
     fillT:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
     fillT:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
+    fillT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
     bgT:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
     bgT:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 0, 0)
-    if isStripe then
-        fillT:SetWidth(200)
-        bgT:SetWidth(200)
-    else
-        fillT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
-        bgT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
-    end
+    bgT:SetPoint("RIGHT", health, "RIGHT", 0, 0)
 end
 
 -- Alpha for the empty (background) portion of an overlay. The per-state "Full
@@ -2283,12 +2280,13 @@ local function EnsureFocusOverlay(plate)
     plate.focusClipFill:SetPoint("RIGHT", fillTex, "RIGHT", 0, 0)
     plate.focusClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     plate.focusOverlayFill = plate.focusClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
-    -- Texture: full bar height, fixed width, anchored to the health LEFT so the
-    -- diagonal pattern stays continuous across the fill/background split (both
-    -- overlays share the same origin) and snaps with the clip's vertical edges.
+    -- Texture: full bar height and full bar width (anchored LEFT+RIGHT to the
+    -- health bar) so the diagonal pattern stays continuous across the
+    -- fill/background split (both overlays share the same geometry) and snaps
+    -- with the clip's vertical edges.
     plate.focusOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
     plate.focusOverlayFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
-    plate.focusOverlayFill:SetWidth(200)
+    plate.focusOverlayFill:SetPoint("RIGHT", plate.health, "RIGHT", 0, 0)
     plate.focusOverlayFill:SetTexture(STRIPE_TEX)
     plate.focusOverlayFill:SetAlpha(overlayAlpha)
     plate.focusOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -2302,7 +2300,7 @@ local function EnsureFocusOverlay(plate)
     plate.focusOverlayBg = plate.focusClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
     plate.focusOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
     plate.focusOverlayBg:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
-    plate.focusOverlayBg:SetWidth(200)
+    plate.focusOverlayBg:SetPoint("RIGHT", plate.health, "RIGHT", 0, 0)
     plate.focusOverlayBg:SetTexture(STRIPE_TEX)
     plate.focusOverlayBg:SetAlpha(OverlayBgAlpha(p and p.focusOverlayFullBgAlpha, overlayAlpha))
     plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -2385,7 +2383,7 @@ ns.EnsureHoverOverlay = function(plate)
     plate.hoverOverlayFill = plate.hoverClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
     plate.hoverOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
     plate.hoverOverlayFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
-    plate.hoverOverlayFill:SetWidth(200)
+    plate.hoverOverlayFill:SetPoint("RIGHT", plate.health, "RIGHT", 0, 0)
     plate.hoverOverlayFill:SetTexture(STRIPE_TEX)
     plate.hoverOverlayFill:SetAlpha(overlayAlpha)
     plate.hoverOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -2399,7 +2397,7 @@ ns.EnsureHoverOverlay = function(plate)
     plate.hoverOverlayBg = plate.hoverClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
     plate.hoverOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
     plate.hoverOverlayBg:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
-    plate.hoverOverlayBg:SetWidth(200)
+    plate.hoverOverlayBg:SetPoint("RIGHT", plate.health, "RIGHT", 0, 0)
     plate.hoverOverlayBg:SetTexture(STRIPE_TEX)
     plate.hoverOverlayBg:SetAlpha(OverlayBgAlpha(p and p.hoverOverlayFullBgAlpha, overlayAlpha))
     plate.hoverOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -2423,12 +2421,13 @@ ns.EnsureTargetOverlay = function(plate)
     plate.targetClipFill:SetPoint("RIGHT", fillTex, "RIGHT", 0, 0)
     plate.targetClipFill:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     plate.targetOverlayFill = plate.targetClipFill:CreateTexture(nil, "ARTWORK", nil, 2)
-    -- Texture: full bar height, fixed width, anchored to the health LEFT so the
-    -- diagonal pattern stays continuous across the fill/background split (both
-    -- overlays share the same origin) and snaps with the clip's vertical edges.
+    -- Texture: full bar height and full bar width (anchored LEFT+RIGHT to the
+    -- health bar) so the diagonal pattern stays continuous across the
+    -- fill/background split (both overlays share the same geometry) and snaps
+    -- with the clip's vertical edges.
     plate.targetOverlayFill:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
     plate.targetOverlayFill:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
-    plate.targetOverlayFill:SetWidth(200)
+    plate.targetOverlayFill:SetPoint("RIGHT", plate.health, "RIGHT", 0, 0)
     plate.targetOverlayFill:SetTexture(STRIPE_TEX)
     plate.targetOverlayFill:SetAlpha(overlayAlpha)
     plate.targetOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -2442,7 +2441,7 @@ ns.EnsureTargetOverlay = function(plate)
     plate.targetOverlayBg = plate.targetClipBg:CreateTexture(nil, "ARTWORK", nil, 1)
     plate.targetOverlayBg:SetPoint("TOPLEFT", plate.health, "TOPLEFT", 0, 0)
     plate.targetOverlayBg:SetPoint("BOTTOMLEFT", plate.health, "BOTTOMLEFT", 0, 0)
-    plate.targetOverlayBg:SetWidth(200)
+    plate.targetOverlayBg:SetPoint("RIGHT", plate.health, "RIGHT", 0, 0)
     plate.targetOverlayBg:SetTexture(STRIPE_TEX)
     plate.targetOverlayBg:SetAlpha(OverlayBgAlpha(p and p.targetOverlayFullBgAlpha, overlayAlpha))
     plate.targetOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
@@ -3414,7 +3413,7 @@ function ns.ShowHoverEffect(plate)
             plate._ovHoverTex, plate._ovHoverAlpha = texPath, ha
             plate._ovHoverBgAlpha = bgAlpha
             plate._ovHoverR, plate._ovHoverG, plate._ovHoverB = hc.r, hc.g, hc.b
-            ApplyOverlayGeometry(plate.hoverOverlayFill, plate.hoverOverlayBg, plate.health, ns.OVERLAY_STRIPE_KEYS[hoverTex] == true)
+            ApplyOverlayGeometry(plate.hoverOverlayFill, plate.hoverOverlayBg, plate.health)
             plate.hoverOverlayFill:SetTexture(texPath)
             plate.hoverOverlayFill:SetAlpha(ha)
             plate.hoverOverlayFill:SetVertexColor(hc.r, hc.g, hc.b)
@@ -6262,7 +6261,7 @@ function NameplateFrame:UpdateHealthColor()
             self._ovFocTex, self._ovFocAlpha = texPath, overlayAlpha
             self._ovFocBgAlpha = bgAlpha
             self._ovFocR, self._ovFocG, self._ovFocB = oc.r, oc.g, oc.b
-            ApplyOverlayGeometry(self.focusOverlayFill, self.focusOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[focusTex] == true)
+            ApplyOverlayGeometry(self.focusOverlayFill, self.focusOverlayBg, self.health)
             self.focusOverlayFill:SetTexture(texPath)
             self.focusOverlayFill:SetAlpha(overlayAlpha)
             self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
@@ -6303,7 +6302,7 @@ function NameplateFrame:UpdateHealthColor()
             self._ovTgtTex, self._ovTgtAlpha = texPath, overlayAlpha
             self._ovTgtBgAlpha = bgAlpha
             self._ovTgtR, self._ovTgtG, self._ovTgtB = oc.r, oc.g, oc.b
-            ApplyOverlayGeometry(self.targetOverlayFill, self.targetOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[targetTex] == true)
+            ApplyOverlayGeometry(self.targetOverlayFill, self.targetOverlayBg, self.health)
             self.targetOverlayFill:SetTexture(texPath)
             self.targetOverlayFill:SetAlpha(overlayAlpha)
             self.targetOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
