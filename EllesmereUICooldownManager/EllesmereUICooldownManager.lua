@@ -8347,17 +8347,21 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "UPDATE_SHAPESHIFT_FORM" then
-        -- Bail fast if no bar actually uses visHideMounted: druids shift
-        -- constantly in combat (Bear/Cat) and we don't want to re-run the
-        -- visibility pipeline for nothing.
+        -- Bail fast if no bar uses mount/dragonriding visibility: druids
+        -- shift constantly in combat (Bear/Cat) and we don't want to
+        -- re-run the visibility pipeline for nothing.
         local p = ECME.db and ECME.db.profile
         local bars = p and p.cdmBars and p.cdmBars.bars
         if not bars then return end
-        local anyMountedOpt = false
+        local anyRelevant = false
         for _, bd in ipairs(bars) do
-            if bd.visHideMounted then anyMountedOpt = true; break end
+            if bd.visHideMounted then anyRelevant = true; break end
+            local bv = bd.barVisibility
+            if bv == "show_dragonriding" or bv == "show_not_dragonriding" then anyRelevant = true; break end
+            local vm = bd.visibilityModes
+            if vm and (vm.show_dragonriding or vm.show_not_dragonriding) then anyRelevant = true; break end
         end
-        if not anyMountedOpt then return end
+        if not anyRelevant then return end
         -- Defer one frame: the Travel Form aura is applied slightly after
         -- UPDATE_SHAPESHIFT_FORM fires, so IsPlayerMountedLike's aura check
         -- would miss it on the immediate pass.
