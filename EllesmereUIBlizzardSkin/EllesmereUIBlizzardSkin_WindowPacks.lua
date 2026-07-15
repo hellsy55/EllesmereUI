@@ -4932,9 +4932,7 @@ local function SkinMailRow(row)
     if row.Button then SkinMailItemButton(row.Button) end
 end
 
--- Letter body is a SimpleHTML with per-element colors and fonts; force
--- readable white in the skin font so stationery-specific faces (AH, crafting)
--- don't look out of place on the dark background.
+-- Letter body: force readable white + skin font on the SimpleHTML elements.
 local function WhitenMailText()
     local html = _G.OpenMailBodyText
     if html and html.SetTextColor then
