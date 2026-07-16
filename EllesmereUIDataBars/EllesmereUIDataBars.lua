@@ -629,6 +629,18 @@ do
     local COL_GAP = 18
     local FONT_SIZE = 12
 
+    -- Interactive rows: a pool of secure spell buttons overlaid on rows that
+    -- declared an action (Tip_AddActionDouble). The buttons are children of
+    -- UIParent, NEVER the tip -- a SecureActionButtonTemplate silently blocks
+    -- spell execution when the action originates from a tooltip-parented
+    -- context in Midnight, so the Insecure variant run from UIParent is used
+    -- instead. A keep-alive poll lets the cursor travel off the owner onto the
+    -- tip to click a row without the tip closing under it.
+    local actionPool = {}
+    local activeActions = 0
+    local interactive = false
+    local keepAlive
+
     local function EnsureTip()
         if tip then return tip end
         tip = CreateFrame("Frame", "EllesmereUIDataBarsTip", UIParent)
@@ -655,6 +667,56 @@ do
         return row
     end
 
+    -- Grow-only pool; buttons are configured fresh on every Tip_Show.
+    local function AcquireActionButton()
+        activeActions = activeActions + 1
+        local b = actionPool[activeActions]
+        if not b then
+            b = CreateFrame("Button", nil, UIParent, "InsecureActionButtonTemplate")
+            b:SetFrameStrata("TOOLTIP")
+            b:SetFrameLevel(250)
+            b:EnableMouse(true)
+            b:RegisterForClicks("LeftButtonDown", "LeftButtonUp")
+            b:SetAttribute("type", "spell")
+            b:SetAttribute("useOnKeyDown", true)
+            actionPool[activeActions] = b
+        end
+        return b
+    end
+
+    -- Hide/detach every overlay button. InsecureActionButtonTemplate frames are
+    -- not protected, so Hide/ClearAllPoints/SetScript are combat-legal.
+    local function HideActionButtons()
+        for i = 1, #actionPool do
+            local b = actionPool[i]
+            b:Hide()
+            b:ClearAllPoints()
+            b:SetScript("OnEnter", nil)
+            b:SetScript("OnLeave", nil)
+            b:SetScript("PostClick", nil)
+        end
+        activeActions = 0
+    end
+
+    local function StopKeepAlive()
+        if keepAlive then keepAlive:Cancel(); keepAlive = nil end
+    end
+
+    -- Dismiss the interactive tip once the cursor is over neither the owner nor
+    -- the tip. IsMouseOver tests rectangles (ignores the overlay buttons on
+    -- top), so hovering a clickable row still counts as "over the tip".
+    local function StartKeepAlive()
+        if keepAlive then return end
+        keepAlive = C_Timer.NewTicker(0.1, function()
+            if not (tip and tip:IsShown()) then StopKeepAlive(); return end
+            local overOwner = owner and owner.IsMouseOver and owner:IsMouseOver()
+            local overTip = tip:IsMouseOver()
+            if not overOwner and not overTip then
+                ns.Tip_Hide()
+            end
+        end)
+    end
+
     function ns.Tip_Begin(ownerFrame)
         EnsureTip()
         owner = ownerFrame
@@ -670,6 +732,7 @@ do
         d.lr = r; d.lg = g; d.lb = b
         d.r = nil
         d.wrap = nil
+        d.action = nil
     end
 
     -- Long prose (currency descriptions etc.): word-wraps at maxWidth px
@@ -690,6 +753,15 @@ do
         d.r = right or ""
         d.rr = rr; d.rg = rg; d.rb = rb
         d.wrap = nil
+        d.action = nil
+    end
+
+    -- Click-to-cast row: identical to Tip_AddDouble, but Tip_Show overlays a
+    -- secure spell button (spellName, a castable spell NAME) over it and keeps
+    -- the tip alive while hovered. Degrades to a plain double line in combat.
+    function ns.Tip_AddActionDouble(left, right, spellName, lr, lg, lb, rr, rg, rb)
+        ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb)
+        if spellName then data[dataCount].action = spellName end
     end
 
     function ns.Tip_Show()
@@ -759,8 +831,39 @@ do
                 row.right:ClearAllPoints()
                 row.right:SetPoint("TOPRIGHT", tip, "TOPRIGHT", -PAD, y)
             end
+            d._y = y
             y = y - d._h - ROW_GAP
         end
+
+        -- Interactive overlay: one secure spell button per row that declared an
+        -- action, spanning the full row rect. Skipped in combat -- rows degrade
+        -- to plain text and no attribute writes fire. Rebuilt from scratch each
+        -- show (HideActionButtons first) so a reused tip never carries stale
+        -- buttons.
+        HideActionButtons()
+        interactive = false
+        if not InCombatLockdown() then
+            local ar, ag, ab = ns.GetAccent()
+            for i = 1, dataCount do
+                local d = data[i]
+                if d.action then
+                    interactive = true
+                    local b = AcquireActionButton()
+                    b:SetAttribute("spell", d.action)
+                    b:ClearAllPoints()
+                    b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
+                    b:SetSize(max(1, innerW), max(1, d._h))
+                    local row = rows[i]
+                    local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
+                    b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
+                    b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
+                    b:SetScript("PostClick", function() ns.Tip_Hide() end)
+                    b:Show()
+                end
+            end
+        end
+        tip:EnableMouse(interactive)
+        if interactive then StartKeepAlive() else StopKeepAlive() end
 
         -- Smart anchoring: the tooltip opens off the BAR's roomier side --
         -- above/below for horizontal bars, left/right for vertical bars --
@@ -818,7 +921,22 @@ do
         if not tip then return end
         if ownerFrame and owner ~= ownerFrame then return end
         owner = nil
+        HideActionButtons()
+        StopKeepAlive()
+        interactive = false
+        tip:EnableMouse(false)
         tip:Hide()
+    end
+
+    -- Owner OnLeave hook: an interactive tip is dismissed by its own keep-alive
+    -- poll (so the cursor can move onto the tip to click a row), a plain tip
+    -- hides immediately -- exactly the old behavior for every non-interactive
+    -- block.
+    function ns.Tip_HideUnlessInteractive(ownerFrame)
+        if not tip then return end
+        if ownerFrame and owner ~= ownerFrame then return end
+        if interactive then return end
+        ns.Tip_Hide(ownerFrame)
     end
 
     function ns.Tip_IsOwned(ownerFrame)
