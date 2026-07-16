@@ -7624,7 +7624,7 @@ local function SkinMerchantListItem(item)
     -- Item Name
     -- Position is set dynamically in UpdateCustomMerchantList so that it never collides with
     -- either the money frame or alt currency frame. If the text is too long, it will be cut (...)
-    _G[item:GetName()..'NameFrame']:Hide()
+    _G[item:GetName().."NameFrame"]:Hide()
     item.Name:ClearAllPoints()
     item.Name:SetPoint("LEFT", item.SlotTexture, "RIGHT", 10, 0)
     item.Name:SetMaxLines(1)
@@ -7705,8 +7705,8 @@ local function UpdateCustomMerchantList(sf, child)
 			end
 
             -- Money & currency cost
-            local moneyFrame = _G['EUI_MerchantItem'..i..'MoneyFrame']
-            local altCurrencyFrame = _G['EUI_MerchantItem'..i..'AltCurrencyFrame']
+            local moneyFrame = _G["EUI_MerchantItem"..i.."MoneyFrame"]
+            local altCurrencyFrame = _G["EUI_MerchantItem"..i.."AltCurrencyFrame"]
             local canAfford = true
             if isBuyback then
                 canAfford = playerMoney >= price
@@ -7739,7 +7739,7 @@ local function UpdateCustomMerchantList(sf, child)
                 MoneyFrame_SetMaxDisplayWidth(moneyFrame, MAX_MONEY_DISPLAY_WIDTH - altCurrencyWidth)
                 MoneyFrame_Update(moneyFrame:GetName(), price)
 
-                local color = (canAfford == false) and 'gray' or nil
+                local color = (canAfford == false) and "gray" or nil
                 SetMoneyFrameColor(moneyFrame:GetName(), color)
 
                 -- Sometimes, altCurrencyWidth can be 0, indicating no alt currency cost even though hasExtendedCost is true
@@ -7762,7 +7762,7 @@ local function UpdateCustomMerchantList(sf, child)
                 MoneyFrame_SetMaxDisplayWidth(moneyFrame, MAX_MONEY_DISPLAY_WIDTH)
                 MoneyFrame_Update(moneyFrame:GetName(), price)
 
-                local color = (canAfford == false) and 'gray' or nil
+                local color = (canAfford == false) and "gray" or nil
                 SetMoneyFrameColor(moneyFrame:GetName(), color)
 
                 moneyFrame:SetPoint("RIGHT", row, "RIGHT", 3, 0)
