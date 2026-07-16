@@ -822,26 +822,28 @@ local function ProcessBlockChildren(frame, depth)
 
 end
 
--- Suppress a POI button. Hide() + EnableMouse(false) only -- NEVER SetParent
--- or hooksecurefunc(pb, "SetParent", ...) here. block.poiButton is a
--- Blizzard-pooled frame that Blizzard's own code re-parents/reacquires
--- elsewhere (world map / world quest pin refresh); a SetParent hook fires
--- our insecure SetParent call from inside Blizzard's own secure call stack
--- the next time Blizzard touches that pooled object, tainting it. That
--- surfaced as ADDON_ACTION_BLOCKED on Button:SetPassThroughButtons() deep in
--- WorldQuestDataProvider:AcquirePin -- nowhere near our own call sites.
--- Re-suppressing every SkinBlock pass (see call site below) is what makes
--- this safe without a persistent hook: if Blizzard swaps in a fresh pooled
--- button, the next pass hides that one too.
+-- Weak-keyed so pooled/recycled poiButtons don't leak or get double-hooked.
+local _hookedPOIButtons = setmetatable({}, { __mode = "k" })
+
 local function SuppressPOI(block)
-    -- "Show Quest Icons" on: leave Blizzard's native POI button visible.
-    -- Reload-gated, so this is read fresh per block; no live un-suppression
-    -- needed.
     if EQT.Cfg("showQuestIcons") then return end
     local pb = block and block.poiButton
     if not pb then return end
     if pb:IsShown() then pb:Hide() end
     pb:EnableMouse(false)
+
+    -- Re-hide synchronously whenever Blizzard shows this button again (e.g.
+    -- on SUPER_TRACKING_CHANGED from clicking a quest) so there's no visible
+    -- flash before the next SkinBlock/suppression pass. Hide() only, never
+    -- SetParent -- that's the taint-safe version of this pattern (see
+    -- InstallShowHook's otf Show-hook above, which does the same thing).
+    if not _hookedPOIButtons[pb] then
+        _hookedPOIButtons[pb] = true
+        hooksecurefunc(pb, "Show", function(self)
+            if EQT.Cfg("showQuestIcons") then return end
+            self:Hide()
+        end)
+    end
 end
 
 local function SkinBlock(block)
