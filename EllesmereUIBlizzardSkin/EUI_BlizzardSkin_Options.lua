@@ -1165,9 +1165,32 @@ initFrame:SetScript("OnEvent", function(self)
         local W = EllesmereUI.Widgets
         local _, h
 
+        local function themedOff()
+            return EllesmereUIDB and EllesmereUIDB.reskinMerchant == false
+        end
+
+        local function AttachDisabledOverlay(target)
+            local block = CreateFrame("Frame", nil, target)
+            block:SetAllPoints(target)
+            block:SetFrameLevel(target:GetFrameLevel() + 10)
+            block:EnableMouse(true)
+            local bg = EllesmereUI.SolidTex(block, "BACKGROUND", 0, 0, 0, 0)
+            bg:SetAllPoints()
+            block:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(block, EllesmereUI.DisabledTooltip("Merchant"))
+            end)
+            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function refresh()
+                if themedOff() then block:Show(); target:SetAlpha(0.3)
+                else block:Hide(); target:SetAlpha(1) end
+            end
+            EllesmereUI.RegisterWidgetRefresh(refresh); refresh()
+        end
+
         _, h = WSCardSection(parent, "QUALITY OF LIFE", y);  y = y - h
 
-        _, h = W:DualRow(parent, y,
+        local row
+        row, h = W:DualRow(parent, y,
             { type="toggle", text="Show Item Level",
               tooltip="Shows the item level on weapons and armor a vendor sells.",
               getValue=function()
@@ -1178,8 +1201,33 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.merchantShowItemLevel = v
                   if EllesmereUI._Merchant_RefreshItemLevels then EllesmereUI._Merchant_RefreshItemLevels() end
               end },
-            { type="label", text="" }
+            { type="toggle", text="Show As List",
+              tooltip="Shows the items as a list instead of pages.",
+              getValue=function()
+                return EllesmereUIDB and EllesmereUIDB.merchantShowAsList == true
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                local previousValue = EllesmereUIDB.merchantShowAsList
+                EllesmereUIDB.merchantShowAsList = v
+
+                -- Enabling the setting breaks the UI immediately, a reload is required
+                if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Merchant Show As List setting requires a UI reload to fully apply.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Cancel",
+                          onConfirm   = function() ReloadUI() end,
+                          onCancel    = function()
+                              EllesmereUIDB.merchantShowAsList = previousValue;
+                              EllesmereUI:RefreshPage()
+                          end,
+                      })
+                  end
+              end }
         );  y = y - h
+        AttachDisabledOverlay(row._rightRegion)
 
         return y
     end
