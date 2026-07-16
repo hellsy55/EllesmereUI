@@ -3062,6 +3062,59 @@ function ns.RefreshMicroMenuHider()
     end)
 end
 
+-- Character stats tooltip (opt-in via the micromenu block's charStatsTooltip
+-- setting). Fixed set: equipped item level, primary stat, and the four
+-- secondary percentages with their raw combat rating in parentheses. The
+-- versatility read is wrapped in pcall -- GetVersatilityBonus /
+-- GetCombatRatingBonus can hand back a Midnight "secret value" under
+-- addon-tainted execution, and any arithmetic on it errors, so the line is
+-- dropped rather than crashing the whole tooltip.
+local CS_DIM = "|cffaaaaaa"
+
+local function MMPrimaryStat()
+    local specIndex = GetSpecialization and GetSpecialization()
+    if not specIndex or specIndex <= 0 then return nil end
+    local _, _, _, _, _, statID = GetSpecializationInfo(specIndex)
+    if statID == LE_UNIT_STAT_STRENGTH  then return SPELL_STAT1_NAME or "Strength",  1 end
+    if statID == LE_UNIT_STAT_AGILITY   then return SPELL_STAT2_NAME or "Agility",   2 end
+    if statID == LE_UNIT_STAT_INTELLECT then return SPELL_STAT4_NAME or "Intellect", 4 end
+    return nil
+end
+
+local function MMAddCharStats()
+    local ar, ag, ab = ns.GetAccent()
+    local function pctRating(label, pct, rating)
+        ns.Tip_AddDouble(label,
+            format("%.2f%%", pct or 0) .. " " .. CS_DIM .. "(" .. floor((rating or 0) + 0.5) .. ")|r",
+            ar, ag, ab, 1, 1, 1)
+    end
+
+    ns.Tip_AddLine(" ")
+
+    local _, eq = GetAverageItemLevel()
+    ns.Tip_AddDouble(STAT_AVERAGE_ITEM_LEVEL or "Item Level", format("%.1f", eq or 0), ar, ag, ab, 1, 1, 1)
+
+    local pLabel, pIdx = MMPrimaryStat()
+    if pLabel and pIdx then
+        local _, eff = UnitStat("player", pIdx)
+        ns.Tip_AddDouble(pLabel, format("%.0f", eff or 0), ar, ag, ab, 1, 1, 1)
+    end
+
+    pctRating(STAT_CRITICAL_STRIKE or "Critical Strike", GetCritChance(),    GetCombatRating(CR_CRIT_MELEE))
+    pctRating(STAT_HASTE or "Haste",                     GetHaste(),         GetCombatRating(CR_HASTE_MELEE))
+    pctRating(STAT_MASTERY or "Mastery",                 GetMasteryEffect(), GetCombatRating(CR_MASTERY))
+
+    -- Versatility: secret-value-safe (see block comment above).
+    local ok, dmg, rating = pcall(function()
+        local d = (GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0)
+                + (GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE)  or 0)
+        return d, GetCombatRating(CR_VERSATILITY_DAMAGE_DONE) or 0
+    end)
+    if ok then
+        pctRating(STAT_VERSATILITY or "Versatility", dmg, rating)
+    end
+end
+
 ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
     local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
     inst.key = InstKey(barCtx, blockCfg)
@@ -3150,6 +3203,10 @@ ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
             end
             ns.Tip_AddDouble('|cFFFFFFFF' .. L["COMPANION_LEVEL"] .. '|r',
                 '|cFF' .. hexAccent .. companionLvl .. '|r', 1, 1, 1, r, g, b)
+        end
+
+        if name == 'char' and D().charStatsTooltip then
+            MMAddCharStats()
         end
 
         ns.Tip_Show()
