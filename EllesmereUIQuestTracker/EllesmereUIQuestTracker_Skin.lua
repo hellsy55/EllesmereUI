@@ -822,27 +822,26 @@ local function ProcessBlockChildren(frame, depth)
 
 end
 
--- Suppress a POI button permanently. Hooks Show + SetAlpha so Blizzard
--- can never make it visible again. The _euiSuppressed flag is on the
--- frame object itself, so it persists even if the button is pooled.
-local _poiHiddenParent = CreateFrame("Frame")
-_poiHiddenParent:Hide()
-
+-- Suppress a POI button. Hide() + EnableMouse(false) only -- NEVER SetParent
+-- or hooksecurefunc(pb, "SetParent", ...) here. block.poiButton is a
+-- Blizzard-pooled frame that Blizzard's own code re-parents/reacquires
+-- elsewhere (world map / world quest pin refresh); a SetParent hook fires
+-- our insecure SetParent call from inside Blizzard's own secure call stack
+-- the next time Blizzard touches that pooled object, tainting it. That
+-- surfaced as ADDON_ACTION_BLOCKED on Button:SetPassThroughButtons() deep in
+-- WorldQuestDataProvider:AcquirePin -- nowhere near our own call sites.
+-- Re-suppressing every SkinBlock pass (see call site below) is what makes
+-- this safe without a persistent hook: if Blizzard swaps in a fresh pooled
+-- button, the next pass hides that one too.
 local function SuppressPOI(block)
-    -- "Show Quest Icons" on: leave Blizzard's native POI button visible and
-    -- skip installing the keep-hidden hook entirely. Reload-gated, so this is
-    -- read fresh per block; no live un-suppression needed.
+    -- "Show Quest Icons" on: leave Blizzard's native POI button visible.
+    -- Reload-gated, so this is read fresh per block; no live un-suppression
+    -- needed.
     if EQT.Cfg("showQuestIcons") then return end
     local pb = block and block.poiButton
-    if not pb or EllesmereUI._GetFFD(pb).suppressed then return end
-    EllesmereUI._GetFFD(pb).suppressed = true
-    pb:SetParent(_poiHiddenParent)
+    if not pb then return end
+    if pb:IsShown() then pb:Hide() end
     pb:EnableMouse(false)
-    hooksecurefunc(pb, "SetParent", function(self, parent)
-        if parent ~= _poiHiddenParent then
-            self:SetParent(_poiHiddenParent)
-        end
-    end)
 end
 
 local function SkinBlock(block)
