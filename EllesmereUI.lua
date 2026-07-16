@@ -2996,6 +2996,9 @@ do
         return DEFAULT_LSM_OFFSET
     end
 
+    -- Textured border edgeSize per size step (1-4).
+    local EDGE_MAP = { 12, 16, 24, 32 }
+
     --- Check if a border texture uses scaled offset (edgeSize/2 base).
     function EllesmereUI.BorderTextureUsesScaleOffset(key)
         if not key or key == "" or key == "solid" then return false end
@@ -3043,7 +3046,17 @@ do
     --- offsetOverride/offsetYOverride: optional user override (nil = use per-addon or global default).
     --- shiftX/shiftY: optional user override (nil = use per-addon default or 0).
     --- addonKey/sizeKey: optional per-addon registry lookup key pair for defaults.
-    function EllesmereUI.ApplyBorderStyle(borderFrame, size, r, g, b, a, textureKey, offsetOverride, offsetYOverride, shiftX, shiftY, addonKey, sizeKey)
+    --- normalizeScale: opt-in, textured borders only. Cancels the frame's scale
+    ---   chain below UIParent so the border matches an unscaled frame's. Pass it
+    ---   ONLY where that scale is an implementation detail the caller already
+    ---   cancels elsewhere -- CDM cancels Blizzard's per-icon scale for the
+    ---   icon's size (iS = 1/iconScale) but not for its border, which is the bug
+    ---   this exists for. Never pass it where the scale is the user's intent
+    ---   (nameplate target/cast scale, buff-bar position scale): those borders
+    ---   are meant to scale with the frame, and because ratio is sampled once at
+    ---   style time, a frame whose scale changes afterwards would bake in a
+    ---   transient value.
+    function EllesmereUI.ApplyBorderStyle(borderFrame, size, r, g, b, a, textureKey, offsetOverride, offsetYOverride, shiftX, shiftY, addonKey, sizeKey, normalizeScale)
         local PP = EllesmereUI.PP
         if not PP or not borderFrame then return end
         a = a or 1
@@ -3104,8 +3117,20 @@ do
                 _bdBorderData[borderFrame] = bdFrame
             end
             bdFrame:SetFrameLevel(borderFrame:GetFrameLevel())
-            local EDGE_MAP = { 12, 16, 24, 32 }
-            local edgeSize = EDGE_MAP[size] or 12
+            -- edgeSize is in local units, so SetBackdrop renders it at
+            -- edgeSize x effectiveScale: a scaled frame draws a proportionally
+            -- scaled border. That is correct by default, hence opt-in only.
+            -- uiES/es is exactly 1 / (scale chain below UIParent), so ratio is
+            -- 1 (and everything below a no-op) for an unscaled frame at any
+            -- resolution or UI scale. The 0.01 floor mirrors CDM's own
+            -- iconScale guard and keeps a degenerate scale from exploding it.
+            local ratio = 1
+            if normalizeScale then
+                local eok, es = pcall(bdFrame.GetEffectiveScale, bdFrame)
+                local uiES = UIParent and UIParent:GetEffectiveScale() or 1
+                if eok and es and es > 0.01 and uiES > 0 then ratio = uiES / es end
+            end
+            local edgeSize = (EDGE_MAP[size] or EDGE_MAP[1]) * ratio
             -- Resolve offset/shift defaults: per-addon registry first, then global fallback.
             local adjX, adjY, sx, sy
             if addonKey and sizeKey then
@@ -3120,6 +3145,10 @@ do
                 sx   = shiftX or 0
                 sy   = shiftY or 0
             end
+            -- Same factor as edgeSize, or a normalized edge would be positioned
+            -- by offsets still in the frame's scaled units.
+            adjX, adjY = adjX * ratio, adjY * ratio
+            sx, sy = sx * ratio, sy * ratio
             -- Custom textures (scaleOffset): base = edgeSize/2 so border tracks
             -- the edge at any size, plus a small fine-tune adjustment.
             -- Other textures: absolute offset (no edgeSize base).
