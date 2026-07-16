@@ -989,11 +989,12 @@ initFrame:SetScript("OnEvent", function(self)
     end
     -- Druid-only per-form popup button. `field` picks the map the toggles write:
     -- "textDisabledForms" (text rows) or "barDisabledForms" (whole-bar enable rows).
-    local function AddFormDisableBtn(rgn, leftOf, cfgFn, refreshFn, field, title)
+    local function AddFormDisableBtn(rgn, leftOf, cfgFn, refreshFn, field, title, tooltip)
         local _, classFile = UnitClass("player")
         if classFile ~= "DRUID" then return end
         field = field or "textDisabledForms"
         title = title or "Enable/Disable per Form"
+        tooltip = tooltip or EllesmereUI.L(title)
         local FORMS = { { key = "mana", label = "Caster" },
                         { key = "rage", label = "Bear" },
                         { key = "energy", label = "Cat" } }
@@ -1032,16 +1033,20 @@ initFrame:SetScript("OnEvent", function(self)
         tex:SetDesaturated(true)
         tex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\class-full\\glyph.tga")
         tex:SetTexCoord(0.375, 0.5, 0, 0.125)  -- DRUID glyph
-        btn:SetScript("OnEnter", function(self) self:SetAlpha(0.7); EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L(title)) end)
+        btn:SetScript("OnEnter", function(self) self:SetAlpha(0.7); EllesmereUI.ShowWidgetTooltip(self, tooltip) end)
         btn:SetScript("OnLeave", function(self) self:SetAlpha(0.4); EllesmereUI.HideWidgetTooltip() end)
         btn:SetScript("OnClick", function(self) formShow(self) end)
         return btn
     end
+    -- The L() literals keep both popup titles in the static locale key list
+    -- (.tools/extract-locale-keys.sh only sees literal string arguments).
     local function AddFormTextBtn(rgn, leftOf, cfgFn, refreshFn)
-        return AddFormDisableBtn(rgn, leftOf, cfgFn, refreshFn, "textDisabledForms")
+        return AddFormDisableBtn(rgn, leftOf, cfgFn, refreshFn, "textDisabledForms",
+            "Enable/Disable per Form", EllesmereUI.L("Enable/Disable per Form"))
     end
     local function AddFormBarBtn(rgn, cfgFn, refreshFn)
-        return AddFormDisableBtn(rgn, nil, cfgFn, refreshFn, "barDisabledForms", "Enable/Disable Bar per Form")
+        return AddFormDisableBtn(rgn, nil, cfgFn, refreshFn, "barDisabledForms",
+            "Enable/Disable Bar per Form", EllesmereUI.L("Enable/Disable Bar per Form"))
     end
 
     ---------------------------------------------------------------------------
