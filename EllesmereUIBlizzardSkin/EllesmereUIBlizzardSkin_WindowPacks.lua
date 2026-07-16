@@ -7778,7 +7778,10 @@ local function UpdateCustomMerchantList(sf, child)
 			local isKnownHeirloom = isHeirloom and C_Heirloom.PlayerHasHeirloom(merchantItemID)
 
             -- Fade if not usable/affordable/already known heirloom
-            if (not isUsable) or (not isBuyback and not isPurchasable) or isKnownHeirloom then
+            row.SlotTexture:SetDesaturated(numAvailable == 0 or isKnownHeirloom)
+            if numAvailable == 0 or isKnownHeirloom then
+                row.Name:SetAlpha(0.6)
+            elseif (not isUsable and not isHeirloom) or (not isBuyback and not isPurchasable) then
                 row.SlotTexture:SetVertexColor(0.5, 0.1, 0.1)
                 row.Name:SetAlpha(0.6)
             else
