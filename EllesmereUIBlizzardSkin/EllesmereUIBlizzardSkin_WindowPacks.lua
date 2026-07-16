@@ -7686,12 +7686,9 @@ local function UpdateCustomMerchantList(sf, child)
             row.ItemButton.name = name
             row.ItemButton.texture = texture
             row.ItemButton.price = ((extendedCost and (price > 0)) or not extendedCost) and price or nil
-            row.ItemButton.extendedCost = extendedCost and price or nil
+            row.ItemButton.extendedCost = (extendedCost and type(price) == "number") or nil
             row.ItemButton.hasItem = true
-
-            local merchantItemID = GetMerchantItemID(i)
-            local isHeirloom = merchantItemID and C_Heirloom.IsItemHeirloom(merchantItemID)
-            row.ItemButton.showNonrefundablePrompt = isHeirloom
+            row.ItemButton.showNonrefundablePrompt = not C_MerchantFrame.IsMerchantItemRefundable(i)
 
             -- Text color and reagent quality overlay
             MerchantFrameItem_UpdateQuality(row, row.ItemButton.link, isBound)
@@ -7776,8 +7773,12 @@ local function UpdateCustomMerchantList(sf, child)
                 row.Name:SetPoint("RIGHT", moneyFrame, "LEFT", -10, 0)
             end
 
-            -- Fade if not usable/affordable
-            if (not isUsable) or (not isBuyback and not isPurchasable) then
+            local merchantItemID = GetMerchantItemID(i)
+            local isHeirloom = merchantItemID and C_Heirloom.IsItemHeirloom(merchantItemID)
+			local isKnownHeirloom = isHeirloom and C_Heirloom.PlayerHasHeirloom(merchantItemID)
+
+            -- Fade if not usable/affordable/already known heirloom
+            if (not isUsable) or (not isBuyback and not isPurchasable) or isKnownHeirloom then
                 row.SlotTexture:SetVertexColor(0.5, 0.1, 0.1)
                 row.Name:SetAlpha(0.6)
             else
