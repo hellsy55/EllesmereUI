@@ -242,7 +242,13 @@ qolFrame:SetScript("OnEvent", function(self)
                                 if InCombatLockdown() or MerchantOpen() then wipe(_pendingOpens); return end
                                 local item = _pendingOpens[idx]
                                 local info = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                                if info and info.itemID then
+                                -- Never act on a slot mid-action (isLocked): re-using a
+                                -- container that's still resolving a previous open (a loot
+                                -- window or a slow server round-trip) leaves it stuck
+                                -- greyed/unopenable. For the same reason, a slot still
+                                -- locked at the post-open check is in-progress, not a real
+                                -- failure, so it isn't cached as failed -- a later pass retries.
+                                if info and info.itemID and not info.isLocked then
                                     if IsWarboundExcluded(item.bag, item.slot) then
                                         OpenNext(idx + 1)
                                         return
@@ -253,7 +259,7 @@ qolFrame:SetScript("OnEvent", function(self)
                                         C_Container.UseContainerItem(item.bag, item.slot)
                                         C_Timer.After(0.5, function()
                                             local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                                            if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
+                                            if after and after.itemID == prevID and not after.isLocked and (after.stackCount or 1) >= prevCount then
                                                 _failedItems[prevID] = true
                                             end
                                             OpenNext(idx + 1)
@@ -346,7 +352,8 @@ qolFrame:SetScript("OnEvent", function(self)
                 if MerchantOpen() then return end
                 local item = toOpen[idx]
                 local info2 = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                if info2 and info2.itemID then
+                -- Skip locked (mid-action) slots -- see the scan pass above.
+                if info2 and info2.itemID and not info2.isLocked then
                     if IsWarboundExcluded(item.bag, item.slot) then
                         OpenNext(idx + 1)
                         return
@@ -357,7 +364,7 @@ qolFrame:SetScript("OnEvent", function(self)
                         C_Container.UseContainerItem(item.bag, item.slot)
                         C_Timer.After(0.5, function()
                             local after = C_Container.GetContainerItemInfo(item.bag, item.slot)
-                            if after and after.itemID == prevID and (after.stackCount or 1) >= prevCount then
+                            if after and after.itemID == prevID and not after.isLocked and (after.stackCount or 1) >= prevCount then
                                 _failedItems[prevID] = true
                             end
                             OpenNext(idx + 1)
