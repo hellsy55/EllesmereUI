@@ -4240,6 +4240,7 @@ do
     -- never register the watcher: the flags stay false and both entry
     -- points early-out on a plain upvalue read.
     local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
+    local sweepName -- cached spell name for aura lookups (resolved outside M+)
     do
         local _, cls = UnitClass("player")
         if cls == "WARRIOR" then
@@ -4249,6 +4250,10 @@ do
                 improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
                 broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
                 fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
+                if not sweepName then
+                    local n = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(SWEEP)
+                    if n and not (issecretvalue and issecretvalue(n)) then sweepName = n end
+                end
             end
             local watcher = CreateFrame("Frame")
             watcher:RegisterEvent("PLAYER_LOGIN")
@@ -4384,6 +4389,15 @@ do
         if not sweepKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
+        end
+        -- Validate prediction against the actual aura to correct drift.
+        if stacks > 0 and sweepName and AuraUtil and AuraUtil.FindAuraByName then
+            local name, _, count = AuraUtil.FindAuraByName(sweepName, "player", "HELPFUL")
+            if not name then
+                stacks, expiresAt = 0, nil
+            elseif count and not (issecretvalue and issecretvalue(count)) then
+                stacks = count
+            end
         end
         return stacks, MaxStacks()
     end
