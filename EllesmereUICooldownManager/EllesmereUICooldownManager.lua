@@ -5436,9 +5436,18 @@ local function RefreshCDMIconAppearance(barKey)
                             ifd._cdStateGlowOn = true
                         end
                     end
-                    -- Event-driven re-evaluation for Resource Aware glows only
-                    -- (inert unless watched).
-                    if glowUsable and ns.CDGlowWatch then ns.CDGlowWatch(icon) end
+                    -- Event-driven re-evaluation: Resource Aware glows always,
+                    -- plus plain glows on EUI custom frames (their SetDesaturation
+                    -- never fires the SetDesaturated hook that would re-evaluate
+                    -- them). Fake-Active-owned frames (PresetHasCdState) excluded.
+                    local watchGlow = glowUsable
+                    if not watchGlow
+                        and (icon._isRacialFrame or icon._isTrinketFrame or icon._isPresetFrame
+                             or icon._isItemPresetFrame or icon._isCustomSpellFrame)
+                        and not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then
+                        watchGlow = true
+                    end
+                    if watchGlow and ns.CDGlowWatch then ns.CDGlowWatch(icon) end
                 end
             end
         elseif glowOv then
@@ -5520,8 +5529,21 @@ local function RefreshCDMIconAppearance(barKey)
                             end
                         end
                     end
-                    if (cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable")
-                       and glowOv and ns.CDGlowWatch then
+                    -- Resource Aware glows always watch cooldown events. Plain
+                    -- glows normally re-evaluate through the SetDesaturated hook,
+                    -- but EUI's custom frames (racial / trinket / potion / custom)
+                    -- drive desaturation via SetDesaturation(float), which never
+                    -- fires that hook -- without a watch their glow stays lit for
+                    -- the whole cooldown. Frames owned by the Fake-Active preset
+                    -- path (PresetHasCdState) are excluded; that engine glows them.
+                    local watchGlow = cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable"
+                    if not watchGlow and (cse == "pixelGlowReady" or cse == "buttonGlowReady")
+                        and (icon._isRacialFrame or icon._isTrinketFrame or icon._isPresetFrame
+                             or icon._isItemPresetFrame or icon._isCustomSpellFrame)
+                        and not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then
+                        watchGlow = true
+                    end
+                    if watchGlow and glowOv and ns.CDGlowWatch then
                         ns.CDGlowWatch(icon)
                     end
                 end

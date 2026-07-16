@@ -2411,6 +2411,24 @@ local function DecorateFrame(frame, barData)
                 if bk2:sub(1, 7) == "__ghost" then return end
                 -- FocusKick icon alpha is owned by SetFocusKickAlpha only.
                 if bk2 == ns.FOCUSKICK_BAR_KEY then return end
+                -- Preset frames (trinket / racial / potion / custom spell) own their
+                -- cd-state entirely through the Fake-Active engine, which reads the
+                -- ITEM/racial cooldown. C_Spell.GetSpellCooldown can't read a negative
+                -- item key, so this spell path always sees the item as ready and would
+                -- re-light the shared glowOverlay every desat tick while it's on
+                -- cooldown. Hand the frame off cleanly (clear any glow we owned).
+                if ns.PresetHasCdState and ns.PresetHasCdState(frame) then
+                    if fd._cdStateGlowOn then
+                        if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+                        fd._cdStateGlowOn = false
+                        -- The Fake-Active path owns this overlay through its own
+                        -- flag; clear it too so its next tick re-asserts the glow we
+                        -- just stopped (otherwise it thinks the glow is still on and
+                        -- never re-starts it, leaving a ready preset dark).
+                        fd._presetCdGlowOn = false
+                    end
+                    return
+                end
                 local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
                 local cse = ss2 and ss2.cdStateEffect
                 -- Shift-Icons variants behave exactly like their base hidden
@@ -2523,9 +2541,22 @@ local function DecorateFrame(frame, barData)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "pixelGlowReady" or cse == "buttonGlowReady" then
                     -- Plain CD Ready Glow: cooldown state only, decided right
-                    -- here -- no usability reads, no deferral, no events. The
-                    -- Resource Aware variants below carry those costs; these
-                    -- deliberately do not.
+                    -- here -- no usability reads, no deferral, no events for
+                    -- genuine Blizzard frames (Blizzard calls SetDesaturated on
+                    -- them at every cd transition, re-firing this hook).
+                    -- EUI's own custom frames (racials / trinkets / potions /
+                    -- custom spells) instead drive desaturation via
+                    -- SetDesaturation(float), which does NOT trigger this
+                    -- SetDesaturated hook -- so on those the glow would never
+                    -- re-evaluate and would stay lit through the whole cooldown.
+                    -- Register just those for the event-driven cooldown watch
+                    -- (its loop handles plain variants too); Blizzard frames keep
+                    -- the zero-event path.
+                    if (frame._isRacialFrame or frame._isTrinketFrame or frame._isPresetFrame
+                        or frame._isItemPresetFrame or frame._isCustomSpellFrame)
+                        and ns.CDGlowWatch then
+                        ns.CDGlowWatch(frame)
+                    end
                     -- Pool reassignment: glow state inherited from a previous
                     -- spell on this frame belongs to that spell -- reset now.
                     if fd._cdGlowBoundSid ~= sid2 then
@@ -3019,10 +3050,16 @@ do
             local sid2 = fc2 and fc2.spellID
             local bk2 = fc2 and fc2.barKey
             local keep = false
-            if fd and fd.glowOverlay and sid2 and bk2 then
+            -- Preset frames are owned by the Fake-Active engine (see the guard in
+            -- the SetDesaturated hook); never let the spell-cooldown path drive
+            -- their glow. keep=false below stops any leftover glow and unwatches.
+            if fd and fd.glowOverlay and sid2 and bk2
+               and not (ns.PresetHasCdState and ns.PresetHasCdState(frame)) then
                 local ss2 = RSP(frame, sid2, ns.GetBarSpellData(bk2))
                 local cse2 = ss2 and ss2.cdStateEffect
-                if cse2 == "pixelGlowReadyUsable" or cse2 == "buttonGlowReadyUsable" then
+                local plainGlow = cse2 == "pixelGlowReady" or cse2 == "buttonGlowReady"
+                local usableGlow = cse2 == "pixelGlowReadyUsable" or cse2 == "buttonGlowReadyUsable"
+                if plainGlow or usableGlow then
                     keep = true
                     -- Pool reassignment: glow state inherited from a previous
                     -- spell on this frame belongs to that spell -- reset now.
@@ -3039,30 +3076,31 @@ do
                     end
                     local ci = C_Spell.GetSpellCooldown(liveSid)
                     local onCD = ci and ci.isActive and not ci.isOnGCD
+                    local shouldGlow
                     if onCD then
                         -- On cooldown always stops the glow -- a safety net
                         -- independent of the SetDesaturated hook, in case that
-                        -- hook doesn't fire for a given transition.
-                        if fd._cdStateGlowOn then
-                            ns.StopNativeGlow(fd.glowOverlay)
-                            fd._cdStateGlowOn = false
-                        end
+                        -- hook doesn't fire for a given transition (it never does
+                        -- for EUI custom frames -- they use SetDesaturation).
+                        shouldGlow = false
+                    elseif usableGlow then
+                        -- Resource Aware: also require castability (resources,
+                        -- form, lockout). nil = no data yet -> not usable.
+                        shouldGlow = (C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(liveSid)) == true
                     else
-                        -- IsSpellUsable is the complete castability signal
-                        -- (resources, form, lockout). nil = no data yet ->
-                        -- treat as not usable; a later event re-evaluates.
-                        local isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(liveSid)
-                        if isUsable == true then
-                            if not fd._cdStateGlowOn then
-                                local style = cse2 == "pixelGlowReadyUsable" and 1 or 3
-                                local gr, gg, gb = ns.ResolveGlowColor(ss2)
-                                ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
-                                fd._cdStateGlowOn = true
-                            end
-                        elseif fd._cdStateGlowOn then
-                            ns.StopNativeGlow(fd.glowOverlay)
-                            fd._cdStateGlowOn = false
+                        -- Plain: cooldown state only.
+                        shouldGlow = true
+                    end
+                    if shouldGlow then
+                        if not fd._cdStateGlowOn then
+                            local style = (cse2 == "pixelGlowReady" or cse2 == "pixelGlowReadyUsable") and 1 or 3
+                            local gr, gg, gb = ns.ResolveGlowColor(ss2)
+                            ns.StartNativeGlow(fd.glowOverlay, style, gr or 1, gg or 1, gb or 1)
+                            fd._cdStateGlowOn = true
                         end
+                    elseif fd._cdStateGlowOn then
+                        ns.StopNativeGlow(fd.glowOverlay)
+                        fd._cdStateGlowOn = false
                     end
                 end
             end
