@@ -3593,6 +3593,7 @@ initFrame:SetScript("OnEvent", function(self)
                     else
                         local anchor =
                             (ciPos == "topright"    and "TOPRIGHT")    or
+                            (ciPos == "center"      and "CENTER")      or
                             (ciPos == "bottomleft"  and "BOTTOMLEFT")  or
                             (ciPos == "bottomright" and "BOTTOMRIGHT") or
                             "TOPLEFT"
@@ -11002,8 +11003,8 @@ initFrame:SetScript("OnEvent", function(self)
             end)
 
             -- Cog popup for combat indicator settings
-            local combatPosValues = { ["topleft"]="Top Left", ["topright"]="Top Right", ["bottomleft"]="Bottom Left", ["bottomright"]="Bottom Right", ["portrait"]="Portrait" }
-            local combatPosOrder = { "topleft", "topright", "bottomleft", "bottomright", "portrait" }
+            local combatPosValues = { ["topleft"]="Top Left", ["topright"]="Top Right", ["center"]="Center", ["bottomleft"]="Bottom Left", ["bottomright"]="Bottom Right", ["portrait"]="Portrait" }
+            local combatPosOrder = { "topleft", "topright", "center", "bottomleft", "bottomright", "portrait" }
 
             local _, combatCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Combat Indicator Settings",

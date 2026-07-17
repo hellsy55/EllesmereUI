@@ -11359,6 +11359,7 @@ function InitializeFrames()
             else
                 local anchor =
                     (pos == "topright"    and "TOPRIGHT")    or
+                    (pos == "center"      and "CENTER")      or
                     (pos == "bottomleft"  and "BOTTOMLEFT")  or
                     (pos == "bottomright" and "BOTTOMRIGHT") or
                     "TOPLEFT"
