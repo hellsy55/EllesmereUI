@@ -2731,6 +2731,12 @@ do
         -- per-button overhead. With 60 populated buttons, the mixin path
         -- caused visible frame drops on high-frequency events.
         dispatcher:SetScript("OnEvent", function(_, event, arg1)
+            -- Assisted shine follows slot contents; coalesced (storm-safe),
+            -- and belt-and-braces vs. the OnActionChanged callback -- an
+            -- in-combat Update() abort dies before Blizzard's TriggerEvent.
+            if event == "ACTIONBAR_SLOT_CHANGED" and ns.QueueAssistRescan then
+                ns.QueueAssistRescan()
+            end
             for _, info in ipairs(BAR_CONFIG) do
                 if not info.isStance and not info.isPetBar then
                     local btns = barButtons[info.key]
@@ -7560,6 +7566,9 @@ do
         local ok, hf = pcall(CreateFrame, "Frame", nil, btn, "ActionBarButtonAssistedCombatHighlightTemplate")
         if not ok or not hf then return nil end
         hf:SetPoint("CENTER")
+        -- Above the cooldown swipe, border frame, glowOverlay (+6) and proc
+        -- alerts -- same margin the CDM twin uses.
+        hf:SetFrameLevel(btn:GetFrameLevel() + 15)
         -- Freeze on a single flipbook frame until we actually animate (in combat).
         if hf.Flipbook and hf.Flipbook.Anim then
             hf.Flipbook.Anim:Play()
@@ -7586,6 +7595,8 @@ do
         end
         local w = btn:GetWidth() or 45
         hf:SetScale(w / 45)
+        -- Re-assert: bar layout can change the button's frame level after create.
+        hf:SetFrameLevel(btn:GetFrameLevel() + 15)
         hf:Show()
         if hf.Flipbook and hf.Flipbook.Anim then
             if _assistInCombat then hf.Flipbook.Anim:Play() else hf.Flipbook.Anim:Stop() end
@@ -7594,9 +7605,12 @@ do
 
     -- The (spell) id a button currently represents, mirroring Blizzard's
     -- AssistedCombatManager:GetActionButtonSpellForAssistedHighlight.
+    -- Attribute first: the secure paging writes the "action" attribute and it
+    -- is the authoritative slot (see ForceCooldownPaint's note); btn.action is
+    -- a derived mirror.
     local function ButtonSpell(btn)
-        local action = btn.action
-        if action == nil and btn.GetAttribute then action = btn:GetAttribute("action") end
+        local action = btn.GetAttribute and btn:GetAttribute("action")
+        if action == nil then action = btn.action end
         if action == nil then return nil end
         local atype, id, subType = GetActionInfo(action)
         if atype == "spell" and subType ~= "assistedcombat" then
@@ -7660,6 +7674,21 @@ do
     end
     ns.UpdateAssistHighlights = UpdateAssistHighlights
 
+    -- Coalesced re-run: OnActionChanged fires per button on page swaps and
+    -- SLOT_CHANGED storms dozens of times per second (mouseover-conditional
+    -- macros re-resolving); one pending flag collapses a burst into a single
+    -- next-frame pass.
+    local _assistRescanPending = false
+    local function QueueAssistRescan()
+        if _assistRescanPending then return end
+        _assistRescanPending = true
+        C_Timer.After(0, function()
+            _assistRescanPending = false
+            UpdateAssistHighlights()
+        end)
+    end
+    ns.QueueAssistRescan = QueueAssistRescan
+
     local function SyncAssistCombat()
         _assistInCombat = (InCombatLockdown() or UnitAffectingCombat("player")) and true or false
         for btn in pairs(_assistGlowed) do
@@ -7679,18 +7708,22 @@ do
         _assistHookInstalled = true
         SyncAssistCombat()
         if EventRegistry and EventRegistry.RegisterCallback then
+            -- No hooksecurefunc on UpdateAllAssistedHighlightFramesForSpell:
+            -- the manager calls it then fires this event right after, so a
+            -- hook would run the full walk twice per suggestion change.
             EventRegistry:RegisterCallback("AssistedCombatManager.OnAssistedHighlightSpellChange", function()
-                UpdateAssistHighlights()
+                QueueAssistRescan()
             end, "EAB_AssistHighlight")
             -- Fires when the assistedCombatHighlight CVar is toggled at runtime.
             EventRegistry:RegisterCallback("AssistedCombatManager.OnSetUseAssistedHighlight", function()
-                UpdateAssistHighlights()
+                QueueAssistRescan()
             end, "EAB_AssistHighlight_CVar")
-        end
-        if AssistedCombatManager and AssistedCombatManager.UpdateAllAssistedHighlightFramesForSpell then
-            hooksecurefunc(AssistedCombatManager, "UpdateAllAssistedHighlightFramesForSpell", function()
-                UpdateAssistHighlights()
-            end)
+            -- Page swaps / drags / hover re-candidacy: the suggestion may not
+            -- change, but which button holds it (or whether Blizzard shows its
+            -- own frame on a hovered button) does. Same signal Blizzard uses.
+            EventRegistry:RegisterCallback("ActionButton.OnActionChanged", function()
+                QueueAssistRescan()
+            end, "EAB_AssistHighlight_Action")
         end
         local cf = CreateFrame("Frame")
         cf:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -7698,6 +7731,7 @@ do
         cf:RegisterEvent("PLAYER_ENTERING_WORLD")
         cf:SetScript("OnEvent", function(_, event)
             if event == "PLAYER_ENTERING_WORLD" then
+                SyncAssistCombat()
                 UpdateAssistHighlights()
             else
                 SyncAssistCombat()
