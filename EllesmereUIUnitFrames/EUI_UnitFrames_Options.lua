@@ -4143,21 +4143,6 @@ initFrame:SetScript("OnEvent", function(self)
             if not sup then return true end
             return sup[selectedUnit] == true
         end
-        -- Only show "Applies to:" tooltip for leader indicator settings
-        local SHOW_APPLIES_TO = {
-            leaderIndicatorEnabled = true, leaderIndicatorSize = true,
-            leaderIndicatorPosition = true, leaderIndicatorX = true, leaderIndicatorY = true,
-        }
-        local function SSupportTooltip(key)
-            if not SHOW_APPLIES_TO[key] then return nil end
-            local sup = UNIT_SUPPORTS[key]
-            if not sup then return nil end
-            local names = {}
-            for _, k in ipairs(GROUP_UNIT_ORDER) do
-                if sup[k] then names[#names+1] = UNIT_LABELS_SUP[k] end
-            end
-            return "Applies to: " .. table.concat(names, ", ")
-        end
         -- Dim a row region and add tooltip when no checked unit supports the
         -- setting. unsupportedTip (optional) is shown over the dimmed row when
         -- the current unit doesn't support the key.
@@ -4167,7 +4152,7 @@ initFrame:SetScript("OnEvent", function(self)
                 region:SetAlpha(0.35)
                 if region._control and region._control.Disable then region._control:Disable() end
             end
-            local tip = SSupportTooltip(key) or (not visible and unsupportedTip) or nil
+            local tip = not visible and unsupportedTip or nil
             if tip then
                 local function MakeSupportHit(anchor)
                     if not anchor then return end
@@ -11198,22 +11183,18 @@ initFrame:SetScript("OnEvent", function(self)
             return selectedUnit == "player" or selectedUnit == "target"
         end
         if leaderIndSupported() then
-            local function SetLeaderBoth(key, val)
-                UNIT_DB_MAP["player"]()[key] = val
-                UNIT_DB_MAP["target"]()[key] = val
-                ReloadAndUpdate(); UpdatePreview()
-            end
+            local leaderSyncUnits = { "player", "target" }
             sharedAddRow5, h = W:DualRow(parent, y,
                 { type="toggle", text="Leader Indicator",
                   getValue=function() return SValSupported("leaderIndicatorEnabled", true) end,
                   setValue=function(v)
-                      SetLeaderBoth("leaderIndicatorEnabled", v)
+                      SSetSupported("leaderIndicatorEnabled", v)
                       EllesmereUI:RefreshPage()
                   end },
                 { type="slider", text="Leader Icon Size", min=8, max=48, step=1,
                   disabled=leaderIndOff, disabledTooltip="Leader Indicator",
                   getValue=function() return SValSupported("leaderIndicatorSize", 16) end,
-                  setValue=function(v) SetLeaderBoth("leaderIndicatorSize", v) end });  y = y - h
+                  setValue=function(v) SSetSupported("leaderIndicatorSize", v) end });  y = y - h
             SApplySupport(sharedAddRow5._leftRegion, "leaderIndicatorEnabled")
             SApplySupport(sharedAddRow5._rightRegion, "leaderIndicatorSize")
             do
@@ -11225,13 +11206,13 @@ initFrame:SetScript("OnEvent", function(self)
                     rows = {
                         { type="dropdown", label="Position", values=leaderPosValues, order=leaderPosOrder,
                           get=function() return SValSupported("leaderIndicatorPosition", "topleft") end,
-                          set=function(v) SetLeaderBoth("leaderIndicatorPosition", v) end },
+                          set=function(v) SSetSupported("leaderIndicatorPosition", v) end },
                         { type="slider", label="X Offset", min=-200, max=200, step=1,
                           get=function() return SValSupported("leaderIndicatorX", 0) end,
-                          set=function(v) SetLeaderBoth("leaderIndicatorX", v) end },
+                          set=function(v) SSetSupported("leaderIndicatorX", v) end },
                         { type="slider", label="Y Offset", min=-200, max=200, step=1,
                           get=function() return SValSupported("leaderIndicatorY", 0) end,
-                          set=function(v) SetLeaderBoth("leaderIndicatorY", v) end },
+                          set=function(v) SSetSupported("leaderIndicatorY", v) end },
                     },
                 })
                 local leaderCogBtn = MakeCogBtn(rgn, leaderCogShow)
@@ -11257,6 +11238,44 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(UpdateLeaderCogState)
                 UpdateLeaderCogState()
             end
+            local function BuildLeaderSync(rgn, key, default, tooltip)
+                local function GetValue(unit)
+                    local v = UNIT_DB_MAP[unit]()[key]
+                    if v == nil then return default end
+                    return v
+                end
+                EllesmereUI.BuildSyncIcon({
+                    region = rgn,
+                    tooltip = tooltip,
+                    onClick = function()
+                        local v = GetValue(selectedUnit)
+                        for _, unit in ipairs(leaderSyncUnits) do UNIT_DB_MAP[unit]()[key] = v end
+                        ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = GetValue(selectedUnit)
+                        for _, unit in ipairs(leaderSyncUnits) do
+                            if GetValue(unit) ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys = leaderSyncUnits,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return selectedUnit end,
+                        onApply = function(checkedKeys)
+                            local v = GetValue(selectedUnit)
+                            for _, unit in ipairs(checkedKeys) do UNIT_DB_MAP[unit]()[key] = v end
+                            ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+            BuildLeaderSync(sharedAddRow5._leftRegion, "leaderIndicatorEnabled", true,
+                "Apply Leader Indicator to all Frames")
+            BuildLeaderSync(sharedAddRow5._rightRegion, "leaderIndicatorSize", 16,
+                "Apply Leader Icon Size to all Frames")
         end
 
         -------------------------------------------------------------------
