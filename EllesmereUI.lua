@@ -4535,6 +4535,21 @@ do
         end
     end
 
+    -- Aura probe for the drift check below, kept as a named function so the
+    -- pcall in the 0.1 s poll allocates nothing. Returns (absent, count):
+    -- absent=true only on a VERIFIED missing aura; count only when
+    -- applications is a readable positive number. Anything secret-shaped
+    -- returns neither (prediction stays in charge) or throws into the pcall.
+    local function ReadSweepAura()
+        local aura = C_UnitAuras.GetPlayerAuraBySpellID(SWEEP)
+        if not aura then return true end
+        local c = aura.applications
+        if c and not (issecretvalue and issecretvalue(c)) and c > 0 then
+            return false, c
+        end
+        return false
+    end
+
     function EllesmereUI.GetSweepingStrikes()
         if not sweepKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
@@ -4542,18 +4557,20 @@ do
         end
         -- Validate prediction against the real aura to correct drift (the
         -- reach probe is ~11 yd while the game sweeps within 8 yd of the
-        -- primary target). Direct spellID lookup: zero-alloc on a 0.1 s
-        -- poll, and safe under 12.x restrictions -- aura PRESENCE stays
-        -- readable in keys (same contract the TBB bind-miss fallback relies
-        -- on), while a secret applications count simply leaves the
-        -- prediction in charge.
-        if stacks > 0 and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-            local aura = C_UnitAuras.GetPlayerAuraBySpellID(SWEEP)
-            if not aura then
-                stacks, expiresAt = 0, nil
-            else
-                local count = aura.applications
-                if count and not (issecretvalue and issecretvalue(count)) and count > 0 then
+        -- primary target). OPEN WORLD ONLY and fail-open: in instanced
+        -- content the 12.x aura surface is restricted -- the lookup can
+        -- return nil/secret (or throw) for a live buff -- and the v8.4.9
+        -- fail-closed version of this check wiped active stacks to 0 in
+        -- combat and pinned the bar at 0 for the whole run in M+. Only a
+        -- verified "buff gone" clears the prediction; an error or an
+        -- unreadable result changes nothing.
+        if stacks > 0 and not IsInInstance()
+           and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+            local ok, absent, count = pcall(ReadSweepAura)
+            if ok then
+                if absent then
+                    stacks, expiresAt = 0, nil
+                elseif count then
                     stacks = count
                 end
             end
