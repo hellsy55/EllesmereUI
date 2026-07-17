@@ -822,27 +822,28 @@ local function ProcessBlockChildren(frame, depth)
 
 end
 
--- Suppress a POI button permanently. Hooks Show + SetAlpha so Blizzard
--- can never make it visible again. The _euiSuppressed flag is on the
--- frame object itself, so it persists even if the button is pooled.
-local _poiHiddenParent = CreateFrame("Frame")
-_poiHiddenParent:Hide()
+-- Weak-keyed so pooled/recycled poiButtons don't leak or get double-hooked.
+local _hookedPOIButtons = setmetatable({}, { __mode = "k" })
 
 local function SuppressPOI(block)
-    -- "Show Quest Icons" on: leave Blizzard's native POI button visible and
-    -- skip installing the keep-hidden hook entirely. Reload-gated, so this is
-    -- read fresh per block; no live un-suppression needed.
     if EQT.Cfg("showQuestIcons") then return end
     local pb = block and block.poiButton
-    if not pb or EllesmereUI._GetFFD(pb).suppressed then return end
-    EllesmereUI._GetFFD(pb).suppressed = true
-    pb:SetParent(_poiHiddenParent)
+    if not pb then return end
+    if pb:IsShown() then pb:Hide() end
     pb:EnableMouse(false)
-    hooksecurefunc(pb, "SetParent", function(self, parent)
-        if parent ~= _poiHiddenParent then
-            self:SetParent(_poiHiddenParent)
-        end
-    end)
+
+    -- Re-hide synchronously whenever Blizzard shows this button again (e.g.
+    -- on SUPER_TRACKING_CHANGED from clicking a quest) so there's no visible
+    -- flash before the next SkinBlock/suppression pass. Hide() only, never
+    -- SetParent -- that's the taint-safe version of this pattern (see
+    -- InstallShowHook's otf Show-hook above, which does the same thing).
+    if not _hookedPOIButtons[pb] then
+        _hookedPOIButtons[pb] = true
+        hooksecurefunc(pb, "Show", function(self)
+            if EQT.Cfg("showQuestIcons") then return end
+            self:Hide()
+        end)
+    end
 end
 
 local function SkinBlock(block)

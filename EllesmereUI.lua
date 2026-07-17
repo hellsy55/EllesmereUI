@@ -2369,8 +2369,15 @@ do
                 local bd = _ppBorderData[f]
                 local ok = pcall(SnapBorderTextures, c, f, bd and bd.borderSize or 1)
                 if not ok then
-                    entry.container = nil
-                    entry.frame = nil
+                    -- Only evict when the failure is real (dead frame). While
+                    -- auras are secret (12.1), rect reads inside engine aura
+                    -- button subtrees are denied -- a transient state that
+                    -- must not permanently drop a live border.
+                    local AKR = EllesmereUI and EllesmereUI.AuraKit
+                    if not (AKR and AKR.AurasRestricted and AKR.AurasRestricted()) then
+                        entry.container = nil
+                        entry.frame = nil
+                    end
                 end
             end
         end
@@ -2382,6 +2389,13 @@ do
     function PP.ResnapBordersUnder(root)
         if not root then return PP.ResnapAllBorders() end
         local count = 0
+        -- Shared method ref for the climb: 12.1 engine aura buttons deny
+        -- access from addon code while auras are secret, and border hosts
+        -- living inside aura button subtrees climb through one. Calling via
+        -- the shared ref under pcall treats a denied step as a chain
+        -- dead-end = not under root (aura button subtrees are never inside
+        -- the options panel, so skipping them is correct, not just safe).
+        local GetParentFn = root.GetParent
         for i = 1, allBordersN do
             local entry = allBorders[i]
             local f = entry.frame
@@ -2390,8 +2404,9 @@ do
                 local parent = f
                 local found = false
                 for _ = 1, 10 do
-                    parent = parent:GetParent()
-                    if not parent then break end
+                    local ok, p = pcall(GetParentFn, parent)
+                    if not ok or not p then break end
+                    parent = p
                     if parent == root then found = true; break end
                 end
                 if found then
@@ -2399,8 +2414,12 @@ do
                     local bd = _ppBorderData[f]
                     local ok = pcall(SnapBorderTextures, entry.container, f, bd and bd.borderSize or 1)
                     if not ok then
-                        entry.container = nil
-                        entry.frame = nil
+                        -- Same transient-vs-dead distinction as ResnapAllBorders.
+                        local AKR = EllesmereUI and EllesmereUI.AuraKit
+                        if not (AKR and AKR.AurasRestricted and AKR.AurasRestricted()) then
+                            entry.container = nil
+                            entry.frame = nil
+                        end
                     end
                 end
             end
@@ -4240,6 +4259,7 @@ do
     -- never register the watcher: the flags stay false and both entry
     -- points early-out on a plain upvalue read.
     local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
+    local sweepName -- cached spell name for aura lookups (resolved outside M+)
     do
         local _, cls = UnitClass("player")
         if cls == "WARRIOR" then
@@ -4249,6 +4269,10 @@ do
                 improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
                 broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
                 fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
+                if not sweepName then
+                    local n = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(SWEEP)
+                    if n and not (issecretvalue and issecretvalue(n)) then sweepName = n end
+                end
             end
             local watcher = CreateFrame("Frame")
             watcher:RegisterEvent("PLAYER_LOGIN")
@@ -4384,6 +4408,15 @@ do
         if not sweepKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
+        end
+        -- Validate prediction against the actual aura to correct drift.
+        if stacks > 0 and sweepName and AuraUtil and AuraUtil.FindAuraByName then
+            local name, _, count = AuraUtil.FindAuraByName(sweepName, "player", "HELPFUL")
+            if not name then
+                stacks, expiresAt = 0, nil
+            elseif count and not (issecretvalue and issecretvalue(count)) then
+                stacks = count
+            end
         end
         return stacks, MaxStacks()
     end
@@ -9662,6 +9695,17 @@ function EllesmereUI:RefreshPage(force)
         for i = 1, #_widgetRefreshList do _widgetRefreshList[i]() end
         return
     end
+    -- Panel hidden: a rebuild here would run buildPage with nothing on
+    -- screen, firing page-open side effects (preview flags, placeholder
+    -- shows) AFTER the OnHide cleanup already cleared them -- they then
+    -- stick until the next open (e.g. CDM buff previews staying visible
+    -- when an override edit session tears down on panel close). Defer the
+    -- rebuild to the next show instead; the on-show callback below consumes
+    -- the flag before module OnShow handlers run.
+    if not (mainFrame and mainFrame:IsShown()) then
+        EllesmereUI._pendingForceRefresh = true
+        return
+    end
     -- Slow path: full teardown + rebuild
     local savedScroll = scrollFrame and scrollFrame:GetVerticalScroll() or 0
     local savedTarget = scrollTarget
@@ -9739,6 +9783,17 @@ function EllesmereUI:RefreshPage(force)
         UpdateScrollThumb()
     end
 end
+
+-- Consume a rebuild that was requested while the panel was hidden (see the
+-- deferral inside RefreshPage). Registered here, before any module files
+-- load, so it runs ahead of module OnShow callbacks -- they then observe
+-- the freshly rebuilt page.
+EllesmereUI:RegisterOnShow(function()
+    if EllesmereUI._pendingForceRefresh then
+        EllesmereUI._pendingForceRefresh = nil
+        EllesmereUI:RefreshPage(true)
+    end
+end)
 
 -- Public: snap the settings scroll back to the top
 -- (e.g. in resource bars clicking on a simple section

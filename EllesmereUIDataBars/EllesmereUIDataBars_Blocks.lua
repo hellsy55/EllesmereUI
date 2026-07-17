@@ -1717,9 +1717,11 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
     local tooltipTimer = 0
     local mouseOver = false
 
-    -- Pre-allocated tooltip line buffers (avoid per-show garbage)
+    -- Pre-allocated tooltip line buffers (avoid per-show garbage). `spell` is
+    -- the castable spell NAME (secure attribute for the click-to-teleport
+    -- overlay), kept separate from the displayed dungeon `name`.
     local _mythicLinesBuf = {}
-    for i = 1, #SEASON_TELEPORTS do _mythicLinesBuf[i] = { name = "", cd = 0 } end
+    for i = 1, #SEASON_TELEPORTS do _mythicLinesBuf[i] = { name = "", cd = 0, spell = nil } end
     local _mythicLineCount = 0
 
     local function D() return blockCfg.settings or {} end
@@ -1750,12 +1752,14 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                 local dName = nil
                 if entry.dungeonId and GetLFGDungeonInfo then dName = GetLFGDungeonInfo(entry.dungeonId) end
                 local spInfo = C_Spell.GetSpellInfo(spellId)
+                local spName = spInfo and spInfo.name
                 local name2 = dName
-                if not name2 and spInfo then name2 = spInfo.name end
+                if not name2 then name2 = spName end
                 if not name2 then name2 = tostring(spellId) end
                 _mythicLineCount = _mythicLineCount + 1
-                _mythicLinesBuf[_mythicLineCount].name = name2
-                _mythicLinesBuf[_mythicLineCount].cd   = TravelGetRemainingCooldown(spellId, true)
+                _mythicLinesBuf[_mythicLineCount].name  = name2
+                _mythicLinesBuf[_mythicLineCount].cd    = TravelGetRemainingCooldown(spellId, true)
+                _mythicLinesBuf[_mythicLineCount].spell = spName
             end
         end
         if _mythicLineCount > 0 then
@@ -1765,8 +1769,9 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
             for i = 2, _mythicLineCount do
                 local j = i
                 while j > 1 and _mythicLinesBuf[j].name < _mythicLinesBuf[j - 1].name do
-                    _mythicLinesBuf[j].name, _mythicLinesBuf[j - 1].name = _mythicLinesBuf[j - 1].name, _mythicLinesBuf[j].name
-                    _mythicLinesBuf[j].cd,   _mythicLinesBuf[j - 1].cd   = _mythicLinesBuf[j - 1].cd,   _mythicLinesBuf[j].cd
+                    _mythicLinesBuf[j].name,  _mythicLinesBuf[j - 1].name  = _mythicLinesBuf[j - 1].name,  _mythicLinesBuf[j].name
+                    _mythicLinesBuf[j].cd,    _mythicLinesBuf[j - 1].cd    = _mythicLinesBuf[j - 1].cd,    _mythicLinesBuf[j].cd
+                    _mythicLinesBuf[j].spell, _mythicLinesBuf[j - 1].spell = _mythicLinesBuf[j - 1].spell, _mythicLinesBuf[j].spell
                     j = j - 1
                 end
             end
@@ -1776,7 +1781,13 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                 if not cs then cs = L["READY"] end
                 local er, eg = 1, 0
                 if e.cd <= 0 then er, eg = 0, 1 end
-                ns.Tip_AddDouble(e.name, cs, 0.8, 0.8, 0.8, er, eg, 0)
+                if e.cd <= 0 and e.spell then
+                    -- Ready teleport: left-click the row to cast it (a secure
+                    -- overlay button; the row highlights on hover).
+                    ns.Tip_AddActionDouble(e.name, cs, e.spell, 0.8, 0.8, 0.8, er, eg, 0)
+                else
+                    ns.Tip_AddDouble(e.name, cs, 0.8, 0.8, 0.8, er, eg, 0)
+                end
             end
         end
         ns.Tip_AddLine(" ")
@@ -1829,7 +1840,9 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
         hearthButton:SetScript("OnLeave", function()
             mouseOver = false
             tooltipTimer = 0
-            ns.Tip_Hide(hearthButton)
+            -- Interactive tip (clickable M+ rows): the keep-alive poll owns
+            -- dismissal so the cursor can travel onto the tip to click a row.
+            ns.Tip_HideUnlessInteractive(hearthButton)
             inst:Refresh()
         end)
 
@@ -3062,6 +3075,59 @@ function ns.RefreshMicroMenuHider()
     end)
 end
 
+-- Character stats tooltip (opt-in via the micromenu block's charStatsTooltip
+-- setting). Fixed set: equipped item level, primary stat, and the four
+-- secondary percentages with their raw combat rating in parentheses. The
+-- versatility read is wrapped in pcall -- GetVersatilityBonus /
+-- GetCombatRatingBonus can hand back a Midnight "secret value" under
+-- addon-tainted execution, and any arithmetic on it errors, so the line is
+-- dropped rather than crashing the whole tooltip.
+local CS_DIM = "|cffaaaaaa"
+
+local function MMPrimaryStat()
+    local specIndex = GetSpecialization and GetSpecialization()
+    if not specIndex or specIndex <= 0 then return nil end
+    local _, _, _, _, _, statID = GetSpecializationInfo(specIndex)
+    if statID == LE_UNIT_STAT_STRENGTH  then return SPELL_STAT1_NAME or "Strength",  1 end
+    if statID == LE_UNIT_STAT_AGILITY   then return SPELL_STAT2_NAME or "Agility",   2 end
+    if statID == LE_UNIT_STAT_INTELLECT then return SPELL_STAT4_NAME or "Intellect", 4 end
+    return nil
+end
+
+local function MMAddCharStats()
+    local ar, ag, ab = ns.GetAccent()
+    local function pctRating(label, pct, rating)
+        ns.Tip_AddDouble(label,
+            format("%.2f%%", pct or 0) .. " " .. CS_DIM .. "(" .. floor((rating or 0) + 0.5) .. ")|r",
+            ar, ag, ab, 1, 1, 1)
+    end
+
+    ns.Tip_AddLine(" ")
+
+    local _, eq = GetAverageItemLevel()
+    ns.Tip_AddDouble(STAT_AVERAGE_ITEM_LEVEL or "Item Level", format("%.1f", eq or 0), ar, ag, ab, 1, 1, 1)
+
+    local pLabel, pIdx = MMPrimaryStat()
+    if pLabel and pIdx then
+        local _, eff = UnitStat("player", pIdx)
+        ns.Tip_AddDouble(pLabel, format("%.0f", eff or 0), ar, ag, ab, 1, 1, 1)
+    end
+
+    pctRating(STAT_CRITICAL_STRIKE or "Critical Strike", GetCritChance(),    GetCombatRating(CR_CRIT_MELEE))
+    pctRating(STAT_HASTE or "Haste",                     GetHaste(),         GetCombatRating(CR_HASTE_MELEE))
+    pctRating(STAT_MASTERY or "Mastery",                 GetMasteryEffect(), GetCombatRating(CR_MASTERY))
+
+    -- Versatility: secret-value-safe (see block comment above).
+    local ok, dmg, rating = pcall(function()
+        local d = (GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) or 0)
+                + (GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE)  or 0)
+        return d, GetCombatRating(CR_VERSATILITY_DAMAGE_DONE) or 0
+    end)
+    if ok then
+        pctRating(STAT_VERSATILITY or "Versatility", dmg, rating)
+    end
+end
+
 ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
     local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
     inst.key = InstKey(barCtx, blockCfg)
@@ -3150,6 +3216,10 @@ ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
             end
             ns.Tip_AddDouble('|cFFFFFFFF' .. L["COMPANION_LEVEL"] .. '|r',
                 '|cFF' .. hexAccent .. companionLvl .. '|r', 1, 1, 1, r, g, b)
+        end
+
+        if name == 'char' and D().charStatsTooltip then
+            MMAddCharStats()
         end
 
         ns.Tip_Show()

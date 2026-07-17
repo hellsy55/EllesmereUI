@@ -160,7 +160,19 @@ end
         end
     end
 
-    local function _ttOnShow(self) _ttSkin(self); _ttFonts(self) end
+    local _ttRelaying = setmetatable({}, { __mode = "k" })
+    local function _ttOnShow(self)
+        _ttSkin(self)
+        _ttFonts(self)
+        -- Re-show so the frame recalculates size with the new fonts. Gated
+        -- on the skin toggle: with it off the fonts above were never
+        -- applied, and the hook (uninstallable) must stay zero-cost.
+        if _enabled() and not _ttRelaying[self] then
+            _ttRelaying[self] = true
+            self:Show()
+            _ttRelaying[self] = nil
+        end
+    end
 
     local function _ttHook(tt)
         if not tt or tt:IsForbidden() or _ttSkinned[tt] then return end
