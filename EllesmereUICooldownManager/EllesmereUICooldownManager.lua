@@ -8148,8 +8148,10 @@ local function UpdateRotationHighlights()
                 if sid and icon:IsShown() then
                     -- Direct/base match first (cheap); only resolve the icon's
                     -- own base if those miss, to keep the common path light.
+                    -- sid > 0: item/trinket icons store -itemID / -13 / -14,
+                    -- which must not be fed to GetBaseSpell.
                     local match = (sid == suggestedSpell) or (sid == suggestedBase)
-                    if not match and GetBaseSpell then
+                    if not match and GetBaseSpell and sid > 0 then
                         match = GetBaseSpell(sid) == suggestedBase
                     end
                     if match then
