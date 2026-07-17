@@ -1642,7 +1642,7 @@ local function SkinCharacterSheet()
             local _, _, maxScroll = _info()
             -- No check on maxScroll, this is intentionnal. It ensures that after a collapse and scroll
             -- being disabled, it will still works.
-            local newScroll = math.max(0, math.min(maxScroll, scrollFrame:GetVerticalScroll() * SCROLL_STEP_PX))
+            local newScroll = math.max(0, math.min(maxScroll, scrollFrame:GetVerticalScroll()))
             scrollFrame:SetVerticalScroll(newScroll)
         end
         track._refreshVerticalScroll = refreshVerticalScroll
