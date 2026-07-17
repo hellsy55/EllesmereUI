@@ -191,6 +191,7 @@ Edit Tab Settings
 Editing Spec
 Element Options
 Enable
+Enable/Disable Bar per Form
 Enable/Disable per Form
 Enemy Name Text
 Enhance 5 Bar minimum is %d (if you want less just change 5 bar color)

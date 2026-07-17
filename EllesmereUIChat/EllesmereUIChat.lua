@@ -2155,56 +2155,7 @@ local function SkinEditBox(cf)
     if idx <= 10 then
     eb:HookScript("OnEditFocusGained", function(self) ApplyEditBoxHeaderFont(self) end)
 
-    eb:SetAltArrowKeyMode(false)
-    if not CFD(eb).history then
-            CFD(eb).history = {}
-            CFD(eb).histIdx = 0
-            hooksecurefunc(eb, "AddHistoryLine", function(self, text)
-                if issecretvalue and (issecretvalue(text)) then return end
-                local h = CFD(self).history
-                local last = h[#h]
-                if issecretvalue and last and issecretvalue(last) then
-                    h[#h] = nil
-                end
-                if h[#h] ~= text then
-                    h[#h + 1] = text
-                    if #h > 50 then table.remove(h, 1) end
-                end
-            end)
-            eb:HookScript("OnKeyDown", function(self, key)
-                if key ~= "UP" and key ~= "DOWN" then return end
-                -- In M+ keys and boss encounters, Blizzard restricts addon
-                -- chat operations. Calling SetText here taints the edit box
-                -- execution context, blocking SendChatMessage on next Enter.
-                -- Fall back to Blizzard's built-in history in restricted contexts.
-                local restricted = GetCVarBool("addonChatRestrictionsForced")
-                    or (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
-                        and C_ChallengeMode.IsChallengeModeActive())
-                if restricted then return end
-                local h = CFD(self).history
-                if #h == 0 then return end
-                if key == "UP" then
-                    CFD(self).histIdx = CFD(self).histIdx + 1
-                    if CFD(self).histIdx > #h then CFD(self).histIdx = #h end
-                elseif key == "DOWN" then
-                    CFD(self).histIdx = CFD(self).histIdx - 1
-                    if CFD(self).histIdx < 0 then CFD(self).histIdx = 0 end
-                end
-                if CFD(self).histIdx == 0 then
-                    self:SetText("")
-                else
-                    local entry = h[#h - CFD(self).histIdx + 1]
-                    if not entry or (issecretvalue and issecretvalue(entry)) then
-                        self:SetText("")
-                    else
-                        self:SetText(entry)
-                    end
-                end
-            end)
-            eb:HookScript("OnEditFocusLost", function(self)
-                CFD(self).histIdx = 0
-            end)
-        end
+    -- History: Blizzard's native Alt+Up/Down (OnKeyDown hook taints SendMacroPing).
     end
 end
 
