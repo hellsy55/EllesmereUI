@@ -4736,8 +4736,8 @@ local function UpdateSecondaryResource()
                         secondaryFrame._countText:SetFormattedText("%s / %s", cur, maxC)
                     end
                 else
-                    -- Secret value path: ScaleTo100 percent + format("%d") renders
-                    -- secrets natively (bare UnitPowerPercent is a 0-1 fraction).
+                    -- Secret value path: percent through the ScaleTo100 curve
+                    -- (bare UnitPowerPercent returns a 0-1 fraction).
                     local pType = (powerType == "MAELSTROM_BAR") and PT.MAELSTROM
                                or (powerType == "INSANITY_BAR") and PT.INSANITY
                                or (powerType == "FOCUS_BAR") and PT.FOCUS
@@ -4745,7 +4745,10 @@ local function UpdateSecondaryResource()
                                or nil
                     if pType and UnitPowerPercent then
                         local pct = UnitPowerPercent("player", pType, true, CurveConstants and CurveConstants.ScaleTo100) or 0
-                        secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
+                        -- SetFormattedText formats engine-side, so a SECRET
+                        -- percent still renders; Lua format()/concat on a
+                        -- secret would error instead.
+                        secondaryFrame._countText:SetFormattedText("%d%s", pct, percentSuffix)
                     elseif powerType == "IGNOREPAIN_BAR" then
                         -- Text is driven per-frame by IP.UpdateText. No-op here.
                     elseif sp.showMaxStacks == false then

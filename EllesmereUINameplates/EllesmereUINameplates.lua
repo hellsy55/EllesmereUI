@@ -194,10 +194,12 @@ local defaults = {
     -- Mini Coloring M+ Only: on = restrict the Mini Enemies color to 5-man
     -- dungeons; off = apply it everywhere (default; see GetReactionColor).
     miniColoringMPlusOnly = false,
-    -- Open World Basic Coloring (inline cog on Enemy Types): off by default.
-    -- On: outside instances, the mob-type special colors (Mini Enemies,
+    -- Full Coloring M+ Only (inline cog on Enemy Types): off by default.
+    -- On: outside 5-man dungeons, the mob-type special colors (Mini Enemies,
     -- Spell Casters, Mini-Bosses, Bosses) collapse into the single flat
     -- owBasicColor; Neutral keeps its own color (see GetReactionColor).
+    -- Keys keep their original owBasic* names (formerly "Open World Basic
+    -- Coloring", which gated on any instance instead of dungeons).
     owBasicColoring = false,
     owBasicColor = { r = 0.800, g = 0.137, b = 0.137 },
     darkenEnemiesOOC = true,
@@ -4604,10 +4606,6 @@ local function RefreshThreatCache()
     -- instanceType "party"; excludes raids/delves/open world). Cached here so the
     -- per-plate color path costs one field read, not a GetInstanceInfo call.
     ns._inDungeon = (instanceType == "party")
-    -- Any-instance flag for Open World Basic Coloring (dungeons, raids, delves,
-    -- scenarios, arenas, battlegrounds all count as instanced; only true open
-    -- world is "none").
-    ns._inInstance = (instanceType ~= nil and instanceType ~= "none")
     if difficultyID == 0
     or (C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap()) then
         _inThreatContent = false
@@ -4910,14 +4908,15 @@ local function GetReactionColor(unit)
     -- still returned at their own priority steps (7, 8, 10b) further down.
     local inCombat = UnitAffectingCombat(unit)
     local classification = UnitClassification(unit)
-    -- Open World Basic Coloring (inline cog on Enemy Types): outside instances,
-    -- collapse the mob-type special colors (Mini Enemies, Spell Casters,
-    -- Mini-Bosses, Bosses) into the single flat owBasicColor at the enemy
-    -- fallback (step 11). Neutral is unaffected: outside dungeons it already
-    -- returned at step 5. Off by default -- when off (or in any instance)
-    -- every step below behaves exactly as before.
+    -- Full Coloring M+ Only (inline cog on Enemy Types): outside 5-man
+    -- dungeons, collapse the mob-type special colors (Mini Enemies, Spell
+    -- Casters, Mini-Bosses, Bosses) into the single flat owBasicColor at the
+    -- enemy fallback (step 11). Neutral is unaffected: outside dungeons it
+    -- already returned at step 5. Off by default -- when off (or in a 5-man
+    -- dungeon) every step below behaves exactly as before. Same dungeon gate
+    -- as Mini Coloring M+ Only (ns._inDungeon).
     local owBasic = false
-    if not ns._inInstance then
+    if not ns._inDungeon then
         owBasic = defaults.owBasicColoring
         if db.owBasicColoring ~= nil then owBasic = db.owBasicColoring end
     end
@@ -5102,8 +5101,8 @@ local function GetReactionColor(unit)
     if isNeutral then
         return ResolveNeutralColor(unit)
     end
-    -- 11. Fallback: enemy in combat / out of combat. With Open World Basic
-    -- Coloring active, every mob-type special above was suppressed, so all
+    -- 11. Fallback: enemy in combat / out of combat. With Full Coloring M+
+    -- Only active, every mob-type special above was suppressed, so all
     -- hostile mobs land here and share the flat "All Enemies" color.
     local eic = _C(owBasic and "owBasicColor" or "enemyInCombat")
     return MaybeDarken(eic.r, eic.g, eic.b, inCombat)

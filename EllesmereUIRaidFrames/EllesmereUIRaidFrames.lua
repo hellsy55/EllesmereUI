@@ -6541,14 +6541,17 @@ FB.EnsureBuilt = function()
         -- visible-count drives the range ticker lifecycle.
         b:HookScript("OnShow", function(self)
             FB.visCount = (FB.visCount or 0) + 1
-            FB.Update(self)
-            FB.ApplyRange(self)
-            FB.UpdateRangeTicker()
+            -- Containers first: the legacy refresh below still has
+            -- restriction-era failure modes, and an error there must not
+            -- starve the container of its unit assignment.
             if ns.RFC_OnUnitAssigned then
                 local d = GetFFD(self)
                 local unit = FB.UnitOf(self)
                 if d and unit then ns.RFC_OnUnitAssigned(self, d, unit) end
             end
+            FB.Update(self)
+            FB.ApplyRange(self)
+            FB.UpdateRangeTicker()
         end)
         b:HookScript("OnHide", function(self)
             FB.visCount = math.max(0, (FB.visCount or 0) - 1)
@@ -6570,13 +6573,14 @@ FB.EnsureBuilt = function()
         -- without an OnShow on already-visible buttons).
         b:HookScript("OnAttributeChanged", function(self, name)
             if name == "unit" and self:IsVisible() then
-                FB.Update(self)
-                FB.ApplyRange(self)
+                -- Containers first (same rationale as the OnShow hook).
                 if ns.RFC_OnUnitAssigned then
                     local d = GetFFD(self)
                     local unit = FB.UnitOf(self)
                     if d and unit then ns.RFC_OnUnitAssigned(self, d, unit) end
                 end
+                FB.Update(self)
+                FB.ApplyRange(self)
             end
         end)
 
@@ -10303,14 +10307,38 @@ ns._scaledExtraProxy = setmetatable({}, { __index = function(_, key)
 end })
 
 ns._scaledPartyProxy = setmetatable({}, { __index = function(_, key)
-    -- Return party dimensions for frameWidth/frameHeight reads
+    -- Return party dimensions for frameWidth/frameHeight reads. The real-
+    -- preview effective overlay (ns._pvOverlayProxy) shadows live while a
+    -- panel view swap is active; it falls through to db.profile itself.
     if key == "frameWidth" then
-        return db and db.profile and (db.profile.partyFrameWidth or db.profile.frameWidth)
+        local p = ns._pvOverlayProxy or (db and db.profile)
+        return p and (p.partyFrameWidth or p.frameWidth)
     end
     if key == "frameHeight" then
-        return db and db.profile and (db.profile.partyFrameHeight or db.profile.frameHeight)
+        local p = ns._pvOverlayProxy or (db and db.profile)
+        return p and (p.partyFrameHeight or p.frameHeight)
     end
-    local val = ns._partyProxy[key]
+    local val
+    local resolved = false
+    -- Effective overlay first (preview-scoped ONLY -- ns._partyProxy also
+    -- serves the REAL party frames and must never consult it): party_
+    -- variant wins over the base key, mirroring _partyProxy's precedence.
+    -- Sentinel deletions resolve to nil WITHOUT falling through to the
+    -- live view value.
+    local ov = ns._pvOverlayProxy and ns._pvOverlay
+    if ov then
+        local pv
+        local section = ns._PARTY_KEY_SECTION[key]
+        if section and ns._IsPartySectionCustom(section) then
+            pv = ov["party_" .. key]
+        end
+        if pv == nil then pv = ov[key] end
+        if pv ~= nil then
+            resolved = true
+            if pv ~= EllesmereUI.SPECOV_NIL then val = pv end
+        end
+    end
+    if not resolved then val = ns._partyProxy[key] end
     if INDICATOR_SCALE_KEYS[key] and type(val) == "number" and ns._partyIndicatorScale ~= 1 then
         return val * ns._partyIndicatorScale
     end
@@ -11142,14 +11170,158 @@ end
 -- previewFrames are file-locals; the closure tracks the live values)
 ns._TSRaidPvState = function() return previewActive, previewFrames end
 -- Party preview reads party-scaled / party-prefixed settings so aura icons match
--- the party frames (size, position, colors); raid preview reads the live profile.
+-- the party frames (size, position, colors); raid preview reads the live profile
+-- through the real-preview effective overlay (below) so an open panel's view
+-- swap never leaks into the preview.
 local function PvSettings()
-    return (ns._partyPvActive and ns._scaledPartyProxy) or db.profile
+    return (ns._partyPvActive and ns._scaledPartyProxy)
+        or ns._pvOverlayProxy or db.profile
 end
 -- Class tokens for icon selection: the async ticker runs outside the synchronous
 -- table swap in ApplyPartyPreviewData, so it must resolve party tokens itself.
 local function PvClassTokens()
     return (ns._partyPvActive and ns._partyPvCT) or previewClassTokens
+end
+
+-------------------------------------------------------------------------------
+--  Real-preview effective-value overlay
+--  While the options panel holds a value-swapped VIEW (Default Editing Mode
+--  or an editing-as session) and preview mode is "real", preview reads must
+--  resolve the CURRENT SPEC's panel-closed effective values (spec override,
+--  else the applied conditional, else defaults) -- never the view's swapped
+--  live values. The overlay is a read-through proxy: captured RF keys
+--  resolve from the override stores, everything else falls through to live
+--  db.profile, so options widgets (which read live directly) keep showing
+--  the view. Rebuilt event-driven at the preview refresh entry points and
+--  the module-refresh tail; nil whenever no view swap is active, making
+--  every read byte-identical to today outside editing views. ZERO writes
+--  to live stores or override stores. (ns fields + do-end locals only:
+--  this file sits at Lua 5.1's 200-local cap.)
+-------------------------------------------------------------------------------
+do
+    local proxy
+    local proxyMT = {
+        __index = function(_, key)
+            local ov = ns._pvOverlay
+            if ov ~= nil then
+                local v = ov[key]
+                if v ~= nil then
+                    if v == EllesmereUI.SPECOV_NIL then return nil end
+                    return v
+                end
+            end
+            return db.profile[key]
+        end,
+    }
+    -- Segment-key resolution mirrors the value system's live walk: prefer
+    -- the string key when the table holds it, else numeric.
+    local function SegKey(t, seg)
+        if t[seg] ~= nil then return seg end
+        local n = tonumber(seg)
+        if n ~= nil and t[n] ~= nil then return n end
+        return seg
+    end
+
+    function ns._RebuildPvOverlay()
+        local active = (db.profile.previewMode == "real")
+            and EllesmereUI.SpecOverrides_ViewActive
+            and EllesmereUI.SpecOverrides_ViewActive()
+            and EllesmereUI.SpecOverrides_PeekEffectiveValues
+        local flat, specSrc, condSrc
+        if active then
+            flat, specSrc, condSrc =
+                EllesmereUI.SpecOverrides_PeekEffectiveValues("EllesmereUIRaidFrames")
+        end
+        if not flat then
+            ns._pvOverlay = nil
+            ns._pvOverlayProxy = nil
+            ns._pvOverlaySrc = nil
+            if ns._UpdatePvModeChrome then ns._UpdatePvModeChrome() end
+            return
+        end
+        local NIL_SENT = EllesmereUI.SPECOV_NIL
+        local overlay = {}
+        for fkey, v in pairs(flat) do
+            local path = fkey:match("^[^\31]+\31(.*)$")
+            if path and path ~= "" then
+                local segs = { strsplit("\30", path) }
+                if #segs == 1 then
+                    -- Depth-1: NIL_SENT stays encoded; the proxy decodes it.
+                    overlay[SegKey(db.profile, segs[1])] = v
+                else
+                    -- Deeper path: shallow-clone the LIVE parent chain along
+                    -- the path once, then set (or remove) the leaf -- sibling
+                    -- keys inside the cloned subtable keep their live values.
+                    local liveT = db.profile
+                    local dstParent = overlay
+                    local ok = true
+                    for i = 1, #segs - 1 do
+                        local k = SegKey(liveT, segs[i])
+                        local liveChild = liveT[k]
+                        if type(liveChild) ~= "table" then ok = false; break end
+                        local dstChild = dstParent[k]
+                        if type(dstChild) ~= "table" then
+                            dstChild = {}
+                            for ck, cv in pairs(liveChild) do dstChild[ck] = cv end
+                            dstParent[k] = dstChild
+                        end
+                        dstParent = dstChild
+                        liveT = liveChild
+                    end
+                    if ok then
+                        local lk = SegKey(liveT, segs[#segs])
+                        if v == NIL_SENT then
+                            dstParent[lk] = nil
+                        else
+                            dstParent[lk] = v
+                        end
+                    end
+                end
+            end
+        end
+        ns._pvOverlay = overlay
+        if not proxy then proxy = setmetatable({}, proxyMT) end
+        ns._pvOverlayProxy = proxy
+        ns._pvOverlaySrc = { spec = specSrc, cond = condSrc }
+        if ns._UpdatePvModeChrome then ns._UpdatePvModeChrome() end
+    end
+
+    -- The preview-path settings accessor: overlay proxy while a view swap
+    -- is active in real preview mode, else the live profile itself.
+    function ns.PvEffectiveProfile()
+        return ns._pvOverlayProxy or db.profile
+    end
+
+    -- Session unlock-layer element lookup: while an override session with a
+    -- CUSTOM unlock mode is being edited in real preview mode, the preview
+    -- mirrors that session's unlock positions -- the layer's recorded elem
+    -- for the key, baseline fallback per element. nil in every other state
+    -- (live positioning, today's behavior). Anchored containers resolve to
+    -- their recorded bookkeeping coordinates, not a live anchor chain.
+    function ns._PvSessionElem(key)
+        if db.profile.previewMode ~= "real" then return nil end
+        local layer, base
+        local sfn = EllesmereUI.SpecOverrides_EditSessionUnlockLayer
+        if sfn then layer, base = sfn() end
+        if not layer then
+            -- Default view: mirror the REAL spec's RESOLVED effective fork.
+            -- Never the live pointer (s.active) -- it lags membership and
+            -- unlock-mode edits made while the panel is open, and the
+            -- preview must show the layer that WOULD apply on exit.
+            -- Baseline-effective specs return nil here -> live positioning,
+            -- byte-identical to before the feature.
+            local vfn = EllesmereUI.SpecOverrides_ViewActive
+            if vfn and vfn() and EllesmereUI.SpecOverrides_EffectiveUnlockLayer then
+                layer, base = EllesmereUI.SpecOverrides_EffectiveUnlockLayer()
+            end
+        end
+        if not layer then return nil end
+        local e = layer.elems and layer.elems[key]
+        if not e and base and base ~= layer then
+            e = base.elems and base.elems[key]
+        end
+        return e
+    end
 end
 
 local function PvAuraGetGroup(index)
@@ -12347,7 +12519,10 @@ local function CreatePreviewFrame(index)
 
     local function PvApplyBorderColor()
         if not PP then return end
-        local s = ns._previewSettingsOverride or (ns._partyPvActive and ns._scaledPartyProxy) or ns._scaledProfile
+        -- Overlay ahead of _scaledProfile: border/hover/target keys are not
+        -- tier-scaled, so the effective overlay may shadow them safely.
+        local s = ns._previewSettingsOverride or (ns._partyPvActive and ns._scaledPartyProxy)
+            or ns._pvOverlayProxy or ns._scaledProfile
         if (s.borderSize or 1) <= 0 then return end
         local r, g, b, a
         local raised = false
@@ -12826,7 +13001,10 @@ local function ApplyPreviewData(f, index)
     -- re-spaced the layout without resizing the buttons whenever a custom raid
     -- size was active (e.g. in a party / small group on the Raid tab). The
     -- party preview still passes its own override via _previewSettingsOverride.
-    local s = ns._previewSettingsOverride or db.profile
+    -- The real-preview effective overlay (when active) resolves captured keys
+    -- to their panel-closed values; it is NOT tier-scaled, so the base-width
+    -- contract above holds.
+    local s = ns._previewSettingsOverride or ns._pvOverlayProxy or db.profile
     local classToken = previewClassTokens[index] or ns._PV_CLASS_TOKENS[((index - 1) % #ns._PV_CLASS_TOKENS) + 1]
     local playerSlot = previewRoles._playerSlot or 1
     local name
@@ -14092,9 +14270,10 @@ end
 local function RefreshPreview()
     if not previewActive then return end
     if not containerFrame then return end
+    if ns._RebuildPvOverlay then ns._RebuildPvOverlay() end
     BuildPreviewRoles()
 
-    local s = db.profile
+    local s = ns._pvOverlayProxy or db.profile
     local groupGrowth = s.groupGrowth or "RIGHT"
     local unitGrowth  = s.unitGrowth or "DOWN"
     local bw = PixelSnap(s.frameWidth or 72)
@@ -14204,19 +14383,19 @@ local function RefreshPreview()
             lbl = anchor:CreateFontString(nil, "OVERLAY")
             previewGroupLabels[g + 1] = lbl
         end
-        ApplyFont(lbl, db.profile.groupNumberSize or 10)
+        ApplyFont(lbl, s.groupNumberSize or 10)
         do
             -- Shared size/color with the real frames (group-number settings).
             -- Not gated by showGroupNumbers: the preview always shows numbers.
-            local gc = db.profile.groupNumberColor or {}
+            local gc = s.groupNumberColor or {}
             lbl:SetTextColor(gc.r or 1, gc.g or 1, gc.b or 1, gc.a or 0.75)
         end
         lbl:SetText(tostring(g + 1))
         lbl:ClearAllPoints()
         -- Anchor based on unit growth: label goes "before" the first unit.
         -- The X/Y offset (shared group-number setting) shifts it from there.
-        local gnox = db.profile.groupNumberOffsetX or 0
-        local gnoy = db.profile.groupNumberOffsetY or 0
+        local gnox = s.groupNumberOffsetX or 0
+        local gnoy = s.groupNumberOffsetY or 0
         if unitGrowth == "DOWN" then
             lbl:SetPoint("BOTTOM", firstFrame, "TOP", gnox, 4 + gnoy)
         elseif unitGrowth == "UP" then
@@ -14263,9 +14442,15 @@ local function RefreshPreview()
         -- until the panel reopened). Anchored at the base footprint's
         -- top-left so size changes grow down/right exactly like the real
         -- container's _ApplyTierOffset scheme.
+        local se = ns._PvSessionElem and ns._PvSessionElem("RF_RaidFrames")
         local bl, bt = ns._RFBaseTopLeft()
         previewContainer:ClearAllPoints()
-        if bl then
+        if se and se.point then
+            -- Editing an override with a custom unlock mode: place the
+            -- preview at the LAYER's recorded container position.
+            previewContainer:SetPoint(se.point, UIParent, se.relPoint or se.point,
+                PixelSnap(se.x or 0), PixelSnap(se.y or 0))
+        elseif bl then
             previewContainer:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", PixelSnap(bl), PixelSnap(bt))
         else
             previewContainer:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -15022,9 +15207,13 @@ local function ApplyPartyPreviewData(f, index)
     -- Use party proxy so ApplyPreviewData reads party-specific settings
     ns._previewSettingsOverride = ns._scaledPartyProxy
 
+    -- Sandwich values sourced through the effective overlay (panel-closed
+    -- values while a view swap is active); s stays live db.profile so the
+    -- mutation+restore semantics are unchanged.
+    local eff = ns._pvOverlayProxy or db.profile
     local origW, origH = s.frameWidth, s.frameHeight
-    s.frameWidth  = s.partyFrameWidth  or s.frameWidth
-    s.frameHeight = s.partyFrameHeight or s.frameHeight
+    s.frameWidth  = eff.partyFrameWidth  or eff.frameWidth
+    s.frameHeight = eff.partyFrameHeight or eff.frameHeight
 
     -- Temporarily swap preview value tables so ApplyPreviewData reads party data
     local origHealth = previewHealthValues
@@ -15104,14 +15293,15 @@ end
 
 local function RefreshPartyPreview()
     if not ns._partyPvActive then return end
+    if ns._RebuildPvOverlay then ns._RebuildPvOverlay() end
     -- Recompute party indicator/aura scale before applying preview data so the
     -- party preview reflects Auto Resize live (preview reads _scaledPartyProxy).
     if ns._UpdatePartyIndicatorScale then ns._UpdatePartyIndicatorScale() end
-    local s = db.profile
+    local s = ns._pvOverlayProxy or db.profile
     local w = PixelSnap(s.partyFrameWidth or s.frameWidth or 125)
     local h = PixelSnap(s.partyFrameHeight or s.frameHeight or 60)
     local spacing = PixelSnap(s.partyCellSpacing or s.cellSpacing or 2)
-    local mode = s.previewMode or "overlay"
+    local mode = db.profile.previewMode or "overlay"
 
     BuildPartyPreviewRoles()
 
@@ -15213,6 +15403,25 @@ local function RefreshPartyPreview()
     -- stack height/width versus the edit-mode location.
     if mode == "real" and ns._partyContainerFrame then
         local pos = s.partyUnlockPos
+        -- Editing an override with a custom unlock mode: anchor the preview
+        -- at the LAYER's recorded party-container position (a lightweight
+        -- proxy frame stands in for the real container, which sits at the
+        -- REAL spec's position).
+        local anchorTo = ns._partyContainerFrame
+        local se = ns._PvSessionElem and ns._PvSessionElem("RF_PartyFrames")
+        if se and se.point then
+            local proxy = ns._pvSessionPartyAnchor
+            if not proxy then
+                proxy = CreateFrame("Frame", nil, UIParent)
+                ns._pvSessionPartyAnchor = proxy
+            end
+            proxy:SetSize(ns._partyContainerFrame:GetSize())
+            proxy:ClearAllPoints()
+            proxy:SetPoint(se.point, UIParent, se.relPoint or se.point,
+                PixelSnap(se.x or 0), PixelSnap(se.y or 0))
+            anchorTo = proxy
+            pos = pos or se
+        end
         if pos then
             local stepX, stepY = 0, 0
             local basePoint = "TOPLEFT"
@@ -15233,7 +15442,7 @@ local function RefreshPartyPreview()
                         f:Hide()
                     else
                         f:ClearAllPoints()
-                        f:SetPoint(basePoint, ns._partyContainerFrame, basePoint,
+                        f:SetPoint(basePoint, anchorTo, basePoint,
                             PixelSnap(stepX * idx), PixelSnap(stepY * idx))
                         idx = idx + 1
                     end
@@ -15579,6 +15788,12 @@ function ERF:OnEnable()
         -- Friendly Boss Frames and Extra Frames re-read the swapped profile.
         if ns.FB_Apply then ns.FB_Apply() end
         if ns.XF_Apply then ns.XF_Apply() end
+        -- Real-preview effective overlay: RunRefreshers reaches here
+        -- synchronously from every view/spec/conditional transition, so the
+        -- preview's value source is corrected in the SAME frame -- the
+        -- shared tickers never render a stale overlay across a flip.
+        -- Near-zero cost when the overlay gate is inactive.
+        if ns._RebuildPvOverlay then ns._RebuildPvOverlay() end
     end
 
     -- Buff Manager LAYER swap refresh (spec-override BM forks): re-derives

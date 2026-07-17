@@ -630,14 +630,19 @@ do
     local FONT_SIZE = 12
 
     -- Interactive rows: a pool of secure spell buttons overlaid on rows that
-    -- declared an action (Tip_AddActionDouble). The buttons are children of
-    -- UIParent, NEVER the tip -- a SecureActionButtonTemplate silently blocks
-    -- spell execution when the action originates from a tooltip-parented
-    -- context in Midnight, so the Insecure variant run from UIParent is used
-    -- instead. A keep-alive poll lets the cursor travel off the owner onto the
-    -- tip to click a row without the tip closing under it.
+    -- declared an action (Tip_AddActionDouble). Casting mechanism matches the
+    -- QoL teleport prompt: SecureActionButtonTemplate, type="spell" fed a
+    -- STATIC INTEGER spellID, attributes written out of combat only (the
+    -- overlay build is combat-skipped). The buttons live on a secure host
+    -- under UIParent whose visibility state driver yanks them the moment
+    -- lockdown starts (covers a tip left open across a pull); the tip itself
+    -- keeps no protected children, so Tip_Hide stays combat-legal. A
+    -- keep-alive poll lets the cursor travel off the owner onto the tip to
+    -- click a row without the tip closing under it.
     local actionPool = {}
     local activeActions = 0
+    local actionHost           -- secure container, built with the first button
+    local actionsDirty = false -- a teardown landed in combat; regen finishes it
     local interactive = false
     local keepAlive
 
@@ -667,35 +672,88 @@ do
         return row
     end
 
-    -- Grow-only pool; buttons are configured fresh on every Tip_Show.
-    local function AcquireActionButton()
-        activeActions = activeActions + 1
-        local b = actionPool[activeActions]
-        if not b then
-            b = CreateFrame("Button", nil, UIParent, "InsecureActionButtonTemplate")
-            b:SetFrameStrata("TOOLTIP")
-            b:SetFrameLevel(250)
-            b:EnableMouse(true)
-            b:RegisterForClicks("LeftButtonDown", "LeftButtonUp")
-            b:SetAttribute("type", "spell")
-            b:SetAttribute("useOnKeyDown", true)
-            actionPool[activeActions] = b
-        end
-        return b
-    end
-
-    -- Hide/detach every overlay button. InsecureActionButtonTemplate frames are
-    -- not protected, so Hide/ClearAllPoints/SetScript are combat-legal.
+    -- Hide/detach every overlay button. The buttons are PROTECTED
+    -- (SecureActionButtonTemplate), so touching them is OOC-only: a teardown
+    -- that lands mid-combat sets the dirty flag and the host's regen handler
+    -- finishes it (the state driver has already pulled the host off screen at
+    -- lockdown start, so nothing stays clickable meanwhile).
     local function HideActionButtons()
+        if activeActions == 0 and not actionsDirty then return end
+        if InCombatLockdown() then actionsDirty = true; return end
+        actionsDirty = false
         for i = 1, #actionPool do
             local b = actionPool[i]
             b:Hide()
             b:ClearAllPoints()
             b:SetScript("OnEnter", nil)
             b:SetScript("OnLeave", nil)
-            b:SetScript("PostClick", nil)
         end
         activeActions = 0
+    end
+
+    local function EnsureActionHost()
+        if actionHost then return actionHost end
+        actionHost = CreateFrame("Frame", "EllesmereUIDataBarsTipActions", UIParent, "SecureHandlerStateTemplate")
+        actionHost:SetFrameStrata("TOOLTIP")
+        actionHost:SetFrameLevel(250)
+        actionHost:SetAllPoints(tip)
+        -- No clickable overlays in combat, ever: the driver hides the host
+        -- securely the instant lockdown starts and re-shows it on regen for
+        -- the next out-of-combat tip.
+        RegisterStateDriver(actionHost, "visibility", "[combat] hide; show")
+        local regen = CreateFrame("Frame")
+        regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        regen:RegisterEvent("PLAYER_REGEN_DISABLED")
+        regen:SetScript("OnEvent", function(_, event)
+            if event == "PLAYER_REGEN_ENABLED" then
+                if actionsDirty then HideActionButtons() end
+                return
+            end
+            -- PLAYER_REGEN_DISABLED: InCombatLockdown() already reports true
+            -- here, but protected-frame writes are still legal until the
+            -- handler returns -- the last window to act. A PROTECTED frame
+            -- (host or button) left anchored to the tip turns tip:SetSize()
+            -- into a blocked call for the whole fight, so hovering ANY plain
+            -- tooltip (clock etc.) fires ADDON_ACTION_BLOCKED. Sever every
+            -- protected anchor on the tip now; the next out-of-combat
+            -- Tip_Show re-attaches the host.
+            actionsDirty = false
+            for i = 1, #actionPool do
+                local b = actionPool[i]
+                b:Hide()
+                b:ClearAllPoints()
+                b:SetScript("OnEnter", nil)
+                b:SetScript("OnLeave", nil)
+            end
+            activeActions = 0
+            actionHost:ClearAllPoints()
+        end)
+        return actionHost
+    end
+
+    -- Grow-only pool; buttons are configured fresh on every Tip_Show. Creation
+    -- and reconfiguration only ever run out of combat (the overlay build is
+    -- combat-skipped), so the secure attribute writes are always legal.
+    local function AcquireActionButton()
+        activeActions = activeActions + 1
+        local b = actionPool[activeActions]
+        if not b then
+            b = CreateFrame("Button", nil, EnsureActionHost(), "SecureActionButtonTemplate")
+            b:SetFrameLevel(250)
+            b:EnableMouse(true)
+            -- AnyUp only + useOnKeyDown=false: registering both click phases
+            -- lets the ActionButtonUseKeyDown CVar fire the cast twice, and
+            -- the second press cancels the teleport cast the first one
+            -- started -- same rule as the travel block's hearth button.
+            b:RegisterForClicks("AnyUp")
+            b:SetAttribute("useOnKeyDown", false)
+            b:SetAttribute("type", "spell")
+            -- Static handler, installed once; pooled reuse only swaps the
+            -- spell attribute and the hover recolor scripts.
+            b:HookScript("PostClick", function() ns.Tip_Hide() end)
+            actionPool[activeActions] = b
+        end
+        return b
     end
 
     local function StopKeepAlive()
@@ -704,15 +762,27 @@ do
 
     -- Dismiss the interactive tip once the cursor is over neither the owner nor
     -- the tip. IsMouseOver tests rectangles (ignores the overlay buttons on
-    -- top), so hovering a clickable row still counts as "over the tip".
+    -- top), so hovering a clickable row still counts as "over the tip". Both
+    -- rects are tested EXPANDED: the tip anchors with a 6px gap off the bar
+    -- (plus the block's inset from the bar edge), and an unexpanded test hides
+    -- the tip the instant a tick lands while the cursor is crossing that dead
+    -- zone -- the expansions overlap across the gap so the crossing always
+    -- counts as "over". The two-tick grace covers slow diagonal exits past a
+    -- corner without making a real leave feel sticky (~0.2s).
+    local KA_SLACK = 12
     local function StartKeepAlive()
         if keepAlive then return end
+        local missed = 0
         keepAlive = C_Timer.NewTicker(0.1, function()
             if not (tip and tip:IsShown()) then StopKeepAlive(); return end
-            local overOwner = owner and owner.IsMouseOver and owner:IsMouseOver()
-            local overTip = tip:IsMouseOver()
-            if not overOwner and not overTip then
-                ns.Tip_Hide()
+            local overOwner = owner and owner.IsMouseOver
+                and owner:IsMouseOver(KA_SLACK, -KA_SLACK, -KA_SLACK, KA_SLACK)
+            local overTip = tip:IsMouseOver(KA_SLACK, -KA_SLACK, -KA_SLACK, KA_SLACK)
+            if overOwner or overTip then
+                missed = 0
+            else
+                missed = missed + 1
+                if missed >= 2 then ns.Tip_Hide() end
             end
         end)
     end
@@ -723,8 +793,15 @@ do
         dataCount = 0
     end
 
+    -- Secret text must never enter a row: SetText would display it, but
+    -- Tip_Show sizes the tooltip from GetStringWidth, which returns a SECRET
+    -- number for secret-fed FontStrings, and the max-width compare errors.
+    -- Rows carrying a secret are dropped at this single chokepoint, so the
+    -- tooltip shortens in restricted content instead of erroring. Add
+    -- functions return true when the row was actually added.
     function ns.Tip_AddLine(text, r, g, b)
         if not tip then return end
+        if text ~= nil and issecretvalue(text) then return end
         dataCount = dataCount + 1
         local d = data[dataCount]
         if not d then d = {}; data[dataCount] = d end
@@ -733,18 +810,22 @@ do
         d.r = nil
         d.wrap = nil
         d.action = nil
+        return true
     end
 
     -- Long prose (currency descriptions etc.): word-wraps at maxWidth px
     -- instead of blowing the tooltip out to the widest single line.
     function ns.Tip_AddWrappedLine(text, maxWidth, r, g, b)
         if not tip then return end
-        ns.Tip_AddLine(text, r, g, b)
-        data[dataCount].wrap = maxWidth or 280
+        if ns.Tip_AddLine(text, r, g, b) then
+            data[dataCount].wrap = maxWidth or 280
+        end
     end
 
     function ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb)
         if not tip then return end
+        if (left ~= nil and issecretvalue(left))
+        or (right ~= nil and issecretvalue(right)) then return end
         dataCount = dataCount + 1
         local d = data[dataCount]
         if not d then d = {}; data[dataCount] = d end
@@ -754,14 +835,18 @@ do
         d.rr = rr; d.rg = rg; d.rb = rb
         d.wrap = nil
         d.action = nil
+        return true
     end
 
     -- Click-to-cast row: identical to Tip_AddDouble, but Tip_Show overlays a
-    -- secure spell button (spellName, a castable spell NAME) over it and keeps
-    -- the tip alive while hovered. Degrades to a plain double line in combat.
-    function ns.Tip_AddActionDouble(left, right, spellName, lr, lg, lb, rr, rg, rb)
-        ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb)
-        if spellName then data[dataCount].action = spellName end
+    -- secure spell button over it and keeps the tip alive while hovered.
+    -- spellID MUST be a static integer spell ID (never an API-derived name or
+    -- secret-capable value -- same contract as the QoL teleport prompt).
+    -- Degrades to a plain double line in combat.
+    function ns.Tip_AddActionDouble(left, right, spellID, lr, lg, lb, rr, rg, rb)
+        if ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb) and spellID then
+            data[dataCount].action = spellID
+        end
     end
 
     function ns.Tip_Show()
@@ -837,9 +922,9 @@ do
 
         -- Interactive overlay: one secure spell button per row that declared an
         -- action, spanning the full row rect. Skipped in combat -- rows degrade
-        -- to plain text and no attribute writes fire. Rebuilt from scratch each
-        -- show (HideActionButtons first) so a reused tip never carries stale
-        -- buttons.
+        -- to plain text and no protected-frame touches fire. Rebuilt from
+        -- scratch each show (HideActionButtons first) so a reused tip never
+        -- carries stale buttons.
         HideActionButtons()
         interactive = false
         if not InCombatLockdown() then
@@ -848,6 +933,13 @@ do
                 local d = data[i]
                 if d.action then
                     interactive = true
+                    -- Re-attach the host: the REGEN_DISABLED handler detaches
+                    -- it (and the buttons) from the tip at every combat start.
+                    if activeActions == 0 then
+                        local host = EnsureActionHost()
+                        host:ClearAllPoints()
+                        host:SetAllPoints(tip)
+                    end
                     local b = AcquireActionButton()
                     b:SetAttribute("spell", d.action)
                     b:ClearAllPoints()
@@ -857,7 +949,6 @@ do
                     local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
                     b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
                     b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
-                    b:SetScript("PostClick", function() ns.Tip_Hide() end)
                     b:Show()
                 end
             end

@@ -558,7 +558,11 @@ ns.RegisterDMUnlock = function()
                 local _, idx = winOf(key)
                 local pos = idx and WinDB(idx).position
                 if not pos then return nil end
-                if pos.point then return pos end
+                -- Return a copy: callers may hold or rebase the table, and the
+                -- live DB entry must never be mutated through it
+                if pos.point then
+                    return { point = pos.point, relPoint = pos.relPoint, x = pos.x, y = pos.y }
+                end
                 if pos.x and pos.y then
                     -- Legacy drag format: TOPLEFT offset from UIParent's BOTTOMLEFT
                     return { point = "TOPLEFT", relPoint = "BOTTOMLEFT", x = pos.x, y = pos.y }

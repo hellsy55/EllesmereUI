@@ -9976,9 +9976,10 @@ local function CommitPositions()
 
     -- Bank the freshly-saved live layout into its owning spec-override
     -- layer (the active group layer, else the stored baseline). Wholesale
-    -- harvest -- no per-aspect routing exists anymore.
+    -- harvest -- no per-aspect routing exists anymore. true = user commit:
+    -- banks even inside the post-import suppression window (and closes it).
     if EllesmereUI.SpecOverrides_HarvestUnlockLayout then
-        local okH, errH = pcall(EllesmereUI.SpecOverrides_HarvestUnlockLayout)
+        local okH, errH = pcall(EllesmereUI.SpecOverrides_HarvestUnlockLayout, true)
         if not okH then
             print("|cffff6060[EllesmereUI]|r Unlock layer harvest failed: "
                 .. tostring(errH))
@@ -10177,8 +10178,6 @@ local function DoClose()
 
     -- Notify action bars to restore Blizzard-owned frame anchors
     if _G._EAB_UnlockModeClose then pcall(_G._EAB_UnlockModeClose) end
-    -- Notify damage meters
-    if _G._EDM_UnlockModeClose then pcall(_G._EDM_UnlockModeClose) end
 
     -- Recalculate action bar flyout directions after positions are finalized
     if _G._EAB_RecalcFlyouts then pcall(_G._EAB_RecalcFlyouts) end
@@ -10874,6 +10873,20 @@ function ns.OpenUnlockMode()
         end
         EllesmereUI._specialUnlockGroup = g
     end
+    -- Close any panel-side editing session/view BEFORE taking the value
+    -- snapshot: the options panel does not hide until much later in this
+    -- flow, so with the Default view (or an editing-as session) still
+    -- holding SWAPPED values live, the snapshot captured the view's values
+    -- while the panel's eventual OnHide restored the SPEC's values -- and
+    -- Save & Exit then diffed spec-vs-default and banked every difference
+    -- into values.default (defaults silently flipping to a group's values;
+    -- 2026-07-16 field data: Show Power Bar, Ignore Pain Bar, Resource
+    -- Text). Exiting the sessions here banks them properly and restores
+    -- canonical spec values, so the snapshot below is clean. No-op when
+    -- the panel is closed (no session can be live then).
+    if EllesmereUI.SpecOverrides_CloseEditSessions then
+        EllesmereUI.SpecOverrides_CloseEditSessions()
+    end
     -- Value-edit banking baseline: captured settings edited from unlock mode
     -- (cog size inputs) are Default-baseline edits; Save & Exit diffs against
     -- this snapshot and banks them into values.default (special sessions are
@@ -10893,8 +10906,6 @@ function ns.OpenUnlockMode()
 
     -- Notify action bars to flip Blizzard-owned frame anchors for drag
     if _G._EAB_UnlockModeOpen then pcall(_G._EAB_UnlockModeOpen) end
-    -- Notify damage meters
-    if _G._EDM_UnlockModeOpen then pcall(_G._EDM_UnlockModeOpen) end
     -- Notify raid frames to fade out overlay previews
     if _G._ERF_UnlockModeOpen then pcall(_G._ERF_UnlockModeOpen) end
 
@@ -11754,5 +11765,41 @@ do
             C_Timer.After(0.5, ResumeAfterCombat)
         end
     end)
+end
+
+-------------------------------------------------------------------------------
+--  /euicdmdbg -- TEMPORARY CDM anchor-chain diagnostic (2026-07-16): prints
+--  the runtime state of the CDM viewer anchor chain (ERB_ClassResource ->
+--  utility -> cooldowns -> buffs) so a screenshot pinpoints where anchor
+--  resolution fails. Read-only. Remove after the incident.
+-------------------------------------------------------------------------------
+SLASH_EUICDMDBG1 = "/euicdmdbg"
+SlashCmdList.EUICDMDBG = function()
+    local function P(msg) print("|cff0cd29fEUI CDMDBG|r " .. msg) end
+    local act = EllesmereUI.SpecOverrides_UnlockActive
+        and EllesmereUI.SpecOverrides_UnlockActive() or "?"
+    P("s.active=" .. tostring(act) .. "  unlockActive=" .. tostring(EllesmereUI._unlockModeActive))
+    local anchors = EllesmereUIDB and EllesmereUIDB.unlockAnchors or {}
+    for _, key in ipairs({ "ERB_ClassResource", "CDM_utility", "CDM_cooldowns", "CDM_buffs" }) do
+        local elem = registeredElements[key]
+        local f = GetBarFrame and GetBarFrame(key) or nil
+        if not f and elem and elem.getFrame then f = elem.getFrame() end
+        local a = anchors[key]
+        local hidden = elem and elem.isHidden and elem.isHidden(key)
+        P(("%s: reg=%s hidden=%s frame=%s shown=%s L=%s B=%s W=%s H=%s -> anchor=%s side=%s"):format(
+            key, tostring(elem ~= nil), tostring(hidden),
+            tostring(f ~= nil), tostring(f and f:IsShown()),
+            tostring(f and f.GetLeft and f:GetLeft() and math.floor(f:GetLeft() + 0.5)),
+            tostring(f and f.GetBottom and f:GetBottom() and math.floor(f:GetBottom() + 0.5)),
+            tostring(f and math.floor((f:GetWidth() or 0) + 0.5)),
+            tostring(f and math.floor((f:GetHeight() or 0) + 0.5)),
+            tostring(a and a.target), tostring(a and a.side)))
+    end
+    local cdmp = EllesmereUI._cdmBarPositions
+    for _, bk in ipairs({ "cooldowns", "utility", "buffs" }) do
+        local p = cdmp and cdmp[bk]
+        P(("cdmPos[%s]: point=%s x=%s y=%s"):format(bk,
+            tostring(p and p.point), tostring(p and p.x), tostring(p and p.y)))
+    end
 end
 end  -- end deferred init
