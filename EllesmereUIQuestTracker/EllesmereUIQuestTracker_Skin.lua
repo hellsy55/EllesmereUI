@@ -1007,6 +1007,47 @@ local function TightenTopAnchor(tracker)
 end
 
 -------------------------------------------------------------------------------
+-- Short-lived per-frame anchor poller. Diagnostic logging (see chat history /
+-- PR notes) showed two things: (1) the TOP/TOP anchor is NOT set yet at the
+-- moment tracker:Update() returns -- GetPoint(1) returns nil/nil right then,
+-- so a synchronous TightenTopAnchor call in the Update hook is a permanent
+-- no-op for this anchor; the real -38 value only exists on the next frame.
+-- (2) Blizzard can fire several independent native Update() passes within
+-- ~0.2s of a single quest interaction (observed: 4 in ~208ms), each
+-- resetting the anchor to -38 again. A single next-frame correction per
+-- burst chased each reset individually and never caught up during the
+-- burst -- visible as the tracker repeatedly dropping back to -38 for that
+-- whole window.
+--
+-- This frame is OUR OWN (never Blizzard's -- respects "never SetScript on
+-- tracker frames"). Its OnUpdate runs every frame for a short window after
+-- any native Update(), re-tightening the anchor before that frame renders
+-- instead of one frame late. TightenTopAnchor() itself is unchanged and
+-- still cheap (GetPoint + early-return unless off by >0.01), so polling it
+-- every frame for a bounded window is negligible cost.
+-------------------------------------------------------------------------------
+local _anchorPoller = CreateFrame("Frame")
+local _pollUntil = 0
+local _pollTrackers = nil  -- set by EQT.InitSkin() once EachTracker exists
+_anchorPoller:Hide()
+_anchorPoller:SetScript("OnUpdate", function()
+    if GetTime() > _pollUntil then
+        _anchorPoller:Hide()
+        return
+    end
+    if _pollTrackers then _pollTrackers() end
+end)
+
+-- Extends (or starts) the poll window. Called from the Update hook below on
+-- every native Update() so any burst of resets stays covered until it goes
+-- quiet for POLL_WINDOW seconds.
+local POLL_WINDOW = 0.4
+local function StartAnchorPoll()
+    _pollUntil = GetTime() + POLL_WINDOW
+    if not _anchorPoller:IsShown() then _anchorPoller:Show() end
+end
+
+-------------------------------------------------------------------------------
 -- Hook a single sub-tracker.
 -------------------------------------------------------------------------------
 local function HookTracker(tracker)
@@ -1059,7 +1100,15 @@ local function HookTracker(tracker)
     local _updateDirty = false
     if tracker.Update then
         hooksecurefunc(tracker, "Update", function()
-            if ShouldSkipSkin() or _updateDirty then return end
+            if ShouldSkipSkin() then return end
+            -- The synchronous TightenTopAnchor call that used to live here
+            -- was removed: diagnostic logging proved it always ran before
+            -- Blizzard assigns the anchor (GetPoint(1) still nil at that
+            -- point), so it never corrected anything. StartAnchorPoll()
+            -- keeps the per-frame poller alive instead, which is the thing
+            -- that actually catches the reset once Blizzard sets it.
+            StartAnchorPoll()
+            if _updateDirty then return end
             _updateDirty = true
             C_Timer.After(0, function()
                 _updateDirty = false
@@ -1078,6 +1127,23 @@ local function HookTracker(tracker)
                     end
                 end
             end)
+        end)
+    end
+
+    -- ObjectiveTrackerSlidingMixin (SUPER_TRACKING_CHANGED can trigger a
+    -- reorder slide, not just collapse/expand) calls tracker:OnEndSlide()
+    -- from EndSlide() right after clearing slideInfo -- i.e. exactly when
+    -- IsSliding() flips back to false. TightenTopAnchor bails out entirely
+    -- while IsSliding() is true (see comment there), so without this hook
+    -- the anchor sits at Blizzard's untightened -38 for the ~0.2-0.3s slide
+    -- duration and only snaps to TOP_ANCHOR_OFFSET on the next Update() call,
+    -- which is what showed up as the whole tracker shifting down briefly on
+    -- quest click. Verified against Blizzard_ObjectiveTrackerShared.lua:
+    -- EndSlide() -> self.slideInfo = nil -> self:OnEndSlide(...).
+    if tracker.OnEndSlide then
+        hooksecurefunc(tracker, "OnEndSlide", function(self)
+            if ShouldSkipSkin() then return end
+            TightenTopAnchor(self)
         end)
     end
 
@@ -1168,6 +1234,15 @@ function EQT.InitSkin()
         -- Strip the parchment / nine-slice background behind the whole tracker.
         if otf.NineSlice then otf.NineSlice:Hide() end
         StripTextures(otf)
+    end
+
+    -- Wire the anchor poller's tracker walk now that EachTracker exists.
+    -- Skips shared-widget-pool trackers, same as the rest of this module.
+    _pollTrackers = function()
+        EachTracker(function(t)
+            if SharesWidgetPool(t) then return end
+            TightenTopAnchor(t)
+        end)
     end
 
     EachTracker(HookTracker)
