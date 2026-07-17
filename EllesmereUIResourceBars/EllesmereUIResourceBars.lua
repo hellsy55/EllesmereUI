@@ -970,12 +970,25 @@ end
 -------------------------------------------------------------------------------
 local _, playerClassFile = UnitClass("player")
 
--- Druid "hide bar text per form"
-_G._ERB_TextHiddenByForm = function(cfg)
+-- Druid "hide bar text per form". isClassResource: Moonkin (31/35) is exempt on
+-- the class resource bar (shows Astral there); power/health keep it in "Caster".
+_G._ERB_TextHiddenByForm = function(cfg, isClassResource)
     if playerClassFile ~= "DRUID" then return false end
     local df = cfg and cfg.textDisabledForms
     if not df then return false end
     local f = GetShapeshiftFormID()
+    if isClassResource and (f == 31 or f == 35) then return false end
+    local key = (f == 1) and "energy" or (f == 5) and "rage" or "mana"
+    return df[key] and true or false
+end
+-- Druid "hide whole bar per form": same buckets/isClassResource rule as above,
+-- driven by cfg.barDisabledForms. Alpha-based hide, safe to flip mid-combat.
+_G._ERB_BarHiddenByForm = function(cfg, isClassResource)
+    if playerClassFile ~= "DRUID" then return false end
+    local df = cfg and cfg.barDisabledForms
+    if not df then return false end
+    local f = GetShapeshiftFormID()
+    if isClassResource and (f == 31 or f == 35) then return false end
     local key = (f == 1) and "energy" or (f == 5) and "rage" or "mana"
     return df[key] and true or false
 end
@@ -1737,8 +1750,9 @@ end
 --  Is the power bar effectively hidden right now?
 --  True when the power bar leaves no visible slot: globally disabled, filtered
 --  off for the current spec via the spec picker, the spec has no primary power,
---  or hidden by "Hide Power Bar if Resource". Mirrors the conditions
---  ResolveShiftDirPower reacts to, plus the hidePowerIfResource toggle. Used to
+--  hidden per druid form, or hidden by "Hide Power Bar if Resource". Mirrors
+--  the conditions ResolveShiftDirPower reacts to, plus the dynamic
+--  hidePowerIfResource / per-form toggles. Used to
 --  gate features that should appear only in the power bar's absence (e.g. the
 --  class resource "Resource Text" shown only when the power bar is hidden).
 -------------------------------------------------------------------------------
@@ -1749,6 +1763,7 @@ local function IsPowerBarHidden()
     if not pp then return true end
     if pp.enabled == false then return true end
     if IsSpecDisabled(pp) then return true end
+    if _G._ERB_BarHiddenByForm(pp) then return true end  -- druid per-form bar disable
     if not GetPrimaryPowerType() then return true end
     if p.secondary and p.secondary.hidePowerIfResource and GetSecondaryResource() then return true end
     return false
@@ -3249,7 +3264,7 @@ local function BuildBars()
             -- (so text-value writes never hit a nil), but hide it while the power
             -- bar is visible. Re-evaluated on every build (spec / power changes
             -- trigger a rebuild, same as the shift feature).
-            if _G._ERB_TextHiddenByForm(ERB.db.profile.secondary) or (sp.showTextOnlyIfNoPower and not IsPowerBarHidden()) then
+            if _G._ERB_TextHiddenByForm(ERB.db.profile.secondary, true) or (sp.showTextOnlyIfNoPower and not IsPowerBarHidden()) then
                 secondaryFrame._countText:Hide()
             else
                 secondaryFrame._countText:Show()
@@ -4185,6 +4200,14 @@ local function UpdateSecondaryResource()
         _tsBandOn = false
     end
 
+    -- Points: read once. A secret can't survive the comparison-based points
+    -- path, so it routes to the secret overlay renderer (custom branch).
+    local _ptsCur, _ptsSecret
+    if cachedSecondary.type == "points" then
+        _ptsCur = UnitPower("player", powerType)
+        _ptsSecret = (issecretvalue and issecretvalue(_ptsCur)) and true or false
+    end
+
     if cachedSecondary.type == "runes" then
         local now = GetTime()
         local readyN, cdN = 0, 0
@@ -4713,35 +4736,16 @@ local function UpdateSecondaryResource()
                         secondaryFrame._countText:SetFormattedText("%s / %s", cur, maxC)
                     end
                 else
-                    -- Secret value path: try UnitPowerPercent first, fall back to tostring
-                    if powerType == "MAELSTROM_BAR" then
-                        local pct = UnitPowerPercent and UnitPowerPercent("player", PT.MAELSTROM) or 0
-                        if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
-                        else
-                            secondaryFrame._countText:SetText(tostring(cur))
-                        end
-                    elseif powerType == "INSANITY_BAR" then
-                        local pct = UnitPowerPercent and UnitPowerPercent("player", PT.INSANITY) or 0
-                        if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
-                        else
-                            secondaryFrame._countText:SetText(tostring(cur))
-                        end
-                    elseif powerType == "FOCUS_BAR" then
-                        local pct = UnitPowerPercent and UnitPowerPercent("player", PT.FOCUS) or 0
-                        if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
-                        else
-                            secondaryFrame._countText:SetText(tostring(cur))
-                        end
-                    elseif powerType == "LUNAR_POWER_BAR" then
-                        local pct = UnitPowerPercent and UnitPowerPercent("player", PT.LUNAR_POWER) or 0
-                        if not issecretvalue(pct) then
-                            secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
-                        else
-                            secondaryFrame._countText:SetText(tostring(cur))
-                        end
+                    -- Secret value path: ScaleTo100 percent + format("%d") renders
+                    -- secrets natively (bare UnitPowerPercent is a 0-1 fraction).
+                    local pType = (powerType == "MAELSTROM_BAR") and PT.MAELSTROM
+                               or (powerType == "INSANITY_BAR") and PT.INSANITY
+                               or (powerType == "FOCUS_BAR") and PT.FOCUS
+                               or (powerType == "LUNAR_POWER_BAR") and PT.LUNAR_POWER
+                               or nil
+                    if pType and UnitPowerPercent then
+                        local pct = UnitPowerPercent("player", pType, true, CurveConstants and CurveConstants.ScaleTo100) or 0
+                        secondaryFrame._countText:SetText(format("%d", pct) .. percentSuffix)
                     elseif powerType == "IGNOREPAIN_BAR" then
                         -- Text is driven per-frame by IP.UpdateText. No-op here.
                     elseif sp.showMaxStacks == false then
@@ -4752,10 +4756,14 @@ local function UpdateSecondaryResource()
                 end
             end
         end
-    elseif cachedSecondary.type == "custom" then
+    elseif cachedSecondary.type == "custom" or _ptsSecret then
         local cur, maxC = 0, maxPts
         local isSecret = false
-        if powerType == "SOUL_FRAGMENTS_VENGEANCE" then
+        if _ptsSecret then
+            cur = _ptsCur
+            maxC = maxPts
+            isSecret = true
+        elseif powerType == "SOUL_FRAGMENTS_VENGEANCE" then
             -- Vengeance DH: GetSpellCastCount returns a SECRET value in 12.0+.
             -- We cannot compare it in Lua.  Instead we pass the raw value to
             -- StatusBar widgets embedded in each pip (SetMinMaxValues(i-1, i)
@@ -4939,9 +4947,17 @@ local function UpdateSecondaryResource()
                     pip._fill:Hide()
                 end
             end
-            -- Count text -- tostring handles secret values safely
+            -- Count text: derive from UnitPowerPercent when it reads clean
+            -- (raw secrets don't reliably render); else pass the raw value.
             if sp.showText and secondaryFrame._countText then
-                secondaryFrame._countText:SetText(tostring(cur))
+                local shown = cur
+                if type(powerType) == "number" and UnitPowerPercent and maxC and maxC > 0 then
+                    local pct = UnitPowerPercent("player", powerType, true, CurveConstants and CurveConstants.ScaleTo100)
+                    if pct and not (issecretvalue and issecretvalue(pct)) then
+                        shown = math.floor(pct * maxC / 100 + 0.5)
+                    end
+                end
+                secondaryFrame._countText:SetText(shown)
             end
         else
             -- Clean-value path: normal boolean comparisons
@@ -5011,7 +5027,18 @@ local function UpdateSecondaryResource()
             end
         end
     else
-        local cur = UnitPower("player", powerType)
+        local cur = _ptsCur or UnitPower("player", powerType)
+        -- Hide any secret StatusBar overlays left from a combat update that
+        -- routed through the secret pip renderer above.
+        for i = 1, maxPts do
+            local p = pips[i]
+            if p then
+                if p._secretBar then p._secretBar:Hide() end
+                if p._secretThreshBar then p._secretThreshBar:Hide() end
+                if p._bandResetBar then p._bandResetBar:Hide() end
+                if p._bandBars then for k = 1, #p._bandBars do p._bandBars[k]:Hide() end end
+            end
+        end
         -- Direction: "From" (>=, default) or "Up to" (<=, thresholdReverse).
         local useThresh = _tsEntry and ((_tsReverse and cur <= _tsThreshCount)
             or ((not _tsReverse) and cur >= _tsThreshCount))
@@ -5257,7 +5284,7 @@ local function UpdateVisibility()
     -- Health bar visibility
     if healthBar then
         local hp = _G._ERB_ResolveHealthCfg()
-        local vis = hp and hp.enabled and not IsSpecDisabled(hp) and not inVehicle and ShouldShowBar(hp)
+        local vis = hp and hp.enabled and not IsSpecDisabled(hp) and not _G._ERB_BarHiddenByForm(hp) and not inVehicle and ShouldShowBar(hp)
         ERB._moEligible.health = (vis == "mouseover")
         if vis == true then
             healthBar:Show()
@@ -5275,7 +5302,7 @@ local function UpdateVisibility()
         -- Also check cachedPrimary: specs without a primary power (e.g. BM/MM Hunter)
         -- should hide the power bar even if enabled in settings
         local hidePower = sp and sp.hidePowerIfResource and cachedSecondary
-        local vis = not hidePower and pp and pp.enabled ~= false and not IsSpecDisabled(pp) and cachedPrimary and not inVehicle and ShouldShowBar(pp)
+        local vis = not hidePower and pp and pp.enabled ~= false and not IsSpecDisabled(pp) and not _G._ERB_BarHiddenByForm(pp) and cachedPrimary and not inVehicle and ShouldShowBar(pp)
         ERB._moEligible.primary = (vis == "mouseover")
         if vis == true then
             primaryBar:Show()
@@ -5289,7 +5316,7 @@ local function UpdateVisibility()
     -- Secondary resource visibility + ooc alpha
     if secondaryFrame then
         local sp = _G._ERB_ResolveSecondaryCfg()
-        local vis = sp and sp.enabled ~= false and not IsSpecDisabled(sp) and cachedSecondary and not inVehicle and ShouldShowSecondary()
+        local vis = sp and sp.enabled ~= false and not IsSpecDisabled(sp) and not _G._ERB_BarHiddenByForm(sp, true) and cachedSecondary and not inVehicle and ShouldShowSecondary()
         ERB._moEligible.secondary = (vis == "mouseover")
         if vis == true then
             secondaryFrame:Show()
@@ -7413,6 +7440,8 @@ local function OnEvent(self, event, ...)
         if oldMax ~= newMax then
             cachedSecondary = newSec
             BuildBars()
+            -- BuildBars re-shows the frames; re-apply conditional hides.
+            UpdateVisibility()
         end
         UpdatePrimaryBar()
         UpdateSecondaryResource()
