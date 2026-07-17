@@ -4200,7 +4200,7 @@ local function SkinCharacterSheet()
             -- 2px pixel-perfect border, recolored per-gem in UpdateSocketIcons.
             PP_GEM.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 1)
             local gemBdr = PP_GEM.GetBorders(gemFrame)
-            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel() + 1) end
+            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel()) end
 
             GetFFD(slot).charSocketsFrames[i] = gemFrame
             GetFFD(slot).charSocketsIcons[i]  = icon
