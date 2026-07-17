@@ -1189,18 +1189,12 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = WSCardSection(parent, "QUALITY OF LIFE", y);  y = y - h
 
+        function merchantShowAsListOff()
+            return EllesmereUIDB and EllesmereUIDB.merchantShowAsList == false
+        end
+
         local row
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Item Level",
-              tooltip="Shows the item level on weapons and armor a vendor sells.",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.merchantShowItemLevel == true
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.merchantShowItemLevel = v
-                  if EllesmereUI._Merchant_RefreshItemLevels then EllesmereUI._Merchant_RefreshItemLevels() end
-              end },
             { type="toggle", text="Show As List",
               tooltip="Shows the items as a list instead of pages.",
               getValue=function()
@@ -1225,9 +1219,31 @@ initFrame:SetScript("OnEvent", function(self)
                           end,
                       })
                   end
+              end },
+            { type="slider", text="Row Height", min=24, max=40, step=1,
+              disabled=merchantShowAsListOff, disabledTooltip="Show As List",
+              getValue=function() return (EllesmereUIDB and EllesmereUIDB.merchantListRowHeight) or 32 end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.merchantListRowHeight = v
+                  if EllesmereUI._Merchant_RefreshRowHeight then EllesmereUI._Merchant_RefreshRowHeight() end
               end }
-        );  y = y - h
-        AttachDisabledOverlay(row._rightRegion)
+        ); y = y - h
+        AttachDisabledOverlay(row)
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Item Level",
+              tooltip="Shows the item level on weapons and armor a vendor sells.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.merchantShowItemLevel == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.merchantShowItemLevel = v
+                  if EllesmereUI._Merchant_RefreshItemLevels then EllesmereUI._Merchant_RefreshItemLevels() end
+              end },
+            { type="text", text="" }
+        ); y = y - h
 
         return y
     end

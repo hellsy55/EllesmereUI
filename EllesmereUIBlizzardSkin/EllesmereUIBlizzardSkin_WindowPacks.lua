@@ -7647,7 +7647,7 @@ local function SkinMerchantListItem(item)
     if not item or item:IsForbidden() then return end
 
     -- Background & Theme
-    item.bg = item:CreateTexture(nil, "BACKGROUND", nil, -7)
+    item.bg = item.bg or item:CreateTexture(nil, "BACKGROUND", nil, -7)
     item.bg:SetColorTexture(Theme.bgR, Theme.bgG, Theme.bgB, Theme.bgA)
     item.bg:SetPoint("TOPLEFT", 0, 0)
     item.bg:SetPoint("BOTTOMRIGHT", 0, 0)
@@ -7660,7 +7660,7 @@ local function SkinMerchantListItem(item)
     item.SlotTexture:SetTexCoord(0, 1, 0, 1)
 
     -- Highlight on hover
-    item.highlight = item.ItemButton:CreateTexture(nil, "HIGHLIGHT")
+    item.highlight = item.highlight or item.ItemButton:CreateTexture(nil, "HIGHLIGHT")
     item.highlight:SetColorTexture(1, 1, 1, 0.1)
     item.highlight:SetAllPoints(item.bg)
 
@@ -7711,7 +7711,7 @@ local function UpdateCustomMerchantList(sf, child)
     local isBuyback = MerchantFrame.selectedTab == 2
     local numItems = isBuyback and GetNumBuybackItems() or GetMerchantNumItems()
 
-    local rowHeight = 32
+    local rowHeight = (EllesmereUIDB and EllesmereUIDB.merchantListRowHeight) or 32
     local rowSpacing = 4
     local playerMoney = GetMoney()
     local MAX_MONEY_DISPLAY_WIDTH = 120
@@ -7878,6 +7878,26 @@ local function UpdateCustomMerchantList(sf, child)
     -- Hide unused rows
     for i = numItems + 1, #sf.rows do
         sf.rows[i]:Hide()
+    end
+end
+
+-- Options toggle entry point: re-sync height
+EllesmereUI._Merchant_RefreshRowHeight = function()
+    local f = _G.MerchantFrame
+    if not f then return end
+    if not EllesmereUIDB.merchantShowAsList or not (f.wSkinScrollFrame and f.wSkinScrollChild) then return end
+
+    local rowHeight = (EllesmereUIDB and EllesmereUIDB.merchantListRowHeight) or 32
+    -- Rows are cached so update manually each existing rows
+    -- New rows created after will have the correct height by default.
+    for _, row in ipairs(f.wSkinScrollFrame.rows or {}) do
+        row:SetHeight(rowHeight)
+        SkinMerchantListItem(row)
+    end
+
+    -- Force a full update if change is done while merchant frame is open
+    if f:IsVisible() then
+        UpdateCustomMerchantList(f.wSkinScrollFrame, f.wSkinScrollChild)
     end
 end
 
