@@ -291,7 +291,7 @@ local defaults = {
             combatIndicatorStyle = "class",
             combatIndicatorColor = "custom",
             combatIndicatorCustomColor = { r = 1, g = 1, b = 1 },
-            combatIndicatorPosition = "healthbar",
+            combatIndicatorPosition = "topleft",
             combatIndicatorSize = 22,
             combatIndicatorX = 0,
             combatIndicatorY = 0,
@@ -328,7 +328,7 @@ local defaults = {
             combatIndicatorStyle = "none",
             combatIndicatorColor = "custom",
             combatIndicatorCustomColor = { r = 1, g = 1, b = 1 },
-            combatIndicatorPosition = "healthbar",
+            combatIndicatorPosition = "topleft",
             combatIndicatorSize = 22,
             combatIndicatorX = 0,
             combatIndicatorY = 0,
@@ -11349,21 +11349,21 @@ function InitializeFrames()
             local sz = ps.combatIndicatorSize or 22
             local ox = ps.combatIndicatorX or 0
             local oy = ps.combatIndicatorY or 0
-            local pos = ps.combatIndicatorPosition or "healthbar"
+            local pos = ps.combatIndicatorPosition or "topleft"
 
             combat:SetSize(sz, sz)
             combat:ClearAllPoints()
 
-            -- Determine anchor element
-            local anchor = pf
-            if pos == "healthbar" and pf.Health then
-                anchor = pf.Health
-            elseif pos == "textbar" and pf._btb then
-                anchor = pf._btb
-            elseif pos == "portrait" and pf.Portrait then
-                anchor = pf.Portrait
+            if pos == "portrait" and pf.Portrait then
+                combat:SetPoint("CENTER", pf.Portrait, "CENTER", ox, oy)
+            else
+                local anchor =
+                    (pos == "topright"    and "TOPRIGHT")    or
+                    (pos == "bottomleft"  and "BOTTOMLEFT")  or
+                    (pos == "bottomright" and "BOTTOMRIGHT") or
+                    "TOPLEFT"
+                combat:SetPoint(anchor, pf.Health or pf, anchor, ox, oy)
             end
-            combat:SetPoint("CENTER", anchor, "CENTER", ox, oy)
 
             -- Determine texture file (always use -custom / white base).
             -- Class theming resolves the FRAME's unit (player class on the

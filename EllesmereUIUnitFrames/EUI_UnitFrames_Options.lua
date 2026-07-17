@@ -3585,15 +3585,19 @@ initFrame:SetScript("OnEvent", function(self)
                     local ciSz = s.combatIndicatorSize or 22
                     local ciOx = s.combatIndicatorX or 0
                     local ciOy = s.combatIndicatorY or 0
-                    local ciPos = s.combatIndicatorPosition or "healthbar"
+                    local ciPos = s.combatIndicatorPosition or "topleft"
                     combatInd:SetSize(ciSz, ciSz)
                     combatInd:ClearAllPoints()
-                    local ciAnchor = pf
-                    if ciPos == "healthbar" then ciAnchor = health
-                    elseif ciPos == "textbar" and btbFrame then ciAnchor = btbFrame
-                    elseif ciPos == "portrait" and portraitFrame and sp then ciAnchor = portraitFrame
+                    if ciPos == "portrait" and portraitFrame and sp then
+                        combatInd:SetPoint("CENTER", portraitFrame, "CENTER", ciOx, ciOy)
+                    else
+                        local anchor =
+                            (ciPos == "topright"    and "TOPRIGHT")    or
+                            (ciPos == "bottomleft"  and "BOTTOMLEFT")  or
+                            (ciPos == "bottomright" and "BOTTOMRIGHT") or
+                            "TOPLEFT"
+                        combatInd:SetPoint(anchor, health, anchor, ciOx, ciOy)
                     end
-                    combatInd:SetPoint("CENTER", ciAnchor, "CENTER", ciOx, ciOy)
                     local _, classToken = UnitClass("player")
                     -- All custom combat icons (combat0..5) are shown as-is (no tint).
                     -- Standard/Class Theme are tinted by the colour mode below.
@@ -10998,8 +11002,8 @@ initFrame:SetScript("OnEvent", function(self)
             end)
 
             -- Cog popup for combat indicator settings
-            local combatPosValues = { ["portrait"]="Portrait", ["healthbar"]="Health Bar", ["textbar"]="Text Bar" }
-            local combatPosOrder = { "portrait", "healthbar", "textbar" }
+            local combatPosValues = { ["topleft"]="Top Left", ["topright"]="Top Right", ["bottomleft"]="Bottom Left", ["bottomright"]="Bottom Right", ["portrait"]="Portrait" }
+            local combatPosOrder = { "topleft", "topright", "bottomleft", "bottomright", "portrait" }
 
             local _, combatCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Combat Indicator Settings",
@@ -11016,15 +11020,18 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return SValSupported("combatIndicatorColor", "custom") == "classcolor" end,
                       set=function(v) SSetSupported("combatIndicatorColor", v and "classcolor" or "custom"); ReloadAndUpdate(); UpdatePreview() end },
                     { type="dropdown", label="Position", values=combatPosValues, order=combatPosOrder,
-                      get=function() return SValSupported("combatIndicatorPosition", "healthbar") end,
+                      get=function()
+                          local pos = SValSupported("combatIndicatorPosition", "topleft")
+                          return combatPosValues[pos] and pos or "topleft"
+                      end,
                       set=function(v) SSetSupported("combatIndicatorPosition", v); ReloadAndUpdate(); UpdatePreview() end },
                     { type="slider", label="Size", min=8, max=64, step=1,
                       get=function() return SValSupported("combatIndicatorSize", 22) end,
                       set=function(v) SSetSupported("combatIndicatorSize", v); ReloadAndUpdate(); UpdatePreview() end },
-                    { type="slider", label="X Offset", min=-100, max=100, step=1,
+                    { type="slider", label="X Offset", min=-200, max=200, step=1,
                       get=function() return SValSupported("combatIndicatorX", 0) end,
                       set=function(v) SSetSupported("combatIndicatorX", v); ReloadAndUpdate(); UpdatePreview() end },
-                    { type="slider", label="Y Offset", min=-100, max=100, step=1,
+                    { type="slider", label="Y Offset", min=-200, max=200, step=1,
                       get=function() return SValSupported("combatIndicatorY", 0) end,
                       set=function(v) SSetSupported("combatIndicatorY", v); ReloadAndUpdate(); UpdatePreview() end },
                 },
