@@ -4365,7 +4365,7 @@ local function SkinCharacterSheet()
     end
 
     local function CharSheetGemsActive()
-        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return false end
+        if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return false end
         if EllesmereUIDB and EllesmereUIDB.showGems == false then return false end
         return true
     end
@@ -4702,7 +4702,7 @@ local function SkinCharacterSheet()
     -- redundant work; the events guarantee we catch upgrade / enchant /
     -- socket changes without per-frame polling.
     local function RefreshAllSlotLabels()
-        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+        if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
         if not (frame and frame:IsShown()) then return end
         for _, slotName in ipairs(itemSlots) do
             local itemLink = GetInventoryItemLink("player", _G[slotName]:GetID())
@@ -4826,7 +4826,7 @@ end
 
 -- Main function to apply themed character sheet
 local function ApplyThemedCharacterSheet()
-    if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then
+    if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then
         return
     end
 
@@ -4848,14 +4848,14 @@ if EllesmereUI then
             -- Lightweight pre-skin (chrome hides, bg, border) runs early
             -- while CharacterFrame is still hidden. Running these mid-OnShow
             -- prevents Rep/Currency ScrollBox from completing its data render.
-            if not EllesmereUIDB or EllesmereUIDB.themedCharacterSheet ~= false then
+            if not EllesmereUIDB or (EllesmereUIDB.themedCharacterSheet ~= false and not EllesmereUI.BlizzWindowSkinsKilled()) then
                 PreSkinCharacterSheet()
                 -- PreSkin hides the portrait once; Blizzard's CharacterFrameMixin:UpdatePortrait
                 -- (RefreshDisplay / UNIT_PORTRAIT_UPDATE / spec icon) runs after OnShow hooks and
                 -- redraws it. Re-hide via secure hook + deferred passes on GetPortrait() as well.
                 if not GetFFD(CharacterFrame)._euiPortraitSuppressRegistered then
                     local function SuppressCharacterFramePortrait()
-                        if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                        if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
                         if not CharacterFrame then return end
                         -- Blizzard re-anchors CharacterFrameInsetRight on each open; it parents
                         -- PaperDollSidebarTabs (Tab1 uses a circular player/spec portrait). Re-apply
@@ -4897,20 +4897,20 @@ if EllesmereUI then
                         end)
 
                         hooksecurefunc(CharacterFrame, "UpdatePortrait", function()
-                            if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                            if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
                             SuppressCharacterFramePortrait()
                         end)
 
                         if CharacterFrame.RefreshDisplay then
                             hooksecurefunc(CharacterFrame, "RefreshDisplay", function()
-                                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                                if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
                                 SuppressCharacterFramePortrait()
                             end)
                         end
 
                         if CharacterFrame.SetPortraitToSpecIcon then
                             hooksecurefunc(CharacterFrame, "SetPortraitToSpecIcon", function()
-                                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                                if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
                                 SuppressCharacterFramePortrait()
                             end)
                         end
@@ -4918,7 +4918,7 @@ if EllesmereUI then
                         local portrait = _G.CharacterFramePortrait
                         if portrait then
                             portrait:HookScript("OnShow", function(self)
-                                if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+                                if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
                                 self:SetShown(false)
                                 self:SetAlpha(0)
                             end)
@@ -5162,7 +5162,7 @@ end
 function EllesmereUI._refreshCharSheetIconZoom()
     -- Only the themed sheet crops its slot icons; if it is off the slots show
     -- Blizzard's default icons, which we must not re-crop.
-    if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+    if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
     local z = (EllesmereUIDB and EllesmereUIDB.charSheetIconZoom) or 0.07
     for _, slotName in ipairs(EUI_ALL_SLOTS) do
         local slot = _G[slotName]

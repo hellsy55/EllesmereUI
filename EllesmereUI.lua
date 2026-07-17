@@ -456,6 +456,83 @@ do
         end
     end
 
+    -- Merged exclusion set for ONE src->dst copy of ONE folder: the static
+    -- registry above plus every setting EITHER profile holds a spec or
+    -- conditional OVERRIDE entry for. Override-owned settings never sync --
+    -- each profile's override system stays the sole owner of its keys (a
+    -- pushed blob would carry the source's current-spec value, and the
+    -- destination's recorded values would drift against a synced base).
+    -- PURE READ: walks the stored profile tables directly and never calls
+    -- into the override system (no store creation, no harvest/apply/
+    -- capture), so it cannot perturb override state. Returns staticEx
+    -- UNCHANGED (same table, zero allocation) when neither profile carries
+    -- override data for the folder; otherwise a FRESH table -- the shared
+    -- registry is never mutated. Callers pcall this and fall back to
+    -- staticEx on any error (sync is never blocked).
+    -- fkey anatomy (mirrors SplitFKey in EllesmereUI_SpecOverrides.lua,
+    -- deliberately inlined so this file never touches the override code):
+    -- fkey = folder .. "\31" .. path, path segments joined with "\30". The
+    -- sync matcher walks the same table tree dot-joined with tostring(k),
+    -- so gsub("\30", ".") is the complete byte-precise translation.
+    EllesmereUI._SyncExclusionsWithOverrides = function(folder, staticEx, srcProf, dstProf)
+        local merged
+        local function ensure()
+            if not merged then
+                merged = {}
+                if staticEx then for k in pairs(staticEx) do merged[k] = true end end
+            end
+        end
+        local function addStore(store)
+            if type(store) ~= "table" then return end
+            for _, entry in ipairs(store) do
+                local vals = type(entry) == "table" and entry.values
+                if type(vals) == "table" then
+                    for _, m in pairs(vals) do  -- default map + every spec/gid map
+                        if type(m) == "table" then
+                            for fkey in pairs(m) do
+                                if type(fkey) == "string" then
+                                    local f, path = fkey:match("^([^\31]+)\31(.*)$")
+                                    if f == folder and path and path ~= "" then
+                                        ensure()
+                                        merged[path:gsub("\30", ".")] = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        local function addProf(prof)
+            if type(prof) ~= "table" then return end
+            addStore(prof.specOverrides)
+            addStore(prof.condOverrides)
+            if folder == "EllesmereUIRaidFrames" then
+                -- Buff Manager forks are layer-shaped, not fkey-shaped: the
+                -- fork system writes bmIndicators/bmSimple/bmDisplayMode/
+                -- bmIconZoom straight into the live RF blob, so when either
+                -- profile carries ANY BM layer those keys are fork territory
+                -- and must not sync. Emptiness predicate mirrors the BM
+                -- harvest's own zero-cost gate. Profiles with no BM layers
+                -- keep syncing their Buff Manager settings normally.
+                local s, c = prof.specBmOverrides, prof.condBmOverrides
+                if (type(s) == "table" and (s.active or s.baselineLayout
+                        or (type(s.layouts) == "table" and next(s.layouts))))
+                   or (type(c) == "table" and type(c.layouts) == "table"
+                        and next(c.layouts)) then
+                    ensure()
+                    merged.bmIndicators  = true
+                    merged.bmSimple      = true
+                    merged.bmDisplayMode = true
+                    merged.bmIconZoom    = true
+                end
+            end
+        end
+        addProf(srcProf)
+        addProf(dstProf)
+        return merged or staticEx
+    end
+
     -- Selective deep-copy: copies src but skips excluded keys.
     -- exclusions is a set of strings. Flat keys ("barPositions") skip that key.
     -- Wildcard keys ("bars.*.growDirection") skip growDirection inside any
@@ -625,12 +702,21 @@ do
         local DeepCopy = EllesmereUI.Lite and EllesmereUI.Lite.DeepCopy
         if not DeepCopy then return end
 
-        local exclusions = syncExclusions[folder]
+        local staticEx = syncExclusions[folder]
+        local exFn = EllesmereUI._SyncExclusionsWithOverrides
         for profName in pairs(targetProfiles) do
             if profName ~= active then
                 local prof = EllesmereUIDB.profiles[profName]
                 if prof then
                     if not prof.addons then prof.addons = {} end
+                    -- Override-owned settings never sync: merge both profiles'
+                    -- override-entry paths into the static set (fail-open --
+                    -- any derive error keeps today's static-only behavior).
+                    local exclusions = staticEx
+                    if exFn then
+                        local ok, m = pcall(exFn, folder, staticEx, src, prof)
+                        if ok and m then exclusions = m end
+                    end
                     if exclusions and next(exclusions) then
                         local dst = prof.addons[folder]
                         if not dst then
@@ -677,12 +763,20 @@ do
         local srcData = srcProf and srcProf.addons and srcProf.addons[folder]
         if not srcData then return end
 
-        local exclusions = syncExclusions[folder]
+        local staticEx = syncExclusions[folder]
+        local exFn = EllesmereUI._SyncExclusionsWithOverrides
         for profName in pairs(targets) do
             if profName ~= srcName then
                 local prof = EllesmereUIDB.profiles[profName]
                 if prof then
                     if not prof.addons then prof.addons = {} end
+                    -- Override-owned settings never sync (see SyncModuleToProfiles);
+                    -- the user-initiated seed honors the same ownership rule.
+                    local exclusions = staticEx
+                    if exFn then
+                        local ok, m = pcall(exFn, folder, staticEx, srcProf, prof)
+                        if ok and m then exclusions = m end
+                    end
                     local dst = prof.addons[folder]
                     if profName == active then
                         -- Live profile: adopt in place, never replace the table
@@ -836,10 +930,52 @@ EllesmereUI.RegisterSyncExclusions("EllesmereUIDragonRiding", {
 
 -- Secondary Stats + FPS counter live in the QoL profile blob. Their on-screen
 -- positions stay per-profile on sync (still exported intact, just never
--- overwritten by a mirror-group push), matching the convention above.
+-- overwritten by a mirror-group push), matching the convention above. The
+-- cursor slice (GCD ring / cast circle) stores its unlock positions at
+-- profile.cursor inside the same blob.
 EllesmereUI.RegisterSyncExclusions("EllesmereUIQoL", {
     "secondaryStatsPos",
     "fpsPos",
+    "cursor.gcd.pos",
+    "cursor.castCircle.pos",
+})
+
+-- Minimap settings nest under profile.minimap.
+EllesmereUI.RegisterSyncExclusions("EllesmereUIMinimap", {
+    "minimap.position",      -- unlock-element drag position
+    "minimap.btnPositions",  -- per-button shift-drag offsets
+})
+
+-- Chat settings nest under profile.chat.
+EllesmereUI.RegisterSyncExclusions("EllesmereUIChat", {
+    "chat.chatPosition",   -- unlock drag position
+    "chat.chatWidth",      -- unlock resize-handle width
+    "chat.chatHeight",     -- unlock resize-handle height
+    "chat.toastPosition",  -- BNet toast unlock position
+    "chat.iconPositions",  -- per-sidebar-icon shift-drag offsets
+})
+
+-- Damage Meters settings nest under profile.dm.
+EllesmereUI.RegisterSyncExclusions("EllesmereUIDamageMeters", {
+    "dm.standaloneTimerPos",  -- drag-written standalone timer position
+    "dm.windows.*.position",  -- per-window drag position
+    "dm.windows.*.width",     -- per-window drag-resize width
+    "dm.windows.*.height",    -- per-window drag-resize height
+})
+
+-- DataBars store per-bar geometry in the top-level bars array (same wildcard
+-- shape as the ActionBars registration above).
+EllesmereUI.RegisterSyncExclusions("EllesmereUIDataBars", {
+    "bars.*.savedPos",   -- unlock drag position
+    "bars.*.length",     -- unlock resize owned
+    "bars.*.thickness",  -- unlock resize owned
+    "bars.*.snapEdge",   -- mutated by the drag save itself
+})
+
+-- Bags is the one auto-synced module: without this the bank window position
+-- mirrors across profiles by default.
+EllesmereUI.RegisterSyncExclusions("EllesmereUIBags", {
+    "bankPosition",  -- bank window shift-drag position
 })
 
 -------------------------------------------------------------------------------
@@ -4259,7 +4395,6 @@ do
     -- never register the watcher: the flags stay false and both entry
     -- points early-out on a plain upvalue read.
     local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
-    local sweepName -- cached spell name for aura lookups (resolved outside M+)
     do
         local _, cls = UnitClass("player")
         if cls == "WARRIOR" then
@@ -4269,10 +4404,6 @@ do
                 improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
                 broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
                 fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
-                if not sweepName then
-                    local n = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(SWEEP)
-                    if n and not (issecretvalue and issecretvalue(n)) then sweepName = n end
-                end
             end
             local watcher = CreateFrame("Frame")
             watcher:RegisterEvent("PLAYER_LOGIN")
@@ -4409,13 +4540,22 @@ do
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
         end
-        -- Validate prediction against the actual aura to correct drift.
-        if stacks > 0 and sweepName and AuraUtil and AuraUtil.FindAuraByName then
-            local name, _, count = AuraUtil.FindAuraByName(sweepName, "player", "HELPFUL")
-            if not name then
+        -- Validate prediction against the real aura to correct drift (the
+        -- reach probe is ~11 yd while the game sweeps within 8 yd of the
+        -- primary target). Direct spellID lookup: zero-alloc on a 0.1 s
+        -- poll, and safe under 12.x restrictions -- aura PRESENCE stays
+        -- readable in keys (same contract the TBB bind-miss fallback relies
+        -- on), while a secret applications count simply leaves the
+        -- prediction in charge.
+        if stacks > 0 and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+            local aura = C_UnitAuras.GetPlayerAuraBySpellID(SWEEP)
+            if not aura then
                 stacks, expiresAt = 0, nil
-            elseif count and not (issecretvalue and issecretvalue(count)) then
-                stacks = count
+            else
+                local count = aura.applications
+                if count and not (issecretvalue and issecretvalue(count)) and count > 0 then
+                    stacks = count
+                end
             end
         end
         return stacks, MaxStacks()
@@ -9378,32 +9518,36 @@ function EllesmereUI:RegisterModule(folderName, config)
     -- Extract the addon folder name from the caller's file path.
     local caller = debugstack(2, 1, 0) or ""
     local callerFolder = caller:match("AddOns/([^/]+)/")
-    if callerFolder then
-        local ALLOWED = {
-            EllesmereUI = true,
-            EllesmereUIActionBars = true,
-            EllesmereUIAuraBuffReminders = true,
-            EllesmereUIBasics = true,
-            EllesmereUICooldownManager = true,
-            EllesmereUINameplates = true,
-            EllesmereUIPartyMode = true,
-            EllesmereUIRaidFrames = true,
-            EllesmereUIResourceBars = true,
-            EllesmereUIUnitFrames = true,
-            EllesmereUIMythicTimer = true,
-            -- v6.6 split
-            EllesmereUIQoL = true,
-            EllesmereUIBlizzardSkin = true,
-            EllesmereUIQuestTracker = true,
-            EllesmereUIMinimap = true,
-            EllesmereUIFriends = true,
-            EllesmereUIChat = true,
-            EllesmereUIDamageMeters = true,
-            EllesmereUIBags = true,
-            EllesmereUIDataBars = true,
-        }
-        if not ALLOWED[callerFolder] then return end
-    end
+    local ALLOWED = {
+        EllesmereUI = true,
+        EllesmereUIActionBars = true,
+        EllesmereUIAuraBuffReminders = true,
+        EllesmereUIBasics = true,
+        EllesmereUICooldownManager = true,
+        EllesmereUINameplates = true,
+        EllesmereUIPartyMode = true,
+        EllesmereUIRaidFrames = true,
+        EllesmereUIResourceBars = true,
+        EllesmereUIUnitFrames = true,
+        EllesmereUIMythicTimer = true,
+        -- v6.6 split
+        EllesmereUIQoL = true,
+        EllesmereUIBlizzardSkin = true,
+        EllesmereUIQuestTracker = true,
+        EllesmereUIMinimap = true,
+        EllesmereUIFriends = true,
+        EllesmereUIChat = true,
+        EllesmereUIDamageMeters = true,
+        EllesmereUIBags = true,
+        EllesmereUIDataBars = true,
+    }
+    if callerFolder and not ALLOWED[callerFolder] then return end
+    -- Suite-core marker (module key is a suite folder): gates the toolbar
+    -- whitelists -- the overrides icon renders for core modules only; the
+    -- inline search renders for core modules + Global Settings. Companion/
+    -- external pages keep their own folder keys and stay unmarked, so
+    -- neither control renders for them (see SelectModule).
+    config._euiCore = ALLOWED[folderName] == true
     modules[folderName] = config
     -- If UI is already built, update sidebar button immediately
     -- Otherwise, RefreshSidebarStates will handle it when the panel first opens
@@ -9877,6 +10021,20 @@ function EllesmereUI:SelectModule(folderName)
     end
     headerFrame._desc:SetText(EllesmereUI.L(config.description or ""))
     BuildTabs(config.pages, config.disabledPages, config.disabledPageTooltips)
+    -- Toolbar whitelists: the overrides icon and the inline search operate
+    -- on suite data only (override capture, search index), so they render
+    -- solely for whitelisted pages -- overrides: core modules; search: core
+    -- modules + Global Settings. Foreign/companion pages get neither.
+    -- (BuildTabs unconditionally shows the search frame; gate it here.)
+    if tabBar then
+        local core = config._euiCore == true
+        if tabBar._searchFrame then
+            tabBar._searchFrame:SetShown(core or folderName == EllesmereUI.GLOBAL_KEY)
+        end
+        if tabBar._specOvBtn then
+            tabBar._specOvBtn:SetShown(core)
+        end
+    end
     local savedPage = _lastPagePerModule[folderName]
     -- Validate saved page still exists in this module's page list
     local validPage = nil
@@ -10285,7 +10443,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.4.7"
+EllesmereUI.VERSION = "8.4.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

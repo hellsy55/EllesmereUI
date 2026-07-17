@@ -7225,7 +7225,7 @@ end
 --- spell IDs present on the live bars but missing from assignedSpells.
 --- Called after CollectAndReanchor so the preview stays in sync with
 --- what the player actually sees on their CDM bars.
-function ns.ReseedAssignedSpellsFromLiveIcons()
+function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
     local p = ECME and ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
 
@@ -7265,10 +7265,15 @@ function ns.ReseedAssignedSpellsFromLiveIcons()
     local FindVar = ns.FindVariantIndexInList
 
     for _, barData in ipairs(p.cdmBars.bars) do
+        -- cdUtilOnly (the automatic reseed path): buff-family bars are
+        -- picker-authoritative -- materializing live buff icons would
+        -- reintroduce the secret-ID drift duplicate-slot bug the options
+        -- materializer's skip exists to prevent. The manual Repopulate
+        -- flow passes nothing and keeps its full sweep.
         if not barData.isGhostBar
            and barData.key ~= "buffs"
            and (barData.barType == "cooldowns" or barData.barType == "utility"
-                or barData.barType == "buffs"
+                or (barData.barType == "buffs" and not cdUtilOnly)
                 or MAIN_BAR_KEYS[barData.key]) then
             local sd = ns.GetBarSpellData(barData.key)
             local icons = ns.cdmBarIcons and ns.cdmBarIcons[barData.key]
@@ -7334,6 +7339,13 @@ function ns.ReseedAssignedSpellsFromLiveIcons()
             end
         end
     end
+end
+
+-- Parent-facing bridge for the automatic / export-time reconcile: cd and
+-- utility bars only (buff-family excluded -- picker-authoritative). The
+-- export path nil-checks this, so a disabled CDM child is a clean no-op.
+EllesmereUI.CDMReconcileActiveSpecSpells = function()
+    ns.ReseedAssignedSpellsFromLiveIcons(true)
 end
 
 --- Repopulate all main bars from Blizzard CDM for the current spec.
@@ -8372,6 +8384,9 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         -- Blizzard re-evaluate the viewer's tracked cooldown set; without a
         -- rebuild the new pool frames are never re-claimed and the
         -- unclaimed-frame cleanup blanks them (arena-exit empty-CDM bug).
+        -- The spell set may have changed: let the post-rebuild reanchor
+        -- re-run the automatic base-bar materialization for this spec.
+        if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
         ScheduleTalentRebuild()
         return
     end
