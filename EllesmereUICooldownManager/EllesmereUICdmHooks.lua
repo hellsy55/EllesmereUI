@@ -5482,6 +5482,25 @@ local function CollectAndReanchor()
                 if ns.QueueReanchor then ns.QueueReanchor() end
             end
         end
+        -- Automatic base-bar materialization (once per spec per session):
+        -- untouched default-bar spells render through the frames-as-truth
+        -- fallback without ever being recorded in assignedSpells, so export
+        -- strings shipped incomplete stores and the import ghost pass hid
+        -- exactly those spells on every recipient. Reseed from the live
+        -- icons -- ONLY after the one-shot migration has stamped (a legacy
+        -- un-migrated store must migrate first or old-model spillovers
+        -- would materialize), never while an import's ghosting is pending
+        -- (Reseed self-guards too), and buff-family bars excluded
+        -- (cdUtilOnly: picker-authoritative). The session flag is wiped on
+        -- talent/loadout changes so newly learned spells re-materialize.
+        if ns.ReseedAssignedSpellsFromLiveIcons and prof
+           and prof._barFilterModelV6 and not prof._importGhostMode then
+            ns._reseededSpecsSession = ns._reseededSpecsSession or {}
+            if not ns._reseededSpecsSession[specKey] then
+                ns._reseededSpecsSession[specKey] = true
+                ns.ReseedAssignedSpellsFromLiveIcons(true)
+            end
+        end
     end
 
     -- Per-spec one-shot: fold legacy dormantSpells back into assignedSpells
