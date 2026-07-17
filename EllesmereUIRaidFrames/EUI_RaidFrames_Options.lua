@@ -587,6 +587,46 @@ initFrame:SetScript("OnEvent", function(self)
     -- All preview mode dropdowns across tabs (refresh all when one changes)
     local pvModeDropdowns = {}
 
+    -- Preview Mode controls carrying override-preview chrome (gold border
+    -- host + tooltip), one entry per built row across tabs/rebuilds.
+    local pvModeCtrls = {}
+
+    -- Gold border + tooltip on every Preview Mode control when the REAL
+    -- preview is rendering an override's effective values (spec group or
+    -- applied conditional). State computed from the runtime resolvers --
+    -- never the panel's view flags -- so it always matches what the real
+    -- preview actually shows. Recomputed at row build time and from
+    -- ns._RebuildPvOverlay (view/spec/conditional changes).
+    function ns._UpdatePvModeChrome()
+        if #pvModeCtrls == 0 then return end
+        local text
+        if (db.profile.previewMode or "overlay") == "real" then
+            -- Editing-as session: the preview shows THAT session's values
+            -- (the effective overlay is off there by design), so the chrome
+            -- names the session being edited.
+            local sessName = EllesmereUI.SpecOverrides_EditSessionName
+                and EllesmereUI.SpecOverrides_EditSessionName()
+            if sessName then
+                text = EllesmereUI.Lf("Previewing Override: %1$s", sessName)
+            elseif EllesmereUI.SpecOverrides_PeekEffectiveValues then
+                local _, specSrc, condSrc =
+                    EllesmereUI.SpecOverrides_PeekEffectiveValues("EllesmereUIRaidFrames")
+                if specSrc and condSrc then
+                    text = EllesmereUI.Lf("Previewing Overrides: %1$s, %2$s", specSrc, condSrc)
+                elseif specSrc or condSrc then
+                    text = EllesmereUI.Lf("Previewing Override: %1$s", specSrc or condSrc)
+                end
+            end
+        end
+        for _, e in ipairs(pvModeCtrls) do
+            if e.gold then e.gold:SetShown(text ~= nil) end
+            if e.ctrl then
+                e.ctrl._ttText = text
+                e.ctrl._ttOpts = nil
+            end
+        end
+    end
+
     -- Shared helper: true when preview is disabled (eyeball toggles should gray out)
     local function IsPreviewOff()
         return (db.profile.previewMode or "overlay") == "none"
@@ -647,6 +687,20 @@ initFrame:SetScript("OnEvent", function(self)
 
         pvModeDropdowns[#pvModeDropdowns + 1] = ddLbl
 
+        -- Override-preview chrome: a separate gold border host (the control's
+        -- own border is re-asserted by its hover scripts, so it is never
+        -- recolored directly -- same pattern as the overrides UI slot marks).
+        do
+            local gold = EllesmereUI._SPECOV_GOLD or { 199 / 255, 166 / 255, 90 / 255 }
+            local host = CreateFrame("Frame", nil, ddCtrl)
+            host:SetAllPoints(ddCtrl)
+            host:SetFrameLevel(ddCtrl:GetFrameLevel() + 30)
+            EllesmereUI.PP.CreateBorder(host, gold[1], gold[2], gold[3], 0.9, 1, "OVERLAY", 7)
+            host:Hide()
+            pvModeCtrls[#pvModeCtrls + 1] = { ctrl = ddCtrl, gold = host }
+        end
+        if ns._UpdatePvModeChrome then ns._UpdatePvModeChrome() end
+
         ns._previewMode = db.profile.previewMode or "overlay"
         return y
     end
@@ -706,7 +760,7 @@ initFrame:SetScript("OnEvent", function(self)
                 wipe(ns._healthAnimState)
 
                 local frames = ns.PvActiveFrames()
-                local s = db.profile
+                local s = (ns.PvEffectiveProfile and ns.PvEffectiveProfile()) or db.profile
                 for i = 1, 20 do
                     local f = frames[i]
                     if f and f._health then
@@ -724,7 +778,9 @@ initFrame:SetScript("OnEvent", function(self)
                     and Enum.StatusBarInterpolation.ExponentialEaseOut
                 ns._healthAnimTicker = C_Timer.NewTicker(0.1, function()
                     if not ns._healthAnimActive then return end
-                    local s = db.profile
+                    -- Effective overlay: preview ticks must never render the
+                    -- panel view's swapped values (real preview contract).
+                    local s = (ns.PvEffectiveProfile and ns.PvEffectiveProfile()) or db.profile
                     local smooth = s.smoothBars
 
                     for i, st in ipairs(ns._healthAnimState) do
@@ -1717,7 +1773,9 @@ initFrame:SetScript("OnEvent", function(self)
                     and Enum.StatusBarInterpolation.ExponentialEaseOut
                 ns._powerAnimTicker = C_Timer.NewTicker(0.1, function()
                     if not ns._powerAnimActive then return end
-                    local smooth = db.profile.smoothPowerBars
+                    -- Effective overlay: see the health ticker note above.
+                    local smooth = ((ns.PvEffectiveProfile and ns.PvEffectiveProfile())
+                        or db.profile).smoothPowerBars
 
                     for i, st in pairs(ns._powerAnimState) do
                         local f = st.frame

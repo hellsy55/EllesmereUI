@@ -934,7 +934,7 @@ local function BuildPanel()
 end
 
 local function OnPaperDollShow()
-    if EllesmereUIDB and EllesmereUIDB.themedCharacterSheet == false then return end
+    if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
     if EllesmereUIDB and EllesmereUIDB.charSheetSocketPanel == false then
         if panel then panel:Hide() end
         return

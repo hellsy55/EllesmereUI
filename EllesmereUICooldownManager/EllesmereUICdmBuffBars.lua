@@ -1429,7 +1429,7 @@ end
 --  numbers (those are spell-specific, matching AddTrackedBuffBar's reset set).
 -------------------------------------------------------------------------------
 local TBB_STYLE_KEYS = {
-    "height", "width", "verticalOrientation", "reverseFill", "texture",
+    "height", "width", "verticalOrientation", "reverseFill", "texture", "strata",
     "fillColorMode", "fillR", "fillG", "fillB", "fillA",
     "bgR", "bgG", "bgB", "bgA",
     "gradientEnabled", "gradientR", "gradientG", "gradientB", "gradientA", "gradientDir",
@@ -1797,12 +1797,13 @@ ns.RefreshBuffBarGating  = function() end
 -------------------------------------------------------------------------------
 local function CreateTrackedBuffBarFrame(parent, idx)
     local wrapFrame = CreateFrame("Frame", "ECME_TBBWrap" .. idx, parent)
-    -- HIGH strata so the whole bar (fill, border, glow, text) renders above
-    -- the buff-icon displays (MEDIUM) -- including their borders and cooldown
-    -- swipes -- when the two elements overlap. Internal ordering stays
+    -- MEDIUM strata at level 100 by default; the user can move the whole bar
+    -- to another strata (cfg.strata, applied in ApplyTrackedBuffBarSettings).
+    -- Level 100 keeps the bar above the buff-icon displays (MEDIUM, low
+    -- levels) when the two elements overlap. Internal ordering stays
     -- level-based within the wrap (strips +6 < pandemic glow +7 < text +8).
-    wrapFrame:SetFrameStrata("HIGH")
-    wrapFrame:SetFrameLevel(10)
+    wrapFrame:SetFrameStrata("MEDIUM")
+    wrapFrame:SetFrameLevel(100)
 
     local bar = CreateFrame("StatusBar", "ECME_TBB" .. idx, wrapFrame)
     if bar.EnableMouseClicks then bar:EnableMouseClicks(false) end
@@ -2023,6 +2024,26 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     if not bar or not cfg then return end
     local sb = bar._bar
     if not sb then return end
+
+    -- User-selectable strata for the whole bar (the options setter keeps
+    -- grouped bars uniform). A parent strata change COLLAPSES child frame
+    -- levels, so the wrap level and the constructor's internal level ladder
+    -- are re-asserted whenever the strata actually changes; the change guard
+    -- keeps the common repaint path free of the engine re-stack.
+    local strata = cfg.strata or "MEDIUM"
+    if bar._lastStrata ~= strata then
+        bar._lastStrata = strata
+        bar:SetFrameStrata(strata)
+        bar:SetFrameLevel(100)
+        local base = bar:GetFrameLevel()
+        sb:SetFrameLevel(base + 1)
+        if bar._gradClip then bar._gradClip:SetFrameLevel(sb:GetFrameLevel() + 1) end
+        if bar._threshOverlay then bar._threshOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
+        if bar._sparkOverlay then bar._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
+        if bar._barBorder then bar._barBorder:SetFrameLevel(base + 5) end
+        if bar._pandemicGlowOverlay then bar._pandemicGlowOverlay:SetFrameLevel(base + 7) end
+        if bar._textOverlay then bar._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
+    end
 
     -- width/height are always visual dimensions (what you see on screen) and
     -- describe the bar's TOTAL footprint, icon included: the wrap is exactly

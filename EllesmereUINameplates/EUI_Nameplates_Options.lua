@@ -8691,10 +8691,12 @@ initFrame:SetScript("OnEvent", function(self)
             swatch:EnableMouse(not off)
         end
 
-        -- Inline cog on the "Enemy Types" region: Open World Basic Coloring.
-        -- On: outside instances, Mini Enemies / Spell Casters / Mini-Bosses /
-        -- Bosses all use the single flat "All Enemies" color below; Neutral
-        -- keeps its own color. Off (default): no effect on coloring anywhere.
+        -- Inline cog on the "Enemy Types" region: Full Coloring M+ Only.
+        -- On: outside 5-man dungeons, Mini Enemies / Spell Casters /
+        -- Mini-Bosses / Bosses all use the single flat "All Enemies" color
+        -- below; Neutral keeps its own color. Off (default): no effect on
+        -- coloring anywhere. Keys keep their original owBasic* names
+        -- (formerly "Open World Basic Coloring", which gated on any instance).
         do
             local leftRgn = enemyTypesRow._leftRegion
             local isOWOff = function()
@@ -8705,7 +8707,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, owCogShow = EllesmereUI.BuildCogPopup({
                 title = "Enemy Colors",
                 rows = {
-                    { type="toggle", label="Open World Basic Coloring",
+                    { type="toggle", label="Full Coloring M+ Only",
                       get=function()
                         local v = DBVal("owBasicColoring")
                         if v == nil then return defaults.owBasicColoring end
@@ -8722,7 +8724,7 @@ initFrame:SetScript("OnEvent", function(self)
                         RefreshAllPlates()
                       end,
                       disabled=isOWOff,
-                      disabledTooltip="Open World Basic Coloring" },
+                      disabledTooltip="Full Coloring M+ Only" },
                 },
             })
             local owCogBtn = CreateFrame("Button", nil, leftRgn)

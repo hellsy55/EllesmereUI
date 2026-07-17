@@ -2002,21 +2002,29 @@ initFrame:SetScript("OnEvent", function(self)
             local wrap = _tbbPopoutBars[n]
             if not wrap then
                 wrap = ns.CreateTBBBarFrame(oc, "Pv" .. n)
-                -- The live constructor pins HIGH strata; lift the preview into
-                -- the popout's strata and re-assert the child levels the
-                -- constructor established (a parent strata change can reset
-                -- child frame levels).
-                wrap:SetFrameStrata("FULLSCREEN_DIALOG")
-                local base = oc:GetFrameLevel() + 20
-                wrap:SetFrameLevel(base)
-                local sb = wrap._bar
-                if sb then sb:SetFrameLevel(base + 1) end
-                if wrap._sparkOverlay and sb then wrap._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
-                if wrap._textOverlay and sb then wrap._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
-                if wrap._pandemicGlowOverlay then wrap._pandemicGlowOverlay:SetFrameLevel(base + 7) end
                 _tbbPopoutBars[n] = wrap
             end
             ns.ApplyTBBBarSettings(wrap, e.cfg)
+            -- The apply path pins the wrap to the bar's own strata (cfg.strata,
+            -- MEDIUM default); lift the preview into the popout's strata AFTER
+            -- each apply and re-assert the child levels the constructor
+            -- established (a parent strata change resets child frame levels).
+            -- Guarded so refreshes that didn't touch strata skip the re-stack
+            -- (level checked too: a bar whose OWN strata is the popout's would
+            -- otherwise dodge the lift and keep the apply-path level).
+            local base = oc:GetFrameLevel() + 20
+            if wrap:GetFrameStrata() ~= "FULLSCREEN_DIALOG" or wrap:GetFrameLevel() ~= base then
+                wrap:SetFrameStrata("FULLSCREEN_DIALOG")
+                wrap:SetFrameLevel(base)
+                local sb = wrap._bar
+                if sb then sb:SetFrameLevel(base + 1) end
+                if wrap._gradClip and sb then wrap._gradClip:SetFrameLevel(sb:GetFrameLevel() + 1) end
+                if wrap._threshOverlay and sb then wrap._threshOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
+                if wrap._sparkOverlay and sb then wrap._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
+                if wrap._barBorder then wrap._barBorder:SetFrameLevel(base + 5) end
+                if wrap._pandemicGlowOverlay then wrap._pandemicGlowOverlay:SetFrameLevel(base + 7) end
+                if wrap._textOverlay and sb then wrap._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
+            end
             DressTBBPopoutBar(wrap, e.cfg)
             wrap:Show()
         end
@@ -4875,7 +4883,27 @@ initFrame:SetScript("OnEvent", function(self)
               values = { __placeholder = "..." }, order = { "__placeholder" },
               getValue = function() return "__placeholder" end,
               setValue = function() end },
-            { type = "label", text = "" });  y = y - h
+            { type = "dropdown", text = "Bar Strata",
+              tooltip = "Screen layer the bar renders on; changing a grouped bar changes its whole group.",
+              values = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium",
+                         HIGH = "High", DIALOG = "Dialog", FULLSCREEN = "Fullscreen",
+                         FULLSCREEN_DIALOG = "Fullscreen Dialog", TOOLTIP = "Tooltip" },
+              order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG",
+                        "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" },
+              getValue = function() local bd = SelectedTBB(); return bd and bd.strata or "MEDIUM" end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.strata = v
+                  -- Grouped bars share one strata: write the rest of the group too.
+                  local gid = ns.TBBBarGroupID(bd)
+                  if gid ~= 0 then
+                      local t = ns.GetTrackedBuffBars()
+                      for _, b in ipairs(t.bars or {}) do
+                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.strata = v end
+                      end
+                  end
+                  RefreshTBB()
+              end });  y = y - h
         do
             local rgn = smoothRow._leftRegion
             if rgn._control then rgn._control:Hide() end
@@ -10721,10 +10749,11 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
-                    -- 3a. Max Stacks Glow (default = nil / none). 1:1 with Active
+                    -- 3a. Max Charges Glow (default = nil / none). 1:1 with Active
                     -- State Glow; glows the icon while a charge spell is at max
-                    -- charges. Shares the unified Glow Effect Color below.
-                    local maxStacksGlowRow = MakeSubnavRow("Max Stacks Glow", ACTIVE_GLOW_ITEMS,
+                    -- charges. Shares the unified Glow Effect Color below. The
+                    -- stored key stays maxStacksGlow (label-only rename).
+                    local maxStacksGlowRow = MakeSubnavRow("Max Charges Glow", ACTIVE_GLOW_ITEMS,
                         function() return ss.maxStacksGlow end,
                         function(v) EnsureSS(); SetOwn("maxStacksGlow", v); if v and v > 0 then ns._cdmAnyMaxStacksGlow = true end end,
                         function() return ss.maxStacksGlow == nil end,
