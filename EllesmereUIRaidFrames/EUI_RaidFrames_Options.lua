@@ -2980,7 +2980,7 @@ initFrame:SetScript("OnEvent", function(self)
             moreBtn:SetFrameLevel(parent:GetFrameLevel() + 5)
             local moreFS = EllesmereUI.MakeFont(moreBtn, 13, nil, 1, 1, 1)
             moreFS:SetPoint("LEFT")
-            moreFS:SetText("+ Show Less Common Indicator Options")
+            moreFS:SetText("+ " .. EllesmereUI.L("Show Less Common Indicator Options"))
             moreBtn:SetWidth(math.max((moreFS:GetStringWidth() or 0) + 8, 120))
             local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
             moreBtn:SetScript("OnEnter", function() moreFS:SetTextColor(EG.r, EG.g, EG.b) end)
