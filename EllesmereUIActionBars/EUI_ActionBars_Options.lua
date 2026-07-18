@@ -563,6 +563,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Preview background texture (behind all buttons)
         local previewBG = pf:CreateTexture(nil, "BACKGROUND", nil, -1)
+        local previewBGBorder = CreateFrame("Frame", nil, pf, "BackdropTemplate")
+        previewBGBorder:EnableMouse(false)
         previewBG:Hide()
 
         -- Store barFrame ref and base size for Update
@@ -1067,8 +1069,9 @@ initFrame:SetScript("OnEvent", function(self)
             if settings.bgEnabled then
                 local bgC = settings.bgColor or { r = 0, g = 0, b = 0, a = 0.5 }
                 previewBG:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
-                local extraX = Snap((settings.bgPadX or 0) * totalScale)
-                local extraY = Snap((settings.bgPadY or 0) * totalScale)
+                local rawPadding = settings.bgPadding
+                local extraX = Snap((rawPadding ~= nil and rawPadding or (settings.bgPadX or 0)) * totalScale)
+                local extraY = Snap((rawPadding ~= nil and rawPadding or (settings.bgPadY or 0)) * totalScale)
                 -- Anchor to the full grid bounds (not individual buttons) so multi-row
                 -- backgrounds cover the entire grid even when the last row is shorter.
                 local gx = self._gridStartX or 0
@@ -1076,11 +1079,40 @@ initFrame:SetScript("OnEvent", function(self)
                 local gh = self._gridH or 0
                 local gy = -Snap(10)  -- top padding (matches startY)
                 previewBG:ClearAllPoints()
-                previewBG:SetPoint("TOPLEFT",     self, "TOPLEFT", gx - extraX,       gy + extraY)
-                previewBG:SetPoint("BOTTOMRIGHT", self, "TOPLEFT", gx + gw + extraX,  gy - gh - extraY)
+                local left, right = gx - extraX, gx + gw + extraX
+                local top, bottom = gy + extraY, gy - gh - extraY
+                local multiplierX = math.max(1, math.min(4, math.floor((settings.bgMultiplierX or 1) + 0.5)))
+                local multiplierY = math.max(1, math.min(4, math.floor((settings.bgMultiplierY or 1) + 0.5)))
+                local directionX = settings.bgExpandDirectionX or "right"
+                local directionY = settings.bgExpandDirectionY or "up"
+                local iconPadding = Snap((settings.buttonPadding or 0) * totalScale)
+                local growX = (multiplierX - 1) * (gw + iconPadding)
+                local growY = (multiplierY - 1) * (gh + iconPadding)
+                if directionX == "left" then left = left - growX else right = right + growX end
+                if directionY == "down" then bottom = bottom - growY else top = top + growY end
+                previewBG:SetPoint("TOPLEFT", self, "TOPLEFT", left, top)
+                previewBG:SetPoint("BOTTOMRIGHT", self, "TOPLEFT", right, bottom)
                 previewBG:Show()
+                previewBGBorder:ClearAllPoints()
+                previewBGBorder:SetAllPoints(previewBG)
+                if EllesmereUI.ApplyBorderStyle then
+                    local bc = settings.bgBorderColor or { r = 0, g = 0, b = 0, a = 1 }
+                    local thicknessKey = settings.bgBorderThickness or "none"
+                    local thickness = ns.BORDER_THICKNESS and ns.BORDER_THICKNESS[thicknessKey]
+                    local borderSize = thickness and thickness.regular or 0
+                    EllesmereUI.ApplyBorderStyle(previewBGBorder, borderSize,
+                        bc.r, bc.g, bc.b, bc.a or 1, settings.bgBorderTexture or "solid",
+                        settings.bgBorderOffsetX, settings.bgBorderOffsetY,
+                        settings.bgBorderShiftX, settings.bgBorderShiftY,
+                        "actionbars", thicknessKey)
+                end
             else
                 previewBG:Hide()
+                if EllesmereUI.ApplyBorderStyle then
+                    EllesmereUI.ApplyBorderStyle(previewBGBorder, 0, 0, 0, 0, settings.bgBorderTexture or "solid")
+                else
+                    previewBGBorder:Hide()
+                end
             end
 
             -- Apply bar opacity to the preview
@@ -2277,7 +2309,7 @@ initFrame:SetScript("OnEvent", function(self)
                 MakeCogBtn(rightRgn, growCogShow)
             end
 
-            -- Row 3: Vertical Orientation | Bar Background
+            -- Row 3: Vertical Orientation
             do
                 local orientRow
                 orientRow, h = W:DualRow(parent, y,
@@ -2297,13 +2329,7 @@ initFrame:SetScript("OnEvent", function(self)
                           EllesmereUI:RefreshPage()
                       end,
                       tooltip="Toggle between horizontal and vertical bar layout." },
-                    { type="toggle", text="Bar Background",
-                      getValue=function() return SGet("bgEnabled") end,
-                      setValue=function(v)
-                          SSet("bgEnabled", v, function(k) EAB:ApplyBackgroundForBar(k) end)
-                          SUpdatePreview()
-                          EllesmereUI:RefreshPage()
-                      end });  y = y - h
+                    { type="label", text="" });  y = y - h
                 -- Sync icon: Orientation (left)
                 do
                     local rgn = orientRow._leftRegion
@@ -2344,6 +2370,10 @@ initFrame:SetScript("OnEvent", function(self)
                     })
                 end
 
+                -- Legacy background controls used to live in Layout. Keep the
+                -- implementation block disabled so only the dedicated section
+                -- below owns these settings.
+                if false then
                 -- Sync icon: Bar Background (right region)
                 do
                     local rgn = orientRow._rightRegion
@@ -2354,13 +2384,19 @@ initFrame:SetScript("OnEvent", function(self)
                             local s = SB()
                             local en = s.bgEnabled
                             local c = s.bgColor
+                            local bc = s.bgBorderColor
                             local px = s.bgPadX or 0
                             local py = s.bgPadY or 0
                             for _, key in ipairs(GROUP_BAR_ORDER) do
-                                EAB.db.profile.bars[key].bgEnabled = en
-                                if c then EAB.db.profile.bars[key].bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
-                                EAB.db.profile.bars[key].bgPadX = px
-                                EAB.db.profile.bars[key].bgPadY = py
+                                local bs = EAB.db.profile.bars[key]
+                                bs.bgEnabled = en
+                                if c then bs.bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
+                                bs.bgPadX = px
+                                bs.bgPadY = py
+                                bs.bgBorderThickness = s.bgBorderThickness
+                                bs.bgBorderTexture = s.bgBorderTexture
+                                bs.bgBorderSize = s.bgBorderSize
+                                if bc then bs.bgBorderColor = { r=bc.r, g=bc.g, b=bc.b, a=bc.a } end
                                 EAB:ApplyBackgroundForBar(key)
                             end
                             EllesmereUI:RefreshPage()
@@ -2375,6 +2411,9 @@ initFrame:SetScript("OnEvent", function(self)
                                 if (bs.bgEnabled or false) ~= en then return false end
                                 if (bs.bgPadX or 0) ~= px then return false end
                                 if (bs.bgPadY or 0) ~= py then return false end
+                                if (bs.bgBorderThickness or "none") ~= (s.bgBorderThickness or "none") then return false end
+                                if (bs.bgBorderTexture or "solid") ~= (s.bgBorderTexture or "solid") then return false end
+                                if (bs.bgBorderSize or 1) ~= (s.bgBorderSize or 1) then return false end
                             end
                             return true
                         end,
@@ -2387,13 +2426,19 @@ initFrame:SetScript("OnEvent", function(self)
                                 local s = SB()
                                 local en = s.bgEnabled
                                 local c = s.bgColor
+                                local bc = s.bgBorderColor
                                 local px = s.bgPadX or 0
                                 local py = s.bgPadY or 0
                                 for _, key in ipairs(checkedKeys) do
-                                    EAB.db.profile.bars[key].bgEnabled = en
-                                    if c then EAB.db.profile.bars[key].bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
-                                    EAB.db.profile.bars[key].bgPadX = px
-                                    EAB.db.profile.bars[key].bgPadY = py
+                                    local bs = EAB.db.profile.bars[key]
+                                    bs.bgEnabled = en
+                                    if c then bs.bgColor = { r=c.r, g=c.g, b=c.b, a=c.a } end
+                                    bs.bgPadX = px
+                                    bs.bgPadY = py
+                                    bs.bgBorderThickness = s.bgBorderThickness
+                                    bs.bgBorderTexture = s.bgBorderTexture
+                                    bs.bgBorderSize = s.bgBorderSize
+                                    if bc then bs.bgBorderColor = { r=bc.r, g=bc.g, b=bc.b, a=bc.a } end
                                     EAB:ApplyBackgroundForBar(key)
                                 end
                                 EllesmereUI:RefreshPage()
@@ -2475,39 +2520,393 @@ initFrame:SetScript("OnEvent", function(self)
                         bgCogBtn:SetAlpha(BgDisabled() and 0.15 or 0.4)
                     end)
                 end
+                end
             end
 
-            -- Row 4: Icon Order | (empty)
-            -- Supersedes the old Reverse Icon Order toggle. "default" and
-            -- "reversed" map exactly onto the legacy boolean (kept in sync
-            -- so older readers of the flag stay correct); the corner values
-            -- place button 1 in that corner of the bar's grid.
-            local iconOrderValues = {
-                default     = "Default",
-                reversed    = "Reversed",
-                TOPLEFT     = "Top Left",
-                TOPRIGHT    = "Top Right",
-                BOTTOMLEFT  = "Bottom Left",
-                BOTTOMRIGHT = "Bottom Right",
-            }
-            local iconOrderOrder = { "default", "reversed", "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
-            _, h = W:DualRow(parent, y,
-                { type="dropdown", text="Icon Order",
-                  tooltip="Order of the buttons on this bar; corner options place the first button in that corner.",
-                  values=iconOrderValues, order=iconOrderOrder,
+            -- Built later, directly below ICON EFFECTS. Keeping the builder
+            -- near the other layout helpers avoids duplicating its callbacks.
+            local function BuildBarBackgroundSection()
+            -------------------------------------------------------------------
+            --  BAR BACKGROUND
+            -------------------------------------------------------------------
+            _, h = W:SectionHeader(parent, "BAR BACKGROUND", y);  y = y - h
+
+            local bgOptionsRow
+            bgOptionsRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Enable",
+                  getValue=function() return SVal("bgEnabled", false) end,
+                  setValue=function(v)
+                      SSet("bgEnabled", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                      SUpdatePreview()
+                  end },
+                { type="slider", text="Spacing", min=0, max=20, step=1,
+                  disabled=BgDisabled,
+                  disabledTooltip="Bar Background",
                   getValue=function()
-                      local v = SVal("iconOrder", nil)
-                      if v == nil then
-                          v = SVal("reverseIconOrder", false) and "reversed" or "default"
-                      end
-                      return v
+                      local v = SGet("bgPadding")
+                      if v ~= nil then return v end
+                      return math.max(SVal("bgPadX", 0), SVal("bgPadY", 0))
                   end,
                   setValue=function(v)
-                      SDB().reverseIconOrder = (v == "reversed")
-                      SSet("iconOrder", v, function(k) EAB:ApplyIconRowOverrides(k) end)
-                      SUpdatePreviewAndResize()
+                      SB().bgPadX, SB().bgPadY = nil, nil
+                      SSet("bgPadding", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                      SUpdatePreview()
+                  end });  y = y - h
+
+            -- Background color swatch.
+            do
+                local left = bgOptionsRow._leftRegion
+                local swatch, refresh = EllesmereUI.BuildColorSwatch(left, left:GetFrameLevel() + 5,
+                    function()
+                        local c = SGet("bgColor") or { r=0, g=0, b=0, a=0.5 }
+                        return c.r, c.g, c.b, c.a
+                    end,
+                    function(r, g, b, a)
+                        SSetColor("bgColor", r, g, b, a, function(k) EAB:ApplyBackgroundForBar(k) end)
+                        SUpdatePreview()
+                    end, true, 20)
+                PP.Point(swatch, "RIGHT", left._control, "LEFT", -12, 0)
+                left._lastInline = swatch
+                EllesmereUI.RegisterWidgetRefresh(refresh)
+
+            end
+
+            do
+                local region = bgOptionsRow._leftRegion
+                EllesmereUI.BuildSyncIcon({
+                    region=region,
+                    tooltip="Apply Bar Background Enable to all Bars",
+                    onClick=function()
+                        local enabled = SVal("bgEnabled", false)
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            EAB.db.profile.bars[key].bgEnabled = enabled
+                            EAB:ApplyBackgroundForBar(key)
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced=function()
+                        local enabled = SVal("bgEnabled", false)
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].bgEnabled or false) ~= enabled then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets=function() return { region } end,
+                    multiApply={
+                        elementKeys=GROUP_BAR_ORDER,
+                        elementLabels=SHORT_LABELS,
+                        getCurrentKey=function() return SelectedKey() end,
+                        onApply=function(checkedKeys)
+                            local enabled = SVal("bgEnabled", false)
+                            for _, key in ipairs(checkedKeys) do
+                                EAB.db.profile.bars[key].bgEnabled = enabled
+                                EAB:ApplyBackgroundForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+
+            do
+                local region = bgOptionsRow._rightRegion
+                local function CurrentSpacing(settings)
+                    if settings.bgPadding ~= nil then return settings.bgPadding end
+                    return math.max(settings.bgPadX or 0, settings.bgPadY or 0)
+                end
+                local function ApplySpacingTo(key)
+                    local target = EAB.db.profile.bars[key]
+                    target.bgPadding = CurrentSpacing(SB())
+                    target.bgPadX = nil
+                    target.bgPadY = nil
+                    EAB:ApplyBackgroundForBar(key)
+                end
+                EllesmereUI.BuildSyncIcon({
+                    region=region,
+                    tooltip="Apply Bar Background Spacing to all Bars",
+                    onClick=function()
+                        for _, key in ipairs(GROUP_BAR_ORDER) do ApplySpacingTo(key) end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced=function()
+                        local spacing = CurrentSpacing(SB())
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if CurrentSpacing(EAB.db.profile.bars[key]) ~= spacing then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets=function() return { region } end,
+                    multiApply={
+                        elementKeys=GROUP_BAR_ORDER,
+                        elementLabels=SHORT_LABELS,
+                        getCurrentKey=function() return SelectedKey() end,
+                        onApply=function(checkedKeys)
+                            for _, key in ipairs(checkedKeys) do ApplySpacingTo(key) end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+
+            do
+                local texValues, texOrder = EllesmereUI.GetBorderTextureDropdown()
+                local bgBorderRow
+                bgBorderRow, h = W:DualRow(parent, y,
+                    { type="dropdown", text="Border Style",
+                      disabled=BgDisabled,
+                      disabledTooltip="Bar Background Border",
+                      values=texValues, order=texOrder,
+                      getValue=function() return SVal("bgBorderTexture", "solid") end,
+                      setValue=function(v)
+                          SSet("bgBorderTexture", v, function(k)
+                              local settings = EAB.db.profile.bars[k]
+                              settings.bgBorderOffsetX = nil
+                              settings.bgBorderOffsetY = nil
+                              settings.bgBorderShiftX = nil
+                              settings.bgBorderShiftY = nil
+                              EAB:ApplyBackgroundForBar(k)
+                          end)
+                          SUpdatePreview()
+                      end },
+                    { type="dropdown", text="Border Size",
+                      disabled=BgDisabled,
+                      disabledTooltip="Bar Background Border",
+                      values=ns.BORDER_THICKNESS_LABELS, order=ns.BORDER_THICKNESS_ORDER,
+                      getValue=function() return SVal("bgBorderThickness", "none") end,
+                      setValue=function(v)
+                          SSet("bgBorderThickness", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                          SUpdatePreview()
+                      end });  y = y - h
+
+                do
+                    local region = bgBorderRow._rightRegion
+                    local borderSwatch, refreshBorder = EllesmereUI.BuildColorSwatch(region, region:GetFrameLevel() + 5,
+                        function()
+                            local c = SGet("bgBorderColor") or { r=0, g=0, b=0, a=1 }
+                            return c.r, c.g, c.b, c.a
+                        end,
+                        function(r, g, b, a)
+                            SSetColor("bgBorderColor", r, g, b, a, function(k) EAB:ApplyBackgroundForBar(k) end)
+                            SUpdatePreview()
+                    end, true, 20)
+                    PP.Point(borderSwatch, "RIGHT", region._control, "LEFT", -12, 0)
+                    region._lastInline = borderSwatch
+                    EllesmereUI.RegisterWidgetRefresh(function()
+                        local disabled = BgDisabled() or SVal("bgBorderThickness", "none") == "none"
+                        borderSwatch:SetAlpha(disabled and 0.15 or 1)
+                        refreshBorder()
+                    end)
+                end
+
+                do
+                    local region = bgBorderRow._rightRegion
+                    local function ApplySizeTo(key)
+                        local source = SB()
+                        local target = EAB.db.profile.bars[key]
+                        target.bgBorderThickness = source.bgBorderThickness
+                        local color = source.bgBorderColor
+                        if color then
+                            target.bgBorderColor = { r=color.r, g=color.g, b=color.b, a=color.a }
+                        end
+                        EAB:ApplyBackgroundForBar(key)
+                    end
+                    EllesmereUI.BuildSyncIcon({
+                        region=region,
+                        tooltip="Apply Background Border Size and Color to all Bars",
+                        onClick=function()
+                            for _, key in ipairs(GROUP_BAR_ORDER) do ApplySizeTo(key) end
+                            EllesmereUI:RefreshPage()
+                        end,
+                        isSynced=function()
+                            local thickness = SVal("bgBorderThickness", "none")
+                            local color = SGet("bgBorderColor") or { r=0, g=0, b=0, a=1 }
+                            for _, key in ipairs(GROUP_BAR_ORDER) do
+                                local target = EAB.db.profile.bars[key]
+                                if (target.bgBorderThickness or "none") ~= thickness then return false end
+                                local targetColor = target.bgBorderColor or { r=0, g=0, b=0, a=1 }
+                                if targetColor.r ~= color.r or targetColor.g ~= color.g
+                                    or targetColor.b ~= color.b or targetColor.a ~= color.a then return false end
+                            end
+                            return true
+                        end,
+                        flashTargets=function() return { region } end,
+                        multiApply={
+                            elementKeys=GROUP_BAR_ORDER,
+                            elementLabels=SHORT_LABELS,
+                            getCurrentKey=function() return SelectedKey() end,
+                            onApply=function(checkedKeys)
+                                for _, key in ipairs(checkedKeys) do ApplySizeTo(key) end
+                                EllesmereUI:RefreshPage()
+                            end,
+                        },
+                    })
+                end
+
+                do
+                    local region = bgBorderRow._leftRegion
+                    local _, showOffsetPopup = EllesmereUI.BuildCogPopup({
+                        title="Border Offset",
+                        captureRegion=region,
+                        rows={
+                            { type="slider", label="Offset X", min=-10, max=10, step=1,
+                              get=function()
+                                  local value = SGet("bgBorderOffsetX")
+                                  if value ~= nil then return value end
+                                  local texture = SVal("bgBorderTexture", "solid")
+                                  local thickness = SVal("bgBorderThickness", "thin")
+                                  local defaultX = EllesmereUI.GetBorderDefaults("actionbars", texture, thickness)
+                                  return defaultX
+                              end,
+                              set=function(v)
+                                  SSet("bgBorderOffsetX", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
+                            { type="slider", label="Offset Y", min=-10, max=10, step=1,
+                              get=function()
+                                  local value = SGet("bgBorderOffsetY")
+                                  if value ~= nil then return value end
+                                  local texture = SVal("bgBorderTexture", "solid")
+                                  local thickness = SVal("bgBorderThickness", "thin")
+                                  local _, defaultY = EllesmereUI.GetBorderDefaults("actionbars", texture, thickness)
+                                  return defaultY
+                              end,
+                              set=function(v)
+                                  SSet("bgBorderOffsetY", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
+                            { type="slider", label="Shift X", min=-10, max=10, step=1,
+                              get=function()
+                                  local value = SGet("bgBorderShiftX")
+                                  if value ~= nil then return value end
+                                  local texture = SVal("bgBorderTexture", "solid")
+                                  local thickness = SVal("bgBorderThickness", "thin")
+                                  local _, _, defaultX = EllesmereUI.GetBorderDefaults("actionbars", texture, thickness)
+                                  return defaultX
+                              end,
+                              set=function(v)
+                                  SSet("bgBorderShiftX", v == 0 and nil or v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
+                            { type="slider", label="Shift Y", min=-10, max=10, step=1,
+                              get=function()
+                                  local value = SGet("bgBorderShiftY")
+                                  if value ~= nil then return value end
+                                  local texture = SVal("bgBorderTexture", "solid")
+                                  local thickness = SVal("bgBorderThickness", "thin")
+                                  local _, _, _, defaultY = EllesmereUI.GetBorderDefaults("actionbars", texture, thickness)
+                                  return defaultY
+                              end,
+                              set=function(v)
+                                  SSet("bgBorderShiftY", v == 0 and nil or v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
+                        },
+                    })
+                    local offsetButton = MakeCogBtn(region, showOffsetPopup, nil, EllesmereUI.DIRECTIONS_ICON)
+                    local function UpdateOffsetButton()
+                        local hidden = BgDisabled()
+                        offsetButton:SetShown(not hidden)
+                    end
+                    EllesmereUI.RegisterWidgetRefresh(UpdateOffsetButton)
+                    UpdateOffsetButton()
+                end
+
+                do
+                    local region = bgBorderRow._leftRegion
+                    local function ApplyStyleTo(key)
+                        local source = SB()
+                        local target = EAB.db.profile.bars[key]
+                        target.bgBorderTexture = source.bgBorderTexture
+                        target.bgBorderOffsetX = source.bgBorderOffsetX
+                        target.bgBorderOffsetY = source.bgBorderOffsetY
+                        target.bgBorderShiftX = source.bgBorderShiftX
+                        target.bgBorderShiftY = source.bgBorderShiftY
+                        EAB:ApplyBackgroundForBar(key)
+                    end
+                    EllesmereUI.BuildSyncIcon({
+                        region=region,
+                        tooltip="Apply Background Border Style to all Bars",
+                        onClick=function()
+                            for _, key in ipairs(GROUP_BAR_ORDER) do ApplyStyleTo(key) end
+                            EllesmereUI:RefreshPage()
+                        end,
+                        isSynced=function()
+                            local source = SB()
+                            for _, key in ipairs(GROUP_BAR_ORDER) do
+                                local target = EAB.db.profile.bars[key]
+                                if (target.bgBorderTexture or "solid") ~= (source.bgBorderTexture or "solid") then return false end
+                                if target.bgBorderOffsetX ~= source.bgBorderOffsetX then return false end
+                                if target.bgBorderOffsetY ~= source.bgBorderOffsetY then return false end
+                                if target.bgBorderShiftX ~= source.bgBorderShiftX then return false end
+                                if target.bgBorderShiftY ~= source.bgBorderShiftY then return false end
+                            end
+                            return true
+                        end,
+                        flashTargets=function() return { region } end,
+                        multiApply={
+                            elementKeys=GROUP_BAR_ORDER,
+                            elementLabels=SHORT_LABELS,
+                            getCurrentKey=function() return SelectedKey() end,
+                            onApply=function(checkedKeys)
+                                for _, key in ipairs(checkedKeys) do ApplyStyleTo(key) end
+                                EllesmereUI:RefreshPage()
+                            end,
+                        },
+                    })
+                end
+            end
+
+            local bgMultiplierRow
+            bgMultiplierRow, h = W:DualRow(parent, y,
+                { type="slider", text="Multiplier X", min=1, max=4, step=1,
+                  disabled=BgDisabled,
+                  disabledTooltip="Bar Background",
+                  getValue=function() return SVal("bgMultiplierX", 1) end,
+                  setValue=function(v)
+                      SSet("bgMultiplierX", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                      SUpdatePreview()
                   end },
-                { type="label", text="" });  y = y - h
+                { type="slider", text="Multiplier Y", min=1, max=4, step=1,
+                  disabled=BgDisabled,
+                  disabledTooltip="Bar Background",
+                  getValue=function() return SVal("bgMultiplierY", 1) end,
+                  setValue=function(v)
+                      SSet("bgMultiplierY", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                      SUpdatePreview()
+                  end });  y = y - h
+
+            do
+                local region = bgMultiplierRow._leftRegion
+                local _, showDirectionX = EllesmereUI.BuildCogPopup({
+                    title="Multiplier X Settings",
+                    captureRegion=region,
+                    rows={{ type="dropdown", label="Growth Direction",
+                        values={ left="Left", right="Right" }, order={ "left", "right" },
+                        get=function() return SVal("bgExpandDirectionX", "right") end,
+                        set=function(v)
+                            SSet("bgExpandDirectionX", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                            SUpdatePreview()
+                        end }},
+                })
+                MakeCogBtn(region, showDirectionX, nil, EllesmereUI.DIRECTIONS_ICON)
+            end
+
+            do
+                local region = bgMultiplierRow._rightRegion
+                local _, showDirectionY = EllesmereUI.BuildCogPopup({
+                    title="Multiplier Y Settings",
+                    captureRegion=region,
+                    rows={{ type="dropdown", label="Growth Direction",
+                        values={ up="Up", down="Down" }, order={ "up", "down" },
+                        get=function() return SVal("bgExpandDirectionY", "up") end,
+                        set=function(v)
+                            SSet("bgExpandDirectionY", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                            SUpdatePreview()
+                        end }},
+                })
+                MakeCogBtn(region, showDirectionY, nil, EllesmereUI.DIRECTIONS_ICON)
+            end
+            end
 
             -------------------------------------------------------------------
             --  ICON APPEARANCE
@@ -3493,6 +3892,8 @@ initFrame:SetScript("OnEvent", function(self)
                 swatch:SetAlpha(off0 and 0.3 or 1)
                 block:SetShown(off0)
             end
+
+            BuildBarBackgroundSection()
 
             -------------------------------------------------------------------
             --  PAGING (MainBar + Bars 2-8 only, not Stance/Pet/Micro/Bag)

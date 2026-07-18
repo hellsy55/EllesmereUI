@@ -438,6 +438,14 @@ for _, info in ipairs(BAR_CONFIG) do
         paging = {},
         bgEnabled = false,
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
+        bgBorderColor = { r = 0, g = 0, b = 0, a = 1 },
+        bgBorderTexture = "solid",
+        bgBorderSize = 1,
+        bgBorderThickness = "none",
+        bgMultiplierX = 1,
+        bgMultiplierY = 1,
+        bgExpandDirectionX = "right",
+        bgExpandDirectionY = "up",
         outOfRangeColoring = false,
         outOfRangeColor = { r = 0.8, g = 0.1, b = 0.1 },
         buttonShape = "none",
@@ -5072,9 +5080,9 @@ function EAB:ApplyCooldownSwipeColor()
 end
 
 -------------------------------------------------------------------------------
---  Background Texture
+--  Bar Background
 -------------------------------------------------------------------------------
-local barBackgrounds = {}  -- [barKey] = texture
+local barBackgrounds = {}  -- [barKey] = { fill = Texture, border = Frame }
 
 function EAB:ApplyBackgroundForBar(barKey)
     local s = self.db.profile.bars[barKey]
@@ -5083,24 +5091,67 @@ function EAB:ApplyBackgroundForBar(barKey)
     if not frame then return end
 
     if not s.bgEnabled then
-        if barBackgrounds[barKey] then barBackgrounds[barKey]:Hide() end
+        local background = barBackgrounds[barKey]
+        if background then
+            background.fill:Hide()
+            if EllesmereUI and EllesmereUI.ApplyBorderStyle then
+                EllesmereUI.ApplyBorderStyle(background.border, 0, 0, 0, 0, s.bgBorderTexture or "solid")
+            else
+                background.border:Hide()
+            end
+        end
         return
     end
 
-    local bg = barBackgrounds[barKey]
-    if not bg then
-        bg = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
-        barBackgrounds[barKey] = bg
+    local background = barBackgrounds[barKey]
+    if not background then
+        local fill = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
+        local border = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+        border:EnableMouse(false)
+        border:SetFrameLevel(math.max(0, frame:GetFrameLevel()))
+        background = { fill = fill, border = border }
+        barBackgrounds[barKey] = background
     end
 
     local c = s.bgColor or { r=0, g=0, b=0, a=0.5 }
-    bg:SetColorTexture(c.r, c.g, c.b, c.a)
-    local padX = s.bgPadX or 0
-    local padY = s.bgPadY or 0
-    bg:ClearAllPoints()
-    bg:SetPoint("TOPLEFT", frame, "TOPLEFT", -padX, padY)
-    bg:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", padX, -padY)
-    bg:Show()
+    background.fill:SetColorTexture(c.r, c.g, c.b, c.a)
+    -- bgPadX/bgPadY are retained as fallbacks for profiles made before the
+    -- unified spacing control was introduced.
+    local padding = s.bgPadding
+    local padX = padding ~= nil and padding or (s.bgPadX or 0)
+    local padY = padding ~= nil and padding or (s.bgPadY or 0)
+    local multiplierX = math.max(1, math.min(4, math.floor((s.bgMultiplierX or 1) + 0.5)))
+    local multiplierY = math.max(1, math.min(4, math.floor((s.bgMultiplierY or 1) + 0.5)))
+    local directionX = s.bgExpandDirectionX or "right"
+    local directionY = s.bgExpandDirectionY or "up"
+    local iconPadding = s.buttonPadding or 0
+    local growX = (multiplierX - 1) * ((frame:GetWidth() or 0) + iconPadding)
+    local growY = (multiplierY - 1) * ((frame:GetHeight() or 0) + iconPadding)
+    local left, right, top, bottom = -padX, padX, padY, -padY
+    if directionX == "left" then left = left - growX else right = right + growX end
+    if directionY == "down" then bottom = bottom - growY else top = top + growY end
+    background.fill:ClearAllPoints()
+    background.fill:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
+    background.fill:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", right, bottom)
+    background.fill:Show()
+
+    local border = background.border
+    border:ClearAllPoints()
+    border:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
+    border:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", right, bottom)
+    if EllesmereUI and EllesmereUI.ApplyBorderStyle then
+        local bc = s.bgBorderColor or { r=0, g=0, b=0, a=1 }
+        local thicknessKey = s.bgBorderThickness or "none"
+        local thickness = ns.BORDER_THICKNESS and ns.BORDER_THICKNESS[thicknessKey]
+        local borderSize = thickness and thickness.regular or 0
+        EllesmereUI.ApplyBorderStyle(border, borderSize,
+            bc.r, bc.g, bc.b, bc.a or 1, s.bgBorderTexture or "solid",
+            s.bgBorderOffsetX, s.bgBorderOffsetY,
+            s.bgBorderShiftX, s.bgBorderShiftY,
+            "actionbars", thicknessKey)
+    else
+        border:Hide()
+    end
 end
 
 -------------------------------------------------------------------------------
