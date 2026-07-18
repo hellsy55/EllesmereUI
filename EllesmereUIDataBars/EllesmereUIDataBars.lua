@@ -101,6 +101,11 @@ local L = {
     DELVE_JOURNEY        = "Delver's Journey",
     COMPANION_LEVEL      = "Companion Level",
     SELECT_CURRENCY      = "Select a currency",
+    WHISPER              = "Whisper",
+    WHISPER_BNET         = "Whisper BNet",
+    INVITE               = "Invite",
+    NO_FRIENDS_ONLINE    = "No friends online",
+    NOT_IN_GUILD         = "Not in a guild",
 }
 ns.L = L
 
@@ -166,7 +171,7 @@ ns.BLOCK_DEFAULTS = {
     profession = {},
     profession2 = {},
     travel     = { randomizeHs = true },
-    micromenu  = { disableBlizzardMicroMenu = false, hideSocialText = false, charStatsTooltip = false, mainMenuSpacing = 4, iconSpacing = 2,
+    micromenu  = { disableBlizzardMicroMenu = false, hideSocialText = false, charStatsTooltip = false, socialTooltip = false, mainMenuSpacing = 4, iconSpacing = 2,
                    menu = true, guild = true, social = true, char = true, spell = true, ach = true, quest = true, lfg = true,
                    pvp = true, housing = true, journal = true, pet = true, shop = true, help = true },
     currency   = { currencyId = nil, showIcon = true },
@@ -646,6 +651,14 @@ do
     local interactive = false
     local keepAlive
 
+    -- Plain clickable rows: an insecure Button overlay running a Lua callback
+    -- on click (Tip_AddClickable). Used by the social/guild member lists, whose
+    -- actions -- whisper, invite, BNet whisper -- are all UNPROTECTED, so unlike
+    -- the spell pool above these buttons need no secure host and no combat
+    -- handling: they are created and configured freely, in or out of combat.
+    local clickPool = {}
+    local activeClicks = 0
+
     local function EnsureTip()
         if tip then return tip end
         tip = CreateFrame("Frame", "EllesmereUIDataBarsTip", UIParent)
@@ -756,6 +769,37 @@ do
         return b
     end
 
+    -- Insecure clickable pool (social/guild rows). No secure host, no combat
+    -- gymnastics: the callbacks call unprotected functions only, so the buttons
+    -- can be built and clicked in any lockdown state.
+    local function HideClickButtons()
+        if activeClicks == 0 then return end
+        for i = 1, #clickPool do
+            local b = clickPool[i]
+            b:Hide()
+            b:ClearAllPoints()
+            b:SetScript("OnClick", nil)
+            b:SetScript("OnEnter", nil)
+            b:SetScript("OnLeave", nil)
+        end
+        activeClicks = 0
+    end
+
+    -- Grow-only pool; buttons parent to the tip (riding its strata/clamping)
+    -- and sit above its FontStrings so the overlay wins hit testing.
+    local function AcquireClickButton()
+        activeClicks = activeClicks + 1
+        local b = clickPool[activeClicks]
+        if not b then
+            b = CreateFrame("Button", nil, EnsureTip())
+            b:SetFrameLevel(tip:GetFrameLevel() + 5)
+            b:EnableMouse(true)
+            b:RegisterForClicks("AnyUp")
+            clickPool[activeClicks] = b
+        end
+        return b
+    end
+
     local function StopKeepAlive()
         if keepAlive then keepAlive:Cancel(); keepAlive = nil end
     end
@@ -802,6 +846,10 @@ do
     function ns.Tip_AddLine(text, r, g, b)
         if not tip then return end
         if text ~= nil and issecretvalue(text) then return end
+        -- Localize: fixed UI strings (click hints, labels) resolve through the
+        -- shared EllesmereUI locale; dynamic content (names, numbers, strings
+        -- the game already localized) has no key and falls back unchanged.
+        text = EllesmereUI.L(text)
         dataCount = dataCount + 1
         local d = data[dataCount]
         if not d then d = {}; data[dataCount] = d end
@@ -810,6 +858,7 @@ do
         d.r = nil
         d.wrap = nil
         d.action = nil
+        d.onClick = nil
         return true
     end
 
@@ -826,6 +875,7 @@ do
         if not tip then return end
         if (left ~= nil and issecretvalue(left))
         or (right ~= nil and issecretvalue(right)) then return end
+        left = EllesmereUI.L(left); right = EllesmereUI.L(right)   -- see Tip_AddLine
         dataCount = dataCount + 1
         local d = data[dataCount]
         if not d then d = {}; data[dataCount] = d end
@@ -835,6 +885,7 @@ do
         d.rr = rr; d.rg = rg; d.rb = rb
         d.wrap = nil
         d.action = nil
+        d.onClick = nil
         return true
     end
 
@@ -846,6 +897,17 @@ do
     function ns.Tip_AddActionDouble(left, right, spellID, lr, lg, lb, rr, rg, rb)
         if ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb) and spellID then
             data[dataCount].action = spellID
+        end
+    end
+
+    -- Click-to-act row: like Tip_AddDouble, but Tip_Show overlays an insecure
+    -- button that runs onClick(mouseButton) and keeps the tip alive while
+    -- hovered. onClick MUST call unprotected functions only (whisper/invite) --
+    -- never a protected call. Unlike Tip_AddActionDouble this stays live in
+    -- combat.
+    function ns.Tip_AddClickable(left, right, onClick, lr, lg, lb, rr, rg, rb)
+        if ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb) and onClick then
+            data[dataCount].onClick = onClick
         end
     end
 
@@ -953,6 +1015,35 @@ do
                 end
             end
         end
+
+        -- Insecure clickable overlay (social/guild rows). No combat guard --
+        -- the callbacks are unprotected -- and rebuilt from scratch each show
+        -- so a reused tip never carries stale buttons.
+        HideClickButtons()
+        local car, cag, cab
+        for i = 1, dataCount do
+            local d = data[i]
+            if d.onClick then
+                interactive = true
+                if not car then car, cag, cab = ns.GetAccent() end
+                local b = AcquireClickButton()
+                b:ClearAllPoints()
+                b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
+                b:SetSize(max(1, innerW), max(1, d._h))
+                -- Hover affordance: recolor the row's left text to the accent,
+                -- exactly like the M+ teleport rows. For this to show, the row
+                -- text must NOT embed its own |c..|r codes -- callers pass the
+                -- normal color through the left-color args instead.
+                local row = rows[i]
+                local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
+                local cb = d.onClick
+                b:SetScript("OnEnter", function() row.left:SetTextColor(car, cag, cab, 1) end)
+                b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
+                b:SetScript("OnClick", function(_, mouseButton) cb(mouseButton) end)
+                b:Show()
+            end
+        end
+
         tip:EnableMouse(interactive)
         if interactive then StartKeepAlive() else StopKeepAlive() end
 
@@ -1013,6 +1104,7 @@ do
         if ownerFrame and owner ~= ownerFrame then return end
         owner = nil
         HideActionButtons()
+        HideClickButtons()
         StopKeepAlive()
         interactive = false
         tip:EnableMouse(false)
