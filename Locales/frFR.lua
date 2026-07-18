@@ -5576,12 +5576,10 @@ L["Vengeful Retreat\n& Glide"] = "Retraite vengeresse\n& Planer"
 L["Void Metamorphosis\n+ Trinket 1"] = "Métamorphose du Vide\n+ Bijou 1"
 L["PW: Barrier\n(Cursor)"] = "Mot de pouvoir : Barrière\n(Curseur)"
 L["Nature's Swiftness\nConvoke"] = "Rapidité de la nature\nConvoke"
-L["Innervate
-(Player)"] = "Innervation
-(Joueur)"
-L["Windrush Totem
-(Cursor)"] = "Totem de bouffée de vent
-(Curseur)"
+L["Innervate"] = "Innervation"
+L["Player"] = "Joueur"
+L["Windrush Totem"] = "Totem de bouffée de vent"
+L["Cursor"] = "Curseur"
 L["Pet Target\nSwap"] = "Cible du familier\nÉchanger"
 L["Dungeoneer"] = "Écumage des donjons"
 L["Lucille's Sewing Needle"] = "Aiguille à coudre de Lucille"
