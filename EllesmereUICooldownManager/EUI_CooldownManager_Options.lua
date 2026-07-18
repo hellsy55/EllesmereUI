@@ -4956,7 +4956,7 @@ initFrame:SetScript("OnEvent", function(self)
                           return bd and bd.chargeHashLineWidth or 2
                       end,
                       set = function(v)
-                          local bd = SelectedTBB(); if not bd then return end
+                  local bd = SelectedTBB(); if not bd then return end
                           bd.chargeHashLineWidth = v
                           RefreshTBB()
                       end },
@@ -5002,11 +5002,11 @@ initFrame:SetScript("OnEvent", function(self)
                     or bd.chargeHashLines ~= true
                 cogBtn:SetAlpha(disabled and 0.15 or 0.4)
                 if disabled then cogBlock:Show() else cogBlock:Hide() end
-            end
+                      end
             cogBtn:HookScript("OnShow", UpdateChargeHashCog)
             EllesmereUI.RegisterWidgetRefresh(UpdateChargeHashCog)
             UpdateChargeHashCog()
-        end
+                  end
 
         do
             local rgn = chargeHashRow._rightRegion
@@ -10044,8 +10044,8 @@ initFrame:SetScript("OnEvent", function(self)
                                       get=function() return ss.stackCountR or (cdmBd and cdmBd.stackCountR) or 1, ss.stackCountG or (cdmBd and cdmBd.stackCountG) or 1, ss.stackCountB or (cdmBd and cdmBd.stackCountB) or 1 end,
                                       set=function(r, g, b) EnsureSS(); ss.stackCountR = r; ss.stackCountG = g; ss.stackCountB = b; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
                                     { type="dropdown", label="Position",
-                                      values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
-                                      order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                                      values={ bottomright="Bottom Right", bottom="Bottom", bottomleft="Bottom Left", left="Left", topleft="Top Left", top="Top", topright="Top Right", right="Right", center="Center" },
+                                      order={ "bottomright", "bottom", "bottomleft", "left", "topleft", "top", "topright", "right", "center" },
                                       get=function() return ss.stackCountPosition or (cdmBd and cdmBd.stackCountPosition) or "bottomright" end,
                                       set=function(v) EnsureSS(); ss.stackCountPosition = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
                                     { type="slider", label="X Offset", min=-150, max=150, step=1,
@@ -14436,9 +14436,13 @@ initFrame:SetScript("OnEvent", function(self)
                         local scY = bd.stackCountY or 0
                         local scPoint = bd.stackCountPosition or "bottomright"
                         if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
+                        elseif scPoint == "bottom" then scPoint = "BOTTOM"; scY = scY + 2
                         elseif scPoint == "topright" then scPoint = "TOPRIGHT"
+                        elseif scPoint == "top" then scPoint = "top"
                         elseif scPoint == "topleft" then scPoint = "TOPLEFT"
                         elseif scPoint == "center" then scPoint = "CENTER"
+                        elseif scPoint == "left" then scPoint = "LEFT"
+                        elseif scPoint == "right" then scPoint = "RIGHT"
                         else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
                         EllesmereUI.ApplyIconTextFont(slot._stackText, scFont, scSize, "cdm")
                         slot._stackText:SetTextColor(scR, scG, scB)
@@ -17451,8 +17455,8 @@ initFrame:SetScript("OnEvent", function(self)
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                       end },
                     { type="dropdown", label="Position",
-                      values={ bottomright="Bottom Right", bottomleft="Bottom Left", topright="Top Right", topleft="Top Left", center="Center" },
-                      order={ "bottomright", "bottomleft", "topright", "topleft", "center" },
+                      values={ bottomright="Bottom Right", bottom="Bottom", bottomleft="Bottom Left", left="Left", topleft="Top Left", top="Top", topright="Top Right", right="Right", center="Center" },
+                      order={ "bottomright", "bottom", "bottomleft", "left", "topleft", "top", "topright", "right", "center" },
                       get=function() return BD().stackCountPosition or "bottomright" end,
                       set=function(v)
                           BD().stackCountPosition = v
