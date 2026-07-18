@@ -3585,15 +3585,20 @@ initFrame:SetScript("OnEvent", function(self)
                     local ciSz = s.combatIndicatorSize or 22
                     local ciOx = s.combatIndicatorX or 0
                     local ciOy = s.combatIndicatorY or 0
-                    local ciPos = s.combatIndicatorPosition or "topleft"
+                    local ciPos = s.combatIndicatorPosition or "healthbar"
                     combatInd:SetSize(ciSz, ciSz)
                     combatInd:ClearAllPoints()
+                    -- "healthbar" is the stored value shown as "Center" in the dropdown;
+                    -- "center" is a render alias for it.
                     if ciPos == "portrait" and portraitFrame and sp then
                         combatInd:SetPoint("CENTER", portraitFrame, "CENTER", ciOx, ciOy)
+                    elseif ciPos == "textbar" then
+                        combatInd:SetPoint("CENTER", btbFrame or pf, "CENTER", ciOx, ciOy)
+                    elseif ciPos == "healthbar" or ciPos == "center" then
+                        combatInd:SetPoint("CENTER", health, "CENTER", ciOx, ciOy)
                     else
                         local anchor =
                             (ciPos == "topright"    and "TOPRIGHT")    or
-                            (ciPos == "center"      and "CENTER")      or
                             (ciPos == "bottomleft"  and "BOTTOMLEFT")  or
                             (ciPos == "bottomright" and "BOTTOMRIGHT") or
                             "TOPLEFT"
@@ -10988,8 +10993,10 @@ initFrame:SetScript("OnEvent", function(self)
             end)
 
             -- Cog popup for combat indicator settings
-            local combatPosValues = { ["topleft"]="Top Left", ["topright"]="Top Right", ["center"]="Center", ["bottomleft"]="Bottom Left", ["bottomright"]="Bottom Right", ["portrait"]="Portrait" }
-            local combatPosOrder = { "topleft", "topright", "center", "bottomleft", "bottomright", "portrait" }
+            -- "healthbar" is the long-standing stored value for centered-on-health-bar,
+            -- shown as "Center". "center" (briefly stored by 8.4.9-era builds) maps to it.
+            local combatPosValues = { ["topleft"]="Top Left", ["topright"]="Top Right", ["healthbar"]="Center", ["bottomleft"]="Bottom Left", ["bottomright"]="Bottom Right", ["textbar"]="Text Bar", ["portrait"]="Portrait" }
+            local combatPosOrder = { "topleft", "topright", "healthbar", "bottomleft", "bottomright", "textbar", "portrait" }
 
             local _, combatCogShowRaw = EllesmereUI.BuildCogPopup({
                 title = "Combat Indicator Settings",
@@ -11007,8 +11014,9 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v) SSetSupported("combatIndicatorColor", v and "classcolor" or "custom"); ReloadAndUpdate(); UpdatePreview() end },
                     { type="dropdown", label="Position", values=combatPosValues, order=combatPosOrder,
                       get=function()
-                          local pos = SValSupported("combatIndicatorPosition", "topleft")
-                          return combatPosValues[pos] and pos or "topleft"
+                          local pos = SValSupported("combatIndicatorPosition", "healthbar")
+                          if pos == "center" then pos = "healthbar" end
+                          return combatPosValues[pos] and pos or "healthbar"
                       end,
                       set=function(v) SSetSupported("combatIndicatorPosition", v); ReloadAndUpdate(); UpdatePreview() end },
                     { type="slider", label="Size", min=8, max=64, step=1,

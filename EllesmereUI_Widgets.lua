@@ -1625,7 +1625,10 @@ local function PixelizeSliderCfg(cfg)
     if not (cfg and cfg.pixel and gamePP) then return cfg end
     local px = {}
     for k, v in pairs(cfg) do px[k] = v end
-    px.min, px.max, px.step = gamePP.ToPixels(cfg.min or 0), gamePP.ToPixels(cfg.max or 0), 1
+    px.min, px.max = gamePP.ToPixels(cfg.min or 0), gamePP.ToPixels(cfg.max or 0)
+    -- Step is declared in coordinate units like min/max; convert it to whole
+    -- pixels (never below 1) so a coarse-stepped slider keeps its coarseness.
+    px.step = math.max(1, math.floor((cfg.step or 1) / (gamePP.mult or 1) + 0.5))
     local get, set = cfg.getValue or cfg.get, cfg.setValue or cfg.set
     local pxGet = get and function()
         local v = get()
@@ -1639,10 +1642,10 @@ local function PixelizeSliderCfg(cfg)
     return px
 end
 
--- Localized label with the pixel-unit suffix. The suffix is appended after
--- localization so the L() lookup key stays the untouched English string.
+-- Localized label with the pixel-unit suffix. Label and suffix are localized
+-- separately so the L() lookup keys stay untouched English strings.
 local function PixelLabel(text)
-    return EllesmereUI.L(text or "") .. " (px)"
+    return EllesmereUI.L(text or "") .. " " .. EllesmereUI.L("(px)")
 end
 
 -------------------------------------------------------------------------------
