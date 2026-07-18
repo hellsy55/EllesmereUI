@@ -8871,7 +8871,8 @@ function EAB:OnInitialize()
         local _qPending = false
         local function QualityScan()
                 _qPending = false
-                local bars = EAB.db.profile.bars
+                local bars = EAB.db and EAB.db.profile and EAB.db.profile.bars
+                if not bars then return end
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
                     local s = bars[info.key]
@@ -8933,6 +8934,13 @@ function EAB:OnInitialize()
                 end
         end
         qf:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+        -- Loadout/spec swap changes slot CONTENTS but does not reliably fire
+        -- ACTIONBAR_SLOT_CHANGED for our EABButtons (same reason the spell
+        -- refresh sweep exists), so a rank icon from the old spec's item can
+        -- persist on a slot the new spec leaves empty or fills with a spell.
+        -- SPELLS_CHANGED covers that swap; the macro name is handled by the
+        -- ForceButtonRefresh sweep on the same event.
+        qf:RegisterEvent("SPELLS_CHANGED")
         qf:SetScript("OnEvent", function()
             if not _qPending then
                 _qPending = true
