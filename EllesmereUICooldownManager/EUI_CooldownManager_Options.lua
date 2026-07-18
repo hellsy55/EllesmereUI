@@ -8483,14 +8483,17 @@ initFrame:SetScript("OnEvent", function(self)
                             -- so Apply to Bar / All Specs here means "rejoin the bar" -- the
                             -- same as Include This Spell. Do that instead of re-applying the
                             -- value already on the bar (which would just toggle it off).
-                            -- For a scalar popup value (Threshold Seconds) the flyout item is
-                            -- a fixed identifier, not the bar's number, so "sits on the bar's
-                            -- value" is only true when the entered number actually matches
-                            -- this scope's value -- rejoin then (keeps the bar apply for other
-                            -- spells); otherwise fall through and push the new number, which
-                            -- rejoining would silently discard.
+                            -- Some items carry a payload the flyout val doesn't capture:
+                            -- a scalar popup value (Threshold Seconds), a custom colour
+                            -- ("custom" is a fixed identifier, the RGB lives in ss), and
+                            -- the + Border Color toggle (an on/off flag plus its RGBA).
+                            -- For those "sits on the bar's value" only holds when the
+                            -- payload actually matches this scope -- rejoin then (keeps
+                            -- the bar apply for other spells); otherwise fall through and
+                            -- push it, which rejoining would silently discard.
                             if AB.KeysBarApplied(keys) and AB.SpellHasOwn(keys)
-                               and (not ctx.scalarApply or (scopeActive and valuesMatch)) then
+                               and (not (ctx.scalarApply or ctx.payloadValue)
+                                    or (scopeActive and valuesMatch)) then
                                 AB.IncludeSpell(keys)
                                 if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                                 if ns.QueueReanchor then ns.QueueReanchor() end
@@ -8499,10 +8502,16 @@ initFrame:SetScript("OnEvent", function(self)
                                 return
                             end
                             -- Toggle OFF: clicking a scope that already holds this
-                            -- exact value un-applies it. Binary toggles un-apply on
-                            -- ANY active value (their valueOf flips each click, so
-                            -- an equality gesture doesn't exist for them).
-                            if scopeActive and (valuesMatch or ctx.isToggle) then
+                            -- exact value un-applies it. Binary toggles carry no value
+                            -- of their own, so any active scope is an un-apply gesture.
+                            -- The + Border Color toggle carries an RGBA payload, so
+                            -- equality IS meaningful: un-apply only when the colour
+                            -- matches, otherwise fall through and push the new one --
+                            -- un-applying there would discard it and snap back to the
+                            -- default. (Custom-colour value items aren't toggles, so
+                            -- isToggle already gates them here; only the rejoin branch
+                            -- above needed the payloadValue guard for them.)
+                            if scopeActive and (valuesMatch or (ctx.isToggle and not ctx.payloadValue)) then
                                 AB.RunBarUnapply(keys, allSpecs)
                                 if ctx.refresh then ctx.refresh() end
                                 if s._updateActive then s._updateActive() end
@@ -8842,6 +8851,23 @@ initFrame:SetScript("OnEvent", function(self)
                             -- Reachable from onItemCreated closures (color swatches),
                             -- which live outside this scope but capture `sub`.
                             sub._refreshSelection = RefreshFlyoutSelection
+                            -- True when apply keys contain an R/G/B triple, i.e. the item
+                            -- carries a per-spell colour the flyout val doesn't capture.
+                            -- Structural on purpose: keying off val == "custom" missed
+                            -- payload toggles that use a different discriminator (Threshold
+                            -- Color, + Border Color), silently reintroducing the reset bug.
+                            local function hasColourPayload(ks)
+                                if not ks then return false end
+                                local set = {}
+                                for _, k in ipairs(ks) do set[k] = true end
+                                for _, k in ipairs(ks) do
+                                    local base = k:match("^(.+)R$")
+                                    if base and set[base .. "G"] and set[base .. "B"] then
+                                        return true
+                                    end
+                                end
+                                return false
+                            end
                             for _, item in ipairs(items) do
                                 if item.divider then
                                     -- Thin separator line (e.g. between built-in sounds
@@ -8976,6 +9002,14 @@ initFrame:SetScript("OnEvent", function(self)
                                             write = applyWrite,
                                             scalarApply = item.scalarApply,
                                             isToggle = isChargeToggle or isActiveBorder or isFnToggle,
+                                            -- Item whose val is only a discriminator while
+                                            -- the real value carries a per-spell colour
+                                            -- payload (an R/G/B triple in applyKeys). For
+                                            -- those, equality must be judged by valuesMatch,
+                                            -- not the identifier, or the rejoin/toggle-off
+                                            -- shortcuts discard the colour (see the two
+                                            -- branches in the apply handler above).
+                                            payloadValue = hasColourPayload(applyKeys),
                                             -- Toggles: "Apply to Bar" ENABLES the feature
                                             -- on the bar (apply true). Disabling is the
                                             -- toggle-off press -- ctx.isToggle un-applies
