@@ -822,28 +822,27 @@ local function ProcessBlockChildren(frame, depth)
 
 end
 
--- Weak-keyed so pooled/recycled poiButtons don't leak or get double-hooked.
-local _hookedPOIButtons = setmetatable({}, { __mode = "k" })
+-- Suppress a POI button permanently. Hooks Show + SetAlpha so Blizzard
+-- can never make it visible again. The _euiSuppressed flag is on the
+-- frame object itself, so it persists even if the button is pooled.
+local _poiHiddenParent = CreateFrame("Frame")
+_poiHiddenParent:Hide()
 
 local function SuppressPOI(block)
+    -- "Show Quest Icons" on: leave Blizzard's native POI button visible and
+    -- skip installing the keep-hidden hook entirely. Reload-gated, so this is
+    -- read fresh per block; no live un-suppression needed.
     if EQT.Cfg("showQuestIcons") then return end
     local pb = block and block.poiButton
-    if not pb then return end
-    if pb:IsShown() then pb:Hide() end
+    if not pb or EllesmereUI._GetFFD(pb).suppressed then return end
+    EllesmereUI._GetFFD(pb).suppressed = true
+    pb:SetParent(_poiHiddenParent)
     pb:EnableMouse(false)
-
-    -- Re-hide synchronously whenever Blizzard shows this button again (e.g.
-    -- on SUPER_TRACKING_CHANGED from clicking a quest) so there's no visible
-    -- flash before the next SkinBlock/suppression pass. Hide() only, never
-    -- SetParent -- that's the taint-safe version of this pattern (see
-    -- InstallShowHook's otf Show-hook above, which does the same thing).
-    if not _hookedPOIButtons[pb] then
-        _hookedPOIButtons[pb] = true
-        hooksecurefunc(pb, "Show", function(self)
-            if EQT.Cfg("showQuestIcons") then return end
-            self:Hide()
-        end)
-    end
+    hooksecurefunc(pb, "SetParent", function(self, parent)
+        if parent ~= _poiHiddenParent then
+            self:SetParent(_poiHiddenParent)
+        end
+    end)
 end
 
 local function SkinBlock(block)
@@ -980,6 +979,75 @@ local function SkinExistingBlocks(tracker)
 end
 
 -------------------------------------------------------------------------------
+-- Blizzard anchors whichever module currently sits in the top slot with a
+-- fixed TOP/TOP offset relative to ObjectiveTrackerFrame. Verified via /dump
+-- across QuestObjectiveTracker and ProfessionsRecipeTracker: always -38,
+-- independent of module type and independent of Header's height (ruled out
+-- separately). We tighten this gap after each layout pass.
+-------------------------------------------------------------------------------
+local TOP_ANCHOR_OFFSET = -6  -- ASSUMPTION: Startwert, per Auge nachjustieren
+-- Shared with EllesmereUIQuestTracker_Visibility.lua (BG/top-divider offset)
+-- so both files derive the top gap from a single source instead of two
+-- independent magic numbers drifting apart.
+EQT.TOP_ANCHOR_OFFSET = TOP_ANCHOR_OFFSET
+
+local function TightenTopAnchor(tracker)
+    if not tracker or not tracker.GetPoint or not tracker.SetPoint then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    -- Nicht während Blizzards Collapse/Expand-Slide-Animation eingreifen,
+    -- sonst kollidiert unser SetPoint mit ObjectiveTrackerSlidingMixin.
+    if tracker.IsSliding and tracker:IsSliding() then return end
+
+    local point, relativeTo, relativePoint, xOfs, yOfs = tracker:GetPoint(1)
+    if point == "TOP" and relativePoint == "TOP" and relativeTo == _G.ObjectiveTrackerFrame then
+        if yOfs and math.abs(yOfs - TOP_ANCHOR_OFFSET) > 0.01 then
+            tracker:SetPoint("TOP", relativeTo, "TOP", xOfs or 0, TOP_ANCHOR_OFFSET)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Short-lived per-frame anchor poller. Diagnostic logging (see chat history /
+-- PR notes) showed two things: (1) the TOP/TOP anchor is NOT set yet at the
+-- moment tracker:Update() returns -- GetPoint(1) returns nil/nil right then,
+-- so a synchronous TightenTopAnchor call in the Update hook is a permanent
+-- no-op for this anchor; the real -38 value only exists on the next frame.
+-- (2) Blizzard can fire several independent native Update() passes within
+-- ~0.2s of a single quest interaction (observed: 4 in ~208ms), each
+-- resetting the anchor to -38 again. A single next-frame correction per
+-- burst chased each reset individually and never caught up during the
+-- burst -- visible as the tracker repeatedly dropping back to -38 for that
+-- whole window.
+--
+-- This frame is OUR OWN (never Blizzard's -- respects "never SetScript on
+-- tracker frames"). Its OnUpdate runs every frame for a short window after
+-- any native Update(), re-tightening the anchor before that frame renders
+-- instead of one frame late. TightenTopAnchor() itself is unchanged and
+-- still cheap (GetPoint + early-return unless off by >0.01), so polling it
+-- every frame for a bounded window is negligible cost.
+-------------------------------------------------------------------------------
+local _anchorPoller = CreateFrame("Frame")
+local _pollUntil = 0
+local _pollTrackers = nil  -- set by EQT.InitSkin() once EachTracker exists
+_anchorPoller:Hide()
+_anchorPoller:SetScript("OnUpdate", function()
+    if GetTime() > _pollUntil then
+        _anchorPoller:Hide()
+        return
+    end
+    if _pollTrackers then _pollTrackers() end
+end)
+
+-- Extends (or starts) the poll window. Called from the Update hook below on
+-- every native Update() so any burst of resets stays covered until it goes
+-- quiet for POLL_WINDOW seconds.
+local POLL_WINDOW = 0.4
+local function StartAnchorPoll()
+    _pollUntil = GetTime() + POLL_WINDOW
+    if not _anchorPoller:IsShown() then _anchorPoller:Show() end
+end
+
+-------------------------------------------------------------------------------
 -- Hook a single sub-tracker.
 -------------------------------------------------------------------------------
 local function HookTracker(tracker)
@@ -1032,13 +1100,22 @@ local function HookTracker(tracker)
     local _updateDirty = false
     if tracker.Update then
         hooksecurefunc(tracker, "Update", function()
-            if ShouldSkipSkin() or _updateDirty then return end
+            if ShouldSkipSkin() then return end
+            -- The synchronous TightenTopAnchor call that used to live here
+            -- was removed: diagnostic logging proved it always ran before
+            -- Blizzard assigns the anchor (GetPoint(1) still nil at that
+            -- point), so it never corrected anything. StartAnchorPoll()
+            -- keeps the per-frame poller alive instead, which is the thing
+            -- that actually catches the reset once Blizzard sets it.
+            StartAnchorPoll()
+            if _updateDirty then return end
             _updateDirty = true
             C_Timer.After(0, function()
                 _updateDirty = false
                 if ShouldSkipSkin() then return end
             
                 if tracker.Header then EnsureAccentDivider(tracker.Header) end
+                TightenTopAnchor(tracker)
                 if EQT.QueueResize then EQT.QueueResize() end
                 if tracker.usedBlocks then
                     for _, byTemplate in pairs(tracker.usedBlocks) do
@@ -1050,6 +1127,23 @@ local function HookTracker(tracker)
                     end
                 end
             end)
+        end)
+    end
+
+    -- ObjectiveTrackerSlidingMixin (SUPER_TRACKING_CHANGED can trigger a
+    -- reorder slide, not just collapse/expand) calls tracker:OnEndSlide()
+    -- from EndSlide() right after clearing slideInfo -- i.e. exactly when
+    -- IsSliding() flips back to false. TightenTopAnchor bails out entirely
+    -- while IsSliding() is true (see comment there), so without this hook
+    -- the anchor sits at Blizzard's untightened -38 for the ~0.2-0.3s slide
+    -- duration and only snaps to TOP_ANCHOR_OFFSET on the next Update() call,
+    -- which is what showed up as the whole tracker shifting down briefly on
+    -- quest click. Verified against Blizzard_ObjectiveTrackerShared.lua:
+    -- EndSlide() -> self.slideInfo = nil -> self:OnEndSlide(...).
+    if tracker.OnEndSlide then
+        hooksecurefunc(tracker, "OnEndSlide", function(self)
+            if ShouldSkipSkin() then return end
+            TightenTopAnchor(self)
         end)
     end
 
@@ -1131,11 +1225,24 @@ function EQT.InitSkin()
         end
         if otf.Header and otf.Header ~= headerMenu then
             otf.Header:Hide()
-            otf.Header:HookScript("OnShow", function(self) self:Hide() end)
+            if otf.Header.SetHeight then otf.Header:SetHeight(0.001) end
+            otf.Header:HookScript("OnShow", function(self)
+                self:Hide()
+                if self.SetHeight then self:SetHeight(0.001) end
+            end)
         end
         -- Strip the parchment / nine-slice background behind the whole tracker.
         if otf.NineSlice then otf.NineSlice:Hide() end
         StripTextures(otf)
+    end
+
+    -- Wire the anchor poller's tracker walk now that EachTracker exists.
+    -- Skips shared-widget-pool trackers, same as the rest of this module.
+    _pollTrackers = function()
+        EachTracker(function(t)
+            if SharesWidgetPool(t) then return end
+            TightenTopAnchor(t)
+        end)
     end
 
     EachTracker(HookTracker)
