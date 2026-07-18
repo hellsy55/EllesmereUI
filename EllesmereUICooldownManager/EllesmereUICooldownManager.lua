@@ -6696,15 +6696,56 @@ local function RebuildKeybindCache()
                     end
                     slot = i + (pg - 1) * 12
                 end
-                local slotType, id = GetActionInfo(slot)
+                local slotType, id, subType = GetActionInfo(slot)
                 local spellID
                 local fromMacro = false
                 if slotType == "spell" then
                     spellID = id
-                elseif slotType == "macro" and id then
-                    local macroSpell = GetMacroSpell(id)
-                    spellID = macroSpell or (id > 0 and id) or nil
+                elseif slotType == "macro" then
                     fromMacro = true
+                    if subType == "spell" then
+                        -- "Smart" single-spell macro: Blizzard already
+                        -- resolved it, and `id` here IS the spellID, not a
+                        -- macro index -- passing it to GetMacroSpell would
+                        -- look up the wrong thing.
+                        spellID = id
+                    else
+                        -- Everything else (single-item, mount/companion,
+                        -- multi-line/conditional...): `id` from GetActionInfo
+                        -- is NOT a reliable identifier here. Resolve the real
+                        -- macro index via its name instead (same workaround
+                        -- EllesmereUICdmHooks.lua's SlotSpellID already uses).
+                        local macroName = GetActionText(slot)
+                        local macroIndex = macroName and GetMacroIndexByName(macroName)
+                        if macroIndex and macroIndex > 0 then
+                            spellID = GetMacroSpell(macroIndex)
+                            if not spellID then
+                                -- Not a spell-shaped macro: pull the first
+                                -- /use target out of the macro body and
+                                -- resolve it as an item instead.
+                                local body = GetMacroBody and GetMacroBody(macroIndex)
+                                local target = body and body:match("/use!?%s+([^\r\n]+)")
+                                if target then
+                                    target = target:gsub("^%[.-%]%s*", ""):match("^%s*(.-)%s*$")
+                                    -- "item:NNNN" is macro-only shorthand for
+                                    -- targeting an itemID directly. It is NOT
+                                    -- a valid GetItemInfoInstant input (that
+                                    -- wants a bare itemID, item name, or a
+                                    -- full item link) -- pull the numeric ID
+                                    -- out ourselves instead of handing the
+                                    -- literal "item:NNNN" string to it.
+                                    local itemID = target:match("^item:(%d+)")
+                                    itemID = itemID and tonumber(itemID)
+                                    if not itemID and not tonumber(target) then
+                                        itemID = C_Item and C_Item.GetItemInfoInstant and C_Item.GetItemInfoInstant(target)
+                                    end
+                                    if itemID then
+                                        _SetKeybind(-itemID, FormatKeybindKey(key), true)
+                                    end
+                                end
+                            end
+                        end
+                    end
                 elseif slotType == "item" and id then
                     -- Store under negated itemID (-id) to match the FC
                     -- convention for item presets/trinkets.
