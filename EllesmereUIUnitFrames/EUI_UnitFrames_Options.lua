@@ -9659,7 +9659,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 3: Bar Spacing + Background Color (with alpha)
         local sharedClassResRow3
         sharedClassResRow3, h = W:DualRow(parent, y,
-            { type="slider", text="Bar Spacing", min=0, max=10, step=1,
+            { type="slider", pixel=true, text="Bar Spacing", min=0, max=10, step=1,
               disabled=function() return SValSupported("classPowerStyle", "none") ~= "modern" end,
               disabledTooltip="Class Resource must be set to Modern", rawTooltip=true,
               getValue=function() return SValSupported("classPowerSpacing", 2) end,
@@ -9889,10 +9889,10 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return SValSupported("buffOffsetY", 0) end,
                       set=function(v) SSetSupported("buffOffsetY", v) end },
                     -- Physical-pixel-perfect gaps between buff icons (X = columns, Y = rows).
-                    { type="slider", label="Spacing X", min=-1, max=10, step=1,
+                    { type="slider", pixel=true, label="Spacing X", min=-1, max=10, step=1,
                       get=function() return SValSupported("buffSpacingX", 1) end,
                       set=function(v) SSetSupported("buffSpacingX", v) end },
-                    { type="slider", label="Spacing Y", min=-1, max=10, step=1,
+                    { type="slider", pixel=true, label="Spacing Y", min=-1, max=10, step=1,
                       get=function() return SValSupported("buffSpacingY", 1) end,
                       set=function(v) SSetSupported("buffSpacingY", v) end },
                 },
@@ -10016,10 +10016,10 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return SValSupported("debuffOffsetY", 0) end,
                       set=function(v) SSetSupported("debuffOffsetY", v) end },
                     -- Physical-pixel-perfect gaps between debuff icons (X = columns, Y = rows).
-                    { type="slider", label="Spacing X", min=-1, max=10, step=1,
+                    { type="slider", pixel=true, label="Spacing X", min=-1, max=10, step=1,
                       get=function() return SValSupported("debuffSpacingX", 1) end,
                       set=function(v) SSetSupported("debuffSpacingX", v) end },
-                    { type="slider", label="Spacing Y", min=-1, max=10, step=1,
+                    { type="slider", pixel=true, label="Spacing Y", min=-1, max=10, step=1,
                       get=function() return SValSupported("debuffSpacingY", 1) end,
                       set=function(v) SSetSupported("debuffSpacingY", v) end },
                 },
@@ -10401,7 +10401,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Row 3: Spacing | Show Countdown Text
         _, h = W:DualRow(parent, y,
-            { type="slider", text="Spacing", min=-1, max=10, step=1,
+            { type="slider", pixel=true, text="Spacing", min=-1, max=10, step=1,
               getValue=function() return PrivGet("paSpacing", 0) end,
               setValue=function(v) PrivSet("paSpacing", v) end },
             { type="toggle", text="Show Countdown Text",
@@ -13080,7 +13080,7 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="dropdown", text="Stack Direction", values={ up="Up", down="Down" }, order={ "up", "down" },
                       getValue=function() return db.profile.boss.bossStackDirection or "down" end,
                       setValue=function(v) db.profile.boss.bossStackDirection = v; ReloadAndUpdate() end },
-                    { type="slider", text="Vertical Spacing", min=-200, max=200, step=1,
+                    { type="slider", pixel=true, text="Vertical Spacing", min=-200, max=200, step=1,
                       getValue=function() return db.profile.bossSpacing or 80 end,
                       setValue=function(v) db.profile.bossSpacing = v; ReloadAndUpdate() end })
                 total = total + ch
@@ -13197,7 +13197,7 @@ initFrame:SetScript("OnEvent", function(self)
                           get=function() local _, y = ns.GetBossSimpleBuffOffset(db.profile.boss); return y end,
                           set=function(v) db.profile.boss.simpleBuffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                         -- Physical-pixel-perfect gap between the simple buff icons.
-                        { type="slider", label="Spacing", min=-1, max=10, step=1,
+                        { type="slider", pixel=true, label="Spacing", min=-1, max=10, step=1,
                           get=function() return db.profile.boss.simpleBuffSpacing or 1 end,
                           set=function(v) db.profile.boss.simpleBuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                     },
@@ -13331,7 +13331,7 @@ initFrame:SetScript("OnEvent", function(self)
                           get=function() local _, y = ns.GetBossSimpleDebuffOffset(db.profile.boss); return y end,
                           set=function(v) db.profile.boss.simpleDebuffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                         -- Physical-pixel-perfect gap between the simple debuff icons.
-                        { type="slider", label="Spacing", min=-1, max=10, step=1,
+                        { type="slider", pixel=true, label="Spacing", min=-1, max=10, step=1,
                           get=function() return db.profile.boss.simpleDebuffSpacing or 1 end,
                           set=function(v) db.profile.boss.simpleDebuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                     },
@@ -13503,7 +13503,7 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return db.profile.boss.buffOffsetY or 0 end,
                       set=function(v) db.profile.boss.buffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                     -- Physical-pixel-perfect gap between the boss buff icons.
-                    { type="slider", label="Spacing", min=-1, max=10, step=1,
+                    { type="slider", pixel=true, label="Spacing", min=-1, max=10, step=1,
                       get=function() return db.profile.boss.buffSpacing or 1 end,
                       set=function(v) db.profile.boss.buffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                 } })
@@ -13528,7 +13528,7 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return db.profile.boss.debuffOffsetY or 0 end,
                       set=function(v) db.profile.boss.debuffOffsetY = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                     -- Physical-pixel-perfect gap between the boss debuff icons.
-                    { type="slider", label="Spacing", min=-1, max=10, step=1,
+                    { type="slider", pixel=true, label="Spacing", min=-1, max=10, step=1,
                       get=function() return db.profile.boss.debuffSpacing or 1 end,
                       set=function(v) db.profile.boss.debuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                 } })
