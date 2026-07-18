@@ -600,6 +600,25 @@ qolFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Auto Sell Junk + Auto Repair
     ---------------------------------------------------------------------------
+    -- Auto-repair cost string. Coin icons (opt-in via the Auto Repair cog) use
+    -- the game's own localized coin textures; the default short text builds
+    -- "12o 34a" from localized suffixes (EllesmereUI.L translates g/s -> o/a in
+    -- frFR; copper "c" falls through untranslated).
+    local function RepairCostString(cost)
+        if EllesmereUIDB and EllesmereUIDB.repairCoinIcons then
+            return C_CurrencyInfo.GetCoinTextureString(cost)
+        end
+        local g = floor(cost / 10000)
+        local s = floor((cost % 10000) / 100)
+        local c = cost % 100
+        local out = ""
+        if g > 0 then out = g .. EllesmereUI.L("g") end
+        if s > 0 then out = out .. (out ~= "" and " " or "") .. s .. EllesmereUI.L("s") end
+        if c > 0 then out = out .. (out ~= "" and " " or "") .. c .. EllesmereUI.L("c") end
+        if out == "" then out = "0" .. EllesmereUI.L("c") end
+        return out
+    end
+
     local merchantFrame = CreateFrame("Frame", "EUI_MerchantHandler", UIParent)
     merchantFrame:RegisterEvent("MERCHANT_SHOW")
     merchantFrame:SetScript("OnEvent", function()
@@ -624,7 +643,7 @@ qolFrame:SetScript("OnEvent", function(self)
 
                     -- Check if we can actually afford the repair
                     if not useGuild and GetMoney() < cost then
-                        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060Not enough gold to repair.|r")
+                        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060" .. EllesmereUI.L("Not enough gold to repair.") .. "|r")
                         return
                     end
 
@@ -641,10 +660,8 @@ qolFrame:SetScript("OnEvent", function(self)
                         end)
                     end
 
-                    local gold = floor(cost / 10000)
-                    local silver = floor((cost % 10000) / 100)
-                    local src = useGuild and " (guild bank)" or ""
-                    EllesmereUI.Print("|cff0CD29DEllesmereUI:|r Repaired all items for " .. gold .. "g " .. silver .. "s." .. src)
+                    local src = useGuild and EllesmereUI.L(" (guild bank)") or ""
+                    EllesmereUI.Print("|cff0CD29DEllesmereUI:|r " .. EllesmereUI.Lf("Repaired all items for %s", RepairCostString(cost)) .. src)
                 end
             end
         end
