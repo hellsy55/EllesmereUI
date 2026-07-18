@@ -4527,7 +4527,9 @@ do
             -- If the game echoes the Fervor-of-Battle Slam as a real cast
             -- event, skip it -- the charge was already counted above. A
             -- player-pressed Slam can't land inside the 0.3 s window (GCD).
-            if spellID == 1464 and GetTime() < fobWindow then return end
+            -- 1269383: Master of Warfare replaces Slam with Heroic Strike,
+            -- so the echo carries that id instead.
+            if (spellID == 1464 or spellID == 1269383) and GetTime() < fobWindow then return end
             -- No sweep partner in range -> the game doesn't consume a charge
             if not EnemiesInReach(2) then return end
             stacks = max(0, stacks - SPENDERS[spellID])
@@ -4538,22 +4540,29 @@ do
     -- NO aura validation here, on purpose. v8.4.9 tried to correct
     -- prediction drift against the real buff (first by name, then by
     -- C_UnitAuras.GetPlayerAuraBySpellID), treating a missing aura as
-    -- "buff gone" and wiping the stacks. But on the live 12.x client the
-    -- player-aura read surface returns nothing for this buff even in the
-    -- open world -- verified in-game 2026-07-17: with Sweeping Strikes
-    -- visibly active, GetPlayerAuraBySpellID(260708) returned nil and a
-    -- full GetAuraDataByIndex("player", i, "HELPFUL") sweep enumerated
-    -- ZERO auras. Any validation built on that surface reads every live
-    -- buff as absent and zeroes the bar (the v8.4.9 bug: stacks wiped in
-    -- combat, pinned at 0 in M+). Until Blizzard exposes a readable
-    -- charge count, the cast-event prediction plus the duration timer IS
-    -- the tracker.
+    -- "buff gone" and wiping the stacks. But Sweeping Strikes (260708) is
+    -- NOT a whitelisted aura, and non-whitelisted player buffs are
+    -- invisible to the aura read surface -- verified in-game 2026-07-17:
+    -- with the buff visibly active, GetPlayerAuraBySpellID(260708)
+    -- returned nil and a GetAuraDataByIndex("player", i, "HELPFUL") sweep
+    -- enumerated zero auras. So any validation on this buff reads it as
+    -- absent and zeroes the bar (the v8.4.9 bug: stacks wiped in combat,
+    -- pinned at 0 in M+). Whitelisted buffs ARE readable -- see
+    -- GetMaelstromWeapon / GetSoulFragments below and the
+    -- NON_SECRET_SPELL_IDS catalogue + C_Secrets.ShouldSpellAuraBeSecret
+    -- probe in EllesmereUIAuraBuffReminders. If Blizzard ever whitelists
+    -- 260708, validation becomes possible again; until then the
+    -- cast-event prediction plus the duration timer IS the tracker.
     function EllesmereUI.GetSweepingStrikes()
         if not sweepKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
         end
-        return stacks, MaxStacks()
+        -- Clamp: a mid-window respec out of Improved drops MaxStacks 18->12
+        -- while the predicted stacks upvalue keeps its old value.
+        local m = MaxStacks()
+        if stacks > m then stacks = m end
+        return stacks, m
     end
 end
 
