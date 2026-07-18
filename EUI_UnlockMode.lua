@@ -59,6 +59,37 @@ if not EllesmereUI.UnregisterUnlockElement then
     end
 end
 
+-- Cross-addon integration: listeners receive real session open/close changes.
+-- Close notifications include "exit", "save", or "discard" as the second argument.
+-- Combat suspension does not end the session and therefore does not fire them.
+if not EllesmereUI._unlockModeListeners then
+    EllesmereUI._unlockModeListeners = {}
+end
+
+if not EllesmereUI.RegisterUnlockModeListener then
+    function EllesmereUI:RegisterUnlockModeListener(owner, listener)
+        self._unlockModeListeners[owner] = listener
+        if self._unlockModeSessionActive then
+            pcall(listener, true)
+        end
+    end
+
+    function EllesmereUI:UnregisterUnlockModeListener(owner)
+        self._unlockModeListeners[owner] = nil
+    end
+
+    function EllesmereUI:IsUnlockModeActive()
+        return self._unlockModeSessionActive == true
+    end
+
+    function EllesmereUI:_NotifyUnlockModeListeners(active, closeAction)
+        self._unlockModeSessionActive = active == true
+        for _, listener in pairs(self._unlockModeListeners) do
+            pcall(listener, self._unlockModeSessionActive, closeAction)
+        end
+    end
+end
+
 -- If this file was already fully loaded by another addon, bail out.
 -- The registration API above is safe to re-run (idempotent), but the
 -- rest of the file (state, frames, animations) must only exist once.
@@ -9108,6 +9139,11 @@ local BANNER_PX_H = 120
 
 local hudFrame
 
+-- Stable visible-height anchor for other addons that stack controls below the banner.
+function EllesmereUI:GetUnlockModeTopBarAnchor()
+    return hudFrame and hudFrame._hoverZone
+end
+
 local function CreateHUD(parent)
     if hudFrame then return hudFrame end
 
@@ -10169,11 +10205,12 @@ local function RevertPositions()
 end
 
 -- Internal close (actually hides everything and returns to options)
-local function DoClose()
+local function DoClose(closeAction)
     if not isUnlocked then return end
     isUnlocked = false
     EllesmereUI._unlockActive = false
     EllesmereUI._unlockModeActive = false
+    EllesmereUI:_NotifyUnlockModeListeners(false, closeAction or "exit")
     if EllesmereUI._HideFallbackGhosts then EllesmereUI._HideFallbackGhosts() end
 
     -- Notify action bars to restore Blizzard-owned frame anchors
@@ -10365,12 +10402,12 @@ function ns.RequestClose(save, afterFn)
     if afterFn then pendingAfterClose = afterFn end
     if save then
         CommitPositions()
-        DoClose()
+        DoClose("save")
         return
     end
     -- No changes → just exit
     if not hasChanges then
-        DoClose()
+        DoClose("exit")
         return
     end
     -- Has unsaved changes → show confirm popup
@@ -10381,11 +10418,11 @@ function ns.RequestClose(save, afterFn)
         confirmText = "Save & Exit",
         onCancel = function()
             RevertPositions()
-            DoClose()
+            DoClose("exit")
         end,
         onConfirm = function()
             CommitPositions()
-            DoClose()
+            DoClose("save")
         end,
         -- Dismiss (ESC / click-off) does nothing -- user stays in unlock mode,
         -- and any pending close callback is cleared since the close was abandoned
@@ -10408,7 +10445,7 @@ function EllesmereUI.ForceCloseUnlockDiscard()
         EllesmereUI.SpecOverrides_UnlockValueSnapDiscard()
     end
     if hasChanges then pcall(RevertPositions) end
-    pcall(DoClose)
+    pcall(DoClose, "discard")
 end
 
 -------------------------------------------------------------------------------
@@ -11008,6 +11045,7 @@ function ns.OpenUnlockMode()
     CreateUnlockFrame()
     CreateGrid(unlockFrame)
     CreateHUD(unlockFrame)
+    EllesmereUI:_NotifyUnlockModeListeners(true)
     CreateOpenAnimFrame(unlockFrame)
 
     -- Special (spec-override) sessions swap the unlock art for the override
@@ -11575,6 +11613,9 @@ ns.CloseUnlockMode = ns.CloseUnlockMode
 -- Expose on the global EllesmereUI so SelectPage can intercept "Unlock Mode"
 if EllesmereUI then
     EllesmereUI._openUnlockMode = ns.OpenUnlockMode
+    function EllesmereUI:OpenUnlockMode()
+        ns.OpenUnlockMode()
+    end
 end
 
 -- Toggle helper + active flag alias used by options pages
