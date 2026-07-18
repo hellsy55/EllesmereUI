@@ -8703,15 +8703,16 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                             local title, message
                             if needRA then
-                                title = "CD Ready Glow (Resource Aware)"
-                                message = "Resource Aware CD Ready Glow may cause a slight loss in performance efficiency."
+                                title = EllesmereUI.L("CD Ready Glow (Resource Aware)")
+                                message = EllesmereUI.L("Resource Aware CD Ready Glow may cause a slight loss in performance efficiency.")
                             else
-                                title = "Overwrite Existing Settings"
+                                title = EllesmereUI.L("Overwrite Existing Settings")
                                 message = ""
                             end
                             if replacing then
-                                local scopeName = allSpecs and "Apply to Bar (All Specs)" or "Apply to Bar"
-                                local line = "This setting's active " .. scopeName .. " value will be replaced."
+                                local line = allSpecs
+                                    and EllesmereUI.L("This setting's active Apply to Bar (All Specs) value will be replaced.")
+                                    or EllesmereUI.L("This setting's active Apply to Bar value will be replaced.")
                                 if message ~= "" then
                                     message = message .. "\n\n" .. line
                                 else
@@ -8719,16 +8720,21 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end
                             if overwrites > 0 then
-                                local scope = allSpecs and "across your specs" or "on this bar"
-                                local line = "This replaces " .. overwrites
-                                    .. " existing value(s) for this setting " .. scope .. "."
+                                -- The English key is itself a valid "%d" format string, so if a
+                                -- locale's translation mangles the specifier and string.format
+                                -- errors, fall back to formatting the untranslated key.
+                                local key = allSpecs
+                                    and "This replaces %d existing value(s) for this setting across your specs."
+                                    or "This replaces %d existing value(s) for this setting on this bar."
+                                local ok, line = pcall(string.format, EllesmereUI.L(key), overwrites)
+                                if not ok then line = string.format(key, overwrites) end
                                 if message ~= "" then
                                     message = message .. "\n\n" .. line
                                 else
                                     message = line
                                 end
                             end
-                            message = message .. " Do you want to continue?"
+                            message = message .. " " .. EllesmereUI.L("Do you want to continue?")
                             menu:Hide()
                             EllesmereUI:ShowConfirmPopup({
                                 title       = title,
