@@ -7525,7 +7525,17 @@ initFrame:SetScript("OnEvent", function(self)
         -- (see RefreshCDMIconAppearance), so writer and reader agree. Custom/injected
         -- buffs have their own positive id as _previewSpellID, which works too.
         local function ResolveBuffSettingsKey(af)
-            return af and af._previewSpellID
+            local sid = af and af._previewSpellID
+            if not sid then return nil end
+            -- Same-spellID collision (Diabolist Demonic Art vs Diabolic Ritual):
+            -- when two viewer slots share this displayed id, key THIS slot by its
+            -- own cooldownID so each is configured independently. Non-collided
+            -- buffs keep the stable spellID key (survives talent swaps).
+            local cdID = af and (af._previewCdID or af.cooldownID)
+            if type(cdID) == "number" and ns.IsCollidedBuffSid and ns.IsCollidedBuffSid(sid) then
+                return "c" .. cdID
+            end
+            return sid
         end
 
         local allSpells = {}
@@ -7800,6 +7810,12 @@ initFrame:SetScript("OnEvent", function(self)
                     local function EnsureSS()
                         if store and not store[spellID] then
                             store[spellID] = ss
+                            -- Flip the runtime hot-path gate the moment a
+                            -- cooldownID-scoped buff entry is first persisted.
+                            if type(spellID) == "string" and string.byte(spellID, 1) == 99
+                               and ns.MarkBuffFamHasCdKey then
+                                ns.MarkBuffFamHasCdKey()
+                            end
                         end
                         return ss
                     end

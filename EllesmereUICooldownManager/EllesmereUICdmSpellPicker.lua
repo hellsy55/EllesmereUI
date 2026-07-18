@@ -1077,6 +1077,63 @@ function ns.CollectDefaultBuffTrackEntries()
     return out
 end
 
+-------------------------------------------------------------------------------
+--  Same-spellID buff disambiguation (Diabolist Demonic Art vs Diabolic Ritual)
+--
+--  Blizzard can report the SAME canonical spellID on two DIFFERENT buff-viewer
+--  slots (cooldownIDs). Per-icon buff settings are keyed by spellID, so those
+--  two collide onto one entry. We let a COLLIDED slot key its settings by
+--  "c"..cooldownID instead, giving each its own entry. Only collided slots do
+--  this: keying every buff by cooldownID would regress non-collided buffs,
+--  whose settings must survive talent swaps (cooldownID drifts; spellID does
+--  not). Collided slots trade that away -- their per-slot settings are
+--  session-stable but may not follow a talent-loadout swap, which is
+--  unavoidable when the two share every identity except the drifting id.
+-------------------------------------------------------------------------------
+
+--- Set of canonical spellIDs that map to 2+ distinct buff-viewer cooldownIDs.
+--- Cold path (settings popup); recomputed per call from the live viewer pool.
+function ns.CollidedBuffSids()
+    local counts, out = {}, {}
+    local entries = ns.EnumerateCDMViewerSpells and ns.EnumerateCDMViewerSpells(true) or {}
+    for _, e in ipairs(entries) do
+        if e.sid and type(e.cdID) == "number" then
+            counts[e.sid] = (counts[e.sid] or 0) + 1
+        end
+    end
+    for sid, n in pairs(counts) do if n > 1 then out[sid] = true end end
+    return out
+end
+
+function ns.IsCollidedBuffSid(sid)
+    if type(sid) ~= "number" or sid <= 0 then return false end
+    return ns.CollidedBuffSids()[sid] == true
+end
+
+-- Runtime hot-path gate: true only when the current spec's buffs store holds at
+-- least one "c"..cooldownID key. Cached by store-table identity, so a spec or
+-- profile swap (which hands back a different store table) recomputes for free
+-- without any explicit invalidation hook.
+local _cdKeyGate
+function ns.BuffFamHasCdKey()
+    local store = ns.GetSpellSettingsStore and ns.GetSpellSettingsStore("buffs")
+    if not store then return false end
+    if _cdKeyGate and _cdKeyGate.store == store then return _cdKeyGate.has end
+    local hit = false
+    for k in pairs(store) do
+        if type(k) == "string" and string.byte(k, 1) == 99 then hit = true; break end  -- 'c'
+    end
+    _cdKeyGate = { store = store, has = hit }
+    return hit
+end
+
+--- Called when a "c"..cooldownID buff entry is first persisted, so the hot-path
+--- gate flips on without waiting for the store-identity cache to expire.
+function ns.MarkBuffFamHasCdKey()
+    local store = ns.GetSpellSettingsStore and ns.GetSpellSettingsStore("buffs")
+    _cdKeyGate = { store = store, has = true }
+end
+
 --- Reorder present keys to match Blizzard viewer order while absent keys (talent
 --- gaps, untalented catalog entries) keep their stored slots.
 local function SyncPresentBuffOrderToBlizzard(order, present, entries)
