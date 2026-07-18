@@ -138,6 +138,26 @@ end
 DYNAMIC_HEALTH_RECOVERY]]
 
 
+-- Resolve an option's display name from its first item ID so the macro menus
+-- read in the client's language. Falls back to the hard-coded English label
+-- (run through L() in case a translation exists) until item data is cached;
+-- an uncached lookup kicks off an async load so a menu refresh can pick it up.
+-- Resolve the in-game item name only for single-item options (unambiguous).
+-- Multi-item options (e.g. base + Fleeting variants) keep their own descriptive
+-- label -- picking one variant's name would be arbitrary -- run through L().
+-- noRequest: when true, skip the async load request (used by the refresh path,
+-- where the initial build already requested the uncached item).
+local function OptionDisplayName(opt, noRequest)
+    local ids = opt.items
+    if ids and #ids == 1 then
+        local n = C_Item.GetItemInfo(ids[1])
+        if n then return n end
+        if not noRequest then C_Item.RequestLoadItemDataByID(ids[1]) end
+    end
+    return EllesmereUI.L(opt.label)
+end
+
+
 function EllesmereUI.BuildMacroFactory(parent, startY, PP)
     local ICON_SIZE = 40
     local ICON_GAP = 40
@@ -706,7 +726,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         titleFS:SetFont(fontPath, 16, "")
         titleFS:SetTextColor(1, 1, 1, 1)
         titleFS:SetPoint("TOP", container, "TOPLEFT", centerX, 0)
-        titleFS:SetText(titleText)
+        titleFS:SetText(EllesmereUI.L(titleText))
 
         local numIcons = #defs
         local totalRows = math.ceil(numIcons / perRow)
@@ -876,9 +896,13 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             local labelFS = iconParent:CreateFontString(nil, "OVERLAY")
             labelFS:SetFont(fontPath, 13, ""); labelFS:SetTextColor(1, 1, 1, 0.9)
             labelFS:SetPoint("TOP", btn, "BOTTOM", 0, -4)
-            local flatLabel = def.label:gsub("\n", " ")
-            if #flatLabel > 12 then flatLabel = flatLabel:sub(1, 12) .. ".." end
-            labelFS:SetText(flatLabel)
+            -- Constrain to the icon stride and disable wrap so an over-long
+            -- localized label truncates with an ellipsis instead of overlapping
+            -- the neighbouring icon's label. The full name still shows on hover.
+            labelFS:SetWidth(ICON_SIZE + gap - 8)
+            labelFS:SetWordWrap(false)
+            labelFS:SetJustifyH("CENTER")
+            labelFS:SetText(EllesmereUI.L(def.label):gsub("\n", " "))
             btn._label = labelFS
 
             -- Flash system (OnUpdate, no AnimationGroup)
@@ -900,7 +924,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 else flashFS:Hide(); flashTex:SetColorTexture(1, 1, 1, 0); btn._label:Show(); self:Hide() end
             end)
             local function PlayFlash()
-                flashElapsed = 0; flashFS:SetText("Macro Created"); flashFS:SetTextColor(1, 1, 1, 0)
+                flashElapsed = 0; flashFS:SetText(EllesmereUI.L("Macro Created")); flashFS:SetTextColor(1, 1, 1, 0)
                 flashFS:Show(); btn._label:Hide(); flashDriver:Show()
             end
             btn._playFlash = PlayFlash
@@ -984,7 +1008,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 aL:SetPoint("LEFT", aR, "LEFT", 12, 0)
                 local aHL = aR:CreateTexture(nil, "ARTWORK"); aHL:SetAllPoints(); aHL:SetColorTexture(1, 1, 1, 0)
                 local function RefAct()
-                    if MacroExists() then aL:SetText("|cffff4444Delete Macro|r") else aL:SetText("Create Macro") end
+                    if MacroExists() then aL:SetText(EllesmereUI.L("|cffff4444Delete Macro|r")) else aL:SetText(EllesmereUI.L("Create Macro")) end
                 end
                 RefAct(); menuFrame._refreshAction = RefAct
                 aR:SetScript("OnEnter", function() aL:SetTextColor(1, 1, 1, 1); aHL:SetColorTexture(1, 1, 1, 0.04) end)
@@ -1022,7 +1046,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                 local tCk = tB:CreateTexture(nil, "ARTWORK"); PP.SetInside(tCk, tB, 2, 2)
                 tCk:SetColorTexture(EG.r, EG.g, EG.b, 1); tCk:SetSnapToPixelGrid(false)
                 local tL = tR:CreateFontString(nil, "OVERLAY"); tL:SetFont(fontPath, 13, "")
-                tL:SetTextColor(0.75, 0.75, 0.75, 1); tL:SetPoint("LEFT", tR, "LEFT", 12, 0); tL:SetText("Show Tooltip")
+                tL:SetTextColor(0.75, 0.75, 0.75, 1); tL:SetPoint("LEFT", tR, "LEFT", 12, 0); tL:SetText(EllesmereUI.L("Show Tooltip"))
                 local tHL = tR:CreateTexture(nil, "ARTWORK"); tHL:SetAllPoints(); tHL:SetColorTexture(1, 1, 1, 0)
                 local function RefTT()
                     local db = GetDB()
@@ -1057,7 +1081,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                     ht:SetPoint("TOPLEFT", menuFrame, "TOPLEFT", 1, mY)
                     ht:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -1, mY)
                     local hfs = ht:CreateFontString(nil, "OVERLAY"); hfs:SetFont(fontPath, 10, "")
-                    hfs:SetTextColor(1, 1, 1, 0.25); hfs:SetPoint("CENTER"); hfs:SetText("Drag to Reorder")
+                    hfs:SetTextColor(1, 1, 1, 0.25); hfs:SetPoint("CENTER"); hfs:SetText(EllesmereUI.L("Drag to Reorder"))
                     mY = mY - HH
 
                     -- Checkbox rows with drag reorder
@@ -1075,7 +1099,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                         row:SetFrameLevel(menuFrame:GetFrameLevel() + 2)
 
                         local rl = row:CreateFontString(nil, "OVERLAY"); rl:SetFont(fontPath, 13, "")
-                        rl:SetTextColor(0.75, 0.75, 0.75, 1); rl:SetPoint("LEFT", row, "LEFT", 12, 0); rl:SetText(cb.label)
+                        rl:SetTextColor(0.75, 0.75, 0.75, 1); rl:SetPoint("LEFT", row, "LEFT", 12, 0); rl:SetText(OptionDisplayName(cb))
                         local rb = CreateFrame("Frame", nil, row); rb:SetSize(16, 16); rb:SetPoint("RIGHT", row, "RIGHT", -10, 0)
                         local rBg = rb:CreateTexture(nil, "BACKGROUND"); rBg:SetAllPoints(); rBg:SetColorTexture(0.12, 0.12, 0.14, 1)
                         local rBrd = EllesmereUI.MakeBorder(rb, 0.4, 0.4, 0.4, 0.6, PP)
@@ -1148,7 +1172,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                             if not db.order then db.order = {}; for oi = 1, #cbItems do db.order[oi] = oi end end
                             for ri = 1, #rowFrames do
                                 local rf = rowFrames[ri]; local oi = db.order[ri]; local it = cbItems[oi]
-                                rf._cbIndex = ri; rf._cb = it; rf._lbl:SetText(it.label)
+                                rf._cbIndex = ri; rf._cb = it; rf._lbl:SetText(OptionDisplayName(it))
                                 local ry = cbBaseY - (ri - 1) * MH; rf._baseY = ry; rf:ClearAllPoints()
                                 rf:SetPoint("TOPLEFT", menuFrame, "TOPLEFT", 1, ry)
                                 rf:SetPoint("TOPRIGHT", menuFrame, "TOPRIGHT", -1, ry)
@@ -1195,6 +1219,17 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
 
                         rowFrames[ci] = row; mY = mY - MH
                     end
+
+                    -- Item names load async (initial build already requested any
+                    -- uncached ones). Relabel rows when the client returns data, but
+                    -- only listen while the menu is visible, and never re-request.
+                    menuFrame:SetScript("OnEvent", function()
+                        for _, rf in ipairs(rowFrames) do
+                            if rf._lbl and rf._cb then rf._lbl:SetText(OptionDisplayName(rf._cb, true)) end
+                        end
+                    end)
+                    menuFrame:SetScript("OnShow", function(self) self:RegisterEvent("GET_ITEM_INFO_RECEIVED") end)
+                    menuFrame:SetScript("OnHide", function(self) self:UnregisterEvent("GET_ITEM_INFO_RECEIVED") end)
                 end  -- hasCheckboxes
 
                 -- Close on click outside
@@ -1221,14 +1256,14 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             btn:SetScript("OnEnter", function(self)
                 self._hoverBdr:Show()
-                local fullName = def.label:gsub("\n", " ")
+                local fullName = EllesmereUI.L(def.label):gsub("\n", " ")
                 if def.tooltip then
-                    local status = self._isGray and "|cff888888Created|r" or "|cff888888Click to create|r"
-                    EllesmereUI.ShowWidgetTooltip(self, fullName .. "\n" .. def.tooltip .. "\n" .. status)
+                    local status = self._isGray and EllesmereUI.L("|cff888888Created|r") or EllesmereUI.L("|cff888888Click to create|r")
+                    EllesmereUI.ShowWidgetTooltip(self, fullName .. "\n" .. EllesmereUI.L(def.tooltip) .. "\n" .. status)
                 elseif self._isGray then
-                    EllesmereUI.ShowWidgetTooltip(self, fullName .. "\n|cff888888Created. Right-click to configure.|r")
+                    EllesmereUI.ShowWidgetTooltip(self, fullName .. "\n" .. EllesmereUI.L("|cff888888Created. Right-click to configure.|r"))
                 else
-                    EllesmereUI.ShowWidgetTooltip(self, fullName .. "\n|cff888888Click to create. Right-click to configure.|r")
+                    EllesmereUI.ShowWidgetTooltip(self, fullName .. "\n" .. EllesmereUI.L("|cff888888Click to create. Right-click to configure.|r"))
                 end
             end)
             btn:SetScript("OnLeave", function(self) self._hoverBdr:Hide(); EllesmereUI.HideWidgetTooltip() end)
@@ -1268,9 +1303,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
         emptyFS:SetTextColor(1, 1, 1, 0.25)
         emptyFS:SetPoint("CENTER", container, "TOPLEFT", halfW + halfW / 2, -SECTION_H / 2)
         if not isEnglishClient then
-            emptyFS:SetText("Spec Macros are currently not supported\nfor non-English clients. Support coming soon!")
+            emptyFS:SetText(EllesmereUI.L("Spec Macros are currently not supported\nfor non-English clients. Support coming soon!"))
         else
-            emptyFS:SetText("No spec macros for " .. (activeSpecName or "this spec"))
+            emptyFS:SetText(EllesmereUI.L("No spec macros for ") .. (activeSpecName or EllesmereUI.L("this spec")))
         end
         emptyFS:SetJustifyH("CENTER")
     end
