@@ -2577,7 +2577,8 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
     -- slots that use action text, clear it otherwise.
     if btn.Name and C_ActionBar and C_ActionBar.UsesActionText then
         if C_ActionBar.UsesActionText(action) then
-            btn.Name:SetText(C_ActionBar.GetActionText(action) or "")
+            local nm = C_ActionBar.GetActionText and C_ActionBar.GetActionText(action)
+            btn.Name:SetText(nm or "")
         else
             btn.Name:SetText("")
         end
