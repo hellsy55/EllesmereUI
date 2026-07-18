@@ -2570,6 +2570,19 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         local display = C_ActionBar.GetActionDisplayCount(action)
         btn.Count:SetText(display or "")
     end
+    -- Macro / action text. The mixin's Update() maintains this normally, but
+    -- we suppress its per-button events, so a moved macro leaves its name
+    -- stuck on the old slot (and the new slot stays blank) until a hover runs
+    -- Blizzard's secure Update. Mirror that logic here: set the name only for
+    -- slots that use action text, clear it otherwise.
+    if btn.Name and C_ActionBar and C_ActionBar.UsesActionText then
+        if C_ActionBar.UsesActionText(action) then
+            local nm = C_ActionBar.GetActionText and C_ActionBar.GetActionText(action)
+            btn.Name:SetText(nm or "")
+        else
+            btn.Name:SetText("")
+        end
+    end
     local cd = btn.cooldown
     if cd and C_ActionBar and C_ActionBar.GetActionCooldown then
         local cdInfo = C_ActionBar.GetActionCooldown(action)
@@ -8859,7 +8872,8 @@ function EAB:OnInitialize()
         local _qPending = false
         local function QualityScan()
                 _qPending = false
-                local bars = EAB.db.profile.bars
+                local bars = EAB.db and EAB.db.profile and EAB.db.profile.bars
+                if not bars then return end
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
                     local s = bars[info.key]
@@ -8921,6 +8935,13 @@ function EAB:OnInitialize()
                 end
         end
         qf:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+        -- Loadout/spec swap changes slot CONTENTS but does not reliably fire
+        -- ACTIONBAR_SLOT_CHANGED for our EABButtons (same reason the spell
+        -- refresh sweep exists), so a rank icon from the old spec's item can
+        -- persist on a slot the new spec leaves empty or fills with a spell.
+        -- SPELLS_CHANGED covers that swap; the macro name is handled by the
+        -- ForceButtonRefresh sweep on the same event.
+        qf:RegisterEvent("SPELLS_CHANGED")
         qf:SetScript("OnEvent", function()
             if not _qPending then
                 _qPending = true
