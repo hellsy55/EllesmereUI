@@ -2570,6 +2570,18 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         local display = C_ActionBar.GetActionDisplayCount(action)
         btn.Count:SetText(display or "")
     end
+    -- Macro / action text. The mixin's Update() maintains this normally, but
+    -- we suppress its per-button events, so a moved macro leaves its name
+    -- stuck on the old slot (and the new slot stays blank) until a hover runs
+    -- Blizzard's secure Update. Mirror that logic here: set the name only for
+    -- slots that use action text, clear it otherwise.
+    if btn.Name and C_ActionBar and C_ActionBar.UsesActionText then
+        if C_ActionBar.UsesActionText(action) then
+            btn.Name:SetText(C_ActionBar.GetActionText(action) or "")
+        else
+            btn.Name:SetText("")
+        end
+    end
     local cd = btn.cooldown
     if cd and C_ActionBar and C_ActionBar.GetActionCooldown then
         local cdInfo = C_ActionBar.GetActionCooldown(action)
