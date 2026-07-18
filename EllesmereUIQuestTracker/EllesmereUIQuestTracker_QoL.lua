@@ -75,6 +75,7 @@ local function InstallAutoQuests()
                     end
                 end
                 if Cfg("autoAccept") and C_GossipInfo.GetAvailableQuests then
+                    if Cfg("autoAcceptShiftSkip") and IsShiftKeyDown() then return end
                     local available = C_GossipInfo.GetAvailableQuests()
                     if available and #available > 0 then
                         local npcGUID = UnitGUID("npc")
@@ -108,6 +109,7 @@ local function InstallAutoQuests()
 
         if event == "QUEST_DETAIL" then
             if not Cfg("autoAccept") then return end
+            if Cfg("autoAcceptShiftSkip") and IsShiftKeyDown() then return end
             AcceptQuest()
         elseif event == "QUEST_COMPLETE" then
             if not Cfg("autoTurnIn") then return end
