@@ -4556,7 +4556,9 @@ do
             -- If the game echoes the Fervor-of-Battle Slam as a real cast
             -- event, skip it -- the charge was already counted above. A
             -- player-pressed Slam can't land inside the 0.3 s window (GCD).
-            if spellID == 1464 and GetTime() < fobWindow then return end
+            -- 1269383: Master of Warfare replaces Slam with Heroic Strike,
+            -- so the echo carries that id instead.
+            if (spellID == 1464 or spellID == 1269383) and GetTime() < fobWindow then return end
             -- No sweep partner in range -> the game doesn't consume a charge
             if not EnemiesInReach(2) then return end
             stacks = max(0, stacks - SPENDERS[spellID])
@@ -4564,30 +4566,32 @@ do
         end
     end
 
+    -- NO aura validation here, on purpose. v8.4.9 tried to correct
+    -- prediction drift against the real buff (first by name, then by
+    -- C_UnitAuras.GetPlayerAuraBySpellID), treating a missing aura as
+    -- "buff gone" and wiping the stacks. But Sweeping Strikes (260708) is
+    -- NOT a whitelisted aura, and non-whitelisted player buffs are
+    -- invisible to the aura read surface -- verified in-game 2026-07-17:
+    -- with the buff visibly active, GetPlayerAuraBySpellID(260708)
+    -- returned nil and a GetAuraDataByIndex("player", i, "HELPFUL") sweep
+    -- enumerated zero auras. So any validation on this buff reads it as
+    -- absent and zeroes the bar (the v8.4.9 bug: stacks wiped in combat,
+    -- pinned at 0 in M+). Whitelisted buffs ARE readable -- see
+    -- GetMaelstromWeapon / GetSoulFragments below and the
+    -- NON_SECRET_SPELL_IDS catalogue + C_Secrets.ShouldSpellAuraBeSecret
+    -- probe in EllesmereUIAuraBuffReminders. If Blizzard ever whitelists
+    -- 260708, validation becomes possible again; until then the
+    -- cast-event prediction plus the duration timer IS the tracker.
     function EllesmereUI.GetSweepingStrikes()
         if not sweepKnown then return 0, 0 end
         if expiresAt and GetTime() >= expiresAt then
             stacks, expiresAt = 0, nil
         end
-        -- Validate prediction against the real aura to correct drift (the
-        -- reach probe is ~11 yd while the game sweeps within 8 yd of the
-        -- primary target). Direct spellID lookup: zero-alloc on a 0.1 s
-        -- poll, and safe under 12.x restrictions -- aura PRESENCE stays
-        -- readable in keys (same contract the TBB bind-miss fallback relies
-        -- on), while a secret applications count simply leaves the
-        -- prediction in charge.
-        if stacks > 0 and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-            local aura = C_UnitAuras.GetPlayerAuraBySpellID(SWEEP)
-            if not aura then
-                stacks, expiresAt = 0, nil
-            else
-                local count = aura.applications
-                if count and not (issecretvalue and issecretvalue(count)) and count > 0 then
-                    stacks = count
-                end
-            end
-        end
-        return stacks, MaxStacks()
+        -- Clamp: a mid-window respec out of Improved drops MaxStacks 18->12
+        -- while the predicted stacks upvalue keeps its old value.
+        local m = MaxStacks()
+        if stacks > m then stacks = m end
+        return stacks, m
     end
 end
 
