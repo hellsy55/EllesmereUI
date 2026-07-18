@@ -2324,6 +2324,7 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       setValue = function(v) s.iconSpacing = v; Apply() end },
                     MkToggle("Character Stats Tooltip", "charStatsTooltip", "Shows item level and secondary stats in the Character button's tooltip."),
+                    MkToggle("Social & Guild Tooltip", "socialTooltip", "Shows a clickable list of online friends and guildmates in the Social and Guild button tooltips."),
                     -- Individual button toggles live in the "Menu Elements"
                     -- checklist dropdown appended after the shared row loop.
                 }

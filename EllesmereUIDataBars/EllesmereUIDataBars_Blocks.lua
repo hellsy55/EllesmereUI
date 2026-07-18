@@ -3128,6 +3128,169 @@ local function MMAddCharStats()
     end
 end
 
+-- Interactive Social / Guild tooltips (opt-in via socialTooltip): the online
+-- member lists ported from the WonderBar micro menu WITHOUT LibQTip. Rows go
+-- through the owned Tip system's insecure clickable-row primitive
+-- (Tip_AddClickable); every action taken -- whisper, invite, BNet whisper --
+-- is an UNPROTECTED call, so the rows stay clickable in and out of combat.
+-- Shift is the fixed invite modifier (the WonderBar default).
+
+-- Taint-safe whisper (mirrors the EllesmereUI minimap friends tooltip): BNet
+-- friends are reached by Battle.net account name (any character/faction/realm),
+-- everyone else by character name. The explicit DEFAULT_CHAT_FRAME argument
+-- skips ChatFrame_SendTell's FCF_OpenTemporaryWindow path, which drives the 12.0
+-- secret window list and tainted all of chat. Whispering is suppressed in
+-- protected content (Mythic+/raid), where chat is taint-sensitive; invites are
+-- unaffected (C_PartyInfo.InviteUnit opens no chat window).
+local function MMOpenWhisper(charName, bnetName)
+    if EllesmereUI and EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then
+        return
+    end
+    if bnetName and bnetName ~= "" then
+        local sendBN = (ChatFrameUtil and ChatFrameUtil.SendBNetTell) or ChatFrame_SendBNetTell
+        if sendBN then sendBN(bnetName, DEFAULT_CHAT_FRAME); return end
+    end
+    if charName and charName ~= "" then
+        local sendTell = (ChatFrameUtil and ChatFrameUtil.SendTell) or ChatFrame_SendTell
+        if sendTell then sendTell(charName, DEFAULT_CHAT_FRAME) end
+    end
+end
+
+-- GuildRoster() itself fires GUILD_ROSTER_UPDATE, and the server rate-limits
+-- it (~10s); throttle so hovering the guild button does not spam requests.
+local mmLastTipRoster = 0
+
+local function MMBuildSocialTip()
+    local ar, ag, ab = ns.GetAccent()
+    local totalBN = BNGetNumFriends()
+    local totalWoW = C_FriendList.GetNumOnlineFriends()
+    local playerFaction = UnitFactionGroup("player")
+
+    ns.Tip_AddLine(" ")
+
+    -- Only people actually in WoW: Battle.net app / other-game friends add
+    -- nothing in-game and are one click away in the real menu. Same filter the
+    -- minimap friends tooltip uses (gameAccountInfo.clientProgram == "WoW").
+    local shown = 0
+
+    -- BNet friends in WoW. Indices are unsorted, so iterate all and filter.
+    for i = 1, totalBN do
+        local acc = C_BattleNet.GetFriendAccountInfo(i)
+        local ga  = acc and acc.gameAccountInfo
+        if ga and ga.isOnline and ga.clientProgram == BNET_CLIENT_WOW then
+            local charName, realmName = ga.characterName, ga.realmName
+            local faction = ga.factionName
+            local icon    = FRIENDS_TEXTURE_ONLINE
+            if acc.isAFK or ga.isGameAFK  then icon = FRIENDS_TEXTURE_AFK end
+            if acc.isDND or ga.isGameBusy then icon = FRIENDS_TEXTURE_DND end
+            -- Left text carries NO |c codes so the hover recolor (Tip_Show)
+            -- shows; its normal color (Battle.net blue) rides the left-color
+            -- args. The right column keeps its own codes (it never recolors).
+            local left  = format("|T%s:16|t %s", icon, acc.accountName or "?")
+            local right = format("|cffecd672%s|r %s", charName or "?", ga.areaName or "")
+            local bnetName   = acc.accountName
+            local sameFaction = (not faction) or (faction == playerFaction)
+            local inviteName  = (charName and realmName) and (charName .. "-" .. realmName) or charName
+            ns.Tip_AddClickable(left, right, function(mouseButton)
+                if mouseButton == "LeftButton" then
+                    if IsShiftKeyDown() and sameFaction and inviteName then
+                        C_PartyInfo.InviteUnit(inviteName)
+                    else
+                        MMOpenWhisper(nil, bnetName)
+                    end
+                elseif mouseButton == "RightButton" and sameFaction and inviteName then
+                    MMOpenWhisper(inviteName, nil)
+                end
+            end, 0.51, 0.77, 1, 1, 1, 1)
+            shown = shown + 1
+        end
+    end
+
+    -- WoW (non-BNet) friends.
+    if totalWoW > 0 then
+        for i = 1, C_FriendList.GetNumFriends() do
+            local fi = C_FriendList.GetFriendInfoByIndex(i)
+            if fi and fi.connected then
+                local icon = FRIENDS_TEXTURE_ONLINE
+                if fi.afk then icon = FRIENDS_TEXTURE_AFK end
+                if fi.dnd then icon = FRIENDS_TEXTURE_DND end
+                -- No |c codes on the left (hover recolor needs a plain string);
+                -- normal color rides the left-color args.
+                local left = format("|T%s:16|t %s  %s", icon, fi.name or "?", fi.level or "")
+                local fname = fi.name
+                ns.Tip_AddClickable(left, fi.area or "", function(mouseButton)
+                    local n = fname
+                    if not n then return end
+                    if not n:find("%-") then n = n .. "-" .. GetRealmName():gsub("%s+", "") end
+                    if mouseButton == "RightButton" then
+                        MMOpenWhisper(n, nil)
+                    elseif mouseButton == "LeftButton" and IsShiftKeyDown() then
+                        C_PartyInfo.InviteUnit(n)
+                    end
+                end, 1, 1, 1, 0.8, 0.8, 0.8)
+                shown = shown + 1
+            end
+        end
+    end
+
+    if shown == 0 then
+        ns.Tip_AddLine(L["NO_FRIENDS_ONLINE"], 0.6, 0.6, 0.6)
+        return
+    end
+
+    -- Left-click BNet-whispers (reaches them cross-realm/faction), right-click
+    -- whispers the character directly -- distinct actions, distinct labels
+    -- (matches the WonderBar micro menu: no duplicated "Whisper" hint).
+    ns.Tip_AddLine(" ")
+    ns.Tip_AddDouble(L["LEFT_CLICK"],       L["WHISPER_BNET"], 1, 1, 1, ar, ag, ab)
+    ns.Tip_AddDouble(L["SHIFT_LEFT_CLICK"], L["INVITE"],       1, 1, 1, ar, ag, ab)
+    ns.Tip_AddDouble(L["RIGHT_CLICK"],      L["WHISPER"],      1, 1, 1, ar, ag, ab)
+end
+
+local function MMBuildGuildTip()
+    local ar, ag, ab = ns.GetAccent()
+    ns.Tip_AddLine(" ")
+    if not IsInGuild() then
+        ns.Tip_AddLine(L["NOT_IN_GUILD"], 0.6, 0.6, 0.6)
+        return
+    end
+
+    local now = GetTime()
+    if not InCombatLockdown() and (now - mmLastTipRoster) >= 10 then
+        mmLastTipRoster = now
+        C_GuildInfo.GuildRoster()
+    end
+
+    local gName = GetGuildInfo("player")
+    if gName then ns.Tip_AddLine("|cff00ff00" .. gName .. "|r") end
+
+    for i = 1, GetNumGuildMembers() do
+        local name, _, _, level, _, zone, _, _, isOnline, status, class = GetGuildRosterInfo(i)
+        if isOnline then
+            local cc  = class and RAID_CLASS_COLORS[class]
+            local clr, clg, clb = 1, 1, 1
+            if cc then clr, clg, clb = cc.r, cc.g, cc.b end
+            local st  = (status == 1 and DEFAULT_AFK_MESSAGE) or (status == 2 and DEFAULT_DND_MESSAGE) or ""
+            local cn  = name and name:match("[^-]+") or "?"
+            -- Left plain (no |c): the class color rides the left-color args so
+            -- the hover recolor to accent shows, like the M+ teleport rows.
+            local left  = format("%s  %s %s", level or "", cn, st)
+            local fname = name
+            ns.Tip_AddClickable(left, zone or "", function(mouseButton)
+                if not fname then return end
+                if mouseButton == "LeftButton" then
+                    if IsShiftKeyDown() then C_PartyInfo.InviteUnit(fname)
+                    else MMOpenWhisper(fname, nil) end
+                end
+            end, clr, clg, clb, 1, 1, 1)
+        end
+    end
+
+    ns.Tip_AddLine(" ")
+    ns.Tip_AddDouble(L["LEFT_CLICK"],       L["WHISPER"], 1, 1, 1, ar, ag, ab)
+    ns.Tip_AddDouble(L["SHIFT_LEFT_CLICK"], L["INVITE"],  1, 1, 1, ar, ag, ab)
+end
+
 ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
     local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
     inst.key = InstKey(barCtx, blockCfg)
@@ -3160,7 +3323,7 @@ ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
     end
 
     local function ShowButtonTooltip(name)
-        if name == 'social' or name == 'guild' then return end
+        if (name == 'social' or name == 'guild') and not D().socialTooltip then return end
         local frame = frames[name]; if not frame then return end
         local def = mmButtonDefsByKey[name]; if not def then return end
         local r, g, b = 1, 1, 1
@@ -3227,6 +3390,9 @@ ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
             pcall(MMAddCharStats)
         end
 
+        if name == 'social' and D().socialTooltip then pcall(MMBuildSocialTip) end
+        if name == 'guild'  and D().socialTooltip then pcall(MMBuildGuildTip)  end
+
         ns.Tip_Show()
     end
 
@@ -3268,7 +3434,7 @@ ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
             local br, bgr, bb = BlockColorOf(blockCfg)
             if icons[name] then icons[name]:SetVertexColor(br, bgr, bb, 1) end
             if textFS[name] then textFS[name]:SetTextColor(br, bgr, bb, 1) end
-            ns.Tip_Hide(frame)
+            ns.Tip_HideUnlessInteractive(frame)
         end)
     end
 
