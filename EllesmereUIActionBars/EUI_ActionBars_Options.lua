@@ -693,8 +693,25 @@ initFrame:SetScript("OnEvent", function(self)
             local gridH = gridRows * scaledBtnH + (gridRows - 1) * scaledPad
             local gridStartX = Snap(math.max(0, (self:GetWidth() - gridW) / 2))
 
-            -- Resize preview frame to fit all rows
-            local frameH = Snap(gridH + 20)  -- 10px padding top + bottom
+            -- Reserve room for a background that grows above/below the icon
+            -- grid. The ScrollFrame clips outside its scroll child, so without
+            -- this inset an upward-growing background loses its top border.
+            local bgTopInset, bgBottomInset = 0, 0
+            if settings.bgEnabled then
+                local rawBgPadding = settings.bgPadding
+                local bgSpacing = Snap((rawBgPadding ~= nil and rawBgPadding or (settings.bgPadY or 0)) * totalScale)
+                local bgMultiplierY = math.max(1, math.min(4, math.floor((settings.bgMultiplierY or 1) + 0.5)))
+                local bgIconPadding = Snap((settings.buttonPadding or 0) * totalScale)
+                local bgGrowY = (bgMultiplierY - 1) * (gridH + bgIconPadding)
+                if (settings.bgExpandDirectionY or "up") == "down" then
+                    bgBottomInset = bgSpacing + bgGrowY
+                else
+                    bgTopInset = bgSpacing + bgGrowY
+                end
+            end
+
+            -- Resize preview frame to fit all rows and background overflow.
+            local frameH = Snap(gridH + 20 + bgTopInset + bgBottomInset)
             self:SetHeight(frameH)
 
             -- Resize wrapper to min(content, max) and toggle scrollbar
@@ -703,7 +720,7 @@ initFrame:SetScript("OnEvent", function(self)
             if parentH > maxH then
                 -- Add bottom padding so the last icon row is fully visible
                 -- when scrolled to the bottom
-                local paddedH = Snap(gridH + 20 + scaledBtnH)
+                local paddedH = Snap(gridH + 20 + bgTopInset + bgBottomInset + scaledBtnH)
                 self:SetHeight(paddedH)
                 self._wrapper:SetHeight(maxH)
             else
@@ -715,10 +732,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Store grid bounds for background anchoring
             self._gridStartX = gridStartX
+            self._gridStartY = -Snap(10) - bgTopInset
             self._gridW      = gridW
             self._gridH      = gridH
 
-            local startY = -Snap(10)  -- top padding
+            local startY = self._gridStartY
             -- Match live layout: rows grow upward for "up" OR "center" (live
             -- lumps center with up for the icon grid; horizontal bars only ever
             -- store left/right/center, so a plain == "up" check never fired).
@@ -1077,7 +1095,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local gx = self._gridStartX or 0
                 local gw = self._gridW or 0
                 local gh = self._gridH or 0
-                local gy = -Snap(10)  -- top padding (matches startY)
+                local gy = self._gridStartY or -Snap(10)
                 previewBG:ClearAllPoints()
                 local left, right = gx - extraX, gx + gw + extraX
                 local top, bottom = gy + extraY, gy - gh - extraY
