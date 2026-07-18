@@ -2744,6 +2744,12 @@ do
         -- per-button overhead. With 60 populated buttons, the mixin path
         -- caused visible frame drops on high-frequency events.
         dispatcher:SetScript("OnEvent", function(_, event, arg1)
+            -- Assisted shine follows slot contents; coalesced (storm-safe),
+            -- and belt-and-braces vs. the OnActionChanged callback -- an
+            -- in-combat Update() abort dies before Blizzard's TriggerEvent.
+            if event == "ACTIONBAR_SLOT_CHANGED" and ns.QueueAssistRescan then
+                ns.QueueAssistRescan()
+            end
             for _, info in ipairs(BAR_CONFIG) do
                 if not info.isStance and not info.isPetBar then
                     local btns = barButtons[info.key]
@@ -7545,6 +7551,208 @@ do
             hooksecurefunc(AssistedCombatManager, "UpdateAllAssistedCombatRotationFrames", ScaleAssistedFrames)
         end
     end
+end
+
+-------------------------------------------------------------------------------
+--  Assisted Combat Highlight (self-painted)
+--  Our action buttons are EABButton frames permanently removed from
+--  ActionBarButtonEventsFrame.frames (the taint fix), so Blizzard's
+--  AssistedCombatManager never builds them into its highlight-candidate list
+--  (it walks .frames once at activation). The result: the shine appeared only
+--  on a button after a mouseover (native OnActionChanged re-adds that one
+--  button to the candidate map) and never survived a reload or a mid-session
+--  CVar toggle. We paint our own shine, driven by the same AssistedCombatManager
+--  events the CDM module uses, so it is immune to that candidate-list timing.
+--  Blizzard may still show its own frame on a hovered button (candidate re-add);
+--  we defer to it there to avoid stacking two identical shines.
+-------------------------------------------------------------------------------
+do
+    local _assistGlowed = {}   -- btn -> true while showing our shine
+    local _assistInCombat = false
+    local _assistHookInstalled = false
+
+    local function AssistCVarOn()
+        return GetCVarBool and GetCVarBool("assistedCombatHighlight")
+    end
+
+    local function AssistCreate(btn)
+        local ok, hf = pcall(CreateFrame, "Frame", nil, btn, "ActionBarButtonAssistedCombatHighlightTemplate")
+        if not ok or not hf then return nil end
+        hf:SetPoint("CENTER")
+        -- Above the cooldown swipe, border frame, glowOverlay (+6) and proc
+        -- alerts -- same margin the CDM twin uses.
+        hf:SetFrameLevel(btn:GetFrameLevel() + 15)
+        -- Freeze on a single flipbook frame until we actually animate (in combat).
+        if hf.Flipbook and hf.Flipbook.Anim then
+            hf.Flipbook.Anim:Play()
+            hf.Flipbook.Anim:Stop()
+        end
+        hf:Hide()
+        return hf
+    end
+
+    local function AssistHide(btn)
+        local hf = EFD(btn).assistHL
+        if not hf then return end
+        if hf.Flipbook and hf.Flipbook.Anim then hf.Flipbook.Anim:Stop() end
+        hf:Hide()
+    end
+
+    local function AssistShow(btn)
+        local fd = EFD(btn)
+        local hf = fd.assistHL
+        if not hf then
+            hf = AssistCreate(btn)
+            if not hf then return end
+            fd.assistHL = hf
+        end
+        local w = btn:GetWidth() or 45
+        hf:SetScale(w / 45)
+        -- Re-assert: bar layout can change the button's frame level after create.
+        hf:SetFrameLevel(btn:GetFrameLevel() + 15)
+        hf:Show()
+        if hf.Flipbook and hf.Flipbook.Anim then
+            if _assistInCombat then hf.Flipbook.Anim:Play() else hf.Flipbook.Anim:Stop() end
+        end
+    end
+
+    -- The (spell) id a button currently represents, mirroring Blizzard's
+    -- AssistedCombatManager:GetActionButtonSpellForAssistedHighlight.
+    -- Attribute first: the secure paging writes the "action" attribute and it
+    -- is the authoritative slot (see ForceCooldownPaint's note); btn.action is
+    -- a derived mirror.
+    local function ButtonSpell(btn)
+        local action = btn.GetAttribute and btn:GetAttribute("action")
+        if action == nil then action = btn.action end
+        if action == nil then return nil end
+        local atype, id, subType = GetActionInfo(action)
+        if atype == "spell" and subType ~= "assistedcombat" then
+            return id
+        elseif atype == "macro" and subType == "spell" then
+            return id
+        end
+        return nil
+    end
+
+    local function UpdateAssistHighlights()
+        if not AssistCVarOn() then
+            for btn in pairs(_assistGlowed) do
+                AssistHide(btn)
+                _assistGlowed[btn] = nil
+            end
+            return
+        end
+        local suggested = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell
+            and C_AssistedCombat.GetNextCastSpell()
+        local newSet = {}
+        if suggested then
+            -- Match base ids in both directions (button or suggestion may hold
+            -- either the base or an override), same as the CDM side. sid > 0
+            -- guards item/macro pseudo-ids out of GetBaseSpell.
+            local GetBaseSpell = C_Spell and C_Spell.GetBaseSpell
+            local suggestedBase = (GetBaseSpell and GetBaseSpell(suggested)) or suggested
+            for _, info in ipairs(BAR_CONFIG) do
+                if not info.isStance and not info.isPetBar then
+                    local buttons = barButtons[info.key]
+                    if buttons then
+                        for i = 1, #buttons do
+                            local btn = buttons[i]
+                            if btn and btn:IsShown() then
+                                local sid = ButtonSpell(btn)
+                                if sid then
+                                    local match = (sid == suggested) or (sid == suggestedBase)
+                                    if not match and GetBaseSpell and sid > 0 then
+                                        match = GetBaseSpell(sid) == suggestedBase
+                                    end
+                                    if match then
+                                        local bf = btn.AssistedCombatHighlightFrame
+                                        if bf and bf:IsShown() then
+                                            AssistHide(btn)  -- Blizzard's covers it
+                                        else
+                                            AssistShow(btn)
+                                        end
+                                        newSet[btn] = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        for btn in pairs(_assistGlowed) do
+            if not newSet[btn] then AssistHide(btn) end
+        end
+        _assistGlowed = newSet
+    end
+    ns.UpdateAssistHighlights = UpdateAssistHighlights
+
+    -- Coalesced re-run: OnActionChanged fires per button on page swaps and
+    -- SLOT_CHANGED storms dozens of times per second (mouseover-conditional
+    -- macros re-resolving); one pending flag collapses a burst into a single
+    -- next-frame pass.
+    local _assistRescanPending = false
+    local function QueueAssistRescan()
+        if _assistRescanPending then return end
+        _assistRescanPending = true
+        C_Timer.After(0, function()
+            _assistRescanPending = false
+            UpdateAssistHighlights()
+        end)
+    end
+    ns.QueueAssistRescan = QueueAssistRescan
+
+    local function SyncAssistCombat()
+        _assistInCombat = (InCombatLockdown() or UnitAffectingCombat("player")) and true or false
+        for btn in pairs(_assistGlowed) do
+            local hf = EFD(btn).assistHL
+            if hf and hf:IsShown() and hf.Flipbook and hf.Flipbook.Anim then
+                if _assistInCombat then
+                    if not hf.Flipbook.Anim:IsPlaying() then hf.Flipbook.Anim:Play() end
+                else
+                    if hf.Flipbook.Anim:IsPlaying() then hf.Flipbook.Anim:Stop() end
+                end
+            end
+        end
+    end
+
+    local function InstallAssistHook()
+        if _assistHookInstalled then return end
+        _assistHookInstalled = true
+        SyncAssistCombat()
+        if EventRegistry and EventRegistry.RegisterCallback then
+            -- No hooksecurefunc on UpdateAllAssistedHighlightFramesForSpell:
+            -- the manager calls it then fires this event right after, so a
+            -- hook would run the full walk twice per suggestion change.
+            EventRegistry:RegisterCallback("AssistedCombatManager.OnAssistedHighlightSpellChange", function()
+                QueueAssistRescan()
+            end, "EAB_AssistHighlight")
+            -- Fires when the assistedCombatHighlight CVar is toggled at runtime.
+            EventRegistry:RegisterCallback("AssistedCombatManager.OnSetUseAssistedHighlight", function()
+                QueueAssistRescan()
+            end, "EAB_AssistHighlight_CVar")
+            -- Page swaps / drags / hover re-candidacy: the suggestion may not
+            -- change, but which button holds it (or whether Blizzard shows its
+            -- own frame on a hovered button) does. Same signal Blizzard uses.
+            EventRegistry:RegisterCallback("ActionButton.OnActionChanged", function()
+                QueueAssistRescan()
+            end, "EAB_AssistHighlight_Action")
+        end
+        local cf = CreateFrame("Frame")
+        cf:RegisterEvent("PLAYER_REGEN_ENABLED")
+        cf:RegisterEvent("PLAYER_REGEN_DISABLED")
+        cf:RegisterEvent("PLAYER_ENTERING_WORLD")
+        cf:SetScript("OnEvent", function(_, event)
+            if event == "PLAYER_ENTERING_WORLD" then
+                SyncAssistCombat()
+                UpdateAssistHighlights()
+            else
+                SyncAssistCombat()
+            end
+        end)
+        UpdateAssistHighlights()
+    end
+    InstallAssistHook()
 end
 
 function EAB:RefreshProcGlows()
