@@ -2811,7 +2811,7 @@ local function SkinCharacterSheet()
 
         -- Add border directly on the slot with item color (2px thickness)
         if EllesmereUI and EllesmereUI.PanelPP then
-            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 7)
+            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 1)
             local bdrFrame = EllesmereUI.PanelPP.GetBorders(slot)
             if bdrFrame then bdrFrame:SetFrameLevel(slot:GetFrameLevel()) end
         end
@@ -4140,7 +4140,7 @@ local function SkinCharacterSheet()
                 overlay:SetAllPoints(slot)
                 overlay:SetFrameLevel(slot:GetFrameLevel())
                 if EllesmereUI and EllesmereUI.PanelPP then
-                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 7)  -- #e54949
+                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 1)  -- #e54949
                     local enchBdr = EllesmereUI.PanelPP.GetBorders(overlay)
                     if enchBdr then enchBdr:SetFrameLevel(slot:GetFrameLevel()) end
                 end
@@ -4215,7 +4215,7 @@ local function SkinCharacterSheet()
             -- 2px pixel-perfect border, recolored per-gem in UpdateSocketIcons.
             PP_GEM.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 1)
             local gemBdr = PP_GEM.GetBorders(gemFrame)
-            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel() + 1) end
+            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel()) end
 
             GetFFD(slot).charSocketsFrames[i] = gemFrame
             GetFFD(slot).charSocketsIcons[i]  = icon
