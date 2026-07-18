@@ -869,6 +869,17 @@ local function IsAnchored(barKey)
     return elem and elem.isAnchored and elem.isAnchored() or false
 end
 
+-- Element anchored through a module option (e.g. ERB "Anchor To") while opting
+-- into keepMoverWhenAnchored: the mover exists but is position-locked -- the
+-- module's anchor owns the position, so drag/nudge/anchor-link are disabled
+-- while resize and width/height matching stay available. Lives on ns (not a
+-- local) -- the deferred body is at the 200-local limit.
+function ns.IsMoverPosLocked(barKey)
+    local elem = registeredElements[barKey]
+    if not (elem and elem.keepMoverWhenAnchored) then return false end
+    return elem.isAnchored and elem.isAnchored() or false
+end
+
 -- Width/Height match persistent links
 local MatchH = {}
 
@@ -5321,6 +5332,7 @@ end
 local function NudgeMover(dx, dy, targetMover, skipCollapse)
     local m = targetMover or selectedMover
     if not m or InCombatLockdown() then return end
+    if ns.IsMoverPosLocked(m._barKey) then return end
 
     -- Read bar's current position, add dx/dy, reposition.
     local bar = GetBarFrame(m._barKey)
@@ -5795,8 +5807,10 @@ local function CreateMover(barKey)
     local elem = registeredElements[barKey]
     local existing = movers[barKey]
 
-    -- Skip elements that are intentionally hidden or currently anchored.
-    if elem and ((elem.isHidden and elem.isHidden()) or (elem.isAnchored and elem.isAnchored())) then
+    -- Skip elements that are intentionally hidden or currently anchored
+    -- (keepMoverWhenAnchored elements keep a position-locked mover instead).
+    if elem and ((elem.isHidden and elem.isHidden())
+        or (elem.isAnchored and elem.isAnchored() and not elem.keepMoverWhenAnchored)) then
         if existing then existing:Hide() end
         return nil
     end
@@ -5986,7 +6000,7 @@ local function CreateMover(barKey)
             t[#t + 1] = { btn = wmBtn, fs = wmFS, fb = 50 }
             t[#t + 1] = { btn = hmBtn, fs = hmFS, fb = 55 }
         end
-        if canAnchorTo then
+        if canAnchorTo and not ns.IsMoverPosLocked(barKey) then
             t[#t + 1] = { btn = atBtn, fs = atFS, fb = 45 }
         end
         if canGrow then
@@ -6134,7 +6148,7 @@ local function CreateMover(barKey)
     -- Update the name label color based on anchor state
     local function RefreshAnchoredIdle()
         local ai = GetAnchorInfo(barKey)
-        isAnchored = ai ~= nil
+        isAnchored = ai ~= nil or ns.IsMoverPosLocked(barKey)
         nameFS:SetText(EllesmereUI.L(label))
         if isAnchored then
             nameFS:SetTextColor(1, 0.7, 0.3, 0.85)
@@ -6547,6 +6561,7 @@ local function CreateMover(barKey)
 
     atBtn:SetScript("OnClick", function()
         EllesmereUI.HideWidgetTooltip()
+        if ns.IsMoverPosLocked(barKey) then return end
         if GetAnchorInfo(barKey) then
             ClearAnchorInfo(barKey)
             -- Capture current screen position so Save & Exit persists it.
@@ -6906,7 +6921,7 @@ local function CreateMover(barKey)
         -- bars resolve elem == nil (they live in BAR_LOOKUP), so this is a no-op
         -- for them; isHidden is read live, so an un-hidden element still syncs.
         if elem and ((elem.isHidden and elem.isHidden())
-                  or (elem.isAnchored and elem.isAnchored())) then
+                  or (elem.isAnchored and elem.isAnchored() and not elem.keepMoverWhenAnchored)) then
             self:Hide()
             return
         end
@@ -7070,6 +7085,8 @@ local function CreateMover(barKey)
     -- Drag handlers: manual cursor-based positioning for live snap + live bar movement
     mover:SetScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
+        -- Position-locked: the module's anchor option owns this bar's position
+        if ns.IsMoverPosLocked(self._barKey) then SelectMover(self); return end
         -- Anchored bars can be dragged -- the offset from parent is updated on drop
         SelectMover(self)
         self:SetAlpha(darkOverlaysEnabled and 1 or MOVER_DRAG)

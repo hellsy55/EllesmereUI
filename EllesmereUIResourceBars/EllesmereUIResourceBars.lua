@@ -1862,6 +1862,7 @@ local function RegisterUnlockElements()
             setWidth = function(_, w) SS().width = PP.Snap(w); Rebuild() end,
             setHeight = function(_, h) SS().height = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
         })
@@ -1882,6 +1883,7 @@ local function RegisterUnlockElements()
             setWidth = function(_, w) SS().width = PP.Snap(w); Rebuild() end,
             setHeight = function(_, h) SS().height = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
         })
@@ -1907,6 +1909,7 @@ local function RegisterUnlockElements()
             setHeight = function(_, h) SS().pipHeight = PP.Snap(h); Rebuild() end,
             isHidden = function() local s = S(); return s.enabled == false or IsSpecDisabled(s) end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
         })
@@ -7300,6 +7303,70 @@ function ERB:ApplySmoothing()
     if secondaryBar then secondaryBar._smoothing = (_sCfg and _sCfg.smoothBars) and interp or nil end
 end
 
+-------------------------------------------------------------------------------
+--  Legacy "Anchor To" retirement
+--  The Bar Position "Anchor To" dropdown for the health/power/class resource
+--  bars was removed from the options UI in 4.9.8, but the runtime kept
+--  honoring profile values written before that (or imported via old profile
+--  strings). A leftover anchorTo still anchors the bar AND suppresses its
+--  unlock-mode mover, with no UI left to see or clear the setting. Retire it:
+--  once the anchored layout has real geometry, capture the bar's on-screen
+--  position as a normal free position (unlockPos), clear anchorTo, and
+--  rebuild -- the bar stays visually in place and gets its mover back.
+--  Geometry-dependent, so it runs from ApplyAll on the active profile rather
+--  than the data-migration registry. do-block + ns exposure: this file is at
+--  Lua's 200-local cap.
+do
+    local pending
+    local function LegacyAnchored()
+        local p = ERB.db and ERB.db.profile
+        if not p then return nil end
+        local list
+        local function add(s, f)
+            if s and s.anchorTo and s.anchorTo ~= "none" then
+                list = list or {}
+                list[#list + 1] = { cfg = s, frame = f }
+            end
+        end
+        add(p.health, healthBar)
+        add(p.primary, primaryBar)
+        add(p.secondary, secondaryFrame)
+        return list
+    end
+    function ns.MigrateLegacyAnchorTo()
+        if pending or (EllesmereUI and EllesmereUI._unlockActive) then return end
+        if not LegacyAnchored() then return end
+        pending = true
+        -- One frame later so ApplyBarAnchor's SetPoint has flushed and
+        -- GetCenter returns the anchored on-screen position.
+        C_Timer.After(0, function()
+            pending = nil
+            if EllesmereUI and EllesmereUI._unlockActive then return end
+            local list = LegacyAnchored()
+            if not list then return end
+            local uiS = UIParent:GetEffectiveScale()
+            local uiW, uiH = UIParent:GetWidth(), UIParent:GetHeight()
+            local cleared = false
+            for _, e in ipairs(list) do
+                local s, f = e.cfg, e.frame
+                local cx, cy = f and f:GetCenter()
+                if cx and cy then
+                    local r = f:GetEffectiveScale() / uiS
+                    s.unlockPos = {
+                        point = "CENTER", relPoint = "CENTER",
+                        x = cx * r - uiW * 0.5, y = cy * r - uiH * 0.5,
+                    }
+                end
+                -- Clear even without geometry (bar never laid out): defaults
+                -- position the bar; leaving anchorTo would re-suppress the mover.
+                s.anchorTo = nil
+                cleared = true
+            end
+            if cleared then ERB:ApplyAll() end
+        end)
+    end
+end
+
 function ERB:ApplyAll()
     local _, classFile = UnitClass("player")
     cachedClass = classFile
@@ -7333,6 +7400,7 @@ function ERB:ApplyAll()
     UpdateSecondaryResource()
     UpdateVisibility()
     self:ApplySmoothing()
+    if ns.MigrateLegacyAnchorTo then ns.MigrateLegacyAnchorTo() end
 
     -- Vehicle proxy: hide resource bars during full vehicle UI ([vehicleui] condition)
     -- Secure frame creation + RegisterStateDriver both need to happen outside combat

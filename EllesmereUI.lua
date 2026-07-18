@@ -5029,6 +5029,11 @@ function EllesmereUI.MakeUnlockElement(opts)
         -- noSizeMatchTarget: other elements may NOT size-match TO this one.
         allowMatchSource  = opts.allowMatchSource,
         noSizeMatchTarget = opts.noSizeMatchTarget,
+        -- keepMoverWhenAnchored: elements whose isAnchored() reflects a module
+        -- option (e.g. ERB "Anchor To") still get a mover while anchored --
+        -- position-locked (no drag/nudge/anchor link), but resize and
+        -- width/height matching stay available.
+        keepMoverWhenAnchored = opts.keepMoverWhenAnchored,
     }
 end
 
