@@ -2041,7 +2041,12 @@ initFrame:SetScript("OnEvent", function(self)
                 if sb then sb:SetFrameLevel(base + 1) end
                 if wrap._gradClip and sb then wrap._gradClip:SetFrameLevel(sb:GetFrameLevel() + 1) end
                 if wrap._chargeHashFillClip and sb then wrap._chargeHashFillClip:SetFrameLevel(sb:GetFrameLevel() + 1) end
-                if wrap._threshOverlay and sb then wrap._threshOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
+                if wrap._threshOverlays and sb then
+                    for i = 1, #wrap._threshOverlays do
+                        local ov = wrap._threshOverlays[i]
+                        if ov then ov:SetFrameLevel(sb:GetFrameLevel() + 2) end
+                    end
+                end
                 if wrap._sparkOverlay and sb then wrap._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
                 if wrap._chargeHashOverlay and sb then wrap._chargeHashOverlay:SetFrameLevel(sb:GetFrameLevel() + 4) end
                 if wrap._barBorder then wrap._barBorder:SetFrameLevel(base + 5) end
@@ -2961,6 +2966,341 @@ initFrame:SetScript("OnEvent", function(self)
         return "Preset " .. n
     end
 
+    ---------------------------------------------------------------------------
+    --  Stack threshold editor (opt-in). A small popup, opened from the cog on
+    --  the "Enable Stack Threshold" row, that edits cfg.stackThresholds -- an
+    --  ordered list of { value=<stack count>, r,g,b,a } color stops, capped at
+    --  STACK_THRESH_MAX. The list only drives rendering while
+    --  cfg.stackThresholdMulti is on; until then the legacy single-threshold
+    --  keys own the bar, so opening this popup changes nothing on its own.
+    --  ShowStackThreshEditor() rebinds it to the calling bar each time it opens.
+    ---------------------------------------------------------------------------
+    local STACK_THRESH_MAX = 5
+    local _stCloseIcon = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png"
+    local stPopup
+    local _stRows = {}
+    local _stGetCfg, _stRefreshFn
+    local _stMultiRow, _stMultiSnap, _stAddBtn, _stAddLbl
+    local ST_POPUP_W = 260
+    local ST_ROW_H = 26
+    local ST_PAD = 14
+    local ST_GAP = 10
+    local ST_DEF_R, ST_DEF_G, ST_DEF_B, ST_DEF_A = 0.8, 0.1, 0.1, 1
+    local RefreshStackThreshEditor  -- forward decl
+
+    -- Shared explainers. The literals live inside the L() calls so
+    -- .tools/extract-locale-keys.sh can see them (it only reads string
+    -- literals passed directly to L/Lf, never variables).
+    local function StackThreshHelpTip()
+        return EllesmereUI.L("Color the bar differently at several stack counts. The highest count you have reached wins.")
+    end
+    local function StackThreshReplacesTip()
+        return EllesmereUI.L("The single stack threshold is off while Multiple Thresholds is on.")
+    end
+    local function StackThreshAtCapTip()
+        return EllesmereUI.L("Maximum of 5 thresholds.")
+    end
+
+    local function CurrentStackThreshCfg()
+        if not _stGetCfg then return nil end
+        return _stGetCfg()
+    end
+
+    local function SortStackThresholds(list)
+        table.sort(list, function(a, b) return (a.value or 0) < (b.value or 0) end)
+    end
+
+    local function BuildStackThreshPopup()
+        stPopup = CreateFrame("Frame", nil, UIParent)
+        stPopup:SetFrameStrata("FULLSCREEN_DIALOG")
+        stPopup:SetFrameLevel(260)
+        stPopup:SetClampedToScreen(true)
+        stPopup:EnableMouse(true)
+        stPopup:SetScale(0.9)
+        stPopup:Hide()
+        PP.Size(stPopup, ST_POPUP_W, 200)
+
+        local bg = stPopup:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.06, 0.08, 0.10, 0.97)
+        PP.CreateBorder(stPopup, 1, 1, 1, 0.18, 1, "BORDER", 7)
+
+        local clickCatcher = CreateFrame("Button", nil, stPopup)
+        clickCatcher:SetFrameStrata("FULLSCREEN_DIALOG")
+        clickCatcher:SetFrameLevel(stPopup:GetFrameLevel() - 1)
+        clickCatcher:SetAllPoints((EllesmereUI.GetMainFrame and EllesmereUI:GetMainFrame()) or UIParent)
+        clickCatcher:SetScript("OnClick", function() stPopup:Hide() end)
+        clickCatcher:Hide()
+        -- Close on entering combat
+        stPopup:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_REGEN_DISABLED" then self:Hide() end
+        end)
+        stPopup:SetScript("OnShow", function(self)
+            clickCatcher:Show()
+            self:RegisterEvent("PLAYER_REGEN_DISABLED")
+            self:SetScript("OnUpdate", function(p)
+                if IsMouseButtonDown("LeftButton") then
+                    local mf = EllesmereUI._mainFrame
+                    local dm = EllesmereUI._openDropdownMenu
+                    if not p:IsMouseOver() and not (mf and mf:IsMouseOver()) and not (dm and dm:IsShown() and dm:IsMouseOver()) then p:Hide() end
+                end
+            end)
+        end)
+        stPopup:SetScript("OnHide", function(self)
+            clickCatcher:Hide()
+            self:UnregisterEvent("PLAYER_REGEN_DISABLED")
+            self:SetScript("OnUpdate", nil)
+        end)
+
+        local titleFS = EllesmereUI.MakeFont(stPopup, 13, nil, 1, 1, 1)
+        titleFS:SetAlpha(0.6)
+        titleFS:SetPoint("TOP", stPopup, "TOP", 0, -ST_PAD)
+        titleFS:SetText(EllesmereUI.L("Stack Thresholds"))
+
+        -- Row: multi opt-in (label left, toggle right) -- matches the band editor.
+        _stMultiRow = CreateFrame("Frame", nil, stPopup)
+        _stMultiRow:SetFrameLevel(stPopup:GetFrameLevel() + 3)
+        PP.Height(_stMultiRow, ST_ROW_H)
+        local mlbl = EllesmereUI.MakeFont(_stMultiRow, 12, nil, 1, 1, 1)
+        mlbl:SetAlpha(0.6)
+        mlbl:SetPoint("LEFT", _stMultiRow, "LEFT", 0, 0)
+        mlbl:SetText(EllesmereUI.L("Use Multiple Thresholds"))
+        local multiToggle
+        multiToggle, _, _stMultiSnap = EllesmereUI.BuildToggleControl(
+            _stMultiRow, _stMultiRow:GetFrameLevel() + 3,
+            function()
+                local cfg = CurrentStackThreshCfg()
+                return cfg and cfg.stackThresholdMulti
+            end,
+            function(v)
+                local cfg = CurrentStackThreshCfg(); if not cfg then return end
+                cfg.stackThresholdMulti = v and true or false
+                if _stRefreshFn then _stRefreshFn() end
+                RefreshStackThreshEditor()
+                EllesmereUI:RefreshPage()
+            end,
+            { sizeRatio = 0.95 })
+        multiToggle:SetPoint("RIGHT", _stMultiRow, "RIGHT", 0, 0)
+        local multiHit = CreateFrame("Frame", nil, _stMultiRow)
+        multiHit:SetAllPoints(mlbl)
+        multiHit:EnableMouse(true)
+        multiHit:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, StackThreshHelpTip()) end)
+        multiHit:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+        -- Add Threshold button
+        _stAddBtn = CreateFrame("Button", nil, stPopup)
+        PP.Size(_stAddBtn, ST_POPUP_W - ST_PAD * 2, 26)
+        _stAddBtn:SetFrameLevel(stPopup:GetFrameLevel() + 3)
+        local abg = EllesmereUI.SolidTex(_stAddBtn, "BACKGROUND", 0.05, 0.07, 0.09, 0.92)
+        abg:SetAllPoints()
+        _stAddBtn._border = EllesmereUI.MakeBorder(_stAddBtn, 1, 1, 1, 0.4, PP)
+        _stAddLbl = EllesmereUI.MakeFont(_stAddBtn, 12, nil, 1, 1, 1)
+        _stAddLbl:SetAlpha(0.5)
+        _stAddLbl:SetPoint("CENTER")
+        _stAddLbl:SetText(EllesmereUI.L("+ Add Threshold"))
+        _stAddBtn:SetScript("OnEnter", function(self)
+            local cfg = CurrentStackThreshCfg()
+            local list = cfg and cfg.stackThresholds
+            if list and #list >= STACK_THRESH_MAX then
+                EllesmereUI.ShowWidgetTooltip(self, StackThreshAtCapTip())
+                return
+            end
+            _stAddLbl:SetAlpha(0.7)
+            if self._border and self._border.SetColor then self._border:SetColor(1, 1, 1, 0.6) end
+        end)
+        _stAddBtn:SetScript("OnLeave", function(self)
+            EllesmereUI.HideWidgetTooltip()
+            _stAddLbl:SetAlpha(0.5)
+            if self._border and self._border.SetColor then self._border:SetColor(1, 1, 1, 0.4) end
+        end)
+        _stAddBtn:SetScript("OnClick", function()
+            local cfg = CurrentStackThreshCfg(); if not cfg then return end
+            if not cfg.stackThresholds then cfg.stackThresholds = {} end
+            local list = cfg.stackThresholds
+            if #list >= STACK_THRESH_MAX then return end
+            local last = list[#list]
+            local nextVal = last and math.min(100, (last.value or 0) + 1) or 5
+            list[#list + 1] = { value = nextVal, r = ST_DEF_R, g = ST_DEF_G, b = ST_DEF_B, a = ST_DEF_A }
+            SortStackThresholds(list)
+            if _stRefreshFn then _stRefreshFn() end
+            RefreshStackThreshEditor()
+        end)
+    end
+
+    -- Lazily create the widgets for threshold row k; returns the row table.
+    local function EnsureStackThreshRow(k)
+        local row = _stRows[k]
+        if row then return row end
+        row = {}
+        local rf = CreateFrame("Frame", nil, stPopup)
+        rf:SetSize(ST_POPUP_W - ST_PAD * 2, ST_ROW_H)
+        rf:SetFrameLevel(stPopup:GetFrameLevel() + 2)
+        row.frame = rf
+
+        local lbl = EllesmereUI.MakeFont(rf, 12, nil, 1, 1, 1)
+        lbl:SetAlpha(0.6)
+        lbl:SetPoint("LEFT", rf, "LEFT", 2, 0)
+        lbl:SetText(EllesmereUI.L("At"))
+        row.lbl = lbl
+
+        local input = CreateFrame("EditBox", nil, rf)
+        input:SetSize(54, 22)
+        input:SetPoint("LEFT", lbl, "RIGHT", 6, 0)
+        input:SetFrameLevel(rf:GetFrameLevel() + 2)
+        input:SetAutoFocus(false)
+        input:SetFontObject(GameFontHighlightSmall)
+        local inFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("main") or "Fonts\\FRIZQT__.TTF"
+        input:SetFont(inFont, 12, "")
+        input:SetTextColor(1, 1, 1, 0.75)
+        input:SetJustifyH("CENTER")
+        input:SetNumeric(true)
+        local inBg = input:CreateTexture(nil, "BACKGROUND")
+        inBg:SetAllPoints()
+        inBg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
+        EllesmereUI.MakeBorder(input, 1, 1, 1, 0.08, PP)
+        row.input = input
+
+        -- Commit on focus loss (Enter clears focus -> triggers this; Escape sets
+        -- _cancelCommit so leaving the field discards the typed text).
+        local function CommitInput(self)
+            if self._cancelCommit then self._cancelCommit = nil; return end
+            local cfg = CurrentStackThreshCfg()
+            local list = cfg and cfg.stackThresholds
+            local ent = list and list[row._idx]
+            if not ent then return end
+            local val = tonumber(self:GetText())
+            if val then
+                -- Same range as the single-threshold slider on the Extras row.
+                ent.value = math.max(0, math.min(100, math.floor(val + 0.5)))
+                SortStackThresholds(list)
+                if _stRefreshFn then _stRefreshFn() end
+            end
+            RefreshStackThreshEditor()
+        end
+        input:SetScript("OnEditFocusLost", CommitInput)
+        input:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+        input:SetScript("OnEscapePressed", function(self) self._cancelCommit = true; self:ClearFocus(); RefreshStackThreshEditor() end)
+
+        local swatch, swatchSnap = EllesmereUI.BuildColorSwatch(rf, rf:GetFrameLevel() + 3,
+            function()
+                local cfg = CurrentStackThreshCfg()
+                local list = cfg and cfg.stackThresholds
+                local ent = list and list[row._idx]
+                if not ent then return ST_DEF_R, ST_DEF_G, ST_DEF_B, ST_DEF_A end
+                return ent.r or ST_DEF_R, ent.g or ST_DEF_G, ent.b or ST_DEF_B, ent.a or ST_DEF_A
+            end,
+            function(r, g, b, a)
+                local cfg = CurrentStackThreshCfg()
+                local list = cfg and cfg.stackThresholds
+                local ent = list and list[row._idx]
+                if ent then
+                    ent.r, ent.g, ent.b, ent.a = r, g, b, a
+                    if _stRefreshFn then _stRefreshFn() end
+                end
+            end, true, 19)
+        swatch:SetPoint("LEFT", input, "RIGHT", 10, 0)
+        row.swatch = swatch
+        row.swatchSnap = swatchSnap
+
+        local delBtn = CreateFrame("Button", nil, rf)
+        delBtn:SetSize(14, 14)
+        delBtn:SetPoint("RIGHT", rf, "RIGHT", -2, 0)
+        delBtn:SetFrameLevel(rf:GetFrameLevel() + 3)
+        local delIcon = delBtn:CreateTexture(nil, "OVERLAY")
+        delIcon:SetAllPoints()
+        delIcon:SetTexture(_stCloseIcon)
+        delIcon:SetAlpha(0.4)
+        delBtn:SetScript("OnEnter", function() delIcon:SetAlpha(0.9) end)
+        delBtn:SetScript("OnLeave", function() delIcon:SetAlpha(0.4) end)
+        delBtn:SetScript("OnClick", function()
+            local cfg = CurrentStackThreshCfg()
+            local list = cfg and cfg.stackThresholds
+            if list and list[row._idx] then
+                table.remove(list, row._idx)
+                -- An empty list would silently fall back to the single
+                -- threshold while the toggle still reads "on"; turn it off so
+                -- what the popup says matches what the bar does.
+                if #list == 0 and cfg.stackThresholdMulti then
+                    cfg.stackThresholdMulti = false
+                    EllesmereUI:RefreshPage()
+                end
+                if _stRefreshFn then _stRefreshFn() end
+                RefreshStackThreshEditor()
+            end
+        end)
+        row.delBtn = delBtn
+
+        _stRows[k] = row
+        return row
+    end
+
+    RefreshStackThreshEditor = function()
+        if not stPopup then return end
+        local cfg = CurrentStackThreshCfg()
+        if not cfg then stPopup:Hide(); return end
+        if not cfg.stackThresholds then cfg.stackThresholds = {} end
+        local list = cfg.stackThresholds
+
+        local curY = -(ST_PAD + 24)  -- below the title
+
+        _stMultiRow:ClearAllPoints()
+        PP.Point(_stMultiRow, "TOPLEFT", stPopup, "TOPLEFT", ST_PAD, curY)
+        PP.Point(_stMultiRow, "TOPRIGHT", stPopup, "TOPRIGHT", -ST_PAD, curY)
+        _stMultiRow:Show()
+        if _stMultiSnap then _stMultiSnap() end
+        curY = curY - ST_ROW_H - ST_GAP
+
+        local n = #list
+        for k = 1, n do
+            local row = EnsureStackThreshRow(k)
+            row._idx = k
+            row.frame:ClearAllPoints()
+            PP.Point(row.frame, "TOPLEFT", stPopup, "TOPLEFT", ST_PAD, curY)
+            row.input:SetText(tostring(list[k].value or 5))
+            if row.swatchSnap then row.swatchSnap() end
+            row.frame:Show()
+            curY = curY - ST_ROW_H - 4
+        end
+        for k = n + 1, #_stRows do
+            if _stRows[k] then _stRows[k].frame:Hide() end
+        end
+
+        curY = curY - 4
+        _stAddBtn:ClearAllPoints()
+        PP.Point(_stAddBtn, "TOPLEFT", stPopup, "TOPLEFT", ST_PAD, curY)
+        local atCap = (n >= STACK_THRESH_MAX)
+        _stAddBtn:SetEnabled(not atCap)
+        _stAddBtn:SetAlpha(atCap and 0.35 or 1)
+        curY = curY - 26
+
+        local totalH = math.abs(curY) + ST_PAD
+        PP.Size(stPopup, ST_POPUP_W, totalH)
+    end
+
+    -- params = { getCfg, refreshFn, anchor }
+    local function ShowStackThreshEditor(params)
+        if not stPopup then BuildStackThreshPopup() end
+        _stGetCfg   = params.getCfg
+        _stRefreshFn = params.refreshFn
+        local cfg = CurrentStackThreshCfg()
+        if cfg then
+            if not cfg.stackThresholds then cfg.stackThresholds = {} end
+            -- Seed the first entry from the single threshold the first time.
+            -- Inert until stackThresholdMulti is turned on, so simply opening
+            -- and closing this popup changes nothing on the bar.
+            if #cfg.stackThresholds == 0 then
+                cfg.stackThresholds[1] = {
+                    value = cfg.stackThreshold or 5,
+                    r = cfg.stackThresholdR or ST_DEF_R, g = cfg.stackThresholdG or ST_DEF_G,
+                    b = cfg.stackThresholdB or ST_DEF_B, a = cfg.stackThresholdA or ST_DEF_A,
+                }
+            end
+        end
+        RefreshStackThreshEditor()
+        stPopup:ClearAllPoints()
+        stPopup:SetPoint("TOP", params.anchor, "BOTTOM", 0, -4)
+        stPopup:Show()
+    end
 
     local function BuildBuffBarsPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
@@ -5604,9 +5944,20 @@ initFrame:SetScript("OnEvent", function(self)
                   bd.stackThresholdEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Stack Threshold",
-              min = 0, max = 50, step = 1,
-              disabled = function() local bd = SelectedTBB(); return not bd or not bd.stackThresholdEnabled end,
-              disabledTooltip = "Stack Threshold",
+              min = 0, max = 100, step = 1,
+              disabled = function()
+                  local bd = SelectedTBB()
+                  if not bd or not bd.stackThresholdEnabled then return true end
+                  return bd.stackThresholdMulti and true or false
+              end,
+              disabledTooltip = function()
+                  local bd = SelectedTBB()
+                  if bd and bd.stackThresholdEnabled and bd.stackThresholdMulti then
+                      return StackThreshReplacesTip()
+                  end
+                  return EllesmereUI.DisabledTooltip("Stack Threshold")
+              end,
+              rawTooltip = true,
               getValue = function() local bd = SelectedTBB(); return bd and bd.stackThreshold or 5 end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
@@ -5634,14 +5985,44 @@ initFrame:SetScript("OnEvent", function(self)
             threshBlock:SetAllPoints(); threshBlock:SetFrameLevel(threshSwatch:GetFrameLevel() + 10)
             threshBlock:EnableMouse(true)
             threshBlock:SetScript("OnEnter", function()
+                local bd = SelectedTBB()
+                if bd and bd.stackThresholdEnabled and bd.stackThresholdMulti then
+                    EllesmereUI.ShowWidgetTooltip(threshSwatch, StackThreshReplacesTip())
+                    return
+                end
                 EllesmereUI.ShowWidgetTooltip(threshSwatch, EllesmereUI.DisabledTooltip("Stack Threshold"))
             end)
             threshBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            -- Cog: opens the multi-threshold editor. Stays usable while multi is
+            -- on, since it is the only way back out of it.
+            local threshCog = MakeCogBtn(rgn, function(self)
+                ShowStackThreshEditor({
+                    getCfg    = SelectedTBB,
+                    refreshFn = RefreshTBB,
+                    anchor    = self,
+                })
+            end, threshSwatch, EllesmereUI.COGS_ICON)
+            threshCog:SetScript("OnEnter", function(self)
+                if not self:IsEnabled() then return end
+                self:SetAlpha(0.7)
+                EllesmereUI.ShowWidgetTooltip(self, StackThreshHelpTip())
+            end)
+            threshCog:SetScript("OnLeave", function(self)
+                if self:IsEnabled() then self:SetAlpha(0.4) end
+                EllesmereUI.HideWidgetTooltip()
+            end)
+
             local function UpdateThreshSwatchState()
                 local bd = SelectedTBB()
-                local off = not bd or not bd.stackThresholdEnabled
+                local enabled = bd and bd.stackThresholdEnabled
+                -- The swatch edits the single threshold color, so multi masks it
+                -- the same way it masks the slider.
+                local off = not enabled or (bd.stackThresholdMulti and true or false)
                 if off then threshSwatch:SetAlpha(0.3); threshBlock:Show()
                 else threshSwatch:SetAlpha(1); threshBlock:Hide() end
+                threshCog:SetEnabled(enabled and true or false)
+                threshCog:SetAlpha(enabled and 0.4 or 0.15)
             end
             EllesmereUI.RegisterWidgetRefresh(function() updateThreshSwatch(); UpdateThreshSwatchState() end)
             UpdateThreshSwatchState()
