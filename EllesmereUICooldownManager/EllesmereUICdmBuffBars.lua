@@ -3065,6 +3065,26 @@ end
 -------------------------------------------------------------------------------
 --  Stacks Helper (reads Blizzard child Applications frame)
 -------------------------------------------------------------------------------
+-- Applications count for a Blizzard child without the aura-instance query
+-- when possible. The child's auraDataCached table (the aura it currently
+-- shows) reads without erroring on every client; its applications field is
+-- plain on live and secret under the 12.1 combat restriction, and both feed
+-- StatusBar:SetValue / FontString:SetText natively. The instance-id query
+-- stays as the fallback for a child whose cache is not populated -- it
+-- hard-errors on 12.1 restricted units, hence the pcall and the secret-iid
+-- guard.
+local function ReadStackApplications(blzChild)
+    local ad = blzChild.auraDataCached
+    if ad and ad.applications then return ad.applications end
+    local auraInstID = blzChild.auraInstanceID
+    local auraUnit = blzChild.auraDataUnit
+    if auraInstID and auraUnit and not issecretvalue(auraInstID) then
+        local ok, d = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, auraUnit, auraInstID)
+        if ok and d and d.applications then return d.applications end
+    end
+    return nil
+end
+
 local function UpdateStacks(bar, blzChild, cfg)
     -- Stack-based fill needs a live count even when Blizzard renders no
     -- Applications text (hidden at 1 stack), plus a restricted marker so the
@@ -3072,6 +3092,33 @@ local function UpdateStacks(bar, blzChild, cfg)
     local stackFill = cfg and cfg.stackBasedBar and cfg.trackType ~= "cooldown"
         and cfg.stackThresholdMaxEnabled
     bar._stackUnreadable = nil
+    if stackFill and blzChild then
+        -- Stack-based bar: skip the Blizzard text mirror (blank below 2
+        -- stacks) and drive both fill and text from the aura data. This
+        -- helper only runs for active frames, so the aura is up and a
+        -- readable count floors at 1; a secret count passes through to the
+        -- SetValue/SetText sinks untouched.
+        local apps = ReadStackApplications(blzChild)
+        if apps then
+            if not issecretvalue(apps) and apps < 1 then apps = 1 end
+            bar._stackCount = apps
+            if bar._stacksText then
+                if bar._stacksHidden then
+                    bar._stacksText:Hide()
+                else
+                    bar._stacksText:SetText(apps)
+                    bar._stacksText:Show()
+                end
+            end
+        else
+            -- No cached aura table and no readable instance id: count
+            -- unknowable; the fill site fails open.
+            bar._stackCount = 0
+            bar._stackUnreadable = true
+            if bar._stacksText then bar._stacksText:Hide() end
+        end
+        return
+    end
     -- Read stacks from blzChild.Icon.Applications FontString.
     if blzChild and blzChild.Icon and blzChild.Icon.Applications then
         -- Pass the text straight through without comparing (it may be tainted).
@@ -3080,26 +3127,11 @@ local function UpdateStacks(bar, blzChild, cfg)
         if ok and txt then
             bar._stacksText:SetText(txt)
             bar._stacksText:Show()
-            -- Stack count for threshold overlay: read from aura data via the
-            -- Blizzard child's auraInstanceID. The applications field is a
-            -- secret number so we can't compare it directly, but StatusBar
-            -- SetValue accepts secret numbers natively. Feed it straight to
-            -- the threshold overlay (FeedTBBThresholdOverlay uses SetValue).
-            -- 12.1: viewer auraInstanceIDs are SECRET in combat and the iid
-            -- query hard-errors on them; the threshold stack overlay
-            -- degrades to inert while restricted (no readable substitute --
-            -- application-count APIs are all restricted too).
-            local auraInstID = blzChild.auraInstanceID
-            local auraUnit = blzChild.auraDataUnit
-            bar._stackCount = 0
-            if auraInstID and auraUnit and not issecretvalue(auraInstID) then
-                local ok2, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, auraUnit, auraInstID)
-                if ok2 and ad and ad.applications then
-                    bar._stackCount = ad.applications
-                end
-            elseif auraInstID and issecretvalue(auraInstID) then
-                bar._stackUnreadable = true
-            end
+            -- Stack count for the threshold overlay. The applications field
+            -- can be a secret number we can't compare, but the overlay
+            -- consumes it through SetValue (FeedTBBThresholdOverlay), which
+            -- accepts secret numbers natively.
+            bar._stackCount = ReadStackApplications(blzChild) or 0
             return
         end
     end
@@ -3108,23 +3140,12 @@ local function UpdateStacks(bar, blzChild, cfg)
         local appsText = blzChild.Applications.Applications
         if appsText then
             local ok, txt = pcall(appsText.GetText, appsText)
-            if ok and txt and txt ~= "" then
+            if ok and txt and (issecretvalue(txt) or txt ~= "") then
                 if bar._stacksText and not bar._stacksHidden then
                     bar._stacksText:SetText(txt)
                     bar._stacksText:Show()
                 end
-                -- 12.1: secret iid in combat -- same degrade as above.
-                local auraInstID = blzChild.auraInstanceID
-                local auraUnit = blzChild.auraDataUnit
-                bar._stackCount = 0
-                if auraInstID and auraUnit and not issecretvalue(auraInstID) then
-                    local ok2, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, auraUnit, auraInstID)
-                    if ok2 and ad and ad.applications then
-                        bar._stackCount = ad.applications
-                    end
-                elseif auraInstID and issecretvalue(auraInstID) then
-                    bar._stackUnreadable = true
-                end
+                bar._stackCount = ReadStackApplications(blzChild) or 0
                 return
             end
         end
@@ -3132,31 +3153,6 @@ local function UpdateStacks(bar, blzChild, cfg)
     -- No stacks text
     if bar._stacksText then bar._stacksText:Hide() end
     bar._stackCount = 0
-    if stackFill and blzChild then
-        -- Stack-based fill: this helper only runs for active frames, so the
-        -- aura is up and counts as at least 1 even with no Applications text.
-        local auraInstID = blzChild.auraInstanceID
-        local auraUnit = blzChild.auraDataUnit
-        if auraInstID and auraUnit then
-            if issecretvalue(auraInstID) then
-                bar._stackUnreadable = true
-            else
-                bar._stackCount = 1
-                local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, auraUnit, auraInstID)
-                if ok and ad and ad.applications then
-                    local apps = ad.applications
-                    -- Secret counts pass straight through to SetValue;
-                    -- readable counts keep the >= 1 floor set above.
-                    if issecretvalue(apps) or apps >= 1 then
-                        bar._stackCount = apps
-                    end
-                end
-            end
-        else
-            -- Active frame with no aura instance to query: count unknowable.
-            bar._stackUnreadable = true
-        end
-    end
 end
 
 -------------------------------------------------------------------------------
@@ -4614,8 +4610,9 @@ function ns.UpdateTrackedBuffBarTimers()
                        and cfg.stackThresholdMaxEnabled then
                         -- Stack-based fill: current stacks over the user's Max
                         -- Stacks instead of the time mirror. An unreadable
-                        -- count (12.1 combat restriction) fails open to a
-                        -- full bar like every other unreadable fill here.
+                        -- count (no cached aura data and no readable instance
+                        -- id) fails open to a full bar like every other
+                        -- unreadable fill here.
                         if bar._stackUnreadable then
                             sb:SetMinMaxValues(0, 1)
                             sb:SetValue(1)
@@ -4820,7 +4817,53 @@ function ns.UpdateTrackedBuffBarTimers()
                 local exp = fbAura.expirationTime
                 local isSec = issecretvalue
                 local clean = dur and exp and not (isSec and (isSec(dur) or isSec(exp)))
-                if sb then
+                -- Stack-based fill works in fallback mode too: fill and
+                -- stacks text come from the live aura's applications (plain
+                -- or secret; SetValue/SetText accept both) while the timer
+                -- keeps tracking remaining time.
+                local fbStackFill = cfg.stackBasedBar
+                    and cfg.trackType ~= "cooldown"
+                    and cfg.stackThresholdMaxEnabled
+                if sb and fbStackFill then
+                    local apps = fbAura.applications
+                    -- The aura is up, so a readable count floors at 1 even
+                    -- when applications reads 0/nil (non-stacking aura).
+                    if not apps or (not (isSec and isSec(apps)) and apps < 1) then
+                        apps = 1
+                    end
+                    sb:SetMinMaxValues(0, cfg.stackThresholdMax or 10)
+                    local smooth = _smoothBuffs and wasShown and Enum
+                        and Enum.StatusBarInterpolation
+                        and Enum.StatusBarInterpolation.ExponentialEaseOut
+                    if smooth then
+                        sb:SetValue(apps, smooth)
+                    else
+                        sb:SetValue(apps)
+                    end
+                    bar._stackCount = apps
+                    if bar._stacksText and not bar._stacksHidden then
+                        bar._stacksText:SetText(apps)
+                        bar._stacksText:Show()
+                    elseif bar._stacksText then
+                        bar._stacksText:Hide()
+                    end
+                    -- Timer text: same handling as the duration fill below.
+                    if clean and dur > 0 then
+                        if cfg.showTimer and bar._timerText then
+                            local remaining = exp - GetTime()
+                            if remaining < 0 then remaining = 0 end
+                            if not MirrorEngineTimer(bar, cfg) then
+                                bar._timerText:SetText(FormatTime(remaining))
+                            end
+                            bar._timerText:Show()
+                        elseif bar._timerText then
+                            bar._timerText:Hide()
+                        end
+                    elseif bar._timerText then
+                        bar._timerText:SetShown(MirrorEngineTimer(bar, cfg))
+                    end
+                    if cfg.showSpark and bar._spark then bar._spark:Show() end
+                elseif sb then
                     if clean and dur > 0 then
                         local remaining = exp - GetTime()
                         if remaining < 0 then remaining = 0 end
@@ -4875,9 +4918,12 @@ function ns.UpdateTrackedBuffBarTimers()
                     bar._nameSet = true
                 end
                 -- Keep the extras quiet in fallback mode: no Blizzard child to
-                -- read stacks/pandemic state from.
-                if bar._stacksText then bar._stacksText:Hide() end
-                bar._stackCount = 0
+                -- read stacks/pandemic state from. Skipped when the stack fill
+                -- drove them above.
+                if not (sb and fbStackFill) then
+                    if bar._stacksText then bar._stacksText:Hide() end
+                    bar._stackCount = 0
+                end
                 if bar._pandemicGlowActive then ClearPandemic(bar) end
             else
                 -- Inactive: clear transient state
