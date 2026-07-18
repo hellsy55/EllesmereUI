@@ -1834,8 +1834,11 @@ local function CreateTrackedBuffBarFrame(parent, idx)
     bg:SetColorTexture(0, 0, 0, 0.4)
     wrapFrame._bg = bg
 
-    -- Spark on a dedicated overlay frame one level above the (gradient) fill so
-    -- it always draws OVER the fill, still clipped to the bar so it never spills
+    -- Spark on a dedicated overlay frame above the (gradient) fill and the
+    -- threshold overlays so it always draws OVER the fill and any threshold
+    -- recolor. ApplyTrackedBuffBarSettings owns the final level; the value set
+    -- here only holds until the first apply. Still clipped to the bar so it
+    -- never spills
     -- past the ends. SnapToPixelGrid off so it tracks the smoothly-interpolated
     -- fill edge at sub-pixel precision instead of jumping a pixel as the edge
     -- crosses a grid line.
@@ -2198,7 +2201,7 @@ local function ApplyTBBChargeHashLines(bar, cfg, maxCharges)
     if not bar._chargeHashOverlay then
         local overlay = CreateFrame("Frame", nil, sb)
         overlay:SetAllPoints(sb)
-        overlay:SetFrameLevel(sb:GetFrameLevel() + 4)
+        overlay:SetFrameLevel(sb:GetFrameLevel() + 5)
         bar._chargeHashOverlay = overlay
     end
     bar._chargeHashOverlay:Show()
@@ -2327,8 +2330,12 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
                 if ov then ov:SetFrameLevel(sb:GetFrameLevel() + 2) end
             end
         end
-        if bar._sparkOverlay then bar._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
-        if bar._chargeHashOverlay then bar._chargeHashOverlay:SetFrameLevel(sb:GetFrameLevel() + 4) end
+        -- Spark sits one level ABOVE the threshold overlays: at the same level
+        -- it loses the tie to them (they are created lazily, so they win) and
+        -- vanishes the moment a threshold is crossed. Tick marks and charge
+        -- hash lines shift up in step to keep their existing order.
+        if bar._sparkOverlay then bar._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 3) end
+        if bar._chargeHashOverlay then bar._chargeHashOverlay:SetFrameLevel(sb:GetFrameLevel() + 5) end
         if bar._barBorder then bar._barBorder:SetFrameLevel(base + 5) end
         if bar._pandemicGlowOverlay then bar._pandemicGlowOverlay:SetFrameLevel(base + 7) end
         if bar._textOverlay then bar._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
@@ -2607,7 +2614,7 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     if not bar._tickOverlay then
         local to = CreateFrame("Frame", nil, sb)
         to:SetAllPoints(sb)
-        to:SetFrameLevel(sb:GetFrameLevel() + 3)
+        to:SetFrameLevel(sb:GetFrameLevel() + 4)
         bar._tickOverlay = to
     end
     ApplyTBBTickMarks(sb, cfg, bar._threshTicks, isVert, bar._tickOverlay)

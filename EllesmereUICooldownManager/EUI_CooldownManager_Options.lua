@@ -2047,8 +2047,8 @@ initFrame:SetScript("OnEvent", function(self)
                         if ov then ov:SetFrameLevel(sb:GetFrameLevel() + 2) end
                     end
                 end
-                if wrap._sparkOverlay and sb then wrap._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 2) end
-                if wrap._chargeHashOverlay and sb then wrap._chargeHashOverlay:SetFrameLevel(sb:GetFrameLevel() + 4) end
+                if wrap._sparkOverlay and sb then wrap._sparkOverlay:SetFrameLevel(sb:GetFrameLevel() + 3) end
+                if wrap._chargeHashOverlay and sb then wrap._chargeHashOverlay:SetFrameLevel(sb:GetFrameLevel() + 5) end
                 if wrap._barBorder then wrap._barBorder:SetFrameLevel(base + 5) end
                 if wrap._pandemicGlowOverlay then wrap._pandemicGlowOverlay:SetFrameLevel(base + 7) end
                 if wrap._textOverlay and sb then wrap._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
