@@ -921,6 +921,7 @@ local function SkinCharacterSheet()
                     slot:SetShown(isCharacterTab)
                     if GetFFD(slot).itemLevelLabel    then GetFFD(slot).itemLevelLabel:SetShown(isCharacterTab)    end
                     if GetFFD(slot).enchantLabel      then GetFFD(slot).enchantLabel:SetShown(isCharacterTab)      end
+                    if GetFFD(slot).enchantHoverFrame then GetFFD(slot).enchantHoverFrame:SetShown(isCharacterTab) end
                     if GetFFD(slot).upgradeTrackLabel then GetFFD(slot).upgradeTrackLabel:SetShown(isCharacterTab) end
                 end
             end
