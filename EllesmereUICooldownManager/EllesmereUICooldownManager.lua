@@ -5017,8 +5017,8 @@ function ns.StyleCustomChargeText(icon, barKey)
     local iconScale = icon:GetScale() or 1
     if iconScale < 0.01 then iconScale = 1 end
     local scSize = (barData.stackCountSize or 11) / iconScale
-    local scX = barData.stackCountX or 0
-    local scY = barData.stackCountY or 0
+    local scX = (barData.stackCountX or 0) / iconScale
+    local scY = (barData.stackCountY or 0) / iconScale
     local scPoint = barData.stackCountPosition or "bottomright"
     if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
     elseif scPoint == "topright" then scPoint = "TOPRIGHT"
@@ -5297,8 +5297,8 @@ local function RefreshCDMIconAppearance(barKey)
         local scR = (ssb and ssb.stackCountR) or barData.stackCountR or 1
         local scG = (ssb and ssb.stackCountG) or barData.stackCountG or 1
         local scB = (ssb and ssb.stackCountB) or barData.stackCountB or 1
-        local scX = (ssb and ssb.stackCountX) or barData.stackCountX or 0
-        local scY = (ssb and ssb.stackCountY) or barData.stackCountY or 0
+        local scX = ((ssb and ssb.stackCountX) or barData.stackCountX or 0) * fontScale
+        local scY = ((ssb and ssb.stackCountY) or barData.stackCountY or 0) * fontScale
         -- Stack/charge/item-count text anchor. Default bottom-right keeps the
         -- historical +2 vertical nudge so existing bars stay pixel-identical;
         -- top and center positions sit flush with no baseline nudge.
