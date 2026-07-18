@@ -997,9 +997,33 @@ local function BmScaleFor(d)
 end
 
 local function BmIndicators()
+    if not (ns.BM_GetSpecIndicators and ns.db) then return nil, nil, "custom" end
     local specKey = ns.BM_CurrentSpecKey and ns.BM_CurrentSpecKey()
-    if not (specKey and ns.BM_GetSpecIndicators and ns.db) then return nil, nil, "custom" end
     local mode = (ns.db.profile and ns.db.profile.bmDisplayMode) or "custom"
+    if mode == "simple" then
+        -- The simple grid resolves through BM_SimpleSpecKey so Show Own on
+        -- All Specs can lift the tracked-spec restriction (class fallback on
+        -- untracked specs). Indicator lists are custom-mode-only data.
+        local simpleKey = (ns.BM_SimpleSpecKey and ns.BM_SimpleSpecKey()) or specKey
+        return nil, simpleKey, mode
+    end
+    if not specKey then
+        -- Untracked spec: indicators flagged Show Own on All Specs still
+        -- render from the class-fallback spec's config.
+        local fbKey = ns.BM_ClassFallbackSpecKey and ns.BM_ClassFallbackSpecKey()
+        local all = fbKey and ns.BM_GetSpecIndicators(ns.db, fbKey)
+        if all then
+            local flagged
+            for _, ind in ipairs(all) do
+                if ind.showOwnAllSpecs then
+                    flagged = flagged or {}
+                    flagged[#flagged + 1] = ind
+                end
+            end
+            if flagged then return flagged, fbKey, mode end
+        end
+        return nil, nil, "custom"
+    end
     return ns.BM_GetSpecIndicators(ns.db, specKey), specKey, mode
 end
 
@@ -1111,10 +1135,14 @@ local function BmSignature(inds, specKey, mode)
             if cmode == "g" then
                 ownTag = BmEffOwnOnly(ind, (ind.spells and ind.spells[1]) or 0) and ":o" or ":a"
             end
+            -- The all-specs flag is structural: it changes which spells
+            -- survive the borrow filter in BuildBmSlots, so flipping it must
+            -- swap the container.
             parts[#parts + 1] = tostring(ind.id or ("x" .. i)) .. ":" .. (ind.type or "icon")
                 .. ":" .. table.concat(ind.spells or {}, "-")
                 .. ":" .. tostring(ind.showWhen or "present")
                 .. ":" .. cmode .. ownTag
+                .. (ind.showOwnAllSpecs and ":s" or "")
         end
     end
     return table.concat(parts, "|")
@@ -1566,7 +1594,9 @@ local function BuildBmSlots(inds, d, health, iscale, styleBase)
             local spells = {}
             for k = 1, #(ind.spells or {}) do
                 local sid = ind.spells[k]
-                if not borrow or borrow[sid] then spells[#spells + 1] = sid end
+                if not borrow or ind.showOwnAllSpecs or borrow[sid] then
+                    spells[#spells + 1] = sid
+                end
             end
             local kind = ind.type or "icon"
             if (kind == "icon" or kind == "square") and BmChainMode(ind) == "g" then
@@ -2283,7 +2313,9 @@ local function BmRebindPendingChains(button, d, cls)
             local spells = {}
             for k = 1, #(ind.spells or {}) do
                 local sid = ind.spells[k]
-                if not borrow or borrow[sid] then spells[#spells + 1] = sid end
+                if not borrow or ind.showOwnAllSpecs or borrow[sid] then
+                    spells[#spells + 1] = sid
+                end
             end
             if #spells > 0 then
                 local chainKey = tostring(ind.id or ("x" .. i))
@@ -2889,7 +2921,9 @@ local function ApplyAssistGate(button, d, unit)
         -- resurrected the grid next to the custom indicators.
         local bs = BmSimpleSettings()
         local mode = (ns.db and ns.db.profile and ns.db.profile.bmDisplayMode) or "custom"
-        local specKey = ns.BM_CurrentSpecKey and ns.BM_CurrentSpecKey()
+        -- Same option-aware key the grid tracks with (Show Own on All Specs).
+        local specKey = (ns.BM_SimpleSpecKey and ns.BM_SimpleSpecKey())
+            or (ns.BM_CurrentSpecKey and ns.BM_CurrentSpecKey())
         d.rfcBmSimple:SetShown(assist and mode == "simple" and specKey ~= nil
             and (bs and bs.showBuffs) and true or false)
     end

@@ -1118,7 +1118,7 @@ local DEFAULTS = {
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
             showTextOnlyIfNoPower = false,  -- only show the resource text while the power bar is hidden (see IsPowerBarHidden)
-            showPercent = false,  -- secondary "Show %": OFF = value (default), ON = percent (Maelstrom/Insanity/Focus/Astral Power bars)
+            showPercent = false,  -- secondary "Show %": OFF (default) = current / max, ON = percent (Maelstrom/Insanity/Focus/Astral Power bars). Default OFF restores the pre-8.4.9 value display; 8.4.9 accidentally forced percent in combat for all four bars.
             showMaxStacks = true,
             textSize    = 11,
             textR       = 1, textG = 1, textB = 1,
@@ -4722,13 +4722,17 @@ local function UpdateSecondaryResource()
             if sp.showText and secondaryFrame._countText then
                 local ct = secondaryFrame._countText
                 local percentSuffix = (sp.showPercent == false) and "" or "%"
-                -- The power-based bar resources :"Show %" as a
-                -- value<->percent switch: ON = percent (secret-safe via the
-                -- ScaleTo100 declassifier; capped 0-100 by nature), OFF = the raw
-                -- value. Value is the default (showPercent defaults false for
-                -- the secondary). Both modes use SetFormattedText, which renders a
-                -- secret value's digits engine-side, so they work in instanced
-                -- combat with no Lua compare/concat on the secret.
+                -- The power-based bar resources treat "Show %" as a
+                -- value<->percent switch: OFF (the default) = the bare
+                -- current value (what these bars actually displayed before
+                -- 8.4.9 -- the old in-combat percent probe was secret and
+                -- always fell back to the raw value), ON = percent
+                -- (secret-safe via the ScaleTo100 declassifier; capped 0-100
+                -- by nature). The same mode now applies in and out of
+                -- instanced combat -- the old code flipped display with the
+                -- taint state. All modes use SetFormattedText, which renders
+                -- a secret value's digits engine-side, so they work in
+                -- instanced combat with no Lua compare/concat on the secret.
                 local pType = (powerType == "MAELSTROM_BAR") and PT.MAELSTROM
                            or (powerType == "INSANITY_BAR") and PT.INSANITY
                            or (powerType == "FOCUS_BAR") and PT.FOCUS
@@ -4750,9 +4754,19 @@ local function UpdateSecondaryResource()
                     -- Percent
                     local pct = UnitPowerPercent("player", pType, true, CurveConstants and CurveConstants.ScaleTo100) or 0
                     ct:SetFormattedText("%d%%", pct)
-                else
-                    -- Value
+                elseif pType then
+                    -- Value: bare current for the power bars (their pre-8.4.9
+                    -- display; no "/ max").
                     ct:SetFormattedText("%s", cur)
+                elseif sp.showMaxStacks == false then
+                    -- Current count only (Devourer "Show Max Stacks" off).
+                    ct:SetFormattedText("%s", cur)
+                else
+                    -- Current / max (Devourer default). SetFormattedText
+                    -- renders the (possibly secret) current and keeps the
+                    -- clean max -- no Lua concat of a secret value (see the
+                    -- note at the primary bar).
+                    ct:SetFormattedText("%s / %s", cur, maxC)
                 end
             end
         end
@@ -7343,7 +7357,10 @@ do
             local cleared = false
             for _, e in ipairs(list) do
                 local s, f = e.cfg, e.frame
-                local cx, cy = f and f:GetCenter()
+                -- Plain multi-value assignment: wrapping GetCenter in "f and"
+                -- would truncate it to one value and leave cy always nil.
+                local cx, cy
+                if f then cx, cy = f:GetCenter() end
                 if cx and cy then
                     local r = f:GetEffectiveScale() / uiS
                     s.unlockPos = {

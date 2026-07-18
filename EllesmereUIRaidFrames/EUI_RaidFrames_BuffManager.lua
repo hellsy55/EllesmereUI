@@ -707,6 +707,41 @@ function ns.BM_BorrowSpellFilter()
     return nil
 end
 
+-- "Show Own on All Specs" (Simple Setup > Buff Display): lifts the
+-- tracked-spec restriction for the SIMPLE grid only.
+local function SimpleShowOwnAllSpecs()
+    local p = ns.db and ns.db.profile
+    local bs = p and p.bmSimple
+    return (bs and bs.showOwnAllSpecs) == true
+end
+
+-- First tracked spec of the player's class, or nil for untracked classes.
+-- The all-specs fallbacks (simple grid toggle, per-indicator flag) resolve
+-- their configuration through this.
+local function ClassFallbackSpecKey()
+    local _, classToken = UnitClass("player")
+    if classToken then
+        for _, spec in ipairs(HEALER_SPECS) do
+            if spec.classToken == classToken then return spec.key end
+        end
+    end
+    return nil
+end
+ns.BM_ClassFallbackSpecKey = ClassFallbackSpecKey
+
+-- The spec key the SIMPLE grid tracks. Normally the player's resolved spec;
+-- with Show Own on All Specs enabled, untracked specs fall back to the
+-- class's first tracked spec so the player still sees their own class buffs.
+-- Secret-aura fingerprints stay gated on the REAL resolved spec
+-- (activeSpecKey_BM), so on fallback specs only plain non-secret spells can
+-- match -- deliberate scope limit, not a bug.
+local function SimpleSpecKey()
+    if activeSpecKey_BM then return activeSpecKey_BM end
+    if not SimpleShowOwnAllSpecs() then return nil end
+    return ClassFallbackSpecKey()
+end
+ns.BM_SimpleSpecKey = SimpleSpecKey
+
 -- Simple Setup whitelist for the container grid (rebuilt by RebuildLookup;
 -- read-only for consumers -- the engine copies candidate tables on set).
 function ns.BM_SimpleTrackedSpellIDs()
@@ -733,19 +768,33 @@ local function RebuildLookup(db)
         GetSpecIndicators(db, spec.key)
     end
 
-    -- Only load indicators for the player's active spec.
+    -- Only load indicators for the player's active spec. With no resolved
+    -- spec (untracked class spec), indicators flagged Show Own on All Specs
+    -- still load from the class-fallback spec so the player's own casts keep
+    -- their indicators (non-secret spells only there: MatchSecretAura stays
+    -- gated on activeSpecKey_BM).
     DetectActiveSpecKey()
-    if activeSpecKey_BM then
-        local specData = db.profile.bmIndicators[activeSpecKey_BM]
+    local loadKey = activeSpecKey_BM
+    local flaggedOnly = false
+    if not loadKey then
+        loadKey = ClassFallbackSpecKey()
+        flaggedOnly = true
+    end
+    if loadKey then
+        local specData = db.profile.bmIndicators[loadKey]
         if specData and type(specData) == "table" then
             for _, ind in ipairs(specData) do
-                if ind.enabled and ind.spells then
+                if ind.enabled and ind.spells
+                   and (not flaggedOnly or ind.showOwnAllSpecs) then
                     allActiveIndicators[#allActiveIndicators + 1] = ind
                     for _, sid in ipairs(ind.spells) do
                         -- Borrow specs (Enh/Ele) only track the spells they can
                         -- cast; the borrowed spec's other indicators stay inert
-                        -- (never match an aura) so nothing else shows.
-                        if (not activeBorrow_BM) or activeBorrow_BM.spells[sid] then
+                        -- (never match an aura) so nothing else shows. An
+                        -- indicator flagged Show Own on All Specs opts out of
+                        -- that restriction.
+                        if (not activeBorrow_BM) or ind.showOwnAllSpecs
+                           or activeBorrow_BM.spells[sid] then
                             trackedSpellIDs[sid] = true
                             if not spellToIndicators[sid] then
                                 spellToIndicators[sid] = {}
@@ -768,14 +817,17 @@ local function RebuildLookup(db)
 
     -- Simple Setup whitelist: every non-hidden spell of the active spec,
     -- regardless of indicators (hidden entries are alternate IDs resolved via
-    -- PRIMARY_BY_ALT during the scan). Borrow specs show only the borrowed spells.
+    -- PRIMARY_BY_ALT during the scan). Borrow specs show only the borrowed
+    -- spells. Show Own on All Specs lifts both restrictions: borrow specs get
+    -- the source spec's full list, untracked specs get the class fallback.
     wipe(simpleTrackedSpellIDs)
-    if activeBorrow_BM then
+    if activeBorrow_BM and not SimpleShowOwnAllSpecs() then
         for sid in pairs(activeBorrow_BM.spells) do
             simpleTrackedSpellIDs[sid] = true
         end
-    elseif activeSpecKey_BM then
-        local spec = SPEC_BY_KEY[activeSpecKey_BM]
+    else
+        local simpleKey = SimpleSpecKey()
+        local spec = simpleKey and SPEC_BY_KEY[simpleKey]
         if spec then
             for _, spell in ipairs(spec.spells) do
                 if not spell.hide then
@@ -3083,7 +3135,9 @@ local function AutoDetectSpec()
             end
         end
     end
-    return nil
+    -- Class has no tracked spec at all (e.g. Warrior): open on Holy Paladin
+    -- instead of a blank page.
+    return "PALADIN_HOLY"
 end
 
 -------------------------------------------------------------------------------
@@ -3507,6 +3561,35 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
         RebuildLookup(db)
         if ns.ReloadFrames then ns.ReloadFrames() end
         EllesmereUI:RefreshPage(true)
+    end
+
+    -- Inline cog on each indicator's Own Only control: per-indicator
+    -- Show Own on All Specs (the indicator keeps rendering the player's own
+    -- casts on every spec of the class, bypassing the borrow restriction).
+    local function AttachOwnAllSpecsCog(rgn, ind)
+        local _, cogShow = EllesmereUI.BuildCogPopup({
+            title = "Own Only",
+            rows = {
+                { type = "toggle", label = "Show Own on All Specs",
+                  tooltip = "Show this indicator's buffs on every spec of your class, not only this spec.",
+                  get = function() return ind.showOwnAllSpecs == true end,
+                  set = function(v)
+                      ind.showOwnAllSpecs = v and true or false
+                      ReloadAndUpdate()
+                  end },
+            },
+        })
+        local cogBtn = CreateFrame("Button", nil, rgn)
+        cogBtn:SetSize(26, 26)
+        cogBtn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+        cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+        cogBtn:SetAlpha(0.4)
+        local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+        cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+        cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+        cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        rgn._lastInline = cogBtn
     end
 
     local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
@@ -3963,6 +4046,21 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             UpdateStacksCog()
             EllesmereUI.RegisterWidgetRefresh(UpdateStacksCog)
         end
+
+        -- Row 6: Show Own on All Specs | (empty)
+        _, hh = W:DualRow(optsFrame, sy,
+            { type="toggle", text="Show Own on All Specs",
+              tooltip="Show your own class buffs on every spec, not only on the tracked healer spec.",
+              disabled=BuffsOff, disabledTooltip="Show Buffs",
+              getValue=function() return BVal("showOwnAllSpecs", false) end,
+              setValue=function(v)
+                  bs.showOwnAllSpecs = v and true or false
+                  -- The simple whitelist is spec-resolved inside the lookup
+                  -- build, so the toggle re-runs it before the re-render.
+                  if ns.BM_RebuildLookup then ns.BM_RebuildLookup(ns.db) end
+                  BApply()
+              end },
+            { type="label", text="" });  sy = sy - hh
 
         return 0
     end
@@ -5172,6 +5270,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
             PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
+            AttachOwnAllSpecsCog(rgn, ind)
         end
 
         -- Auto-default growth direction based on position
@@ -5559,6 +5658,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
                     rgn._control = cbDD
                     rgn._lastInline = nil
+                    AttachOwnAllSpecsCog(rgn, ind)
                 end
             end
 
@@ -5918,6 +6018,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
                         rgn._control = cbDD
                         rgn._lastInline = nil
+                        AttachOwnAllSpecsCog(rgn, ind)
                     end
                 end
 
@@ -6167,6 +6268,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
                         rgn._control = cbDD
                         rgn._lastInline = nil
+                        AttachOwnAllSpecsCog(rgn, ind)
                     end
                 end
 
@@ -6263,6 +6365,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
                         rgn._control = cbDD
                         rgn._lastInline = nil
+                        AttachOwnAllSpecsCog(rgn, ind)
                     end
                 end
 
@@ -6350,6 +6453,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
                         rgn._control = cbDD
                         rgn._lastInline = nil
+                        AttachOwnAllSpecsCog(rgn, ind)
                     end
                 end
 

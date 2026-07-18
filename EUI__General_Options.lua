@@ -406,6 +406,72 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.5.1",
+        heroes = {
+            {
+                module = "Cooldown Manager",
+                title  = "Stack Based Tracking Bars",
+                desc   = "Buff Tracking Bars can now fill by stack count instead of remaining time: turn on Stack Based Bar, set your Max Stacks, and the bar fills as your stacks build.",
+                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "EXTRAS", highlight = "Stack Based Bar" },
+            },
+            {
+                module = "Raid Frames",
+                title  = "Show Your Buffs on All Specs",
+                desc   = "Your own tracked buffs can now show on every spec of your class: flip one toggle in Simple Setup, or use the new cog on Own Only to opt in a single Custom Buff Display indicator.",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Buff Manager", section = "BUFF DISPLAY", highlight = "Show Own on All Specs" },
+            },
+        },
+        features = {
+            {
+                module = "Cooldown Manager",
+                title  = "CD Tracking Bar Charge Lines",
+                desc   = "Split multi-charge bars into per-charge segments with divider lines",
+                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "BAR LAYOUT", highlight = "Charge Hash Lines" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "More Combat Indicator Positions",
+                desc   = "Anchor to any health bar corner, plus a wider offset range",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "EXTRAS", highlight = "Combat Indicator",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                    end },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Independent Leader Indicator",
+                desc   = "Player and Target set separately, with one-click sync",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "EXTRAS", highlight = "Leader Indicator",
+                    preSelect = function()
+                        if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("player") end
+                    end },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Macro names and profession rank icons now update immediately after moving or swapping macros or switching loadouts." },
+            { module = "Blizzard Windows", text = "Fixed the character stats scrollbar getting stuck after collapsing a section, and hidden stat categories reappearing after a reload." },
+            { module = "Blizzard Windows", text = "Item quality, enchant, and socket borders no longer cover crafting order and catalyst slot highlights on the character sheet." },
+            { module = "Cooldown Manager", text = "Fixed keybind text missing or wrong for abilities and items cast from a macro." },
+            { module = "Cooldown Manager", text = "Fixed textured icon borders showing at different thicknesses on icons in the same bar." },
+            { module = "Cooldown Manager", text = "Fixed charge and stack count text offsets not scaling with icon size." },
+            { module = "Cooldown Manager", text = "Fixed custom colors being discarded when using Apply to Bar on an Active State color row." },
+            { module = "Cooldown Manager", text = "Fixed Diabolist buffs that share a spell ID collapsing into one icon and sharing settings." },
+            { module = "Cooldown Manager", text = "Raised the Tracking Bars Max Stacks slider cap from 50 to 100." },
+            { module = "Cooldown Manager", text = "Fixed charge hash lines and stack tick marks not appearing on the Tracking Bars preview until settings were edited again." },
+            { module = "Cooldown Manager", text = "Fixed stack tick marks never showing unless the Stack Threshold color was also enabled; they now only require Max Stacks." },
+            { module = "General", text = "Spacing sliders across the whole suite now show and step in real screen pixels, so 1 always equals exactly one pixel on your monitor at any UI scale; saved layouts are unchanged." },
+            { module = "General", text = "Fixed a rare rounding issue that could shave one pixel off some element sizes at certain UI scales." },
+            { module = "General", text = "Fixed the French translation failing to load entirely, with all text falling back to English." },
+            { module = "General", text = "Updated Korean, French, Simplified Chinese, and Traditional Chinese translations." },
+            { module = "QoL", text = "The auto repair chat message is now translatable, with a new Coin Icons option to show the cost with coin icons instead of text." },
+            { module = "Quest Tracker", text = "Removed the large empty gap at the top of the tracker and stopped it briefly dropping down when clicking a quest." },
+            { module = "Raid Frames", text = "The Buff Manager's Editing Spec dropdown now opens on your class's tracked spec (or Holy Paladin) instead of blank when playing an untracked spec." },
+            { module = "Resource Bars", text = "Fixed the Sweeping Strikes bar dropping to zero mid-combat and in Mythic+." },
+            { module = "Resource Bars", text = "Restored Unlock Mode movers for bars still using an old Anchor To setting, keeping the bar's position." },
+            { module = "Resource Bars", text = "Resource text no longer flips between value and percent when combat starts; a Show % option picks the display." },
+        },
+    },
+    {
         version = "8.4.9",
         heroes = {
             {
@@ -1081,13 +1147,13 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 module = "Nameplates",
                 title  = "Cast Icon Offset",
                 desc   = "X and Y sliders to reposition the nameplate cast icon",
-                nav    = { module = "EllesmereUINameplates", page = "Display", section = "BARS", highlight = "Spell Icon" },
+                nav    = { module = "EllesmereUINameplates", page = "Display", section = "HEALTH AND CAST BAR", highlight = "Spell Icon" },
             },
             {
                 module = "Nameplates",
                 title  = "Cast Icon Target Border",
                 desc   = "Match the full-size cast icon border to your target color",
-                nav    = { module = "EllesmereUINameplates", page = "Display", section = "BARS", highlight = "Spell Icon" },
+                nav    = { module = "EllesmereUINameplates", page = "Display", section = "HEALTH AND CAST BAR", highlight = "Spell Icon" },
             },
             {
                 module = "Unit & Raid Frames",
@@ -1398,82 +1464,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Unit Frames", text = "Fixed the power bar border on detached power bars failing to appear on the target and focus frames without a reload." },
             { module = "Unit Frames", text = "Fixed unlock-anchored frames and castbars snapping back to an old position after a reload." },
             { module = "Unit Frames", text = "Fixed the native Blizzard class power bar snapping back onto the player frame after a form or spec change." },
-        },
-    },
-    {
-        version = "8.3.6",
-        heroes = {
-            {
-                module = "Nameplates",
-                title  = "Class Resource Shapes & Icons",
-                desc   = "Draw your class resource pips as squares, circles, diamonds, hexagons, or shields, or swap them for Blizzard's own resource art (runes, holy power, soul shards, combo points, chi, arcane charges, and essence), with an optional colored border in the settings cog.",
-                nav    = { module = "EllesmereUINameplates", page = "Display", section = "CLASS RESOURCE", highlight = "Shape" },
-            },
-            {
-                module = "Action Bars",
-                title  = "Cooldown Icon Alpha & Swipe Color",
-                desc   = "Dim action button icons to a custom opacity while they are on cooldown, and recolor the cooldown swipe overlay with its own opacity slider and color.",
-                nav    = { module = "EllesmereUIActionBars", page = "Bar Display", section = "ICON EFFECTS", highlight = "Alpha when on CD" },
-            },
-            {
-                module = "CDM",
-                title  = "Cooldown Icon Alpha & Hide CD Swipe",
-                desc   = "Two new per-icon cooldown effects in an icon's right-click menu: Lower Alpha fades an icon to a custom opacity while it is on cooldown instead of hiding it, and Hide CD Swipe removes the radial cooldown swipe entirely.",
-                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars" },
-            },
-            {
-                module = "Nameplates",
-                title  = "Text Width and Wrap",
-                desc   = "Enemy name, health text, cast spell name, and cast target each gain a Width % slider and a Wrap toggle in their settings cog, so long text can be narrowed, widened, or spread onto two lines instead of always cutting off.",
-                nav    = { module = "EllesmereUINameplates", page = "Display", section = "CORE TEXT POSITIONS", highlight = "Top Text" },
-            },
-        },
-        features = {
-            {
-                module = "Blizzard Skin",
-                title  = "Hide Unit Health Strip",
-                desc   = "Blizzard's health bar at the bottom of unit tooltips is now hidden by default. Toggle it back on if you prefer it showing.",
-                nav    = { module = "EllesmereUIBlizzardSkin", page = "Tooltips, Menus & Popups", section = "BLIZZARD TOOLTIP", highlight = "Hide Unit Health Strip" },
-            },
-            {
-                module = "General",
-                title  = "Auto Assign to Specs on Import",
-                desc   = "When an imported profile was assigned to specializations by whoever exported it, a new opt-in checkbox can point your own matching specs at it too. Off by default, so your existing assignments stay put.",
-                nav    = { module = "_EUIProfiles", page = "Profiles" },
-            },
-            {
-                module = "Mythic Timer",
-                title  = "Timer Font Picker",
-                desc   = "Pick a custom font just for the Mythic+ timer clock text, independent of the module's general font setting.",
-                nav    = { module = "EllesmereUIMythicTimer", page = "Mythic+ Timer", section = "TIMER", highlight = "Timer Font" },
-            },
-            {
-                module = "Nameplates",
-                title  = "Has Aggro Boss Override",
-                desc   = "The Has Aggro settings cog gains an Override Boss Colors toggle, so the tank has-aggro color can take priority over the Boss color in addition to Mini-Boss and Caster.",
-                nav    = { module = "EllesmereUINameplates", page = "Colors", section = "THREAT COLORS (INSTANCES ONLY)", highlight = "Tank: Show Special" },
-            },
-            {
-                module = "Unit Frames",
-                title  = "Percent-Only Health Decimal",
-                desc   = "A new Only Show for % Health option keeps the health percent showing a decimal (77.3%) while health values stay whole numbers (240k), off by default.",
-                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "DISPLAY", highlight = "Show Decimal on Health Text" },
-            },
-        },
-        fixes = {
-            { module = "CDM", text = "A spell picked up from a talent swap now lands in its correct slot instead of at the end of the bar, and a spell talented out keeps its spot so it returns there when re-talented." },
-            { module = "CDM", text = "The CD Ready sound no longer fires at random while another ability is used, buff gained and lost sounds no longer fire from zoning or logging in, and the first buff proc after login now plays its sound." },
-            { module = "Damage Meters", text = "Meter windows can now be resized to a shorter minimum height for a more compact meter." },
-            { module = "Damage Meters", text = "Numbers now abbreviate using Korean units on Korean clients, matching the existing Chinese support." },
-            { module = "General", text = "Shared fallback text in chat menus, quest tracker headers, and default tooltips now follows each area's chosen font outline, not just its typeface." },
-            { module = "General", text = "Expanded Traditional Chinese translations, including the Raid Frames full preview and the aura and buff reminder labels." },
-            { module = "Mythic Timer", text = "A new Show Dungeon Name toggle in the Title cog hides the dungeon name so only the key level shows, and Title Size is now a slider on the row instead of a hidden cog option." },
-            { module = "Nameplates", text = "Fixed borders sometimes showing as a solid black box at certain UI scales, and the Wrap Around Castbar border leaving a seam or gap between the health and cast bars." },
-            { module = "Nameplates", text = "Target, Focus, and Hover bar textures each gain a Full Alpha on Empty Part of Bar toggle so the pattern can show at full opacity across the whole bar." },
-            { module = "Nameplates", text = "Fixed the cast bar shifting by a pixel as the plate moved with a Cast Bar Y Offset set, and the cast timer getting cut off on longer casts." },
-            { module = "Nameplates", text = "Fixed the pandemic glow on aura icons showing over their cooldown countdown and stack count text." },
-            { module = "Unit Frames", text = "Boss frame buff and debuff icons, and the duration and stack numbers on tracked auras, no longer show the frame border in front of them." },
-            { module = "Unit Frames", text = "The detached power bar's Border Size slider now actually draws a border; it previously had no visible effect." },
         },
     },
 }

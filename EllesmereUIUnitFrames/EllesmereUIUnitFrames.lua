@@ -291,7 +291,7 @@ local defaults = {
             combatIndicatorStyle = "class",
             combatIndicatorColor = "custom",
             combatIndicatorCustomColor = { r = 1, g = 1, b = 1 },
-            combatIndicatorPosition = "topleft",
+            combatIndicatorPosition = "healthbar",
             combatIndicatorSize = 22,
             combatIndicatorX = 0,
             combatIndicatorY = 0,
@@ -328,7 +328,7 @@ local defaults = {
             combatIndicatorStyle = "none",
             combatIndicatorColor = "custom",
             combatIndicatorCustomColor = { r = 1, g = 1, b = 1 },
-            combatIndicatorPosition = "topleft",
+            combatIndicatorPosition = "healthbar",
             combatIndicatorSize = 22,
             combatIndicatorX = 0,
             combatIndicatorY = 0,
@@ -11356,17 +11356,22 @@ function InitializeFrames()
             local sz = ps.combatIndicatorSize or 22
             local ox = ps.combatIndicatorX or 0
             local oy = ps.combatIndicatorY or 0
-            local pos = ps.combatIndicatorPosition or "topleft"
+            local pos = ps.combatIndicatorPosition or "healthbar"
 
             combat:SetSize(sz, sz)
             combat:ClearAllPoints()
 
+            -- "healthbar" is the stored value shown as "Center" in the dropdown;
+            -- "center" is a render alias for it.
             if pos == "portrait" and pf.Portrait then
                 combat:SetPoint("CENTER", pf.Portrait, "CENTER", ox, oy)
+            elseif pos == "textbar" then
+                combat:SetPoint("CENTER", pf._btb or pf, "CENTER", ox, oy)
+            elseif pos == "healthbar" or pos == "center" then
+                combat:SetPoint("CENTER", pf.Health or pf, "CENTER", ox, oy)
             else
                 local anchor =
                     (pos == "topright"    and "TOPRIGHT")    or
-                    (pos == "center"      and "CENTER")      or
                     (pos == "bottomleft"  and "BOTTOMLEFT")  or
                     (pos == "bottomright" and "BOTTOMRIGHT") or
                     "TOPLEFT"

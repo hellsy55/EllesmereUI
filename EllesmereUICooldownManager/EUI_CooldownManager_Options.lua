@@ -2003,7 +2003,28 @@ initFrame:SetScript("OnEvent", function(self)
             if not wrap then
                 wrap = ns.CreateTBBBarFrame(oc, "Pv" .. n)
                 _tbbPopoutBars[n] = wrap
+                -- Width-gated geometry (charge hash lines, threshold ticks)
+                -- silently skips while the fill's anchor-derived size is
+                -- still 0 on a fresh pool bar. Live bars re-drive from the
+                -- timer tick; previews have no tick, so re-drive when the
+                -- size resolves.
+                if wrap._bar then
+                    wrap._bar:SetScript("OnSizeChanged", function(sbSelf)
+                        local cfg = wrap._pvCfg
+                        if not cfg then return end
+                        if ns.ApplyTBBChargeHashLines then
+                            local mc = ns.GetTBBMaxCharges and ns.GetTBBMaxCharges(cfg)
+                            ns.ApplyTBBChargeHashLines(wrap, cfg, mc)
+                        end
+                        if ns.ApplyTBBTickMarks then
+                            ns.ApplyTBBTickMarks(sbSelf, cfg, wrap._threshTicks,
+                                cfg.verticalOrientation, wrap._tickOverlay)
+                            wrap._ticksDirty = nil
+                        end
+                    end)
+                end
             end
+            wrap._pvCfg = e.cfg
             ns.ApplyTBBBarSettings(wrap, e.cfg)
             -- The apply path pins the wrap to the bar's own strata (cfg.strata,
             -- MEDIUM default); lift the preview into the popout's strata AFTER
@@ -2028,6 +2049,15 @@ initFrame:SetScript("OnEvent", function(self)
                 if wrap._textOverlay and sb then wrap._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
             end
             DressTBBPopoutBar(wrap, e.cfg)
+            -- Reused pool bars already have a resolved size, so OnSizeChanged
+            -- may never fire for this refresh: consume the deferred tick-mark
+            -- pass here (the apply path drew hash lines itself when sized).
+            local psb = wrap._bar
+            if wrap._ticksDirty and psb and psb:GetWidth() > 0 and ns.ApplyTBBTickMarks then
+                ns.ApplyTBBTickMarks(psb, e.cfg, wrap._threshTicks,
+                    e.cfg.verticalOrientation, wrap._tickOverlay)
+                wrap._ticksDirty = nil
+            end
             wrap:Show()
         end
         for n = #list + 1, #_tbbPopoutBars do
@@ -5310,7 +5340,111 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
 
-        -- Row 1: Enable Max Stacks (toggle + inline slider) | Ticks at Stacks (label + inline input)
+        -- Row 1: Pandemic Glow (dropdown + swatch + cog + sync) | Stack Based
+        -- Bar (buff bars only; page rebuilds on selection change, so cd/utility
+        -- bars get a blank slot). Stack Based Bar is inert until Max Stacks is
+        -- enabled below.
+        do
+            local function tbbPandemicOff()
+                local bd = SelectedTBB(); return not bd or bd.pandemicGlow ~= true
+            end
+            local function tbbAntsOff()
+                if tbbPandemicOff() then return true end
+                local bd = SelectedTBB()
+                -- Pixel-glow "ants" settings apply for every bar style except
+                -- Auto-Cast Shine (4). Any non-{1,4} stored value (e.g. the legacy
+                -- -1 "Blizzard Default", which is meaningless on a rectangle)
+                -- renders as Pixel Glow, so its ants settings stay editable.
+                return not bd or bd.pandemicGlowStyle == 4
+            end
+
+            local bd0 = SelectedTBB()
+            local rightSlot
+            if bd0 and bd0.trackType ~= "cooldown" then
+                rightSlot = { type = "toggle", text = "Stack Based Bar",
+                    tooltip = "Fill this bar from current stacks out of Max Stacks instead of remaining time (requires Enable Max Stacks below).",
+                    getValue = function() local bd = SelectedTBB(); return bd and bd.stackBasedBar end,
+                    setValue = function(v)
+                        local bd = SelectedTBB(); if not bd then return end
+                        bd.stackBasedBar = v and true or false; RefreshTBB()
+                    end }
+            else
+                rightSlot = { type = "label", text = "" }
+            end
+
+            local tbbPanRow
+            tbbPanRow, h = W:DualRow(parent, y,
+                { type = "dropdown", text = "Pandemic Glow",
+                  values = PAN_GLOW_BAR_VALUES, order = PAN_GLOW_BAR_ORDER,
+                  getValue = function()
+                      local bd = SelectedTBB(); if not bd then return 0 end
+                      if bd.pandemicGlow ~= true then return 0 end
+                      -- Bars only render Pixel Glow (1) or Auto-Cast Shine (4).
+                      -- Any other stored style (e.g. the -1 "Blizzard Default"
+                      -- default, which has no meaning on a rectangle) renders as
+                      -- Pixel Glow, so show it as Pixel Glow instead of a raw -1.
+                      local style = bd.pandemicGlowStyle
+                      if style ~= 4 then style = 1 end
+                      return style
+                  end,
+                  setValue = function(v)
+                      local bd = SelectedTBB(); if not bd then return end
+                      if v == 0 then bd.pandemicGlow = false
+                      else bd.pandemicGlow = true; bd.pandemicGlowStyle = v end
+                      RefreshTBB()
+                      C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+                  end,
+                  tooltip = "Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)" },
+                rightSlot);  y = y - h
+
+            -- Inline color swatch
+            do
+                local tbbLR = tbbPanRow._leftRegion
+                local tbbCtrl = tbbLR and tbbLR._control
+                if tbbCtrl and EllesmereUI.BuildColorSwatch then
+                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                        tbbLR, tbbPanRow:GetFrameLevel() + 3,
+                        function()
+                            local bd = SelectedTBB(); local c = bd and bd.pandemicGlowColor
+                            if c then return c.r or 1, c.g or 1, c.b or 0 end; return 1, 1, 0
+                        end,
+                        function(r, g, b)
+                            local bd = SelectedTBB(); if not bd then return end
+                            bd.pandemicGlowColor = { r = r, g = g, b = b }; RefreshTBB()
+                        end, nil, 20)
+                    PP.Point(swatch, "RIGHT", tbbCtrl, "LEFT", -12, 0)
+                    tbbLR._lastInline = swatch
+                    EllesmereUI.RegisterWidgetRefresh(function()
+                        local off = tbbPandemicOff()
+                        swatch:SetAlpha(off and 0.15 or 1); swatch:EnableMouse(not off)
+                        if updateSwatch then updateSwatch() end
+                    end)
+                    swatch:SetAlpha(tbbPandemicOff() and 0.15 or 1)
+                    swatch:EnableMouse(not tbbPandemicOff())
+                end
+            end
+
+            BuildPandemicCogButton(tbbPanRow, tbbAntsOff, SelectedTBB, function() RefreshTBB() end)
+
+            -- Apply All
+            if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
+                EllesmereUI.BuildSyncIcon({
+                    region = tbbPanRow._leftRegion,
+                    tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
+                    isSynced = function()
+                        local src = SelectedTBB(); if not src then return true end
+                        return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                    end,
+                    onClick = function()
+                        local src = SelectedTBB(); if not src then return end
+                        EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                        RefreshTBB()
+                    end,
+                })
+            end
+        end
+
+        -- Row 2: Enable Max Stacks (toggle + inline slider) | Ticks at Stacks (label + inline input)
         local function maxStacksOff()
             local bd = SelectedTBB()
             return not bd or not bd.stackThresholdMaxEnabled
@@ -5332,7 +5466,7 @@ initFrame:SetScript("OnEvent", function(self)
             local SL = EllesmereUI.SL or {}
             local trackFrame, valBox, _, slThumb = EllesmereUI.BuildSliderCore(
                 rgn, 90, 4, 14, 36, 26, 13, SL.INPUT_A or 0.6,
-                1, 50, 1,
+                1, 100, 1,
                 function() local bd = SelectedTBB(); return bd and bd.stackThresholdMax or 10 end,
                 function(v) local bd = SelectedTBB(); if bd then bd.stackThresholdMax = v; RefreshTBB() end end,
                 true)
@@ -5430,7 +5564,7 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateTicksInput()
         end
 
-        -- Row 2: Enable Stack Threshold (toggle + inline swatch) | Stack Threshold (slider)
+        -- Row 3: Enable Stack Threshold (toggle + inline swatch) | Stack Threshold (slider)
         local threshRow
         threshRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Stack Threshold",
@@ -5482,97 +5616,6 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(function() updateThreshSwatch(); UpdateThreshSwatchState() end)
             UpdateThreshSwatchState()
-        end
-
-        -- Row 3: Pandemic Glow | Pandemic Glow Preview
-        do
-            local function tbbPandemicOff()
-                local bd = SelectedTBB(); return not bd or bd.pandemicGlow ~= true
-            end
-            local function tbbAntsOff()
-                if tbbPandemicOff() then return true end
-                local bd = SelectedTBB()
-                -- Pixel-glow "ants" settings apply for every bar style except
-                -- Auto-Cast Shine (4). Any non-{1,4} stored value (e.g. the legacy
-                -- -1 "Blizzard Default", which is meaningless on a rectangle)
-                -- renders as Pixel Glow, so its ants settings stay editable.
-                return not bd or bd.pandemicGlowStyle == 4
-            end
-
-            local tbbPanRow
-            tbbPanRow, h = W:DualRow(parent, y,
-                { type = "dropdown", text = "Pandemic Glow",
-                  values = PAN_GLOW_BAR_VALUES, order = PAN_GLOW_BAR_ORDER,
-                  getValue = function()
-                      local bd = SelectedTBB(); if not bd then return 0 end
-                      if bd.pandemicGlow ~= true then return 0 end
-                      -- Bars only render Pixel Glow (1) or Auto-Cast Shine (4).
-                      -- Any other stored style (e.g. the -1 "Blizzard Default"
-                      -- default, which has no meaning on a rectangle) renders as
-                      -- Pixel Glow, so show it as Pixel Glow instead of a raw -1.
-                      local style = bd.pandemicGlowStyle
-                      if style ~= 4 then style = 1 end
-                      return style
-                  end,
-                  setValue = function(v)
-                      local bd = SelectedTBB(); if not bd then return end
-                      if v == 0 then bd.pandemicGlow = false
-                      else bd.pandemicGlow = true; bd.pandemicGlowStyle = v end
-                      RefreshTBB()
-                      if tbbPanRow and tbbPanRow._refreshPreview then tbbPanRow._refreshPreview() end
-                      C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
-                  end,
-                  tooltip = "Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)" },
-                { type = "label", text = "Pandemic Glow Preview" });  y = y - h
-
-            BuildPandemicPreview(tbbPanRow, tbbPandemicOff, SelectedTBB)
-
-            -- Inline color swatch
-            do
-                local tbbLR = tbbPanRow._leftRegion
-                local tbbCtrl = tbbLR and tbbLR._control
-                if tbbCtrl and EllesmereUI.BuildColorSwatch then
-                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
-                        tbbLR, tbbPanRow:GetFrameLevel() + 3,
-                        function()
-                            local bd = SelectedTBB(); local c = bd and bd.pandemicGlowColor
-                            if c then return c.r or 1, c.g or 1, c.b or 0 end; return 1, 1, 0
-                        end,
-                        function(r, g, b)
-                            local bd = SelectedTBB(); if not bd then return end
-                            bd.pandemicGlowColor = { r = r, g = g, b = b }; RefreshTBB()
-                            if tbbPanRow._refreshPreview then tbbPanRow._refreshPreview() end
-                        end, nil, 20)
-                    PP.Point(swatch, "RIGHT", tbbCtrl, "LEFT", -12, 0)
-                    tbbLR._lastInline = swatch
-                    EllesmereUI.RegisterWidgetRefresh(function()
-                        local off = tbbPandemicOff()
-                        swatch:SetAlpha(off and 0.15 or 1); swatch:EnableMouse(not off)
-                        if updateSwatch then updateSwatch() end
-                    end)
-                    swatch:SetAlpha(tbbPandemicOff() and 0.15 or 1)
-                    swatch:EnableMouse(not tbbPandemicOff())
-                end
-            end
-
-            BuildPandemicCogButton(tbbPanRow, tbbAntsOff, SelectedTBB, function() RefreshTBB() end)
-
-            -- Apply All
-            if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
-                EllesmereUI.BuildSyncIcon({
-                    region = tbbPanRow._leftRegion,
-                    tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
-                    isSynced = function()
-                        local src = SelectedTBB(); if not src then return true end
-                        return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
-                    end,
-                    onClick = function()
-                        local src = SelectedTBB(); if not src then return end
-                        EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
-                        RefreshTBB()
-                    end,
-                })
-            end
         end
 
         -- Preview click-navigation map: preview element -> section + row.

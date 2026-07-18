@@ -11884,13 +11884,21 @@ local function GetConfiguredBuffSpells()
     -- Resolve the player's spec via the shared, locale-independent helper (matches
     -- by spec ID, not the localized spec name) so indicators show on every client.
     local specKey = ns.BM_CurrentSpecKey and ns.BM_CurrentSpecKey()
+    -- Untracked spec: preview only the class-fallback indicators flagged
+    -- Show Own on All Specs (the ones that actually render live there).
+    local flaggedOnly = false
+    if not specKey then
+        specKey = ns.BM_ClassFallbackSpecKey and ns.BM_ClassFallbackSpecKey()
+        flaggedOnly = true
+    end
     if not specKey then return {} end
     local indicators = db.profile.bmIndicators[specKey]
     if not indicators then return {} end
     local spells = {}
     local seen = {}
     for _, ind in ipairs(indicators) do
-        if ind.enabled and ind.spells and (ind.type == "icon" or ind.type == "square") then
+        if ind.enabled and ind.spells and (not flaggedOnly or ind.showOwnAllSpecs)
+           and (ind.type == "icon" or ind.type == "square") then
             for _, sid in ipairs(ind.spells) do
                 if not seen[sid] then
                     seen[sid] = true

@@ -285,6 +285,7 @@ local TBB_DEFAULT_BAR = {
     stackThresholdMaxEnabled = false,
     stackThresholdMax = 10,
     stackThresholdTicks = "",
+    stackBasedBar = false,
     pandemicGlow = true,
     pandemicGlowStyle = -1,
     pandemicGlowColor = { r = 1, g = 1, b = 0 },
@@ -1429,8 +1430,9 @@ end
 -------------------------------------------------------------------------------
 --  Style copy
 --  The "style" of a bar is every visual key -- everything except the tracked
---  spell identity, enable state, group membership and the stack-threshold
---  numbers (those are spell-specific, matching AddTrackedBuffBar's reset set).
+--  spell identity, enable state, group membership and the stack-threshold /
+--  stack-based-fill keys (those are spell-specific, matching
+--  AddTrackedBuffBar's reset set).
 -------------------------------------------------------------------------------
 local TBB_STYLE_KEYS = {
     "height", "width", "verticalOrientation", "reverseFill",
@@ -2007,8 +2009,10 @@ local function ApplyTBBTickMarks(sb, cfg, tickCache, isVert, tickParent)
     if tickCache then
         for i = 1, #tickCache do tickCache[i]:Hide() end
     end
+    -- Ticks are governed by Max Stacks alone (the options input unlocks with
+    -- it); Enable Stack Threshold only drives the recolor overlay, not ticks.
     if (cfg.trackType == "cooldown" and cfg.chargeHashLines == true)
-       or not cfg.stackThresholdEnabled or not cfg.stackThresholdMaxEnabled
+       or not cfg.stackThresholdMaxEnabled
        or not vals or maxStacks < 1 or not tickCache then return end
 
     local PP = EllesmereUI and EllesmereUI.PP
@@ -2163,6 +2167,9 @@ local function ApplyTBBChargeHashLines(bar, cfg, maxCharges)
     bar._chargeHashLineB = lineB
     bar._chargeHashLineA = lineA
 end
+-- Exported for the options popout preview: its bars have no timer tick to
+-- re-drive width-gated geometry once the fill's anchor-derived size resolves.
+ns.ApplyTBBChargeHashLines = ApplyTBBChargeHashLines
 
 local function AnchorTBBSparkState(bar, anchor, isVert, reverse, flushToEdge)
     local sb, spark = bar and bar._bar, bar and bar._spark
@@ -3059,6 +3066,12 @@ end
 --  Stacks Helper (reads Blizzard child Applications frame)
 -------------------------------------------------------------------------------
 local function UpdateStacks(bar, blzChild, cfg)
+    -- Stack-based fill needs a live count even when Blizzard renders no
+    -- Applications text (hidden at 1 stack), plus a restricted marker so the
+    -- fill site can fail open instead of drawing an empty bar.
+    local stackFill = cfg and cfg.stackBasedBar and cfg.trackType ~= "cooldown"
+        and cfg.stackThresholdMaxEnabled
+    bar._stackUnreadable = nil
     -- Read stacks from blzChild.Icon.Applications FontString.
     if blzChild and blzChild.Icon and blzChild.Icon.Applications then
         -- Pass the text straight through without comparing (it may be tainted).
@@ -3084,6 +3097,8 @@ local function UpdateStacks(bar, blzChild, cfg)
                 if ok2 and ad and ad.applications then
                     bar._stackCount = ad.applications
                 end
+            elseif auraInstID and issecretvalue(auraInstID) then
+                bar._stackUnreadable = true
             end
             return
         end
@@ -3107,14 +3122,41 @@ local function UpdateStacks(bar, blzChild, cfg)
                     if ok2 and ad and ad.applications then
                         bar._stackCount = ad.applications
                     end
+                elseif auraInstID and issecretvalue(auraInstID) then
+                    bar._stackUnreadable = true
                 end
                 return
             end
         end
     end
-    -- No stacks
+    -- No stacks text
     if bar._stacksText then bar._stacksText:Hide() end
     bar._stackCount = 0
+    if stackFill and blzChild then
+        -- Stack-based fill: this helper only runs for active frames, so the
+        -- aura is up and counts as at least 1 even with no Applications text.
+        local auraInstID = blzChild.auraInstanceID
+        local auraUnit = blzChild.auraDataUnit
+        if auraInstID and auraUnit then
+            if issecretvalue(auraInstID) then
+                bar._stackUnreadable = true
+            else
+                bar._stackCount = 1
+                local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, auraUnit, auraInstID)
+                if ok and ad and ad.applications then
+                    local apps = ad.applications
+                    -- Secret counts pass straight through to SetValue;
+                    -- readable counts keep the >= 1 floor set above.
+                    if issecretvalue(apps) or apps >= 1 then
+                        bar._stackCount = apps
+                    end
+                end
+            end
+        else
+            -- Active frame with no aura instance to query: count unknowable.
+            bar._stackUnreadable = true
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -3221,6 +3263,18 @@ local function EffectiveIconSpellID(cfg)
         return cfg.baseSpellID
     end
     return sid
+end
+
+-- Cooldown-bar spell resolution. Charge Hash Lines needs a STABLE identity
+-- (the segment math breaks if the tracked id flips to a proc override
+-- mid-recharge), so bars with that toggle on resolve via
+-- StableCooldownSpellID. Every other cooldown bar keeps the long-standing
+-- override-following EffectiveIconSpellID behavior.
+local function CooldownBarSpellID(cfg)
+    if cfg and cfg.chargeHashLines == true then
+        return StableCooldownSpellID(cfg)
+    end
+    return EffectiveIconSpellID(cfg)
 end
 
 -- Mirror the 12.1 engine-written decimal timer string (hidden FS on the aura
@@ -3998,7 +4052,7 @@ function ns.UpdateCooldownCastListener()
     if tbb and tbb.bars then
         for _, cfg in ipairs(tbb.bars) do
             if cfg.enabled ~= false and cfg.trackType == "cooldown" then
-                local canon = StableCooldownSpellID(cfg)
+                local canon = CooldownBarSpellID(cfg)
                 if canon then
                     any = true
                     -- Every form the cast event could fire with maps to the
@@ -4050,7 +4104,7 @@ SlashCmdList.TBBCD = function()
     for i, cfg in ipairs(tbb.bars) do
         if cfg.enabled ~= false and cfg.trackType == "cooldown" then
             found = true
-            local sid = StableCooldownSpellID(cfg)
+            local sid = CooldownBarSpellID(cfg)
             local name = sid and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
             print("  bar " .. i .. " " .. tostring(name)
                 .. " saved=" .. tostring(cfg.spellID)
@@ -4124,7 +4178,7 @@ end
 --     errors.
 -------------------------------------------------------------------------------
 local function _UpdateCooldownBar(bar, cfg)
-    local sid = StableCooldownSpellID(cfg)
+    local sid = CooldownBarSpellID(cfg)
 
     -- remaining/duration: CLEAN numbers only (nil = ready or secret).
     -- wantHandle: which engine duration handle drives the fill ("charge" /
@@ -4552,14 +4606,32 @@ function ns.UpdateTrackedBuffBarTimers()
                 if blizzBar then
                     -- Mirror Blizzard's bar onto ours. Secret values pass
                     -- through natively to widget setters -- no Lua comparison.
-                    sb:SetMinMaxValues(blizzBar:GetMinMaxValues())
                     -- Smooth fill is baseline (see UpdateLustBar note).
                     local smooth = _smoothBuffs and wasShown and Enum
                         and Enum.StatusBarInterpolation
                         and Enum.StatusBarInterpolation.ExponentialEaseOut
-                    if smooth then
+                    if cfg.stackBasedBar and cfg.trackType ~= "cooldown"
+                       and cfg.stackThresholdMaxEnabled then
+                        -- Stack-based fill: current stacks over the user's Max
+                        -- Stacks instead of the time mirror. An unreadable
+                        -- count (12.1 combat restriction) fails open to a
+                        -- full bar like every other unreadable fill here.
+                        if bar._stackUnreadable then
+                            sb:SetMinMaxValues(0, 1)
+                            sb:SetValue(1)
+                        else
+                            sb:SetMinMaxValues(0, cfg.stackThresholdMax or 10)
+                            if smooth then
+                                sb:SetValue(bar._stackCount or 0, smooth)
+                            else
+                                sb:SetValue(bar._stackCount or 0)
+                            end
+                        end
+                    elseif smooth then
+                        sb:SetMinMaxValues(blizzBar:GetMinMaxValues())
                         sb:SetValue(blizzBar:GetValue(), smooth)
                     else
+                        sb:SetMinMaxValues(blizzBar:GetMinMaxValues())
                         sb:SetValue(blizzBar:GetValue())
                     end
                     if cfg.showSpark and bar._spark then bar._spark:Show() end
@@ -4953,6 +5025,8 @@ function ns.BuildTrackedBuffBars()
         if cfg.pandemicGlow                             then _anyPandemic  = true end
         if cfg.stackThresholdEnabled                    then _anyThreshold = true; _anyStacks = true end
         if (cfg.stacksPosition or "center") ~= "none"  then _anyStacks    = true end
+        if cfg.stackBasedBar and cfg.trackType ~= "cooldown"
+           and cfg.stackThresholdMaxEnabled             then _anyStacks    = true end
 
         if not tbbFrames[i] then
             tbbFrames[i] = CreateTrackedBuffBarFrame(UIParent, i)
