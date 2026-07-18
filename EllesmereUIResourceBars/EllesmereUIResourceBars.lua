@@ -1862,6 +1862,7 @@ local function RegisterUnlockElements()
             setWidth = function(_, w) SS().width = PP.Snap(w); Rebuild() end,
             setHeight = function(_, h) SS().height = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
         })
@@ -1882,6 +1883,7 @@ local function RegisterUnlockElements()
             setWidth = function(_, w) SS().width = PP.Snap(w); Rebuild() end,
             setHeight = function(_, h) SS().height = PP.Snap(h); Rebuild() end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
         })
@@ -1907,6 +1909,7 @@ local function RegisterUnlockElements()
             setHeight = function(_, h) SS().pipHeight = PP.Snap(h); Rebuild() end,
             isHidden = function() local s = S(); return s.enabled == false or IsSpecDisabled(s) end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
+            keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
             savePos = save, loadPos = load, clearPos = clear, applyPos = apply,
         })
