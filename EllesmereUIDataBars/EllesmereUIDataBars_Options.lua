@@ -1870,7 +1870,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "slider", text = lenLabel, min = 100, max = 3000, step = 10,
               tooltip = "Size of the bar along its block axis in pixels.",
               disabled = function() return cfg.lengthMode == "full" end,
-              disabledTooltip = "Disabled while " .. fullLabel .. " is enabled.",
+              disabledTooltip = EllesmereUI.Lf("Disabled while %1$s is enabled.", EllesmereUI.L(fullLabel)),
               rawTooltip = true,
               getValue = function()
                   local v = cfg.length
