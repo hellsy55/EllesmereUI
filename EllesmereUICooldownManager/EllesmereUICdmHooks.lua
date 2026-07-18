@@ -1586,7 +1586,7 @@ local function DecorateFrame(frame, barData)
             brdR, brdG, brdB, barData.borderA or 1,
             textureKey, barData.borderTextureOffset, barData.borderTextureOffsetY,
             barData.borderTextureShiftX, barData.borderTextureShiftY,
-            "cdm", barData.borderThickness or "thin")
+            "cdm", barData.borderThickness or "thin", true)
         -- ApplyBorderStyle above always paints the bar's BASE color. If this
         -- spell's active-state tint is currently engaged (ns.ApplyActiveOverlays
         -- drives fd._activeBorderOn independently of DecorateFrame, via Blizzard's
