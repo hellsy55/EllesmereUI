@@ -338,6 +338,28 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
 
     local ChainSettings = ns.ChainSettings
 
+    -- Per-cooldownID buff override: two buff-viewer slots can share one
+    -- canonical spellID (Diabolist Demonic Art vs Diabolic Ritual) but be
+    -- configured independently under a "c"..cooldownID key. Gated so the hot
+    -- path is untouched for every store WITHOUT such a key (BuffFamHasCdKey is
+    -- a cheap store-identity-cached bool), and scoped to buff-viewer frames so
+    -- no cooldown/utility icon ever pays the string build.
+    if frame then
+        local fdC = ns._hookFrameData and ns._hookFrameData[frame]
+        -- Buff-viewer frames AND their inactive-buff placeholders (Always Show /
+        -- Keep in Same Place) both carry the viewer cooldownID and must resolve
+        -- the same per-slot entry, else a collided slot's styling would revert
+        -- whenever the placeholder shows. type(cdID) == "number" still excludes
+        -- preset placeholders, which nil the cooldownID.
+        if (fdC and fdC._isBuffViewerFrame) or frame._isPlaceholderFrame then
+            local cdID = frame.cooldownID
+            if type(cdID) == "number" and ns.BuffFamHasCdKey and ns.BuffFamHasCdKey(settings) then
+                local cd = settings["c" .. cdID]
+                if cd then ChainSettings(cd, tier); return cd end
+            end
+        end
+    end
+
     -- Fast path: direct hit on the primary id (the common, non-override case).
     -- Returns before building the identity set / addId closure below, so the hot
     -- SetSwipeColor path stays allocation-free for spells without an override.
