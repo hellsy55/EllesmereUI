@@ -406,7 +406,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.5",
+        version = "8.5.1",
         heroes = {
             {
                 module = "Cooldown Manager",
@@ -457,17 +457,18 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Cooldown Manager", text = "Fixed custom colors being discarded when using Apply to Bar on an Active State color row." },
             { module = "Cooldown Manager", text = "Fixed Diabolist buffs that share a spell ID collapsing into one icon and sharing settings." },
             { module = "Cooldown Manager", text = "Raised the Tracking Bars Max Stacks slider cap from 50 to 100." },
+            { module = "Cooldown Manager", text = "Fixed charge hash lines and stack tick marks not appearing on the Tracking Bars preview until settings were edited again." },
+            { module = "Cooldown Manager", text = "Fixed stack tick marks never showing unless the Stack Threshold color was also enabled; they now only require Max Stacks." },
             { module = "General", text = "Spacing sliders across the whole suite now show and step in real screen pixels, so 1 always equals exactly one pixel on your monitor at any UI scale; saved layouts are unchanged." },
             { module = "General", text = "Fixed a rare rounding issue that could shave one pixel off some element sizes at certain UI scales." },
             { module = "General", text = "Fixed the French translation failing to load entirely, with all text falling back to English." },
             { module = "General", text = "Updated Korean, French, Simplified Chinese, and Traditional Chinese translations." },
-            { module = "Nameplates", text = "The cast bar Interrupted text now shows translated on non-English clients." },
             { module = "QoL", text = "The auto repair chat message is now translatable, with a new Coin Icons option to show the cost with coin icons instead of text." },
             { module = "Quest Tracker", text = "Removed the large empty gap at the top of the tracker and stopped it briefly dropping down when clicking a quest." },
+            { module = "Raid Frames", text = "The Buff Manager's Editing Spec dropdown now opens on your class's tracked spec (or Holy Paladin) instead of blank when playing an untracked spec." },
             { module = "Resource Bars", text = "Fixed the Sweeping Strikes bar dropping to zero mid-combat and in Mythic+." },
             { module = "Resource Bars", text = "Restored Unlock Mode movers for bars still using an old Anchor To setting, keeping the bar's position." },
             { module = "Resource Bars", text = "Resource text no longer flips between value and percent when combat starts; a Show % option picks the display." },
-            { module = "Unit Frames", text = "Added MethodInternal (EasyNicknameAPI) as a nickname source for Show Nicknames." },
         },
     },
     {

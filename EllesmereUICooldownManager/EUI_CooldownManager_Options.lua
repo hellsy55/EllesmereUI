@@ -2003,7 +2003,28 @@ initFrame:SetScript("OnEvent", function(self)
             if not wrap then
                 wrap = ns.CreateTBBBarFrame(oc, "Pv" .. n)
                 _tbbPopoutBars[n] = wrap
+                -- Width-gated geometry (charge hash lines, threshold ticks)
+                -- silently skips while the fill's anchor-derived size is
+                -- still 0 on a fresh pool bar. Live bars re-drive from the
+                -- timer tick; previews have no tick, so re-drive when the
+                -- size resolves.
+                if wrap._bar then
+                    wrap._bar:SetScript("OnSizeChanged", function(sbSelf)
+                        local cfg = wrap._pvCfg
+                        if not cfg then return end
+                        if ns.ApplyTBBChargeHashLines then
+                            local mc = ns.GetTBBMaxCharges and ns.GetTBBMaxCharges(cfg)
+                            ns.ApplyTBBChargeHashLines(wrap, cfg, mc)
+                        end
+                        if ns.ApplyTBBTickMarks then
+                            ns.ApplyTBBTickMarks(sbSelf, cfg, wrap._threshTicks,
+                                cfg.verticalOrientation, wrap._tickOverlay)
+                            wrap._ticksDirty = nil
+                        end
+                    end)
+                end
             end
+            wrap._pvCfg = e.cfg
             ns.ApplyTBBBarSettings(wrap, e.cfg)
             -- The apply path pins the wrap to the bar's own strata (cfg.strata,
             -- MEDIUM default); lift the preview into the popout's strata AFTER
@@ -2028,6 +2049,15 @@ initFrame:SetScript("OnEvent", function(self)
                 if wrap._textOverlay and sb then wrap._textOverlay:SetFrameLevel(sb:GetFrameLevel() + 7) end
             end
             DressTBBPopoutBar(wrap, e.cfg)
+            -- Reused pool bars already have a resolved size, so OnSizeChanged
+            -- may never fire for this refresh: consume the deferred tick-mark
+            -- pass here (the apply path drew hash lines itself when sized).
+            local psb = wrap._bar
+            if wrap._ticksDirty and psb and psb:GetWidth() > 0 and ns.ApplyTBBTickMarks then
+                ns.ApplyTBBTickMarks(psb, e.cfg, wrap._threshTicks,
+                    e.cfg.verticalOrientation, wrap._tickOverlay)
+                wrap._ticksDirty = nil
+            end
             wrap:Show()
         end
         for n = #list + 1, #_tbbPopoutBars do

@@ -2009,8 +2009,10 @@ local function ApplyTBBTickMarks(sb, cfg, tickCache, isVert, tickParent)
     if tickCache then
         for i = 1, #tickCache do tickCache[i]:Hide() end
     end
+    -- Ticks are governed by Max Stacks alone (the options input unlocks with
+    -- it); Enable Stack Threshold only drives the recolor overlay, not ticks.
     if (cfg.trackType == "cooldown" and cfg.chargeHashLines == true)
-       or not cfg.stackThresholdEnabled or not cfg.stackThresholdMaxEnabled
+       or not cfg.stackThresholdMaxEnabled
        or not vals or maxStacks < 1 or not tickCache then return end
 
     local PP = EllesmereUI and EllesmereUI.PP
@@ -2165,6 +2167,9 @@ local function ApplyTBBChargeHashLines(bar, cfg, maxCharges)
     bar._chargeHashLineB = lineB
     bar._chargeHashLineA = lineA
 end
+-- Exported for the options popout preview: its bars have no timer tick to
+-- re-drive width-gated geometry once the fill's anchor-derived size resolves.
+ns.ApplyTBBChargeHashLines = ApplyTBBChargeHashLines
 
 local function AnchorTBBSparkState(bar, anchor, isVert, reverse, flushToEdge)
     local sb, spark = bar and bar._bar, bar and bar._spark
