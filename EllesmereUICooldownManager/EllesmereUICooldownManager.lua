@@ -5021,9 +5021,13 @@ function ns.StyleCustomChargeText(icon, barKey)
     local scY = (barData.stackCountY or 0) / iconScale
     local scPoint = barData.stackCountPosition or "bottomright"
     if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
+    elseif scPoint == "bottom" then scPoint = "BOTTOM"; scY = scY + 2
     elseif scPoint == "topright" then scPoint = "TOPRIGHT"
+    elseif scPoint == "top" then scPoint = "TOP"
     elseif scPoint == "topleft" then scPoint = "TOPLEFT"
     elseif scPoint == "center" then scPoint = "CENTER"
+    elseif scPoint == "left" then scPoint = "LEFT"
+    elseif scPoint == "right" then scPoint = "RIGHT"
     else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
     SetBlizzCDMFont(fs, GetCDMFont(), scSize,
         barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1)
@@ -5304,9 +5308,13 @@ local function RefreshCDMIconAppearance(barKey)
         -- top and center positions sit flush with no baseline nudge.
         local scPoint = (ssb and ssb.stackCountPosition) or barData.stackCountPosition or "bottomright"
         if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
+        elseif scPoint == "bottom" then scPoint = "BOTTOM"; scY = scY + 2
         elseif scPoint == "topright" then scPoint = "TOPRIGHT"
+        elseif scPoint == "top" then scPoint = "TOP"
         elseif scPoint == "topleft" then scPoint = "TOPLEFT"
         elseif scPoint == "center" then scPoint = "CENTER"
+        elseif scPoint == "left" then scPoint = "LEFT"
+        elseif scPoint == "right" then scPoint = "RIGHT"
         else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
         local showItemCount = barData.showItemCount ~= false
         if ssb and ssb.showItemCount ~= nil then showItemCount = ssb.showItemCount end
