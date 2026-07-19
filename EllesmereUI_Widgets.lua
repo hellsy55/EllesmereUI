@@ -1626,9 +1626,14 @@ local function PixelizeSliderCfg(cfg)
     local px = {}
     for k, v in pairs(cfg) do px[k] = v end
     px.min, px.max = gamePP.ToPixels(cfg.min or 0), gamePP.ToPixels(cfg.max or 0)
-    -- Step is declared in coordinate units like min/max; convert it to whole
-    -- pixels (never below 1) so a coarse-stepped slider keeps its coarseness.
-    px.step = math.max(1, math.floor((cfg.step or 1) / (gamePP.mult or 1) + 0.5))
+    -- A declared step of 1 means "finest available", not "one coordinate
+    -- unit": the pixel unit exists to reach single pixels, so it must stay
+    -- 1 px. Converting it like min/max rounds 1 coord to 2 px whenever
+    -- mult <= 2/3 (e.g. 4K at 0.71 uiScale), which snaps a typed 1 to 2 and
+    -- makes every odd pixel value unreachable. Only genuinely coarse steps
+    -- (> 1 coordinate unit) convert, keeping their physical coarseness.
+    local st = cfg.step or 1
+    px.step = st > 1 and math.max(1, math.floor(st / (gamePP.mult or 1) + 0.5)) or 1
     local get, set = cfg.getValue or cfg.get, cfg.setValue or cfg.set
     local pxGet = get and function()
         local v = get()
