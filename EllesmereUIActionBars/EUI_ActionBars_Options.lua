@@ -1112,6 +1112,8 @@ initFrame:SetScript("OnEvent", function(self)
                 previewBG:SetPoint("TOPLEFT", self, "TOPLEFT", left, top)
                 previewBG:SetPoint("BOTTOMRIGHT", self, "TOPLEFT", right, bottom)
                 previewBG:Show()
+                previewBGBorder:SetFrameLevel(settings.bgBorderBehind
+                    and math.max(0, self:GetFrameLevel() - 1) or self:GetFrameLevel())
                 previewBGBorder:ClearAllPoints()
                 previewBGBorder:SetAllPoints(previewBG)
                 if EllesmereUI.ApplyBorderStyle then
@@ -2456,6 +2458,7 @@ initFrame:SetScript("OnEvent", function(self)
                                     bs.bgPadY = py
                                     bs.bgBorderThickness = s.bgBorderThickness
                                     bs.bgBorderTexture = s.bgBorderTexture
+                                    bs.bgBorderBehind = s.bgBorderBehind
                                     bs.bgBorderSize = s.bgBorderSize
                                     if bc then bs.bgBorderColor = { r=bc.r, g=bc.g, b=bc.b, a=bc.a } end
                                     EAB:ApplyBackgroundForBar(key)
@@ -2763,15 +2766,19 @@ initFrame:SetScript("OnEvent", function(self)
                       values=texValues, order=texOrder,
                       getValue=function() return SVal("bgBorderTexture", "solid") end,
                       setValue=function(v)
+                          local color, behind = EllesmereUI.GetBorderStyleSelectDefaults(v)
                           SSet("bgBorderTexture", v, function(k)
                               local settings = EAB.db.profile.bars[k]
                               settings.bgBorderOffsetX = nil
                               settings.bgBorderOffsetY = nil
                               settings.bgBorderShiftX = nil
                               settings.bgBorderShiftY = nil
+                              settings.bgBorderBehind = behind
+                              settings.bgBorderColor = { r=color.r, g=color.g, b=color.b, a=1 }
                               EAB:ApplyBackgroundForBar(k)
                           end)
                           SUpdatePreview()
+                          EllesmereUI:RefreshPage()
                       end },
                     { type="dropdown", text="Border Size",
                       disabled=BgDisabled,
@@ -2905,6 +2912,12 @@ initFrame:SetScript("OnEvent", function(self)
                                   SSet("bgBorderShiftY", v == 0 and nil or v, function(k) EAB:ApplyBackgroundForBar(k) end)
                                   SUpdatePreview()
                               end },
+                            { type="toggle", label="Show Behind",
+                              get=function() return SVal("bgBorderBehind", false) end,
+                              set=function(v)
+                                  SSet("bgBorderBehind", v, function(k) EAB:ApplyBackgroundForBar(k) end)
+                                  SUpdatePreview()
+                              end },
                         },
                     })
                     local offsetButton = MakeCogBtn(region, showOffsetPopup, nil, EllesmereUI.DIRECTIONS_ICON)
@@ -2926,6 +2939,7 @@ initFrame:SetScript("OnEvent", function(self)
                         target.bgBorderOffsetY = source.bgBorderOffsetY
                         target.bgBorderShiftX = source.bgBorderShiftX
                         target.bgBorderShiftY = source.bgBorderShiftY
+                        target.bgBorderBehind = source.bgBorderBehind
                         EAB:ApplyBackgroundForBar(key)
                     end
                     EllesmereUI.BuildSyncIcon({
@@ -2944,6 +2958,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 if target.bgBorderOffsetY ~= source.bgBorderOffsetY then return false end
                                 if target.bgBorderShiftX ~= source.bgBorderShiftX then return false end
                                 if target.bgBorderShiftY ~= source.bgBorderShiftY then return false end
+                                if (target.bgBorderBehind or false) ~= (source.bgBorderBehind or false) then return false end
                             end
                             return true
                         end,

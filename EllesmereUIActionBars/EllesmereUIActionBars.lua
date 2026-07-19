@@ -440,6 +440,7 @@ for _, info in ipairs(BAR_CONFIG) do
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
         bgBorderColor = { r = 0, g = 0, b = 0, a = 1 },
         bgBorderTexture = "solid",
+        bgBorderBehind = false,
         bgBorderSize = 1,
         bgBorderThickness = "none",
         bgMultiplierX = 1,
@@ -5137,6 +5138,7 @@ function EAB:ApplyBackgroundForBar(barKey)
     background.fill:Show()
 
     local border = background.border
+    border:SetFrameLevel(s.bgBorderBehind and math.max(0, frame:GetFrameLevel() - 1) or frame:GetFrameLevel())
     border:ClearAllPoints()
     border:SetPoint("TOPLEFT", frame, "TOPLEFT", left, top)
     border:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", right, bottom)
