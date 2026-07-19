@@ -41,6 +41,7 @@
 + Add New Cooldowns Bar
 + Add New Group
 + Add New Utility Bar
++ Add Threshold
 A profile named \
 AFK
 Abilities
@@ -89,6 +90,7 @@ Are you sure you want to reset all %1$s settings to their defaults? This will re
 Assign Preset to Specs
 Assign this profile to the same specializations it was assigned to on export. Off = your current spec assignments stay as they are.
 Assign to Spec
+At
 Auto Assign to Specs
 Automatic (Client)
 Avoidance
@@ -131,6 +133,7 @@ Click to edit this bar
 Close
 Color Bands
 Color Picker
+Color the bar differently at several stack counts. The highest count you have reached wins.
 Colors are shared globally from the \
 Context Menu
 Continue
@@ -301,6 +304,7 @@ Macros
 Main Bags (%d / %d)
 Mastery
 Match Scale
+Maximum of 5 thresholds.
 Maximum width the text can fill before it truncates, as a percentage of the bar.
 Missing Buffs?
 Missing Spells?
@@ -340,10 +344,12 @@ OneBag
 OneBank
 OneWarbank
 Opacity
+Open Great Vault
 Override Active:
 Overwrite Existing Settings
 PER-SPELL OPTIONS
 Page
+Party Keystones
 Paste Interrupted
 Paste your profile string here...
 Patch Notes
@@ -461,6 +467,7 @@ Spell Target
 Spell Target Settings
 Spells
 Stack
+Stack Thresholds
 Status
 Stone
 Stop Moving
@@ -475,6 +482,7 @@ Talent gating is only available while playing this spec's class
 Target
 Target Unit
 The pasted string could not be read completely. Please paste it again.
+The single stack threshold is off while Multiple Thresholds is on.
 Thickness
 This Action Bar is also used as the Moonkin Form bar.\nChanging spells on a Druid for this bar will also change them on your Moonkin Form bar.
 This bar will always be attached to your current target's nameplate
@@ -511,6 +519,7 @@ Unknown error
 Unlock Mode
 Up to
 Update Sync Group
+Use Multiple Thresholds
 Use arrow keys to move selected element 1px any direction
 Value
 Vers
@@ -530,6 +539,7 @@ X Position
 Y Offset
 Y Position
 Yes
+Your Keystone
 Your current spec has an assigned profile so you cannot switch to another. Please unassign to switch.
 [ Import string captured (%1$s characters) ]
 \
