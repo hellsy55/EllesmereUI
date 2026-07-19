@@ -4941,6 +4941,25 @@ local function CollectAndReanchor()
 
                 -- Inject custom frames (trinkets, items, racials)
                 if spellList then
+                    -- Items already represented by an equipment-slot entry on
+                    -- this bar. The slot frame renders whatever is equipped
+                    -- there, so injecting the same item's preset frame too
+                    -- would show one physical item twice -- classic case: a
+                    -- legacy custom-item belt entry plus a slot entry appended
+                    -- at the bar's end by an add or an RPT sync. The item
+                    -- entry stays in the data and renders again the moment the
+                    -- item is unequipped from that slot.
+                    local slotEquippedItems
+                    for _, sid in ipairs(spellList) do
+                        local slot = sid and ns.SlotIDFromKey(sid)
+                        if slot then
+                            local eqItemID = GetInventoryItemID("player", slot)
+                            if eqItemID then
+                                slotEquippedItems = slotEquippedItems or {}
+                                slotEquippedItems[eqItemID] = true
+                            end
+                        end
+                    end
                     for _, sid in ipairs(spellList) do
                         if sid and ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid) then
                             -- Hosted-buff marker: the buff renders via the reparent
@@ -4971,7 +4990,12 @@ local function CollectAndReanchor()
                             -- the live-icon fallback for arbitrary items) is
                             -- shared with the buff-family injection.
                             local itemID = -sid
-                            local f = GetOrCreateItemPresetFrame(barKey, itemID)
+                            -- Skip when a slot entry on this bar already shows
+                            -- this exact item (see slotEquippedItems above);
+                            -- the orphan sweep hides any frame from a previous
+                            -- pass.
+                            local f = not (slotEquippedItems and slotEquippedItems[itemID])
+                                and GetOrCreateItemPresetFrame(barKey, itemID)
                             if f then
                                 -- Remember the bar that owns this frame so bag
                                 -- events can re-evaluate it even while hidden.
