@@ -844,6 +844,128 @@ end
         end
     end
 
+    ---------------------------------------------------------------------------
+    --  Resurrect Accept Glow (resurrectAcceptGlow, default OFF)
+    --  Pulsating border around button1 of the RESURRECT StaticPopups so a
+    --  pending resurrect is hard to miss. Independent of reskinPopupsMenus.
+    --  Zero cost until first enable: no hooks or frames exist before then.
+    --  The overlay is our own frame (state in FFD); the pulse is a C-side
+    --  Alpha AnimationGroup, so there is no per-frame Lua while it runs.
+    ---------------------------------------------------------------------------
+    local RES_WHICH = {
+        RESURRECT             = true,
+        RESURRECT_NO_SICKNESS = true,
+        RESURRECT_NO_TIMER    = true,
+    }
+    local _resGlowHooked = false
+
+    local function _resGlowEnabled()
+        return EllesmereUIDB and EllesmereUIDB.resurrectAcceptGlow or false
+    end
+
+    local function _resGlowButton(popup)
+        return popup.button1
+            or (popup.GetName and popup:GetName() and _G[popup:GetName() .. "Button1"])
+    end
+
+    -- Addon-owned overlay anchored 3px outside the button, built once per
+    -- button on first glow; state lives in FFD, never on the Blizzard frame.
+    local function _resGlowGet(btn)
+        local d = GetFFD(btn)
+        if not d.resGlow then
+            local ov = CreateFrame("Frame", nil, btn)
+            ov:SetPoint("TOPLEFT", btn, "TOPLEFT", -3, 3)
+            ov:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 3, -3)
+            ov:SetFrameLevel(btn:GetFrameLevel() + 5)
+            ov:Hide()
+            if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
+            if _PP and _PP.CreateBorder then
+                _PP.CreateBorder(ov, 1, 1, 1, 1, 2, "OVERLAY", 7)
+            end
+            local ag = ov:CreateAnimationGroup()
+            ag:SetLooping("BOUNCE")
+            local pulse = ag:CreateAnimation("Alpha")
+            pulse:SetFromAlpha(1); pulse:SetToAlpha(0.15)
+            pulse:SetDuration(0.7); pulse:SetSmoothing("IN_OUT")
+            d.resGlow = ov
+            d.resGlowAG = ag
+        end
+        return d.resGlow, d.resGlowAG
+    end
+
+    local function _resGlowStart(btn)
+        local ov, ag = _resGlowGet(btn)
+        if not ov then return end
+        -- Color resolved at every start so re-shows follow the current
+        -- Accent Colored Elements setting (same source as the popup skin).
+        local EG = EllesmereUI.ELLESMERE_GREEN
+        if _PP and _PP.SetBorderColor then
+            if _accentEnabled() and EG then
+                _PP.SetBorderColor(ov, EG.r, EG.g, EG.b, 1)
+            else
+                _PP.SetBorderColor(ov, 1, 1, 1, 1)
+            end
+        end
+        ov:SetAlpha(1)
+        ov:Show()
+        if ag and not ag:IsPlaying() then ag:Play() end
+    end
+
+    -- Raw FFD read (not GetFFD): stopping must never allocate state for a
+    -- button that never glowed.
+    local function _resGlowStop(btn)
+        local d = btn and FFD[btn]
+        local ov = d and d.resGlow
+        if ov then
+            if d.resGlowAG then d.resGlowAG:Stop() end
+            ov:Hide()
+        end
+    end
+
+    local function _resGlowRefresh(popup)
+        local btn = _resGlowButton(popup)
+        if not btn then return end
+        if _resGlowEnabled() and RES_WHICH[popup.which] and popup:IsShown() then
+            _resGlowStart(btn)
+        else
+            _resGlowStop(btn)
+        end
+    end
+
+    local function _resGlowRefreshAll()
+        for i = 1, STATICPOPUP_NUMDIALOGS or 4 do
+            local popup = _G["StaticPopup" .. i]
+            if popup and not popup:IsForbidden() then _resGlowRefresh(popup) end
+        end
+    end
+
+    -- Install OnShow/OnHide hooks once. Hooks cannot be uninstalled, so they
+    -- self-gate: OnShow early-returns when the toggle is off, OnHide is a raw
+    -- weak-table lookup. Never called before the first enable.
+    local function _resGlowInit()
+        if _resGlowHooked then return end
+        _resGlowHooked = true
+        for i = 1, STATICPOPUP_NUMDIALOGS or 4 do
+            local popup = _G["StaticPopup" .. i]
+            if popup then
+                popup:HookScript("OnShow", function(self)
+                    if not _resGlowEnabled() then return end
+                    _resGlowRefresh(self)
+                end)
+                popup:HookScript("OnHide", function(self)
+                    _resGlowStop(_resGlowButton(self))
+                end)
+            end
+        end
+    end
+
+    -- Options-panel entry point: installs hooks on first enable and syncs
+    -- currently visible popups on any flip, so no reload is ever needed.
+    EllesmereUI._EnsureResurrectGlow = function()
+        if _resGlowEnabled() then _resGlowInit() end
+        if _resGlowHooked then _resGlowRefreshAll() end
+    end
+
     do
         local f = CreateFrame("Frame")
         f:RegisterEvent("PLAYER_LOGIN")
@@ -864,6 +986,12 @@ end
             if _pmEnabled() then
                 _menuInit()
                 _popupInit()
+            end
+            -- Resurrect Accept Glow: independent of both reskin masters.
+            -- Default OFF; disabled users pay only this boolean check
+            -- (no hooks, no frames).
+            if _resGlowEnabled() then
+                _resGlowInit()
             end
         end)
     end
