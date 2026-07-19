@@ -602,7 +602,9 @@ local function NewIndicator(indType, spells)
         ind.ownOnly          = true
         local _ac = EllesmereUI and EllesmereUI.ACCENT_COLOR
         ind.color       = _ac and { r = _ac.r, g = _ac.g, b = _ac.b } or { r = 0.05, g = 0.82, b = 0.62 }
+        ind.borderStyle = "solid"
         ind.borderWidth = 2
+        ind.borderDashCount = 8
         ind.borderOpacity = 100
         ind.showWhen    = "present"
     elseif indType == "framealpha" then
@@ -1526,11 +1528,53 @@ end
 local function ApplyOverlayThresholdColor(overlay, colorResult)
     overlay:SetVertexColor(colorResult:GetRGBA())
 end
--- Frame-border effect: PP.SetBorderColor only forwards to SetVertexColor on the
--- border textures (no arithmetic), so a secret color is safe.
+-- Frame-border threshold recolor. Every style recolors via SetVertexColor with
+-- no arithmetic on the channels (dashed -> the ants textures; solid/textured ->
+-- PP or BackdropTemplate, both routed through SetBorderStyleColor), so a secret
+-- (12.1-restricted) color stays safe. The active style is stamped on the frame
+-- by ApplyEffectBorder.
 local function ApplyBorderThresholdColor(borderFrame, colorResult)
-    local PP2 = EllesmereUI.PanelPP or EllesmereUI.PP
-    if PP2 and PP2.SetBorderColor then PP2.SetBorderColor(borderFrame, colorResult:GetRGBA()) end
+    if borderFrame._euiBorderStyle == "dashed" then
+        local Glows = EllesmereUI.Glows
+        if Glows and Glows.SetProceduralAntsColor then
+            Glows.SetProceduralAntsColor(borderFrame, colorResult:GetRGBA())
+        end
+        return
+    end
+    if EllesmereUI.SetBorderStyleColor then
+        EllesmereUI.SetBorderStyleColor(borderFrame, colorResult:GetRGBA())
+    end
+end
+
+-- Apply the Frame-Border effect in the configured style. "dashed" draws a static
+-- (non-marching) procedural-ants border from the shared glow engine; every other
+-- style ("solid" plus the textured styles glow/shadow/blizz/lightspark/dialog and
+-- LibSharedMedia borders) is drawn by EllesmereUI.ApplyBorderStyle, which manages
+-- the PP-vs-BackdropTemplate swap internally. Only one renderer is shown at a
+-- time; the active style is stamped on the frame so ApplyBorderThresholdColor
+-- recolors the right texture set. r,g,b,a are the normal (non-secret) configured
+-- color/opacity; the frame is Show()n by callers.
+local function ApplyEffectBorder(borderFrame, ind, r, g, b, a)
+    local style = ind.borderStyle or "solid"
+    local bw = ind.borderWidth or 2
+    local Glows = EllesmereUI.Glows
+    if style == "dashed" and Glows and Glows.StartProceduralAnts then
+        if EllesmereUI.HideBorderStyle then EllesmereUI.HideBorderStyle(borderFrame) end
+        Glows.StartProceduralAnts(borderFrame, ind.borderDashCount or 8, bw, nil, nil,
+            r, g, b, nil, nil, nil, nil, nil, nil, true)
+        Glows.SetProceduralAntsColor(borderFrame, r, g, b, a)
+        borderFrame._euiBorderStyle = "dashed"
+    else
+        if Glows and Glows.StopProceduralAnts then Glows.StopProceduralAnts(borderFrame) end
+        if EllesmereUI.ApplyBorderStyle then
+            -- Solid takes the width as literal pixels (any value); textured
+            -- styles index the engine's edge-size map, which only defines steps
+            -- 1-4, so cap those to avoid the width>4 thin-fallback.
+            local sz = (style == "solid") and bw or math.min(bw, 4)
+            EllesmereUI.ApplyBorderStyle(borderFrame, sz, r, g, b, a, style)
+        end
+        borderFrame._euiBorderStyle = style
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -2591,8 +2635,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                     if d.bmEffectBorder and PP then
                         local c = ind.color or { r=0, g=1, b=0 }
                         local op = (ind.borderOpacity or 100) / 100
-                        local bw = ind.borderWidth or 2
-                        PP.UpdateBorder(d.bmEffectBorder, bw, c.r, c.g, c.b, op)
+                        ApplyEffectBorder(d.bmEffectBorder, ind, c.r, c.g, c.b, op)
                         d.bmEffectBorder:Show()
                         local curve
                         if threshOK then
@@ -2924,8 +2967,7 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                                 f._bmHCOverlay:Show()
                             elseif indType == "border" and f._bmEffectBorder and PP then
                                 local c = ind.color or { r=0, g=1, b=0 }
-                                local bw = ind.borderWidth or 2
-                                PP.UpdateBorder(f._bmEffectBorder, bw, c.r, c.g, c.b, (ind.borderOpacity or 100) / 100)
+                                ApplyEffectBorder(f._bmEffectBorder, ind, c.r, c.g, c.b, (ind.borderOpacity or 100) / 100)
                                 f._bmEffectBorder:Show()
                             elseif indType == "framealpha" then
                                 f:SetAlpha(ind.alpha or 0.4)
@@ -6277,17 +6319,61 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 -----------------------------------------------------------
                 _, h = W:SectionHeader(leftFrame, "DISPLAY", sy); sy = sy - h
 
-                -- Row 1: Border Width | Color (opacity slider + inline swatch)
-                local ac = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
-                local bdrColorRow = SettingsRow(
+                -- Offered styles: the shared border-texture set MINUS the two
+                -- built-ins that don't suit the small buff frames -- "shadow"
+                -- (renders identically to glow without behind/black handling) and
+                -- "lightspark" (oversized outward halo) -- with "Dashed" (the
+                -- static ants border) inserted right after Solid. LibSharedMedia
+                -- borders are kept; built per-render so newly registered ones
+                -- appear without a reload.
+                local EXCLUDED_BORDER_STYLES = { shadow = true, lightspark = true }
+                local allVals, allOrder = EllesmereUI.GetBorderTextureDropdown()
+                local bsVals, bsOrder = {}, {}
+                for _, k in ipairs(allOrder) do
+                    if not EXCLUDED_BORDER_STYLES[k] then
+                        bsVals[k] = allVals[k]
+                        bsOrder[#bsOrder + 1] = k
+                        if k == "solid" then
+                            bsVals.dashed = "Dashed"
+                            bsOrder[#bsOrder + 1] = "dashed"
+                        end
+                    end
+                end
+
+                -- Row 1: Border Style | Border Width
+                SettingsRow(
+                    { type="dropdown", text="Border Style", values=bsVals, order=bsOrder,
+                      -- Fall back to Solid in the menu if the stored style is no
+                      -- longer offered (e.g. a removed style left over from testing).
+                      getValue=function()
+                          local s = ind.borderStyle or "solid"
+                          return bsVals[s] and s or "solid"
+                      end,
+                      setValue=function(v) ind.borderStyle = v; ReloadAndRebuild() end },
                     { type="slider", text="Border Width", min=1, max=6, step=1, trackWidth=120,
                       getValue=function() return ind.borderWidth or 2 end,
-                      setValue=function(v) ind.borderWidth = v; ReloadAndUpdate() end },
+                      setValue=function(v) ind.borderWidth = v; ReloadAndUpdate() end })
+
+                -- Row 2 (last of section): Color (opacity slider + inline swatch) |
+                -- Dashes. The Dashes count applies only to the dashed style, so its
+                -- slot is a blank label for every other style -- allowed because
+                -- this is the section's last row.
+                local ac = EllesmereUI.ACCENT_COLOR or { r = 0.05, g = 0.82, b = 0.62 }
+                local dashesSlot
+                if (ind.borderStyle or "solid") == "dashed" then
+                    dashesSlot = { type="slider", text="Dashes", min=4, max=16, step=1, trackWidth=120,
+                      getValue=function() return ind.borderDashCount or 8 end,
+                      setValue=function(v) ind.borderDashCount = v; ReloadAndUpdate() end }
+                else
+                    dashesSlot = { type="label", text="" }
+                end
+                local bdrColorRow = SettingsRow(
                     { type="slider", text="Color", min=0, max=100, step=1, trackWidth=120,
                       getValue=function() return ind.borderOpacity or 100 end,
-                      setValue=function(v) ind.borderOpacity = v; ReloadAndUpdate() end })
+                      setValue=function(v) ind.borderOpacity = v; ReloadAndUpdate() end },
+                    dashesSlot)
                 do
-                    local rgn = bdrColorRow._rightRegion
+                    local rgn = bdrColorRow._leftRegion
                     local colorSwatch = EllesmereUI.BuildColorSwatch(
                         rgn, bdrColorRow:GetFrameLevel() + 3,
                         function()
