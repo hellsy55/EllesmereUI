@@ -8316,8 +8316,11 @@ local function Skin_Quest()
     -- Greeting text + section labels + quest title buttons. Blizzard re-applies
     -- the dark parchment material colour in the greeting panel OnShow after our
     -- skin runs, so re-white on every show (hooked below), not just once here.
+    -- The greeting paragraph's global is Blizzard's bare "GreetingText"
+    -- (QuestFrame.xml), not QuestGreetingText -- the old name matched nil and
+    -- silently skipped the paragraph, leaving it material-dark on every show.
     local function StyleQuestGreeting()
-        if _G.QuestGreetingText then WSkin.White(_G.QuestGreetingText); RecolorDarkText(_G.QuestGreetingText) end
+        if _G.GreetingText then WSkin.White(_G.GreetingText); RecolorDarkText(_G.GreetingText) end
         for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
             local fs = _G[n]
             if fs then WSkin.White(fs); RecolorDarkText(fs) end
@@ -8330,7 +8333,7 @@ local function Skin_Quest()
         end
     end
 
-    if _G.QuestGreetingText then WSkin.Font(_G.QuestGreetingText) end
+    if _G.GreetingText then WSkin.Font(_G.GreetingText) end
     for _, n in ipairs({ "CurrentQuestsText", "AvailableQuestsText" }) do
         local fs = _G[n]
         if fs then WSkin.Font(fs) end
