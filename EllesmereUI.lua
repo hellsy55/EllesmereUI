@@ -4544,6 +4544,7 @@ do
     -- stacks -- the v8.4.9 fail-closed bug must not come back.
     local cdmChild, cdmChildCdID, cdmNextScan = nil, nil, 0
     local cdmSeenActive, cdmInactiveSince = false, nil
+    local cdmSigDbg, cdmAppsDbg = nil, nil
     local function dbg(...)
         if EllesmereUI._SSDEBUG then print("|cff33ff99[SS]|r", ...) end
     end
@@ -4685,8 +4686,17 @@ do
         -- unchanged); trusting a single signal that clears while the buff
         -- lives would wipe live stacks.
         local shown = child:IsShown()
-        local active = shown or child.wasSetFromAura == true
-            or child.auraInstanceID ~= nil
+        local wsfa = child.wasSetFromAura == true
+        local iid = child.auraInstanceID ~= nil
+        if EllesmereUI._SSDEBUG then
+            local sig = (shown and "S" or "-") .. (wsfa and "W" or "-")
+                .. (iid and "I" or "-")
+            if sig ~= cdmSigDbg then
+                cdmSigDbg = sig
+                dbg("signals:", sig, "(S=shown W=wasSetFromAura I=auraInstanceID)")
+            end
+        end
+        local active = shown or wsfa or iid
         if active then
             cdmInactiveSince = nil
             if not cdmSeenActive then
@@ -4697,6 +4707,17 @@ do
             end
             local ad = child.auraDataCached
             local apps = ad and ad.applications
+            if EllesmereUI._SSDEBUG then
+                local state
+                if not ad then state = "no-cache"
+                elseif apps == nil then state = "no-apps"
+                elseif issecretvalue(apps) then state = "secret"
+                else state = tostring(apps) end
+                if state ~= cdmAppsDbg then
+                    cdmAppsDbg = state
+                    dbg("apps:", state, "(predicted " .. stacks .. ")")
+                end
+            end
             if apps and not issecretvalue(apps) and type(apps) == "number"
                and apps ~= stacks then
                 dbg("snap:", stacks, "->", apps)
