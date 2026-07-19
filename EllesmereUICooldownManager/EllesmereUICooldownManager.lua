@@ -7352,9 +7352,28 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                     -- Skip hosted-buff frames and their placeholders: their bar
                     -- membership is the hosted MARKER entry, and their positive
                     -- spellID would materialize the same spell's COOLDOWN form.
+                    -- But DO advance the cursor over their marker: on a mixed
+                    -- bar (spells + hosted buffs) a spell re-inserted after a
+                    -- buff must land after the buff's marker, not squeezed back
+                    -- next to the previous CD spell (reported: Shift snapping
+                    -- to right after Voidray, jumping its three buffs).
                     local fdRS = ns._hookFrameData and ns._hookFrameData[icon]
                     if (fc and fc.isHostedBuff) or icon._isPlaceholderFrame
                        or (fdRS and fdRS._isBuffViewerFrame) then
+                        local hSid = fc and fc.spellID
+                        if type(hSid) == "number" and hSid > 0
+                           and ns.HostedBuffMarkerToSpell
+                           and not (fc and fc._overflowLayoutBar) then
+                            for i = 1, #sd.assignedSpells do
+                                local dec = ns.HostedBuffMarkerToSpell(sd.assignedSpells[i])
+                                if dec and (dec == hSid
+                                    or (ns.IsVariantOf and ns.IsVariantOf(dec, hSid))) then
+                                    -- Forward-only: never drag the cursor backward.
+                                    if not insertPos or i > insertPos then insertPos = i end
+                                    break
+                                end
+                            end
+                        end
                         sid = nil
                     end
                     -- Skip overflow-diverted icons: they render on this bar

@@ -6398,6 +6398,22 @@ initFrame:SetScript("OnEvent", function(self)
                 -- for the same spell (the buff frame's id resolves positive).
                 local _fdLI = ns._hookFrameData and ns._hookFrameData[icon]
                 if icon._isPlaceholderFrame or (_fdLI and _fdLI._isBuffViewerFrame) then
+                    -- Advance the cursor over the hosted buff's MARKER entry so
+                    -- a spell inserted after it on a mixed bar lands after the
+                    -- buff, not squeezed back beside the previous CD spell
+                    -- (mirrors the reseed pass).
+                    if type(_sid) == "number" and _sid > 0
+                       and ns.HostedBuffMarkerToSpell
+                       and not (ns.CdmFrameOverflowBar and ns.CdmFrameOverflowBar(icon)) then
+                        for i = 1, #sd.assignedSpells do
+                            local dec = ns.HostedBuffMarkerToSpell(sd.assignedSpells[i])
+                            if dec and (dec == _sid
+                                or (ns.IsVariantOf and ns.IsVariantOf(dec, _sid))) then
+                                if not insertPos or i > insertPos then insertPos = i end
+                                break
+                            end
+                        end
+                    end
                     _sid = nil
                 end
                 -- Skip overflow-diverted icons outright: they render on this
