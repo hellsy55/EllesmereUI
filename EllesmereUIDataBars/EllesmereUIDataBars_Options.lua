@@ -45,6 +45,9 @@ initFrame:SetScript("OnEvent", function(self)
     local _edbPreviewHost        -- the preview strip frame (live theme feedback)
     local _edbHeldGlowKey        -- click-target key whose glow pulses until the
                                  -- setting is filled in; outlives page builds
+    local _edbHeldGlowY          -- its section offset when last shown: sections
+                                 -- follow bar order, so a change means the row
+                                 -- moved and the view has to follow it
     local _cardsExpanded = false -- template card strip open/closed
     local _dividerDragging = false
 
@@ -1492,7 +1495,7 @@ initFrame:SetScript("OnEvent", function(self)
             if not headerY then return end
             EllesmereUI.SmoothScrollTo(math.max(0, math.abs(headerY) - 40))
             local glowTarget = GlowTargetOf(m)
-            if m.holdWhile then _edbHeldGlowKey = key end
+            if m.holdWhile then _edbHeldGlowKey, _edbHeldGlowY = key, headerY end
             C_Timer.After(0.15, function() PlaySettingGlow(glowTarget, m.holdWhile) end)
         end
 
@@ -1500,17 +1503,25 @@ initFrame:SetScript("OnEvent", function(self)
         -- showed it. Every page rebuild -- reordering a block, switching bars,
         -- reopening the panel -- destroys the row it was parented to, which
         -- released the pulse for good even though the setting was still empty.
-        -- Re-attach it to the freshly built row, without scrolling: the player
-        -- did not ask to go anywhere, they just moved something.
+        -- Re-attach it to the freshly built row.
         local function RearmHeldGlow()
             if not _edbHeldGlowKey then return end
             local targets = parent._edbClickTargets
             local m = targets and targets[_edbHeldGlowKey]
             -- Absent from this build (another bar is selected): keep the key so
             -- coming back re-arms. Only a satisfied predicate retires it.
-            if not (m and m.target and m.holdWhile) then return end
+            if not (m and m.section and m.target and m.holdWhile) then return end
             if not m.holdWhile() then
                 _edbHeldGlowKey = nil
+                return
+            end
+            -- Sections are laid out in bar order, so reordering blocks moves
+            -- this row: re-glowing in place would pulse off-screen. Follow it
+            -- only when it actually moved -- yanking the view on an unrelated
+            -- rebuild (a Fill toggle, a theme change) would be worse.
+            local _, _, _, _, headerY = m.section:GetPoint(1)
+            if headerY ~= _edbHeldGlowY then
+                NavigateToSetting(_edbHeldGlowKey)
                 return
             end
             PlaySettingGlow(GlowTargetOf(m), m.holdWhile)
