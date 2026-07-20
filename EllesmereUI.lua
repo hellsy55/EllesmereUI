@@ -5211,6 +5211,11 @@ function EllesmereUI.MakeUnlockElement(opts)
         -- noSizeMatchTarget: other elements may NOT size-match TO this one.
         allowMatchSource  = opts.allowMatchSource,
         noSizeMatchTarget = opts.noSizeMatchTarget,
+        -- matchUnavailable: function(key) -> reason string when creating a NEW
+        -- width/height match is currently not possible (e.g. action bars in
+        -- Blizzard Style, where EUI doesn't control sizing). Clearing an
+        -- existing match stays allowed.
+        matchUnavailable  = opts.matchUnavailable,
         -- keepMoverWhenAnchored: elements whose isAnchored() reflects a module
         -- option (e.g. ERB "Anchor To") still get a mover while anchored --
         -- position-locked (no drag/nudge/anchor link), but resize and
