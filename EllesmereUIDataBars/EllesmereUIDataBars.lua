@@ -65,6 +65,7 @@ local L = {
     SHIFT_MIDDLE_CLICK   = "|cffFFFFFFShift + Middle Click:|r",
     SHIFT_LEFT_CLICK     = "|cffFFFFFFShift + Left Click:|r",
     CTRL_RIGHT_CLICK     = "|cffFFFFFFCtrl + Right Click:|r",
+    CTRL_ALT_LEFT_CLICK  = "|cffFFFFFFCtrl + Alt + Left Click:|r",
     YOU_HAVE_MAIL        = "You've Got Mail!",
     SERVER_TIME          = "Server time",
     SAVED_INSTANCES      = "Saved Raid(s)",
@@ -91,6 +92,7 @@ local L = {
     OPEN_BAGS            = "Open Bags",
     OPEN_CURRENCIES      = "Open Currencies",
     RESET_SESSION        = "Reset Session",
+    REMOVE_CHARACTER     = "Remove Character",
     TRAVEL_COOLDOWNS     = "Travel Cooldowns",
     HEARTHSTONE          = "Hearthstone",
     READY                = "Ready",
@@ -303,18 +305,51 @@ local DENOMINATIONS = {
     { divisor = 1,     symbol = COPPER_AMOUNT_SYMBOL, color = "|cffed8a3f" },  -- copper-orange
 }
 
--- Opt-in per gold block: Blizzard's coin textures instead of the letters.
--- GetCoinTextureString renders every denomination it needs in one indivisible
--- string and has no colored/plain variants, so useColors and showSmall do not
--- apply to it.
-local function CoinIconString(amount)
-    return C_CurrencyInfo.GetCoinTextureString(amount)
+-- Coin textures, one per denomination, same paths the bag module already uses.
+-- ":0:0:2:0" is Blizzard's own sizing in GetCoinTextureString: 0 height means
+-- inherit the font, so the icons follow the bar's and the tooltip's text size.
+-- Split per coin on purpose -- GetCoinTextureString returns all three welded
+-- into one string, which cannot be laid out in aligned columns.
+local COIN_TEX = {
+    "|TInterface\\MoneyFrame\\UI-GoldIcon:0:0:2:0|t",
+    "|TInterface\\MoneyFrame\\UI-SilverIcon:0:0:2:0|t",
+    "|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:2:0|t",
+}
+-- What trails the number for denomination i: a coin texture when Coin Icons is
+-- on, otherwise the localized suffix letter, colored on request. Every money
+-- renderer goes through this, so Coin Icons, Coin Colored and Show Silver and
+-- Copper compose the same way in all of them -- GetCoinTextureString could not
+-- do that, it always emits all three coins in one indivisible string.
+local function CoinMarker(i, coinIcons, coloured)
+    if coinIcons then return COIN_TEX[i] end
+    local d = DENOMINATIONS[i]
+    if coloured then return d.color .. d.symbol .. "|r" end
+    return d.symbol
 end
-ns.CoinIconString = CoinIconString
+
+-- Money split per denomination: one token per coin, so callers can lay them out
+-- in aligned columns (the tooltip) or on separate lines (a vertical bar). A
+-- single formatted string can do neither -- the game font is proportional, so
+-- "9o" and "1 234o" are different widths and everything after the first drifts.
+-- The buffer is reused; Tip_AddColumns copies it, so one buffer serves all rows.
+local _moneyTokens = {}
+
+function ns.MoneyTokens(amount, showSmall, coinIcons, coloured)
+    amount = floor(abs(amount or 0))
+    wipe(_moneyTokens)
+    local gold = floor(amount / DENOMINATIONS[1].divisor)
+    local gStr = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
+    _moneyTokens[1] = gStr .. CoinMarker(1, coinIcons, coloured)
+    if showSmall ~= false then
+        local silver = floor((amount % DENOMINATIONS[1].divisor) / DENOMINATIONS[2].divisor)
+        _moneyTokens[2] = silver .. CoinMarker(2, coinIcons, coloured)
+        _moneyTokens[3] = (amount % DENOMINATIONS[2].divisor) .. CoinMarker(3, coinIcons, coloured)
+    end
+    return _moneyTokens
+end
 
 function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
-    if coinIcons then return CoinIconString(amount) end
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
         local val = floor(amount / denom.divisor)
@@ -322,18 +357,17 @@ function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
         if i == 1 and val > 0 then
             foundGold = true
             local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. denom.symbol
+            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, false)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
-            parts[#parts + 1] = val .. denom.symbol
+            parts[#parts + 1] = val .. CoinMarker(i, coinIcons, false)
         end
     end
     if #parts > 0 then return tconcat(parts, " ") end
-    return "0" .. DENOMINATIONS[3].symbol
+    return "0" .. CoinMarker(3, coinIcons, false)
 end
 
 function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
-    if coinIcons then return CoinIconString(amount) end
     local coloured = useColors ~= false
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
@@ -342,19 +376,13 @@ function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
         if i == 1 and val > 0 then
             foundGold = true
             local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            local cOpen, cClose = "", ""
-            if coloured then cOpen = denom.color; cClose = "|r" end
-            parts[#parts + 1] = display .. cOpen .. denom.symbol .. cClose
+            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, coloured)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
-            local cOpen, cClose = "", ""
-            if coloured then cOpen = denom.color; cClose = "|r" end
-            parts[#parts + 1] = val .. cOpen .. denom.symbol .. cClose
+            parts[#parts + 1] = val .. CoinMarker(i, coinIcons, coloured)
         end
     end
     if #parts == 0 then
-        local cOpen, cClose = "", ""
-        if coloured then cOpen = DENOMINATIONS[3].color; cClose = "|r" end
-        return "0" .. cOpen .. DENOMINATIONS[3].symbol .. cClose
+        return "0" .. CoinMarker(3, coinIcons, coloured)
     end
     return tconcat(parts, " ")
 end
@@ -803,6 +831,16 @@ do
     -- Grow-only pool; buttons are configured fresh on every Tip_Show. Creation
     -- and reconfiguration only ever run out of combat (the overlay build is
     -- combat-skipped), so the secure attribute writes are always legal.
+    -- House style for an interactive tooltip row: a white 0.10 wash across the
+    -- whole row on hover, HIGHLIGHT layer, no scripts involved. Both overlay
+    -- pools go through this -- when only one of them had it, the two kinds of
+    -- clickable row silently looked different for as long as they existed.
+    local function AddRowHighlight(b)
+        local hl = b:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.10)
+    end
+
     local function AcquireActionButton()
         activeActions = activeActions + 1
         local b = actionPool[activeActions]
@@ -816,11 +854,7 @@ do
             -- started -- same rule as the travel block's hearth button.
             b:RegisterForClicks("AnyUp")
             b:SetAttribute("useOnKeyDown", false)
-            -- Full-row white hover wash (house style: rows 0.10). HIGHLIGHT
-            -- layer shows on hover automatically -- no scripts involved.
-            local hl = b:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.10)
+            AddRowHighlight(b)
             -- Default type; the overlay build swaps type/payload per row
             -- (spell rows and toy rows share this pool).
             b:SetAttribute("type", "spell")
@@ -858,9 +892,27 @@ do
             b:SetFrameLevel(tip:GetFrameLevel() + 5)
             b:EnableMouse(true)
             b:RegisterForClicks("AnyUp")
+            AddRowHighlight(b)
             clickPool[activeClicks] = b
         end
         return b
+    end
+
+    -- Lay an overlay button over row i and wire its hover affordance. Shared by
+    -- both kinds -- secure action rows and insecure clickable ones -- because
+    -- they are the same thing to the player: an interactive tooltip row.
+    -- The accent recolor only shows if the row's left text carries no embedded
+    -- |c..|r codes; callers pass the normal color through the left-color args.
+    local function PlaceRowOverlay(b, i, innerW)
+        local d, row = data[i], rows[i]
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
+        b:SetSize(max(1, innerW), max(1, d._h))
+        local ar, ag, ab = ns.GetAccent()
+        local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
+        b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
+        b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
+        b:Show()
     end
 
     local function StopKeepAlive()
@@ -1046,6 +1098,16 @@ do
         end
     end
 
+    -- Tip_AddColumns + Tip_AddClickable: sub-column alignment AND a click
+    -- overlay. The two were mutually exclusive only because each add-function
+    -- clears the other's field; the overlay is placed over the row's rectangle
+    -- and never cared how the row was laid out.
+    function ns.Tip_AddClickableColumns(left, tokens, onClick, lr, lg, lb)
+        if ns.Tip_AddColumns(left, tokens, lr, lg, lb) and onClick then
+            data[dataCount].onClick = onClick
+        end
+    end
+
     function ns.Tip_Show()
         if not tip or not owner then return end
         local maxLeft, maxRight, totalH = 0, 0, 0
@@ -1180,7 +1242,6 @@ do
         HideActionButtons()
         interactive = false
         if not InCombatLockdown() then
-            local ar, ag, ab = ns.GetAccent()
             for i = 1, dataCount do
                 local d = data[i]
                 if d.action or d.actionToy or d.actionMacro then
@@ -1211,14 +1272,7 @@ do
                         b:SetAttribute("spell", nil)
                         b:SetAttribute("toy", nil)
                     end
-                    b:ClearAllPoints()
-                    b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
-                    b:SetSize(max(1, innerW), max(1, d._h))
-                    local row = rows[i]
-                    local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
-                    b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
-                    b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
-                    b:Show()
+                    PlaceRowOverlay(b, i, innerW)
                 end
             end
         end
@@ -1227,27 +1281,14 @@ do
         -- the callbacks are unprotected -- and rebuilt from scratch each show
         -- so a reused tip never carries stale buttons.
         HideClickButtons()
-        local car, cag, cab
         for i = 1, dataCount do
             local d = data[i]
             if d.onClick then
                 interactive = true
-                if not car then car, cag, cab = ns.GetAccent() end
                 local b = AcquireClickButton()
-                b:ClearAllPoints()
-                b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
-                b:SetSize(max(1, innerW), max(1, d._h))
-                -- Hover affordance: recolor the row's left text to the accent,
-                -- exactly like the M+ teleport rows. For this to show, the row
-                -- text must NOT embed its own |c..|r codes -- callers pass the
-                -- normal color through the left-color args instead.
-                local row = rows[i]
-                local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
                 local cb = d.onClick
-                b:SetScript("OnEnter", function() row.left:SetTextColor(car, cag, cab, 1) end)
-                b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
+                PlaceRowOverlay(b, i, innerW)
                 b:SetScript("OnClick", function(_, mouseButton) cb(mouseButton) end)
-                b:Show()
             end
         end
 
