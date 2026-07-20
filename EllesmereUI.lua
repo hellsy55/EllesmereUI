@@ -4513,25 +4513,40 @@ do
     -- NOTE: relies on enemy nameplates showing for off-target enemies.
     -- InReach is block-scoped (no upvalues from the call) so EnemiesInReach
     -- allocates nothing -- it runs on every tracked spender cast in combat.
-    local function InReach(u)
+    -- idx defaults to the index-2 trade probe; index 3 (duel, ~9.9 yd) is
+    -- exercised by the _SSDEBUG comparison output as a candidate tighter fit
+    -- for the real 8 yd sweep.
+    local function InReach(u, idx)
         if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
             return false
         end
-        return CheckInteractDistance(u, 2) or false
+        return CheckInteractDistance(u, idx or 2) or false
     end
-    local function EnemiesInReach(need)
+    local function EnemiesInReach(need, idx)
         local count, targetPlated = 0, false
         for i = 1, 40 do
             local u = "nameplate" .. i
-            if InReach(u) then
+            if InReach(u, idx) then
                 count = count + 1
                 if UnitIsUnit(u, "target") then targetPlated = true end
                 if count >= need then return true end
             end
         end
         -- Target without a visible nameplate still counts as one body
-        if not targetPlated and InReach("target") then count = count + 1 end
+        if not targetPlated and InReach("target", idx) then count = count + 1 end
         return count >= need
+    end
+
+    -- CDM child sync state (see CdmSweepSync below the event handler).
+    -- cdmSeenActive gates the zero-on-inactive path: it must be re-earned
+    -- after every activation so a present-but-never-active child (buff
+    -- removed from the tracked set, EUI TBB quirks) can never wipe live
+    -- stacks -- the v8.4.9 fail-closed bug must not come back.
+    local cdmChild, cdmChildCdID, cdmNextScan = nil, nil, 0
+    local cdmSeenActive, cdmInactiveSince = false, nil
+    local cdmSigDbg, cdmAppsDbg = nil, nil
+    local function dbg(...)
+        if EllesmereUI._SSDEBUG then print("|cff33ff99[SS]|r", ...) end
     end
 
     function EllesmereUI.HandleSweepingStrikes(event, unit, castGUID, spellID)
@@ -4539,6 +4554,7 @@ do
             stacks, expiresAt = 0, nil
             fobWindow = 0
             bladestormUntil = 0
+            cdmSeenActive, cdmInactiveSince = false, nil
             wipe(seenGUID)
             guidCount = 0
             return
@@ -4572,6 +4588,8 @@ do
            or (CS_GENERATORS[spellID] and broadKnown) then
             stacks = MaxStacks()
             expiresAt = GetTime() + DURATION
+            cdmSeenActive, cdmInactiveSince = false, nil
+            dbg("activated:", stacks, "stacks (cast", spellID .. ")")
         elseif FOB_TRIGGERS[spellID] and stacks > 0 and fervorKnown then
             -- Fervor of Battle: Cleave/Whirlwind hitting 3+ targets also
             -- Slams the primary target; that Slam sweeps and consumes a
@@ -4583,6 +4601,7 @@ do
             fobWindow = GetTime() + 0.3
             stacks = max(0, stacks - 1)
             if stacks == 0 then expiresAt = nil end
+            dbg("FoB spend (cast", spellID .. "):", stacks, "stacks left")
         elseif SPENDERS[spellID] and stacks > 0 then
             -- Bladestorm window: Slayer's Unhinged auto-casts Mortal Strike
             -- (12294) here, but the game does not consume a Sweeping Strikes
@@ -4596,9 +4615,131 @@ do
             -- so the echo carries that id instead.
             if (spellID == 1464 or spellID == 1269383) and GetTime() < fobWindow then return end
             -- No sweep partner in range -> the game doesn't consume a charge
-            if not EnemiesInReach(2) then return end
+            local reach = EnemiesInReach(2)
+            if EllesmereUI._SSDEBUG then
+                -- Side-by-side probe comparison: index 2 (trade, ~11.1 yd,
+                -- live) vs index 3 (duel, ~9.9 yd, candidate).
+                dbg(("spend %d: reach11=%s reach10=%s stacks=%d"):format(
+                    spellID, tostring(reach), tostring(EnemiesInReach(2, 3)), stacks))
+            end
+            if not reach then return end
             stacks = max(0, stacks - SPENDERS[spellID])
             if stacks == 0 then expiresAt = nil end
+        end
+    end
+
+    -- Blizzard's CooldownViewer tracked-buff child for 260708 caches aura
+    -- state in plain frame fields even though the C_UnitAuras surface
+    -- refuses this aura (see the no-validation note below): presence via
+    -- wasSetFromAura/auraInstanceID/IsShown, count via
+    -- auraDataCached.applications -- plain out of restricted combat, secret
+    -- inside it (both observations from the CDM module's TBB stack reader,
+    -- ReadStackApplications). Same source Coolinator displays; here it
+    -- feeds two fail-open corrections the cast prediction can't make:
+    -- zero on a confirmed early drop (/cancelaura), and drift resync
+    -- whenever the count reads plain. CDM disabled or the buff untracked
+    -- -> no child is ever found and prediction behaves exactly as before.
+    local function CdmInfoMatches(info)
+        if not info then return false end
+        if info.spellID == SWEEP or info.overrideSpellID == SWEEP then return true end
+        local linked = info.linkedSpellIDs
+        if linked then
+            for i = 1, #linked do
+                if linked[i] == SWEEP then return true end
+            end
+        end
+        return false
+    end
+    local function FindCdmChild()
+        local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+        if not gci then return nil end
+        local function ScanViewer(viewer)
+            local pool = viewer and viewer.itemFramePool
+            if not pool then return nil end
+            for frame in pool:EnumerateActive() do
+                local cdID = frame.cooldownID
+                if cdID and CdmInfoMatches(gci(cdID)) then return frame end
+            end
+        end
+        return ScanViewer(_G.BuffIconCooldownViewer) or ScanViewer(_G.BuffBarCooldownViewer)
+    end
+
+    local function CdmSweepSync(now)
+        local child = cdmChild
+        -- Pooled frames get re-acquired for other spells; cooldownID moving
+        -- invalidates the cache.
+        if child and child.cooldownID ~= cdmChildCdID then
+            child, cdmChild = nil, nil
+        end
+        if not child then
+            if now < cdmNextScan then return end
+            cdmNextScan = now + 1
+            child = FindCdmChild()
+            if not child then return end
+            cdmChild, cdmChildCdID = child, child.cooldownID
+            dbg("CDM child found:", child:GetName() or tostring(child),
+                "cdID", cdmChildCdID)
+        end
+
+        -- OR of every presence signal, on purpose: a signal that sticks
+        -- true only makes the inactive branch unreachable (prediction
+        -- unchanged); trusting a single signal that clears while the buff
+        -- lives would wipe live stacks.
+        local shown = child:IsShown()
+        local wsfa = child.wasSetFromAura == true
+        local iid = child.auraInstanceID ~= nil
+        if EllesmereUI._SSDEBUG then
+            local sig = (shown and "S" or "-") .. (wsfa and "W" or "-")
+                .. (iid and "I" or "-")
+            if sig ~= cdmSigDbg then
+                cdmSigDbg = sig
+                dbg("signals:", sig, "(S=shown W=wasSetFromAura I=auraInstanceID)")
+            end
+        end
+        local active = shown or wsfa or iid
+        if active then
+            cdmInactiveSince = nil
+            if not cdmSeenActive then
+                cdmSeenActive = true
+                dbg("CDM child active: shown=" .. tostring(shown)
+                    .. " wsfa=" .. tostring(child.wasSetFromAura)
+                    .. " iid=" .. tostring(child.auraInstanceID ~= nil))
+            end
+            local ad = child.auraDataCached
+            local apps = ad and ad.applications
+            if EllesmereUI._SSDEBUG then
+                local state
+                if not ad then state = "no-cache"
+                elseif apps == nil then state = "no-apps"
+                elseif issecretvalue(apps) then state = "secret"
+                else state = tostring(apps) end
+                if state ~= cdmAppsDbg then
+                    cdmAppsDbg = state
+                    dbg("apps:", state, "(predicted " .. stacks .. ")")
+                end
+            end
+            if apps and not issecretvalue(apps) and type(apps) == "number"
+               and apps ~= stacks then
+                dbg("snap:", stacks, "->", apps)
+                stacks = apps
+                local exp = ad.expirationTime
+                if exp and not issecretvalue(exp) and type(exp) == "number"
+                   and exp > now then
+                    expiresAt = exp
+                elseif not expiresAt then
+                    expiresAt = now + DURATION
+                end
+            end
+        elseif cdmSeenActive and stacks > 0 then
+            -- Debounce: aura refreshes can blink the child inactive for a
+            -- frame while Blizzard re-acquires it.
+            if not cdmInactiveSince then
+                cdmInactiveSince = now
+            elseif now - cdmInactiveSince > 0.3 then
+                dbg("CDM child inactive -> buff gone, clearing", stacks, "stacks")
+                stacks, expiresAt = 0, nil
+                cdmSeenActive, cdmInactiveSince = false, nil
+            end
         end
     end
 
@@ -4618,9 +4759,14 @@ do
     -- probe in EllesmereUIAuraBuffReminders. If Blizzard ever whitelists
     -- 260708, validation becomes possible again; until then the
     -- cast-event prediction plus the duration timer IS the tracker.
+    -- CdmSweepSync above is NOT that validation: it reads Blizzard's own
+    -- widget (not the aura surface), corrects only on positive evidence,
+    -- and degrades to pure prediction when the widget is absent.
     function EllesmereUI.GetSweepingStrikes()
         if not sweepKnown then return 0, 0 end
-        if expiresAt and GetTime() >= expiresAt then
+        local now = GetTime()
+        CdmSweepSync(now)
+        if expiresAt and now >= expiresAt then
             stacks, expiresAt = 0, nil
         end
         -- Clamp: a mid-window respec out of Improved drops MaxStacks 18->12
