@@ -51,6 +51,7 @@ local CHAT_DEFAULTS = {
             extendBgBehindTabs = false,
             forceOnScreen = false,
             showFriends = true,
+            showGuild = false,
             showDurability = false,
             showCopy = true,
             showPortals = true,
@@ -522,6 +523,7 @@ function ECHAT.ApplySidebarIcons()
     -- skipped so the chain hangs off the last icon that actually exists.
     local CHAIN_REFS = {
         showFriends    = { btn = "friendsBtn",    tail = "friendsCount" },
+        showGuild      = { btn = "guildBtn",      tail = "guildCount" },
         showDurability = { btn = "durabilityBtn", tail = "durabilityPct" },
         showCopy       = { btn = "copyBtn" },
         showPortals    = { btn = "portalBtn" },
@@ -565,6 +567,7 @@ end
 -- brand-new icon (scrollBtn is always created, so it never needs one).
 local SIDEBAR_ICON_REFS = {
     showFriends    = "friendsBtn",
+    showGuild      = "guildBtn",
     showDurability = "durabilityBtn",
     showCopy       = "copyBtn",
     showPortals    = "portalBtn",
@@ -580,10 +583,10 @@ local SIDEBAR_ICON_REFS = {
 -- Friends, Durability, then the middle group. Scroll is not part of the
 -- chain -- it stays pinned at the sidebar bottom.
 local SIDEBAR_CHAIN_KEYS = {
-    "showFriends", "showDurability", "showCopy", "showPortals", "showVoice", "showSettings",
+    "showFriends", "showGuild", "showDurability", "showCopy", "showPortals", "showVoice", "showSettings",
 }
 local SIDEBAR_FALLBACK_ORDER = {
-    showFriends = -20, showDurability = -10,
+    showFriends = -20, showGuild = -15, showDurability = -10,
     showCopy = 1, showPortals = 2, showVoice = 3, showSettings = 4,
 }
 
@@ -724,13 +727,14 @@ function ECHAT.ApplyIconColor()
     local ICON_HOVER_ALPHA = 0.9
     local d = CFD(cf1)
     local ICON_LABELS = {
-        friendsBtn = "Friends", durabilityBtn = "Durability", copyBtn = "Copy Chat",
+        friendsBtn = "Friends", guildBtn = "Guild", durabilityBtn = "Durability", copyBtn = "Copy Chat",
         portalBtn = "M+ Portals", voiceBtn = "Voice/Channels", settingsBtn = "Settings",
         scrollBtn = "Scroll to Bottom",
     }
     local fc = d.friendsCount
+    local gc = d.guildCount
     local dp = d.durabilityPct
-    for _, key in ipairs({ "friendsBtn", "durabilityBtn", "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
+    for _, key in ipairs({ "friendsBtn", "guildBtn", "durabilityBtn", "copyBtn", "portalBtn", "voiceBtn", "settingsBtn", "scrollBtn" }) do
         local btn = CFD(cf1)[key]
         if btn and btn._icon then
             btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
@@ -747,6 +751,20 @@ function ECHAT.ApplyIconColor()
                 btn:SetScript("OnLeave", function()
                     btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
                     fc:SetTextColor(r, g, b, 0.5)
+                    if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+                end)
+            elseif key == "guildBtn" and gc then
+                gc:SetTextColor(r, g, b, 0.5)
+                btn:SetScript("OnEnter", function(self)
+                    btn._icon:SetVertexColor(r, g, b, ICON_HOVER_ALPHA)
+                    gc:SetTextColor(r, g, b, 0.9)
+                    if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                        EUI.ShowWidgetTooltip(self, label)
+                    end
+                end)
+                btn:SetScript("OnLeave", function()
+                    btn._icon:SetVertexColor(r, g, b, ICON_ALPHA)
+                    gc:SetTextColor(r, g, b, 0.5)
                     if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
                 end)
             elseif key == "durabilityBtn" and dp then
@@ -827,6 +845,15 @@ function ECHAT.ApplySidebarIconScale()
     if CFD(cf1).friendsCount then
         CFD(cf1).friendsCount:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
         CFD(cf1).friendsCount._freeMoveH = max(7, BASE_FONT * scale)
+    end
+
+    if CFD(cf1).guildBtn then
+        CFD(cf1).guildBtn:SetSize(BASE_FRIEND * scale, BASE_FRIEND * scale)
+        CFD(cf1).guildBtn._freeMoveH = BASE_FRIEND * scale
+    end
+    if CFD(cf1).guildCount then
+        CFD(cf1).guildCount:SetFont(GetFont(), max(7, BASE_FONT * scale), "")
+        CFD(cf1).guildCount._freeMoveH = max(7, BASE_FONT * scale)
     end
 
     if CFD(cf1).durabilityPct then
@@ -987,6 +1014,7 @@ function ECHAT.ApplyIconFreeMove()
 
     local btns = {
         { ref = "friendsBtn",    key = "friends" },
+        { ref = "guildBtn",      key = "guild" },
         { ref = "durabilityBtn", key = "durability" },
         { ref = "copyBtn",       key = "copy" },
         { ref = "portalBtn",     key = "portals" },
@@ -2412,6 +2440,7 @@ local function SkinChatFrame(cf)
         -- Read visibility + ordering config at creation time
         local icfg = ECHAT.DB()
         local showFriends    = icfg.showFriends ~= false
+        local showGuild      = icfg.showGuild ~= false
         local showDurability = icfg.showDurability ~= false
 
         -- When the background is extended behind the tabs, the sidebar panel
@@ -2425,6 +2454,7 @@ local function SkinChatFrame(cf)
         -- the options dropdown; a new order takes effect on the next reload).
         local anchor = nil
         local friendsBtn, friendsCount, durabilityBtn, durabilityPct, copyBtn, portalBtn, voiceBtn, settingsBtn
+        local guildBtn, guildCount
 
         local function ChainAnchor(btn)
             btn:ClearAllPoints()
@@ -2474,6 +2504,53 @@ local function SkinChatFrame(cf)
             anchor = friendsCount
         end
 
+        local function CreateGuildIcon()
+            guildBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_guild.png")
+            guildBtn:SetSize(26, 26)
+            ChainAnchor(guildBtn)
+
+            guildCount = sidebar:CreateFontString(nil, "OVERLAY")
+            guildCount:SetFont(GetFont(), 9, "")
+            guildCount:SetTextColor(1, 1, 1, 0.5)
+            guildCount:SetPoint("TOP", guildBtn, "BOTTOM", 0, 7)
+            guildCount:SetText("0")
+
+            guildBtn:HookScript("OnEnter", function(self)
+                guildCount:SetTextColor(1, 1, 1, 0.9)
+                if not self._freeMoveJustDragged and EUI.ShowWidgetTooltip then
+                    EUI.ShowWidgetTooltip(self, "Guild")
+                end
+            end)
+            guildBtn:HookScript("OnLeave", function()
+                guildCount:SetTextColor(1, 1, 1, 0.5)
+                if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+            end)
+
+            -- Online guildmate count (GetNumGuildMembers 2nd return), like
+            -- Friends. Roster request is throttled: GuildRoster() itself fires
+            -- GUILD_ROSTER_UPDATE, which re-enters this; unthrottled that loops.
+            local lastRoster = 0
+            local function UpdateGuildCount()
+                if not IsInGuild() then guildCount:SetText(0); return end
+                local now = GetTime()
+                if not InCombatLockdown() and (now - lastRoster) >= 15 then
+                    lastRoster = now
+                    C_GuildInfo.GuildRoster()
+                end
+                local _, online = GetNumGuildMembers()
+                guildCount:SetText(online)
+            end
+
+            local gcEvents = CreateFrame("Frame")
+            gcEvents:RegisterEvent("GUILD_ROSTER_UPDATE")
+            gcEvents:RegisterEvent("PLAYER_GUILD_UPDATE")
+            gcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+            gcEvents:SetScript("OnEvent", UpdateGuildCount)
+
+            CFD(cf).guildCount = guildCount
+            anchor = guildCount
+        end
+
         local function CreateDurabilityIcon()
             durabilityBtn = MakeSidebarIcon(sidebar, MEDIA .. "chat_durability.png")
             ChainAnchor(durabilityBtn)
@@ -2521,6 +2598,7 @@ local function SkinChatFrame(cf)
         -- plain sidebar icons.
         local SPECIAL_CREATORS = {
             showFriends    = { show = showFriends,    create = CreateFriendsIcon },
+            showGuild      = { show = showGuild,      create = CreateGuildIcon },
             showDurability = { show = showDurability, create = CreateDurabilityIcon },
         }
         local MIDDLE_DEFS = {
@@ -2601,6 +2679,17 @@ local function SkinChatFrame(cf)
         end)
         end
 
+        -- Guild button click handler
+        if guildBtn then
+        guildBtn:SetScript("OnClick", function()
+            if InCombatLockdown() then
+                UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.3, 0.3, 1.0)
+                return
+            end
+            ToggleGuildFrame()
+        end)
+        end
+
         -- Portals button click handler
 
         if portalBtn then
@@ -2649,6 +2738,7 @@ local function SkinChatFrame(cf)
 
         local sbd = CFD(cf)
         sbd.friendsBtn = friendsBtn
+        sbd.guildBtn = guildBtn
         sbd.durabilityBtn = durabilityBtn
         sbd.copyBtn = copyBtn
         sbd.portalBtn = portalBtn

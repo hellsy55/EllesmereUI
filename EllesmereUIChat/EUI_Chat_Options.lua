@@ -299,6 +299,7 @@ initFrame:SetScript("OnEvent", function(self)
         local sidebarVisOrder = { "always", "mouseover", "never" }
         local SIDEBAR_ICON_LABELS = {
             showFriends    = "Friends",
+            showGuild      = "Guild",
             showDurability = "Durability",
             showCopy       = "Copy Chat",
             showPortals    = "M+ Portals",
@@ -309,7 +310,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Scroll is pinned to the sidebar bottom, so its row is fixed.
         local sidebarIconItems = {}
         local sidebarOrderedKeys = ECHAT.ResolveSidebarIconOrder and ECHAT.ResolveSidebarIconOrder()
-            or { "showFriends", "showDurability", "showCopy", "showPortals", "showVoice", "showSettings" }
+            or { "showFriends", "showGuild", "showDurability", "showCopy", "showPortals", "showVoice", "showSettings" }
         for _, k in ipairs(sidebarOrderedKeys) do
             sidebarIconItems[#sidebarIconItems + 1] = { key = k, label = SIDEBAR_ICON_LABELS[k] }
         end
