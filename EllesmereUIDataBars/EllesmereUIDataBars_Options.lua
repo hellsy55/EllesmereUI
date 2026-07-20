@@ -1418,7 +1418,13 @@ initFrame:SetScript("OnEvent", function(self)
         --  cached/restored header never fires a stale closure.
         -------------------------------------------------------------------
         local _navGlowFrame
-        local function PlaySettingGlow(targetFrame)
+        -- holdWhile (optional): keeps the glow pulsing for as long as it
+        -- returns true, instead of the one-shot fade. Used when the glow is
+        -- pointing at a setting the player still has to fill in -- a 0.75s
+        -- flash is gone before they have finished reading the page. The pulse
+        -- also releases when the target stops being visible (page rebuilt,
+        -- options closed), so the shared frame can never strand its OnUpdate.
+        local function PlaySettingGlow(targetFrame, holdWhile)
             if not targetFrame then return end
             if not _navGlowFrame then
                 _navGlowFrame = CreateFrame("Frame")
@@ -1442,8 +1448,19 @@ initFrame:SetScript("OnEvent", function(self)
             _navGlowFrame:SetAlpha(1)
             _navGlowFrame:Show()
             local elapsed = 0
+            local holding = holdWhile ~= nil
             _navGlowFrame:SetScript("OnUpdate", function(glowSelf, dt)
                 elapsed = elapsed + dt
+                if holding then
+                    if targetFrame:IsVisible() and holdWhile() then
+                        glowSelf:SetAlpha(0.35 + 0.65 * math.abs(math.sin(elapsed * 3)))
+                        return
+                    end
+                    -- Released: restart the clock so the normal fade plays out
+                    -- from full alpha instead of expiring on its first frame.
+                    holding = false
+                    elapsed = 0
+                end
                 if elapsed >= 0.75 then
                     glowSelf:Hide()
                     glowSelf:SetScript("OnUpdate", nil)
@@ -1467,7 +1484,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
                 if region then glowTarget = region end
             end
-            C_Timer.After(0.15, function() PlaySettingGlow(glowTarget) end)
+            C_Timer.After(0.15, function() PlaySettingGlow(glowTarget, m.holdWhile) end)
         end
         -- Never retarget the live header's click handler from a hidden
         -- global-search pre-build: its targets belong to an off-screen
@@ -2360,7 +2377,9 @@ initFrame:SetScript("OnEvent", function(self)
                 -- the picker itself, not just the section (ns.OpenBlockSettings).
                 if b.type == "currency" and k == 1 then
                     parent._edbClickTargets["block:" .. blockId .. ":currency"] =
-                        { section = secHdr, target = row, slotSide = "left" }
+                        { section = secHdr, target = row, slotSide = "left",
+                          -- Pulse until the player actually picks one.
+                          holdWhile = function() return s.currencyId == nil end }
                 end
             end
 
