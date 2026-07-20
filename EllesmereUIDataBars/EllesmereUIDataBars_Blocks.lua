@@ -1207,25 +1207,36 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
     local _sideLineCount = 0
     -- coin: Coin Colored text mode -- suffix letters carry the denomination
     -- colors (same codes as ns.FormatMoney), numbers inherit the white base.
-    local function GetMoneySideLines(amount, showSmall, coin)
+    local function GetMoneySideLines(amount, showSmall, coin, coinIcons)
         amount = floor(abs(amount or 0))
+        -- Coin icons: GetCoinTextureString emits every denomination in one
+        -- string, so the vertical bar shows it as a single wrapped line
+        -- instead of one line per denomination. Coin Colored has nothing left
+        -- to tint -- the textures carry their own color.
+        if coinIcons then
+            _sideLinesBuf[1] = ns.CoinIconString(amount)
+            _sideLinesBuf[2] = nil
+            _sideLinesBuf[3] = nil
+            _sideLineCount = 1
+            return _sideLinesBuf, _sideLineCount
+        end
         local gold   = floor(amount / 10000)
         local silver = floor((amount % 10000) / 100)
         local copper = amount % 100
         local gStr
         if BreakUpLargeNumbers then gStr = BreakUpLargeNumbers(gold) else gStr = tostring(gold) end
         if coin then
-            _sideLinesBuf[1] = gStr .. "|cffe2ac7a" .. L["GOLD_SUFFIX"] .. "|r"
+            _sideLinesBuf[1] = gStr .. "|cffe2ac7a" .. GOLD_AMOUNT_SYMBOL .. "|r"
         else
-            _sideLinesBuf[1] = gStr .. L["GOLD_SUFFIX"]
+            _sideLinesBuf[1] = gStr .. GOLD_AMOUNT_SYMBOL
         end
         if showSmall ~= false then
             if coin then
-                _sideLinesBuf[2] = silver .. "|cffc7c7cf" .. L["SILVER_SUFFIX"] .. "|r"
-                _sideLinesBuf[3] = copper .. "|cffed8a3f" .. L["COPPER_SUFFIX"] .. "|r"
+                _sideLinesBuf[2] = silver .. "|cffc7c7cf" .. SILVER_AMOUNT_SYMBOL .. "|r"
+                _sideLinesBuf[3] = copper .. "|cffed8a3f" .. COPPER_AMOUNT_SYMBOL .. "|r"
             else
-                _sideLinesBuf[2] = silver .. L["SILVER_SUFFIX"]
-                _sideLinesBuf[3] = copper .. L["COPPER_SUFFIX"]
+                _sideLinesBuf[2] = silver .. SILVER_AMOUNT_SYMBOL
+                _sideLinesBuf[3] = copper .. COPPER_AMOUNT_SYMBOL
             end
             _sideLineCount = 3
         else
@@ -1263,11 +1274,12 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
         ns.SetFont(bagText, fontSize, barCfg)
 
         local money = GetMoney()
+        local ci = dg.coinIcons == true
         if isSide then
             local slotW = VSlotW(inst)
             local innerW = max(30, slotW - 8)
             local lines, lineCount = GetMoneySideLines(money, dg.showSmall == true,
-                blockCfg.useCoinColor == true and not mouseOver)
+                blockCfg.useCoinColor == true and not mouseOver, ci)
             local startSize = min(fontSize, max(10, floor(CONTENT_BASE * 0.52 + 0.5)))
             local goldFontSize = startSize
             ns.SetFont(goldText, goldFontSize, barCfg)
@@ -1278,11 +1290,11 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
             else r, g, b = BlockColorOf(blockCfg) end
             goldText:SetTextColor(r, g, b, 1)
         elseif mouseOver then
-            goldText:SetText(ns.FormatMoneyPlain(money, dg.showSmall == true))
+            goldText:SetText(ns.FormatMoneyPlain(money, dg.showSmall == true, ci))
             local r, g, b = ns.GetAccent()
             goldText:SetTextColor(r, g, b, 1)
         else
-            goldText:SetText(ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true))
+            goldText:SetText(ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true, ci))
             if blockCfg.useCoinColor then
                 goldText:SetTextColor(1, 1, 1, 1)
             else
@@ -1351,8 +1363,8 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
             -- Fit against BOTH money formats so font/icon size (and the frame
             -- width below) stay identical whether hovered or not; otherwise
             -- the element visibly resizes on mouseover.
-            local plainText = ns.FormatMoneyPlain(money, dg.showSmall == true)
-            local fancyText = ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true)
+            local plainText = ns.FormatMoneyPlain(money, dg.showSmall == true, ci)
+            local fancyText = ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true, ci)
             local moneyText
             if mouseOver then moneyText = plainText else moneyText = fancyText end
             local bagTextValue = ""
@@ -1410,20 +1422,21 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
         inst:Refresh()
         -- Tooltip money lines honor the block's Show Silver and Copper toggle.
         local sm = D().showSmall == true
+        local ci = D().coinIcons == true
         local ar, ag, ab = 1, 1, 1
         ns.Tip_Begin(goldButton)
         ns.Tip_AddLine(L["GOLD"], ar, ag, ab)
         ns.Tip_AddLine(" ")
         ns.Tip_AddLine(L["SESSION"], 0.8, 0.8, 0.8)
-        ns.Tip_AddDouble(L["EARNED"], ns.FormatMoney(goldLedger.profit, true, sm), 0.6, 0.6, 0.6, 0, 1, 0)
-        ns.Tip_AddDouble(L["SPENT"],  ns.FormatMoney(goldLedger.spent,  true, sm), 0.6, 0.6, 0.6, 1, 0.3, 0.3)
+        ns.Tip_AddDouble(L["EARNED"], ns.FormatMoney(goldLedger.profit, true, sm, ci), 0.6, 0.6, 0.6, 0, 1, 0)
+        ns.Tip_AddDouble(L["SPENT"],  ns.FormatMoney(goldLedger.spent,  true, sm, ci), 0.6, 0.6, 0.6, 1, 0.3, 0.3)
         local net = goldLedger.profit - goldLedger.spent
         if net ~= 0 then
             local label
             if net > 0 then label = L["PROFIT"] else label = L["DEFICIT"] end
             local nr, ngr = 1, 0.3
             if net > 0 then nr, ngr = 0, 1 end
-            ns.Tip_AddDouble(label, ns.FormatMoney(abs(net), true, sm), 0.6, 0.6, 0.6, nr, ngr, 0.3)
+            ns.Tip_AddDouble(label, ns.FormatMoney(abs(net), true, sm, ci), 0.6, 0.6, 0.6, nr, ngr, 0.3)
         end
         local store = GoldStore()
         local total, charList = 0, {}
@@ -1446,7 +1459,7 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
                 if char.name == UnitName("player") then
                     label = label .. " |TInterface\\COMMON\\Indicator-Green:14|t"
                 end
-                ns.Tip_AddDouble(label, ns.FormatMoney(char.currentMoney, true, sm), cr, cg, cb, 1, 1, 1)
+                ns.Tip_AddDouble(label, ns.FormatMoney(char.currentMoney, true, sm, ci), cr, cg, cb, 1, 1, 1)
             end
         end
         local bankType = 2
@@ -1455,15 +1468,15 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
             local wbank = C_Bank.FetchDepositedMoney(bankType)
             if wbank and wbank > 0 then
                 ns.Tip_AddLine(" ")
-                ns.Tip_AddDouble(L["WARBANK"], ns.FormatMoney(wbank, true, sm), 0.6, 0.6, 0.6, 1, 1, 1)
+                ns.Tip_AddDouble(L["WARBANK"], ns.FormatMoney(wbank, true, sm, ci), 0.6, 0.6, 0.6, 1, 1, 1)
                 total = total + wbank
             end
         end
         ns.Tip_AddLine(" ")
-        ns.Tip_AddDouble(L["TOTAL"], ns.FormatMoney(total, true, sm), ar, ag, ab, 1, 1, 1)
+        ns.Tip_AddDouble(L["TOTAL"], ns.FormatMoney(total, true, sm, ci), ar, ag, ab, 1, 1, 1)
         if goldLedger.tokenPrice and goldLedger.tokenPrice > 0 then
             ns.Tip_AddLine(" ")
-            ns.Tip_AddDouble(L["WOW_TOKEN"], ns.FormatMoney(goldLedger.tokenPrice, true, sm), 0, 0.8, 1, 1, 1, 1)
+            ns.Tip_AddDouble(L["WOW_TOKEN"], ns.FormatMoney(goldLedger.tokenPrice, true, sm, ci), 0, 0.8, 1, 1, 1, 1)
         end
         ns.Tip_AddLine(" ")
         ns.Tip_AddDouble(L["LEFT_CLICK"],       L["OPEN_BAGS"],       1, 1, 1, ar, ag, ab)

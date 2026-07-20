@@ -2660,6 +2660,9 @@ initFrame:SetScript("OnEvent", function(self)
                 typeRows = {
                     MkToggle("Show Icon", "showIcons", "Shows the coin icon next to the amount."),
                     MkToggle("Show Bag Space", "showBagSpace", "Shows your free bag slots."),
+                    -- Off (default) = the letter suffixes; on = coin textures.
+                    -- Independent of Coin Colored, which tints those letters.
+                    MkToggle("Coin Icons", "coinIcons", "Uses Blizzard's coin textures instead of the letter suffixes."),
                 }
             elseif b.type == "xprep" then
                 typeRows = {
