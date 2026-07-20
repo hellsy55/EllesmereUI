@@ -1586,6 +1586,13 @@ local function ResolveDisplayName(unit, applyCap)
             display = dn
         end
     end
+	if not display and RG_UnitName and RG_ALTS_SETTINGS and RG_ALTS_SETTINGS.settings["ellesmereui"] then
+		local ok, dn = pcall(RG_UnitName, unit)
+		if ok and type(dn) == "string"
+		   and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+			display = dn
+		end
+	end
     if not display then
         if Ambiguate then name = Ambiguate(name, "short") end
         display = name
@@ -15981,17 +15988,40 @@ function ERF:OnEnable()
         end
         return false
     end
+	local function RegisterRGALIASNicknames()
+		if ns._rgaliasNickHooked then return true end
+		local RGA = _G.RG_ALIAS
+		if RGA and RGA.RegisterCallback then
+			RGA.RegisterCallback("DbUpdated", function(event)
+				if ns.RefreshAllNames then ns.RefreshAllNames() end
+			end)
+			RGA.RegisterCallback("ModuleEnabled", function(event, moduleName)
+				if moduleName ~= "ellesmereui" then return end
+				if ns.RefreshAllNames then ns.RefreshAllNames() end
+			end)
+			RGA.RegisterCallback("ModuleDisabled", function(event, moduleName)
+				if moduleName ~= "ellesmereui" then return end
+				if ns.RefreshAllNames then ns.RefreshAllNames() end
+			end)
+			ns._rgaliasNickHooked = true
+			return true
+		end
+		return false
+	end
+
     local nsrtHooked = RegisterNSRTNicknames()
     local trHooked = RegisterTRNicknames()
-    if not (nsrtHooked and trHooked) then
+	local rgaliasHooked = RegisterRGALIASNicknames()
+    if not (nsrtHooked and trHooked and rgaliasHooked) then
         local nickFrame = CreateFrame("Frame")
         nickFrame:RegisterEvent("PLAYER_LOGIN")
         nickFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
         nickFrame:SetScript("OnEvent", function(self, event)
             local a = RegisterNSRTNicknames()
             local b = RegisterTRNicknames()
+			local c = RegisterRGALIASNicknames()
             -- Anything not loaded by first PLAYER_ENTERING_WORLD is not coming.
-            if (a and b) or event == "PLAYER_ENTERING_WORLD" then self:UnregisterAllEvents() end
+            if (a and b and c) or event == "PLAYER_ENTERING_WORLD" then self:UnregisterAllEvents() end
         end)
     end
 
