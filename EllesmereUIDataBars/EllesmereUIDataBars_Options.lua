@@ -43,6 +43,8 @@ initFrame:SetScript("OnEvent", function(self)
                                  -- bar highlight (the watcher must not clear it)
     local _edbStripRelayout      -- set per header build: re-solves + repositions the preview
     local _edbPreviewHost        -- the preview strip frame (live theme feedback)
+    local _edbHeldGlowKey        -- click-target key whose glow pulses until the
+                                 -- setting is filled in; outlives page builds
     local _cardsExpanded = false -- template card strip open/closed
     local _dividerDragging = false
 
@@ -1472,6 +1474,15 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
+        local function GlowTargetOf(m)
+            if m.slotSide then
+                local region
+                if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
+                if region then return region end
+            end
+            return m.target
+        end
+
         local function NavigateToSetting(key)
             local targets = parent._edbClickTargets
             if not targets then return end
@@ -1480,14 +1491,31 @@ initFrame:SetScript("OnEvent", function(self)
             local _, _, _, _, headerY = m.section:GetPoint(1)
             if not headerY then return end
             EllesmereUI.SmoothScrollTo(math.max(0, math.abs(headerY) - 40))
-            local glowTarget = m.target
-            if m.slotSide then
-                local region
-                if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
-                if region then glowTarget = region end
-            end
+            local glowTarget = GlowTargetOf(m)
+            if m.holdWhile then _edbHeldGlowKey = key end
             C_Timer.After(0.15, function() PlaySettingGlow(glowTarget, m.holdWhile) end)
         end
+
+        -- A held glow belongs to the SETTING, not to the navigation that first
+        -- showed it. Every page rebuild -- reordering a block, switching bars,
+        -- reopening the panel -- destroys the row it was parented to, which
+        -- released the pulse for good even though the setting was still empty.
+        -- Re-attach it to the freshly built row, without scrolling: the player
+        -- did not ask to go anywhere, they just moved something.
+        local function RearmHeldGlow()
+            if not _edbHeldGlowKey then return end
+            local targets = parent._edbClickTargets
+            local m = targets and targets[_edbHeldGlowKey]
+            -- Absent from this build (another bar is selected): keep the key so
+            -- coming back re-arms. Only a satisfied predicate retires it.
+            if not (m and m.target and m.holdWhile) then return end
+            if not m.holdWhile() then
+                _edbHeldGlowKey = nil
+                return
+            end
+            PlaySettingGlow(GlowTargetOf(m), m.holdWhile)
+        end
+
         -- Never retarget the live header's click handler from a hidden
         -- global-search pre-build: its targets belong to an off-screen
         -- wrapper. (SetContentHeader itself is stubbed out during pre-builds
@@ -2497,6 +2525,14 @@ initFrame:SetScript("OnEvent", function(self)
         -- Adding blocks lives in the preview strip's "+" tile only -- no
         -- body section.
         W:Spacer(parent, y, 20);  y = y - 20
+
+        -- Every click target of this build is registered by now. Same settle
+        -- delay the navigation paths use, and the same pre-build guard: a
+        -- hidden search pre-build would steal the shared glow frame for rows
+        -- nobody can see.
+        if not EllesmereUI._prebuilding then
+            C_Timer.After(0.05, RearmHeldGlow)
+        end
 
         return math.abs(y)
     end
