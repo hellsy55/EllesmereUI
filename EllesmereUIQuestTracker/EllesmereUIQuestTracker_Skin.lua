@@ -68,8 +68,8 @@ end
 
 -- Shared font sizes -- read from DB so the options panel can tweak them.
 -- Defaults are seeded in the loader's QT_DEFAULTS table.
-local function GetTitleSize() return EQT.Cfg("titleFontSize")     or 13 end
-local function GetObjSize()   return EQT.Cfg("objectiveFontSize") or 11 end
+local function GetTitleSize() return EQT.Cfg("titleFontSize") or 13 end
+local function GetObjSize() return EQT.Cfg("objectiveFontSize") or 11 end
 
 -------------------------------------------------------------------------------
 -- External weak-keyed flag tables. Never write custom fields onto Blizzard-
@@ -79,15 +79,15 @@ local function GetObjSize()   return EQT.Cfg("objectiveFontSize") or 11 end
 -------------------------------------------------------------------------------
 local _hookedTrackers    = setmetatable({}, { __mode = "k" })
 local _hookedBlocks      = setmetatable({}, { __mode = "k" })
-local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our icon texture
+local _blockIcons        = setmetatable({}, { __mode = "k" }) -- block -> our icon texture
 
 -- External weak-keyed flag tables. Every "am I in a state?" bool / number
 -- we used to write directly onto Blizzard-owned frames (block, tracker,
 -- line, FontString, StatusBar, bar, etc.) lives here instead so Blizzard's
 -- iteration of its own tables never sees our additions. This is the
 -- canonical taint-avoidance pattern per CLAUDE.md.
-local _blockFocus        = setmetatable({}, { __mode = "k" })  -- block -> focus texture
-local _headerClickOverlays = setmetatable({}, { __mode = "k" })  -- header -> click overlay
+local _blockFocus          = setmetatable({}, { __mode = "k" }) -- block -> focus texture
+local _headerClickOverlays = setmetatable({}, { __mode = "k" }) -- header -> click overlay
 
 -------------------------------------------------------------------------------
 -- Helpers
@@ -149,9 +149,9 @@ local function StyleFontStringSized(fs, size)
 end
 
 -- Convenience wrappers so every title / objective uses the shared sizes.
-local function StyleFontString(fs)     StyleFontStringSized(fs, nil)            end
-local function StyleTitleFS(fs)        StyleFontStringSized(fs, GetTitleSize()) end
-local function StyleObjectiveFS(fs)    StyleFontStringSized(fs, GetObjSize())   end
+local function StyleFontString(fs) StyleFontStringSized(fs, nil) end
+local function StyleTitleFS(fs) StyleFontStringSized(fs, GetTitleSize()) end
+local function StyleObjectiveFS(fs) StyleFontStringSized(fs, GetObjSize()) end
 
 -- Walk every FontString region on a frame (top-level only) and restyle it.
 -- No recursion: child frames each go through their own skin call.
@@ -251,7 +251,7 @@ local function EnsureAccentDivider(header)
         _headerDividers[header] = tex
     end
     tex:ClearAllPoints()
-    tex:SetPoint("TOPLEFT",  header, "BOTTOMLEFT",  7, 0)
+    tex:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 7, 0)
     tex:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -1, 0)
     local PP_CORE = EllesmereUI and EllesmereUI.PP
     local PP_SEC  = EllesmereUI and EllesmereUI.PanelPP
@@ -280,7 +280,7 @@ local function StripTextures(frame, keep)
     -- textHeight crashes).
     for _, region in ipairs({ frame:GetRegions() }) do
         if region and region:GetObjectType() == "Texture" and not keep[region]
-           and region.SetTexture then
+            and region.SetTexture then
             region:SetTexture("")
         end
     end
@@ -333,10 +333,10 @@ local function SkinHeader(header)
             if tex.SetDesaturated then tex:SetDesaturated(true) end
             if tex.SetVertexColor then tex:SetVertexColor(r, g, b) end
         end
-        tint(minBtn.GetNormalTexture    and minBtn:GetNormalTexture())
-        tint(minBtn.GetPushedTexture    and minBtn:GetPushedTexture())
+        tint(minBtn.GetNormalTexture and minBtn:GetNormalTexture())
+        tint(minBtn.GetPushedTexture and minBtn:GetPushedTexture())
         tint(minBtn.GetHighlightTexture and minBtn:GetHighlightTexture())
-        tint(minBtn.GetDisabledTexture  and minBtn:GetDisabledTexture())
+        tint(minBtn.GetDisabledTexture and minBtn:GetDisabledTexture())
         if minBtn.GetRegions then
             for _, rg in ipairs({ minBtn:GetRegions() }) do
                 if rg:GetObjectType() == "Texture" then tint(rg) end
@@ -374,17 +374,20 @@ local function SkinHeader(header)
     -- button in lockdown is blocked, and SkinHeader runs again from the
     -- SetCollapsed hook and RestyleAll, so a header first seen in combat
     -- picks its overlay up on the next out-of-combat pass.
-    if not _headerClickOverlays[header] and header.MinimizeButton
-       and not InCombatLockdown() then
+    -- Click-anywhere-on-header overlay (taint-safe)
+    if not _headerClickOverlays[header] and header.MinimizeButton then
         local minBtn = header.MinimizeButton
-        local overlay = CreateFrame("Button", nil, header,
-            "SecureActionButtonTemplate")
+        local overlay = CreateFrame("Button", nil, header)
         overlay:SetFrameLevel(header:GetFrameLevel() + 1)
         overlay:RegisterForClicks("LeftButtonUp")
-        overlay:SetPoint("TOPLEFT",     header, "TOPLEFT",     0, 0)
+        overlay:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
         overlay:SetPoint("BOTTOMRIGHT", minBtn, "BOTTOMLEFT", -2, 0)
-        overlay:SetAttribute("type", "click")
-        overlay:SetAttribute("clickbutton", minBtn)
+        overlay:SetScript("OnClick", function()
+            if InCombatLockdown() then return end
+            if minBtn and minBtn:IsShown() then
+                minBtn:Click()
+            end
+        end)
         _headerClickOverlays[header] = overlay
     end
 end
@@ -448,18 +451,18 @@ local function _computeClassification(questID)
 
     local key = "normal"
     if C_CampaignInfo and C_CampaignInfo.IsCampaignQuest
-       and C_CampaignInfo.IsCampaignQuest(questID) then
+        and C_CampaignInfo.IsCampaignQuest(questID) then
         key = "campaign"
     elseif cls and Enum and Enum.QuestClassification then
         local QC = Enum.QuestClassification
-        if     cls == QC.Important then key = "important"
+        if cls == QC.Important then key = "important"
         elseif cls == QC.Legendary then key = "legendary"
-        elseif cls == QC.Campaign  then key = "campaign"
+        elseif cls == QC.Campaign then key = "campaign"
         elseif cls == QC.Recurring then key = "recurring"
         end
     end
     if key == "normal" then
-        if     freq == 1 then key = "daily"
+        if freq == 1 then key = "daily"
         elseif freq == 2 then key = "weekly"
         end
     end
@@ -544,15 +547,15 @@ local function ApplyQuestTypeIcon(block)
     -- fields directly (the icon you SEE is Blizzard's, and our overlay
     -- texture is mouse-pass-through, so it eats the visual click target).
     local hasItem = (block.ItemButton and block.ItemButton.IsShown
-                     and block.ItemButton:IsShown())
-                 or (block.itemButton and block.itemButton.IsShown
-                     and block.itemButton:IsShown())
+            and block.ItemButton:IsShown())
+        or (block.itemButton and block.itemButton.IsShown
+            and block.itemButton:IsShown())
     local hasLFG  = (block.groupFinderButton and block.groupFinderButton.IsShown
-                     and block.groupFinderButton:IsShown())
-                 or (block.GroupFinderButton and block.GroupFinderButton.IsShown
-                     and block.GroupFinderButton:IsShown())
-                 or (block.rightEdgeFrame and block.rightEdgeFrame.IsShown
-                     and block.rightEdgeFrame:IsShown())
+            and block.groupFinderButton:IsShown())
+        or (block.GroupFinderButton and block.GroupFinderButton.IsShown
+            and block.GroupFinderButton:IsShown())
+        or (block.rightEdgeFrame and block.rightEdgeFrame.IsShown
+            and block.rightEdgeFrame:IsShown())
     if hasItem or hasLFG then
         if _blockIcons[block] then _blockIcons[block]:Hide() end
         return
@@ -655,14 +658,14 @@ end
 
 -- Lightweight color-only refresh. Called on hover (OnEnter/OnLeave) and
 -- from the stamped fast-path in SkinBlock.
-function ApplyFocusHighlight(block)  -- global to file
+function ApplyFocusHighlight(block) -- global to file
     if not block then return end
     local fs = GetBlockTitleFS(block)
     if not fs then return end
     local qID     = (type(block.id) == "number") and block.id or nil
     local isFocus = qID and (qID == GetSuperTrackedIDCached())
     local isDone  = qID and C_QuestLog and C_QuestLog.IsComplete
-                    and C_QuestLog.IsComplete(qID)
+        and C_QuestLog.IsComplete(qID)
     local r, g, b
     if isFocus then
         r, g, b = GetFocusRGB()
@@ -752,7 +755,7 @@ local function ProcessBlockChildren(frame, depth)
             local ok, otype = pcall(child.GetObjectType, child)
             if ok then
                 if (otype == "Frame" or otype == "Button")
-                       and not child.Tooltip then
+                    and not child.Tooltip then
                     if child.GetRegions then
                         for _, rg in ipairs({ child:GetRegions() }) do
                             local ot = rg.GetObjectType and rg:GetObjectType()
@@ -768,7 +771,6 @@ local function ProcessBlockChildren(frame, depth)
             end
         end
     end
-
 end
 
 -- Weak-keyed so pooled/recycled poiButtons don't leak or get double-hooked.
@@ -870,7 +872,6 @@ local function SkinBlock(block)
     ProcessBlockChildren(block, 0)
 
     _skinned[block] = true
-
 end
 
 
@@ -925,43 +926,47 @@ local function SkinExistingBlocks(tracker)
             end
         end
     end
-
 end
 
 -------------------------------------------------------------------------------
--- Blizzard anchors whichever module currently sits in the top slot with a
--- fixed TOP/TOP offset relative to ObjectiveTrackerFrame. Verified via /dump
--- across QuestObjectiveTracker and ProfessionsRecipeTracker: always -38,
--- independent of module type and independent of Header's height (ruled out
--- separately). We tighten this gap after each layout pass.
+-- Blizzard anchors whichever module currently sits in the top slot via
+-- ObjectiveTrackerContainerMixin:Update() (Blizzard_ObjectiveTrackerContainer.lua):
+--   module:SetPoint("TOP", 0, -self.topModulePadding)
+-- topModulePadding defaults to 38 (Blizzard_ObjectiveTracker.xml KeyValue on
+-- ObjectiveTrackerFrame) -- verified independent of module type and of
+-- Header's height, matching what we observed via /dump.
+--
+-- ObjectiveTrackerFrame inherits EditModeObjectiveTrackerSystemTemplate, so
+-- Blizzard's Update() runs this SetPoint from a protected/Edit-Mode-managed
+-- call stack. That's why the previous approach -- hooking the module's own
+-- SetPoint and re-issuing tracker:SetPoint() to correct the offset -- hit
+-- ADDON_ACTION_BLOCKED in combat and needed an InCombatLockdown() bail, a
+-- re-entrancy guard, an OnEndSlide catch-up hook, and a PLAYER_REGEN_ENABLED
+-- catch-up event, and still visibly flashed to -38 whenever one of those
+-- bail conditions was hit (e.g. killing one mob while still fighting another).
+--
+-- topModulePadding itself is a plain Lua field -- Blizzard's Update() just
+-- reads self.topModulePadding fresh every layout pass. Writing that field is
+-- a table assignment, not a protected function call, so it carries no taint
+-- or combat-lockdown exposure at all: Blizzard's own (already-privileged)
+-- code performs the actual SetPoint using our value, in and out of combat,
+-- and we never call SetPoint on the module ourselves. This replaces
+-- TightenTopAnchor entirely -- no hook, no guard, no combat bail, no
+-- catch-up event.
 -------------------------------------------------------------------------------
-local TOP_ANCHOR_OFFSET = -6  -- starting value, tuned by eye
+local TOP_MODULE_PADDING = 6 -- tuned by eye; Blizzard's default is 38
 -- Shared with EllesmereUIQuestTracker_Visibility.lua (BG/top-divider offset)
 -- so both files derive the top gap from a single source instead of two
--- independent magic numbers drifting apart.
-EQT.TOP_ANCHOR_OFFSET = TOP_ANCHOR_OFFSET
+-- independent magic numbers drifting apart. Sign convention (negative Y
+-- offset) preserved for compatibility with that existing consumer.
+EQT.TOP_ANCHOR_OFFSET = -TOP_MODULE_PADDING
 
--- Reentry guard: TightenTopAnchor's own SetPoint fires the SetPoint hook
--- installed in HookTracker below.
-local _tighteningAnchor = false
-
-local function TightenTopAnchor(tracker)
-    if _tighteningAnchor then return end
-    if not tracker or not tracker.GetPoint or not tracker.SetPoint then return end
-    if InCombatLockdown and InCombatLockdown() then return end
-    -- Do not interfere during Blizzard's collapse/expand slide animation,
-    -- or our SetPoint collides with ObjectiveTrackerSlidingMixin.
-    if tracker.IsSliding and tracker:IsSliding() then return end
-
-    local point, relativeTo, relativePoint, xOfs, yOfs = tracker:GetPoint(1)
-    if point == "TOP" and relativePoint == "TOP" and relativeTo == _G.ObjectiveTrackerFrame then
-        if yOfs and math.abs(yOfs - TOP_ANCHOR_OFFSET) > 0.01 then
-            _tighteningAnchor = true
-            tracker:SetPoint("TOP", relativeTo, "TOP", xOfs or 0, TOP_ANCHOR_OFFSET)
-            _tighteningAnchor = false
-        end
-    end
+local function ApplyTopModulePadding()
+    local otf = _G.ObjectiveTrackerFrame
+    if not otf then return end
+    otf.topModulePadding = TOP_MODULE_PADDING
 end
+EQT.ApplyTopModulePadding = ApplyTopModulePadding
 
 -------------------------------------------------------------------------------
 -- Hook a single sub-tracker.
@@ -994,7 +999,7 @@ local function HookTracker(tracker)
         if tracker.Header.SetCollapsed then
             hooksecurefunc(tracker.Header, "SetCollapsed", function(self)
                 if ShouldSkipSkin() then return end
-            
+
                 SkinHeader(self)
             end)
         end
@@ -1003,7 +1008,7 @@ local function HookTracker(tracker)
     if tracker.AddBlock then
         hooksecurefunc(tracker, "AddBlock", function(_, block)
             if ShouldSkipSkin() then return end
-        
+
             if block then _skinned[block] = nil end
             SkinBlock(block)
         end)
@@ -1021,9 +1026,8 @@ local function HookTracker(tracker)
             C_Timer.After(0, function()
                 _updateDirty = false
                 if ShouldSkipSkin() then return end
-            
+
                 if tracker.Header then EnsureAccentDivider(tracker.Header) end
-                TightenTopAnchor(tracker)
                 if EQT.QueueResize then EQT.QueueResize() end
                 if tracker.usedBlocks then
                     for _, byTemplate in pairs(tracker.usedBlocks) do
@@ -1037,38 +1041,6 @@ local function HookTracker(tracker)
             end)
         end)
     end
-
-    -- ObjectiveTrackerSlidingMixin (SUPER_TRACKING_CHANGED can trigger a
-    -- reorder slide, not just collapse/expand) calls tracker:OnEndSlide()
-    -- from EndSlide() right after clearing slideInfo -- i.e. exactly when
-    -- IsSliding() flips back to false. TightenTopAnchor bails out entirely
-    -- while IsSliding() is true (see comment there), so without this hook
-    -- the anchor sits at Blizzard's untightened -38 for the ~0.2-0.3s slide
-    -- duration and only snaps to TOP_ANCHOR_OFFSET on the next Update() call,
-    -- which is what showed up as the whole tracker shifting down briefly on
-    -- quest click. Verified against Blizzard_ObjectiveTrackerShared.lua:
-    -- EndSlide() -> self.slideInfo = nil -> self:OnEndSlide(...).
-    if tracker.OnEndSlide then
-        hooksecurefunc(tracker, "OnEndSlide", function(self)
-            if ShouldSkipSkin() then return end
-            TightenTopAnchor(self)
-        end)
-    end
-
-    -- Blizzard assigns the top-slot TOP/TOP/-38 anchor at some point AFTER
-    -- tracker:Update() returns (GetPoint(1) is still nil inside the Update
-    -- hook), and a burst of native Update() passes can re-assign it several
-    -- times in quick succession. Hooking SetPoint catches every assignment at
-    -- the exact moment it happens and re-tightens synchronously, before the
-    -- frame renders -- no visible drop to -38, no polling. _tighteningAnchor
-    -- keeps our own SetPoint inside TightenTopAnchor from re-entering the
-    -- hook. Combat/slide cases bail inside TightenTopAnchor and are caught
-    -- up by the OnEndSlide hook and the deferred Update pass above.
-    hooksecurefunc(tracker, "SetPoint", function(self)
-        if _tighteningAnchor then return end
-        if ShouldSkipSkin() then return end
-        TightenTopAnchor(self)
-    end)
 
     -- ContentsFrame:HookScript("OnSizeChanged") REMOVED: HookScript injects
     -- addon code into Blizzard's execution context, tainting ANY secure call
@@ -1159,6 +1131,8 @@ function EQT.InitSkin()
         StripTextures(otf)
     end
 
+    ApplyTopModulePadding()
+
     EachTracker(HookTracker)
 
     -- Re-skin on tracker refresh events. Each of these fires when Blizzard
@@ -1172,22 +1146,14 @@ function EQT.InitSkin()
     evt:RegisterEvent("TRACKED_ACHIEVEMENT_LIST_CHANGED")
     evt:RegisterEvent("TRACKED_RECIPE_UPDATE")
     evt:RegisterEvent("SUPER_TRACKING_CHANGED")
-    -- Combat catch-up for TightenTopAnchor: a tracker Update() fired while
-    -- still in combat (killing one mob while fighting another) hits the
-    -- InCombatLockdown() bail in TightenTopAnchor, leaving the top anchor
-    -- at Blizzard's untightened -38 until some later natural update. Re-run
-    -- the correction the moment lockdown lifts.
-    evt:RegisterEvent("PLAYER_REGEN_ENABLED")
     -- Quest events just need a BG resize. Block skinning is handled by
     -- AddBlock/AddObjective/GetProgressBar/GetTimerBar hooks, so we no
-    -- longer need to walk the entire tracker tree on every event.
+    -- longer need to walk the entire tracker tree on every event. No combat
+    -- catch-up event needed anymore: ApplyTopModulePadding() sets a plain
+    -- field once and Blizzard's own Update() re-reads it every layout pass,
+    -- in and out of combat -- there's nothing for us to re-correct after
+    -- PLAYER_REGEN_ENABLED.
     evt:SetScript("OnEvent", function(_, event)
-        if event == "PLAYER_REGEN_ENABLED" and not ShouldSkipSkin() then
-            EachTracker(function(t)
-                if SharesWidgetPool(t) then return end
-                TightenTopAnchor(t)
-            end)
-        end
         -- Resize only. A forced ObjectiveTrackerFrame:Update() used to run
         -- here on SUPER_TRACKING_CHANGED; removed -- see the FORBIDDEN
         -- comment near the top of this file. Focus-change layout staleness
@@ -1198,7 +1164,7 @@ function EQT.InitSkin()
     if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
     local idx = #EQT._eventFrames + 1
     EQT._eventFrames[idx] = evt
-    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED", "PLAYER_REGEN_ENABLED"}
+    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED" }
 
     -- OTF.Update / ObjectiveTracker_Update hooks REMOVED (session 68).
     -- They only called QueueResize, which is already triggered by
@@ -1231,8 +1197,7 @@ function EQT.InitSkin()
     -- changes the UI accent color in Global Settings.
     if EllesmereUI and EllesmereUI.RegAccent then
         EllesmereUI.RegAccent({ type = "callback", fn = function()
-            if EQT.RestyleAll then EQT.RestyleAll() end
-        end })
+                if EQT.RestyleAll then EQT.RestyleAll() end
+            end })
     end
 end
-
