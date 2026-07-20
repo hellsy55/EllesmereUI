@@ -9182,12 +9182,27 @@ function EAB:OnInitialize()
                                     -- API is a different quality family and
                                     -- returned a wrong (lower) tier for ranked
                                     -- potions when used as a fallback here.
+                                    -- Resolve via the action's full hyperlink
+                                    -- first: crafted quality can live in link
+                                    -- modifiers, where the bare itemID reads
+                                    -- nil. itemID stays as the fallback.
                                     local ts = C_TradeSkillUI
-                                    quality = ts and ts.GetItemCraftedQualityByItemInfo
-                                        and ts.GetItemCraftedQualityByItemInfo(aID)
+                                    local getQ = ts and ts.GetItemCraftedQualityByItemInfo
+                                    local gal = GetActionLink
+                                        or (C_ActionBar and C_ActionBar.GetActionLink)
+                                    local link = gal and gal(action)
+                                    if getQ then
+                                        quality = (link and getQ(link)) or getQ(aID)
+                                    end
                                     if EllesmereUI._RANKDEBUG then
-                                        print("|cff33ff99[Rank]|r item", aID,
-                                            "quality", tostring(quality))
+                                        pcall(function()
+                                            local rq = ts and ts.GetItemReagentQualityByItemInfo
+                                            print("|cff33ff99[Rank]|r item", aID,
+                                                "link", tostring(link),
+                                                "q(link)", tostring(link and getQ and getQ(link)),
+                                                "q(id)", tostring(getQ and getQ(aID)),
+                                                "reagent(id)", tostring(rq and rq(aID)))
+                                        end)
                                     end
                                     -- A freshly looted/moved item can be
                                     -- uncached, reading nil quality until the
