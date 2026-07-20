@@ -101,6 +101,7 @@ local L = {
     DELVE_JOURNEY        = "Delver's Journey",
     COMPANION_LEVEL      = "Companion Level",
     SELECT_CURRENCY      = "Select a currency",
+    OPEN_SETTINGS        = "Open Settings",
     WHISPER              = "Whisper",
     WHISPER_BNET         = "Whisper BNet",
     INVITE               = "Invite",

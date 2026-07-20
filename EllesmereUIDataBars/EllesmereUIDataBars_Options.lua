@@ -2354,7 +2354,14 @@ initFrame:SetScript("OnEvent", function(self)
             for k = 1, #typeRows, 2 do
                 local rightCfg = typeRows[k + 1]
                 if not rightCfg then rightCfg = { type = "label", text = "" } end
-                _, h = W:DualRow(parent, y, typeRows[k], rightCfg);  y = y - h
+                row, h = W:DualRow(parent, y, typeRows[k], rightCfg);  y = y - h
+                -- Deep-link target for an unconfigured currency block: clicking
+                -- its "Select a currency" placeholder on the live bar lands on
+                -- the picker itself, not just the section (ns.OpenBlockSettings).
+                if b.type == "currency" and k == 1 then
+                    parent._edbClickTargets["block:" .. blockId .. ":currency"] =
+                        { section = secHdr, target = row, slotSide = "left" }
+                end
             end
 
             if b.type == "micromenu" then
@@ -2469,6 +2476,29 @@ initFrame:SetScript("OnEvent", function(self)
         W:Spacer(parent, y, 20);  y = y - 20
 
         return math.abs(y)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Deep link from a live block to its own settings row. A block whose
+    --  empty state invites a click (the currency picker's placeholder) calls
+    --  this so the invitation leads to the control that fulfills it; the
+    --  preview strip navigates through _edbNavigateFn directly.
+    ---------------------------------------------------------------------------
+    function ns.OpenBlockSettings(barId, blockId, settingKey)
+        if not EllesmereUI.NavigateToElementSettings then return end
+        local key = "block:" .. blockId
+        if settingKey then key = key .. ":" .. settingKey end
+        EllesmereUI:NavigateToElementSettings("EllesmereUIDataBars", PAGE_DATABARS, nil,
+            function()
+                local p = Profile()
+                if p then p.selectedBarId = barId end
+            end)
+        -- The click-target map belongs to the page build the call above kicks
+        -- off; resolve the scroll target once it has repopulated (same settle
+        -- delay NavigateToElementSettings uses for its own section lookup).
+        C_Timer.After(0.05, function()
+            if _edbNavigateFn then _edbNavigateFn(key) end
+        end)
     end
 
     ---------------------------------------------------------------------------
