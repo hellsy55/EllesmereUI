@@ -14186,6 +14186,7 @@ initFrame:SetScript("OnEvent", function(self)
                         EllesmereUI.RegisterWidgetRefresh(upd)
                     end
                 end
+                AddBossAuraBorderSettings()
                 -- Boss Debuff Filter in slot 1. The right slot is the
                 -- 12.1-only Boss Buff Filter; on 12.0 it stays the blank
                 -- label it is today (boss buffs are never filtered there).
@@ -14363,9 +14364,8 @@ initFrame:SetScript("OnEvent", function(self)
                     UpdateDebuffCogDisabled()
                     EllesmereUI.RegisterWidgetRefresh(UpdateDebuffCogDisabled)
                 end
-            end
 
-            AddBossAuraBorderSettings()
+            end
 
             -- Buff/Debuff text colors now live as inline swatches on the Buff Text
             -- Size / Debuff Text Size sliders above (Duration + Stack per side).
