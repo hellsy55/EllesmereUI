@@ -1478,12 +1478,10 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local function GlowTargetOf(m)
-            if m.slotSide then
-                local region
-                if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
-                if region then return region end
-            end
-            return m.target
+            if not m.slotSide then return m.target end
+            local region
+            if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
+            return region or m.target
         end
 
         local function NavigateToSetting(key)
@@ -1500,10 +1498,16 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- A held glow belongs to the SETTING, not to the navigation that first
-        -- showed it. Every page rebuild -- reordering a block, switching bars,
-        -- reopening the panel -- destroys the row it was parented to, which
+        -- showed it. A page rebuild -- reordering a block, switching bars,
+        -- adding or removing one -- destroys the row it was parented to, which
         -- released the pulse for good even though the setting was still empty.
         -- Re-attach it to the freshly built row.
+        --
+        -- Scope: rebuilds only. Reopening the panel takes SelectPage's warm
+        -- path (EllesmereUI.lua), which re-shows the cached wrapper without
+        -- running the page builder, so nothing calls this -- the pulse stays
+        -- dead until the next rebuild. Covering that means driving this from
+        -- onPageCacheRestore too, the way _edbStripRelayout is.
         local function RearmHeldGlow()
             if not _edbHeldGlowKey then return end
             local targets = parent._edbClickTargets
