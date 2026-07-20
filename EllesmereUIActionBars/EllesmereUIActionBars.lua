@@ -9201,6 +9201,7 @@ function EAB:OnInitialize()
                                                 "link", tostring(link),
                                                 "q(link)", tostring(link and getQ and getQ(link)),
                                                 "q(id)", tostring(getQ and getQ(aID)),
+                                                "reagent(link)", tostring(link and rq and rq(link)),
                                                 "reagent(id)", tostring(rq and rq(aID)))
                                         end)
                                     end
