@@ -1126,6 +1126,13 @@ local function GoldStore()
     return profile.characters
 end
 
+-- Drop a character the player no longer has (renamed, deleted, transferred).
+-- Sits next to the writer so both mutations of the store are in one place.
+local function GoldForgetCharacter(key)
+    GoldStore()[key] = nil
+    for gi in pairs(goldInstances) do gi:QueueRefresh() end
+end
+
 local function GoldSaveCurrentMoney(money)
     local store = GoldStore()
     local _, class = UnitClass("player")
@@ -1203,46 +1210,6 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
     local function D() return blockCfg.settings or {} end
     local function BC() return barCtx.cfg end
 
-    local _sideLinesBuf = { "", "", "" }
-    local _sideLineCount = 0
-    -- coin: Coin Colored text mode -- suffix letters carry the denomination
-    -- colors (same codes as ns.FormatMoney), numbers inherit the white base.
-    local function GetMoneySideLines(amount, showSmall, coin, coinIcons)
-        amount = floor(abs(amount or 0))
-        local gold   = floor(amount / 10000)
-        local silver = floor((amount % 10000) / 100)
-        local copper = amount % 100
-        local gStr
-        if BreakUpLargeNumbers then gStr = BreakUpLargeNumbers(gold) else gStr = tostring(gold) end
-        -- Coin icons carry their own color, so Coin Colored has nothing left to
-        -- tint and the two options compose instead of fighting.
-        if coinIcons then
-            _sideLinesBuf[1] = gStr .. ns.COIN_TEX[1]
-        elseif coin then
-            _sideLinesBuf[1] = gStr .. "|cffe2ac7a" .. GOLD_AMOUNT_SYMBOL .. "|r"
-        else
-            _sideLinesBuf[1] = gStr .. GOLD_AMOUNT_SYMBOL
-        end
-        if showSmall ~= false then
-            if coinIcons then
-                _sideLinesBuf[2] = silver .. ns.COIN_TEX[2]
-                _sideLinesBuf[3] = copper .. ns.COIN_TEX[3]
-            elseif coin then
-                _sideLinesBuf[2] = silver .. "|cffc7c7cf" .. SILVER_AMOUNT_SYMBOL .. "|r"
-                _sideLinesBuf[3] = copper .. "|cffed8a3f" .. COPPER_AMOUNT_SYMBOL .. "|r"
-            else
-                _sideLinesBuf[2] = silver .. SILVER_AMOUNT_SYMBOL
-                _sideLinesBuf[3] = copper .. COPPER_AMOUNT_SYMBOL
-            end
-            _sideLineCount = 3
-        else
-            _sideLinesBuf[2] = nil
-            _sideLinesBuf[3] = nil
-            _sideLineCount = 1
-        end
-        return _sideLinesBuf, _sideLineCount
-    end
-
     local goldButton = CreateFrame("Button", nil, content)
     goldButton:SetSize(120, 20); goldButton:SetPoint("CENTER")
     goldButton:EnableMouse(true); goldButton:RegisterForClicks("AnyUp")
@@ -1274,12 +1241,15 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
         if isSide then
             local slotW = VSlotW(inst)
             local innerW = max(30, slotW - 8)
-            local lines, lineCount = GetMoneySideLines(money, dg.showSmall == true,
-                blockCfg.useCoinColor == true and not mouseOver, ci)
+            -- One token per coin, one coin per line. Coin Colored tints the
+            -- suffix letters (nothing to tint once Coin Icons is on, so the two
+            -- compose); hovering drops it so the accent wash reads.
+            local lines = ns.MoneyTokens(money, dg.showSmall == true, ci,
+                blockCfg.useCoinColor == true and not mouseOver)
             local startSize = min(fontSize, max(10, floor(CONTENT_BASE * 0.52 + 0.5)))
             local goldFontSize = startSize
             ns.SetFont(goldText, goldFontSize, barCfg)
-            goldText:SetText(tconcat(lines, "\n", 1, lineCount))
+            goldText:SetText(tconcat(lines, "\n"))
             local r, g, b
             if mouseOver then r, g, b = ns.GetAccent()
             elseif blockCfg.useCoinColor then r, g, b = 1, 1, 1
@@ -1435,41 +1405,41 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
             ns.Tip_AddDouble(label, ns.FormatMoney(abs(net), true, sm, ci), 0.6, 0.6, 0.6, nr, ngr, 0.3)
         end
         local store = GoldStore()
+        -- The list holds store KEYS ("Name-Realm"): a delete needs the key, and
+        -- the entry itself does not carry one.
         local total, charList = 0, {}
-        -- The store key ("Name-Realm") rides along: it is what a delete needs,
-        -- and the entry itself does not carry it.
         for key, cdata in pairs(store) do
             if cdata and cdata.currentMoney then
-                tinsert(charList, { key = key, data = cdata })
+                tinsert(charList, key)
                 total = total + cdata.currentMoney
             end
         end
-        tsort(charList, function(a, b) return (a.data.currentMoney or 0) > (b.data.currentMoney or 0) end)
+        tsort(charList, function(a, b)
+            return (store[a].currentMoney or 0) > (store[b].currentMoney or 0)
+        end)
         if #charList > 0 then
             local selfKey = GoldCharKey()
             ns.Tip_AddLine(" ")
             ns.Tip_AddLine(GetRealmName() or "?", 0.5, 0.78, 1)
-            for _, entry in ipairs(charList) do
-                local char = entry.data
+            for _, key in ipairs(charList) do
+                local char = store[key]
                 local cr, cg, cb = 1, 1, 1
                 if char.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class] then
                     local cc = RAID_CLASS_COLORS[char.class]; cr, cg, cb = cc.r, cc.g, cc.b
                 end
                 local label = char.name or "?"
-                local tokens = ns.MoneyTokens(char.currentMoney, sm, ci)
-                if entry.key == selfKey then
+                local tokens = ns.MoneyTokens(char.currentMoney, sm, ci, true)
+                if key == selfKey then
                     -- The live character re-saves itself on every money event,
                     -- so deleting it would only bring it straight back.
                     label = label .. " |TInterface\\COMMON\\Indicator-Green:14|t"
                     ns.Tip_AddColumns(label, tokens, cr, cg, cb)
                 else
-                    local delKey = entry.key
                     ns.Tip_AddClickableColumns(label, tokens, function(mouseButton)
                         if mouseButton ~= "LeftButton" then return end
                         if not (IsControlKeyDown() and IsAltKeyDown()) then return end
-                        GoldStore()[delKey] = nil
+                        GoldForgetCharacter(key)
                         ns.Tip_Hide(goldButton)
-                        for gi in pairs(goldInstances) do gi:QueueRefresh() end
                     end, cr, cg, cb)
                 end
             end

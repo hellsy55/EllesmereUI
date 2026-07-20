@@ -315,37 +315,35 @@ local COIN_TEX = {
     "|TInterface\\MoneyFrame\\UI-SilverIcon:0:0:2:0|t",
     "|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:2:0|t",
 }
-ns.COIN_TEX = COIN_TEX
-
 -- What trails the number for denomination i: a coin texture when Coin Icons is
--- on, otherwise the localized suffix letter, colored unless the caller asks for
--- plain. Every money formatter below goes through this, so the Coin Icons and
--- Show Silver and Copper options compose the same way in all of them --
--- GetCoinTextureString could not do that, it always emits all three coins.
+-- on, otherwise the localized suffix letter, colored on request. Every money
+-- renderer goes through this, so Coin Icons, Coin Colored and Show Silver and
+-- Copper compose the same way in all of them -- GetCoinTextureString could not
+-- do that, it always emits all three coins in one indivisible string.
 local function CoinMarker(i, coinIcons, coloured)
     if coinIcons then return COIN_TEX[i] end
-    if coloured == false then return DENOMINATIONS[i].symbol end
-    return DENOMINATIONS[i].color .. DENOMINATIONS[i].symbol .. "|r"
+    local d = DENOMINATIONS[i]
+    if coloured then return d.color .. d.symbol .. "|r" end
+    return d.symbol
 end
-ns.CoinMarker = CoinMarker
 
--- Money split per denomination, for Tip_AddColumns: one token per coin so the
--- amounts line up vertically down the tooltip. A single formatted string
--- cannot -- the game font is proportional, so "9o" and "1 234o" are different
--- widths and every column after the first drifts.
+-- Money split per denomination: one token per coin, so callers can lay them out
+-- in aligned columns (the tooltip) or on separate lines (a vertical bar). A
+-- single formatted string can do neither -- the game font is proportional, so
+-- "9o" and "1 234o" are different widths and everything after the first drifts.
 -- The buffer is reused; Tip_AddColumns copies it, so one buffer serves all rows.
 local _moneyTokens = {}
 
-function ns.MoneyTokens(amount, showSmall, coinIcons)
+function ns.MoneyTokens(amount, showSmall, coinIcons, coloured)
     amount = floor(abs(amount or 0))
     wipe(_moneyTokens)
     local gold = floor(amount / DENOMINATIONS[1].divisor)
     local gStr = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
-    _moneyTokens[1] = gStr .. CoinMarker(1, coinIcons)
+    _moneyTokens[1] = gStr .. CoinMarker(1, coinIcons, coloured)
     if showSmall ~= false then
         local silver = floor((amount % DENOMINATIONS[1].divisor) / DENOMINATIONS[2].divisor)
-        _moneyTokens[2] = silver .. CoinMarker(2, coinIcons)
-        _moneyTokens[3] = (amount % DENOMINATIONS[2].divisor) .. CoinMarker(3, coinIcons)
+        _moneyTokens[2] = silver .. CoinMarker(2, coinIcons, coloured)
+        _moneyTokens[3] = (amount % DENOMINATIONS[2].divisor) .. CoinMarker(3, coinIcons, coloured)
     end
     return _moneyTokens
 end
@@ -905,11 +903,12 @@ do
     -- they are the same thing to the player: an interactive tooltip row.
     -- The accent recolor only shows if the row's left text carries no embedded
     -- |c..|r codes; callers pass the normal color through the left-color args.
-    local function PlaceRowOverlay(b, i, d, innerW, ar, ag, ab)
+    local function PlaceRowOverlay(b, i, innerW)
+        local d, row = data[i], rows[i]
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
         b:SetSize(max(1, innerW), max(1, d._h))
-        local row = rows[i]
+        local ar, ag, ab = ns.GetAccent()
         local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
         b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
         b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
@@ -1243,7 +1242,6 @@ do
         HideActionButtons()
         interactive = false
         if not InCombatLockdown() then
-            local ar, ag, ab = ns.GetAccent()
             for i = 1, dataCount do
                 local d = data[i]
                 if d.action or d.actionToy or d.actionMacro then
@@ -1274,7 +1272,7 @@ do
                         b:SetAttribute("spell", nil)
                         b:SetAttribute("toy", nil)
                     end
-                    PlaceRowOverlay(b, i, d, innerW, ar, ag, ab)
+                    PlaceRowOverlay(b, i, innerW)
                 end
             end
         end
@@ -1283,15 +1281,13 @@ do
         -- the callbacks are unprotected -- and rebuilt from scratch each show
         -- so a reused tip never carries stale buttons.
         HideClickButtons()
-        local car, cag, cab
         for i = 1, dataCount do
             local d = data[i]
             if d.onClick then
                 interactive = true
-                if not car then car, cag, cab = ns.GetAccent() end
                 local b = AcquireClickButton()
                 local cb = d.onClick
-                PlaceRowOverlay(b, i, d, innerW, car, cag, cab)
+                PlaceRowOverlay(b, i, innerW)
                 b:SetScript("OnClick", function(_, mouseButton) cb(mouseButton) end)
             end
         end
