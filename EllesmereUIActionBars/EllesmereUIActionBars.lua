@@ -2575,6 +2575,28 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         elseif icon.SetDesaturated then
             icon:SetDesaturated(false)
         end
+        -- Usable tint is a separate stale channel (vertex color): a slot
+        -- whose item hit zero quantity renders grey, and the grey survives
+        -- the content change exactly like the desat did -- usability events
+        -- only fire on usability CHANGES, so nothing repaints until hover.
+        -- Mirror Blizzard's UpdateUsable coloring (live ActionButton.lua);
+        -- pcall-guarded in case the usability booleans are restricted, in
+        -- which case the tint is left for the usable-event path.
+        pcall(function()
+            local isUsable, noMana
+            if C_ActionBar and C_ActionBar.IsUsableAction then
+                isUsable, noMana = C_ActionBar.IsUsableAction(action)
+            elseif IsUsableAction then
+                isUsable, noMana = IsUsableAction(action)
+            end
+            if isUsable then
+                icon:SetVertexColor(1, 1, 1)
+            elseif noMana then
+                icon:SetVertexColor(0.5, 0.5, 1.0)
+            elseif isUsable ~= nil then
+                icon:SetVertexColor(0.4, 0.4, 0.4)
+            end
+        end)
     end
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
         local display = C_ActionBar.GetActionDisplayCount(action)
