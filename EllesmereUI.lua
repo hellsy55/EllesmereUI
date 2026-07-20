@@ -2076,7 +2076,12 @@ do
         local m = PP.mult
         if m == 1 then return x end
         local pixels = x / m
-        pixels = x > 0 and math.floor(pixels) or math.ceil(pixels)
+        -- Epsilon-guarded truncation: values saved by pixel-unit sliders sit
+        -- exactly ON a grid boundary (px * mult), and float dust from the
+        -- multiply/divide round trip can land them a hair below it -- without
+        -- the guard the floor drops a whole pixel. 0.001 px is far below any
+        -- legitimate mid-interval distance, so ordinary values are unaffected.
+        pixels = x > 0 and math.floor(pixels + 0.001) or math.ceil(pixels - 0.001)
         return pixels * m
     end
 
@@ -2996,6 +3001,9 @@ do
         return DEFAULT_LSM_OFFSET
     end
 
+    -- Textured border edgeSize per size step (1-4).
+    local EDGE_MAP = { 12, 16, 24, 32 }
+
     --- Check if a border texture uses scaled offset (edgeSize/2 base).
     function EllesmereUI.BorderTextureUsesScaleOffset(key)
         if not key or key == "" or key == "solid" then return false end
@@ -3043,7 +3051,17 @@ do
     --- offsetOverride/offsetYOverride: optional user override (nil = use per-addon or global default).
     --- shiftX/shiftY: optional user override (nil = use per-addon default or 0).
     --- addonKey/sizeKey: optional per-addon registry lookup key pair for defaults.
-    function EllesmereUI.ApplyBorderStyle(borderFrame, size, r, g, b, a, textureKey, offsetOverride, offsetYOverride, shiftX, shiftY, addonKey, sizeKey)
+    --- normalizeScale: opt-in, textured borders only. Cancels the frame's scale
+    ---   chain below UIParent so the border matches an unscaled frame's. Pass it
+    ---   ONLY where that scale is an implementation detail the caller already
+    ---   cancels elsewhere -- CDM cancels Blizzard's per-icon scale for the
+    ---   icon's size (iS = 1/iconScale) but not for its border, which is the bug
+    ---   this exists for. Never pass it where the scale is the user's intent
+    ---   (nameplate target/cast scale, buff-bar position scale): those borders
+    ---   are meant to scale with the frame, and because ratio is sampled once at
+    ---   style time, a frame whose scale changes afterwards would bake in a
+    ---   transient value.
+    function EllesmereUI.ApplyBorderStyle(borderFrame, size, r, g, b, a, textureKey, offsetOverride, offsetYOverride, shiftX, shiftY, addonKey, sizeKey, normalizeScale)
         local PP = EllesmereUI.PP
         if not PP or not borderFrame then return end
         a = a or 1
@@ -3059,14 +3077,13 @@ do
                 if PP.GetBorders(borderFrame) then
                     PP.UpdateBorder(borderFrame, size, r, g, b, a)
                     PP.ShowBorder(borderFrame)
-                    -- Restore alpha in case textured mode zeroed it
-                    local ppC = PP.GetBorders(borderFrame)
-                    if ppC then
-                        if ppC._top then ppC._top:SetAlpha(1) end
-                        if ppC._bottom then ppC._bottom:SetAlpha(1) end
-                        if ppC._left then ppC._left:SetAlpha(1) end
-                        if ppC._right then ppC._right:SetAlpha(1) end
-                    end
+                    -- No SetAlpha "restore" for textured-mode zeroing here: on
+                    -- Textures SetAlpha writes the SAME alpha state as
+                    -- SetVertexColor's 4th arg, so UpdateBorder's color write
+                    -- above already restores it -- and a hardcoded SetAlpha(1)
+                    -- stomps every fractional border alpha on re-apply (first
+                    -- apply takes the create branch and looks right; every
+                    -- later apply flashed to full alpha).
                 else
                     PP.CreateBorder(borderFrame, r, g, b, a, size, "OVERLAY", 7)
                 end
@@ -3104,8 +3121,20 @@ do
                 _bdBorderData[borderFrame] = bdFrame
             end
             bdFrame:SetFrameLevel(borderFrame:GetFrameLevel())
-            local EDGE_MAP = { 12, 16, 24, 32 }
-            local edgeSize = EDGE_MAP[size] or 12
+            -- edgeSize is in local units, so SetBackdrop renders it at
+            -- edgeSize x effectiveScale: a scaled frame draws a proportionally
+            -- scaled border. That is correct by default, hence opt-in only.
+            -- uiES/es is exactly 1 / (scale chain below UIParent), so ratio is
+            -- 1 (and everything below a no-op) for an unscaled frame at any
+            -- resolution or UI scale. The 0.01 floor mirrors CDM's own
+            -- iconScale guard and keeps a degenerate scale from exploding it.
+            local ratio = 1
+            if normalizeScale then
+                local eok, es = pcall(bdFrame.GetEffectiveScale, bdFrame)
+                local uiES = UIParent and UIParent:GetEffectiveScale() or 1
+                if eok and es and es > 0.01 and uiES > 0 then ratio = uiES / es end
+            end
+            local edgeSize = (EDGE_MAP[size] or EDGE_MAP[1]) * ratio
             -- Resolve offset/shift defaults: per-addon registry first, then global fallback.
             local adjX, adjY, sx, sy
             if addonKey and sizeKey then
@@ -3120,6 +3149,10 @@ do
                 sx   = shiftX or 0
                 sy   = shiftY or 0
             end
+            -- Same factor as edgeSize, or a normalized edge would be positioned
+            -- by offsets still in the frame's scaled units.
+            adjX, adjY = adjX * ratio, adjY * ratio
+            sx, sy = sx * ratio, sy * ratio
             -- Custom textures (scaleOffset): base = edgeSize/2 so border tracks
             -- the edge at any size, plus a small fine-tune adjustment.
             -- Other textures: absolute offset (no edgeSize base).
@@ -4385,6 +4418,21 @@ do
     local IMPROVED = 383155   -- Improved Sweeping Strikes: 12 -> 18 charges
     local BROAD    = 1261049  -- Broad Strokes: Colossus Smash activates Sweep
     local FERVOR   = 202316   -- Fervor of Battle: Cleave/WW on 3+ targets Slams
+    -- Bladestorm: Slayer's Unhinged auto-casts Mortal Strike during it, but
+    -- those do NOT consume Sweeping Strikes charges. Observed in-game (8.5.1,
+    -- Slayer Arms): no CHANNEL events and no 227847 -- pressing Bladestorm
+    -- fires SUCCEEDED 446035 once, then SUCCEEDED 50622 pulses roughly every
+    -- 0.7 s for the storm's duration, with the Unhinged 12294 casts landing
+    -- between pulses. Each pulse extends the suppression window; the window
+    -- just needs to outlive the gap to the next pulse (and the trailing
+    -- Unhinged cast after the final pulse) without eating a real post-storm
+    -- Mortal Strike, which is >= a GCD away.
+    local BLADESTORM_IDS = {
+        [446035] = true,  -- cast on press
+        [50622]  = true,  -- per-pulse tick
+        [227847] = true,  -- talent/base cast id, kept in case a variant reports it
+    }
+    local BLADESTORM_PULSE_GAP = 1.0
 
     -- Cached IsSpellKnown flags. GetSweepingStrikes is polled every 0.1 s by
     -- the resource bar, unit frame and nameplate readouts, and
@@ -4450,6 +4498,7 @@ do
         [845]  = true,  -- Cleave
     }
     local fobWindow = 0  -- suppress a possibly-echoed Slam cast event
+    local bladestormUntil = 0  -- suppress Sweeping Strikes spends until this time
 
     -- Deduplicate cast events via GUID
     local seenGUID = {}
@@ -4463,43 +4512,68 @@ do
     -- NOTE: relies on enemy nameplates showing for off-target enemies.
     -- InReach is block-scoped (no upvalues from the call) so EnemiesInReach
     -- allocates nothing -- it runs on every tracked spender cast in combat.
-    local function InReach(u)
+    -- idx defaults to the index-2 trade probe; index 3 (duel, ~9.9 yd) is
+    -- exercised by the _SSDEBUG comparison output as a candidate tighter fit
+    -- for the real 8 yd sweep.
+    local function InReach(u, idx)
         if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
             return false
         end
-        return CheckInteractDistance(u, 2) or false
+        return CheckInteractDistance(u, idx or 2) or false
     end
-    local function EnemiesInReach(need)
+    local function EnemiesInReach(need, idx)
         local count, targetPlated = 0, false
         for i = 1, 40 do
             local u = "nameplate" .. i
-            if InReach(u) then
+            if InReach(u, idx) then
                 count = count + 1
                 if UnitIsUnit(u, "target") then targetPlated = true end
                 if count >= need then return true end
             end
         end
         -- Target without a visible nameplate still counts as one body
-        if not targetPlated and InReach("target") then count = count + 1 end
+        if not targetPlated and InReach("target", idx) then count = count + 1 end
         return count >= need
+    end
+
+    -- CDM child sync state (see CdmSweepSync below the event handler).
+    -- cdmSeenActive gates the zero-on-inactive path: it must be re-earned
+    -- after every activation so a present-but-never-active child (buff
+    -- removed from the tracked set, EUI TBB quirks) can never wipe live
+    -- stacks -- the v8.4.9 fail-closed bug must not come back.
+    local cdmChild, cdmChildCdID, cdmNextScan = nil, nil, 0
+    local cdmSeenActive, cdmInactiveSince = false, nil
+    local cdmSigDbg, cdmAppsDbg = nil, nil
+    local function dbg(...)
+        if EllesmereUI._SSDEBUG then print("|cff33ff99[SS]|r", ...) end
     end
 
     function EllesmereUI.HandleSweepingStrikes(event, unit, castGUID, spellID)
         if event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
             stacks, expiresAt = 0, nil
             fobWindow = 0
+            bladestormUntil = 0
+            cdmSeenActive, cdmInactiveSince = false, nil
             wipe(seenGUID)
             guidCount = 0
             return
         end
         if event == "PLAYER_REGEN_ENABLED" then
             -- Clean up GUID cache on combat end to prevent unbounded growth
+            bladestormUntil = 0  -- safety: Bladestorm can't outlive combat
             wipe(seenGUID)
             guidCount = 0
             return
         end
         if event ~= "UNIT_SPELLCAST_SUCCEEDED" or unit ~= "player" then return end
         if not sweepKnown then return end
+
+        -- Before GUID dedup: every Bladestorm pulse must extend the window,
+        -- even if the game reuses a castGUID across pulses.
+        if BLADESTORM_IDS[spellID] then
+            bladestormUntil = GetTime() + BLADESTORM_PULSE_GAP
+            return
+        end
 
         if castGUID and seenGUID[castGUID] then return end
         if castGUID then
@@ -4513,52 +4587,192 @@ do
            or (CS_GENERATORS[spellID] and broadKnown) then
             stacks = MaxStacks()
             expiresAt = GetTime() + DURATION
+            cdmSeenActive, cdmInactiveSince = false, nil
+            dbg("activated:", stacks, "stacks (cast", spellID .. ")")
         elseif FOB_TRIGGERS[spellID] and stacks > 0 and fervorKnown then
             -- Fervor of Battle: Cleave/Whirlwind hitting 3+ targets also
             -- Slams the primary target; that Slam sweeps and consumes a
             -- charge. The trigger itself is not a player cast event, so it
             -- is counted here off the Cleave/WW cast, gated on 3 enemies in
             -- reach (with 3+ up, a sweep partner necessarily exists).
+            if GetTime() < bladestormUntil then return end
             if not EnemiesInReach(3) then return end
             fobWindow = GetTime() + 0.3
             stacks = max(0, stacks - 1)
             if stacks == 0 then expiresAt = nil end
+            dbg("FoB spend (cast", spellID .. "):", stacks, "stacks left")
         elseif SPENDERS[spellID] and stacks > 0 then
+            -- Bladestorm window: Slayer's Unhinged auto-casts Mortal Strike
+            -- (12294) here, but the game does not consume a Sweeping Strikes
+            -- charge for it (bug: LeoS, 8.5.1). Skip all spends until the
+            -- window closes so the bar matches the real buff.
+            if GetTime() < bladestormUntil then return end
             -- If the game echoes the Fervor-of-Battle Slam as a real cast
             -- event, skip it -- the charge was already counted above. A
             -- player-pressed Slam can't land inside the 0.3 s window (GCD).
-            if spellID == 1464 and GetTime() < fobWindow then return end
+            -- 1269383: Master of Warfare replaces Slam with Heroic Strike,
+            -- so the echo carries that id instead.
+            if (spellID == 1464 or spellID == 1269383) and GetTime() < fobWindow then return end
             -- No sweep partner in range -> the game doesn't consume a charge
-            if not EnemiesInReach(2) then return end
+            local reach = EnemiesInReach(2)
+            if EllesmereUI._SSDEBUG then
+                -- Side-by-side probe comparison: index 2 (trade, ~11.1 yd,
+                -- live) vs index 3 (duel, ~9.9 yd, candidate).
+                dbg(("spend %d: reach11=%s reach10=%s stacks=%d"):format(
+                    spellID, tostring(reach), tostring(EnemiesInReach(2, 3)), stacks))
+            end
+            if not reach then return end
             stacks = max(0, stacks - SPENDERS[spellID])
             if stacks == 0 then expiresAt = nil end
         end
     end
 
-    function EllesmereUI.GetSweepingStrikes()
-        if not sweepKnown then return 0, 0 end
-        if expiresAt and GetTime() >= expiresAt then
-            stacks, expiresAt = 0, nil
-        end
-        -- Validate prediction against the real aura to correct drift (the
-        -- reach probe is ~11 yd while the game sweeps within 8 yd of the
-        -- primary target). Direct spellID lookup: zero-alloc on a 0.1 s
-        -- poll, and safe under 12.x restrictions -- aura PRESENCE stays
-        -- readable in keys (same contract the TBB bind-miss fallback relies
-        -- on), while a secret applications count simply leaves the
-        -- prediction in charge.
-        if stacks > 0 and C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-            local aura = C_UnitAuras.GetPlayerAuraBySpellID(SWEEP)
-            if not aura then
-                stacks, expiresAt = 0, nil
-            else
-                local count = aura.applications
-                if count and not (issecretvalue and issecretvalue(count)) and count > 0 then
-                    stacks = count
-                end
+    -- Blizzard's CooldownViewer tracked-buff child for 260708 caches aura
+    -- state in plain frame fields even though the C_UnitAuras surface
+    -- refuses this aura (see the no-validation note below): presence via
+    -- wasSetFromAura/auraInstanceID/IsShown, count via
+    -- auraDataCached.applications -- plain out of restricted combat, secret
+    -- inside it (both observations from the CDM module's TBB stack reader,
+    -- ReadStackApplications). Same source Coolinator displays; here it
+    -- feeds two fail-open corrections the cast prediction can't make:
+    -- zero on a confirmed early drop (/cancelaura), and drift resync
+    -- whenever the count reads plain. CDM disabled or the buff untracked
+    -- -> no child is ever found and prediction behaves exactly as before.
+    local function CdmInfoMatches(info)
+        if not info then return false end
+        if info.spellID == SWEEP or info.overrideSpellID == SWEEP then return true end
+        local linked = info.linkedSpellIDs
+        if linked then
+            for i = 1, #linked do
+                if linked[i] == SWEEP then return true end
             end
         end
-        return stacks, MaxStacks()
+        return false
+    end
+    local function FindCdmChild()
+        local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+        if not gci then return nil end
+        local function ScanViewer(viewer)
+            local pool = viewer and viewer.itemFramePool
+            if not pool then return nil end
+            for frame in pool:EnumerateActive() do
+                local cdID = frame.cooldownID
+                if cdID and CdmInfoMatches(gci(cdID)) then return frame end
+            end
+        end
+        return ScanViewer(_G.BuffIconCooldownViewer) or ScanViewer(_G.BuffBarCooldownViewer)
+    end
+
+    local function CdmSweepSync(now)
+        local child = cdmChild
+        -- Pooled frames get re-acquired for other spells; cooldownID moving
+        -- invalidates the cache.
+        if child and child.cooldownID ~= cdmChildCdID then
+            child, cdmChild = nil, nil
+        end
+        if not child then
+            if now < cdmNextScan then return end
+            cdmNextScan = now + 1
+            child = FindCdmChild()
+            if not child then return end
+            cdmChild, cdmChildCdID = child, child.cooldownID
+            dbg("CDM child found:", child:GetName() or tostring(child),
+                "cdID", cdmChildCdID)
+        end
+
+        -- OR of every presence signal, on purpose: a signal that sticks
+        -- true only makes the inactive branch unreachable (prediction
+        -- unchanged); trusting a single signal that clears while the buff
+        -- lives would wipe live stacks.
+        local shown = child:IsShown()
+        local wsfa = child.wasSetFromAura == true
+        local iid = child.auraInstanceID ~= nil
+        if EllesmereUI._SSDEBUG then
+            local sig = (shown and "S" or "-") .. (wsfa and "W" or "-")
+                .. (iid and "I" or "-")
+            if sig ~= cdmSigDbg then
+                cdmSigDbg = sig
+                dbg("signals:", sig, "(S=shown W=wasSetFromAura I=auraInstanceID)")
+            end
+        end
+        local active = shown or wsfa or iid
+        if active then
+            cdmInactiveSince = nil
+            if not cdmSeenActive then
+                cdmSeenActive = true
+                dbg("CDM child active: shown=" .. tostring(shown)
+                    .. " wsfa=" .. tostring(child.wasSetFromAura)
+                    .. " iid=" .. tostring(child.auraInstanceID ~= nil))
+            end
+            local ad = child.auraDataCached
+            local apps = ad and ad.applications
+            if EllesmereUI._SSDEBUG then
+                local state
+                if not ad then state = "no-cache"
+                elseif apps == nil then state = "no-apps"
+                elseif issecretvalue(apps) then state = "secret"
+                else state = tostring(apps) end
+                if state ~= cdmAppsDbg then
+                    cdmAppsDbg = state
+                    dbg("apps:", state, "(predicted " .. stacks .. ")")
+                end
+            end
+            if apps and not issecretvalue(apps) and type(apps) == "number"
+               and apps ~= stacks then
+                dbg("snap:", stacks, "->", apps)
+                stacks = apps
+                local exp = ad.expirationTime
+                if exp and not issecretvalue(exp) and type(exp) == "number"
+                   and exp > now then
+                    expiresAt = exp
+                elseif not expiresAt then
+                    expiresAt = now + DURATION
+                end
+            end
+        elseif cdmSeenActive and stacks > 0 then
+            -- Debounce: aura refreshes can blink the child inactive for a
+            -- frame while Blizzard re-acquires it.
+            if not cdmInactiveSince then
+                cdmInactiveSince = now
+            elseif now - cdmInactiveSince > 0.3 then
+                dbg("CDM child inactive -> buff gone, clearing", stacks, "stacks")
+                stacks, expiresAt = 0, nil
+                cdmSeenActive, cdmInactiveSince = false, nil
+            end
+        end
+    end
+
+    -- NO aura validation here, on purpose. v8.4.9 tried to correct
+    -- prediction drift against the real buff (first by name, then by
+    -- C_UnitAuras.GetPlayerAuraBySpellID), treating a missing aura as
+    -- "buff gone" and wiping the stacks. But Sweeping Strikes (260708) is
+    -- NOT a whitelisted aura, and non-whitelisted player buffs are
+    -- invisible to the aura read surface -- verified in-game 2026-07-17:
+    -- with the buff visibly active, GetPlayerAuraBySpellID(260708)
+    -- returned nil and a GetAuraDataByIndex("player", i, "HELPFUL") sweep
+    -- enumerated zero auras. So any validation on this buff reads it as
+    -- absent and zeroes the bar (the v8.4.9 bug: stacks wiped in combat,
+    -- pinned at 0 in M+). Whitelisted buffs ARE readable -- see
+    -- GetMaelstromWeapon / GetSoulFragments below and the
+    -- NON_SECRET_SPELL_IDS catalogue + C_Secrets.ShouldSpellAuraBeSecret
+    -- probe in EllesmereUIAuraBuffReminders. If Blizzard ever whitelists
+    -- 260708, validation becomes possible again; until then the
+    -- cast-event prediction plus the duration timer IS the tracker.
+    -- CdmSweepSync above is NOT that validation: it reads Blizzard's own
+    -- widget (not the aura surface), corrects only on positive evidence,
+    -- and degrades to pure prediction when the widget is absent.
+    function EllesmereUI.GetSweepingStrikes()
+        if not sweepKnown then return 0, 0 end
+        local now = GetTime()
+        CdmSweepSync(now)
+        if expiresAt and now >= expiresAt then
+            stacks, expiresAt = 0, nil
+        end
+        -- Clamp: a mid-window respec out of Improved drops MaxStacks 18->12
+        -- while the predicted stacks upvalue keeps its old value.
+        local m = MaxStacks()
+        if stacks > m then stacks = m end
+        return stacks, m
     end
 end
 
@@ -4996,6 +5210,21 @@ function EllesmereUI.MakeUnlockElement(opts)
         -- noSizeMatchTarget: other elements may NOT size-match TO this one.
         allowMatchSource  = opts.allowMatchSource,
         noSizeMatchTarget = opts.noSizeMatchTarget,
+        -- matchUnavailable: function(key) -> reason string when creating a NEW
+        -- width/height match is currently not possible (e.g. action bars in
+        -- Blizzard Style, where EUI doesn't control sizing). Clearing an
+        -- existing match stays allowed.
+        matchUnavailable  = opts.matchUnavailable,
+        -- keepMoverWhenAnchored: elements whose isAnchored() reflects a module
+        -- option (e.g. ERB "Anchor To") still get a mover while anchored --
+        -- position-locked (no drag/nudge/anchor link), but resize and
+        -- width/height matching stay available.
+        keepMoverWhenAnchored = opts.keepMoverWhenAnchored,
+        -- moverBg: optional {r,g,b} base tint for the unlock mover background
+        -- (defaults to the standard dark overlay color when omitted).
+        -- subtitle: optional dimmed helper line shown under the mover label.
+        moverBg           = opts.moverBg,
+        subtitle          = opts.subtitle,
     }
 end
 
@@ -8594,7 +8823,7 @@ local function CreateMainFrame()
         end
     end
 
-    -- Done  (right side, FOOTER_PAD from right edge, green, closes window)
+    -- Close  (right side, FOOTER_PAD from right edge, green, closes window)
     do
         local btn = CreateFrame("Button", nil, footerFrame)
         PanelPP.Size(btn, DONE_BTN_W, FOOTER_BTN_H)
@@ -8604,7 +8833,7 @@ local function CreateMainFrame()
         local bg = SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, .92)
         bg:SetAllPoints()
         local lbl = MakeFont(btn, 13, nil, ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b)
-        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L("Done"))
+        lbl:SetAlpha(0.7); lbl:SetPoint("CENTER"); lbl:SetText(EllesmereUI.L("Close"))
         -- Hover animation reads from ELLESMERE_GREEN live
         local FADE_DUR = 0.1
         local progress, target = 0, 0
@@ -9069,6 +9298,13 @@ end
 
 function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     if not activeModule or not activePage then return end
+    -- Active search force-expands every "Show Less Common" section (links
+    -- hidden entirely); clearing collapses them back to session state. Must
+    -- run BEFORE the cache lookup below: a state transition rebuilds and
+    -- replaces this page's cache entry (see SetLessCommonSearchActive).
+    if EllesmereUI.SetLessCommonSearchActive then
+        EllesmereUI.SetLessCommonSearchActive(query ~= nil and query ~= "")
+    end
     local cacheKey = activeModule .. "::" .. activePage
     local cached = _pageCache[cacheKey]
     if not cached or not cached.wrapper then return end
@@ -10443,7 +10679,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.4.9"
+EllesmereUI.VERSION = "8.5.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -10941,7 +11177,7 @@ do
         local f = CreateFrame("Frame", "EllesmereUIDevModeBadge", UIParent)
         f:SetFrameStrata("HIGH")
         f:SetHeight(26)
-        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -16)
+        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -41)
         f:EnableMouse(false)
         f:Hide()
 
@@ -11279,8 +11515,6 @@ initFrame:SetScript("OnEvent", function(self, event)
 
         -- Skin our custom buttons the same way as pooled Blizzard buttons
         if _reskinMenu then
-            local RS = EllesmereUI.RESKIN
-            local PP = EllesmereUI.PP
             for _, customBtn in ipairs({ btn, unlockBtn }) do
                 for j = 1, select("#", customBtn:GetRegions()) do
                     local r = select(j, customBtn:GetRegions())
@@ -11305,10 +11539,11 @@ initFrame:SetScript("OnEvent", function(self, event)
                 inset:SetFrameLevel(customBtn:GetFrameLevel())
                 local cBg = inset:CreateTexture(nil, "BACKGROUND", nil, -6)
                 cBg:SetAllPoints()
-                cBg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
-                if PP and PP.CreateBorder then
-                    PP.CreateBorder(inset, 1, 1, 1, RS.BRD_ALPHA, 1, "OVERLAY", 7)
-                end
+                local c=EllesmereUIDB and EllesmereUIDB.popupMenuButtonBackgroundColor or {r=.1,g=.1,b=.1,a=.8}
+                cBg:SetColorTexture(c.r,c.g,c.b,c.a == nil and .8 or c.a)
+                EllesmereUI._GetFFD(customBtn).gameMenuInset=inset
+                EllesmereUI._GetFFD(customBtn).gameMenuButtonBg=cBg
+                if EllesmereUI._applyBlizzardConfiguredBorder then EllesmereUI._applyBlizzardConfiguredBorder(inset,"popupMenuButton",1) end
                 local hl = customBtn:CreateTexture(nil, "HIGHLIGHT")
                 hl:SetAllPoints(inset)
                 hl:SetColorTexture(1, 1, 1, 0.1)
@@ -11317,6 +11552,14 @@ initFrame:SetScript("OnEvent", function(self, event)
                     local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or nil
                     local _, size, flags = cfs:GetFont()
                     cfs:SetFont(euiFont or "Fonts\\FRIZQT__.TTF", (size or 14) - 2, flags or "")
+                    -- Native mode keeps the branded inline-code labels set by
+                    -- the Layout hook; only explicit modes flat-recolor.
+                    if EllesmereUI._getPopupMenuElementMode
+                       and EllesmereUI._getPopupMenuElementMode() ~= "native"
+                       and EllesmereUI._getPopupMenuButtonTextColor then
+                        local r,g,b=EllesmereUI._getPopupMenuButtonTextColor()
+                        cfs:SetTextColor(r,g,b,1)
+                    end
                 end
             end
         end
@@ -11335,8 +11578,10 @@ initFrame:SetScript("OnEvent", function(self, event)
                 if header then
                     local headerText = header.Text
                     if headerText and headerText.SetTextColor then
-                        local EG = ELLESMERE_GREEN
-                        headerText:SetTextColor(EG.r, EG.g, EG.b, 1)
+                        if EllesmereUI._getPopupMenuButtonTextColor then
+                            local r,g,b=EllesmereUI._getPopupMenuButtonTextColor()
+                            headerText:SetTextColor(r,g,b,1)
+                        end
                     end
                 end
             end
@@ -11348,9 +11593,6 @@ initFrame:SetScript("OnEvent", function(self, event)
             if not showEUI then btn:Hide() end
             if not showUnlock then unlockBtn:Hide() end
             if not showEUI and not showUnlock then return end
-
-            local eg = ELLESMERE_GREEN
-            local hex = string.format("|cff%02x%02x%02x", (eg.r or 0.05) * 255, (eg.g or 0.82) * 255, (eg.b or 0.62) * 255)
 
             -- Find the Shop button to anchor below (fall back to Options)
             local anchorBtn
@@ -11377,13 +11619,32 @@ initFrame:SetScript("OnEvent", function(self, event)
             local lastBtn = anchorBtn
             local euiFont = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath() or "Fonts\\FRIZQT__.TTF"
             local btnFontSize = 13
+            -- Branded two-tone labels are the default (native mode, or when
+            -- BlizzardSkin is not loaded) -- applied via inline color codes
+            -- in SetText, which works with the pause-menu reskin off, exactly
+            -- as before 8.5.2. Only an explicitly chosen Element & Text Color
+            -- mode switches to a plain label + whole-string recolor (inline
+            -- codes would override SetTextColor otherwise).
+            local elemMode = EllesmereUI._getPopupMenuElementMode
+                and EllesmereUI._getPopupMenuElementMode() or "native"
+            local brandHex
+            if elemMode == "native" then
+                local EG = EllesmereUI.ELLESMERE_GREEN or { r = .27, g = .86, b = .49 }
+                brandHex = string.format("|cff%02x%02x%02x",
+                    math.floor(EG.r * 255 + 0.5), math.floor(EG.g * 255 + 0.5),
+                    math.floor(EG.b * 255 + 0.5))
+            end
 
             if showEUI then
                 btn:Show()
-                btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")
+                if brandHex then
+                    btn:SetText(brandHex .. "Ellesmere|r|cffffffffUI|r")
+                else
+                    btn:SetText("EllesmereUI")
+                end
                 if _reskinMenu then
                     local fs = btn:GetFontString()
-                    if fs then fs:SetFont(euiFont, btnFontSize, "") end
+                    if fs then fs:SetFont(euiFont, btnFontSize, ""); if not brandHex and EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); fs:SetTextColor(r,g,b,1) end end
                 end
                 btn:ClearAllPoints()
                 btn:SetPoint("TOP", lastBtn, "BOTTOM", 0, -12)
@@ -11392,10 +11653,14 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
             if showUnlock then
                 unlockBtn:Show()
-                unlockBtn:SetText(hex .. "EUI|r |cffffffffUnlock Mode|r")
+                if brandHex then
+                    unlockBtn:SetText(brandHex .. "EUI|r |cffffffffUnlock Mode|r")
+                else
+                    unlockBtn:SetText("EUI Unlock Mode")
+                end
                 if _reskinMenu then
                     local fs2 = unlockBtn:GetFontString()
-                    if fs2 then fs2:SetFont(euiFont, btnFontSize, "") end
+                    if fs2 then fs2:SetFont(euiFont, btnFontSize, ""); if not brandHex and EllesmereUI._getPopupMenuButtonTextColor then local r,g,b=EllesmereUI._getPopupMenuButtonTextColor(); fs2:SetTextColor(r,g,b,1) end end
                 end
                 unlockBtn:ClearAllPoints()
                 unlockBtn:SetPoint("TOP", lastBtn, "BOTTOM", 0, showEUI and -4 or -12)
@@ -11700,7 +11965,7 @@ initFrame:SetScript("OnEvent", function(self, event)
                     _, h = W:SectionHeader(parent, "LAYOUT", y);                                          y = y - h
                     _, h = W:Slider(parent, "Button Spacing", y, 0, 12, 1,
                         function() return dS[k].spacing end,
-                        function(v) dS[k].spacing = v end);                                              y = y - h
+                        function(v) dS[k].spacing = v end, nil, true);                                   y = y - h
                     _, h = W:Slider(parent, "Global Scale", y, 50, 200, 5,
                         function() return dS[k].scale end,
                         function(v) dS[k].scale = v end);                                                y = y - h

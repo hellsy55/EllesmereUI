@@ -921,6 +921,7 @@ local function SkinCharacterSheet()
                     slot:SetShown(isCharacterTab)
                     if GetFFD(slot).itemLevelLabel    then GetFFD(slot).itemLevelLabel:SetShown(isCharacterTab)    end
                     if GetFFD(slot).enchantLabel      then GetFFD(slot).enchantLabel:SetShown(isCharacterTab)      end
+                    if GetFFD(slot).enchantHoverFrame then GetFFD(slot).enchantHoverFrame:SetShown(isCharacterTab) end
                     if GetFFD(slot).upgradeTrackLabel then GetFFD(slot).upgradeTrackLabel:SetShown(isCharacterTab) end
                 end
             end
@@ -1638,6 +1639,15 @@ local function SkinCharacterSheet()
         scrollFrame:HookScript("OnSizeChanged",    UpdateThumb)
         scrollChild:HookScript("OnSizeChanged",    UpdateThumb)
 
+        local function refreshVerticalScroll()
+            local _, _, maxScroll = _info()
+            -- No check on maxScroll, this is intentionnal. It ensures that after a collapse and scroll
+            -- being disabled, it will still works.
+            local newScroll = math.max(0, math.min(maxScroll, scrollFrame:GetVerticalScroll()))
+            scrollFrame:SetVerticalScroll(newScroll)
+        end
+        track._refreshVerticalScroll = refreshVerticalScroll
+
         scrollFrame:EnableMouseWheel(true)
         scrollFrame:SetScript("OnMouseWheel", function(_, delta)
             local _, _, maxScroll = _info()
@@ -1697,8 +1707,9 @@ local function SkinCharacterSheet()
         trackOwner = statsPanel,
         topInset   = -HEADER_H,
     })
-    GetFFD(frame).scrollBar         = scrollTrack
-    GetFFD(frame).updateScrollThumb = scrollTrack._update
+    GetFFD(frame).scrollBar              = scrollTrack
+    GetFFD(frame).updateScrollThumb      = scrollTrack._update
+    GetFFD(frame).refreshVerticalScroll  = scrollTrack._refreshVerticalScroll
 
     -- Re-anchor the scroll frame + track top edge based on whether the
     -- PvP iLvl and M+ Score lines are visible. Each hidden line collapses
@@ -2166,6 +2177,7 @@ local function SkinCharacterSheet()
             end
         end
         scrollChild:SetHeight(-yOffset)
+        if GetFFD(frame).refreshVerticalScroll then GetFFD(frame).refreshVerticalScroll() end
     end
     GetFFD(frame).recalculateSections = RecalculateSectionPositions
 
@@ -2683,6 +2695,10 @@ local function SkinCharacterSheet()
 
     -- Apply initial visibility settings
     UpdateStatCategoryVisibility()
+    -- Defer a call as some settings may not be fully initialized like section visibility
+    C_Timer.After(0, function()
+        UpdateStatCategoryVisibility()
+    end)
 
     -- Function to update all stats
     local function UpdateAllStats()
@@ -2796,7 +2812,7 @@ local function SkinCharacterSheet()
 
         -- Add border directly on the slot with item color (2px thickness)
         if EllesmereUI and EllesmereUI.PanelPP then
-            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 7)
+            EllesmereUI.PanelPP.CreateBorder(slot, borderR, borderG, borderB, 1, 2, "OVERLAY", 1)
             local bdrFrame = EllesmereUI.PanelPP.GetBorders(slot)
             if bdrFrame then bdrFrame:SetFrameLevel(slot:GetFrameLevel()) end
         end
@@ -4125,7 +4141,7 @@ local function SkinCharacterSheet()
                 overlay:SetAllPoints(slot)
                 overlay:SetFrameLevel(slot:GetFrameLevel())
                 if EllesmereUI and EllesmereUI.PanelPP then
-                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 7)  -- #e54949
+                    EllesmereUI.PanelPP.CreateBorder(overlay, 0.898, 0.286, 0.286, 1, 2, "OVERLAY", 1)  -- #e54949
                     local enchBdr = EllesmereUI.PanelPP.GetBorders(overlay)
                     if enchBdr then enchBdr:SetFrameLevel(slot:GetFrameLevel()) end
                 end
@@ -4200,7 +4216,7 @@ local function SkinCharacterSheet()
             -- 2px pixel-perfect border, recolored per-gem in UpdateSocketIcons.
             PP_GEM.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 1)
             local gemBdr = PP_GEM.GetBorders(gemFrame)
-            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel() + 1) end
+            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel()) end
 
             GetFFD(slot).charSocketsFrames[i] = gemFrame
             GetFFD(slot).charSocketsIcons[i]  = icon
@@ -5201,8 +5217,10 @@ function EllesmereUI._refreshEnchantsVisibility()
         if slot and GetFFD(slot).enchantLabel then
             if showEnchants then
                 GetFFD(slot).enchantLabel:Show()
+                if GetFFD(slot).enchantHoverFrame then GetFFD(slot).enchantHoverFrame:Show() end
             else
                 GetFFD(slot).enchantLabel:Hide()
+                if GetFFD(slot).enchantHoverFrame then GetFFD(slot).enchantHoverFrame:Hide() end
             end
         end
     end

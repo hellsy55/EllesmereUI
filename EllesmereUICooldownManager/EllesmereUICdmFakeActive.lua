@@ -557,9 +557,10 @@ end
 -- alpha follows that bar's opacity (same source the visibility/layout
 -- passes use), not the identity bar's.
 local function FrameBaseAlpha(fc)
-    local bk = fc and (fc._overflowLayoutBar or fc.barKey)
-    local bd = bk and ns.barDataByKey and ns.barDataByKey[bk]
-    return ns.EffectiveBarAlpha(bd)
+    -- IconShownAlpha = EffectiveBarAlpha of the painted bar, forced to 0
+    -- while that bar is visibility-hidden -- a restore here must never
+    -- resurrect an icon the visibility engine has hidden.
+    return ns.IconShownAlpha(fc)
 end
 
 -- cas is the rule's styling entry (passed in so a trinket, whose frame key is a
@@ -593,7 +594,10 @@ ApplyCdState = function(frame, fc, cas, eff, onCD)
         -- Identical to hiddenOnCD but with a customizable opacity instead of 0.
         -- Reuse the _cdStateHidden flag as "cd-state owns this alpha" so a relayout
         -- keeps the lowered value instead of flashing back to full opacity.
-        frame:SetAlpha(onCD and ((cas and cas.cdStateLowerAlpha) or 0.5) or FrameBaseAlpha(fc))
+        -- A visibility-hidden bar (base 0) stays at 0 in both states.
+        local faBase = FrameBaseAlpha(fc)
+        frame:SetAlpha(faBase == 0 and 0
+            or (onCD and ((cas and cas.cdStateLowerAlpha) or 0.5) or faBase))
         fc._cdStateHidden = onCD or false
         if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
         return

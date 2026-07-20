@@ -247,8 +247,20 @@ local function EnumerateCDMViewerSpells(includeBuffViewer)
             for frame in viewer.itemFramePool:EnumerateActive() do
                 if frame:IsShown() or frame.cooldownInfo then
                     local sid = GetCanonicalSpellIDForFrame(frame)
-                    if _IsUsableSID(sid) and not seen[sid] then
-                        seen[sid] = true
+                    -- Dedup identity. In the BUFF viewer each slot is a distinct
+                    -- cooldownID, and Blizzard can report the SAME canonical
+                    -- spellID for two DIFFERENT cooldownIDs (Diabolist: the
+                    -- Demonic Art slot reports Diabolic Ritual's id) -- deduping
+                    -- by sid there wrongly merges the two into one, so the user
+                    -- can't see or style them individually. Key on cooldownID so
+                    -- both survive. CD/util viewers keep sid-dedup to collapse a
+                    -- spell that shows up in two viewers. Non-colliding specs are
+                    -- unaffected: there a unique sid implies a unique cooldownID.
+                    local cd = frame.cooldownID
+                    local dkey = (includeBuffViewer and type(cd) == "number")
+                        and ("c" .. cd) or sid
+                    if _IsUsableSID(sid) and dkey ~= nil and not seen[dkey] then
+                        seen[dkey] = true
                         entries[#entries + 1] = {
                             sid          = sid,
                             cdID         = frame.cooldownID,
@@ -990,6 +1002,7 @@ end
 --- minus spells diverted to other buff-family or hosted CD/utility bars.
 function ns.CollectDefaultBuffTrackEntries()
     local diverted = {}
+    local divertedCd = {}  -- cooldownID-level diversions (collided-buff slots)
     local p = ECME and ECME.db and ECME.db.profile
     if p and p.cdmBars and p.cdmBars.bars then
         for _, otherBd in ipairs(p.cdmBars.bars) do
@@ -999,6 +1012,11 @@ function ns.CollectDefaultBuffTrackEntries()
                     if otherSd and otherSd.assignedSpells then
                         for _, sid in ipairs(otherSd.assignedSpells) do
                             if type(sid) == "number" and sid > 0 then diverted[sid] = true end
+                        end
+                    end
+                    if otherSd and otherSd.assignedBuffCdIDs then
+                        for cdID in pairs(otherSd.assignedBuffCdIDs) do
+                            if type(cdID) == "number" then divertedCd[cdID] = true end
                         end
                     end
                 elseif otherSd and otherSd.hostedBuffSpellIDs then
@@ -1014,17 +1032,21 @@ function ns.CollectDefaultBuffTrackEntries()
     local seen = {}
     local entries = ns.EnumerateCDMViewerSpells and ns.EnumerateCDMViewerSpells(true) or {}
     for _, e in ipairs(entries) do
-        if e.sid and not diverted[e.sid] and not seen[e.sid] then
-            seen[e.sid] = true
-            local key = BuffDisplayStableKey(e.sid, e.cdID)
-            if key then
-                out[#out + 1] = {
-                    key         = key,
-                    sid         = e.sid,
-                    cdID        = e.cdID,
-                    layoutIndex = e.layoutIndex or 0,
-                }
-            end
+        -- Dedup on the stable (cooldownID-derived) key, not e.sid: two viewer
+        -- slots can share a canonical spellID but are distinct cooldownIDs
+        -- (Diabolist Demonic Art vs Diabolic Ritual). Keying on sid here would
+        -- re-merge what EnumerateCDMViewerSpells now keeps separate.
+        local key = BuffDisplayStableKey(e.sid, e.cdID)
+        if e.sid and not diverted[e.sid]
+           and not (e.cdID and divertedCd[e.cdID])
+           and key and not seen[key] then
+            seen[key] = true
+            out[#out + 1] = {
+                key         = key,
+                sid         = e.sid,
+                cdID        = e.cdID,
+                layoutIndex = e.layoutIndex or 0,
+            }
         end
     end
 
@@ -1061,6 +1083,65 @@ function ns.CollectDefaultBuffTrackEntries()
         return (a.key or "") < (b.key or "")
     end)
     return out
+end
+
+-------------------------------------------------------------------------------
+--  Same-spellID buff disambiguation (Diabolist Demonic Art vs Diabolic Ritual)
+--
+--  Blizzard can report the SAME canonical spellID on two DIFFERENT buff-viewer
+--  slots (cooldownIDs). Per-icon buff settings are keyed by spellID, so those
+--  two collide onto one entry. We let a COLLIDED slot key its settings by
+--  "c"..cooldownID instead, giving each its own entry. Only collided slots do
+--  this: keying every buff by cooldownID would regress non-collided buffs,
+--  whose settings must survive talent swaps (cooldownID drifts; spellID does
+--  not). Collided slots trade that away -- their per-slot settings are
+--  session-stable but may not follow a talent-loadout swap, which is
+--  unavoidable when the two share every identity except the drifting id.
+-------------------------------------------------------------------------------
+
+--- Set of canonical spellIDs that map to 2+ distinct buff-viewer cooldownIDs.
+--- Cold path (settings popup); recomputed per call from the live viewer pool.
+function ns.CollidedBuffSids()
+    local counts, out = {}, {}
+    local entries = ns.EnumerateCDMViewerSpells and ns.EnumerateCDMViewerSpells(true) or {}
+    for _, e in ipairs(entries) do
+        if e.sid and type(e.cdID) == "number" then
+            counts[e.sid] = (counts[e.sid] or 0) + 1
+        end
+    end
+    for sid, n in pairs(counts) do if n > 1 then out[sid] = true end end
+    return out
+end
+
+function ns.IsCollidedBuffSid(sid)
+    if type(sid) ~= "number" or sid <= 0 then return false end
+    return ns.CollidedBuffSids()[sid] == true
+end
+
+-- Runtime hot-path gate: true only when the current spec's buffs store holds at
+-- least one "c"..cooldownID key. Cached by store-table identity, so a spec or
+-- profile swap (which hands back a different store table) recomputes for free
+-- without any explicit invalidation hook.
+local _cdKeyGate
+function ns.BuffFamHasCdKey(store)
+    -- The runtime resolver already holds the buffs store; accept it to skip a
+    -- second spec/profile lookup per buff-frame resolve.
+    store = store or (ns.GetSpellSettingsStore and ns.GetSpellSettingsStore("buffs"))
+    if not store then return false end
+    if _cdKeyGate and _cdKeyGate.store == store then return _cdKeyGate.has end
+    local hit = false
+    for k in pairs(store) do
+        if type(k) == "string" and string.byte(k, 1) == 99 then hit = true; break end  -- 'c'
+    end
+    _cdKeyGate = { store = store, has = hit }
+    return hit
+end
+
+--- Called when a "c"..cooldownID buff entry is first persisted, so the hot-path
+--- gate flips on without waiting for the store-identity cache to expire.
+function ns.MarkBuffFamHasCdKey()
+    local store = ns.GetSpellSettingsStore and ns.GetSpellSettingsStore("buffs")
+    _cdKeyGate = { store = store, has = true }
 end
 
 --- Reorder present keys to match Blizzard viewer order while absent keys (talent
@@ -1565,6 +1646,52 @@ function ns.AddTrackedSpell(barKey, id)
 
     if sd.removedSpells then sd.removedSpells[id] = nil end
 
+    local frame = cdmBarFrames[barKey]
+    if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+    if ns.QueueReanchor then ns.QueueReanchor() end
+    return true
+end
+
+--- Track a single buff-viewer SLOT (cooldownID) on a buff-family bar.
+--- Collision escape hatch: two viewer slots can share one canonical spellID
+--- (Diabolist Demonic Art vs Diabolic Ritual), and AddTrackedSpell's
+--- variant dedup makes the second slot un-addable by sid. Storing the
+--- cooldownID in sd.assignedBuffCdIDs routes exactly ONE slot to this bar
+--- (ResolveCDIDToBar checks the cd-level map before the sid map) while its
+--- twin keeps its own routing. Same one-home-per-family sweep as
+--- AddTrackedSpell. Collision-gated by the caller: non-collided buffs keep
+--- the sid path, whose identity survives talent swaps (cooldownIDs drift --
+--- the same accepted limitation as the per-cooldownID settings keys).
+function ns.AddTrackedBuffByCdID(barKey, cdID)
+    if type(cdID) ~= "number" or cdID <= 0 then return false end
+    local sd = ns.GetBarSpellData(barKey)
+    if not sd then return false end
+    sd.assignedBuffCdIDs = sd.assignedBuffCdIDs or {}
+    if sd.assignedBuffCdIDs[cdID] then return false end
+
+    local p = ECME.db.profile
+    if p and p.cdmBars and p.cdmBars.bars then
+        for _, b in ipairs(p.cdmBars.bars) do
+            if b.key ~= barKey and b.barType ~= "custom_buff" and IsBarBuffFamily(b) then
+                local osd = ns.GetBarSpellData(b.key)
+                if osd and osd.assignedBuffCdIDs then osd.assignedBuffCdIDs[cdID] = nil end
+            end
+        end
+    end
+
+    sd.assignedBuffCdIDs[cdID] = true
+    local frame = cdmBarFrames[barKey]
+    if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
+    if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+    if ns.QueueReanchor then ns.QueueReanchor() end
+    return true
+end
+
+function ns.RemoveTrackedBuffCdID(barKey, cdID)
+    local sd = ns.GetBarSpellData(barKey)
+    if not sd or not sd.assignedBuffCdIDs or not sd.assignedBuffCdIDs[cdID] then return false end
+    sd.assignedBuffCdIDs[cdID] = nil
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
