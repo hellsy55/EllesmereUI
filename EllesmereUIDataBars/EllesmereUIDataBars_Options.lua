@@ -1347,6 +1347,10 @@ initFrame:SetScript("OnEvent", function(self)
                     HardRefresh()
                     if nb then
                         local navKey = "block:" .. nb.id
+                        -- A currency block lands unusable until one is picked,
+                        -- so aim at the picker itself: that target pulses until
+                        -- it is filled in, instead of the one-shot section glow.
+                        if typeKey == "currency" then navKey = navKey .. ":currency" end
                         C_Timer.After(0.05, function()
                             if _edbNavigateFn then _edbNavigateFn(navKey) end
                         end)
