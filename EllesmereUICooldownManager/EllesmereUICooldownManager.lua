@@ -3497,8 +3497,12 @@ BuildCDMBar = function(barIndex)
             -- the park carries them along; position is immune to every alpha
             -- path. The lastMX reset forces a re-SetPoint on the first frame
             -- after the visibility engine un-hides the bar.
+            -- The GetLeft probe re-asserts the park if anything moved the
+            -- container back on-screen while hidden (LayoutCDMBar, a
+            -- rebuild, or a stale _mouseParked flag surviving an
+            -- unanchor/re-anchor cycle -- teardown never clears it).
             if frame._visHidden then
-                if not frame._mouseParked then
+                if not frame._mouseParked or (frame:GetLeft() or 0) > -9000 then
                     frame._mouseParked = true
                     lastMX, lastMY = nil, nil
                     frame:ClearAllPoints()
