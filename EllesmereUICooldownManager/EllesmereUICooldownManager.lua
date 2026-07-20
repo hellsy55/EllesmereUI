@@ -6992,6 +6992,25 @@ BuildAllCDMBars = function()
     ns._cdmAnyOverflowCfg = nil
     for i, barData in ipairs(p.cdmBars.bars) do
         barDataByKey[barData.key] = barData
+        -- Live migration: buffGlowMode replaced buffGlowClassColor + "buffGlowR set" nil checks
+        if not barData.buffGlowMode then
+            if barData.buffGlowClassColor then
+                barData.buffGlowMode = "class"
+            elseif barData.buffGlowR ~= nil then
+                barData.buffGlowMode = "custom"
+            else
+                barData.buffGlowMode = "default"
+            end
+        end
+        -- Live migration: pandemicGlowMode replaced pandemicGlowColor always being set
+        if not barData.pandemicGlowMode then
+            local c = barData.pandemicGlowColor
+            if c and not (c.r == 1 and c.g == 1 and c.b == 0) then
+                barData.pandemicGlowMode = "custom"
+            else
+                barData.pandemicGlowMode = "default"
+            end
+        end
         -- Max Icons overflow: cheap session gate. Validity of the target is
         -- checked at reanchor time (Phase 3b); this only answers "is it
         -- worth looking" so the feature is two nil-checks when unused.

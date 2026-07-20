@@ -27,13 +27,17 @@ local DEFAULT_GLOW_COLOR = {r=1, g=0.776, b=0.376}
 local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 
 local function ResolveGlowTint(p)
-    local c = p and p.glowColor or DEFAULT_GLOW_COLOR
-    local mode = p and p.glowColorMode
-    local isStock = c.r == DEFAULT_GLOW_COLOR.r and c.g == DEFAULT_GLOW_COLOR.g and c.b == DEFAULT_GLOW_COLOR.b
-    if mode == "custom" or (mode == nil and not isStock) then
-        return c.r or 1, c.g or 0.776, c.b or 0.376
+    if not p then return nil end
+    if p.glowColorMode == "class" then
+        local _, ct = UnitClass("player")
+        local cc = ct and RAID_CLASS_COLORS[ct]
+        if cc then return cc.r, cc.g, cc.b end
+        return nil
     end
-    return nil
+    if p.glowColorMode ~= "custom" then return nil end
+    local c = p.glowColor
+    if not c then return nil end
+    return c.r or 1, c.g or 0.776, c.b or 0.376
 end
 
 local TEXT_ANCHOR_POINTS = {
@@ -1544,7 +1548,6 @@ local defaults = {
         display = {
             remindersEnabled = true,
             glowType = 0,
-            glowColor = {r=1, g=0.776, b=0.376},
             scale = 1.0,
             xOffset = 0,
             yOffset = 200,
@@ -3428,6 +3431,17 @@ end
 -------------------------------------------------------------------------------
 function EABR:OnInitialize()
     db = EllesmereUI.Lite.NewDB("EllesmereUIAuraBuffRemindersDB", defaults, true)
+
+    -- Live migration: glowColorMode replaced glowColor always being set
+    local d = db.profile.display
+    if d and not d.glowColorMode then
+        local c = d.glowColor
+        if c and not (c.r == 1 and c.g == 0.776 and c.b == 0.376) then
+            d.glowColorMode = "custom"
+        else
+            d.glowColorMode = "default"
+        end
+    end
 end
 
 -------------------------------------------------------------------------------

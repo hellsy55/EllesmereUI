@@ -895,65 +895,61 @@ initFrame:SetScript("OnEvent", function(self)
         -- Inline color swatch on Glow Type (right of row 3)
         do
             local rgn = row2._rightRegion
-            local swatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel()+5,
-                function()
-                    local d = DDB()
-                    local gc = d and d.glowColor or {r=1, g=0.776, b=0.376}
-                    return gc.r, gc.g, gc.b, 1
-                end,
-                function(r, g, b)
-                    local d = DDB(); if not d then return end
-                    d.glowColor = {r=r, g=g, b=b}
-                    d.glowColorMode = "custom"
-                    RefreshAll(); UpdatePreviewHeader()
-                end, false, 20)
-            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
-            swatch:HookScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, "Custom Color")
-            end)
-            swatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            local defaultSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel()+5,
-                function() return 1.0, 0.788, 0.137, 1 end,
-                function() end, false, 20)
+            local isNone = function()
+                local d = DDB()
+                return not d or (d.glowType or 0) == 0
+            end
+            local swatch, defaultSwatch, classSwatch = EllesmereUI.BuildTrioColorSwatch(
+                rgn, rgn:GetFrameLevel()+5,
+                {
+                    getMode = function()
+                        local d = DDB()
+                        return (d and d.glowColorMode) or "default"
+                    end,
+                    setMode = function(m)
+                        local d = DDB(); if not d then return end
+                        d.glowColorMode = m
+                    end,
+                    getCustomRGB = function()
+                        local d = DDB()
+                        local gc = d and d.glowColor or {r=1.0, g=0.788, b=0.137}
+                        return gc.r, gc.g, gc.b
+                    end,
+                    setCustomRGB = function(r, g, b)
+                        local d = DDB(); if not d then return end
+                        d.glowColor = {r=r, g=g, b=b}
+                    end,
+                    hasClassColor = true,
+                    onChange = function() RefreshAll(); UpdatePreviewHeader(); EllesmereUI:RefreshPage() end,
+                    disabled = isNone,
+                    overrideSize = 20,
+                })
+            classSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
+            swatch:SetPoint("RIGHT", classSwatch, "LEFT", -8, 0)
             defaultSwatch:SetPoint("RIGHT", swatch, "LEFT", -8, 0)
             rgn._lastInline = defaultSwatch
-            defaultSwatch:SetScript("OnClick", function()
-                local d = DDB(); if not d then return end
-                d.glowColorMode = "default"
-                RefreshAll(); UpdatePreviewHeader()
-                EllesmereUI:RefreshPage()
-            end)
-            defaultSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(defaultSwatch, "Default (Untinted)")
-            end)
-            defaultSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
             -- Disabled overlay when glow type is None
-            local swatchBlock = CreateFrame("Frame", nil, swatch)
-            swatchBlock:SetAllPoints()
-            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-            swatchBlock:EnableMouse(true)
-            swatchBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip("This option requires a Glow Type other than None"))
-            end)
-            swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateSwatchDisabled()
-                local d = DDB()
-                local isNone = not d or (d.glowType or 0) == 0
-                local isCustom = d and _G._EABR_ResolveGlowTint and _G._EABR_ResolveGlowTint(d) ~= nil
-                if isNone then
-                    swatch:SetAlpha(0.3)
-                    defaultSwatch:SetAlpha(0.3)
-                    swatchBlock:Show()
-                else
-                    swatch:SetAlpha(isCustom and 1 or 0.3)
-                    defaultSwatch:SetAlpha(isCustom and 0.3 or 1)
-                    swatchBlock:Hide()
+            local function MakeSwatchBlock(target)
+                local block = CreateFrame("Frame", nil, target)
+                block:SetAllPoints()
+                block:SetFrameLevel(target:GetFrameLevel() + 10)
+                block:EnableMouse(true)
+                block:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(target, EllesmereUI.DisabledTooltip("This option requires a Glow Type other than None"))
+                end)
+                block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                return block
+            end
+            local swatchBlocks = { MakeSwatchBlock(swatch), MakeSwatchBlock(defaultSwatch), MakeSwatchBlock(classSwatch) }
+            local function UpdateSwatchBlock()
+                local none = isNone()
+                for _, block in ipairs(swatchBlocks) do
+                    if none then block:Show() else block:Hide() end
                 end
             end
-            UpdateSwatchDisabled()
-            EllesmereUI.RegisterWidgetRefresh(UpdateSwatchDisabled)
+            UpdateSwatchBlock()
+            EllesmereUI.RegisterWidgetRefresh(UpdateSwatchBlock)
         end
 
         -- Inline color swatch + cog on Show Text (left of row 2)

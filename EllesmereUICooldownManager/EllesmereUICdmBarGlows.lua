@@ -76,6 +76,23 @@ function ns.GetBarGlows()
             assignments = {},
         }
     end
+    -- Live migration: colorMode replaced classColor + "glowColor set" nil check
+    if not prof.barGlows._colorModeMigrated then
+        prof.barGlows._colorModeMigrated = true
+        for _, buffList in pairs(prof.barGlows.assignments) do
+            for _, entry in ipairs(buffList) do
+                if not entry.colorMode then
+                    if entry.classColor then
+                        entry.colorMode = "class"
+                    elseif entry.glowColor then
+                        entry.colorMode = "custom"
+                    else
+                        entry.colorMode = "default"
+                    end
+                end
+            end
+        end
+    end
     return prof.barGlows
 end
 
@@ -271,16 +288,16 @@ local function UpdateOverlayVisuals()
                         style = 2
                     end
                     local cr, cg, cb
-                    if entry.classColor then
+                    if entry.colorMode == "class" then
                         local _, ct = UnitClass("player")
                         if ct then
                             local cc = RAID_CLASS_COLORS[ct]
                             if cc then cr, cg, cb = cc.r, cc.g, cc.b end
                         end
-                    elseif entry.glowColor then
+                    elseif entry.colorMode == "custom" and entry.glowColor then
                         cr = entry.glowColor.r or 1
-                        cg = entry.glowColor.g or 0.82
-                        cb = entry.glowColor.b or 0.1
+                        cg = entry.glowColor.g or 0.788
+                        cb = entry.glowColor.b or 0.137
                     end
                     StartNativeGlow(overlay, style, cr, cg, cb)
                 else

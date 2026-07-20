@@ -294,7 +294,6 @@ local TBB_DEFAULT_BAR = {
     stackBasedBar = false,
     pandemicGlow = true,
     pandemicGlowStyle = -1,
-    pandemicGlowColor = { r = 1, g = 1, b = 0 },
     pandemicGlowLines = 8,
     pandemicGlowThickness = 2,
     pandemicGlowSpeed = 4,
@@ -347,6 +346,20 @@ function ns.GetTrackedBuffBars()
             end
         end
         tbb._iconTotalMigrated = true
+    end
+    -- Live migration: pandemicGlowMode replaced pandemicGlowColor always being set
+    if not tbb._pandemicModeMigrated then
+        for _, b in ipairs(tbb.bars or {}) do
+            if not b.pandemicGlowMode then
+                local c = b.pandemicGlowColor
+                if c and not (c.r == 1 and c.g == 1 and c.b == 0) then
+                    b.pandemicGlowMode = "custom"
+                else
+                    b.pandemicGlowMode = "default"
+                end
+            end
+        end
+        tbb._pandemicModeMigrated = true
     end
     return tbb
 end
@@ -3286,7 +3299,14 @@ local function UpdatePandemic(bar, cfg)
            and bar._pandemicGlowTarget ~= glowTarget then
             StopGlow(bar._pandemicGlowTarget)
         end
-        local c = cfg.pandemicGlowColor or { r = 1, g = 1, b = 0 }
+        local c
+        if cfg.pandemicGlowMode == "class" then
+            local _, ct = UnitClass("player")
+            local cc = ct and RAID_CLASS_COLORS[ct]
+            if cc then c = cc end
+        elseif cfg.pandemicGlowMode == "custom" then
+            c = cfg.pandemicGlowColor
+        end
         local glowOpts = (style == 1) and {
             N      = cfg.pandemicGlowLines or 8,
             th     = cfg.pandemicGlowThickness or 2,
@@ -3297,7 +3317,7 @@ local function UpdatePandemic(bar, cfg)
                 b = (cfg.pandemicGlowBackgroundColor and cfg.pandemicGlowBackgroundColor.b) or 0,
             } or nil,
         } or nil
-        StartGlow(glowTarget, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
+        StartGlow(glowTarget, style, c and c.r, c and c.g, c and c.b, glowOpts)
         bar._pandemicGlowActive   = true
         bar._pandemicGlowStyleIdx = style
         bar._pandemicGlowTarget   = glowTarget
