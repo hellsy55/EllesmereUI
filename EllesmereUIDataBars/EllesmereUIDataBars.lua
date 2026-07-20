@@ -65,6 +65,7 @@ local L = {
     SHIFT_MIDDLE_CLICK   = "|cffFFFFFFShift + Middle Click:|r",
     SHIFT_LEFT_CLICK     = "|cffFFFFFFShift + Left Click:|r",
     CTRL_RIGHT_CLICK     = "|cffFFFFFFCtrl + Right Click:|r",
+    CTRL_ALT_LEFT_CLICK  = "|cffFFFFFFCtrl + Alt + Left Click:|r",
     YOU_HAVE_MAIL        = "You've Got Mail!",
     SERVER_TIME          = "Server time",
     SAVED_INSTANCES      = "Saved Raid(s)",
@@ -91,6 +92,7 @@ local L = {
     OPEN_BAGS            = "Open Bags",
     OPEN_CURRENCIES      = "Open Currencies",
     RESET_SESSION        = "Reset Session",
+    REMOVE_CHARACTER     = "Remove Character",
     TRAVEL_COOLDOWNS     = "Travel Cooldowns",
     HEARTHSTONE          = "Hearthstone",
     READY                = "Ready",
@@ -311,6 +313,33 @@ local function CoinIconString(amount)
     return C_CurrencyInfo.GetCoinTextureString(amount)
 end
 ns.CoinIconString = CoinIconString
+
+-- Money split per denomination, for Tip_AddColumns: one token per coin so the
+-- suffixes line up vertically down the tooltip. A single formatted string
+-- cannot -- the game font is proportional, so "9o" and "1 234o" are different
+-- widths and every column after the first drifts.
+-- Coin icons render every denomination in one indivisible string, so that mode
+-- yields a single token (still one aligned column, just not three).
+-- The buffer is reused; Tip_AddColumns copies it, so one buffer serves all rows.
+local _moneyTokens = {}
+function ns.MoneyTokens(amount, showSmall, coinIcons)
+    amount = floor(abs(amount or 0))
+    wipe(_moneyTokens)
+    if coinIcons then
+        _moneyTokens[1] = CoinIconString(amount)
+        return _moneyTokens
+    end
+    local gold = floor(amount / DENOMINATIONS[1].divisor)
+    local gStr = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
+    _moneyTokens[1] = gStr .. DENOMINATIONS[1].color .. DENOMINATIONS[1].symbol .. "|r"
+    if showSmall ~= false then
+        local silver = floor((amount % DENOMINATIONS[1].divisor) / DENOMINATIONS[2].divisor)
+        _moneyTokens[2] = silver .. DENOMINATIONS[2].color .. DENOMINATIONS[2].symbol .. "|r"
+        _moneyTokens[3] = (amount % DENOMINATIONS[2].divisor)
+            .. DENOMINATIONS[3].color .. DENOMINATIONS[3].symbol .. "|r"
+    end
+    return _moneyTokens
+end
 
 function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
@@ -1042,6 +1071,16 @@ do
     -- combat.
     function ns.Tip_AddClickable(left, right, onClick, lr, lg, lb, rr, rg, rb)
         if ns.Tip_AddDouble(left, right, lr, lg, lb, rr, rg, rb) and onClick then
+            data[dataCount].onClick = onClick
+        end
+    end
+
+    -- Tip_AddColumns + Tip_AddClickable: sub-column alignment AND a click
+    -- overlay. The two were mutually exclusive only because each add-function
+    -- clears the other's field; the overlay is placed over the row's rectangle
+    -- and never cared how the row was laid out.
+    function ns.Tip_AddClickableColumns(left, tokens, onClick, lr, lg, lb)
+        if ns.Tip_AddColumns(left, tokens, lr, lg, lb) and onClick then
             data[dataCount].onClick = onClick
         end
     end

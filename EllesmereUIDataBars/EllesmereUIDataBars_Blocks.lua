@@ -1440,26 +1440,42 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
         end
         local store = GoldStore()
         local total, charList = 0, {}
-        for _, cdata in pairs(store) do
+        -- The store key ("Name-Realm") rides along: it is what a delete needs,
+        -- and the entry itself does not carry it.
+        for key, cdata in pairs(store) do
             if cdata and cdata.currentMoney then
-                tinsert(charList, cdata)
+                tinsert(charList, { key = key, data = cdata })
                 total = total + cdata.currentMoney
             end
         end
-        tsort(charList, function(a, b) return (a.currentMoney or 0) > (b.currentMoney or 0) end)
+        tsort(charList, function(a, b) return (a.data.currentMoney or 0) > (b.data.currentMoney or 0) end)
         if #charList > 0 then
+            local selfKey = GoldCharKey()
             ns.Tip_AddLine(" ")
             ns.Tip_AddLine(GetRealmName() or "?", 0.5, 0.78, 1)
-            for _, char in ipairs(charList) do
+            for _, entry in ipairs(charList) do
+                local char = entry.data
                 local cr, cg, cb = 1, 1, 1
                 if char.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[char.class] then
                     local cc = RAID_CLASS_COLORS[char.class]; cr, cg, cb = cc.r, cc.g, cc.b
                 end
                 local label = char.name or "?"
-                if char.name == UnitName("player") then
+                local tokens = ns.MoneyTokens(char.currentMoney, sm, ci)
+                if entry.key == selfKey then
+                    -- The live character re-saves itself on every money event,
+                    -- so deleting it would only bring it straight back.
                     label = label .. " |TInterface\\COMMON\\Indicator-Green:14|t"
+                    ns.Tip_AddColumns(label, tokens, cr, cg, cb)
+                else
+                    local delKey = entry.key
+                    ns.Tip_AddClickableColumns(label, tokens, function(mouseButton)
+                        if mouseButton ~= "LeftButton" then return end
+                        if not (IsControlKeyDown() and IsAltKeyDown()) then return end
+                        GoldStore()[delKey] = nil
+                        ns.Tip_Hide(goldButton)
+                        for gi in pairs(goldInstances) do gi:QueueRefresh() end
+                    end, cr, cg, cb)
                 end
-                ns.Tip_AddDouble(label, ns.FormatMoney(char.currentMoney, true, sm, ci), cr, cg, cb, 1, 1, 1)
             end
         end
         local bankType = 2
@@ -1482,11 +1498,16 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
         ns.Tip_AddDouble(L["LEFT_CLICK"],       L["OPEN_BAGS"],       1, 1, 1, ar, ag, ab)
         ns.Tip_AddDouble(L["RIGHT_CLICK"],      L["OPEN_CURRENCIES"], 1, 1, 1, ar, ag, ab)
         ns.Tip_AddDouble(L["CTRL_RIGHT_CLICK"], L["RESET_SESSION"],   1, 1, 1, ar, ag, ab)
+        if #charList > 1 then
+            ns.Tip_AddDouble(L["CTRL_ALT_LEFT_CLICK"], L["REMOVE_CHARACTER"], 1, 1, 1, ar, ag, ab)
+        end
         ns.Tip_Show()
     end)
     goldButton:SetScript("OnLeave", function()
         mouseOver = false
-        ns.Tip_Hide(goldButton)
+        -- The character rows are clickable, so the tooltip has to survive the
+        -- cursor leaving the block to be reachable at all.
+        ns.Tip_HideUnlessInteractive(goldButton)
         inst:Refresh()
     end)
     goldButton:SetScript("OnClick", function(_, button)
