@@ -282,13 +282,19 @@ initFrame:SetScript("OnEvent", function(self)
     -- (best-effort, name-based so styles never shift across surfaces). Callers
     -- build a payload with EllesmereUI.PandemicPayloadFrom* and pass it.
 
-    -- Create a pandemic glow preview icon in a DualRow right-half
-    local function BuildPandemicPreview(row, isOffFn, getDataFn)
+    -- Create a pandemic glow preview icon in a DualRow half. anchorRgn defaults
+    -- to the row's right half (row._rightRegion) for TBB's layout; CDM anchors
+    -- it inline in the left half instead
+    local function BuildPandemicPreview(row, isOffFn, getDataFn, anchorRgn)
         local SIDE_PAD = 20
         local iconSize = 36
         local iconFrame = CreateFrame("Frame", nil, row)
         PP.Size(iconFrame, iconSize, iconSize)
-        PP.Point(iconFrame, "RIGHT", row, "RIGHT", -SIDE_PAD, 0)
+        if anchorRgn then
+            PP.Point(iconFrame, "RIGHT", anchorRgn._control, "LEFT", -8, 0)
+        else
+            PP.Point(iconFrame, "RIGHT", row, "RIGHT", -SIDE_PAD, 0)
+        end
 
         local iconTex = iconFrame:CreateTexture(nil, "ARTWORK")
         iconTex:SetAllPoints()
@@ -323,7 +329,12 @@ initFrame:SetScript("OnEvent", function(self)
             local bd = getDataFn()
             if not bd then return end
             local style = bd.pandemicGlowStyle or 1
-            local c = bd.pandemicGlowColor or { r = 1, g = 1, b = 0 }
+            local c
+            if bd.pandemicGlowMode == "class" then
+                c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+            elseif bd.pandemicGlowMode == "custom" then
+                c = bd.pandemicGlowColor
+            end
             local glowOpts = (style == 1) and {
                 N = bd.pandemicGlowLines or 8,
                 th = bd.pandemicGlowThickness or 2,
@@ -334,11 +345,11 @@ initFrame:SetScript("OnEvent", function(self)
                     b = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.b) or 0,
                 } or nil,
             } or nil
-            ns.StartNativeGlow(glowOvr, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
+            ns.StartNativeGlow(glowOvr, style, c and c.r, c and c.g, c and c.b, glowOpts)
         end
         RefreshPreview()
 
-        local previewLabel = ({ row._rightRegion:GetRegions() })[1]
+        local previewLabel = not anchorRgn and ({ row._rightRegion:GetRegions() })[1]
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = isOffFn()
             iconFrame:SetAlpha(off and 0.3 or 1)
@@ -349,6 +360,7 @@ initFrame:SetScript("OnEvent", function(self)
         end)
 
         row._refreshPreview = RefreshPreview
+        return iconFrame
     end
 
     -- Create a pixel glow cog popup for pandemic settings
@@ -771,8 +783,6 @@ initFrame:SetScript("OnEvent", function(self)
                     local newEntry = {
                         spellID = sp.spellID,
                         glowStyle = 1,
-                        glowColor = { r = 1, g = 0.82, b = 0.1 },
-                        classColor = false,
                         mode = "ACTIVE",
                         onlyInCombat = false,
                     }
@@ -1567,18 +1577,18 @@ initFrame:SetScript("OnEvent", function(self)
                         local ov = _bgPreviewGlowOverlays[pvKey]
                         if not ov then return end
                         local style = BarHasCustomShape(curBar) and 2 or (entry.glowStyle or 1)
-                        local cr, cg, cb = 1, 0.82, 0.1
-                        if entry.classColor then
-                            local _, ct = UnitClass("player")
-                            if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
-                        elseif entry.glowColor then
+                        local cr, cg, cb
+                        if entry.colorMode == "class" then
+                            local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                            cr, cg, cb = cc.r, cc.g, cc.b
+                        elseif entry.colorMode == "custom" and entry.glowColor then
                             cr, cg, cb = entry.glowColor.r, entry.glowColor.g, entry.glowColor.b
                         end
                         ns.StopNativeGlow(ov)
                         ns.StartNativeGlow(ov, style, cr, cg, cb)
                     end
 
-                    -- Row 2: Glow Type (with eyeball) | Class Colored Glow (with swatch)
+                    -- Row 2: Glow Type (with eyeball) | Glow Color Swatch Selectors
                     local glowRow
                     glowRow, h = W:DualRow(parent, y,
                         { type = "dropdown", text = "Glow Type",
@@ -1595,15 +1605,7 @@ initFrame:SetScript("OnEvent", function(self)
                               RefreshPreviewGlow()
                           end,
                         },
-                        { type = "toggle", text = "Class Colored Glow",
-                          getValue = function() return entry.classColor end,
-                          setValue = function(v)
-                              entry.classColor = v
-                              Refresh()
-                              RefreshPreviewGlow()
-                              EllesmereUI:RefreshPage()
-                          end,
-                        }
+                        { type = "label", text = "Glow Color" }
                     );  y = y - h
 
                     -- Eyeball preview toggle (on left region of glow type row)
@@ -1641,11 +1643,11 @@ initFrame:SetScript("OnEvent", function(self)
                                     if previewBtn._accentBrd then previewBtn._accentBrd:Show() end
                                 else
                                     local style = BarHasCustomShape(curBar) and 2 or (entry.glowStyle or 1)
-                                    local cr, cg, cb = 1, 0.82, 0.1
-                                    if entry.classColor then
-                                        local _, ct = UnitClass("player")
-                                        if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
-                                    elseif entry.glowColor then
+                                    local cr, cg, cb
+                                    if entry.colorMode == "class" then
+                                        local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                        cr, cg, cb = cc.r, cc.g, cc.b
+                                    elseif entry.colorMode == "custom" and entry.glowColor then
                                         cr, cg, cb = entry.glowColor.r, entry.glowColor.g, entry.glowColor.b
                                     end
                                     ns.StartNativeGlow(ov, style, cr, cg, cb)
@@ -1663,27 +1665,26 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Inline color swatch for glow color (on right region of row 2)
                     do
                         local rightRgn = glowRow._rightRegion
-                        if rightRgn and rightRgn._control and EllesmereUI.BuildColorSwatch then
-                            local toggle = rightRgn._control
-                            local glowSwatch, updateGlowSwatch = EllesmereUI.BuildColorSwatch(
+                        if rightRgn and EllesmereUI.BuildTrioColorSwatch then
+                            local glowSwatch, defaultSwatch, classSwatch = EllesmereUI.BuildTrioColorSwatch(
                                 rightRgn, glowRow:GetFrameLevel() + 3,
-                                function()
-                                    if entry.classColor then
-                                        local _, ct = UnitClass("player")
-                                        if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then return cc.r, cc.g, cc.b end end
-                                    end
-                                    local c = entry.glowColor or { r = 1, g = 0.82, b = 0.1 }
-                                    return c.r, c.g, c.b
-                                end,
-                                function(r, g, b)
-                                    entry.glowColor = { r = r, g = g, b = b }
-                                    entry.classColor = false
-                                    Refresh()
-                                    RefreshPreviewGlow()
-                                    EllesmereUI:RefreshPage()
-                                end,
-                                false, 20)
-                            PP.Point(glowSwatch, "RIGHT", toggle, "LEFT", -8, 0)
+                                {
+                                    getMode = function() return entry.colorMode or "default" end,
+                                    setMode = function(m) entry.colorMode = m end,
+                                    getCustomRGB = function()
+                                        local c = entry.glowColor or { r = 1.0, g = 0.788, b = 0.137 }
+                                        return c.r, c.g, c.b
+                                    end,
+                                    setCustomRGB = function(r, g, b)
+                                        entry.glowColor = { r = r, g = g, b = b }
+                                    end,
+                                    hasClassColor = true,
+                                    onChange = function() Refresh(); RefreshPreviewGlow(); EllesmereUI:RefreshPage() end,
+                                    overrideSize = 20,
+                                })
+                            PP.Point(classSwatch, "RIGHT", rightRgn, "RIGHT", -20, 0)
+                            PP.Point(glowSwatch, "RIGHT", classSwatch, "LEFT", -8, 0)
+                            PP.Point(defaultSwatch, "RIGHT", glowSwatch, "LEFT", -8, 0)
                         end
                     end
 
@@ -17437,65 +17438,37 @@ initFrame:SetScript("OnEvent", function(self)
                 local leftRgn = buffGlowRow._leftRegion
                 local ctrl = leftRgn._control
 
-                local classSwatch, updateClassSwatch = EllesmereUI.BuildColorSwatch(
+                local noGlow = function()
+                    local gt = BD().buffGlowType or 0
+                    return gt == 0 or IsCustomShape()
+                end
+                local glowSwatch, defaultSwatch, classSwatch = EllesmereUI.BuildTrioColorSwatch(
                     leftRgn, buffGlowRow:GetFrameLevel() + 3,
-                    function()
-                        local _, classFile = UnitClass("player")
-                        local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-                        if cc then return cc.r, cc.g, cc.b end
-                        return 1, 0.82, 0
-                    end,
-                    function() end,
-                    false, 20)
+                    {
+                        getMode = function() return BD().buffGlowMode or "default" end,
+                        setMode = function(m) BD().buffGlowMode = m; ns.BuildAllCDMBars() end,
+                        getCustomRGB = function() return BD().buffGlowR or 1.0, BD().buffGlowG or 0.788, BD().buffGlowB or 0.137 end,
+                        setCustomRGB = function(r, g, b)
+                            BD().buffGlowR = r; BD().buffGlowG = g; BD().buffGlowB = b
+                        end,
+                        hasClassColor = true,
+                        onChange = function() Refresh(); EllesmereUI:RefreshPage() end,
+                        disabled = noGlow,
+                        overrideSize = 20,
+                    })
                 PP.Point(classSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-                classSwatch:SetScript("OnClick", function()
-                    BD().buffGlowClassColor = true; ns.BuildAllCDMBars()
-                    Refresh(); EllesmereUI:RefreshPage()
-                end)
-                classSwatch:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(classSwatch, "Class Colored")
-                end)
-                classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-                local glowSwatch, updateGlowSwatch = EllesmereUI.BuildColorSwatch(
-                    leftRgn, buffGlowRow:GetFrameLevel() + 3,
-                    function() return BD().buffGlowR or 1.0, BD().buffGlowG or 0.776, BD().buffGlowB or 0.376 end,
-                    function(r, g, b)
-                        BD().buffGlowR = r; BD().buffGlowG = g; BD().buffGlowB = b
-                        ns.BuildAllCDMBars(); Refresh()
-                    end,
-                    false, 20)
                 PP.Point(glowSwatch, "RIGHT", classSwatch, "LEFT", -8, 0)
-                glowSwatch:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(glowSwatch, "Custom Colored")
-                end)
-                glowSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                PP.Point(defaultSwatch, "RIGHT", glowSwatch, "LEFT", -8, 0)
 
-                -- Click the dimmed custom swatch to switch back from class color (no block overlay)
+                -- No glow selected (or custom shape): allow swapping boxes but do not open the color picker
                 local origGlowClick = glowSwatch:GetScript("OnClick")
                 glowSwatch:SetScript("OnClick", function(self, ...)
-                    if BD().buffGlowClassColor then
-                        BD().buffGlowClassColor = false; ns.BuildAllCDMBars()
-                        Refresh(); EllesmereUI:RefreshPage()
-                        return
-                    end
-                    -- No glow selected (or custom shape): allow swapping boxes but do not open the color picker
-                    if (BD().buffGlowType or 0) == 0 or IsCustomShape() then return end
+                    if noGlow() then return end
                     if origGlowClick then origGlowClick(self, ...) end
                 end)
 
                 -- Anchor for the inline pixel-glow cog (placed left of the swatches).
-                leftRgn._lastInline = glowSwatch
-
-                local function UpdateBuffGlowState()
-                    local gt = BD().buffGlowType or 0
-                    local noGlow = gt == 0 or IsCustomShape()
-                    local isClassColored = BD().buffGlowClassColor
-                    glowSwatch:SetAlpha((isClassColored or noGlow) and 0.3 or 1)
-                    classSwatch:SetAlpha((isClassColored and not noGlow) and 1 or 0.3)
-                end
-                EllesmereUI.RegisterWidgetRefresh(function() updateGlowSwatch(); updateClassSwatch(); UpdateBuffGlowState() end)
-                UpdateBuffGlowState()
+                leftRgn._lastInline = defaultSwatch
             end
 
             -- (Pixel Glow Thickness / Lines / Speed moved to a dedicated row at the
@@ -18668,39 +18641,54 @@ initFrame:SetScript("OnEvent", function(self)
                       C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
                   end,
                   tooltip="Show a glow on icons when the remaining duration is in the pandemic window (last 30%)" },
-                { type="label", text="Pandemic Glow Preview" });  y = y - h
+                { type="label", text="Pandemic Glow Color" });  y = y - h
 
-            BuildPandemicPreview(panGlowRow, pandemicOff, BD)
-
-            do
-                local leftRgn = panGlowRow._leftRegion
-                local ctrl = leftRgn and leftRgn._control
-                if ctrl and EllesmereUI.BuildColorSwatch then
-                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
-                        leftRgn, panGlowRow:GetFrameLevel() + 3,
-                        function()
-                            local c = BD().pandemicGlowColor
-                            if c then return c.r or 1, c.g or 1, c.b or 0 end
-                            return BD().pandemicR or 1, BD().pandemicG or 1, BD().pandemicB or 0
-                        end,
-                        function(r, g, b)
-                            BD().pandemicGlowColor = { r = r, g = g, b = b }
-                            ns.BuildAllCDMBars(); Refresh()
-                            if panGlowRow._refreshPreview then panGlowRow._refreshPreview() end
-                        end, nil, 20)
-                    PP.Point(swatch, "RIGHT", ctrl, "LEFT", -12, 0)
-                    leftRgn._lastInline = swatch
-                    EllesmereUI.RegisterWidgetRefresh(function()
-                        local off = pandemicOff()
-                        swatch:SetAlpha(off and 0.15 or 1); swatch:EnableMouse(not off)
-                        if updateSwatch then updateSwatch() end
-                    end)
-                    swatch:SetAlpha(pandemicOff() and 0.15 or 1)
-                    swatch:EnableMouse(not pandemicOff())
-                end
-            end
+            local leftRgn = panGlowRow._leftRegion
+            local previewIcon = BuildPandemicPreview(panGlowRow, pandemicOff, BD, leftRgn)
+            leftRgn._lastInline = previewIcon
 
             BuildPandemicCogButton(panGlowRow, antsOff, BD, function() ns.BuildAllCDMBars() end)
+
+            do
+                local rightRgn = panGlowRow._rightRegion
+                if rightRgn and EllesmereUI.BuildTrioColorSwatch then
+                    local swatch, defaultSwatch, classSwatch = EllesmereUI.BuildTrioColorSwatch(
+                        rightRgn, panGlowRow:GetFrameLevel() + 3,
+                        {
+                            getMode = function() return BD().pandemicGlowMode or "default" end,
+                            setMode = function(m)
+                                BD().pandemicGlowMode = m
+                                ns.BuildAllCDMBars(); Refresh()
+                                if panGlowRow._refreshPreview then panGlowRow._refreshPreview() end
+                            end,
+                            getCustomRGB = function()
+                                local c = BD().pandemicGlowColor
+                                return (c and c.r) or 1, (c and c.g) or 1, (c and c.b) or 0
+                            end,
+                            setCustomRGB = function(r, g, b)
+                                BD().pandemicGlowColor = { r = r, g = g, b = b }
+                                ns.BuildAllCDMBars(); Refresh()
+                                if panGlowRow._refreshPreview then panGlowRow._refreshPreview() end
+                            end,
+                            hasClassColor = true,
+                            onChange = function() EllesmereUI:RefreshPage() end,
+                            disabled = pandemicOff,
+                            disabledAlpha = 0.15,
+                        })
+                    PP.Point(classSwatch, "RIGHT", rightRgn, "RIGHT", -20, 0)
+                    PP.Point(swatch, "RIGHT", classSwatch, "LEFT", -8, 0)
+                    PP.Point(defaultSwatch, "RIGHT", swatch, "LEFT", -8, 0)
+
+                    local function UpdatePanSwatchMouse()
+                        local off = pandemicOff()
+                        swatch:EnableMouse(not off)
+                        defaultSwatch:EnableMouse(not off)
+                        classSwatch:EnableMouse(not off)
+                    end
+                    EllesmereUI.RegisterWidgetRefresh(UpdatePanSwatchMouse)
+                    UpdatePanSwatchMouse()
+                end
+            end
 
             if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
                 EllesmereUI.BuildSyncIcon({

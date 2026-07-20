@@ -505,10 +505,9 @@ function ns.ApplyActiveOverlays(frame, fd, ss, isActive, bd)
                         local cc = RAID_CLASS_COLORS[ct]
                         if cc then gr, gg, gb = cc.r, cc.g, cc.b end
                     end
+                elseif ss.activeGlowR ~= nil then
+                    gr, gg, gb = ss.activeGlowR, ss.activeGlowG or 0.85, ss.activeGlowB or 0
                 end
-                gr = gr or (ss.activeGlowR or 1)
-                gg = gg or (ss.activeGlowG or 0.85)
-                gb = gb or (ss.activeGlowB or 0)
             end
             -- (Re)start on first activation OR when the style/colour changed, so a
             -- live colour edit takes effect. A steady active window with unchanged
@@ -1062,7 +1061,6 @@ local function ApplyMaxStacksGlow(frame, fd, ss2, atMax)
             if mo then
                 if frame then mo:SetFrameLevel(frame:GetFrameLevel() + 16) end
                 local gr, gg, gb = ns.ResolveGlowColor(ss2)
-                gr = gr or 1; gg = gg or 0.85; gb = gb or 0
                 ns.StartNativeGlow(mo, ss2.maxStacksGlow, gr, gg, gb)
                 fd._maxStacksGlowOn = true
             end
@@ -6465,17 +6463,20 @@ function ns.SetupViewerHooks()
                                     -- each pass, matching the primary glowOverlay (+16).
                                     fd.buffGlowOverlay:SetFrameLevel(frame:GetFrameLevel() + 16)
                                     if not fd.buffGlowActive then
-                                        local cr, cg, cb = bd.buffGlowR or 1.0, bd.buffGlowG or 0.776, bd.buffGlowB or 0.376
-                                        local classColor = bd.buffGlowClassColor
+                                        local cr, cg, cb
+                                        if bd.buffGlowMode == "custom" then
+                                            cr, cg, cb = bd.buffGlowR, bd.buffGlowG, bd.buffGlowB
+                                        end
+                                        local classColor = bd.buffGlowMode == "class"
                                         if fd._bgColor == "class" then
                                             classColor = true
                                         elseif fd._bgColor == "custom" then
                                             classColor = false
                                             cr, cg, cb = fd._bgR or cr, fd._bgG or cg, fd._bgB or cb
                                         end
-                                        if classColor and _cachedClassToken then
-                                            local cc = RAID_CLASS_COLORS[_cachedClassToken]
-                                            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                                        if classColor then
+                                            local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                            cr, cg, cb = cc.r, cc.g, cc.b
                                         end
                                         fd.buffGlowOverlay:SetAlpha(1)
                                         ns.StartNativeGlow(fd.buffGlowOverlay, effGlowType, cr, cg, cb, {
@@ -6515,7 +6516,12 @@ function ns.SetupViewerHooks()
                                         -- level higher so pandemic sits above buff glow.
                                         fd.pandemicOverlay:SetFrameLevel(frame:GetFrameLevel() + 17)
                                         if not fd.pandemicGlowActive then
-                                            local c = bd.pandemicGlowColor or { r = 1, g = 1, b = 0 }
+                                            local c
+                                            if bd.pandemicGlowMode == "class" then
+                                                c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                            elseif bd.pandemicGlowMode == "custom" then
+                                                c = bd.pandemicGlowColor
+                                            end
                                             local style = bd.pandemicGlowStyle or 1
                                             local glowOpts = (style == 1) and {
                                                 N      = bd.pandemicGlowLines or 8,
@@ -6528,7 +6534,7 @@ function ns.SetupViewerHooks()
                                                 } or nil,
                                             } or nil
                                             fd.pandemicOverlay:SetAlpha(1)
-                                            ns.StartNativeGlow(fd.pandemicOverlay, style, c.r or 1, c.g or 1, c.b or 0, glowOpts)
+                                            ns.StartNativeGlow(fd.pandemicOverlay, style, c and c.r, c and c.g, c and c.b, glowOpts)
                                             fd.pandemicGlowActive = true
                                         end
                                     elseif fd.pandemicGlowActive and fd.pandemicOverlay then
