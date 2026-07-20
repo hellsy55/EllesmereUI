@@ -1209,29 +1209,25 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
     -- colors (same codes as ns.FormatMoney), numbers inherit the white base.
     local function GetMoneySideLines(amount, showSmall, coin, coinIcons)
         amount = floor(abs(amount or 0))
-        -- Coin icons: GetCoinTextureString emits every denomination in one
-        -- string, so the vertical bar shows it as a single wrapped line
-        -- instead of one line per denomination. Coin Colored has nothing left
-        -- to tint -- the textures carry their own color.
-        if coinIcons then
-            _sideLinesBuf[1] = ns.CoinIconString(amount)
-            _sideLinesBuf[2] = nil
-            _sideLinesBuf[3] = nil
-            _sideLineCount = 1
-            return _sideLinesBuf, _sideLineCount
-        end
         local gold   = floor(amount / 10000)
         local silver = floor((amount % 10000) / 100)
         local copper = amount % 100
         local gStr
         if BreakUpLargeNumbers then gStr = BreakUpLargeNumbers(gold) else gStr = tostring(gold) end
-        if coin then
+        -- Coin icons carry their own color, so Coin Colored has nothing left to
+        -- tint and the two options compose instead of fighting.
+        if coinIcons then
+            _sideLinesBuf[1] = gStr .. ns.COIN_TEX[1]
+        elseif coin then
             _sideLinesBuf[1] = gStr .. "|cffe2ac7a" .. GOLD_AMOUNT_SYMBOL .. "|r"
         else
             _sideLinesBuf[1] = gStr .. GOLD_AMOUNT_SYMBOL
         end
         if showSmall ~= false then
-            if coin then
+            if coinIcons then
+                _sideLinesBuf[2] = silver .. ns.COIN_TEX[2]
+                _sideLinesBuf[3] = copper .. ns.COIN_TEX[3]
+            elseif coin then
                 _sideLinesBuf[2] = silver .. "|cffc7c7cf" .. SILVER_AMOUNT_SYMBOL .. "|r"
                 _sideLinesBuf[3] = copper .. "|cffed8a3f" .. COPPER_AMOUNT_SYMBOL .. "|r"
             else

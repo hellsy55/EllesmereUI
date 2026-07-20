@@ -305,45 +305,53 @@ local DENOMINATIONS = {
     { divisor = 1,     symbol = COPPER_AMOUNT_SYMBOL, color = "|cffed8a3f" },  -- copper-orange
 }
 
--- Opt-in per gold block: Blizzard's coin textures instead of the letters.
--- GetCoinTextureString renders every denomination it needs in one indivisible
--- string and has no colored/plain variants, so useColors and showSmall do not
--- apply to it.
-local function CoinIconString(amount)
-    return C_CurrencyInfo.GetCoinTextureString(amount)
+-- Coin textures, one per denomination, same paths the bag module already uses.
+-- ":0:0:2:0" is Blizzard's own sizing in GetCoinTextureString: 0 height means
+-- inherit the font, so the icons follow the bar's and the tooltip's text size.
+-- Split per coin on purpose -- GetCoinTextureString returns all three welded
+-- into one string, which cannot be laid out in aligned columns.
+local COIN_TEX = {
+    "|TInterface\\MoneyFrame\\UI-GoldIcon:0:0:2:0|t",
+    "|TInterface\\MoneyFrame\\UI-SilverIcon:0:0:2:0|t",
+    "|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:2:0|t",
+}
+ns.COIN_TEX = COIN_TEX
+
+-- What trails the number for denomination i: a coin texture when Coin Icons is
+-- on, otherwise the localized suffix letter, colored unless the caller asks for
+-- plain. Every money formatter below goes through this, so the Coin Icons and
+-- Show Silver and Copper options compose the same way in all of them --
+-- GetCoinTextureString could not do that, it always emits all three coins.
+local function CoinMarker(i, coinIcons, coloured)
+    if coinIcons then return COIN_TEX[i] end
+    if coloured == false then return DENOMINATIONS[i].symbol end
+    return DENOMINATIONS[i].color .. DENOMINATIONS[i].symbol .. "|r"
 end
-ns.CoinIconString = CoinIconString
+ns.CoinMarker = CoinMarker
 
 -- Money split per denomination, for Tip_AddColumns: one token per coin so the
--- suffixes line up vertically down the tooltip. A single formatted string
+-- amounts line up vertically down the tooltip. A single formatted string
 -- cannot -- the game font is proportional, so "9o" and "1 234o" are different
 -- widths and every column after the first drifts.
--- Coin icons render every denomination in one indivisible string, so that mode
--- yields a single token (still one aligned column, just not three).
 -- The buffer is reused; Tip_AddColumns copies it, so one buffer serves all rows.
 local _moneyTokens = {}
+
 function ns.MoneyTokens(amount, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
     wipe(_moneyTokens)
-    if coinIcons then
-        _moneyTokens[1] = CoinIconString(amount)
-        return _moneyTokens
-    end
     local gold = floor(amount / DENOMINATIONS[1].divisor)
     local gStr = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
-    _moneyTokens[1] = gStr .. DENOMINATIONS[1].color .. DENOMINATIONS[1].symbol .. "|r"
+    _moneyTokens[1] = gStr .. CoinMarker(1, coinIcons)
     if showSmall ~= false then
         local silver = floor((amount % DENOMINATIONS[1].divisor) / DENOMINATIONS[2].divisor)
-        _moneyTokens[2] = silver .. DENOMINATIONS[2].color .. DENOMINATIONS[2].symbol .. "|r"
-        _moneyTokens[3] = (amount % DENOMINATIONS[2].divisor)
-            .. DENOMINATIONS[3].color .. DENOMINATIONS[3].symbol .. "|r"
+        _moneyTokens[2] = silver .. CoinMarker(2, coinIcons)
+        _moneyTokens[3] = (amount % DENOMINATIONS[2].divisor) .. CoinMarker(3, coinIcons)
     end
     return _moneyTokens
 end
 
 function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
-    if coinIcons then return CoinIconString(amount) end
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
         local val = floor(amount / denom.divisor)
@@ -351,18 +359,17 @@ function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
         if i == 1 and val > 0 then
             foundGold = true
             local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. denom.symbol
+            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, false)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
-            parts[#parts + 1] = val .. denom.symbol
+            parts[#parts + 1] = val .. CoinMarker(i, coinIcons, false)
         end
     end
     if #parts > 0 then return tconcat(parts, " ") end
-    return "0" .. DENOMINATIONS[3].symbol
+    return "0" .. CoinMarker(3, coinIcons, false)
 end
 
 function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
-    if coinIcons then return CoinIconString(amount) end
     local coloured = useColors ~= false
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
@@ -371,19 +378,13 @@ function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
         if i == 1 and val > 0 then
             foundGold = true
             local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            local cOpen, cClose = "", ""
-            if coloured then cOpen = denom.color; cClose = "|r" end
-            parts[#parts + 1] = display .. cOpen .. denom.symbol .. cClose
+            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, coloured)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
-            local cOpen, cClose = "", ""
-            if coloured then cOpen = denom.color; cClose = "|r" end
-            parts[#parts + 1] = val .. cOpen .. denom.symbol .. cClose
+            parts[#parts + 1] = val .. CoinMarker(i, coinIcons, coloured)
         end
     end
     if #parts == 0 then
-        local cOpen, cClose = "", ""
-        if coloured then cOpen = DENOMINATIONS[3].color; cClose = "|r" end
-        return "0" .. cOpen .. DENOMINATIONS[3].symbol .. cClose
+        return "0" .. CoinMarker(3, coinIcons, coloured)
     end
     return tconcat(parts, " ")
 end
