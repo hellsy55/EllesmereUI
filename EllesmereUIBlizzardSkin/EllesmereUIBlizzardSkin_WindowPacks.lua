@@ -3240,9 +3240,16 @@ local function Skin_Guild()
         end
     end
     SkinRosterColumns()
-    if ml and ml.ColumnDisplay and not GetFFD(ml.ColumnDisplay).showHooked then
-        GetFFD(ml.ColumnDisplay).showHooked = true
-        ml.ColumnDisplay:HookScript("OnShow", WSkin.Debounce(SkinRosterColumns))
+    -- Re-skin roster columns when Blizzard rebuilds them (per club / view change)
+    -- via hooksecurefunc on the list refresh -- NOT a HookScript on the secure
+    -- ColumnDisplay. A HookScript OnShow/OnHide on ColumnDisplay fires INSIDE the
+    -- secure roster refresh that a protected guild action (SetNote /
+    -- SetGuildRankOrder) triggers, tainting that action -> ADDON_ACTION_FORBIDDEN
+    -- (root-caused by bisection; @Halt57/@woaw guild-note reports). hooksecurefunc
+    -- post-hooks are taint-safe by design -- the pattern ElvUI uses here.
+    if ml and ml.RefreshListDisplay and not GetFFD(ml).colRefreshHooked then
+        GetFFD(ml).colRefreshHooked = true
+        hooksecurefunc(ml, "RefreshListDisplay", WSkin.Debounce(SkinRosterColumns))
     end
     -- Member-name list rides up 2px (one-shot, every anchor preserved).
     local mlBox = ml and ml.ScrollBox
@@ -3366,17 +3373,33 @@ local function Skin_Guild()
             end
         end
         hooksecurefunc(box2, "Update", WSkin.Debounce(SyncRowWidths))
-        cd2:HookScript("OnShow", function()
-            applyPts(box2, boxWide)
-            applyPts(cd2, cdWide)
-            ml:SetWidth(mlWideWidth)
-            SyncRowWidths()
-        end)
-        cd2:HookScript("OnHide", function()
-            applyPts(box2, boxStock)
-            ml:SetWidth(mlStockWidth)
-            SyncRowWidths()
-        end)
+        -- Swap column widths on roster<->chat view change WITHOUT a HookScript
+        -- on the secure ColumnDisplay (cd2): its OnShow/OnHide fires inside the
+        -- secure roster refresh a protected guild action triggers, tainting
+        -- SetNote / SetGuildRankOrder (the guild-note ADDON_ACTION_FORBIDDEN,
+        -- root-caused via bisection). A self-driven throttled OnUpdate on OUR
+        -- OWN frame polls cd2's shown state and applies the swap, so it never
+        -- runs inside that secure execution. Idles when the window is closed.
+        if not GetFFD(cd2)._euiWidthWatcher then
+            GetFFD(cd2)._euiWidthWatcher = true
+            local watcher = CreateFrame("Frame")
+            local wasShown, acc = nil, 0
+            watcher:SetScript("OnUpdate", function(_, elapsed)
+                if f and not f:IsShown() then return end
+                acc = acc + elapsed
+                if acc < 0.1 then return end
+                acc = 0
+                local shown = cd2:IsShown()
+                if shown == wasShown then return end
+                wasShown = shown
+                if shown then
+                    applyPts(box2, boxWide); applyPts(cd2, cdWide); ml:SetWidth(mlWideWidth)
+                else
+                    applyPts(box2, boxStock); ml:SetWidth(mlStockWidth)
+                end
+                SyncRowWidths()
+            end)
+        end
         if cd2:IsShown() then
             applyPts(box2, boxWide)
             applyPts(cd2, cdWide)
