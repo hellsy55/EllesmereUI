@@ -2973,6 +2973,8 @@ local function BuildColorPickerPopup()
     local _confirmed = false
     MakeStyledButton(okBtn, "OK", 10, RB_COLOURS, function()
         RecordRecentColor(HSVtoRGB(currentH, currentS, currentV))
+        -- fire callback when "ok" is clicked, even if no color was changed as to confirm selection
+        FireCallbacks()
         _confirmed = true; popup:Hide()
     end)
 
@@ -3268,6 +3270,91 @@ local function BuildColorSwatch(parentFrame, baseLevel, getValue, setValue, hasA
     end
 
     return swatch, UpdateSwatch
+end
+
+-- default/custom/class color swatch widget
+-- callers track a mode string ("default"/"custom"/"class")
+-- opts:
+--   getMode()           -> "default" | "custom" | "class"
+--   setMode(mode)       -> store the new mode
+--   getCustomRGB()      -> r, g, b of the custom color
+--   setCustomRGB(r,g,b) -> store the picked color
+--   onChange()          -> optional, called after any swatch click
+--   disabled()          -> optional, true to disable all swatches
+--   disabledAlpha       -> optional alpha while disabled (default 0.3)
+--   hasAlpha, overrideSize -> forwarded to BuildColorSwatch
+-- Returns customSwatch, defaultSwatch, classSwatch, Update.
+local DEFAULT_UNTINTED_R, DEFAULT_UNTINTED_G, DEFAULT_UNTINTED_B = 1.0, 0.788, 0.137
+local function BuildTrioColorSwatch(parentFrame, baseLevel, opts)
+    local customSwatch, updateCustom = BuildColorSwatch(parentFrame, baseLevel,
+        function()
+            local r, g, b = opts.getCustomRGB()
+            return r, g, b, 1
+        end,
+        function(r, g, b)
+            opts.setCustomRGB(r, g, b)
+            opts.setMode("custom")
+            if opts.onChange then opts.onChange() end
+        end,
+        opts.hasAlpha, opts.overrideSize)
+    customSwatch:HookScript("OnEnter", function()
+        ShowWidgetTooltip(customSwatch, "Custom Color")
+    end)
+    customSwatch:HookScript("OnLeave", function() HideWidgetTooltip() end)
+
+    local defaultSwatch = BuildColorSwatch(parentFrame, baseLevel,
+        function() return DEFAULT_UNTINTED_R, DEFAULT_UNTINTED_G, DEFAULT_UNTINTED_B, 1 end,
+        function() end,
+        opts.hasAlpha, opts.overrideSize)
+    defaultSwatch:SetScript("OnClick", function()
+        opts.setMode("default")
+        if opts.onChange then opts.onChange() end
+    end)
+    defaultSwatch:SetScript("OnEnter", function()
+        ShowWidgetTooltip(defaultSwatch, "Default")
+    end)
+    defaultSwatch:SetScript("OnLeave", function() HideWidgetTooltip() end)
+
+    local classSwatch
+    if opts.hasClassColor then
+        classSwatch = BuildColorSwatch(parentFrame, baseLevel,
+            function()
+                local _, classFile = UnitClass("player")
+                local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
+                if cc then return cc.r, cc.g, cc.b, 1 end
+                return 1, 0.82, 0, 1
+            end,
+            function() end,
+            opts.hasAlpha, opts.overrideSize)
+        classSwatch:SetScript("OnClick", function()
+            opts.setMode("class")
+            if opts.onChange then opts.onChange() end
+        end)
+        classSwatch:SetScript("OnEnter", function()
+            ShowWidgetTooltip(classSwatch, "Class Colored")
+        end)
+        classSwatch:SetScript("OnLeave", function() HideWidgetTooltip() end)
+    end
+
+    local function Update()
+        local disabled = opts.disabled and opts.disabled()
+        local mode = opts.getMode()
+        if disabled then
+            local a = opts.disabledAlpha or 0.3
+            customSwatch:SetAlpha(a)
+            defaultSwatch:SetAlpha(a)
+            if classSwatch then classSwatch:SetAlpha(a) end
+        else
+            customSwatch:SetAlpha(mode == "custom" and 1 or 0.3)
+            defaultSwatch:SetAlpha(mode == "default" and 1 or 0.3)
+            if classSwatch then classSwatch:SetAlpha(mode == "class" and 1 or 0.3) end
+        end
+        updateCustom()
+    end
+    Update()
+    RegisterWidgetRefresh(Update)
+
+    return customSwatch, defaultSwatch, classSwatch, Update
 end
 
 -- Color Picker  (swatch that opens Blizzard's ColorPickerFrame)
@@ -6818,6 +6905,7 @@ end
 EllesmereUI.BuildSliderCore     = BuildSliderCore
 EllesmereUI.BuildDropdownControl = BuildDropdownControl
 EllesmereUI.BuildColorSwatch    = BuildColorSwatch
+EllesmereUI.BuildTrioColorSwatch = BuildTrioColorSwatch
 EllesmereUI.BuildToggleControl   = BuildToggleControl
 EllesmereUI.BuildInlineToggle    = BuildInlineToggle
 EllesmereUI.BuildCheckboxControl = BuildCheckboxControl
