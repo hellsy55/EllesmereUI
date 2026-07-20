@@ -2565,6 +2565,16 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         -- hover ran Blizzard's secure Update). Gate on HasAction -- a clean
         -- boolean -- never on the texture value, which can be secret.
         icon:SetShown(HasAction(action))
+        -- Saturated baseline on every content change: desaturation is
+        -- otherwise event/hover-managed and survives the slot being emptied,
+        -- so whatever lands next inherited a stale desat until mouseover.
+        -- The recompute below re-applies a genuine on-CD desat when the
+        -- feature is on.
+        if icon.SetDesaturation then
+            icon:SetDesaturation(0)
+        elseif icon.SetDesaturated then
+            icon:SetDesaturated(false)
+        end
     end
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
         local display = C_ActionBar.GetActionDisplayCount(action)
@@ -2594,6 +2604,14 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         else
             cd:Clear()
         end
+    end
+    -- Desaturation / on-CD alpha are otherwise only recomputed by cooldown
+    -- events, and Blizzard's secure Update only runs on hover. A persistent
+    -- EABButton keeps its last desaturated state through being emptied, so
+    -- content moved onto it rendered desaturated until mouseover. Recompute
+    -- from live cooldown data now that the slot's contents changed.
+    if EAB._RefreshCooldownVisuals then
+        EAB._RefreshCooldownVisuals(btn)
     end
 end
 
@@ -9129,6 +9147,9 @@ function EAB:OnInitialize()
             if fd.rankIconAtlas ~= atlas then
                 fd.rankIconAtlas = atlas
                 tex:SetAtlas(atlas, true)
+                if EllesmereUI._RANKDEBUG then
+                    print("|cff33ff99[Rank]|r atlas", atlas)
+                end
             end
             -- Blizzard designed the diamond against the default 45px button;
             -- scale with the button so custom sizes keep the proportions.
@@ -9156,14 +9177,17 @@ function EAB:OnInitialize()
                             if action > 0 and GetActionInfo then
                                 local aType, aID = GetActionInfo(action)
                                 if aType == "item" and aID then
-                                    -- Crafted quality (potions, gear) first,
-                                    -- reagent quality as the fallback family.
+                                    -- Crafted quality ONLY -- the same source
+                                    -- Blizzard's own overlay uses. The reagent
+                                    -- API is a different quality family and
+                                    -- returned a wrong (lower) tier for ranked
+                                    -- potions when used as a fallback here.
                                     local ts = C_TradeSkillUI
                                     quality = ts and ts.GetItemCraftedQualityByItemInfo
                                         and ts.GetItemCraftedQualityByItemInfo(aID)
-                                    if not quality then
-                                        quality = ts and ts.GetItemReagentQualityByItemInfo
-                                            and ts.GetItemReagentQualityByItemInfo(aID)
+                                    if EllesmereUI._RANKDEBUG then
+                                        print("|cff33ff99[Rank]|r item", aID,
+                                            "quality", tostring(quality))
                                     end
                                     -- A freshly looted/moved item can be
                                     -- uncached, reading nil quality until the
