@@ -1517,6 +1517,12 @@ initFrame:SetScript("OnEvent", function(self)
         local W = EllesmereUI.Widgets
         local _, h
 
+        -- Scoped HERE, not shared with BuildMenuBagsXPPage's identically-named
+        -- local: the Icon Size rows below referenced that other function's
+        -- local, which resolved as a nil GLOBAL in this scope -- so the
+        -- disabled-slider tooltip silently never showed (reported 8.5.1).
+        local BLIZZ_DIS_TIP = "This option does not work with Blizzard Bars. Please use Blizzard Edit Mode."
+
         ---------------------------------------------------------------
         --  Unified Get / Set / DB abstraction
         ---------------------------------------------------------------
@@ -2014,6 +2020,10 @@ initFrame:SetScript("OnEvent", function(self)
                       return EAB.db.profile.useBlizzardStyle or false
                   end,
                   disabledTooltip=function()
+                      -- Blizzard Style wins the message: sizing is Blizzard
+                      -- Edit Mode's regardless of any (stale) match link, so
+                      -- "unmatch to edit" would send the user on a dead end.
+                      if EAB.db.profile.useBlizzardStyle then return BLIZZ_DIS_TIP end
                       local k = SelectedKey()
                       local wt = EllesmereUI.GetWidthMatchTarget and EllesmereUI.GetWidthMatchTarget(k)
                       local ht = EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget(k)

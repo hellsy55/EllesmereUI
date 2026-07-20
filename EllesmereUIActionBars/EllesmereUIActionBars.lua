@@ -8771,9 +8771,20 @@ local function RegisterWithUnlockMode()
                 return frame:GetWidth(), frame:GetHeight()
             end,
             linkedDimensions = true,
+            -- Blizzard Style: EUI does not control bar sizing (the options
+            -- Icon Size slider is disabled for the same reason), so refuse
+            -- new width/height matches and never let a match apply or an
+            -- unmatch width-persist write buttonWidth/_matchExtraPixels
+            -- junk into the EUI-style settings.
+            matchUnavailable = function()
+                if EAB.db.profile.useBlizzardStyle then
+                    return EllesmereUI.L("Size matching is unavailable with Blizzard Style Action Bars.")
+                end
+            end,
             setWidth = function(_, w)
                 local s = EAB.db.profile.bars[info.key]
                 if not s then return end
+                if EAB.db.profile.useBlizzardStyle then return end
                 -- Reverse-engineer square button size from total bar width
                 -- using physical pixel math to distribute remainder pixels.
                 local numIcons = s.overrideNumIcons or s.numIcons or info.count
@@ -8814,6 +8825,7 @@ local function RegisterWithUnlockMode()
             setHeight = function(_, h)
                 local s = EAB.db.profile.bars[info.key]
                 if not s then return end
+                if EAB.db.profile.useBlizzardStyle then return end
                 -- Reverse-engineer square button size from total bar height
                 -- using physical pixel math to distribute remainder pixels.
                 local numIcons = s.overrideNumIcons or s.numIcons or info.count

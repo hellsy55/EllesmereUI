@@ -6552,6 +6552,18 @@ local function CreateMover(barKey)
             LayoutActionRow()
             return
         end
+        -- Element-declared dynamic block on NEW matches (clearing above stays
+        -- allowed): e.g. action bars in Blizzard Style, where EUI doesn't
+        -- size the bars and a match would only write junk settings.
+        if elem and elem.matchUnavailable then
+            local why = elem.matchUnavailable(barKey)
+            if why then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(wmBtn, why)
+                end
+                return
+            end
+        end
         CancelPickMode()
         pickMode = "widthMatch"
         pickModeMover = mover
@@ -6571,6 +6583,16 @@ local function CreateMover(barKey)
             RefreshLinkStates()
             LayoutActionRow()
             return
+        end
+        -- Element-declared dynamic block on NEW matches (see wmBtn above).
+        if elem and elem.matchUnavailable then
+            local why = elem.matchUnavailable(barKey)
+            if why then
+                if EllesmereUI.ShowWidgetTooltip then
+                    EllesmereUI.ShowWidgetTooltip(hmBtn, why)
+                end
+                return
+            end
         end
         CancelPickMode()
         pickMode = "heightMatch"
