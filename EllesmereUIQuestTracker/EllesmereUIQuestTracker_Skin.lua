@@ -68,8 +68,8 @@ end
 
 -- Shared font sizes -- read from DB so the options panel can tweak them.
 -- Defaults are seeded in the loader's QT_DEFAULTS table.
-local function GetTitleSize() return EQT.Cfg("titleFontSize") or 13 end
-local function GetObjSize() return EQT.Cfg("objectiveFontSize") or 11 end
+local function GetTitleSize() return EQT.Cfg("titleFontSize")     or 13 end
+local function GetObjSize()   return EQT.Cfg("objectiveFontSize") or 11 end
 
 -------------------------------------------------------------------------------
 -- External weak-keyed flag tables. Never write custom fields onto Blizzard-
@@ -79,15 +79,15 @@ local function GetObjSize() return EQT.Cfg("objectiveFontSize") or 11 end
 -------------------------------------------------------------------------------
 local _hookedTrackers    = setmetatable({}, { __mode = "k" })
 local _hookedBlocks      = setmetatable({}, { __mode = "k" })
-local _blockIcons        = setmetatable({}, { __mode = "k" }) -- block -> our icon texture
+local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our icon texture
 
 -- External weak-keyed flag tables. Every "am I in a state?" bool / number
 -- we used to write directly onto Blizzard-owned frames (block, tracker,
 -- line, FontString, StatusBar, bar, etc.) lives here instead so Blizzard's
 -- iteration of its own tables never sees our additions. This is the
 -- canonical taint-avoidance pattern per CLAUDE.md.
-local _blockFocus          = setmetatable({}, { __mode = "k" }) -- block -> focus texture
-local _headerClickOverlays = setmetatable({}, { __mode = "k" }) -- header -> click overlay
+local _blockFocus        = setmetatable({}, { __mode = "k" })  -- block -> focus texture
+local _headerClickOverlays = setmetatable({}, { __mode = "k" })  -- header -> click overlay
 
 -------------------------------------------------------------------------------
 -- Helpers
@@ -149,9 +149,9 @@ local function StyleFontStringSized(fs, size)
 end
 
 -- Convenience wrappers so every title / objective uses the shared sizes.
-local function StyleFontString(fs) StyleFontStringSized(fs, nil) end
-local function StyleTitleFS(fs) StyleFontStringSized(fs, GetTitleSize()) end
-local function StyleObjectiveFS(fs) StyleFontStringSized(fs, GetObjSize()) end
+local function StyleFontString(fs)     StyleFontStringSized(fs, nil)            end
+local function StyleTitleFS(fs)        StyleFontStringSized(fs, GetTitleSize()) end
+local function StyleObjectiveFS(fs)    StyleFontStringSized(fs, GetObjSize())   end
 
 -- Walk every FontString region on a frame (top-level only) and restyle it.
 -- No recursion: child frames each go through their own skin call.
@@ -251,7 +251,7 @@ local function EnsureAccentDivider(header)
         _headerDividers[header] = tex
     end
     tex:ClearAllPoints()
-    tex:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 7, 0)
+    tex:SetPoint("TOPLEFT",  header, "BOTTOMLEFT",  7, 0)
     tex:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", -1, 0)
     local PP_CORE = EllesmereUI and EllesmereUI.PP
     local PP_SEC  = EllesmereUI and EllesmereUI.PanelPP
@@ -280,7 +280,7 @@ local function StripTextures(frame, keep)
     -- textHeight crashes).
     for _, region in ipairs({ frame:GetRegions() }) do
         if region and region:GetObjectType() == "Texture" and not keep[region]
-            and region.SetTexture then
+           and region.SetTexture then
             region:SetTexture("")
         end
     end
@@ -333,10 +333,10 @@ local function SkinHeader(header)
             if tex.SetDesaturated then tex:SetDesaturated(true) end
             if tex.SetVertexColor then tex:SetVertexColor(r, g, b) end
         end
-        tint(minBtn.GetNormalTexture and minBtn:GetNormalTexture())
-        tint(minBtn.GetPushedTexture and minBtn:GetPushedTexture())
+        tint(minBtn.GetNormalTexture    and minBtn:GetNormalTexture())
+        tint(minBtn.GetPushedTexture    and minBtn:GetPushedTexture())
         tint(minBtn.GetHighlightTexture and minBtn:GetHighlightTexture())
-        tint(minBtn.GetDisabledTexture and minBtn:GetDisabledTexture())
+        tint(minBtn.GetDisabledTexture  and minBtn:GetDisabledTexture())
         if minBtn.GetRegions then
             for _, rg in ipairs({ minBtn:GetRegions() }) do
                 if rg:GetObjectType() == "Texture" then tint(rg) end
@@ -375,9 +375,9 @@ local function SkinHeader(header)
     -- SetCollapsed hook and RestyleAll, so a header first seen in combat
     -- picks its overlay up on the next out-of-combat pass.
     -- Click-anywhere-on-header overlay (taint-safe)
-    if not _headerClickOverlays[header] and header.MinimizeButton then
+    if not _headerClickOverlays[header] and header.MinimizeButton then							  	  
         local minBtn = header.MinimizeButton
-        local overlay = CreateFrame("Button", nil, header)
+        local overlay = CreateFrame("Button", nil, header)							 							 
         overlay:SetFrameLevel(header:GetFrameLevel() + 1)
         overlay:RegisterForClicks("LeftButtonUp")
         overlay:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
@@ -451,18 +451,18 @@ local function _computeClassification(questID)
 
     local key = "normal"
     if C_CampaignInfo and C_CampaignInfo.IsCampaignQuest
-        and C_CampaignInfo.IsCampaignQuest(questID) then
+       and C_CampaignInfo.IsCampaignQuest(questID) then
         key = "campaign"
     elseif cls and Enum and Enum.QuestClassification then
         local QC = Enum.QuestClassification
-        if cls == QC.Important then key = "important"
+        if     cls == QC.Important then key = "important"
         elseif cls == QC.Legendary then key = "legendary"
-        elseif cls == QC.Campaign then key = "campaign"
+        elseif cls == QC.Campaign  then key = "campaign"
         elseif cls == QC.Recurring then key = "recurring"
         end
     end
     if key == "normal" then
-        if freq == 1 then key = "daily"
+        if     freq == 1 then key = "daily"
         elseif freq == 2 then key = "weekly"
         end
     end
@@ -547,15 +547,15 @@ local function ApplyQuestTypeIcon(block)
     -- fields directly (the icon you SEE is Blizzard's, and our overlay
     -- texture is mouse-pass-through, so it eats the visual click target).
     local hasItem = (block.ItemButton and block.ItemButton.IsShown
-            and block.ItemButton:IsShown())
-        or (block.itemButton and block.itemButton.IsShown
-            and block.itemButton:IsShown())
+                     and block.ItemButton:IsShown())
+                 or (block.itemButton and block.itemButton.IsShown
+                     and block.itemButton:IsShown())
     local hasLFG  = (block.groupFinderButton and block.groupFinderButton.IsShown
-            and block.groupFinderButton:IsShown())
-        or (block.GroupFinderButton and block.GroupFinderButton.IsShown
-            and block.GroupFinderButton:IsShown())
-        or (block.rightEdgeFrame and block.rightEdgeFrame.IsShown
-            and block.rightEdgeFrame:IsShown())
+                     and block.groupFinderButton:IsShown())
+                 or (block.GroupFinderButton and block.GroupFinderButton.IsShown
+                     and block.GroupFinderButton:IsShown())
+                 or (block.rightEdgeFrame and block.rightEdgeFrame.IsShown
+                     and block.rightEdgeFrame:IsShown())
     if hasItem or hasLFG then
         if _blockIcons[block] then _blockIcons[block]:Hide() end
         return
@@ -658,14 +658,14 @@ end
 
 -- Lightweight color-only refresh. Called on hover (OnEnter/OnLeave) and
 -- from the stamped fast-path in SkinBlock.
-function ApplyFocusHighlight(block) -- global to file
+function ApplyFocusHighlight(block)  -- global to file
     if not block then return end
     local fs = GetBlockTitleFS(block)
     if not fs then return end
     local qID     = (type(block.id) == "number") and block.id or nil
     local isFocus = qID and (qID == GetSuperTrackedIDCached())
     local isDone  = qID and C_QuestLog and C_QuestLog.IsComplete
-        and C_QuestLog.IsComplete(qID)
+                    and C_QuestLog.IsComplete(qID)
     local r, g, b
     if isFocus then
         r, g, b = GetFocusRGB()
@@ -755,7 +755,7 @@ local function ProcessBlockChildren(frame, depth)
             local ok, otype = pcall(child.GetObjectType, child)
             if ok then
                 if (otype == "Frame" or otype == "Button")
-                    and not child.Tooltip then
+                       and not child.Tooltip then
                     if child.GetRegions then
                         for _, rg in ipairs({ child:GetRegions() }) do
                             local ot = rg.GetObjectType and rg:GetObjectType()
@@ -999,7 +999,6 @@ local function HookTracker(tracker)
         if tracker.Header.SetCollapsed then
             hooksecurefunc(tracker.Header, "SetCollapsed", function(self)
                 if ShouldSkipSkin() then return end
-
                 SkinHeader(self)
             end)
         end
@@ -1008,7 +1007,6 @@ local function HookTracker(tracker)
     if tracker.AddBlock then
         hooksecurefunc(tracker, "AddBlock", function(_, block)
             if ShouldSkipSkin() then return end
-
             if block then _skinned[block] = nil end
             SkinBlock(block)
         end)
@@ -1026,7 +1024,6 @@ local function HookTracker(tracker)
             C_Timer.After(0, function()
                 _updateDirty = false
                 if ShouldSkipSkin() then return end
-
                 if tracker.Header then EnsureAccentDivider(tracker.Header) end
                 if EQT.QueueResize then EQT.QueueResize() end
                 if tracker.usedBlocks then
@@ -1164,7 +1161,8 @@ function EQT.InitSkin()
     if not EQT._eventRegistrations then EQT._eventRegistrations = {} end
     local idx = #EQT._eventFrames + 1
     EQT._eventFrames[idx] = evt
-    EQT._eventRegistrations[idx] = {"QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE", "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED" }
+    EQT._eventRegistrations[idx] = { "QUEST_LOG_UPDATE", "QUEST_WATCH_LIST_CHANGED", "SCENARIO_UPDATE",
+        "SCENARIO_CRITERIA_UPDATE", "TRACKED_ACHIEVEMENT_LIST_CHANGED", "TRACKED_RECIPE_UPDATE", "SUPER_TRACKING_CHANGED" }
 
     -- OTF.Update / ObjectiveTracker_Update hooks REMOVED (session 68).
     -- They only called QueueResize, which is already triggered by
@@ -1197,7 +1195,7 @@ function EQT.InitSkin()
     -- changes the UI accent color in Global Settings.
     if EllesmereUI and EllesmereUI.RegAccent then
         EllesmereUI.RegAccent({ type = "callback", fn = function()
-                if EQT.RestyleAll then EQT.RestyleAll() end
-            end })
+            if EQT.RestyleAll then EQT.RestyleAll() end
+        end })
     end
 end
