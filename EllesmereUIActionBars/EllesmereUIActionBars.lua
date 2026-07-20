@@ -9188,21 +9188,44 @@ function EAB:OnInitialize()
                                     -- nil. itemID stays as the fallback.
                                     local ts = C_TradeSkillUI
                                     local getQ = ts and ts.GetItemCraftedQualityByItemInfo
-                                    local gal = GetActionLink
-                                        or (C_ActionBar and C_ActionBar.GetActionLink)
-                                    local link = gal and gal(action)
-                                    if getQ then
-                                        quality = (link and getQ(link)) or getQ(aID)
+                                    quality = getQ and getQ(aID)
+                                    -- Live diagnosis (2026-07-19): for ranked
+                                    -- consumables on the bar, EVERY
+                                    -- C_TradeSkillUI read off the bare itemID
+                                    -- is nil (and GetActionLink returns nil,
+                                    -- so no link is reachable), while the
+                                    -- reagent API returns a flat 2 for every
+                                    -- ranked item -- a different quality
+                                    -- family, never correct here. The action
+                                    -- TOOLTIP is the one source that renders
+                                    -- the true rank (as a quality-tier atlas
+                                    -- tag in its name line); parse the tier
+                                    -- from it. pcall-guarded: tooltip text
+                                    -- surfaces can be restricted, and a failed
+                                    -- parse must read as "no rank", never
+                                    -- error the scan.
+                                    if not quality and C_TooltipInfo and C_TooltipInfo.GetAction then
+                                        local okT, tq = pcall(function()
+                                            local tip = C_TooltipInfo.GetAction(action)
+                                            local lines = tip and tip.lines
+                                            if not lines then return nil end
+                                            local nL = #lines
+                                            if nL > 3 then nL = 3 end
+                                            for li = 1, nL do
+                                                local lt = lines[li] and lines[li].leftText
+                                                if type(lt) == "string" then
+                                                    local t = lt:match("[Qq]uality%-[Tt]ier(%d)")
+                                                    if t then return tonumber(t) end
+                                                end
+                                            end
+                                        end)
+                                        if okT then quality = tq end
                                     end
                                     if EllesmereUI._RANKDEBUG then
                                         pcall(function()
-                                            local rq = ts and ts.GetItemReagentQualityByItemInfo
                                             print("|cff33ff99[Rank]|r item", aID,
-                                                "link", tostring(link),
-                                                "q(link)", tostring(link and getQ and getQ(link)),
                                                 "q(id)", tostring(getQ and getQ(aID)),
-                                                "reagent(link)", tostring(link and rq and rq(link)),
-                                                "reagent(id)", tostring(rq and rq(aID)))
+                                                "final", tostring(quality))
                                         end)
                                     end
                                     -- A freshly looted/moved item can be
