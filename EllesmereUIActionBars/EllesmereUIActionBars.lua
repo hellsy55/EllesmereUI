@@ -2565,6 +2565,38 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         -- hover ran Blizzard's secure Update). Gate on HasAction -- a clean
         -- boolean -- never on the texture value, which can be secret.
         icon:SetShown(HasAction(action))
+        -- Saturated baseline on every content change: desaturation is
+        -- otherwise event/hover-managed and survives the slot being emptied,
+        -- so whatever lands next inherited a stale desat until mouseover.
+        -- The recompute below re-applies a genuine on-CD desat when the
+        -- feature is on.
+        if icon.SetDesaturation then
+            icon:SetDesaturation(0)
+        elseif icon.SetDesaturated then
+            icon:SetDesaturated(false)
+        end
+        -- Usable tint is a separate stale channel (vertex color): a slot
+        -- whose item hit zero quantity renders grey, and the grey survives
+        -- the content change exactly like the desat did -- usability events
+        -- only fire on usability CHANGES, so nothing repaints until hover.
+        -- Mirror Blizzard's UpdateUsable coloring (live ActionButton.lua);
+        -- pcall-guarded in case the usability booleans are restricted, in
+        -- which case the tint is left for the usable-event path.
+        pcall(function()
+            local isUsable, noMana
+            if C_ActionBar and C_ActionBar.IsUsableAction then
+                isUsable, noMana = C_ActionBar.IsUsableAction(action)
+            elseif IsUsableAction then
+                isUsable, noMana = IsUsableAction(action)
+            end
+            if isUsable then
+                icon:SetVertexColor(1, 1, 1)
+            elseif noMana then
+                icon:SetVertexColor(0.5, 0.5, 1.0)
+            elseif isUsable ~= nil then
+                icon:SetVertexColor(0.4, 0.4, 0.4)
+            end
+        end)
     end
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
         local display = C_ActionBar.GetActionDisplayCount(action)
@@ -2594,6 +2626,14 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         else
             cd:Clear()
         end
+    end
+    -- Desaturation / on-CD alpha are otherwise only recomputed by cooldown
+    -- events, and Blizzard's secure Update only runs on hover. A persistent
+    -- EABButton keeps its last desaturated state through being emptied, so
+    -- content moved onto it rendered desaturated until mouseover. Recompute
+    -- from live cooldown data now that the slot's contents changed.
+    if EAB._RefreshCooldownVisuals then
+        EAB._RefreshCooldownVisuals(btn)
     end
 end
 
@@ -3572,30 +3612,24 @@ local function LayoutBar(key)
                 btn.SpellActivationAlert:SetScale(1)
             end
 
-            -- Profession quality diamond overlays (added in Dragonflight)
+            -- Profession quality diamond overlays (added in Dragonflight):
+            -- EAB paints its own rank icon (the quality scan in OnEnable).
+            -- Blizzard's overlay is created lazily inside the secure button
+            -- Update, which our buttons no longer receive events for, so it
+            -- only ever appeared after a mouseover -- and forcing the update
+            -- from addon code writes the lazily-created frame onto the
+            -- secure button's table (tainted field). Blizzard's overlay
+            -- therefore stays permanently hidden so nothing double-draws.
             if btn.ProfessionQualityOverlayFrame then
-                btn.ProfessionQualityOverlayFrame:SetShown(s.showRankIcon and true or false)
+                btn.ProfessionQualityOverlayFrame:SetShown(false)
                 if not EFD(btn).qualityHooked then
                     btn.ProfessionQualityOverlayFrame:HookScript("OnShow", function(self)
-                        local bInfo = buttonToBar[btn]
-                        local bs = bInfo and EAB.db.profile.bars[bInfo.barKey]
-                        if not bs or not bs.showRankIcon then
-                            self:SetShown(false)
-                            return
-                        end
-                        -- Hide stale overlays after spec swap: if the slot
-                        -- no longer holds an item, the overlay is ghost state.
-                        local action = btn:GetAttribute("action") or 0
-                        if action > 0 and GetActionInfo then
-                            local actionType = GetActionInfo(action)
-                            if actionType ~= "item" then
-                                self:SetShown(false)
-                            end
-                        end
+                        self:SetShown(false)
                     end)
                     EFD(btn).qualityHooked = true
                 end
             end
+            if EAB._QueueRankScan then EAB._QueueRankScan() end
 
             if not showEmpty and not (_gridState.shown or ShouldQuickKeybindSurfaceBar(s)) and not ButtonHasAction(btn, info.blizzBtnPrefix) then
                 btn:SetAlpha(0)
@@ -9084,77 +9118,170 @@ function EAB:OnInitialize()
     end
 
 
-    -- Hide quality overlay on newly-placed items (overlay is created lazily
-    -- by Blizzard after the slot changes, so defer the check by one frame).
-    -- Coalesced: ACTIONBAR_SLOT_CHANGED storms (mouseover-conditional macros
-    -- re-resolving) collapse into one deferred scan per frame.
+    -- Rank (crafted quality) icons: EAB paints its own overlay texture per
+    -- button. Blizzard's ProfessionQualityOverlayFrame is created lazily
+    -- inside the secure button Update; our buttons no longer receive
+    -- ACTIONBAR_SLOT_CHANGED (central dispatcher owns it), so Blizzard's
+    -- overlay only ever appeared after a mouseover -- and forcing
+    -- UpdateProfessionQuality() from addon code writes the lazily-created
+    -- frame onto the secure button's table (tainted field on a protected
+    -- frame). Self-painting from EFD sidesteps both: no button-table
+    -- writes, no reliance on Blizzard's update timing. Blizzard's overlay
+    -- stays hidden everywhere (apply pass + scan + OnShow hook) so the two
+    -- renderers never double-draw. Coalesced: ACTIONBAR_SLOT_CHANGED storms
+    -- (mouseover-conditional macros re-resolving) collapse into one
+    -- deferred scan per frame.
     do
         local qf = CreateFrame("Frame")
         local _qPending = false
+        local _rankAtlas = {}       -- quality -> atlas name (false = none found)
+        local QueueQualityScan
+
+        local function RankAtlasFor(q)
+            local hit = _rankAtlas[q]
+            if hit ~= nil then return hit or nil end
+            local probe = C_Texture and C_Texture.GetAtlasInfo
+            local names = {
+                "Professions-Icon-Quality-Tier" .. q .. "-Inv-Small",
+                "Professions-Icon-Quality-Tier" .. q .. "-Small",
+                "Professions-Icon-Quality-Tier" .. q,
+            }
+            for i = 1, #names do
+                if probe and probe(names[i]) then
+                    _rankAtlas[q] = names[i]
+                    return names[i]
+                end
+            end
+            _rankAtlas[q] = false
+            return nil
+        end
+
+        local function SetRankShown(btn, atlas)
+            local fd = EFD(btn)
+            if not atlas then
+                if fd.rankIconTex then fd.rankIconTex:Hide() end
+                return
+            end
+            local tex = fd.rankIconTex
+            if not tex then
+                -- First paint creates the holder. A new cosmetic child frame
+                -- writes nothing onto the secure button's table; skip only
+                -- in combat lockdown (next out-of-combat scan paints it).
+                if InCombatLockdown() then return end
+                local holder = CreateFrame("Frame", nil, btn)
+                holder:SetAllPoints(btn)
+                holder:SetFrameLevel((btn:GetFrameLevel() or 1) + 18)
+                holder:EnableMouse(false)
+                tex = holder:CreateTexture(nil, "OVERLAY", nil, 7)
+                fd.rankIconHolder = holder
+                fd.rankIconTex = tex
+            end
+            if fd.rankIconAtlas ~= atlas then
+                fd.rankIconAtlas = atlas
+                -- The atlas name comes straight from Blizzard's quality info
+                -- (or the probe-verified fallback), but guard anyway: an
+                -- unknown atlas must read as no-rank, not an error.
+                if not pcall(tex.SetAtlas, tex, atlas, true) then
+                    fd.rankIconAtlas = nil
+                    tex:Hide()
+                    return
+                end
+                if EllesmereUI._RANKDEBUG then
+                    print("|cff33ff99[Rank]|r atlas", atlas)
+                end
+            end
+            -- Mirror Blizzard's overlay anchor: its template centers an
+            -- atlas-sized texture on a point 14,-14 from the button's
+            -- TOPLEFT (designed against the default 45px button; scale with
+            -- the button so custom sizes keep the proportions).
+            local sc = (btn:GetWidth() or 45) / 45
+            tex:ClearAllPoints()
+            tex:SetPoint("CENTER", btn, "TOPLEFT", 14 * sc, -14 * sc)
+            tex:SetScale(sc)
+            tex:Show()
+            fd.rankIconHolder:Show()
+        end
+
         local function QualityScan()
-                _qPending = false
-                local bars = EAB.db and EAB.db.profile and EAB.db.profile.bars
-                if not bars then return end
-                for _, info in ipairs(BAR_CONFIG) do
-                    local btns = barButtons[info.key]
-                    local s = bars[info.key]
-                    if btns and s and s.showRankIcon then
-                        -- Feature ON: Blizzard does NOT refresh the quality
-                        -- overlay when an item is swapped in place (rank 1 ->
-                        -- rank 2 potion in the same slot), so it keeps showing
-                        -- the previous item's rank until a hover forces the
-                        -- button's own update. Re-run that update here so the
-                        -- rank tracks the new item immediately.
-                        for _, btn in ipairs(btns) do
-                            -- Rank icons only apply to items, so only run the
-                            -- (item-info-querying) refresh on item slots -- an
-                            -- ACTIONBAR_SLOT_CHANGED storm from mouseover-macros
-                            -- re-resolving fires in combat, and this must not
-                            -- do a quality lookup on every spell button per
-                            -- frame. A non-item slot (spell swapped in, or the
-                            -- slot cleared) just gets any lingering rank hidden.
+            _qPending = false
+            local bars = EAB.db and EAB.db.profile and EAB.db.profile.bars
+            if not bars then return end
+            for _, info in ipairs(BAR_CONFIG) do
+                local btns = barButtons[info.key]
+                local s = bars[info.key]
+                if btns and s then
+                    local featureOn = s.showRankIcon and true or false
+                    for _, btn in ipairs(btns) do
+                        local rankAtlas
+                        if featureOn then
                             local action = btn:GetAttribute("action") or 0
-                            if action > 0 and GetActionInfo
-                               and GetActionInfo(action) == "item" then
-                                -- Only refresh when the overlay ALREADY exists:
-                                -- UpdateProfessionQuality lazily CREATES the
-                                -- overlay and writes it onto the secure action
-                                -- button's table -- under our execution that
-                                -- is a tainted field write (and a combat-time
-                                -- frame creation during slot-changed storms).
-                                -- A stale WRONG rank always has an existing
-                                -- overlay, so the gate loses nothing; a slot
-                                -- that never had one stays on Blizzard's own
-                                -- lazy creation, exactly as before this fix.
-                                if btn.ProfessionQualityOverlayFrame
-                                   and btn.UpdateProfessionQuality then
-                                    btn:UpdateProfessionQuality()
+                            if action > 0 then
+                                -- Blizzard's own source, from live
+                                -- ActionButton.lua UpdateProfessionQuality: a
+                                -- dedicated action API that returns the
+                                -- overlay atlas directly. Every other surface
+                                -- is dead from an action slot on live
+                                -- (verified via in-game debug 2026-07-19):
+                                -- C_TradeSkillUI reads off the bare itemID
+                                -- are nil (the reagent one returns a flat 2
+                                -- for every ranked item), GetActionLink
+                                -- returns nil, and the tooltip's name line
+                                -- carries no quality markup.
+                                local ab = C_ActionBar
+                                if ab and ab.GetProfessionQualityInfo
+                                   and (not ab.IsItemAction or ab.IsItemAction(action)) then
+                                    local qi = ab.GetProfessionQualityInfo(action)
+                                    rankAtlas = qi and qi.iconInventory
                                 end
-                            else
-                                local ov = btn.ProfessionQualityOverlayFrame
-                                if ov and ov:IsShown() then ov:SetShown(false) end
+                                -- Older-client fallback: crafted quality by
+                                -- itemID, mapped through the atlas probe.
+                                if not rankAtlas and GetActionInfo then
+                                    local aType, aID = GetActionInfo(action)
+                                    if aType == "item" and aID then
+                                        local ts = C_TradeSkillUI
+                                        local q = ts and ts.GetItemCraftedQualityByItemInfo
+                                            and ts.GetItemCraftedQualityByItemInfo(aID)
+                                        if type(q) == "number" and q >= 1 and q <= 5 then
+                                            rankAtlas = RankAtlasFor(q)
+                                        end
+                                    end
+                                end
+                                if EllesmereUI._RANKDEBUG and rankAtlas ~= nil then
+                                    pcall(function()
+                                        print("|cff33ff99[Rank]|r action", action,
+                                            "atlas", tostring(rankAtlas))
+                                    end)
+                                end
                             end
                         end
-                    elseif btns and s and not s.showRankIcon then
-                        for _, btn in ipairs(btns) do
-                            local ov = btn.ProfessionQualityOverlayFrame
-                            if ov and ov:IsShown() then
-                                ov:SetShown(false)
-                                if not EFD(btn).qualityHooked then
-                                    ov:HookScript("OnShow", function(self2)
-                                        local bInfo = buttonToBar[btn]
-                                        local bs = bInfo and EAB.db.profile.bars[bInfo.barKey]
-                                        if not bs or not bs.showRankIcon then
-                                            self2:SetShown(false)
-                                        end
-                                    end)
-                                    EFD(btn).qualityHooked = true
-                                end
+                        SetRankShown(btn, rankAtlas)
+                        -- Blizzard's overlay must never draw over ours: it can
+                        -- pre-exist this fix or get shown by a hover-driven
+                        -- lazy creation. Hide + install the permanent OnShow
+                        -- hide for overlays born after the apply pass ran.
+                        local ov = btn.ProfessionQualityOverlayFrame
+                        if ov then
+                            if ov:IsShown() then ov:SetShown(false) end
+                            if not EFD(btn).qualityHooked then
+                                ov:HookScript("OnShow", function(self2)
+                                    self2:SetShown(false)
+                                end)
+                                EFD(btn).qualityHooked = true
                             end
                         end
                     end
                 end
+            end
         end
+
+        QueueQualityScan = function()
+            if not _qPending then
+                _qPending = true
+                C_Timer_After(0, QualityScan)
+            end
+        end
+        EAB._QueueRankScan = QueueQualityScan
+
         qf:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
         -- Loadout/spec swap changes slot CONTENTS but does not reliably fire
         -- ACTIONBAR_SLOT_CHANGED for our EABButtons (same reason the spell
@@ -9163,12 +9290,19 @@ function EAB:OnInitialize()
         -- SPELLS_CHANGED covers that swap; the macro name is handled by the
         -- ForceButtonRefresh sweep on the same event.
         qf:RegisterEvent("SPELLS_CHANGED")
-        qf:SetScript("OnEvent", function()
-            if not _qPending then
-                _qPending = true
-                C_Timer_After(0, QualityScan)
-            end
-        end)
+        qf:SetScript("OnEvent", QueueQualityScan)
+        -- A hover is what makes Blizzard lazily CREATE its overlay (and shows
+        -- it in the same breath) -- and no slot event fires from hovering, so
+        -- the suppression + our repaint would otherwise lag until the next
+        -- slot change. Re-scan off the tooltip hook (coalesced, deferred to a
+        -- clean context; same GameTooltip hook pattern as tooltip
+        -- suppression). Also converges anything the hover's item-data load
+        -- just made resolvable.
+        if GameTooltip then
+            hooksecurefunc(GameTooltip, "SetAction", QueueQualityScan)
+        end
+        -- Initial paint (login / reload): bars applied before this block ran.
+        QueueQualityScan()
     end
 
     SLASH_ELLESMEREACTIONBARS1 = "/eab"
