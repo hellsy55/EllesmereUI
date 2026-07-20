@@ -2291,6 +2291,21 @@ local cdmBarIcons = {}
 -- Fast barData lookup by key (rebuilt in BuildAllCDMBars, avoids linear scan per tick)
 local barDataByKey = {}
 
+-- Shown-alpha for cd-state / fake-active restore paths: EffectiveBarAlpha,
+-- except 0 while the icon's bar is visibility-hidden. Restores that painted
+-- EffectiveBarAlpha directly resurrected icons on bars the visibility
+-- engine had hidden (alpha 0): any cooldown/aura flip repainted them
+-- visible until the next visibility pass. Overflow-diverted frames follow
+-- the bar they are painted on (same rule as the fake-active engine's
+-- FrameBaseAlpha, which routes through here).
+local function IconShownAlpha(fc, barData)
+    local bk = fc and (fc._overflowLayoutBar or fc.barKey)
+    local bf = bk and cdmBarFrames[bk]
+    if bf and bf._visHidden then return 0 end
+    return EffectiveBarAlpha(barData or (bk and barDataByKey[bk]))
+end
+ns.IconShownAlpha = IconShownAlpha
+
 -- Expose our CDM bar frames so the glow system can reference them
 ns.GetCDMBarFrame = function(barKey)
     return cdmBarFrames[barKey]
@@ -3472,6 +3487,30 @@ BuildCDMBar = function(barIndex)
                 end
                 _CDMApplyVisibility()
             end
+            -- Visibility-hidden: park the bar offscreen instead of tracking
+            -- the cursor. Alpha alone cannot keep the icons invisible -- the
+            -- engine re-raises item alpha through paths no hook can see
+            -- (SetAlphaFromBoolean, alpha animations) whenever cooldown/aura
+            -- state changes, so a hidden bar kept flashing back mid-screen
+            -- riding the cursor (same lesson as the unclaimed-frame park in
+            -- EllesmereUICdmHooks). Icons are anchored to this container, so
+            -- the park carries them along; position is immune to every alpha
+            -- path. The lastMX reset forces a re-SetPoint on the first frame
+            -- after the visibility engine un-hides the bar.
+            -- The GetLeft probe re-asserts the park if anything moved the
+            -- container back on-screen while hidden (LayoutCDMBar, a
+            -- rebuild, or a stale _mouseParked flag surviving an
+            -- unanchor/re-anchor cycle -- teardown never clears it).
+            if frame._visHidden then
+                if not frame._mouseParked or (frame:GetLeft() or 0) > -9000 then
+                    frame._mouseParked = true
+                    lastMX, lastMY = nil, nil
+                    frame:ClearAllPoints()
+                    frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", -10000, -10000)
+                end
+                return
+            end
+            frame._mouseParked = false
             -- Throttled mouse-through re-assert: the Decorate/Show/Cooldown
             -- path can re-enable mouse on icons mid-session, and an icon
             -- riding the cursor with mouse enabled intermittently kills
@@ -5493,7 +5532,7 @@ local function RefreshCDMIconAppearance(barKey)
                 local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                 if cse == "hiddenOnCD" or cse == "hiddenReady" then
                     local hide = (cse == "hiddenOnCD") == onCD
-                    icon:SetAlpha(hide and 0 or EffectiveBarAlpha(barData))
+                    icon:SetAlpha(hide and 0 or IconShownAlpha(fc, barData))
                     if fc then
                         fc._cdStateHidden = hide or false
                         if ns.SetCdStateShiftHidden then
@@ -5504,7 +5543,10 @@ local function RefreshCDMIconAppearance(barKey)
                     -- Identical to hiddenOnCD but with a customizable opacity instead
                     -- of 0. Reuse the _cdStateHidden flag as "cd-state owns this alpha"
                     -- so the opacity appliers leave the lowered value alone.
-                    icon:SetAlpha(onCD and (csSs.cdStateLowerAlpha or 0.5) or EffectiveBarAlpha(barData))
+                    -- A visibility-hidden bar stays at 0 in both states.
+                    local csBase = IconShownAlpha(fc, barData)
+                    icon:SetAlpha(csBase == 0 and 0
+                        or (onCD and (csSs.cdStateLowerAlpha or 0.5) or csBase))
                     if fc then
                         fc._cdStateHidden = onCD or false
                         if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
@@ -5513,7 +5555,7 @@ local function RefreshCDMIconAppearance(barKey)
                     -- Clear stale hidden state when switching to a glow effect
                     if fc and fc._cdStateHidden then
                         fc._cdStateHidden = false
-                        icon:SetAlpha(EffectiveBarAlpha(barData))
+                        icon:SetAlpha(IconShownAlpha(fc, barData))
                     end
                     if fc and ns.SetCdStateShiftHidden then
                         ns.SetCdStateShiftHidden(fc, false)
@@ -5565,7 +5607,7 @@ local function RefreshCDMIconAppearance(barKey)
                 -- so don't clear it here or the icon flashes visible.
                 if not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then
                     fc._cdStateHidden = false
-                    icon:SetAlpha(EffectiveBarAlpha(barData))
+                    icon:SetAlpha(IconShownAlpha(fc, barData))
                     if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
                 end
             end

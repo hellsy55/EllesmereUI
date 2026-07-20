@@ -2555,7 +2555,7 @@ local function DecorateFrame(frame, barData)
                     if fc2 and fc2._cdStateHidden then
                         fc2._cdStateHidden = false
                         local bd2 = barDataByKey and barDataByKey[bk2]
-                        frame:SetAlpha(ns.EffectiveBarAlpha(bd2))
+                        frame:SetAlpha(ns.IconShownAlpha(fc2, bd2))
                     end
                     -- (cse is already normalized, so Shift variants never land here.)
                     if fc2 and ns.SetCdStateShiftHidden then
@@ -2593,12 +2593,14 @@ local function DecorateFrame(frame, barData)
                         local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
                         local myCse = self.cse
                         local bd3 = barDataByKey and barDataByKey[bk3]
-                        local baseA = ns.EffectiveBarAlpha(bd3)
+                        local baseA = ns.IconShownAlpha(fc3, bd3)
                         if myCse == "lowerAlphaOnCD" then
                             -- Lowered (not hidden): reuse _cdStateHidden as the
                             -- "cd-state owns this alpha" flag so the opacity appliers
                             -- leave the lowered value in place, exactly like hiddenOnCD.
-                            frame:SetAlpha(onCD and (self.lowAlpha or 0.5) or baseA)
+                            -- A visibility-hidden bar (baseA 0) stays at 0 in both states.
+                            frame:SetAlpha(baseA == 0 and 0
+                                or (onCD and (self.lowAlpha or 0.5) or baseA))
                             if fc3 then
                                 fc3._cdStateHidden = onCD or false
                                 if ns.SetCdStateShiftHidden then
