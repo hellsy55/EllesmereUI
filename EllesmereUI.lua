@@ -4481,8 +4481,14 @@ do
         [12294]   = 1,  -- Mortal Strike
         [7384]    = 1,  -- Overpower
         [1464]    = 1,  -- Slam
-        [163201]  = 1,  -- Execute (Arms)
-        [5308]    = 1,  -- Execute (base)
+        -- Execute: in 12.x a single Arms Execute press fires TWO SUCCEEDED
+        -- events as a pair (260798 + 281000), not 163201/5308 (in-game trace,
+        -- LeoS report). All four are listed and share the executeWindow echo
+        -- guard below so one press only ever consumes one charge.
+        [260798]  = 1,  -- Execute (Arms, real SUCCEEDED id)
+        [281000]  = 1,  -- Execute (Arms, paired SUCCEEDED id)
+        [163201]  = 1,  -- Execute (Arms, legacy id kept as a fallback)
+        [5308]    = 1,  -- Execute (base, kept as a fallback)
         [260643]  = 1,  -- Skullsplitter
         [34428]   = 1,  -- Victory Rush
         [202168]  = 1,  -- Impending Victory
@@ -4498,6 +4504,10 @@ do
         [845]  = true,  -- Cleave
     }
     local fobWindow = 0  -- suppress a possibly-echoed Slam cast event
+    -- Execute fires a pair of SUCCEEDED ids for one press (see SPENDERS); the
+    -- first to spend opens EllesmereUI._ssExecWindow so the second is skipped
+    -- -> one charge. Stored as a field (not a local) because this do-block's
+    -- main chunk sits at Lua's 200-local cap.
     local bladestormUntil = 0  -- suppress Sweeping Strikes spends until this time
 
     -- Deduplicate cast events via GUID
@@ -4505,19 +4515,44 @@ do
     local guidCount = 0
 
     -- A charge is only consumed when the strike can sweep onto a second
-    -- enemy (~8 yd). Count the hostile target plus enemy nameplates inside
-    -- the index-2 interact probe (~11 yd, slightly generous; same probe as
-    -- the Whirlwind tracker above). `need` = how many enemies must be in
-    -- reach (2 for a sweep partner, 3 for a Fervor of Battle trigger).
+    -- enemy. `need` = how many enemies must be in reach (2 for a sweep
+    -- partner, 3 for a Fervor of Battle trigger).
     -- NOTE: relies on enemy nameplates showing for off-target enemies.
     -- InReach is block-scoped (no upvalues from the call) so EnemiesInReach
     -- allocates nothing -- it runs on every tracked spender cast in combat.
-    -- idx defaults to the index-2 trade probe; index 3 (duel, ~9.9 yd) is
-    -- exercised by the _SSDEBUG comparison output as a candidate tighter fit
-    -- for the real 8 yd sweep.
+    --
+    -- Range gauge: the cleave is player-anchored at ~6 yd (melee), NOT the
+    -- ~11 yd the interact probe measures. H3llfish range-tracker test: the
+    -- game cleaves out to ~6 yd, but the old index-2 probe fired to ~8-11 yd,
+    -- so the 6-11 yd band produced false depletions.
+    --
+    -- C_Spell.IsSpellInRange on Mortal Strike gives a ~5 yd nameplate check
+    -- that tracks the cleave (verified in-game: true at 4-5 yd where it
+    -- cleaves, false past ~6 yd). It is the TIGHTEST primitive that resolves
+    -- on nameplate units: IsItemInRange does NOT work on nameplates (tested --
+    -- always false), so LibRangeCheck's 6/7 yd harm items are unavailable
+    -- here, and CheckInteractDistance bottoms out at ~9.9 yd. So ~5 yd is the
+    -- closest we can measure; the residual ~1 yd gap (cleaves at 5-6 yd but
+    -- the probe reads false) is an UNDER-count -- the safe direction: the bar
+    -- reads slightly full, never empty, and self-heals via CdmSweepSync at the
+    -- next combat lull. Fall back to the interact probe only when
+    -- IsSpellInRange can't answer (nil, or a secret value inside instanced
+    -- content) so the bar never regresses to "never depletes". idx defaults to
+    -- the index-2 trade probe.
     local function InReach(u, idx)
         if not (UnitExists(u) and UnitCanAttack("player", u) and not UnitIsDead(u)) then
             return false
+        end
+        local isr = C_Spell and C_Spell.IsSpellInRange
+        if isr then
+            -- Resolve the live override id (a talent-replaced base id returns
+            -- nil), matching the nameplate range-text / crosshair probes.
+            local ms = (C_SpellBook and C_SpellBook.FindSpellOverrideByID
+                and C_SpellBook.FindSpellOverrideByID(12294)) or 12294
+            local r = isr(ms, u)
+            if not (issecretvalue and issecretvalue(r)) and r ~= nil then
+                return r == true
+            end
         end
         return CheckInteractDistance(u, idx or 2) or false
     end
@@ -4583,6 +4618,20 @@ do
             if guidCount > 200 then wipe(seenGUID); guidCount = 0 end
         end
 
+        -- Catch-all trace: the live reach gauge (IsSpellInRange on Mortal
+        -- Strike ~5 yd, see InReach), regardless of stacks. This is the line
+        -- that identified the Execute cast ids and the cleave range.
+        -- Diagnostic only (_SSDEBUG).
+        if EllesmereUI._SSDEBUG then
+            local nm = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or "?"
+            local cls = (spellID == SWEEP or (CS_GENERATORS[spellID] and broadKnown)) and "ACTIVATE"
+                or (SPENDERS[spellID] and "SPENDER")
+                or (FOB_TRIGGERS[spellID] and "FoB")
+                or "ignored"
+            dbg(("cast %d %s [%s] stacks=%d reach=%s"):format(
+                spellID, nm, cls, stacks, tostring(EnemiesInReach(2))))
+        end
+
         if spellID == SWEEP
            or (CS_GENERATORS[spellID] and broadKnown) then
             stacks = MaxStacks()
@@ -4613,17 +4662,21 @@ do
             -- 1269383: Master of Warfare replaces Slam with Heroic Strike,
             -- so the echo carries that id instead.
             if (spellID == 1464 or spellID == 1269383) and GetTime() < fobWindow then return end
-            -- No sweep partner in range -> the game doesn't consume a charge
-            local reach = EnemiesInReach(2)
-            if EllesmereUI._SSDEBUG then
-                -- Side-by-side probe comparison: index 2 (trade, ~11.1 yd,
-                -- live) vs index 3 (duel, ~9.9 yd, candidate).
-                dbg(("spend %d: reach11=%s reach10=%s stacks=%d"):format(
-                    spellID, tostring(reach), tostring(EnemiesInReach(2, 3)), stacks))
+            -- Execute's paired second cast id lands in the same frame as the
+            -- first; skip it so one Execute press consumes a single charge.
+            local isExec = spellID == 260798 or spellID == 281000
+                or spellID == 163201 or spellID == 5308
+            if isExec and GetTime() < (EllesmereUI._ssExecWindow or 0) then return end
+            -- No sweep partner in melee range -> the game doesn't cleave, so
+            -- no charge is consumed (see InReach for the ~6 yd gauge).
+            if not EnemiesInReach(2) then
+                dbg("spend BLOCKED (no reach):", spellID)
+                return
             end
-            if not reach then return end
             stacks = max(0, stacks - SPENDERS[spellID])
             if stacks == 0 then expiresAt = nil end
+            if isExec then EllesmereUI._ssExecWindow = GetTime() + 0.3 end
+            dbg("spend APPLIED:", spellID, "->", stacks, "stacks left")
         end
     end
 
