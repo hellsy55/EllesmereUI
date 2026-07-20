@@ -9100,7 +9100,6 @@ function EAB:OnInitialize()
         local qf = CreateFrame("Frame")
         local _qPending = false
         local _rankAtlas = {}       -- quality -> atlas name (false = none found)
-        local _rankLoadWaited = {}  -- itemID -> true (one uncached-data retry each)
         local QueueQualityScan
 
         local function RankAtlasFor(q)
@@ -9122,10 +9121,8 @@ function EAB:OnInitialize()
             return nil
         end
 
-        local function SetRankShown(btn, quality)
+        local function SetRankShown(btn, atlas)
             local fd = EFD(btn)
-            local atlas = type(quality) == "number" and quality >= 1
-                and quality <= 5 and RankAtlasFor(quality)
             if not atlas then
                 if fd.rankIconTex then fd.rankIconTex:Hide() end
                 return
@@ -9146,16 +9143,25 @@ function EAB:OnInitialize()
             end
             if fd.rankIconAtlas ~= atlas then
                 fd.rankIconAtlas = atlas
-                tex:SetAtlas(atlas, true)
+                -- The atlas name comes straight from Blizzard's quality info
+                -- (or the probe-verified fallback), but guard anyway: an
+                -- unknown atlas must read as no-rank, not an error.
+                if not pcall(tex.SetAtlas, tex, atlas, true) then
+                    fd.rankIconAtlas = nil
+                    tex:Hide()
+                    return
+                end
                 if EllesmereUI._RANKDEBUG then
                     print("|cff33ff99[Rank]|r atlas", atlas)
                 end
             end
-            -- Blizzard designed the diamond against the default 45px button;
-            -- scale with the button so custom sizes keep the proportions.
+            -- Mirror Blizzard's overlay anchor: its template centers an
+            -- atlas-sized texture on a point 14,-14 from the button's
+            -- TOPLEFT (designed against the default 45px button; scale with
+            -- the button so custom sizes keep the proportions).
             local sc = (btn:GetWidth() or 45) / 45
             tex:ClearAllPoints()
-            tex:SetPoint("TOPLEFT", btn, "TOPLEFT", -4 * sc, 3 * sc)
+            tex:SetPoint("CENTER", btn, "TOPLEFT", 14 * sc, -14 * sc)
             tex:SetScale(sc)
             tex:Show()
             fd.rankIconHolder:Show()
@@ -9171,97 +9177,49 @@ function EAB:OnInitialize()
                 if btns and s then
                     local featureOn = s.showRankIcon and true or false
                     for _, btn in ipairs(btns) do
-                        local quality
+                        local rankAtlas
                         if featureOn then
                             local action = btn:GetAttribute("action") or 0
-                            if action > 0 and GetActionInfo then
-                                local aType, aID = GetActionInfo(action)
-                                if aType == "item" and aID then
-                                    -- Crafted quality ONLY -- the same source
-                                    -- Blizzard's own overlay uses. The reagent
-                                    -- API is a different quality family and
-                                    -- returned a wrong (lower) tier for ranked
-                                    -- potions when used as a fallback here.
-                                    -- Resolve via the action's full hyperlink
-                                    -- first: crafted quality can live in link
-                                    -- modifiers, where the bare itemID reads
-                                    -- nil. itemID stays as the fallback.
-                                    local ts = C_TradeSkillUI
-                                    local getQ = ts and ts.GetItemCraftedQualityByItemInfo
-                                    quality = getQ and getQ(aID)
-                                    -- Live diagnosis (2026-07-19): for ranked
-                                    -- consumables on the bar, EVERY
-                                    -- C_TradeSkillUI read off the bare itemID
-                                    -- is nil (and GetActionLink returns nil,
-                                    -- so no link is reachable), while the
-                                    -- reagent API returns a flat 2 for every
-                                    -- ranked item -- a different quality
-                                    -- family, never correct here. The action
-                                    -- TOOLTIP is the one source that renders
-                                    -- the true rank (as a quality-tier atlas
-                                    -- tag in its name line); parse the tier
-                                    -- from it. pcall-guarded: tooltip text
-                                    -- surfaces can be restricted, and a failed
-                                    -- parse must read as "no rank", never
-                                    -- error the scan.
-                                    if not quality and C_TooltipInfo and C_TooltipInfo.GetAction then
-                                        local okT, tq = pcall(function()
-                                            local tip = C_TooltipInfo.GetAction(action)
-                                            if not tip then return nil end
-                                            -- The tooltip data's own hyperlink
-                                            -- carries the full modified link
-                                            -- (GetActionLink does not).
-                                            if tip.hyperlink and getQ then
-                                                local ql = getQ(tip.hyperlink)
-                                                if ql then return ql end
-                                            end
-                                            local lines = tip.lines
-                                            if not lines then return nil end
-                                            local nL = #lines
-                                            if nL > 3 then nL = 3 end
-                                            for li = 1, nL do
-                                                local lt = lines[li] and lines[li].leftText
-                                                if type(lt) == "string" then
-                                                    local t = lt:match("[Qq]uality%-[Tt]ier(%d)")
-                                                    if t then return tonumber(t) end
-                                                end
-                                            end
-                                        end)
-                                        if okT then quality = tq end
+                            if action > 0 then
+                                -- Blizzard's own source, from live
+                                -- ActionButton.lua UpdateProfessionQuality: a
+                                -- dedicated action API that returns the
+                                -- overlay atlas directly. Every other surface
+                                -- is dead from an action slot on live
+                                -- (verified via in-game debug 2026-07-19):
+                                -- C_TradeSkillUI reads off the bare itemID
+                                -- are nil (the reagent one returns a flat 2
+                                -- for every ranked item), GetActionLink
+                                -- returns nil, and the tooltip's name line
+                                -- carries no quality markup.
+                                local ab = C_ActionBar
+                                if ab and ab.GetProfessionQualityInfo
+                                   and (not ab.IsItemAction or ab.IsItemAction(action)) then
+                                    local qi = ab.GetProfessionQualityInfo(action)
+                                    rankAtlas = qi and qi.iconInventory
+                                end
+                                -- Older-client fallback: crafted quality by
+                                -- itemID, mapped through the atlas probe.
+                                if not rankAtlas and GetActionInfo then
+                                    local aType, aID = GetActionInfo(action)
+                                    if aType == "item" and aID then
+                                        local ts = C_TradeSkillUI
+                                        local q = ts and ts.GetItemCraftedQualityByItemInfo
+                                            and ts.GetItemCraftedQualityByItemInfo(aID)
+                                        if type(q) == "number" and q >= 1 and q <= 5 then
+                                            rankAtlas = RankAtlasFor(q)
+                                        end
                                     end
-                                    if EllesmereUI._RANKDEBUG then
-                                        pcall(function()
-                                            local gta = C_TooltipInfo and C_TooltipInfo.GetAction
-                                            local tip = gta and gta(action)
-                                            local l1 = tip and tip.lines and tip.lines[1]
-                                                and tip.lines[1].leftText
-                                            print("|cff33ff99[Rank]|r item", aID,
-                                                "tipApi", tostring(gta ~= nil),
-                                                "tip", tostring(tip ~= nil),
-                                                "hlink", tostring(tip and tip.hyperlink),
-                                                "line1", type(l1) == "string"
-                                                    and l1:gsub("|", "||") or tostring(l1),
-                                                "final", tostring(quality))
-                                        end)
-                                    end
-                                    -- A freshly looted/moved item can be
-                                    -- uncached, reading nil quality until the
-                                    -- item data loads. One deferred repaint
-                                    -- per item covers it.
-                                    if not quality and not _rankLoadWaited[aID]
-                                       and C_Item and C_Item.IsItemDataCachedByID
-                                       and not C_Item.IsItemDataCachedByID(aID)
-                                       and Item and Item.CreateFromItemID then
-                                        _rankLoadWaited[aID] = true
-                                        pcall(function()
-                                            Item:CreateFromItemID(aID)
-                                                :ContinueOnItemLoad(QueueQualityScan)
-                                        end)
-                                    end
+                                end
+                                if EllesmereUI._RANKDEBUG and rankAtlas ~= nil then
+                                    pcall(function()
+                                        print("|cff33ff99[Rank]|r action", action,
+                                            "atlas", tostring(rankAtlas))
+                                    end)
                                 end
                             end
                         end
-                        SetRankShown(btn, quality)
+                        SetRankShown(btn, rankAtlas)
                         -- Blizzard's overlay must never draw over ours: it can
                         -- pre-exist this fix or get shown by a hover-driven
                         -- lazy creation. Hide + install the permanent OnShow
