@@ -2306,6 +2306,14 @@ do
         local gsx, gsy = EllesmereUI._FallbackGrowShift(childKey, side, cW, cH)
         cx = cx + gsx
         cy = cy + gsy
+        -- Temporary per-target visual shift (e.g. "Shift Elements if No
+        -- Resource/Power"), mirrors the main path's block at ~3278-3283.
+        -- fb.target is the live target actually being used here (not
+        -- targetKey, which is the inactive primary target).
+        if not isUnlocked and EllesmereUI._GetAnchorTargetShiftDir then
+            local dir, extraY = EllesmereUI._GetAnchorTargetShiftDir(fb.target, childKey)
+            if dir ~= 0 then cy = cy + dir * ((tT - tB) + (extraY or 0)) end
+        end
         -- Child-local scale space + pixel snap + idempotent guard, mirroring
         -- the standard CENTER path in ApplyAnchorPosition.
         local acRatio = uiS / cS
@@ -3511,7 +3519,15 @@ PropagateAnchorChain = function(parentKey, visited, changedAxis)
         PropagateAnchorChain(aliasKey, visited, changedAxis)
     end
     for childKey, info in pairs(anchorDB) do
-        if info.target == parentKey then
+        local primaryMatch = (info.target == parentKey)
+        -- A child reached only via its fallback link (e.g. a buff bar/icon
+        -- whose primary target is a TBB bar, fallback-anchored to Class
+        -- Resource/Power) must also re-cascade when ITS fallback target
+        -- moves/shifts -- otherwise it goes stale until the next full
+        -- ReapplyAllUnlockAnchors pass (login/settle/etc).
+        local fallbackMatch = (not primaryMatch) and info.fallback
+            and info.fallback.target == parentKey
+        if primaryMatch or fallbackMatch then
             -- Axis isolation: skip children on the unaffected axis. A resize
             -- leaves a perpendicular-anchored child unaffected ONLY when the
             -- target's center is invariant on the changed axis. That holds for
@@ -3525,8 +3541,12 @@ PropagateAnchorChain = function(parentKey, visited, changedAxis)
             -- content-sized bar (corner-follow needs the same-tick cascade); and
             -- a plain AB grow child of a still-dominated CDM/chain-driven parent.
             -- Every other child keeps the original gate.
+            -- fallbackMatch skips this entirely: info.side describes the
+            -- PRIMARY anchor's geometry, meaningless for the fallback
+            -- relationship's own side/offset math, and this child is only
+            -- reached here because ITS fallback target moved.
             local dominated = false
-            if changedAxis == "width" then
+            if primaryMatch and changedAxis == "width" then
                 dominated = (info.side == "TOP" or info.side == "BOTTOM")
                 if dominated then
                     if parentKey:sub(1, 4) == "CDM_"
@@ -3544,7 +3564,7 @@ PropagateAnchorChain = function(parentKey, visited, changedAxis)
                         dominated = false
                     end
                 end
-            elseif changedAxis == "height" then
+            elseif primaryMatch and changedAxis == "height" then
                 dominated = (info.side == "LEFT" or info.side == "RIGHT")
                 if dominated then
                     if parentKey:sub(1, 4) == "CDM_"
