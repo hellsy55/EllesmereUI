@@ -2805,8 +2805,19 @@ do
                                     -- Slot emptied: the refresh leaves stale count
                                     -- text behind (buttons no longer receive
                                     -- ACTIONBAR_SLOT_CHANGED themselves).
-                                    if btn.Count and not HasAction(action) then
+                                    local filled = HasAction(action)
+                                    if btn.Count and not filled then
                                         btn.Count:SetText("")
+                                    end
+                                    -- Blizzard icon background follows slot
+                                    -- contents; same reason as the count text --
+                                    -- the per-button OnEvent hook that used to
+                                    -- sync it never sees this event now, so a
+                                    -- vacated slot kept its background hidden.
+                                    local clip = EFD(btn).iconBgClip
+                                    if clip then
+                                        local p2 = EAB.db and EAB.db.profile
+                                        clip:SetShown((p2 and p2.showBlizzIconBg or false) and not filled)
                                     end
                                 end
                             end
@@ -5165,7 +5176,9 @@ function EAB:ApplyIconBackgroundForBar(barKey)
             bg:SetAtlas("UI-HUD-ActionBar-IconFrame-Slot")
             bfd.iconBgClip = clip
             bfd.iconBg = bg
-            -- Auto-update when slot content changes
+            -- Auto-update on button events. ACTIONBAR_SLOT_CHANGED is not
+            -- delivered to buttons (central dispatcher owns it and syncs the
+            -- clip there); this hook covers the remaining per-button events.
             btn:HookScript("OnEvent", function(self)
                 local sfd = EFD(self)
                 local c = sfd.iconBgClip
