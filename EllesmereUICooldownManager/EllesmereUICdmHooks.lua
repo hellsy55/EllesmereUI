@@ -6474,9 +6474,9 @@ function ns.SetupViewerHooks()
                                             classColor = false
                                             cr, cg, cb = fd._bgR or cr, fd._bgG or cg, fd._bgB or cb
                                         end
-                                        if classColor and _cachedClassToken then
-                                            local cc = RAID_CLASS_COLORS[_cachedClassToken]
-                                            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                                        if classColor then
+                                            local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                            cr, cg, cb = cc.r, cc.g, cc.b
                                         end
                                         fd.buffGlowOverlay:SetAlpha(1)
                                         ns.StartNativeGlow(fd.buffGlowOverlay, effGlowType, cr, cg, cb, {
@@ -6518,8 +6518,7 @@ function ns.SetupViewerHooks()
                                         if not fd.pandemicGlowActive then
                                             local c
                                             if bd.pandemicGlowMode == "class" then
-                                                local cc = _cachedClassToken and RAID_CLASS_COLORS[_cachedClassToken]
-                                                if cc then c = cc end
+                                                c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
                                             elseif bd.pandemicGlowMode == "custom" then
                                                 c = bd.pandemicGlowColor
                                             end

@@ -29,10 +29,8 @@ local DEFAULT_TEXT_COLOR = {r=1, g=1, b=1}
 local function ResolveGlowTint(p)
     if not p then return nil end
     if p.glowColorMode == "class" then
-        local _, ct = UnitClass("player")
-        local cc = ct and RAID_CLASS_COLORS[ct]
-        if cc then return cc.r, cc.g, cc.b end
-        return nil
+        local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+        return cc.r, cc.g, cc.b
     end
     if p.glowColorMode ~= "custom" then return nil end
     local c = p.glowColor

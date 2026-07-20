@@ -289,11 +289,8 @@ local function UpdateOverlayVisuals()
                     end
                     local cr, cg, cb
                     if entry.colorMode == "class" then
-                        local _, ct = UnitClass("player")
-                        if ct then
-                            local cc = RAID_CLASS_COLORS[ct]
-                            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
-                        end
+                        local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                        cr, cg, cb = cc.r, cc.g, cc.b
                     elseif entry.colorMode == "custom" and entry.glowColor then
                         cr = entry.glowColor.r or 1
                         cg = entry.glowColor.g or 0.788

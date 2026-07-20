@@ -3301,9 +3301,7 @@ local function UpdatePandemic(bar, cfg)
         end
         local c
         if cfg.pandemicGlowMode == "class" then
-            local _, ct = UnitClass("player")
-            local cc = ct and RAID_CLASS_COLORS[ct]
-            if cc then c = cc end
+            c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
         elseif cfg.pandemicGlowMode == "custom" then
             c = cfg.pandemicGlowColor
         end

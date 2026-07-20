@@ -3319,10 +3319,8 @@ local function BuildTrioColorSwatch(parentFrame, baseLevel, opts)
     if opts.hasClassColor then
         classSwatch = BuildColorSwatch(parentFrame, baseLevel,
             function()
-                local _, classFile = UnitClass("player")
-                local cc = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-                if cc then return cc.r, cc.g, cc.b, 1 end
-                return 1, 0.82, 0, 1
+                local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                return cc.r, cc.g, cc.b, 1
             end,
             function() end,
             opts.hasAlpha, opts.overrideSize)

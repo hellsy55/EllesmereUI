@@ -331,9 +331,7 @@ initFrame:SetScript("OnEvent", function(self)
             local style = bd.pandemicGlowStyle or 1
             local c
             if bd.pandemicGlowMode == "class" then
-                local _, ct = UnitClass("player")
-                local cc = ct and RAID_CLASS_COLORS[ct]
-                if cc then c = cc end
+                c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
             elseif bd.pandemicGlowMode == "custom" then
                 c = bd.pandemicGlowColor
             end
@@ -1581,8 +1579,8 @@ initFrame:SetScript("OnEvent", function(self)
                         local style = BarHasCustomShape(curBar) and 2 or (entry.glowStyle or 1)
                         local cr, cg, cb
                         if entry.colorMode == "class" then
-                            local _, ct = UnitClass("player")
-                            if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
+                            local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                            cr, cg, cb = cc.r, cc.g, cc.b
                         elseif entry.colorMode == "custom" and entry.glowColor then
                             cr, cg, cb = entry.glowColor.r, entry.glowColor.g, entry.glowColor.b
                         end
@@ -1647,8 +1645,8 @@ initFrame:SetScript("OnEvent", function(self)
                                     local style = BarHasCustomShape(curBar) and 2 or (entry.glowStyle or 1)
                                     local cr, cg, cb
                                     if entry.colorMode == "class" then
-                                        local _, ct = UnitClass("player")
-                                        if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then cr, cg, cb = cc.r, cc.g, cc.b end end
+                                        local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                        cr, cg, cb = cc.r, cc.g, cc.b
                                     elseif entry.colorMode == "custom" and entry.glowColor then
                                         cr, cg, cb = entry.glowColor.r, entry.glowColor.g, entry.glowColor.b
                                     end
