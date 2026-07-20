@@ -832,6 +832,16 @@ do
     -- Grow-only pool; buttons are configured fresh on every Tip_Show. Creation
     -- and reconfiguration only ever run out of combat (the overlay build is
     -- combat-skipped), so the secure attribute writes are always legal.
+    -- House style for an interactive tooltip row: a white 0.10 wash across the
+    -- whole row on hover, HIGHLIGHT layer, no scripts involved. Both overlay
+    -- pools go through this -- when only one of them had it, the two kinds of
+    -- clickable row silently looked different for as long as they existed.
+    local function AddRowHighlight(b)
+        local hl = b:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.10)
+    end
+
     local function AcquireActionButton()
         activeActions = activeActions + 1
         local b = actionPool[activeActions]
@@ -845,11 +855,7 @@ do
             -- started -- same rule as the travel block's hearth button.
             b:RegisterForClicks("AnyUp")
             b:SetAttribute("useOnKeyDown", false)
-            -- Full-row white hover wash (house style: rows 0.10). HIGHLIGHT
-            -- layer shows on hover automatically -- no scripts involved.
-            local hl = b:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.10)
+            AddRowHighlight(b)
             -- Default type; the overlay build swaps type/payload per row
             -- (spell rows and toy rows share this pool).
             b:SetAttribute("type", "spell")
@@ -887,15 +893,26 @@ do
             b:SetFrameLevel(tip:GetFrameLevel() + 5)
             b:EnableMouse(true)
             b:RegisterForClicks("AnyUp")
-            -- Same full-row white hover wash the secure action rows carry
-            -- (house style: rows 0.10). These rows only ever recolored their
-            -- left text, so "exactly like the M+ teleport rows" was half true.
-            local hl = b:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.10)
+            AddRowHighlight(b)
             clickPool[activeClicks] = b
         end
         return b
+    end
+
+    -- Lay an overlay button over row i and wire its hover affordance. Shared by
+    -- both kinds -- secure action rows and insecure clickable ones -- because
+    -- they are the same thing to the player: an interactive tooltip row.
+    -- The accent recolor only shows if the row's left text carries no embedded
+    -- |c..|r codes; callers pass the normal color through the left-color args.
+    local function PlaceRowOverlay(b, i, d, innerW, ar, ag, ab)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
+        b:SetSize(max(1, innerW), max(1, d._h))
+        local row = rows[i]
+        local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
+        b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
+        b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
+        b:Show()
     end
 
     local function StopKeepAlive()
@@ -1256,14 +1273,7 @@ do
                         b:SetAttribute("spell", nil)
                         b:SetAttribute("toy", nil)
                     end
-                    b:ClearAllPoints()
-                    b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
-                    b:SetSize(max(1, innerW), max(1, d._h))
-                    local row = rows[i]
-                    local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
-                    b:SetScript("OnEnter", function() row.left:SetTextColor(ar, ag, ab, 1) end)
-                    b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
-                    b:Show()
+                    PlaceRowOverlay(b, i, d, innerW, ar, ag, ab)
                 end
             end
         end
@@ -1279,20 +1289,9 @@ do
                 interactive = true
                 if not car then car, cag, cab = ns.GetAccent() end
                 local b = AcquireClickButton()
-                b:ClearAllPoints()
-                b:SetPoint("TOPLEFT", tip, "TOPLEFT", PAD, d._y)
-                b:SetSize(max(1, innerW), max(1, d._h))
-                -- Hover affordance: recolor the row's left text to the accent,
-                -- exactly like the M+ teleport rows. For this to show, the row
-                -- text must NOT embed its own |c..|r codes -- callers pass the
-                -- normal color through the left-color args instead.
-                local row = rows[i]
-                local lr, lg, lb = d.lr or 1, d.lg or 1, d.lb or 1
                 local cb = d.onClick
-                b:SetScript("OnEnter", function() row.left:SetTextColor(car, cag, cab, 1) end)
-                b:SetScript("OnLeave", function() row.left:SetTextColor(lr, lg, lb, 1) end)
+                PlaceRowOverlay(b, i, d, innerW, car, cag, cab)
                 b:SetScript("OnClick", function(_, mouseButton) cb(mouseButton) end)
-                b:Show()
             end
         end
 
