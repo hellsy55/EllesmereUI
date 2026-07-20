@@ -91,9 +91,6 @@ local L = {
     OPEN_BAGS            = "Open Bags",
     OPEN_CURRENCIES      = "Open Currencies",
     RESET_SESSION        = "Reset Session",
-    GOLD_SUFFIX          = "g",
-    SILVER_SUFFIX        = "s",
-    COPPER_SUFFIX        = "c",
     TRAVEL_COOLDOWNS     = "Travel Cooldowns",
     HEARTHSTONE          = "Hearthstone",
     READY                = "Ready",
@@ -189,7 +186,7 @@ ns.BLOCK_DEFAULTS = {
     clock      = { localTime = true, twentyFour = true, showMail = true, showResting = true, fontSizeClock = nil, fontSizeInfo = nil },
     fps        = {},
     ms         = { useWorldLatency = false },
-    gold       = { showIcons = true, showBagSpace = false, showSmall = false },
+    gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false },
     durability = { showIcon = true },
     xprep      = { mode = "auto" },
     spec       = { showLoadout = true, useUppercase = false },
@@ -301,13 +298,23 @@ end
 --  Money / time formatting (pure)
 -------------------------------------------------------------------------------
 local DENOMINATIONS = {
-    { divisor = 10000, suffix = "GOLD_SUFFIX",   color = "|cffe2ac7a" },  -- E2AC7A (user-set; do not "restore" to ffd700)
-    { divisor = 100,   suffix = "SILVER_SUFFIX", color = "|cffc7c7cf" },
-    { divisor = 1,     suffix = "COPPER_SUFFIX", color = "|cffed8a3f" },  -- copper-orange
+    { divisor = 10000, symbol = GOLD_AMOUNT_SYMBOL,   color = "|cffe2ac7a" },  -- E2AC7A (user-set; do not "restore" to ffd700)
+    { divisor = 100,   symbol = SILVER_AMOUNT_SYMBOL, color = "|cffc7c7cf" },
+    { divisor = 1,     symbol = COPPER_AMOUNT_SYMBOL, color = "|cffed8a3f" },  -- copper-orange
 }
 
-function ns.FormatMoneyPlain(amount, showSmall)
+-- Opt-in per gold block: Blizzard's coin textures instead of the letters.
+-- GetCoinTextureString renders every denomination it needs in one indivisible
+-- string and has no colored/plain variants, so useColors and showSmall do not
+-- apply to it.
+local function CoinIconString(amount)
+    return C_CurrencyInfo.GetCoinTextureString(amount)
+end
+ns.CoinIconString = CoinIconString
+
+function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
+    if coinIcons then return CoinIconString(amount) end
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
         local val = floor(amount / denom.divisor)
@@ -315,17 +322,18 @@ function ns.FormatMoneyPlain(amount, showSmall)
         if i == 1 and val > 0 then
             foundGold = true
             local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. L[denom.suffix]
+            parts[#parts + 1] = display .. denom.symbol
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
-            parts[#parts + 1] = val .. L[denom.suffix]
+            parts[#parts + 1] = val .. denom.symbol
         end
     end
     if #parts > 0 then return tconcat(parts, " ") end
-    return "0" .. L["COPPER_SUFFIX"]
+    return "0" .. DENOMINATIONS[3].symbol
 end
 
-function ns.FormatMoney(amount, useColors, showSmall)
+function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
     amount = floor(abs(amount or 0))
+    if coinIcons then return CoinIconString(amount) end
     local coloured = useColors ~= false
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
@@ -336,17 +344,17 @@ function ns.FormatMoney(amount, useColors, showSmall)
             local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
             local cOpen, cClose = "", ""
             if coloured then cOpen = denom.color; cClose = "|r" end
-            parts[#parts + 1] = display .. cOpen .. L[denom.suffix] .. cClose
+            parts[#parts + 1] = display .. cOpen .. denom.symbol .. cClose
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
             local cOpen, cClose = "", ""
             if coloured then cOpen = denom.color; cClose = "|r" end
-            parts[#parts + 1] = val .. cOpen .. L[denom.suffix] .. cClose
+            parts[#parts + 1] = val .. cOpen .. denom.symbol .. cClose
         end
     end
     if #parts == 0 then
         local cOpen, cClose = "", ""
         if coloured then cOpen = DENOMINATIONS[3].color; cClose = "|r" end
-        return "0" .. cOpen .. L["COPPER_SUFFIX"] .. cClose
+        return "0" .. cOpen .. DENOMINATIONS[3].symbol .. cClose
     end
     return tconcat(parts, " ")
 end
