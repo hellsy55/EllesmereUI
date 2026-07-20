@@ -43,6 +43,15 @@
 --   ns.UpdateAllBarVisibility()
 --   ns.MakePreviewBackdrop(host, themeCfg)
 --   ns.BLOCK_TYPES / ns.BLOCK_DEFAULTS / ns.EDB_VIS_CAPS / ns.EDGE_PAD
+--
+--  The one call that runs the other way -- options file -> runtime, so a block
+--  whose empty state invites a click can send the player to the control that
+--  fills it in. Defined from the options file's PLAYER_LOGIN handler, hence
+--  the nil guard at its call site:
+--
+--   ns.OpenBlockSettings(barId, blockId, settingKey)
+--       deep-links to the "block:<blockId>:<settingKey>" click target the
+--       options page registers for that row (see _edbClickTargets).
 
 local ADDON_NAME, ns = ...
 
@@ -101,6 +110,7 @@ local L = {
     DELVE_JOURNEY        = "Delver's Journey",
     COMPANION_LEVEL      = "Companion Level",
     SELECT_CURRENCY      = "Select a currency",
+    OPEN_SETTINGS        = "Open Settings",
     WHISPER              = "Whisper",
     WHISPER_BNET         = "Whisper BNet",
     INVITE               = "Invite",

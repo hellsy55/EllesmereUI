@@ -43,6 +43,11 @@ initFrame:SetScript("OnEvent", function(self)
                                  -- bar highlight (the watcher must not clear it)
     local _edbStripRelayout      -- set per header build: re-solves + repositions the preview
     local _edbPreviewHost        -- the preview strip frame (live theme feedback)
+    local _edbHeldGlowKey        -- click-target key whose glow pulses until the
+                                 -- setting is filled in; outlives page builds
+    local _edbHeldGlowY          -- its section offset when last shown: sections
+                                 -- follow bar order, so a change means the row
+                                 -- moved and the view has to follow it
     local _cardsExpanded = false -- template card strip open/closed
     local _dividerDragging = false
 
@@ -1347,6 +1352,10 @@ initFrame:SetScript("OnEvent", function(self)
                     HardRefresh()
                     if nb then
                         local navKey = "block:" .. nb.id
+                        -- A currency block lands unusable until one is picked,
+                        -- so aim at the picker itself: that target pulses until
+                        -- it is filled in, instead of the one-shot section glow.
+                        if typeKey == "currency" then navKey = navKey .. ":currency" end
                         C_Timer.After(0.05, function()
                             if _edbNavigateFn then _edbNavigateFn(navKey) end
                         end)
@@ -1418,7 +1427,13 @@ initFrame:SetScript("OnEvent", function(self)
         --  cached/restored header never fires a stale closure.
         -------------------------------------------------------------------
         local _navGlowFrame
-        local function PlaySettingGlow(targetFrame)
+        -- holdWhile (optional): keeps the glow pulsing for as long as it
+        -- returns true, instead of the one-shot fade. Used when the glow is
+        -- pointing at a setting the player still has to fill in -- a 0.75s
+        -- flash is gone before they have finished reading the page. The pulse
+        -- also releases when the target stops being visible (page rebuilt,
+        -- options closed), so the shared frame can never strand its OnUpdate.
+        local function PlaySettingGlow(targetFrame, holdWhile)
             if not targetFrame then return end
             if not _navGlowFrame then
                 _navGlowFrame = CreateFrame("Frame")
@@ -1444,6 +1459,15 @@ initFrame:SetScript("OnEvent", function(self)
             local elapsed = 0
             _navGlowFrame:SetScript("OnUpdate", function(glowSelf, dt)
                 elapsed = elapsed + dt
+                if holdWhile then
+                    if targetFrame:IsVisible() and holdWhile() then
+                        glowSelf:SetAlpha(0.35 + 0.65 * math.abs(math.sin(elapsed * 3)))
+                        return
+                    end
+                    -- Released: drop the predicate and restart the clock so the
+                    -- fade plays from full alpha instead of expiring at once.
+                    holdWhile, elapsed = nil, 0
+                end
                 if elapsed >= 0.75 then
                     glowSelf:Hide()
                     glowSelf:SetScript("OnUpdate", nil)
@@ -1451,6 +1475,13 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 glowSelf:SetAlpha(1 - elapsed / 0.75)
             end)
+        end
+
+        local function GlowTargetOf(m)
+            if not m.slotSide then return m.target end
+            local region
+            if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
+            return region or m.target
         end
 
         local function NavigateToSetting(key)
@@ -1461,14 +1492,45 @@ initFrame:SetScript("OnEvent", function(self)
             local _, _, _, _, headerY = m.section:GetPoint(1)
             if not headerY then return end
             EllesmereUI.SmoothScrollTo(math.max(0, math.abs(headerY) - 40))
-            local glowTarget = m.target
-            if m.slotSide then
-                local region
-                if m.slotSide == "left" then region = m.target._leftRegion else region = m.target._rightRegion end
-                if region then glowTarget = region end
-            end
-            C_Timer.After(0.15, function() PlaySettingGlow(glowTarget) end)
+            local glowTarget = GlowTargetOf(m)
+            if m.holdWhile then _edbHeldGlowKey, _edbHeldGlowY = key, headerY end
+            C_Timer.After(0.15, function() PlaySettingGlow(glowTarget, m.holdWhile) end)
         end
+
+        -- A held glow belongs to the SETTING, not to the navigation that first
+        -- showed it. A page rebuild -- reordering a block, switching bars,
+        -- adding or removing one -- destroys the row it was parented to, which
+        -- released the pulse for good even though the setting was still empty.
+        -- Re-attach it to the freshly built row.
+        --
+        -- Scope: rebuilds only. Reopening the panel takes SelectPage's warm
+        -- path (EllesmereUI.lua), which re-shows the cached wrapper without
+        -- running the page builder, so nothing calls this -- the pulse stays
+        -- dead until the next rebuild. Covering that means driving this from
+        -- onPageCacheRestore too, the way _edbStripRelayout is.
+        local function RearmHeldGlow()
+            if not _edbHeldGlowKey then return end
+            local targets = parent._edbClickTargets
+            local m = targets and targets[_edbHeldGlowKey]
+            -- Absent from this build (another bar is selected): keep the key so
+            -- coming back re-arms. Only a satisfied predicate retires it.
+            if not (m and m.section and m.target and m.holdWhile) then return end
+            if not m.holdWhile() then
+                _edbHeldGlowKey = nil
+                return
+            end
+            -- Sections are laid out in bar order, so reordering blocks moves
+            -- this row: re-glowing in place would pulse off-screen. Follow it
+            -- only when it actually moved -- yanking the view on an unrelated
+            -- rebuild (a Fill toggle, a theme change) would be worse.
+            local _, _, _, _, headerY = m.section:GetPoint(1)
+            if headerY ~= _edbHeldGlowY then
+                NavigateToSetting(_edbHeldGlowKey)
+                return
+            end
+            PlaySettingGlow(GlowTargetOf(m), m.holdWhile)
+        end
+
         -- Never retarget the live header's click handler from a hidden
         -- global-search pre-build: its targets belong to an off-screen
         -- wrapper. (SetContentHeader itself is stubbed out during pre-builds
@@ -2354,7 +2416,18 @@ initFrame:SetScript("OnEvent", function(self)
             for k = 1, #typeRows, 2 do
                 local rightCfg = typeRows[k + 1]
                 if not rightCfg then rightCfg = { type = "label", text = "" } end
-                _, h = W:DualRow(parent, y, typeRows[k], rightCfg);  y = y - h
+                row, h = W:DualRow(parent, y, typeRows[k], rightCfg);  y = y - h
+                -- Deep-link target for an unconfigured currency block: clicking
+                -- its "Select a currency" placeholder on the live bar lands on
+                -- the picker itself, not just the section (ns.OpenBlockSettings).
+                -- k == 1 IS the Currency dropdown: it heads the currency
+                -- typeRows built above. Prepend a row there and retarget here.
+                if b.type == "currency" and k == 1 then
+                    parent._edbClickTargets["block:" .. blockId .. ":currency"] =
+                        { section = secHdr, target = row, slotSide = "left",
+                          -- Pulse until the player actually picks one.
+                          holdWhile = function() return s.currencyId == nil end }
+                end
             end
 
             if b.type == "micromenu" then
@@ -2468,7 +2541,36 @@ initFrame:SetScript("OnEvent", function(self)
         -- body section.
         W:Spacer(parent, y, 20);  y = y - 20
 
+        -- Every click target of this build is registered by now. Same settle
+        -- delay the navigation paths use, and the same pre-build guard: a
+        -- hidden search pre-build would steal the shared glow frame for rows
+        -- nobody can see.
+        if not EllesmereUI._prebuilding then
+            C_Timer.After(0.05, RearmHeldGlow)
+        end
+
         return math.abs(y)
+    end
+
+    ---------------------------------------------------------------------------
+    --  Deep link from a live block to its own settings row. A block whose
+    --  empty state invites a click (the currency picker's placeholder) calls
+    --  this so the invitation leads to the control that fulfills it; the
+    --  preview strip navigates through _edbNavigateFn directly.
+    ---------------------------------------------------------------------------
+    function ns.OpenBlockSettings(barId, blockId, settingKey)
+        local key = "block:" .. blockId .. ":" .. settingKey
+        EllesmereUI:NavigateToElementSettings("EllesmereUIDataBars", PAGE_DATABARS, nil,
+            function()
+                local p = Profile()
+                if p then p.selectedBarId = barId end
+            end)
+        -- The click-target map belongs to the page build the call above kicks
+        -- off; resolve the scroll target once it has repopulated (same settle
+        -- delay NavigateToElementSettings uses for its own section lookup).
+        C_Timer.After(0.05, function()
+            if _edbNavigateFn then _edbNavigateFn(key) end
+        end)
     end
 
     ---------------------------------------------------------------------------

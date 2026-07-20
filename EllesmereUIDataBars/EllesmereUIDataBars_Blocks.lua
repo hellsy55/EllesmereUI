@@ -3827,7 +3827,17 @@ ns.BlockFactories.currency = function(blockCfg, slot, content, barCtx)
     -- Manual tooltip composition (the owned tooltip has no SetCurrencyByID).
     local function ShowCurrencyTooltip()
         local s = D()
-        if not s.currencyId then return end
+        local ar, ag, ab = ns.GetAccent()
+        -- Unconfigured: the placeholder is the whole block, so the tooltip
+        -- has to say where the currency is actually picked.
+        if not s.currencyId then
+            ns.Tip_Begin(button)
+            ns.Tip_AddLine(L["SELECT_CURRENCY"], 1, 1, 1)
+            ns.Tip_AddLine(" ")
+            ns.Tip_AddDouble(L["LEFT_CLICK"], L["OPEN_SETTINGS"], 1, 1, 1, ar, ag, ab)
+            ns.Tip_Show()
+            return
+        end
         local info = nil
         if C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
             info = C_CurrencyInfo.GetCurrencyInfo(s.currencyId)
@@ -3854,6 +3864,8 @@ ns.BlockFactories.currency = function(blockCfg, slot, content, barCtx)
         else
             ns.Tip_AddDouble(L["TOTAL"], qty, 0.6, 0.6, 0.6, 1, 1, 1)
         end
+        ns.Tip_AddLine(" ")
+        ns.Tip_AddDouble(L["LEFT_CLICK"], L["OPEN_CURRENCIES"], 1, 1, 1, ar, ag, ab)
         ns.Tip_Show()
     end
 
@@ -3869,6 +3881,14 @@ ns.BlockFactories.currency = function(blockCfg, slot, content, barCtx)
     end)
     button:SetScript("OnClick", function(_, mb)
         if mb == "LeftButton" then
+            -- No currency picked yet: the Blizzard panel cannot assign one,
+            -- so send the player to the picker instead of dead-ending there.
+            if not D().currencyId then
+                if ns.OpenBlockSettings then
+                    ns.OpenBlockSettings(barCtx.id, blockCfg.id, "currency")
+                end
+                return
+            end
             if C_CurrencyInfo and C_CurrencyInfo.OpenCurrencyPanel then
                 C_CurrencyInfo.OpenCurrencyPanel()
             elseif ToggleCharacter then
