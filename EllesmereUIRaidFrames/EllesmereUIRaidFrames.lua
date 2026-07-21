@@ -11031,6 +11031,11 @@ ns.ReloadPartyFrames = function()
     -- Re-layout header
     ns._LayoutPartyFrames()
     ns._RebuildPartyUnitMap()
+    -- Re-sync UNIT_POWER_UPDATE registration: a Power Bar section sync/unsync
+    -- (or a party-side role-flag edit) changes the party's effective power
+    -- gating, same reasoning as UpdateCombatEventRegistration above. Must run
+    -- after the temp-swap restore so raid reads see raid values.
+    if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
     ns._UpdateAllPartyButtons()
 
     -- Re-register private aura anchors
@@ -15968,18 +15973,33 @@ function ERF:OnEnable()
 
     -- Dynamically register/unregister UNIT_POWER_UPDATE per unit based on
     -- role and power display settings. Called after roster changes and
-    -- when the user changes power bar role filters.
+    -- when the user changes power bar role filters. The trackers are shared
+    -- by raid AND party frames: player/party1-4 tokens also drive the party
+    -- buttons, whose Power Bar section can be unsynced from raid -- those
+    -- must consult the party proxy too, or raid-off/party-on would strip
+    -- their events and freeze the party power bars mid-combat.
     local function UpdatePowerEventRegistration()
-        local s = db.profile
-        local anyPower = IsPowerBarEnabled(s)
+        local rs = db.profile
+        local ps = ns._partyProxy
+        local function wantsPower(s, role)
+            return (role == "HEALER" and s.powerShowForHealer)
+                or (role == "TANK" and s.powerShowForTank)
+                or (role == "DAMAGER" and s.powerShowForDPS)
+                or (role == "NONE" and s.powerShowForDPS)
+        end
         for unit, tracker in pairs(unitTrackers) do
             local wantPower = false
-            if anyPower and UnitExists(unit) then
+            if UnitExists(unit) then
                 local role = ns._ResolvePowerRole(unit)
-                wantPower = (role == "HEALER" and s.powerShowForHealer)
-                    or (role == "TANK" and s.powerShowForTank)
-                    or (role == "DAMAGER" and s.powerShowForDPS)
-                    or (role == "NONE" and s.powerShowForDPS)
+                wantPower = IsPowerBarEnabled(rs) and wantsPower(rs, role)
+                -- player/party tokens always count as party-displayable; the
+                -- routing-map check additionally covers arena, where the party
+                -- header binds raid1-5.
+                if not wantPower and IsPowerBarEnabled(ps)
+                    and (unit == "player" or unit:match("^party%d$")
+                        or (ns._partyUnitToButton and ns._partyUnitToButton[unit])) then
+                    wantPower = wantsPower(ps, role)
+                end
             end
             if wantPower then
                 tracker:RegisterUnitEvent("UNIT_POWER_UPDATE", unit)
