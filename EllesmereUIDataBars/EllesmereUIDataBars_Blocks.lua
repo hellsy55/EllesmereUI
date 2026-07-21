@@ -1950,7 +1950,6 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
     local HEARTH_TEX = MEDIA .. "hearthstone.png"
     local _trvFitBuf1 = { "" }
     local _trvFitBuf2 = { "" }
-    local tooltipTimer = 0
     local mouseOver = false
 
     -- Pre-allocated tooltip line buffers (avoid per-show garbage). `spellId`
@@ -2182,13 +2181,11 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
 
         hearthButton:SetScript("OnEnter", function()
             mouseOver = true
-            tooltipTimer = 0
             inst:Refresh()
             RefreshTravelTooltip()
         end)
         hearthButton:SetScript("OnLeave", function()
             mouseOver = false
-            tooltipTimer = 0
             -- Interactive tip (clickable M+ rows): the keep-alive poll owns
             -- dismissal so the cursor can travel onto the tip to click a row.
             ns.Tip_HideUnlessInteractive(hearthButton)
@@ -2299,13 +2296,12 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
         MaybeRelayout(inst)
     end
 
-    -- 1s heartbeat: drives the ready/cooldown tint flip; the open tooltip
-    -- refreshes every 5s while hovered.
+    -- 1s heartbeat: drives the ready/cooldown tint flip, and rebuilds the open
+    -- tooltip on every tick while hovered. The cooldown columns read M:SS, so
+    -- anything slower than the heartbeat shows visibly stale seconds.
     local function TravelTick()
-        tooltipTimer = tooltipTimer + 1
         inst:Refresh()
-        if built and mouseOver and ns.Tip_IsOwned(hearthButton) and tooltipTimer >= 5 then
-            tooltipTimer = 0
+        if built and mouseOver and ns.Tip_IsOwned(hearthButton) then
             RefreshTravelTooltip()
         end
     end
@@ -2316,7 +2312,6 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
 
     function inst:Enable()
         content:Show()
-        tooltipTimer = 0
         RegisterInstEvents(self)
         ns.RegisterHeartbeat("travel:" .. self.key, TravelTick)
     end
