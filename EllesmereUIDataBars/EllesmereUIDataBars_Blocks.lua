@@ -665,7 +665,13 @@ ns.BlockFactories.clock = function(blockCfg, slot, content, barCtx)
         -- Tooltips are all-white by design (no accent tinting).
         local ar, ag, ab = 1, 1, 1
         ns.Tip_Begin(clockTextFrame)
-        ns.Tip_AddLine(date("%A %d %B %Y"), 1, 1, 1)
+        -- date()'s %A and %B come from the C runtime, which is English in every
+        -- client, so the tooltip read "Monday 21 July 2026" on a French one.
+        -- The calendar globals are localized and FULLDATE carries each locale's
+        -- own field order, so the day/month order is the client's too.
+        local today = C_DateAndTime.GetCurrentCalendarTime()
+        ns.Tip_AddLine(format(FULLDATE, CALENDAR_WEEKDAY_NAMES[today.weekday],
+            CALENDAR_FULLDATE_MONTH_NAMES[today.month], today.monthDay, today.year), 1, 1, 1)
         local gh, gm = GetGameTime()
         local _, tipUse24 = ClockUses()
         ns.Tip_AddDouble(L["SERVER_TIME"], FormatClock(floor(gh), floor(gm), tipUse24), 0.6, 0.6, 0.6, 1, 1, 1)
