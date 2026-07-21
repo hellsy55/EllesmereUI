@@ -1840,11 +1840,11 @@ local HEARTHSTONE_IDS = {
 -- one -- which is why Astral Recall belongs here and not in the pool above,
 -- even though it also returns to the bind point. Spell IDs (for a future
 -- clickable overlay): Dalaran 222695, Arcantina 1255801, Garrison 171253.
-local TRAVEL_TOYS = {
+local TRAVEL_EXTRAS = {
     140192,  -- Dalaran Hearthstone
     253629,  -- Key to the Arcantina
     110560,  -- Garrison Hearthstone
-    556,     -- Astral Recall (shaman spell, not a toy)
+    556,     -- Astral Recall (a spell, hence the per-entry kind probe below)
 }
 
 -- Hearthstones share one cooldown, so polling a single owned one suffices.
@@ -2010,29 +2010,29 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
         end
 
         -- Collected travel entries ride the same section; each has its own
-        -- cooldown. Astral Recall is a spell, not a toy: IsPlayerSpell both
-        -- gates the row to shamans and selects the spell-side name, cooldown
-        -- and click overlay. Name lookups can be nil on a cold cache -- the
-        -- row just appears on the next tooltip refresh.
-        for _, toyId in ipairs(TRAVEL_TOYS) do
-            local isToy   = PlayerHasToy(toyId)
-            local isSpell = not isToy and IsPlayerSpell(toyId)
+        -- cooldown. A spell entry takes the spell-side name, cooldown and
+        -- click overlay -- and IsPlayerSpell gates it to its class for free.
+        -- Name lookups can be nil on a cold cache -- the row just appears on
+        -- the next tooltip refresh.
+        for _, entryId in ipairs(TRAVEL_EXTRAS) do
+            local isToy   = PlayerHasToy(entryId)
+            local isSpell = not isToy and IsPlayerSpell(entryId)
             if isToy or isSpell then
-                local toyName
+                local entryName
                 if isSpell then
-                    local sInfo = C_Spell.GetSpellInfo(toyId)
-                    toyName = sInfo and sInfo.name
+                    local sInfo = C_Spell.GetSpellInfo(entryId)
+                    entryName = sInfo and sInfo.name
                 else
                     if C_ToyBox and C_ToyBox.GetToyInfo then
-                        local _, tn = C_ToyBox.GetToyInfo(toyId)
-                        toyName = tn
+                        local _, tn = C_ToyBox.GetToyInfo(entryId)
+                        entryName = tn
                     end
-                    if not toyName and C_Item and C_Item.GetItemInfo then
-                        toyName = C_Item.GetItemInfo(toyId)
+                    if not entryName and C_Item and C_Item.GetItemInfo then
+                        entryName = C_Item.GetItemInfo(entryId)
                     end
                 end
-                if toyName then
-                    local tcd = TravelGetRemainingCooldown(toyId, isSpell)
+                if entryName then
+                    local tcd = TravelGetRemainingCooldown(entryId, isSpell)
                     local tstr = ns.FormatCooldown(tcd)
                     if not tstr then tstr = L["READY"] end
                     local tr, tg, tb = 0.5, 0.5, 0.5
@@ -2041,16 +2041,16 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                         -- Ready: click-to-use, same secure overlay contract
                         -- as the M+ teleport rows (degrades to text in
                         -- combat). White while ready; the row wash + accent
-                        -- recolor carry the hover affordance.
-                        if isSpell then
-                            ns.Tip_AddActionDouble(toyName, tstr, toyId, 1, 1, 1, tr, tg, tb)
-                        else
-                            ns.Tip_AddToyActionDouble(toyName, tstr, toyId, 1, 1, 1, tr, tg, tb)
-                        end
+                        -- recolor carry the hover affordance. Both helpers
+                        -- take the same arguments; only the secure attribute
+                        -- they seed differs.
+                        local AddActionRow = isSpell and ns.Tip_AddActionDouble
+                                                      or ns.Tip_AddToyActionDouble
+                        AddActionRow(entryName, tstr, entryId, 1, 1, 1, tr, tg, tb)
                     else
                         -- On cooldown: the same gray as the M+ "On Cooldown"
                         -- label.
-                        ns.Tip_AddDouble(toyName, tstr, 0.65, 0.65, 0.65, tr, tg, tb)
+                        ns.Tip_AddDouble(entryName, tstr, 0.65, 0.65, 0.65, tr, tg, tb)
                     end
                 end
             end
@@ -2165,8 +2165,7 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                 id = TravelPickHearthstone(choice == "random")
             end
             if id then hearthButton:SetAttribute("*macrotext1", TravelBuildMacro(id)) end
-            -- Right click ignores the choice and always rolls a fresh random
-            -- one, reseeded per click like the left one.
+            -- Right click ignores the choice and always rolls its own.
             local rid = TravelPickHearthstone(true)
             if rid then hearthButton:SetAttribute("*macrotext2", TravelBuildMacro(rid)) end
         end
