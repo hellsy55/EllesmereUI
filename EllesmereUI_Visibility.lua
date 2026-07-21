@@ -525,7 +525,10 @@ function EUI.BuildVisibilityDriverString(prefix, vm)
             out = out .. "[" .. conj .. tok .. "] show; "
         end
         if g1 then emit("group:raid") end
-        if g2 then emit("group:party") end
+        -- [group:party] alone is TRUE inside a raid; nogroup:raid narrows the
+        -- party disjunct to a real party (a separate group:raid clause, when
+        -- In Raid Group is also checked, still shows there).
+        if g2 then emit("group:party,nogroup:raid") end
         if g3 then emit("nogroup") end
         return out .. "hide"
     end
