@@ -8279,14 +8279,17 @@ local function UpdateKeybinds()
             -- button (SetOverrideBindingClick) so the keypress reads our paged
             -- "action" attr -- exactly what empower/flyout already do, and what
             -- ElvUI/Bartender do for every button via LibActionButton.
+            --
+            -- Class-default form paging (Druid/Rogue) is NOT custom paging: it
+            -- rides on bonusbar, a native engine concept that ACTIONBUTTONn
+            -- resolves correctly on its own, so the icon and the native keybind
+            -- already agree in every form. Routing those bars through the button
+            -- instead only costs us press-and-hold repeat casting (a synthetic
+            -- click never reaches UseAction with isKeyPress=true), which is why
+            -- it must stay on the native command -- only genuine user-configured
+            -- paging (bs.paging) needs the click route.
             local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[info.key]
             local barHasCustomPaging = (bs and bs.paging and next(bs.paging) ~= nil) and true or false
-            if not barHasCustomPaging and info.key == "MainBar" then
-                local _, cls = UnitClass("player")
-                if cls == "DRUID" or cls == "ROGUE" then
-                    barHasCustomPaging = true
-                end
-            end
             for i, btn in ipairs(btns) do
                 if btn then
                     local cmd = prefix .. i
