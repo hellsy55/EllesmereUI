@@ -629,11 +629,17 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
                 end)
                 if BuffFrame.RefreshConsolidationFrameVisibility then
                     hooksecurefunc(BuffFrame, "RefreshConsolidationFrameVisibility", function()
-                        local cfgNow = PA()
-                        if cfgNow and cfgNow.showExpandButton == false
-                            and BuffFrame.CollapseAndExpandButton then
-                            BuffFrame.CollapseAndExpandButton:Hide()
-                        end
+                        -- Deferred: this can fire inside Blizzard's secure
+                        -- buff-system refresh (incl. Edit Mode's passes);
+                        -- hiding inline there taints the rest of that
+                        -- execution.
+                        C_Timer.After(0, function()
+                            local cfgNow = PA()
+                            if cfgNow and cfgNow.showExpandButton == false
+                                and BuffFrame.CollapseAndExpandButton then
+                                BuffFrame.CollapseAndExpandButton:Hide()
+                            end
+                        end)
                     end)
                 end
             end
