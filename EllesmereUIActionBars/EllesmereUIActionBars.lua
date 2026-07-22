@@ -686,6 +686,7 @@ local function FormatHotkeyText(text)
     text = text:gsub("Mouse Button ", "M")
     text = text:gsub("MOUSEWHEELUP", "MwU")
     text = text:gsub("MOUSEWHEELDOWN", "MwD")
+    text = text:gsub("CAPSLOCK", "Caps")
     -- Specific NUMPAD keys must be handled before the generic NUMPAD prefix,
     -- or the prefix replacement makes them unmatchable (N. showed as NDECIMAL).
     text = text:gsub("NUMPADDECIMAL", "N.")
