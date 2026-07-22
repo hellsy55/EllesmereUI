@@ -7599,14 +7599,31 @@ WSkin.RegisterWindow({
 --  Shell + tabs + item tiles as flat cards (mail-row treatment). The repair /
 --  sell-junk icon buttons and the buyback money display stay stock content.
 -------------------------------------------------------------------------------
--- Completely hide Blizzard's native pagination and 10-slot grid
+-- Completely hide Blizzard's native pagination and 10-slot grid.
+-- Permanence via the achievements-pack Kill pattern: a reentry-safe
+-- hooksecurefunc that re-hides on every Blizzard Show (MerchantFrame_Update
+-- re-Shows the tiles each pass) -- never a method overwrite on a Blizzard
+-- frame table. Registry lives on WSkin so re-runs of Skin_Merchant cannot
+-- double-hook.
+local function KillFrameShow(frame)
+    if not frame then return end
+    local killed = WSkin._merchantKilledShow
+    if not killed then
+        killed = setmetatable({}, { __mode = "k" })
+        WSkin._merchantKilledShow = killed
+    end
+    if killed[frame] then frame:Hide() return end
+    killed[frame] = true
+    frame:Hide()
+    hooksecurefunc(frame, "Show", function(self) self:Hide() end)
+end
+
 local function HideNativeMerchantGrid()
     for i = 1, 12 do
         local item = _G["MerchantItem" .. i]
         if item then
-            item:Hide()
             item:SetAlpha(0)
-            item.Show = function() end
+            KillFrameShow(item)
         end
     end
 
@@ -7616,10 +7633,7 @@ local function HideNativeMerchantGrid()
         _G.MerchantPageText
     }
     for _, ctrl in ipairs(controls) do
-        if ctrl then
-            ctrl:Hide()
-            ctrl.Show = function() end
-        end
+        KillFrameShow(ctrl)
     end
 end
 

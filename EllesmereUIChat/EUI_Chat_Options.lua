@@ -122,22 +122,38 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 2: Background Opacity (+ inline color swatch) | Idle Fade Delay
+        -- Row 2: Background Opacity (+ inline color swatch) | Background
+        -- Texture (Unit Frames bar texture catalogue incl. SharedMedia, with
+        -- per-item texture preview backgrounds)
+        if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
+        local btValues, btOrder = {}, {}
+        do
+            local texNames = ns.chatBgTextureNames or {}
+            for _, key in ipairs(ns.chatBgTextureOrder or {}) do
+                if key ~= "---" then
+                    btValues[key] = texNames[key] or key
+                    btOrder[#btOrder + 1] = key
+                end
+            end
+            local texLookup = ns.chatBgTextures or {}
+            btValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key)
+                    return texLookup[key]
+                end,
+            }
+        end
         local bgRow
         bgRow, h = W:DualRow(parent, y,
             { type="slider", text="Background Opacity",
               min = 0, max = 1, step = 0.05,
               getValue=function() return Cfg("bgAlpha") or 0.65 end,
               setValue=function(v) Set("bgAlpha", v); RefreshAll() end },
-            { type="slider", text="Idle Fade Delay",
-              min = 5, max = 30, step = 1,
-              disabled=function() return Cfg("idleFadeEnabled") == false end,
-              disabledTooltip="Enable Idle Fade",
-              getValue=function() return Cfg("idleFadeDelay") or 15 end,
-              setValue=function(v)
-                  Set("idleFadeDelay", v)
-                  if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
-              end })
+            { type="dropdown", text="Background Texture",
+              tooltip="Texture drawn over the chat background color.",
+              values=btValues, order=btOrder,
+              getValue=function() return Cfg("bgTexture") or "none" end,
+              setValue=function(v) Set("bgTexture", v); RefreshAll() end })
         do
             local rgn = bgRow._leftRegion
             local ctrl = rgn._control
@@ -156,19 +172,32 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 3: Idle Fade Strength | Font (+ cog: Outline Mode)
+        -- Row 3: Timestamps | Font (+ cog: Outline Mode)
         do
             local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
+            local tsValues = {
+                ["__blizzard"]  = { text = "Use Blizzard Setting" },
+                ["none"]        = { text = "None" },
+                ["%I:%M "]      = { text = "03:27" },
+                ["%I:%M:%S "]   = { text = "03:27:32" },
+                ["%I:%M %p "]   = { text = "03:27 PM" },
+                ["%I:%M:%S %p "] = { text = "03:27:32 PM" },
+                ["%H:%M "]      = { text = "15:27" },
+                ["%H:%M:%S "]   = { text = "15:27:32" },
+            }
+            local tsOrder = {
+                "__blizzard", "none", "---",
+                "%I:%M ", "%I:%M:%S ", "%I:%M %p ", "%I:%M:%S %p ", "---",
+                "%H:%M ", "%H:%M:%S ",
+            }
             local fontRow
             fontRow, h = W:DualRow(parent, y,
-                { type="slider", text="Idle Fade Strength",
-                  min = 0, max = 100, step = 1,
-                  disabled=function() return Cfg("idleFadeEnabled") == false end,
-                  disabledTooltip="Enable Idle Fade",
-                  getValue=function() return Cfg("idleFadeStrength") or 40 end,
+                { type="dropdown", text="Timestamps",
+                  values=tsValues, order=tsOrder,
+                  getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
                   setValue=function(v)
-                      Set("idleFadeStrength", v)
-                      if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+                      Set("timestampFormat", v)
+                      if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
                   end },
                 { type="dropdown", text="Font",
                   values=fontValues, order=fontOrder,
@@ -227,69 +256,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 4: Timestamps | (empty)
-        do
-            local tsValues = {
-                ["__blizzard"]  = { text = "Use Blizzard Setting" },
-                ["none"]        = { text = "None" },
-                ["%I:%M "]      = { text = "03:27" },
-                ["%I:%M:%S "]   = { text = "03:27:32" },
-                ["%I:%M %p "]   = { text = "03:27 PM" },
-                ["%I:%M:%S %p "] = { text = "03:27:32 PM" },
-                ["%H:%M "]      = { text = "15:27" },
-                ["%H:%M:%S "]   = { text = "15:27:32" },
-            }
-            local tsOrder = {
-                "__blizzard", "none", "---",
-                "%I:%M ", "%I:%M:%S ", "%I:%M %p ", "%I:%M:%S %p ", "---",
-                "%H:%M ", "%H:%M:%S ",
-            }
-            _, h = W:DualRow(parent, y,
-                { type="dropdown", text="Timestamps",
-                  values=tsValues, order=tsOrder,
-                  getValue=function() return Cfg("timestampFormat") or "%I:%M " end,
-                  setValue=function(v)
-                      Set("timestampFormat", v)
-                      if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
-                  end },
-                { type="toggle", text="Enable Idle Fade",
-                  getValue=function() return Cfg("idleFadeEnabled") ~= false end,
-                  setValue=function(v)
-                      Set("idleFadeEnabled",v)
-                      if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
-                      EllesmereUI:RefreshPage()
-                  end })
-        end
-        y = y - h
-
-        -- Row: Background Texture (Unit Frames bar texture catalogue incl.
-        -- SharedMedia, with per-item texture preview backgrounds) | (empty)
-        do
-            if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
-            local btValues, btOrder = {}, {}
-            local texNames = ns.chatBgTextureNames or {}
-            for _, key in ipairs(ns.chatBgTextureOrder or {}) do
-                if key ~= "---" then
-                    btValues[key] = texNames[key] or key
-                    btOrder[#btOrder + 1] = key
-                end
-            end
-            local texLookup = ns.chatBgTextures or {}
-            btValues._menuOpts = {
-                itemHeight = 28,
-                background = function(key)
-                    return texLookup[key]
-                end,
-            }
-            _, h = W:DualRow(parent, y,
-                { type="dropdown", text="Background Texture",
-                  tooltip="Texture drawn over the chat background color.",
-                  values=btValues, order=btOrder,
-                  getValue=function() return Cfg("bgTexture") or "none" end,
-                  setValue=function(v) Set("bgTexture", v); RefreshAll() end },
-                { type="label", text="" })
-            y = y - h
-        end
         -- Outer panel border. Without the extended background, visible tabs get
         -- matching individual borders instead of outlining empty tab-strip space.
             local thicknessValues = {
@@ -332,6 +298,12 @@ initFrame:SetScript("OnEvent", function(self)
                     title = "Border Offset",
                     captureRegion = rgn,
                     rows = {
+                        { type="toggle", label="Show Behind",
+                          get=function() return Cfg("panelBorderBehind") or false end,
+                          set=function(v)
+                              Set("panelBorderBehind", v)
+                              if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                          end },
                         { type="slider", label="Offset X", min=-10, max=10, step=1,
                           get=function()
                               local v = Cfg("panelBorderOffsetX")
@@ -481,6 +453,41 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(RefreshBorderSwatches)
                 RefreshBorderSwatches()
             end
+
+        -- -- IDLE FADE ---------------------------------------------------------
+        _, h = W:SectionHeader(parent, "IDLE FADE", y); y = y - h
+
+        -- Row 1: Enable Idle Fade | Fade Delay
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Idle Fade",
+              getValue=function() return Cfg("idleFadeEnabled") ~= false end,
+              setValue=function(v)
+                  Set("idleFadeEnabled", v)
+                  if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Fade Delay",
+              min = 5, max = 30, step = 1,
+              disabled=function() return Cfg("idleFadeEnabled") == false end,
+              disabledTooltip="Enable Idle Fade",
+              getValue=function() return Cfg("idleFadeDelay") or 15 end,
+              setValue=function(v)
+                  Set("idleFadeDelay", v)
+                  if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+              end });  y = y - h
+
+        -- Row 2 (odd last slot): Fade Strength | (empty)
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Fade Strength",
+              min = 0, max = 100, step = 1,
+              disabled=function() return Cfg("idleFadeEnabled") == false end,
+              disabledTooltip="Enable Idle Fade",
+              getValue=function() return Cfg("idleFadeStrength") or 40 end,
+              setValue=function(v)
+                  Set("idleFadeStrength", v)
+                  if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+              end },
+            { type="label", text="" });  y = y - h
 
         end -- isChat
 
@@ -728,6 +735,55 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Row 4: Separate Sidebar (+ cog: Sidebar Spacing) | (empty)
+        local sepRow
+        sepRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Separate Sidebar",
+              tooltip="Separates the sidebar from the chat panel and gives it its own background and border.",
+              getValue=function() return Cfg("sidebarSeparate") or false end,
+              setValue=function(v)
+                  Set("sidebarSeparate", v)
+                  if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
+                  if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "label", text = "" })
+        do
+            local lrgn = sepRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Separate Sidebar",
+                rows = {
+                    { type="slider", pixel=true, label="Sidebar Spacing",
+                      min = 0, max = 30, step = 1,
+                      get=function() return Cfg("sidebarSeparateSpacing") or 8 end,
+                      set=function(v)
+                          Set("sidebarSeparateSpacing", v)
+                          if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
+                          if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, lrgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
+            lrgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(Cfg("sidebarSeparate") and 0.4 or 0.15)
+            end
+            UpdateCogAlpha()
+            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) UpdateCogAlpha() end)
+            cogBtn:SetScript("OnClick", function(s)
+                if Cfg("sidebarSeparate") then cogShow(s) end
+            end)
+        end
+        y = y - h
+
         end -- isSidebar
 
         if isTabs then
@@ -837,27 +893,58 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
 
             _, h = W:SectionHeader(parent, "APPEARANCE", y); y = y - h
-            local function TabBackgroundSwatch(active)
+            -- Tab background: opacity slider + inline RGB swatch per state.
+            -- Same stored tables as the old picker rows ({r,g,b,a} in
+            -- tabBackgroundColor / tabBackgroundColorActive): the slider edits
+            -- .a, the swatch edits rgb. No migration -- these keys have only
+            -- ever existed in tester builds of PR #841, never in a release.
+            local TAB_BG_FALLBACK = {
+                [false] = { r=.03, g=.045, b=.05, a=.44 },
+                [true]  = { r=.03, g=.045, b=.05, a=.65 },
+            }
+            local function TabBgSliderCfg(active)
                 local key = active and "tabBackgroundColorActive" or "tabBackgroundColor"
-                local fallback = active
-                    and {r=.03,g=.045,b=.05,a=.65}
-                    or {r=.03,g=.045,b=.05,a=.44}
+                local fallback = TAB_BG_FALLBACK[active]
                 return {
-                    { tooltip=active and "Active Tab Background Color" or "Tab Background Color", hasAlpha=true,
-                      getValue=function()
-                          local c=Cfg(key) or fallback
-                          return c.r,c.g,c.b,c.a == nil and fallback.a or c.a
-                      end,
-                      setValue=function(r,g,b,a)
-                          Set(key,{r=r,g=g,b=b,a=a})
-                          if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
-                      end,
-                    },
+                    type="slider",
+                    text=active and "Tab Background Color Active" or "Tab Background Color",
+                    min=0, max=100, step=1, trackWidth=120,
+                    getValue=function()
+                        local c = Cfg(key) or fallback
+                        local a = c.a == nil and fallback.a or c.a
+                        return math.floor(a * 100 + 0.5)
+                    end,
+                    setValue=function(v)
+                        local c = Cfg(key) or fallback
+                        Set(key, { r=c.r, g=c.g, b=c.b, a=v/100 })
+                        if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                    end,
                 }
             end
-            _, h = W:DualRow(parent, y,
-                { type="multiSwatch", text="Tab Background Color", swatches=TabBackgroundSwatch(false) },
-                { type="multiSwatch", text="Tab Background Color Active", swatches=TabBackgroundSwatch(true) })
+            local tabBgRow
+            tabBgRow, h = W:DualRow(parent, y, TabBgSliderCfg(false), TabBgSliderCfg(true))
+            local function AttachTabBgSwatch(rgn, active)
+                local key = active and "tabBackgroundColorActive" or "tabBackgroundColor"
+                local fallback = TAB_BG_FALLBACK[active]
+                local swatch, refresh = EllesmereUI.BuildColorSwatch(
+                    rgn, tabBgRow:GetFrameLevel() + 3,
+                    function()
+                        local c = Cfg(key) or fallback
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        local c = Cfg(key) or fallback
+                        local a = c.a == nil and fallback.a or c.a
+                        Set(key, { r=r, g=g, b=b, a=a })
+                        if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                    end,
+                    false, 20)
+                PP.Point(swatch, "RIGHT", rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                EllesmereUI.RegisterWidgetRefresh(refresh)
+            end
+            AttachTabBgSwatch(tabBgRow._leftRegion, false)
+            AttachTabBgSwatch(tabBgRow._rightRegion, true)
             y = y - h
 
             local function UnderlineSwatches()
@@ -919,35 +1006,10 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="multiSwatch", text="Underline Color", swatches=UnderlineSwatches() })
             y = y - h
 
-            _, h = W:SectionHeader(parent, "IDLE FADE", y); y = y - h
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Enable Idle Fade",
-                  getValue=function() return Cfg("tabIdleFadeEnabled") ~= false end,
-                  setValue=function(v)
-                      Set("tabIdleFadeEnabled", v)
-                      if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type="label", text="" })
-            y = y - h
-            _, h = W:DualRow(parent, y,
-                { type="slider", text="Idle Fade Delay", min=5, max=30, step=1,
-                  disabled=function() return Cfg("tabIdleFadeEnabled") == false end,
-                  disabledTooltip="Enable Idle Fade",
-                  getValue=function() return Cfg("tabIdleFadeDelay") or 15 end,
-                  setValue=function(v)
-                      Set("tabIdleFadeDelay", v)
-                      if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
-                  end },
-                { type="slider", text="Idle Fade Strength", min=0, max=100, step=1,
-                  disabled=function() return Cfg("tabIdleFadeEnabled") == false end,
-                  disabledTooltip="Enable Idle Fade",
-                  getValue=function() return Cfg("tabIdleFadeStrength") or 40 end,
-                  setValue=function(v)
-                      Set("tabIdleFadeStrength", v)
-                      if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
-                  end })
-            y = y - h
+            -- (No tab idle-fade section: the per-tab fade layer was removed
+            -- 2026-07-20 -- Blizzard's own tab alpha machinery always won and
+            -- the setting visibly did nothing. Tabs fade with the chat panel
+            -- via the dock; see the tab-alpha note in EllesmereUIChat.lua.)
 
             _, h = W:SectionHeader(parent, "BORDER", y); y = y - h
             _, h = W:DualRow(parent, y,
@@ -1078,6 +1140,77 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI.RegisterWidgetRefresh(Refresh); Refresh()
             end
+
+            -- Row: Active Tab Border (+ inline color swatch) | Tab Background Texture
+            -- Texture catalogue (same build as the Chat page's Background
+            -- Texture dropdown -- that local is scoped to the isChat block).
+            if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
+            local btValues, btOrder = {}, {}
+            do
+                local texNames = ns.chatBgTextureNames or {}
+                for _, key in ipairs(ns.chatBgTextureOrder or {}) do
+                    if key ~= "---" then
+                        btValues[key] = texNames[key] or key
+                        btOrder[#btOrder + 1] = key
+                    end
+                end
+                local texLookup = ns.chatBgTextures or {}
+                btValues._menuOpts = {
+                    itemHeight = 28,
+                    background = function(key)
+                        return texLookup[key]
+                    end,
+                }
+            end
+            local activeBorderRow
+            activeBorderRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Active Tab Border",
+                  tooltip="Gives the selected tab its own border color.",
+                  disabled=tabBordersDisabled, disabledTooltip=TabBorderDisabledTip,
+                  getValue=function() return Cfg("activeTabBorder") ~= false end,
+                  setValue=function(v)
+                      Set("activeTabBorder", v)
+                      if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="dropdown", text="Tab Background Texture",
+                  tooltip="Texture drawn over the tab background colors.",
+                  values=btValues, order=btOrder,
+                  disabled=function() return Cfg("syncTabBorder") ~= false end,
+                  disabledTooltip="Requires Sync Style with Chat Panel disabled",
+                  getValue=function() return Cfg("tabBackgroundTexture") or "none" end,
+                  setValue=function(v)
+                      Set("tabBackgroundTexture", v)
+                      if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                  end })
+            do
+                local rgn = activeBorderRow._leftRegion
+                local swatch, refreshSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, activeBorderRow:GetFrameLevel() + 3,
+                    function()
+                        local c = Cfg("tabBorderColorActive") or { r=1, g=1, b=1 }
+                        return c.r, c.g, c.b, c.a == nil and 0.18 or c.a
+                    end,
+                    function(r, g, b, a)
+                        Set("tabBorderColorActive", { r=r, g=g, b=b, a=a })
+                        if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
+                    end,
+                    true, 20)
+                PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                swatch:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(swatch, "Active Border Color")
+                end)
+                swatch:SetScript("OnLeave", EllesmereUI.HideWidgetTooltip)
+                local function RefreshActiveSwatch()
+                    refreshSwatch()
+                    local off = tabBordersDisabled() or Cfg("activeTabBorder") == false
+                    swatch:SetAlpha(off and 0.3 or 1)
+                end
+                EllesmereUI.RegisterWidgetRefresh(RefreshActiveSwatch)
+                RefreshActiveSwatch()
+            end
+            y = y - h
         end -- isTabs
 
         -- -- EXTRAS ------------------------------------------------------------
@@ -1144,6 +1277,14 @@ initFrame:SetScript("OnEvent", function(self)
         do
             local rgn = extrasBorderRow._rightRegion
             local ctrl = rgn._control
+            local function SetInnerMode(mode)
+                if Cfg("hideBorders") then return end
+                Set("innerBorderColorMode", mode)
+                if ECHAT.ApplyBorders then ECHAT.ApplyBorders() end
+                if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                if ECHAT.ApplyTabSeparators then ECHAT.ApplyTabSeparators() end
+                EllesmereUI:RefreshPage()
+            end
             local swatch, refreshSwatch = EllesmereUI.BuildColorSwatch(
                 rgn, extrasBorderRow:GetFrameLevel() + 3,
                 function()
@@ -1152,19 +1293,47 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 function(r, g, b, a)
                     Set("innerBorderColor", { r=r, g=g, b=b, a=a })
+                    Set("innerBorderColorMode", "custom")
                     if ECHAT.ApplyBorders then ECHAT.ApplyBorders() end
+                    if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                    if ECHAT.ApplyTabSeparators then ECHAT.ApplyTabSeparators() end
                 end,
                 true, 20)
             PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
+            -- Accent mode swatch sits left of the custom one (select-mode-
+            -- first convention, matching the tab border color trio).
+            local accentSw, refreshAccent = EllesmereUI.BuildColorSwatch(
+                rgn, extrasBorderRow:GetFrameLevel() + 3,
+                function() return EllesmereUI.GetAccentColor() end,
+                function() end, false, 20)
+            PP.Point(accentSw, "RIGHT", swatch, "LEFT", -8, 0)
+            accentSw:SetScript("OnClick", function() SetInnerMode("accent") end)
+            accentSw:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(accentSw, "Accent Inner Border Color")
+            end)
+            accentSw:SetScript("OnLeave", EllesmereUI.HideWidgetTooltip)
+            local origClick = swatch:GetScript("OnClick")
+            swatch:SetScript("OnClick", function(self, ...)
+                if Cfg("hideBorders") then return end
+                if (Cfg("innerBorderColorMode") or "custom") ~= "custom" then
+                    SetInnerMode("custom")
+                elseif origClick then
+                    origClick(self, ...)
+                end
+            end)
             swatch:SetScript("OnEnter", function()
                 EllesmereUI.ShowWidgetTooltip(swatch, "Inner Border Color")
             end)
             swatch:SetScript("OnLeave", EllesmereUI.HideWidgetTooltip)
-            EllesmereUI.RegisterWidgetRefresh(function()
-                refreshSwatch()
-                swatch:SetAlpha(Cfg("hideBorders") and 0.3 or 1)
-            end)
-            swatch:SetAlpha(Cfg("hideBorders") and 0.3 or 1)
+            local function RefreshInner()
+                refreshSwatch(); refreshAccent()
+                local off = Cfg("hideBorders")
+                local mode = Cfg("innerBorderColorMode") or "custom"
+                swatch:SetAlpha(off and 0.3 or (mode == "custom" and 1 or 0.3))
+                accentSw:SetAlpha(off and 0.3 or (mode == "accent" and 1 or 0.3))
+            end
+            EllesmereUI.RegisterWidgetRefresh(RefreshInner)
+            RefreshInner()
         end
         y = y - h
 

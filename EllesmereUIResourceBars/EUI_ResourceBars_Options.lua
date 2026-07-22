@@ -3291,10 +3291,18 @@ initFrame:SetScript("OnEvent", function(self)
                   c.barAlpha = v / 100; RefreshHealth()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "multiSwatch", text = "Fill Color",
+            { type = "slider", text = "Fill Color", min = 0, max = 100, step = 1, trackWidth = 120,
+              tooltip = "Opacity of the bar fill; below 100 the world shows through the fill instead of the background.",
               disabled = healthOff,
               disabledTooltip = "Health Bar",
-              swatches = {
+              getValue = function() local c = cfg(); return (c and c.fillOpacity) or 100 end,
+              setValue = function(v)
+                  local c = cfg(); if not c then return end
+                  c.fillOpacity = v; RebuildHealth()
+              end }
+        );  y = y - h
+        -- Inline swatches on Fill Color (gradient end / custom / class)
+        EllesmereUI.BuildInlineSwatches(healthBorderRow._rightRegion, {
                 { tooltip = "Gradient End Color", hasAlpha = true,
                   disabled = function()
                       local c = cfg(); if not c then return true end
@@ -3321,15 +3329,15 @@ initFrame:SetScript("OnEvent", function(self)
                       SmoothRefresh()
                   end },
                 { tooltip = "Custom Colored",
-                  hasAlpha = true,
+                  hasAlpha = false,
                   getValue = function()
                       local c = cfg()
                       if not c then return 37/255, 193/255, 29/255, 1 end
-                      return c.fillR, c.fillG, c.fillB, c.fillA
+                      return c.fillR, c.fillG, c.fillB, 1
                   end,
-                  setValue = function(r, g, b, a)
+                  setValue = function(r, g, b)
                       local c = cfg(); if not c then return end
-                      c.fillR, c.fillG, c.fillB, c.fillA = r, g, b, a
+                      c.fillR, c.fillG, c.fillB = r, g, b
                       if not c.customColored then c.customColored = true end
                       SmoothRefresh(); EllesmereUI:RefreshPage()
                   end,
@@ -3365,8 +3373,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local isClassColored = not c or not c.customColored
                       return isClassColored and 1 or 0.3
                   end },
-              } }
-        );  y = y - h
+        }, { disabled = healthOff, disabledTooltip = "Health Bar" })
         if not ctx.advanced and ctx.syncRows then
             ctx.syncRows.healthOpacity = healthBorderRow._leftRegion
             local rgn = healthBorderRow._leftRegion
@@ -3407,13 +3414,6 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           local c = cfg(); if not c then return end
                           c.gradientDir = v; RebuildHealth()
-                      end },
-                    { type = "slider", label = "Fill Opacity", min = 0, max = 100, step = 1,
-                      tooltip = "Opacity of the bar fill; below 100 the world shows through the fill instead of the background.",
-                      get = function() local c = cfg(); return (c and c.fillOpacity) or 100 end,
-                      set = function(v)
-                          local c = cfg(); if not c then return end
-                          c.fillOpacity = v; RebuildHealth()
                       end },
                 },
             })
@@ -4060,10 +4060,18 @@ initFrame:SetScript("OnEvent", function(self)
                   c.barAlpha = v / 100; RefreshPower()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "multiSwatch", text = "Fill Color",
+            { type = "slider", text = "Fill Color", min = 0, max = 100, step = 1, trackWidth = 120,
+              tooltip = "Opacity of the bar fill; below 100 the world shows through the fill instead of the background.",
               disabled = powerOff,
               disabledTooltip = powerDisTip,
-              swatches = {
+              getValue = function() local c = cfg(); return (c and c.fillOpacity) or 100 end,
+              setValue = function(v)
+                  local c = cfg(); if not c then return end
+                  c.fillOpacity = v; RebuildPower()
+              end }
+        );  y = y - h
+        -- Inline swatches on Fill Color (gradient end / custom / power)
+        EllesmereUI.BuildInlineSwatches(powerBorderRow._rightRegion, {
                 { tooltip = "Gradient End Color", hasAlpha = true,
                   disabled = function()
                       local c = cfg(); if not c then return true end
@@ -4090,15 +4098,15 @@ initFrame:SetScript("OnEvent", function(self)
                       SmoothRefresh()
                   end },
                 { tooltip = "Custom Colored",
-                  hasAlpha = true,
+                  hasAlpha = false,
                   getValue = function()
                       local c = cfg()
                       if not c then return 0x23/255, 0x8F/255, 0xE7/255, 1 end
-                      return c.fillR, c.fillG, c.fillB, c.fillA
+                      return c.fillR, c.fillG, c.fillB, 1
                   end,
-                  setValue = function(r, g, b, a)
+                  setValue = function(r, g, b)
                       local c = cfg(); if not c then return end
-                      c.fillR, c.fillG, c.fillB, c.fillA = r, g, b, a
+                      c.fillR, c.fillG, c.fillB = r, g, b
                       RebuildPower(); SmoothRefresh()
                   end,
                   onClick = function(self)
@@ -4133,8 +4141,7 @@ initFrame:SetScript("OnEvent", function(self)
                       local isPowerColored = not c or not c.customColored
                       return isPowerColored and 1 or 0.3
                   end },
-              } }
-        );  y = y - h
+        }, { disabled = powerOff, disabledTooltip = powerDisTip })
         if not ctx.advanced and ctx.syncRows then
             ctx.syncRows.powerOpacity = powerBorderRow._leftRegion
             local rgn = powerBorderRow._leftRegion
@@ -4174,13 +4181,6 @@ initFrame:SetScript("OnEvent", function(self)
                       set = function(v)
                           local c = cfg(); if not c then return end
                           c.gradientDir = v; RebuildPower()
-                      end },
-                    { type = "slider", label = "Fill Opacity", min = 0, max = 100, step = 1,
-                      tooltip = "Opacity of the bar fill; below 100 the world shows through the fill instead of the background.",
-                      get = function() local c = cfg(); return (c and c.fillOpacity) or 100 end,
-                      set = function(v)
-                          local c = cfg(); if not c then return end
-                          c.fillOpacity = v; RebuildPower()
                       end },
                 },
             })
@@ -5057,24 +5057,28 @@ initFrame:SetScript("OnEvent", function(self)
                   c.barAlpha = v / 100; RefreshClass()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "multiSwatch", text = "Fill Color",
-              disabled = function() local c = cfg(); return (not c) or (not c.enabled) or c.darkTheme end,
-              disabledTooltip = function()
-                  local c = cfg()
-                  if c and c.darkTheme then return "This option requires Dark Mode Class Resource to be disabled" end
-                  return "Class Resource"
-              end,
-              swatches = {
+            { type = "slider", text = "Fill Color", min = 0, max = 100, step = 1, trackWidth = 120,
+              tooltip = "Opacity of the resource fill; below 100 the world shows through the fill instead of the background.",
+              disabled = classOff,
+              disabledTooltip = "Class Resource",
+              getValue = function() local c = cfg(); return (c and c.fillOpacity) or 100 end,
+              setValue = function(v)
+                  local c = cfg(); if not c then return end
+                  c.fillOpacity = v; RebuildClass(); SmoothRefresh()
+              end }
+        );  y = y - h
+        -- Inline swatches on Fill Color (custom / class / resource)
+        EllesmereUI.BuildInlineSwatches(classBorderRow._rightRegion, {
                 { tooltip = "Custom Colored",
-                  hasAlpha = true,
+                  hasAlpha = false,
                   getValue = function()
                       local c = cfg()
                       if not c then return 0xDB/255, 0xCF/255, 0x37/255, 1 end
-                      return c.fillR, c.fillG, c.fillB, c.fillA
+                      return c.fillR, c.fillG, c.fillB, 1
                   end,
-                  setValue = function(r, g, b, a)
+                  setValue = function(r, g, b)
                       local c = cfg(); if not c then return end
-                      c.fillR, c.fillG, c.fillB, c.fillA = r, g, b, a
+                      c.fillR, c.fillG, c.fillB = r, g, b
                       RebuildClass(); SmoothRefresh()
                   end,
                   onClick = function(self)
@@ -5140,8 +5144,12 @@ initFrame:SetScript("OnEvent", function(self)
                       local c = cfg()
                       return (c and c.resourceColored) and 1 or 0.3
                   end },
-              } }
-        );  y = y - h
+        }, { disabled = function() local c = cfg(); return (not c) or (not c.enabled) or c.darkTheme end,
+             disabledTooltip = function()
+                 local c = cfg()
+                 if c and c.darkTheme then return "This option requires Dark Mode Class Resource to be disabled" end
+                 return "Class Resource"
+             end })
         -- Inline cog for Charged Combo Point color (on Fill Color)
         do
             local rgn = classBorderRow._rightRegion
@@ -5160,13 +5168,6 @@ initFrame:SetScript("OnEvent", function(self)
                           c.chargedR, c.chargedG = cr, cg
                           c.chargedB, c.chargedA = cb, ca
                           RebuildClass(); SmoothRefresh()
-                      end },
-                    { type = "slider", label = "Fill Opacity", min = 0, max = 100, step = 1,
-                      tooltip = "Opacity of the resource fill; below 100 the world shows through the fill instead of the background.",
-                      get = function() local c = cfg(); return (c and c.fillOpacity) or 100 end,
-                      set = function(v)
-                          local c = cfg(); if not c then return end
-                          c.fillOpacity = v; RebuildClass(); SmoothRefresh()
                       end },
                 },
                 footer = false,
@@ -7924,7 +7925,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Bar color / gradient
         local fillTex = pf.bar:GetStatusBarTexture()
-        local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, cb.fillA
+        local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, 1
         if cb.classColored == true then
             local _, cf = UnitClass("player")
             local cc = cf and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cf]
@@ -8104,9 +8105,9 @@ initFrame:SetScript("OnEvent", function(self)
         local fillTex = bar:GetStatusBarTexture()
         if cb.gradientEnabled then
             local dir = cb.gradientDir or "HORIZONTAL"
-            fillTex:SetGradient(dir, CreateColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA), CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA))
+            fillTex:SetGradient(dir, CreateColor(cb.fillR, cb.fillG, cb.fillB, 1), CreateColor(cb.gradientR, cb.gradientG, cb.gradientB, cb.gradientA))
         else
-            fillTex:SetVertexColor(cb.fillR, cb.fillG, cb.fillB, cb.fillA)
+            fillTex:SetVertexColor(cb.fillR, cb.fillG, cb.fillB, 1)
         end
         _castBarPreviewFrames.bar = bar
 
@@ -8520,14 +8521,42 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Row 2: Color (multiSwatch + cog: gradient) | (empty)
+        -- Row 2: Fill Color (opacity slider + inline swatches + cog: gradient) | Background
         local castColorRow
         castColorRow, h = W:DualRow(parent, y,
-            { type = "multiSwatch", text = "Color",
+            { type = "slider", text = "Fill Color", min = 0, max = 100, step = 1, trackWidth = 120,
+              tooltip = "Opacity of the bar fill; below 100 the world shows through the fill instead of the background.",
               disabled = castOff,
               disabledTooltip = "Player Cast Bar",
-              swatches = {
+              getValue = function() local p = DB(); return p and (p.castBar.fillOpacity or 100) or 100 end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.castBar.fillOpacity = v; RefreshCast()
+              end },
+            { type = "slider", text = "Background", min = 0, max = 100, step = 1,
+              disabled = castOff,
+              disabledTooltip = "Player Cast Bar",
+              getValue = function()
+                  local p = DB(); return math.floor(((p and p.castBar.bgA or 0.7) * 100) + 0.5)
+              end,
+              setValue = function(v)
+                  local p = DB(); if not p then return end
+                  p.castBar.bgA = v / 100; RefreshCast()
+              end }
+        );  y = y - h
+        -- Inline swatches on Fill Color (gradient end / custom / class)
+        EllesmereUI.BuildInlineSwatches(castColorRow._leftRegion, {
                   { tooltip = "Gradient End Color", hasAlpha = true,
+                    disabled = function()
+                        local p = DB()
+                        if not p or not p.castBar.enabled then return true end
+                        return not p.castBar.gradientEnabled
+                    end,
+                    disabledTooltip = function()
+                        local p = DB()
+                        if not p or not p.castBar.enabled then return "Player Cast Bar" end
+                        return "Gradient"
+                    end,
                     getValue = function()
                         local p = DB()
                         if not p then return 0.20, 0.20, 0.80, 1 end
@@ -8538,7 +8567,7 @@ initFrame:SetScript("OnEvent", function(self)
                         p.castBar.gradientR, p.castBar.gradientG, p.castBar.gradientB, p.castBar.gradientA = r, g, b, a
                         RefreshCast()
                     end },
-                  { tooltip = "Custom Colored", hasAlpha = true,
+                  { tooltip = "Custom Colored", hasAlpha = false,
                     getValue = function()
                         local p = DB()
                         if not p then
@@ -8546,11 +8575,11 @@ initFrame:SetScript("OnEvent", function(self)
                             local cc = CLASS_COLORS[cf]
                             return cc and cc[1] or 1, cc and cc[2] or 0.70, cc and cc[3] or 0, 1
                         end
-                        return p.castBar.fillR, p.castBar.fillG, p.castBar.fillB, p.castBar.fillA
+                        return p.castBar.fillR, p.castBar.fillG, p.castBar.fillB, 1
                     end,
-                    setValue = function(r, g, b, a)
+                    setValue = function(r, g, b)
                         local p = DB(); if not p then return end
-                        p.castBar.fillR, p.castBar.fillG, p.castBar.fillB, p.castBar.fillA = r, g, b, a
+                        p.castBar.fillR, p.castBar.fillG, p.castBar.fillB = r, g, b
                         if p.castBar.classColored then p.castBar.classColored = false end
                         RefreshCast(); EllesmereUI:RefreshPage()
                     end,
@@ -8584,19 +8613,8 @@ initFrame:SetScript("OnEvent", function(self)
                         local p = DB()
                         return (not p or p.castBar.classColored == true) and 1 or 0.3
                     end },
-              } },
-            { type = "slider", text = "Background", min = 0, max = 100, step = 1,
-              disabled = castOff,
-              disabledTooltip = "Player Cast Bar",
-              getValue = function()
-                  local p = DB(); return math.floor(((p and p.castBar.bgA or 0.7) * 100) + 0.5)
-              end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.castBar.bgA = v / 100; RefreshCast()
-              end }
-        );  y = y - h
-        -- Inline cog on Color for gradient settings
+        }, { disabled = castOff, disabledTooltip = "Player Cast Bar" })
+        -- Inline cog on Fill Color for gradient settings
         do
             local rgn = castColorRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
@@ -8637,25 +8655,6 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateCogDisGrad()
         end
 
-        -- Manual gradient swatch enable/disable (cursor addon pattern)
-        do
-            local swatch = castColorRow._leftRegion._control
-            local function UpdateGradientSwatch()
-                local p = DB()
-                if not p or not p.castBar.enabled then
-                    swatch:SetAlpha(0.15); swatch:Disable()
-                    swatch._disabledTooltip = "Player Cast Bar"
-                elseif not p.castBar.gradientEnabled then
-                    swatch:SetAlpha(0.15); swatch:Disable()
-                    swatch._disabledTooltip = "Gradient"
-                else
-                    swatch:SetAlpha(1); swatch:Enable()
-                    swatch._disabledTooltip = nil
-                end
-            end
-            UpdateGradientSwatch()
-            EllesmereUI.RegisterWidgetRefresh(UpdateGradientSwatch)
-        end
         -- Inline color swatch on Background (right region)
         do
             local rgn = castColorRow._rightRegion
@@ -8842,19 +8841,6 @@ initFrame:SetScript("OnEvent", function(self)
             UpdateCogDisTimer()
         end
 
-        -- Row 5: Fill Opacity | (empty)
-        _, h = W:DualRow(parent, y,
-            { type = "slider", text = "Fill Opacity", min = 0, max = 100, step = 1,
-              tooltip = "Opacity of the bar fill; below 100 the world shows through the fill instead of the background.",
-              disabled = castOff,
-              disabledTooltip = "Player Cast Bar",
-              getValue = function() local p = DB(); return p and (p.castBar.fillOpacity or 100) or 100 end,
-              setValue = function(v)
-                  local p = DB(); if not p then return end
-                  p.castBar.fillOpacity = v; RefreshCast()
-              end },
-            { type = "label", text = "" }
-        );  y = y - h
 
         -- ── MARKS section ───────────────────────────────────────────
         _, h = W:SectionHeader(parent, "TICK MARKERS", y);  y = y - h

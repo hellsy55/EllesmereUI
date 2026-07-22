@@ -18,6 +18,72 @@ if not EUI then return end
 ns.ECHAT = ns.ECHAT or {}
 local ECHAT = ns.ECHAT
 
+-- BISECT LADDER (whisper-creation taint). The gate-7 configuration below
+-- (every flag true) is the last field-CLEAN state. Gates are cleared ONE
+-- per tester cycle -- multiple taint sources are possible, so a returning
+-- error attributes to the single flag flipped that cycle. The clip-homed
+-- tab hosts (GetTabHostClip) are the root-cause fix for gate 7A and are
+-- ACTIVE; this build's only new variable vs the clean state.
+local BISECT_TAB_GEOMETRY_OFF = false   -- 1: CLEARED (this cycle)
+local BISECT_TAB_PADDING_OFF = false    -- 3: CLEARED (this cycle)
+local BISECT_TAB_BORDERS_OFF = false    -- 4: RETEST -- dirty on first clear;
+                                        --    tab getters removed since
+-- 4b: gate-4 stayed dirty with all tab getters gone. This flag skips ONLY
+-- the border-engine call (EllesmereUI.ApplyBorderStyle + PP solid border)
+-- on the tab hosts; host management, FCF_IsDocked, and separators all
+-- still run. The engine's scale walk + PP pixel-snap machinery have never
+-- executed on a gdm-chained frame in any clean build.
+local BISECT_EXT_BG_OFF = false         -- 5: CLEARED (this cycle)
+local BISECT_DEFERRED_PASSES_OFF = false -- 6: CLEARED (this cycle)
+local BISECT_EB_ANCHORS_OFF = false     -- 7: CLEARED (this cycle)
+local BISECT_TEX_SHIFT_OFF = false      -- 8: CLEARED (this cycle) -- textures
+                                        --    re-anchored to their OWN parent
+                                        --    add no dependency edge; anchor +
+                                        --    unsnap both have clean alibis
+-- FINAL HOST DESIGN (gate 9 confirmed CLEAN in field): an insecure frame
+-- ANCHORED to a Blizzard chat tab is the taint injector -- parenting,
+-- existence, and strata were all exonerated; the anchor dependency alone
+-- poisons the secure dock pass into UpdateHeader's secret whisper math.
+-- Hosts therefore carry ZERO tab anchors: clip-parented and positioned
+-- NUMERICALLY (PositionTabHosts) from coordinates resolved in our own
+-- deferred passes. Geometry READS of tabs from our execution are safe;
+-- anchor TIES are not.
+
+-- WHISPER-CREATION TAINT: ROOT CAUSE (field-bisected 2026-07-22 over a
+-- 7-gate ladder against the clean 8.5.2 baseline). Creating child FRAMES
+-- on Blizzard chat tabs (841's panelBorder/separatorHost/underlineHost)
+-- taints the temp-whisper creation chain: FCF_OpenTemporaryWindow ->
+-- FCF_DockUpdate walks the tabs with our frames in their child lists, and
+-- the chain then runs UpdateHeader's SECRET whisper-name width math
+-- tainted ("arithmetic on a secret value blocked... EllesmereUIChat",
+-- ChatFrameEditBox.lua:677) and the whisper fails to route. The pre-841
+-- module avoided exactly this ("zero writes to Blizzard frames" -- its
+-- underline lived on a UIParent clip frame). FIX: all per-tab host frames
+-- are parented to the shared UIParent clip container below and only
+-- ANCHORED to their tab. NEVER CreateFrame with a Blizzard chat tab (or
+-- chat frame) as parent. Textures created directly on tabs (bg/hover)
+-- are fine -- they existed in 8.5.2, field-clean.
+local _tabHostClip
+local function GetTabHostClip()
+    if _tabHostClip then return _tabHostClip end
+    local clip = CreateFrame("Frame", nil, UIParent)
+    clip:SetFrameStrata("DIALOG")
+    clip:EnableMouse(false)
+    clip:SetClipsChildren(true)
+    local gdm = _G.GeneralDockManager
+    if gdm then
+        -- Slack past the dock bounds so the 1px separators/underline and
+        -- the dynamic-tab visual shift are not clipped at the edges.
+        clip:SetPoint("TOPLEFT", gdm, "TOPLEFT", -4, 8)
+        clip:SetPoint("BOTTOMRIGHT", gdm, "BOTTOMRIGHT", 4, -8)
+    else
+        clip:SetAllPoints(UIParent)
+    end
+    ns._tabHostClip = clip
+    _tabHostClip = clip
+    return clip
+end
+
 -- Chat uses the same tuned Blizzard-border offsets as the other rectangular
 -- EUI panels. Without a chat registration the shared engine resolves the
 -- addon-specific lookup to zero, which clips this texture into the panel.
@@ -70,6 +136,11 @@ local CHAT_DEFAULTS = {
             sidebarVisibility = "always",
             hideBorders = false,
             innerBorderColor = { r=1, g=1, b=1, a=0.06 },
+            innerBorderColorMode = "custom",
+            panelBorderBehind = false,
+            tabBackgroundTexture = "none",
+            activeTabBorder = true,
+            tabBorderColorActive = { r=1, g=1, b=1, a=0.18 },
             extendBgBehindTabs = false,
             panelBorderTexture = "solid",
             panelBorderThickness = "none",
@@ -103,6 +174,8 @@ local CHAT_DEFAULTS = {
             showScroll = true,
             hideTooltipOnHover = true,
             sidebarRight = false,
+            sidebarSeparate = false,
+            sidebarSeparateSpacing = 8,
             iconR = 1,
             iconG = 1,
             iconB = 1,
@@ -110,9 +183,6 @@ local CHAT_DEFAULTS = {
             idleFadeDelay = 15,
             idleFadeStrength = 40,
             idleFadeEnabled = true,
-            tabIdleFadeDelay = 15,
-            tabIdleFadeStrength = 40,
-            tabIdleFadeEnabled = true,
             inputOnTop = false,
             lockChatSize = false,
             hideSidebarBg = false,
@@ -193,7 +263,6 @@ local function GetIdleFadeAlpha()
     return 1 - (strength / 100)
 end
 local _idleFadeActive = false
-local _tabIdleFadeActive = false
 local FADE_IN_DURATION = 0.35
 local FADE_OUT_DURATION = 1.0
 local IDLE_FADE_OUT_DURATION = 2.0
@@ -202,72 +271,16 @@ local _chatAlphaCurrent = 1
 local _chatFadeFrame = CreateFrame("Frame")
 _chatFadeFrame:Hide()
 local _visAlpha = 1
-local _tabAlphaTarget = 1
-local _tabAlphaCurrent = 1
-local _tabFadeFrame = CreateFrame("Frame")
-_tabFadeFrame:Hide()
 local _euiDockStyled
-
-local function GetTabIdleFadeAlpha()
-    local cfg = ECHAT.DB()
-    local strength = min(cfg.tabIdleFadeStrength or 40, 99)
-    return 1 - (strength / 100)
-end
-
--- Tabs belong to the chat panel visually: panel idle fade is therefore the
--- upper alpha limit, while the optional tab idle fade may dim them further.
-local function GetEffectiveTabAlpha()
-    local alpha = _idleFadeActive and GetIdleFadeAlpha() or 1
-    if _tabIdleFadeActive then
-        alpha = min(alpha, GetTabIdleFadeAlpha())
-    end
-    return alpha
-end
-
-local function SetTabAlphaTarget(alpha)
-    _tabAlphaTarget = min(alpha, _visAlpha)
-    _tabFadeFrame:Show()
-end
-
-local function ApplyTabFadeAlpha(alpha)
-    if _euiDockStyled and _G.GeneralDockManager then
-        _G.GeneralDockManager:SetAlpha(1)
-    end
-    for i = 1, 20 do
-        local tab = _G["ChatFrame" .. i .. "Tab"]
-        if tab and CFD(tab).skinned then
-            local d = CFD(tab)
-            if d.fadeBaseAlpha == nil then
-                local current = tab:GetAlpha()
-                d.fadeBaseAlpha = current == nil and 1 or current
-            end
-            local applied = d.fadeBaseAlpha * alpha
-            tab:SetAlpha(applied)
-            local border = CFD(tab).panelBorder
-            if border then border:SetAlpha(border:GetParent() == tab and 1 or applied) end
-        end
-    end
-    if ns._tabPanelBottomSeparator then ns._tabPanelBottomSeparator:SetAlpha(alpha) end
-    if alpha == 1 and _tabAlphaTarget == 1 then
-        for i = 1, 20 do
-            local tab = _G["ChatFrame" .. i .. "Tab"]
-            if tab then CFD(tab).fadeBaseAlpha = nil end
-        end
-    end
-end
-
-_tabFadeFrame:SetScript("OnUpdate", function(self, dt)
-    if _tabAlphaCurrent == _tabAlphaTarget then self:Hide(); return end
-    local duration = _tabAlphaTarget > _tabAlphaCurrent and FADE_IN_DURATION
-        or ((_idleFadeActive or _tabIdleFadeActive) and IDLE_FADE_OUT_DURATION or FADE_OUT_DURATION)
-    local speed = dt / duration
-    if _tabAlphaTarget > _tabAlphaCurrent then
-        _tabAlphaCurrent = min(_tabAlphaTarget, _tabAlphaCurrent + speed)
-    else
-        _tabAlphaCurrent = max(_tabAlphaTarget, _tabAlphaCurrent - speed)
-    end
-    ApplyTabFadeAlpha(_tabAlphaCurrent)
-end)
+-- Tab alpha is NOT managed here. The per-tab fade layer (own driver frame,
+-- fadeBaseAlpha capture, tab:SetAlpha writes) shipped 2026-07-20 and was
+-- removed same day: Blizzard's own tab alpha machinery (FCFTab_UpdateAlpha,
+-- mouseover alphas) rewrites tab alpha constantly and always won, so the
+-- feature visibly did nothing. Tabs fade with the chat panel the original
+-- way instead -- the dock-level GeneralDockManager:SetAlpha in _ApplyAlpha,
+-- which the tabs inherit as children. Do not reintroduce per-tab SetAlpha
+-- (and NEVER hook tab SetAlpha -- the pre-2026 attempt was a constant
+-- hot-path perf hit).
 
 -- Height of the tab strip (GeneralDockManager dockH, set in StyleDockManager).
 -- Used by the "Extend Background Behind Tabs" feature to size the strip behind
@@ -316,6 +329,11 @@ local BG_R, BG_G, BG_B, BG_A = 0.03, 0.045, 0.05, 0.70
 local EDIT_BG_R, EDIT_BG_G, EDIT_BG_B = 0.05, 0.065, 0.08
 
 local function GetInnerBorderColor(cfg)
+    if cfg.innerBorderColorMode == "accent" and EllesmereUI.GetAccentColor then
+        local r, g, b = EllesmereUI.GetAccentColor()
+        local c = cfg.innerBorderColor
+        return r, g, b, (c and c.a) or 0.06
+    end
     local c = cfg.innerBorderColor or { r=1, g=1, b=1, a=0.06 }
     return c.r or 1, c.g or 1, c.b or 1, c.a == nil and 0.06 or c.a
 end
@@ -464,6 +482,12 @@ end
 -- a BACKGROUND strata keeps it BEHIND the tabs. Because it does not inherit a
 -- chat frame's alpha, _ApplyAlpha fades it directly.
 function ECHAT.ApplyExtendedBackground()
+    if BISECT_EXT_BG_OFF then
+        if ns._chatBgExt then ns._chatBgExt:Hide() end
+        if ns._chatPanelBorder then ns._chatPanelBorder:Hide() end
+        if ns._tabPanelBottomSeparatorTex then ns._tabPanelBottomSeparatorTex:Hide() end
+        return
+    end
     local cfg = ECHAT.DB()
     local extend = cfg.extendBgBehindTabs == true
     local cf1 = _G.ChatFrame1
@@ -491,7 +515,9 @@ function ECHAT.ApplyExtendedBackground()
         -- above the 3D world, and the strip never overlaps the chat text or the
         -- sidebar, so dropping this low has no other visual side effects.
         ext:SetFrameStrata("BACKGROUND")
-        ext:SetFrameLevel(0)
+        -- Level 1 leaves level 0 free for the panel border's "Show Behind"
+        -- mode, whose outward half stays visible around the strip.
+        ext:SetFrameLevel(1)
         if _chatAlphaCurrent then ext:SetAlpha(_chatAlphaCurrent) end
         ext:SetShown(extend)
     end
@@ -555,6 +581,9 @@ function ECHAT.ApplyExtendedBackground()
         local includeSidebar = sb
             and not cfg.hideSidebarBg
             and (cfg.sidebarVisibility or "always") ~= "never"
+            -- A separate sidebar is its own island: excluded from the
+            -- panel border, wrapped by its own border below.
+            and cfg.sidebarSeparate ~= true
         local topExtension = extend and GetTabAreaHeight() or 0
         if includeSidebar and not cfg.sidebarRight then
             border:SetPoint("TOPLEFT", sb, "TOPLEFT", 0, topExtension)
@@ -568,10 +597,15 @@ function ECHAT.ApplyExtendedBackground()
         end
         -- Chat tabs and the edit box can live on a higher strata than the chat
         -- frame itself, so a frame-level bump on the chat strata is not enough.
-        border:SetFrameStrata("DIALOG")
+        -- "Show Behind" instead drops the border to the very back so the chat
+        -- fill covers its inward half and only the outward half frames the
+        -- panel.
+        local showBehind = cfg.panelBorderBehind == true
+        border:SetFrameStrata(showBehind and "BACKGROUND" or "DIALOG")
         -- Solid borders use a child at host + 1, while textured borders render
-        -- directly at host level.
-        local borderLevel = max(100, cf1:GetFrameLevel() + 20)
+        -- directly at host level. In behind mode both stay at 0, under the
+        -- extended strip (level 1) and the chat bg.
+        local borderLevel = showBehind and 0 or max(100, cf1:GetFrameLevel() + 20)
         border:SetFrameLevel(borderLevel)
 
         if EllesmereUI.ApplyBorderStyle then
@@ -595,8 +629,41 @@ function ECHAT.ApplyExtendedBackground()
                 cfg.panelBorderOffsetX, cfg.panelBorderOffsetY,
                 cfg.panelBorderShiftX, cfg.panelBorderShiftY, "chat", thicknessKey)
             local solidBorder = PP and PP.GetBorders and PP.GetBorders(border)
-            if solidBorder then solidBorder:SetFrameLevel(borderLevel + 1) end
+            if solidBorder then solidBorder:SetFrameLevel(borderLevel + (showBehind and 0 or 1)) end
             border:Show()
+
+            -- Separate Sidebar: its own border, same style as the panel.
+            -- Same construction class as the panel border (our UIParent
+            -- frame anchored to our sidebar frame).
+            local wantSbBorder = cfg.sidebarSeparate == true and sb
+                and not cfg.hideSidebarBg
+                and (cfg.sidebarVisibility or "always") ~= "never"
+            local sbBorder = ns._sidebarSeparateBorder
+            if wantSbBorder and not sbBorder then
+                sbBorder = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+                sbBorder:EnableMouse(false)
+                ns._sidebarSeparateBorder = sbBorder
+            end
+            if sbBorder then
+                if wantSbBorder then
+                    local sbTop = (extend and not cfg.hideSidebarBg)
+                        and GetTabAreaHeight() or 0
+                    sbBorder:ClearAllPoints()
+                    sbBorder:SetPoint("TOPLEFT", sb, "TOPLEFT", 0, sbTop)
+                    sbBorder:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
+                    sbBorder:SetFrameStrata(showBehind and "BACKGROUND" or "DIALOG")
+                    sbBorder:SetFrameLevel(borderLevel)
+                    EllesmereUI.ApplyBorderStyle(sbBorder, sizes[thicknessKey] or 1,
+                        color.r, color.g, color.b, alpha, cfg.panelBorderTexture or "solid",
+                        cfg.panelBorderOffsetX, cfg.panelBorderOffsetY,
+                        cfg.panelBorderShiftX, cfg.panelBorderShiftY, "chat", thicknessKey)
+                    local sbSolid = PP and PP.GetBorders and PP.GetBorders(sbBorder)
+                    if sbSolid then sbSolid:SetFrameLevel(borderLevel + (showBehind and 0 or 1)) end
+                    sbBorder:Show()
+                else
+                    sbBorder:Hide()
+                end
+            end
         else
             if EllesmereUI.ApplyBorderStyle then
                 EllesmereUI.ApplyBorderStyle(border, 0, 1, 1, 1, 0, cfg.panelBorderTexture or "solid")
@@ -661,6 +728,10 @@ function ECHAT.ApplySidebarVisibility()
         sidebar:SetAlpha(1)
         sidebar:EnableMouse(true)
     end
+    -- Separate-mode border mirrors the sidebar's alpha.
+    if ns._sidebarSeparateBorder then
+        ns._sidebarSeparateBorder:SetAlpha(_sidebarFadeAlpha)
+    end
 
     -- Re-anchor the extended panel border when the sidebar enters or leaves
     -- the visible layout.
@@ -683,6 +754,9 @@ function ECHAT.ApplySidebarVisibility()
             end
             local sb = _G.ChatFrame1 and CFD(_G.ChatFrame1).sidebar
             if sb then sb:SetAlpha(min(_sidebarFadeAlpha, _chatAlphaCurrent)) end
+            if ns._sidebarSeparateBorder then
+                ns._sidebarSeparateBorder:SetAlpha(min(_sidebarFadeAlpha, _chatAlphaCurrent))
+            end
             if _sidebarFadeAlpha == _sidebarFadeTarget then self:Hide() end
         end)
     end
@@ -906,15 +980,20 @@ function ECHAT.ApplySidebarPosition()
     if not sb or not CFD(cf1).bg then return end
     local PP = EllesmereUI and EllesmereUI.PP
     local onePx = (PP and PP.mult) or 1
+    -- Separate Sidebar: detach from the panel by the configured gap; the
+    -- sidebar keeps its own bg and (via ApplyExtendedBackground) gets its
+    -- own panel-style border.
+    local gap = (cfg.sidebarSeparate == true) and (cfg.sidebarSeparateSpacing or 8) or 0
     sb:ClearAllPoints()
     if cfg.sidebarRight then
-        sb:SetPoint("TOPLEFT", CFD(cf1).bg, "TOPRIGHT", 0, 0)
-        sb:SetPoint("BOTTOMLEFT", CFD(cf1).bg, "BOTTOMRIGHT", 0, 0)
+        sb:SetPoint("TOPLEFT", CFD(cf1).bg, "TOPRIGHT", gap, 0)
+        sb:SetPoint("BOTTOMLEFT", CFD(cf1).bg, "BOTTOMRIGHT", gap, 0)
     else
-        sb:SetPoint("TOPRIGHT", CFD(cf1).bg, "TOPLEFT", 0, 0)
-        sb:SetPoint("BOTTOMRIGHT", CFD(cf1).bg, "BOTTOMLEFT", 0, 0)
+        sb:SetPoint("TOPRIGHT", CFD(cf1).bg, "TOPLEFT", -gap, 0)
+        sb:SetPoint("BOTTOMRIGHT", CFD(cf1).bg, "BOTTOMLEFT", -gap, 0)
     end
-    -- Move the divider to the correct edge
+    -- Move the divider to the correct edge; hidden entirely in separate
+    -- mode (it is the joint line between sidebar and panel).
     if CFD(cf1).sidebarDiv then
         CFD(cf1).sidebarDiv:ClearAllPoints()
         if cfg.sidebarRight then
@@ -924,6 +1003,7 @@ function ECHAT.ApplySidebarPosition()
             CFD(cf1).sidebarDiv:SetPoint("TOPRIGHT", sb, "TOPRIGHT", 0, 0)
             CFD(cf1).sidebarDiv:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
         end
+        CFD(cf1).sidebarDiv:SetShown(cfg.sidebarSeparate ~= true)
     end
 
     -- Re-place the behind-tabs divider continuation onto the new edge.
@@ -1643,7 +1723,7 @@ function ECHAT.ApplyInputPosition()
             local fsc = cf.FontStringContainer
             local bar = cf.ScrollBar
 
-            if eb then
+            if eb and (i <= 10 or not BISECT_EB_ANCHORS_OFF) then
                 eb:ClearAllPoints()
                 if onTop then
                     eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
@@ -1685,7 +1765,7 @@ function ECHAT.ApplyInputPosition()
                 fsc:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 0, 0)
             end
 
-            if bar then
+            if bar and (i <= 10 or not BISECT_EB_ANCHORS_OFF) then
                 bar:ClearAllPoints()
                 if onTop then
                     bar:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -22)
@@ -1726,6 +1806,15 @@ end
 local function _ApplyAlpha(alpha)
     _chatAlphaCurrent = alpha
     if not _alphaFrames then _BuildAlphaCache() end
+    -- Dock manager: once, outside the loop. The tabs are its children and
+    -- inherit this alpha -- the original (and only working) way the tab strip
+    -- fades with the panel; see the tab-alpha note at the fade locals.
+    if _euiDockStyled and _G.GeneralDockManager then
+        _G.GeneralDockManager:SetAlpha(alpha)
+    end
+    -- Tab host clip container (UIParent-parented): carries the dock fade
+    -- for the border/separator/underline hosts.
+    if ns._tabHostClip then ns._tabHostClip:SetAlpha(alpha) end
     for i = 1, #_alphaFrames do
         local af = _alphaFrames[i]
         local cf = af.cf
@@ -1746,6 +1835,12 @@ local function _ApplyAlpha(alpha)
     -- the chat frame alpha -- fade it directly alongside the chat).
     if ns._chatBgExt then ns._chatBgExt:SetAlpha(alpha) end
     if ns._chatPanelBorder then ns._chatPanelBorder:SetAlpha(alpha) end
+    if ns._sidebarSeparateBorder then
+        ns._sidebarSeparateBorder:SetAlpha(min(alpha, _sidebarFadeAlpha))
+    end
+    -- Tab-strip bottom separator is UIParent-parented like the extension.
+    -- Panel bottom separator is now a texture on bg -- inherits the chat
+    -- frame's alpha automatically, no explicit write needed.
     -- Sidebar (mode cached at build time)
     local sb = _alphaFrames._sidebar
     if sb then
@@ -1798,13 +1893,11 @@ function ECHAT.SetChatAlpha(alpha)
     _visAlpha = alpha
     _visChatVisible = (alpha >= 1)
     _SetAlphaTarget(alpha)
-    SetTabAlphaTarget(min(alpha, GetEffectiveTabAlpha()))
 end
 
 -- Set alpha for idle fade (animated), clamped to visibility alpha
 function ECHAT.SetIdleFadeAlpha(alpha)
     _SetAlphaTarget(min(alpha, _visAlpha))
-    SetTabAlphaTarget(min(alpha, GetEffectiveTabAlpha()))
 end
 
 -- Refresh visibility based on DB settings (combat, mouseover, always, etc.)
@@ -2243,8 +2336,11 @@ local CHAT_MSG_EVENTS = {
 --  Tab reskin: in-place reskin of Blizzard tabs.
 --  We work WITH Blizzard's tab system instead of replacing it.
 --  Blizzard tabs are stripped of textures and restyled with our visuals.
---  hooksecurefunc on SetAlpha/FCFTab_UpdateColors/FCFDock_SelectWindow
---  keeps our styling applied after Blizzard updates.
+--  ALL styling re-assert is DEFERRED (QueueTabPass + the deferred
+--  FCFDock_SelectWindow/FCF_Close hooks). No synchronous hooks on
+--  FCFTab_UpdateColors, FCFDock_UpdateTabs, or tab methods -- their bodies
+--  executed inside the secure temp-whisper creation chain and blocked
+--  UpdateHeader's secret width math (2026-07-21 taintlog).
 -------------------------------------------------------------------------------
 
 -- Texture name suffixes to strip from each tab
@@ -2264,13 +2360,49 @@ local function UpdateTabStyle(tab)
         and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
     local isActive = chatFrame.isDocked == false and chatFrame:IsShown()
         or (chatFrame == selected)
-    -- Blizzard dims/re-shows custom window tabs during its color pass. This is
-    -- deferred outside that secure chain, so our complete tab remains visible.
-    local fadeBase = CFD(tab).fadeBaseAlpha
-    if fadeBase ~= nil then
-        tab:SetAlpha(fadeBase * _tabAlphaCurrent)
-    elseif chatFrame.isDocked == false then
-        tab:SetAlpha(1)
+
+    -- Dynamic (temp whisper) tabs sit at Blizzard's native seat: flush
+    -- against the static strip and 1px low. The tab FRAME must never be
+    -- moved (three field failures; see the note above ApplyTabLayout), so
+    -- correct it visually: shift OUR drawn layers one PHYSICAL pixel right
+    -- and up on dynamic tabs (PP.perfect / UIParent effective scale -- the
+    -- chat module never SetScales, so every tab shares UIParent's effective
+    -- scale, and reading it touches nothing chat-owned). State-guarded so
+    -- the re-anchor runs only when the shift value actually changes
+    -- (dock-state transitions, UI-scale/resolution changes).
+    local d = CFD(tab)
+    local onePhysPx = 1
+    if PP and PP.perfect then
+        onePhysPx = PP.perfect / UIParent:GetEffectiveScale()
+    end
+    -- Per-axis shift, tuned empirically against the rendered result (the
+    -- tab's fractional physical position makes the axes round differently):
+    -- 0 right / 2 up lands the visuals level and gapped at the tested scale.
+    local isDyn = chatFrame.isDocked and not chatFrame.isStaticDocked
+    local visShiftX = isDyn and 0 or 0
+    local visShiftY = isDyn and (2 * onePhysPx) or 0
+    local visShift = visShiftX + visShiftY * 1000  -- change-detection key
+    if not BISECT_TEX_SHIFT_OFF and d.visShift ~= visShift then
+        d.visShift = visShift
+        -- Pixel-snap defeats a sub-unit offset: the tab sits at fractional
+        -- physical coords, so a snapped texture rounds the shift
+        -- asymmetrically. Disable snapping on the shifted layers so they
+        -- render the exact offset. Dynamic tabs only -- static tab layers
+        -- keep default snapping (crisp edges, and SetAllPoints alignment
+        -- never exposes the fraction there).
+        local unsnap = isDyn and PP and PP.DisablePixelSnap
+        local function ShiftRect(r)
+            if not r then return end
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", tab, "TOPLEFT", visShiftX, visShiftY)
+            r:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", visShiftX, visShiftY)
+            if unsnap and r.SetSnapToPixelGrid then PP.DisablePixelSnap(r) end
+        end
+        -- Tab-parented TEXTURES only (field-safe class). Host FRAMES get
+        -- their shift inside PositionTabHosts -- never anchor writes that
+        -- tie a frame to the tab.
+        ShiftRect(d.bg)
+        ShiftRect(d.hover)
     end
 
     -- Reparent whisper conversation icon to hidden container
@@ -2287,12 +2419,18 @@ local function UpdateTabStyle(tab)
         fs:SetFont(GetTabFont(), ECHAT.DB().tabFontSize or 11, "")
         fs:SetJustifyH("CENTER")
         fs:ClearAllPoints()
-        fs:SetPoint("CENTER", tab, 0, 0)
+        fs:SetPoint("CENTER", tab, visShiftX, visShiftY)
         local cfg = ECHAT.DB()
         local tc = isActive
             and (cfg.tabFontColorActive or { r=1, g=1, b=1, a=1 })
             or (cfg.tabFontColor or { r=1, g=1, b=1, a=.65 })
-        fs:SetTextColor(tc.r or 1, tc.g or 1, tc.b or 1, tc.a == nil and 1 or tc.a)
+        -- PERMANENT (user decision 2026-07-22): temp whisper tabs keep
+        -- Blizzard's own text color -- zero writes to the secret-name
+        -- fontstring, and the whisper color doubles as a visual marker for
+        -- conversation tabs. Same gate the pre-841 module shipped.
+        if not chatFrame.isTemporary then
+            fs:SetTextColor(tc.r or 1, tc.g or 1, tc.b or 1, tc.a == nil and 1 or tc.a)
+        end
     end
 
     local cfg = ECHAT.DB()
@@ -2300,7 +2438,29 @@ local function UpdateTabStyle(tab)
         local c = isActive
             and (cfg.tabBackgroundColorActive or {r=.03,g=.045,b=.05,a=.65})
             or (cfg.tabBackgroundColor or {r=.03,g=.045,b=.05,a=.44})
-        CFD(tab).bg:SetColorTexture(c.r or .03, c.g or .045, c.b or .05, c.a == nil and 1 or c.a)
+        local bgRegion = CFD(tab).bg
+        -- Optional tab background texture (un-synced style only); "none"
+        -- keeps the flat color. Same catalogue + tint mechanism as the
+        -- chat panel background.
+        local texKey = (cfg.syncTabBorder == false)
+            and (cfg.tabBackgroundTexture or "none") or "none"
+        local texPath
+        if texKey ~= "none" then
+            if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
+            if EllesmereUI.ResolveTexturePath then
+                texPath = EllesmereUI.ResolveTexturePath(ns.chatBgTextures, texKey, nil)
+            else
+                texPath = ns.chatBgTextures and ns.chatBgTextures[texKey]
+            end
+        end
+        if texPath then
+            bgRegion:SetTexture(texPath)
+            bgRegion:SetVertexColor(c.r or .03, c.g or .045, c.b or .05, c.a == nil and 1 or c.a)
+        else
+            -- Clear texture-mode tint before returning to solid color.
+            bgRegion:SetVertexColor(1, 1, 1, 1)
+            bgRegion:SetColorTexture(c.r or .03, c.g or .045, c.b or .05, c.a == nil and 1 or c.a)
+        end
     end
 
     local underline = CFD(tab).activeUnderline
@@ -2339,10 +2499,68 @@ function ECHAT.ApplyTabAppearance()
     end
 end
 
+-- Numeric host placement with ZERO getter calls into the chat/dock chain.
+-- Two field-proven taint injectors rule this design: (1) anchoring an
+-- insecure frame to a Blizzard tab, and (2) geometry resolves (GetLeft
+-- etc.) on tab/dock regions from insecure code -- both poison the secure
+-- dock pass into UpdateHeader's secret whisper math. Positions therefore
+-- accumulate purely from OUR OWN layout numbers: the widths ApplyTabLayout
+-- stamps (CFD hostW), the configured spacing, and the clip's fixed slack
+-- constants (clip TOPLEFT = gdm TOPLEFT -4,+8; first static tab sits at
+-- gdm BOTTOMLEFT, i.e. clip-local x=4, y=8). STATIC docked tabs only --
+-- dynamic whisper tabs get no host visuals (their bg/hover textures
+-- remain); until the tab-geometry gate clears, no hostW exists and hosts
+-- simply stay hidden.
+function ECHAT.PositionTabHosts()
+    local clip = ns._tabHostClip
+    if not clip then return end
+    local cfg = ECHAT.DB()
+    local configured = cfg.tabSpacing == nil and 1 or cfg.tabSpacing
+    local spacing = (cfg.extendBgBehindTabs and 1 or configured) * ((PP and PP.mult) or 1)
+    local height = GetTabHeight()
+    local positioned = {}
+    local x = 4
+    if GENERAL_CHAT_DOCK and GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES then
+        for _, cf in ipairs(GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES) do
+            local n = cf and cf:GetName()
+            local tab = n and _G[n .. "Tab"]
+            local d = tab and CFD(tab)
+            if d and d.skinned and cf.isStaticDocked and d.hostW then
+                local function Place(host)
+                    if not host then return end
+                    host:ClearAllPoints()
+                    host:SetPoint("BOTTOMLEFT", clip, "BOTTOMLEFT", x, 8)
+                    host:SetSize(d.hostW, height)
+                    host:Show()
+                    positioned[host] = true
+                end
+                Place(d.panelBorder)
+                Place(d.tabSeparatorHost)
+                Place(d.activeUnderlineHost)
+                x = x + d.hostW + spacing
+            end
+        end
+    end
+    -- Anything not placed this pass (dynamic whisper tabs, hidden or
+    -- unmeasured tabs) stays hidden.
+    for i = 1, 20 do
+        local tab = _G["ChatFrame" .. i .. "Tab"]
+        local d = tab and CFD(tab)
+        if d and d.skinned then
+            for _, host in ipairs({ d.panelBorder, d.tabSeparatorHost, d.activeUnderlineHost }) do
+                if host and not positioned[host] and host:GetParent() ~= UIParent then
+                    host:Hide()
+                end
+            end
+        end
+    end
+end
+
 -- Without the extended tab-strip background, each visible tab is its own
 -- visual island. Give those tabs the same configurable border as the chat
 -- panel; the unified layout uses only the single outer panel border instead.
 function ECHAT.ApplyTabBorders()
+    if BISECT_TAB_BORDERS_OFF then return end
     local cfg = ECHAT.DB()
     local sync = cfg.syncTabBorder ~= false
     local prefix = sync and "panelBorder" or "tabBorder"
@@ -2369,6 +2587,8 @@ function ECHAT.ApplyTabBorders()
     end
     local alpha = B("Opacity", nil)
     if alpha == nil then alpha = mode == "custom" and 0.18 or 0.5 end
+    local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow
+        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
 
     for i = 1, 20 do
         local tab = _G["ChatFrame" .. i .. "Tab"]
@@ -2380,18 +2600,36 @@ function ECHAT.ApplyTabBorders()
                 local ok, docked = pcall(FCF_IsDocked, chatFrame)
                 if ok then undocked = not docked end
             end
-            local wantedParent = undocked and UIParent or tab
+            -- Active tab may carry its own border color.
+            local br, bgr, bb, ba = r, g, b, alpha
+            if cfg.activeTabBorder ~= false then
+                local isActive = (chatFrame and chatFrame == selected)
+                    or (chatFrame and undocked and chatFrame:IsShown())
+                local ac = isActive and cfg.tabBorderColorActive
+                if ac then
+                    br, bgr, bb = ac.r or r, ac.g or g, ac.b or b
+                    ba = ac.a == nil and alpha or ac.a
+                end
+            end
+            -- Docked hosts live on the shared clip container (never on the
+            -- tab -- taint root cause); undocked ones on UIParent, unclipped.
+            -- Anchors are owned by PositionTabHosts (numeric, no tab ties).
+            local wantedParent = undocked and UIParent or GetTabHostClip()
             if host:GetParent() ~= wantedParent then
                 host:SetParent(wantedParent)
-                host:ClearAllPoints()
-                host:SetAllPoints(tab)
             end
             host:SetFrameStrata("DIALOG")
-            local level = max(100, tab:GetFrameLevel() + 20)
+            -- Constant level: hosts render on our clip at DIALOG strata,
+            -- so a tab-derived level is meaningless -- and tab:GetFrameLevel
+            -- was an un-exonerated tab getter in this (dirty-tested) pass.
+            local level = 100
             host:SetFrameLevel(level)
-            host:SetAlpha(host:GetParent() == tab and 1 or tab:GetAlpha())
+            -- No alpha writes here at all: hosts default to 1, docked hosts
+            -- inherit the dock fade from the clip container's alpha
+            -- (_ApplyAlpha), and visibility is handled by SetShown below.
+            -- Tab alpha is entirely Blizzard's -- never read or written.
             EllesmereUI.ApplyBorderStyle(host, show and size or 0,
-                r, g, b, alpha, B("Texture", "solid"),
+                br, bgr, bb, ba, B("Texture", "solid"),
                 B("OffsetX", nil), B("OffsetY", nil),
                 B("ShiftX", nil), B("ShiftY", nil), "chat", thicknessKey)
             local solidBorder = PP and PP.GetBorders and PP.GetBorders(host)
@@ -2402,6 +2640,7 @@ function ECHAT.ApplyTabBorders()
 end
 
 function ECHAT.ApplyTabSeparators()
+    if BISECT_TAB_BORDERS_OFF then return end
     local cfg = ECHAT.DB()
     local show = cfg.extendBgBehindTabs == true and not cfg.hideBorders
     local r, g, b, a = GetInnerBorderColor(cfg)
@@ -2416,32 +2655,51 @@ function ECHAT.ApplyTabSeparators()
 
     -- One continuous separator below the chat panel. The sidebar is a separate
     -- visual column and must never be crossed by the tab separator.
-    local cf1 = _G.ChatFrame1
-    local d1 = cf1 and CFD(cf1)
-    local bg = d1 and d1.bg
-    if bg and not ns._tabPanelBottomSeparator then
-        local host = CreateFrame("Frame", nil, UIParent)
-        host:SetHeight((PP and PP.mult) or 1)
-        host:SetFrameStrata("DIALOG")
-        -- Inner separators must remain below the outer chat-panel border
-        -- (panel host >= 100, solid border child at host + 1).
-        host:SetFrameLevel(90)
-        host:EnableMouse(false)
-        local tex = host:CreateTexture(nil, "OVERLAY", nil, 7)
-        tex:SetAllPoints()
-        if PP and PP.DisablePixelSnap then PP.DisablePixelSnap(tex) end
-        ns._tabPanelBottomSeparator = host
-        ns._tabPanelBottomSeparatorTex = tex
-    end
-    local panelSep = ns._tabPanelBottomSeparator
-    if panelSep and bg then
-        panelSep:ClearAllPoints()
-        panelSep:SetPoint("BOTTOMLEFT", bg, "TOPLEFT", 0, 0)
-        panelSep:SetPoint("BOTTOMRIGHT", bg, "TOPRIGHT", 0, 0)
-        if ns._tabPanelBottomSeparatorTex then
-            ns._tabPanelBottomSeparatorTex:SetColorTexture(r, g, b, a)
+    -- FIELD-CONVICTED (2026-07-22): the old implementation was a UIParent
+    -- frame ANCHORED to bg -- an insecure frame in ChatFrame1's rect
+    -- dependency web (bg is cf1-parented), which taints the temp-whisper
+    -- creation chain exactly like tab-anchored hosts did. Safe form: a
+    -- TEXTURE on our bg frame (textures on our own frames are the
+    -- 8.5.2-proven class); it inherits the chat fade for free.
+    -- FIELD-CONVICTED HOME (2026-07-22, three texture variants dirty): the
+    -- separator may NOT live anywhere in ChatFrame1's rect web -- not as
+    -- an anchored frame, not as a texture on bg, in-bounds or out,
+    -- snapped or not. Tab bg/hover textures on the tabs themselves stay
+    -- clean, so the exact hazard boundary inside the cf1 web is unmapped;
+    -- the clip container (gdm-chained, fully exonerated with textures +
+    -- per-pass writes) is the proven-safe home. Position is numeric:
+    -- clip bottom slack is 8, gdm sits GetTabPadding() above bg's top, so
+    -- bg's top edge lies at y = 8 - padding in clip space; x slack 4.
+    -- Separator: EXACT copy of the proven-clean per-tab separator pattern
+    -- (a host FRAME child of the clip, anchored once at creation, with a
+    -- SetAllPoints texture; per pass only color + shown). A direct
+    -- clip-region texture -- the only shape without a clean twin -- tested
+    -- dirty in every variant; do not put regions directly on the clip.
+    local clip = GetTabHostClip()
+    if clip then
+        local y = 8 - (GetTabPadding() or 0)
+        if ns._tabPanelSepHost and ns._tabPanelSepY ~= y then
+            ns._tabPanelSepHost:Hide()
+            ns._tabPanelSepHost = nil
+            ns._tabPanelBottomSeparatorTex = nil
         end
-        panelSep:SetShown(show)
+        if not ns._tabPanelSepHost then
+            local host = CreateFrame("Frame", nil, clip)
+            host:SetFrameStrata("DIALOG")
+            host:SetFrameLevel(90)
+            host:EnableMouse(false)
+            host:SetHeight((PP and PP.mult) or 1)
+            host:SetPoint("BOTTOMLEFT", clip, "BOTTOMLEFT", 4, y)
+            host:SetPoint("BOTTOMRIGHT", clip, "BOTTOMRIGHT", -4, y)
+            local tex = host:CreateTexture(nil, "OVERLAY", nil, 7)
+            tex._euiOwned = true
+            tex:SetAllPoints()
+            ns._tabPanelSepHost = host
+            ns._tabPanelBottomSeparatorTex = tex
+            ns._tabPanelSepY = y
+        end
+        ns._tabPanelBottomSeparatorTex:SetColorTexture(r, g, b, a)
+        ns._tabPanelSepHost:SetShown(show)
     end
 
     for i = 1, 20 do
@@ -2454,7 +2712,9 @@ function ECHAT.ApplyTabSeparators()
             -- A right edge on every docked tab creates all between-tab lines
             -- and gives the final tab the same clean outer edge.
             d.tabSeparatorLeft:SetShown(show and dockedTabs[tab] == true)
-            d.tabSeparatorHost:SetShown(show)
+            -- Clip-parented host no longer auto-hides with its tab; couple
+            -- visibility explicitly.
+            d.tabSeparatorHost:SetShown(show and tab:IsShown())
         end
     end
 end
@@ -2486,21 +2746,30 @@ local function SkinTab(cf)
     hover._euiOwned = true
     hover:SetAllPoints()
     hover:SetColorTexture(1, 1, 1, 0.05)
+    CFD(tab).hover = hover
 
     -- Cache the tab's text FontString for UpdateTabStyle (avoids
     -- repeated GetFontString() calls on the Blizzard tab).
     -- Some tab implementations use _G[name.."TabText"] instead of tab.Text.
     CFD(tab).tabText = tab.Text or _G[name .. "TabText"]
     tab:SetPushedTextOffset(0, 0)
-    tab:SetHeight(GetTabHeight())
+    if not BISECT_TAB_GEOMETRY_OFF then
+        tab:SetHeight(GetTabHeight())
+    end
 
-    local panelBorder = CreateFrame("Frame", nil, tab)
-    panelBorder:SetAllPoints(tab)
+    -- Host frames: parented to the shared UIParent clip container, only
+    -- ANCHORED to the tab (see GetTabHostClip -- parenting frames to the
+    -- tab itself was the whisper-creation taint root cause).
+    local hostParent = GetTabHostClip()
+    -- NO tab anchors on hosts, ever (see FINAL HOST DESIGN at the top).
+    -- PositionTabHosts places them numerically; they start hidden.
+    local panelBorder = CreateFrame("Frame", nil, hostParent)
     panelBorder:EnableMouse(false)
+    panelBorder:Hide()
     CFD(tab).panelBorder = panelBorder
 
-    local separatorHost = CreateFrame("Frame", nil, tab)
-    separatorHost:SetAllPoints(tab)
+    local separatorHost = CreateFrame("Frame", nil, hostParent)
+    separatorHost:Hide()
     separatorHost:SetFrameStrata("DIALOG")
     separatorHost:SetFrameLevel(90)
     separatorHost:EnableMouse(false)
@@ -2521,8 +2790,8 @@ local function SkinTab(cf)
     CFD(tab).tabSeparatorBottom = separatorBottom
     CFD(tab).tabSeparatorLeft = separatorLeft
 
-    local underlineHost = CreateFrame("Frame", nil, tab)
-    underlineHost:SetAllPoints(tab)
+    local underlineHost = CreateFrame("Frame", nil, hostParent)
+    underlineHost:Hide()
     underlineHost:SetFrameStrata("DIALOG")
     underlineHost:SetFrameLevel(95)
     underlineHost:EnableMouse(false)
@@ -2540,29 +2809,24 @@ local function SkinTab(cf)
         tab.conversationIcon:SetParent(_hiddenParent)
     end
 
-    -- Hook SetPoint: zero out Blizzard's y=-1 on LEFT/LEFT anchors
-    -- (tabs anchored to ScrollFrameChild). Skip tabs 1-2.
-    if tab:GetID() >= 3 then
-        local _spIgnore = false
-        hooksecurefunc(tab, "SetPoint", function(self, point, rel, relPoint, x, y)
-            if _spIgnore then return end
-            if point == "LEFT" and relPoint == "LEFT" and y and y ~= 0 then
-                _spIgnore = true
-                local es = self:GetEffectiveScale()
-                local onePx = PP and PP.SnapForES and PP.SnapForES(1, es) or 1
-                self:SetPoint(point, rel, relPoint, (x or 0) + onePx, 0)
-                _spIgnore = false
-            end
-        end)
-    end
+    -- NO hooksecurefunc(tab, "SetPoint") -- removed 2026-07-21 with the
+    -- other synchronous tab hooks: its body executed inside the secure
+    -- temp-whisper creation chain (FCF_DockUpdate re-anchors the tabs
+    -- mid-creation), the same injection that blocked UpdateHeader's secret
+    -- width math. The y=-1 seat normalize now lives in ApplyTabLayout
+    -- (deferred passes only), which is safe again precisely because the
+    -- synchronous FCFDock_UpdateTabs hook is gone -- the deferred-once
+    -- rewrite was stable for months pre-841 under these same conditions.
 
     UpdateTabStyle(tab)
     ECHAT.ApplyTabBorders()
     ECHAT.ApplyTabSeparators()
     if ECHAT.ApplyTabSpacing then ECHAT.ApplyTabSpacing() end
+    if ECHAT.PositionTabHosts then ECHAT.PositionTabHosts() end
 end
 
 function ECHAT.ApplyTabSpacing()
+    if BISECT_TAB_GEOMETRY_OFF then return end
     if not GENERAL_CHAT_DOCK or not GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES then return end
     local cfg = ECHAT.DB()
     local configured = cfg.tabSpacing == nil and 1 or cfg.tabSpacing
@@ -2570,11 +2834,18 @@ function ECHAT.ApplyTabSpacing()
     -- pixel after each right-edge separator so the next tab starts beside the
     -- line instead of rendering on top of it.
     local spacing = (cfg.extendBgBehindTabs and 1 or configured) * ((PP and PP.mult) or 1)
+    -- STATIC tabs only (frames docked with isStaticDocked). Dynamic temp
+    -- whisper tabs are parented to the dock's SCROLL CHILD and their anchors
+    -- and widths feed FCFDock_ScrollToSelectedTab/JumpToTab's math -- when we
+    -- re-chained them here, the jump never converged, the dock's OnUpdate
+    -- stayed armed, and Blizzard and our pass alternated layouts every frame
+    -- (field report: whisper tabs blinking and unclickable). Blizzard owns
+    -- them entirely; their chain keeps its native 1px gap.
     local prev
     for _, cf in ipairs(GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES) do
         local n = cf and cf:GetName()
         local tab = n and _G[n .. "Tab"]
-        if tab and tab:IsShown() then
+        if tab and tab:IsShown() and cf.isStaticDocked then
             if prev then
                 tab:ClearAllPoints()
                 tab:SetPoint("LEFT", prev, "RIGHT", spacing, 0)
@@ -2585,7 +2856,22 @@ function ECHAT.ApplyTabSpacing()
     if ECHAT.ApplyTabSeparators then ECHAT.ApplyTabSeparators() end
 end
 
+-- NO dynamic-tab anchor writes, in ANY timing regime. Field-proven three
+-- times on 2026-07-20: synchronous re-chain (blink + unclickable), sync
+-- Y-only rewrite (permanent scroll drift), and finally the pre-841 style
+-- DEFERRED-once bridge -- which was stable for months pre-841 but now
+-- fights the dock too (841's environment keeps the scroll/jump loop alive
+-- in ways the old module never did). The whisper strip's 1px-left/1px-low
+-- native seat is corrected VISUALLY instead: UpdateTabStyle shifts OUR
+-- drawn elements (bg/hover/text/hosts) on dynamic tabs; the Blizzard tab
+-- frame itself is never moved.
 function ECHAT.ApplyTabLayout()
+    if BISECT_TAB_GEOMETRY_OFF then
+        if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
+        if ECHAT.ApplyTabPadding then ECHAT.ApplyTabPadding() end
+        if ECHAT.PositionTabHosts then ECHAT.PositionTabHosts() end
+        return
+    end
     local cfg = ECHAT.DB()
     local height = GetTabHeight()
     local paddingX = cfg.tabInnerPaddingX or 12
@@ -2594,8 +2880,38 @@ function ECHAT.ApplyTabLayout()
         if tab and CFD(tab).skinned then
             tab:SetHeight(height)
             local fs = CFD(tab).tabText
-            if fs and fs.GetStringWidth then
-                tab:SetWidth(max(40, ceil(fs:GetStringWidth() + paddingX * 2)))
+            local cfOwner = CFD(tab).chatFrame
+            -- Text-derived widths apply to STATIC docked tabs only. Dynamic
+            -- temp whisper tabs are scroll-managed: FCFDock_CalculateTabSize
+            -- caps their width and the scroll/jump math depends on it, so
+            -- Blizzard owns their sizing. Their labels are also SECRET target
+            -- names on Midnight (rendered width of secret text is a secret
+            -- number; arithmetic on it is a hard error -- field report:
+            -- ChatFrame11Tab), so the issecretvalue guard stays as the belt.
+            if fs and fs.GetStringWidth and cfOwner and cfOwner.isStaticDocked then
+                local w = fs:GetStringWidth()
+                if w and not (issecretvalue and issecretvalue(w)) then
+                    local tabW = max(40, ceil(w + paddingX * 2))
+                    tab:SetWidth(tabW)
+                    -- Width record for PositionTabHosts (numeric host
+                    -- placement without geometry resolves).
+                    CFD(tab).hostW = tabW
+                end
+            end
+            -- Dynamic (docked, non-static) whisper tab seat normalize:
+            -- Blizzard anchors the first dynamic tab LEFT/LEFT y=-1 on the
+            -- scroll child; rewrite once to (+1physpx, 0). Idempotent (the
+            -- rewritten anchor has y=0, so repeat passes skip), DEFERRED
+            -- passes only -- this replaced the per-tab SetPoint hook, whose
+            -- body ran inside the secure temp-window creation chain and
+            -- tainted UpdateHeader's secret width math (2026-07-21).
+            if cfOwner and cfOwner.isDocked and not cfOwner.isStaticDocked then
+                local pt, rel, relPt, x, y = tab:GetPoint(1)
+                if pt == "LEFT" and relPt == "LEFT" and y and y ~= 0 then
+                    local es = tab:GetEffectiveScale()
+                    local onePhys = PP and PP.SnapForES and PP.SnapForES(1, es) or 1
+                    tab:SetPoint(pt, rel, relPt, (x or 0) + onePhys, 0)
+                end
             end
         end
     end
@@ -2608,9 +2924,11 @@ function ECHAT.ApplyTabLayout()
     if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
     if ECHAT.ApplyTabPadding then ECHAT.ApplyTabPadding() end
     if ECHAT.ApplyTabSpacing then ECHAT.ApplyTabSpacing() end
+    if ECHAT.PositionTabHosts then ECHAT.PositionTabHosts() end
 end
 
 function ECHAT.ApplyTabPadding()
+    if BISECT_TAB_PADDING_OFF then return end
     local gdm = _G.GeneralDockManager
     local cf1 = _G.ChatFrame1
     local bg = cf1 and CFD(cf1).bg
@@ -2671,7 +2989,6 @@ end
 -------------------------------------------------------------------------------
 --  SkinEditBox: ALL edit box modifications in one place.
 --  Chrome/position/font applied to ALL frames (including temp 11+).
---  Header font only on frames 1-10 (touching header on 11+ taints UpdateHeader).
 --  Edit box hooks only on frames 1-10 (temp windows 11+ get visuals only).
 -------------------------------------------------------------------------------
 local function SkinEditBox(cf)
@@ -2694,11 +3011,15 @@ local function SkinEditBox(cf)
     if eb.focusMid then eb.focusMid:SetAlpha(0) end
     if eb.focusRight then eb.focusRight:SetAlpha(0) end
 
-    -- Position flush below chat frame
-    eb:ClearAllPoints()
-    eb:SetPoint("TOPLEFT", cf, "BOTTOMLEFT", -10, -8)
-    eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
-    eb:SetHeight(23)
+    -- Position flush below chat frame (8.5.2 did this for ALL frames
+    -- incl. temp 11+; gate 7 of the bisect ladder holds 11+ untouched
+    -- until its clearing cycle).
+    if idx <= 10 or not BISECT_EB_ANCHORS_OFF then
+        eb:ClearAllPoints()
+        eb:SetPoint("TOPLEFT", cf, "BOTTOMLEFT", -10, -8)
+        eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
+        eb:SetHeight(23)
+    end
 
     -- Font: use the SAME outline as the chat frames + ECHAT.ApplyFonts (which
     -- reads GetOutlineFlag too), so the input box always matches the rest of
@@ -2722,7 +3043,9 @@ local function SkinEditBox(cf)
             editBox.headerSuffix:SetFont(GetFont(), sz, ol)
         end
     end
-    ApplyEditBoxHeaderFont(eb)
+    if idx <= 10 or not BISECT_EB_ANCHORS_OFF then
+        ApplyEditBoxHeaderFont(eb)
+    end
 
     -- Edit box HOOKS (not the plain setters above) taint a temp whisper
     -- window's execution context. When that conversation's secure code later
@@ -3277,7 +3600,12 @@ local function SkinChatFrame(cf)
     if resizeBtn and CFD(cf).bg then
         resizeBtn:SetSize(18, 18)
         resizeBtn:ClearAllPoints()
-        resizeBtn:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMRIGHT", -2, 2)
+        -- While gate 7 leaves the temp (11+) edit box Blizzard-anchored, its
+        -- native chain includes this button; anchoring to our bg (which
+        -- wraps the eb) would be an anchor cycle there.
+        local rbIdx = tonumber(name:match("ChatFrame(%d+)"))
+        local rbAnchor = (BISECT_EB_ANCHORS_OFF and rbIdx and rbIdx > 10) and cf or CFD(cf).bg
+        resizeBtn:SetPoint("BOTTOMRIGHT", rbAnchor, "BOTTOMRIGHT", -2, 2)
         resizeBtn:SetFrameStrata("HIGH")
         if resizeBtn.GetRegions then
             for ri = 1, select("#", resizeBtn:GetRegions()) do
@@ -3561,7 +3889,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SkinTab(cf)
                 -- Re-enforce height (Blizzard resets it on temp window creation)
                 local tab = _G["ChatFrame" .. i .. "Tab"]
-                if tab and CFD(tab).skinned then
+                if tab and CFD(tab).skinned and not BISECT_TAB_GEOMETRY_OFF then
                     tab:SetHeight(GetTabHeight())
                 end
             end
@@ -3592,11 +3920,45 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end)
     end
-    -- DO NOT hook FCFTab_UpdateColors -- it fires INSIDE
-    -- FCF_OpenTemporaryWindow's secure chain and taints even safe
-    -- operations like SetTextColor (session 46 root cause #1).
-    -- Tab text coloring is handled in UpdateTabStyle instead, which
-    -- runs from FCFDock_SelectWindow (deferred, outside secure chain).
+    -- NO synchronous hooks on FCFTab_UpdateColors or FCFDock_UpdateTabs.
+    -- Both shipped briefly post-841 (recolor funnel + static-layout
+    -- re-assert) and both were removed 2026-07-21: FCF_OpenTemporaryWindow
+    -- -> FCF_SetTemporaryWindowType calls FCFTab_UpdateColors directly and
+    -- ends with FCF_DockUpdate (a synchronous FCFDock_UpdateTabs call), so
+    -- BOTH hook bodies executed inside the temp-whisper creation chain --
+    -- which then Deactivates the new editBox and runs UpdateHeader's width
+    -- math on the SECRET whisper-name geometry. Field taintlog (twice,
+    -- after the FCF_OpenTemporaryWindow hook itself was already removed):
+    -- "arithmetic on a secret value blocked because of taint from
+    -- EllesmereUIChat" at ChatFrameEditBox.lua:677, and the whisper fails
+    -- to route. The absence of any "while reading global" transfer line
+    -- for us (DBM's hook shows one) fingers hook-body EXECUTION mid-chain
+    -- as the injection, so no body shape is safe -- the funnel hooks are
+    -- gone entirely. Recolor + layout now run DEFERRED from our own
+    -- triggers below; the cost is a possible 1-frame Blizzard-styled
+    -- flash on dock passes, accepted over the taint.
+    local _tabPassQueued = false
+    local function QueueTabPass()
+        if BISECT_DEFERRED_PASSES_OFF then return end
+        if _tabPassQueued then return end
+        _tabPassQueued = true
+        C_Timer.After(0, function()
+            _tabPassQueued = false
+            UpdateTabColors()
+            ECHAT.ApplyTabLayout()
+        end)
+    end
+    ECHAT.QueueTabPass = QueueTabPass
+    if not BISECT_DEFERRED_PASSES_OFF then
+        -- The yellow-reset moments (login passes, zone transitions, dock
+        -- config loads) all coincide with these events on our own frame --
+        -- outside Blizzard's dispatch, deferred one tick.
+        local tabPassFrame = CreateFrame("Frame")
+        tabPassFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        tabPassFrame:RegisterEvent("UPDATE_CHAT_WINDOWS")
+        tabPassFrame:RegisterEvent("UPDATE_FLOATING_CHAT_WINDOWS")
+        tabPassFrame:SetScript("OnEvent", QueueTabPass)
+    end
     -- Tab close: Blizzard resets all tab colors via FCFTab_UpdateColors
     -- but FCFDock_SelectWindow only fires if the ACTIVE tab was closed.
     -- Closing a non-active tab skips our color refresh. FCF_Close is a
@@ -3610,9 +3972,30 @@ initFrame:SetScript("OnEvent", function(self)
         end)
     end
     -- Temp window creation: re-run SkinPass to catch new frames.
-    if FCF_OpenTemporaryWindow then
-        hooksecurefunc("FCF_OpenTemporaryWindow", function()
+    -- NEVER hooksecurefunc("FCF_OpenTemporaryWindow") -- field-proven taint
+    -- TWICE (pre-841 module history, and again in the 2026-07-21 tester
+    -- taintlog): the secure whisper router calls it mid-function and then
+    -- continues to DeactivateChat -> UpdateHeader, whose header width math
+    -- runs on the SECRET whisper name geometry; with our hook in the chain
+    -- the remainder of the caller executes tainted and the arithmetic is
+    -- blocked. Instead, listen for the same whisper events on our own frame
+    -- (standalone dispatch, outside Blizzard's) and defer the skin. This
+    -- covers every temp-window trigger: incoming whisper, and outgoing
+    -- /w-in-popout-mode (WHISPER_INFORM). A BACKGROUND open (window not
+    -- selected) anchors the tab during the open itself, before this
+    -- deferred pass installs the per-tab SetPoint hook -- SkinTab's
+    -- one-shot anchor catch-up handles that missed first write.
+    do
+        local tempWinFrame = CreateFrame("Frame")
+        tempWinFrame:RegisterEvent("CHAT_MSG_WHISPER")
+        tempWinFrame:RegisterEvent("CHAT_MSG_WHISPER_INFORM")
+        tempWinFrame:RegisterEvent("CHAT_MSG_BN_WHISPER")
+        tempWinFrame:RegisterEvent("CHAT_MSG_BN_WHISPER_INFORM")
+        tempWinFrame:SetScript("OnEvent", function()
             C_Timer.After(0, SkinPass)
+            -- Recolor + layout (incl. the dynamic-tab seat normalize) after
+            -- the skin lands; QueueTabPass coalesces with other triggers.
+            C_Timer.After(0, QueueTabPass)
         end)
     end
     -- User-created permanent chat windows use a separate creation path from
@@ -3699,7 +4082,6 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     do
         local idleTimer = nil
-        local tabIdleTimer = nil
 
         local function IsIdleApplicable()
             local cfg = ECHAT.DB()
@@ -3714,27 +4096,14 @@ initFrame:SetScript("OnEvent", function(self)
             ECHAT.SetIdleFadeAlpha(GetIdleFadeAlpha())
         end
 
-        local function StartTabIdleFade()
-            if ECHAT.DB().tabIdleFadeEnabled == false then return end
-            if _tabIdleFadeActive then return end
-            _tabIdleFadeActive = true
-            SetTabAlphaTarget(GetEffectiveTabAlpha())
-        end
-
         local function CancelIdleFade()
             _idleFadeActive = false
             if idleTimer then
                 idleTimer:Cancel()
                 idleTimer = nil
             end
-            if tabIdleTimer then
-                tabIdleTimer:Cancel()
-                tabIdleTimer = nil
-            end
-            _tabIdleFadeActive = false
             if _visChatVisible then
                 ECHAT.SetIdleFadeAlpha(1)
-                SetTabAlphaTarget(1)
             end
         end
 
@@ -3745,10 +4114,6 @@ initFrame:SetScript("OnEvent", function(self)
             if cfg.idleFadeEnabled ~= false then
                 local delay = cfg.idleFadeDelay or 15
                 idleTimer = C_Timer.NewTimer(delay, StartIdleFade)
-            end
-            if cfg.tabIdleFadeEnabled ~= false then
-                local tabDelay = cfg.tabIdleFadeDelay or 15
-                tabIdleTimer = C_Timer.NewTimer(tabDelay, StartTabIdleFade)
             end
         end
 
