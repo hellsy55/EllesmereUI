@@ -12529,8 +12529,14 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
             hooksecurefunc(blizzBar, "SetParent", function(self, newParent)
                 if EllesmereUI._GetFFD(self).castBarSuppressed and newParent ~= EllesmereUI._playerCastBarHiddenParent then
                     C_Timer.After(0, function()
+                        -- Never re-parent while Edit Mode is open, even from
+                        -- a timer: SetParent fires Blizzard's synchronous
+                        -- layout handlers under addon taint and poisons the
+                        -- manager's state for its next pass. The Edit Mode
+                        -- close hook (UnitFrames) re-applies suppression.
                         if EllesmereUI._GetFFD(self).castBarSuppressed
                            and not InCombatLockdown()
+                           and not (EditModeManagerFrame and EditModeManagerFrame:IsShown())
                            and self:GetParent() ~= EllesmereUI._playerCastBarHiddenParent
                         then
                             self:SetParent(EllesmereUI._playerCastBarHiddenParent)
