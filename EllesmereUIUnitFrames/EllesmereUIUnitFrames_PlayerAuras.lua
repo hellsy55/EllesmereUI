@@ -220,6 +220,17 @@ local function ApplyExpandButtonSetting()
         if not show then button:Hide() end
         return
     end
+    -- First evaluation with the button wanted in its native shown state:
+    -- nothing to change, so leave Blizzard's model and layout untouched.
+    -- Running BuffFrame's layout functions (RefreshConsolidationFrame-
+    -- Visibility / UpdateGridLayout) from addon context stamps their
+    -- Lua-side state with addon taint, and Edit Mode's enter pass reads
+    -- that state -- the source of secret-value LUA_WARNING storms for
+    -- users with the aura reskin enabled.
+    if _appliedShowExpand == nil and show then
+        _appliedShowExpand = show
+        return
+    end
     _appliedShowExpand = show
     if not show then
         _savedExpandedState = BuffFrame.isExpanded
