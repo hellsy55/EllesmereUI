@@ -2542,6 +2542,33 @@ EllesmereUI.RegisterMigration({
 })
 
 -------------------------------------------------------------------------------
+-- Replace the CDM "Anchor First Row" boolean with the rowGrowDirection enum.
+--
+-- anchorFirstRow pinned the leading perpendicular edge (TOP on horizontal
+-- bars, LEFT on vertical bars), i.e. extra rows grew downward/rightward.
+-- The equivalent enum values are "DOWN" (horizontal) / "RIGHT" (vertical);
+-- unset stays unset (centered growth, the default for both models).
+-------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "cdm_row_grow_direction_v1",
+    scope       = "profile",
+    description = "Migrate CDM anchorFirstRow booleans to the rowGrowDirection enum.",
+    body = function(ctx)
+        local cdm = ctx.profile.addons and ctx.profile.addons.EllesmereUICooldownManager
+        local bars = cdm and cdm.cdmBars and cdm.cdmBars.bars
+        if not bars then return end
+        for _, bar in ipairs(bars) do
+            if bar.anchorFirstRow then
+                if bar.rowGrowDirection == nil then
+                    bar.rowGrowDirection = bar.verticalOrientation and "RIGHT" or "DOWN"
+                end
+                bar.anchorFirstRow = nil
+            end
+        end
+    end,
+})
+
+-------------------------------------------------------------------------------
 -- Migrate per-profile secondary threshold settings into the new thresholdSpecs
 -- array. If the user had thresholdEnabled, create an "All Specs" entry with
 -- their existing threshold and tick values. If disabled, leave empty.
