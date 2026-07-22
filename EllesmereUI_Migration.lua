@@ -3670,18 +3670,14 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
-    id          = "qol_movement_alert_precision_number",
+    id          = "qol_movement_alert_precision_normalize_v2",
     scope       = "profile",
-    description = "Coerce Movement Alert precision to a number. An older numeric-input control could store it as a string (e.g. \"1\"); the Show Decimal toggle's getter compares it with `> 0`, which is a hard error on a string in Lua 5.1, so the toggle silently failed and decimals could not be turned off. Recurred every reload because the bad value persisted on disk.",
+    description = "Normalize Movement Alert precision to a clean 0 or 1. A legacy numeric-input control could leave a non-binary value -- the string \"1\", or a stored -0 -- that the Show Decimal toggle mishandled and that built an invalid \"%.-0f\" format string. Normalized unconditionally (no type guard) because -0 is a number, so the earlier number-only guard skipped it. Positive -> 1 (decimals on); zero/negative/garbage -> 0 (off).",
     body = function(ctx)
         local qol = ctx.profile.addons and ctx.profile.addons.EllesmereUIQoL
         local ma = qol and qol.movementAlert
-        if type(ma) ~= "table" then return end
-        if ma.precision ~= nil and type(ma.precision) ~= "number" then
-            -- Any positive value -> decimals on (1); zero/garbage -> off/default,
-            -- matching the current binary Show Decimal toggle (0 | 1).
-            ma.precision = (tonumber(ma.precision) or 1) > 0 and 1 or 0
-        end
+        if type(ma) ~= "table" or ma.precision == nil then return end
+        ma.precision = (tonumber(ma.precision) or 1) > 0 and 1 or 0
     end,
 })
 
