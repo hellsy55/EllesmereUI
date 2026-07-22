@@ -8,6 +8,111 @@ local issecretvalue = issecretvalue
 local oUF = ns.oUF or oUF
 local PP = EllesmereUI.PP
 
+-- Taint-safe override of the embedded lib's DisableBlizzard for the units
+-- this addon disables. The stock version re-parents a disabled Blizzard
+-- frame back to its hidden parent INLINE from a SetParent hooksecurefunc.
+-- Blizzard's Edit Mode layout pass calls SetParent on managed containers
+-- (confirmed live: BossTargetFrameContainer -> UIParent on every Edit Mode
+-- enter/exit), so the inline re-parent runs inside that secure execution
+-- and taints everything Edit Mode touches afterwards -- every 12.x secret
+-- value read then throws a LUA_WARNING (CompactUnitFrame health compares,
+-- encounter warnings, SecureUtil arithmetic) and the tainted setup pass
+-- poisons party frames for the whole session. Same end state here, but the
+-- re-parent is deferred to a timer (a fresh addon-owned execution) and
+-- further postponed while the Edit Mode manager is open, because SetParent
+-- fires Blizzard's synchronous layout handlers in the caller's execution.
+-- Units this addon never disables fall through to the stock implementation.
+do
+    local hiddenParent = CreateFrame("Frame", nil, UIParent)
+    hiddenParent:Hide()
+    local pendingParent, looseFrames, hookedFrames = {}, {}, {}
+    local bossHandled = false
+
+    -- Combat fallback: protected frames can't be re-parented in lockdown;
+    -- park them here and sweep at regen (mirrors the stock lib's behavior).
+    local regenWatcher = CreateFrame("Frame")
+    regenWatcher:SetScript("OnEvent", function(self)
+        if InCombatLockdown() then return end
+        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        for f in pairs(looseFrames) do f:SetParent(hiddenParent) end
+        wipe(looseFrames)
+    end)
+
+    local function ApplyHiddenParent(frame)
+        pendingParent[frame] = nil
+        if frame:GetParent() == hiddenParent then return end
+        if EditModeManagerFrame and EditModeManagerFrame:IsShown() then
+            pendingParent[frame] = true
+            C_Timer.After(0.25, function() ApplyHiddenParent(frame) end)
+        elseif InCombatLockdown() and frame:IsProtected() then
+            looseFrames[frame] = true
+            regenWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+        else
+            frame:SetParent(hiddenParent)
+        end
+    end
+
+    local function Unreg(child)
+        if child then child:UnregisterAllEvents() end
+    end
+
+    local function HandleFrame(frame, doNotReparent)
+        if type(frame) == "string" then frame = _G[frame] end
+        if not frame then return end
+        frame:UnregisterAllEvents()
+        frame:Hide()
+        if not doNotReparent then
+            frame:SetParent(hiddenParent)
+            if not hookedFrames[frame] then
+                hookedFrames[frame] = true
+                hooksecurefunc(frame, "SetParent", function(self, parent)
+                    if parent ~= hiddenParent and not pendingParent[self] then
+                        pendingParent[self] = true
+                        C_Timer.After(0, function() ApplyHiddenParent(self) end)
+                    end
+                end)
+            end
+        end
+        Unreg(frame.healthBar or frame.healthbar or frame.HealthBar
+            or (frame.HealthBarsContainer and frame.HealthBarsContainer.healthBar))
+        Unreg(frame.manabar or frame.ManaBar)
+        Unreg(frame.castBar or frame.spellbar or frame.CastingBarFrame)
+        Unreg(frame.powerBarAlt or frame.PowerBarAlt)
+        Unreg(frame.BuffFrame or frame.AurasFrame)
+        Unreg(frame.petFrame or frame.PetFrame)
+        Unreg(frame.totFrame)
+        Unreg(frame.CcRemoverFrame)
+        Unreg(frame.DebuffFrame)
+    end
+
+    local origDisableBlizzard = oUF.DisableBlizzard
+    function oUF:DisableBlizzard(unit)
+        if not unit then return end
+        if unit == "player" then
+            HandleFrame(PlayerFrame)
+        elseif unit == "pet" then
+            HandleFrame(PetFrame)
+        elseif unit == "target" then
+            HandleFrame(TargetFrame)
+        elseif unit == "focus" then
+            HandleFrame(FocusFrame)
+        elseif unit:match("boss%d?$") then
+            if not bossHandled then
+                bossHandled = true
+                -- Container is re-parented (Edit Mode can revive it); the
+                -- individual boss frames are container-managed and must not
+                -- be re-parented or the layout code breaks on their sizes.
+                HandleFrame(BossTargetFrameContainer)
+                for i = 1, (_G.MAX_BOSS_FRAMES or 5) do
+                    HandleFrame("Boss" .. i .. "TargetFrame", true)
+                end
+            end
+        else
+            return origDisableBlizzard(self, unit)
+        end
+    end
+end
+
 -- Per-addon border texture defaults (size key = borderSize 0-4)
 do
     local ALL_SIZES = { [0] = true, [1] = true, [2] = true, [3] = true, [4] = true }
