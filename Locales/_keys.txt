@@ -40,6 +40,7 @@
 + Add New Cooldowns Bar
 + Add New Group
 + Add New Utility Bar
++ Add Spell
 + Add Threshold
 A profile named \
 AFK
@@ -59,6 +60,7 @@ Add Global Binding
 Add New
 Add Reminder
 Add Specs
+Add Spell
 Add Threshold
 Add Variant
 Add \
@@ -134,6 +136,7 @@ Click elements to scroll to and highlight their options
 Click this eye icon to preview live\nhealth bar effects like absorbs and healing.
 Click to edit this bar
 Close
+Color
 Color Bands
 Color Picker
 Color the bar differently at several stack counts. The highest count you have reached wins.
@@ -196,6 +199,7 @@ Drag categories on bag sidebar to reposition, group or ungroup.
 Drag to Reorder
 Drag to Reorder Bars
 Drag to Reorder Roles
+Draw tick lines across the bar at positions you choose.
 Duplicate Keybind
 Duration (seconds)
 Dynamic Rez
@@ -205,6 +209,7 @@ Edit Tab Settings
 Editing Spec
 Element Options
 Enable
+Enable hash lines first
 Enable/Disable Bar per Form
 Enable/Disable per Form
 Enemy Name Text
@@ -212,6 +217,7 @@ Enhance 5 Bar minimum is %d (if you want less just change 5 bar color)
 Enter a name for the new preset:
 Enter a name for the new profile:
 Enter a new name for \
+Enter a valid spell ID
 Enter a volume from 0 to 100 for %1$s:
 Enter amount in gold:
 Equipment Slot
@@ -248,8 +254,10 @@ H Match
 H Matched
 HS
 Handcrafted UI setups ready to import.
+Hash Lines
 Hash at %1$s
 Haste
+Health Bar Hash Lines
 Hex#
 Hide
 Hide Item Transforms
@@ -318,6 +326,7 @@ Maximum width the text can fill before it truncates, as a percentage of the bar.
 Missing Buffs?
 Missing Spells?
 Missing Spells? Add as
+Mode
 More Information
 Move Frames
 Move via Blizz Edit Mode
@@ -335,6 +344,7 @@ No
 No Bars - Click to Add
 No Saved Presets
 No buffs assigned. Right click a button in the preview to assign buffs.
+No mobility spells known for your current spec yet -- add one below.
 No patch notes yet.
 No spec macros for 
 No talent
@@ -370,7 +380,9 @@ Pinned Items
 Pixel Glow Settings
 Popular Presets
 Position and size settings are not synced and keep each profile's own values.
+Positions
 Potions & Healthstone
+Power Bar Hash Lines
 Preset Style
 Press a key, click, or scroll...
 Press a key...
@@ -452,6 +464,7 @@ Shift + right click to hide video guide icons
 Shift+Right Click to temporarily hide overlay
 Show 'Not Needed' Reminder
 Show Charges
+Show Hash Lines
 Show Tooltip
 Show a pulsing dot on the Patch Notes button whenever EllesmereUI updates to a new version.
 Size
@@ -516,6 +529,7 @@ Threshold Seconds
 Threshold Settings
 Toggle On/Off Keybind
 Total
+Track on these classes:
 Tracking Bar Group %d
 Tracking Bar in Blizz CDM
 Tracking Bar: %s
