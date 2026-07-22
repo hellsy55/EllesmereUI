@@ -926,7 +926,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     local slot = GetDisplaySlot(index)
     StyleSlot(slot)
     local displayMode = ma.displayMode or "text"
-    local precision   = ma.precision or 1
+    local precision   = tonumber(ma.precision) or 1
     local spellName   = spellEntry.customText or spellEntry.spellName or "Movement"
     local spellIcon   = spellEntry.spellIcon
     local precFmt     = "%." .. precision .. "f"

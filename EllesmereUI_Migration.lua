@@ -3669,6 +3669,22 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "qol_movement_alert_precision_number",
+    scope       = "profile",
+    description = "Coerce Movement Alert precision to a number. An older numeric-input control could store it as a string (e.g. \"1\"); the Show Decimal toggle's getter compares it with `> 0`, which is a hard error on a string in Lua 5.1, so the toggle silently failed and decimals could not be turned off. Recurred every reload because the bad value persisted on disk.",
+    body = function(ctx)
+        local qol = ctx.profile.addons and ctx.profile.addons.EllesmereUIQoL
+        local ma = qol and qol.movementAlert
+        if type(ma) ~= "table" then return end
+        if ma.precision ~= nil and type(ma.precision) ~= "number" then
+            -- Any positive value -> decimals on (1); zero/garbage -> off/default,
+            -- matching the current binary Show Decimal toggle (0 | 1).
+            ma.precision = (tonumber(ma.precision) or 1) > 0 and 1 or 0
+        end
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)
