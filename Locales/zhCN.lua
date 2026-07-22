@@ -3830,7 +3830,8 @@ L["Lower Bound (30+)"] = "下限（30+）"
 L["Minimum (30)"] = "最小值（30）"
 L["Target Distance"] = "目标距离"
 L["Movement Alerts - Time Spiral"] = "位移警报 - 时间螺旋"
-
+L["Not enough gold to repair."] = "金币不足以修理。"
+L["Repaired all items for "] = "已修理所有物品，花费 "
 
 -- 体验优化鼠标提示 (QoL Tooltip)
 L["Adds a 'Train All' button next to the Train button at profession trainers, allowing you to learn all available skills with one click."] = "在专业训练师处的训练按钮旁添加“全部训练”按钮，让您一键学习所有可用技能。"
@@ -4647,7 +4648,7 @@ L["Tab Spacing"] = "标签页间距"
 L["Tab Height"] = "标签页高度"
 L["Align Tabs to Full Panel"] = "标签页对齐到完整面板"
 L["Bottom Spacing to Panel"] = "底部到面板间距"
-L["Inner Padding X"] = "内侧内边距X"
+L["Inner Padding X"] = "水平内边距"
 L["Tab Font"] = "标签页字体"
 L["Tab Font Color"] = "标签页字体颜色"
 L["Tab Font Size"] = "标签页字体大小"
@@ -5807,6 +5808,7 @@ L["Whisper"] = "私聊"
 L["Whisper BNet"] = "战网私聊"
 L["Not in a guild"] = "未加入公会"
 L["Coin Icons"] = "金币图标"
+L["On Cooldown"] = "冷却中"
 
 --数据条鼠标提示（tooltip)
 L["Horizontal bars lay blocks left to right; vertical bars stack them top to bottom."] = "水平条将模块从左到右排列；垂直条从上到下堆叠。"
