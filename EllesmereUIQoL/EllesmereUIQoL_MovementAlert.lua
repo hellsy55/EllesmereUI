@@ -926,7 +926,11 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     local slot = GetDisplaySlot(index)
     StyleSlot(slot)
     local displayMode = ma.displayMode or "text"
-    local precision   = ma.precision or 1
+    -- Clamp to a clean 0/1 (matches the binary Show Decimal toggle). A legacy
+    -- numeric-input value could be a string ("1") or a stored -0; feeding -0 to
+    -- the format below builds an invalid "%.-0f". This local drives all three
+    -- format sites (precFmt and the two bar-text SetFormattedText calls).
+    local precision   = ((tonumber(ma.precision) or 1) > 0) and 1 or 0
     local spellName   = spellEntry.customText or spellEntry.spellName or "Movement"
     local spellIcon   = spellEntry.spellIcon
     local precFmt     = "%." .. precision .. "f"

@@ -3669,6 +3669,18 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+EllesmereUI.RegisterMigration({
+    id          = "qol_movement_alert_precision_normalize_v2",
+    scope       = "profile",
+    description = "Normalize Movement Alert precision to a clean 0 or 1. A legacy numeric-input control could leave a non-binary value -- the string \"1\", or a stored -0 -- that the Show Decimal toggle mishandled and that built an invalid \"%.-0f\" format string. Normalized unconditionally (no type guard) because -0 is a number, so the earlier number-only guard skipped it. Positive -> 1 (decimals on); zero/negative/garbage -> 0 (off).",
+    body = function(ctx)
+        local qol = ctx.profile.addons and ctx.profile.addons.EllesmereUIQoL
+        local ma = qol and qol.movementAlert
+        if type(ma) ~= "table" or ma.precision == nil then return end
+        ma.precision = (tonumber(ma.precision) or 1) > 0 and 1 or 0
+    end,
+})
+
 local migrationFrame = CreateFrame("Frame")
 migrationFrame:RegisterEvent("ADDON_LOADED")
 migrationFrame:SetScript("OnEvent", function(self, event, addonName)
