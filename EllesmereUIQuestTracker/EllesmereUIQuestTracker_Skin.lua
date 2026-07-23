@@ -915,59 +915,44 @@ local function SkinExistingBlocks(tracker)
 end
 
 -------------------------------------------------------------------------------
--- Blizzard anchors whichever module currently sits in the top slot via
+-- Blizzard anchors whichever module sits in the top slot via
 -- ObjectiveTrackerContainerMixin:Update() (Blizzard_ObjectiveTrackerContainer.lua):
 --   module:SetPoint("TOP", 0, -self.topModulePadding)
--- topModulePadding defaults to 38 (Blizzard_ObjectiveTracker.xml KeyValue on
--- ObjectiveTrackerFrame) -- verified independent of module type and of
--- Header's height, matching what we observed via /dump.
---
--- ObjectiveTrackerFrame inherits EditModeObjectiveTrackerSystemTemplate, so
--- Blizzard's Update() runs this SetPoint from a protected/Edit-Mode-managed
--- call stack. That's why the previous approach -- hooking the module's own
--- SetPoint and re-issuing tracker:SetPoint() to correct the offset -- hit
--- ADDON_ACTION_BLOCKED in combat and needed an InCombatLockdown() bail, a
--- re-entrancy guard, an OnEndSlide catch-up hook, and a PLAYER_REGEN_ENABLED
--- catch-up event, and still visibly flashed to -38 whenever one of those
--- bail conditions was hit (e.g. killing one mob while still fighting another).
---
--- topModulePadding itself is a plain Lua field -- Blizzard's Update() just
--- reads self.topModulePadding fresh every layout pass. Writing that field is
--- a table assignment, not a protected function call, so it carries no taint
--- or combat-lockdown exposure at all: Blizzard's own (already-privileged)
--- code performs the actual SetPoint using our value, in and out of combat,
--- and we never call SetPoint on the module ourselves. This replaces
--- TightenTopAnchor entirely -- no hook, no guard, no combat bail, no
--- catch-up event.
+-- topModulePadding is a KeyValue on the EditMode-managed ObjectiveTrackerFrame,
+-- default 38. We once wrote it to 6 for a tighter top gap on the (false)
+-- assumption that "a plain table assignment carries no taint." It does: an
+-- addon-written value is tainted, Update() reads it every layout pass, and the
+-- taint propagates through the managed-frame / UIPanel layout into protected
+-- calls and secret values (see the block below). So we NEVER write it -- the
+-- top gap stays Blizzard's 38 and our skin chrome follows TOP_ANCHOR_OFFSET.
 -------------------------------------------------------------------------------
-local TOP_MODULE_PADDING = 6 -- tuned by eye; Blizzard's default is 38
--- 12.1: NEVER write topModulePadding -- even writing the default value
--- taints it. ObjectiveTrackerContainerMixin:Update() reads the field at the
--- top of every layout pass (GetAvailableHeight), a read of an addon-written
--- value taints the whole pass, and ScenarioObjectiveTracker:LayoutContents
--- then calls ShouldShowMawBuffs -> C_UnitAuras.GetAuraDataByIndex, a
--- RequiresUnitAuraAccess API that hard-errors from tainted execution while
--- auras are secret (load screens into instances, Delves/M+/scenarios --
--- LayoutContents calls it unconditionally, even mid-scenario). The 12.0
--- write below is field-verified taint-clean there (taint only bites
--- protected calls on 12.0; the module SetPoint consuming this value is not
--- protected). On 12.1 the padding stays Blizzard's untainted 38 and the
--- skin chrome follows TOP_ANCHOR_OFFSET, so the BG/divider still hug the
--- content -- the tracker content just sits 32px lower there. The frame
--- itself is EditMode-managed, so compensating via our own SetPoint is not
--- an option (managed-frame-position taint).
-if EllesmereUI and EllesmereUI.IS_121 then TOP_MODULE_PADDING = 38 end
+-- Blizzard's default topModulePadding is 38. We NEVER write this field on
+-- EITHER client. ObjectiveTrackerContainerMixin:Update() reads it at the top
+-- of every layout pass (GetAvailableHeight); reading an addon-written value
+-- taints that whole pass. The frame is EditMode/UIPanel-managed, so opening
+-- ANY panel (the world map, etc.) reflows it and reads the field inside the
+-- secure ShowUIPanel path -- in a secret environment (M+/raid) that tainted
+-- execution then hits a PROTECTED call (WorldMapFrame -> PerformEmote, blocked)
+-- and secret tooltip/widget values (AreaPOI "compare a secret number value").
+-- On 12.1 the same read reaches C_UnitAuras.GetAuraDataByIndex and hard-errors.
+-- The old 12.0-only write (=6, a tighter top gap) was assumed clean because
+-- its only consumer was thought to be a non-protected SetPoint, but that never
+-- covered the secret-env map-open path (field taint.log 2026-07-23: PerformEmote
+-- block + AreaPOI secret-number errors, both tainted by EllesmereUIQuestTracker,
+-- on Retail 12.0). We accept Blizzard's 38px gap on both clients; the skin
+-- chrome follows TOP_ANCHOR_OFFSET so BG/divider still hug content. Comp-
+-- ensating with our own SetPoint is NOT an option (managed-frame-position taint).
+local TOP_MODULE_PADDING = 38
 -- Shared with EllesmereUIQuestTracker_Visibility.lua (BG/top-divider offset)
 -- so both files derive the top gap from a single source instead of two
 -- independent magic numbers drifting apart. Sign convention (negative Y
 -- offset) preserved for compatibility with that existing consumer.
 EQT.TOP_ANCHOR_OFFSET = -TOP_MODULE_PADDING
 
+-- Intentional no-op, retained for its call sites / EQT API: writing
+-- topModulePadding onto the managed tracker taints it (see above), so we
+-- never do -- Blizzard's default value stands.
 local function ApplyTopModulePadding()
-    if EllesmereUI and EllesmereUI.IS_121 then return end -- see above: never taint the field on 12.1
-    local otf = _G.ObjectiveTrackerFrame
-    if not otf then return end
-    otf.topModulePadding = TOP_MODULE_PADDING
 end
 EQT.ApplyTopModulePadding = ApplyTopModulePadding
 

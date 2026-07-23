@@ -1223,7 +1223,7 @@ function ns.CC_SetAllFrames(enabled)
     if enabled then
         -- Grab the static Blizzard list (PlayerFrame/TargetFrame/party/etc.) and
         -- install the CompactUnitFrame hook. Idempotent: self-gates on
-        -- enabled+allFrames, DoRegisterFrame skips already-registered frames,
+        -- enabled+allFrames, the loop below skips already-registered frames,
         -- and the CUF hook installs at most once.
         if RegisterBlizzardFrames then RegisterBlizzardFrames() end
         for frame in pairs(externalFrames) do
@@ -1686,6 +1686,11 @@ local specReadyTicker
 local function ReapplyWhenSpecReady()
     if InCombatLockdown() then pendingApply = true; return end
     if GetCurrentSpecID() then ns.CC_ApplyBindings(); return end
+    -- Spec not ready yet: only spin up the readiness poll if click-casting is
+    -- actually enabled. A disabled install has no bindings to re-apply, so the
+    -- poll would be idle cost for a user who never turned the feature on.
+    local cc = GetClickCastDB()
+    if not (cc and cc.enabled) then return end
     if specReadyTicker then return end
     local tries = 0
     specReadyTicker = C_Timer.NewTicker(0.25, function(t)
