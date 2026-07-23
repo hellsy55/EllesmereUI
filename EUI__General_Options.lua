@@ -406,7 +406,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.5.4",
+        version = "8.5.5",
         heroes = {
             {
                 module = "PTR Raid Frames",

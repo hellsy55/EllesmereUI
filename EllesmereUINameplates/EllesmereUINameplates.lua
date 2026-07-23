@@ -4663,44 +4663,15 @@ local questMobCache = {}
 -- file-scope local) because this file is near the Lua 5.1 local cap.
 ns._questObjText = ns._questObjText or {}
 -- Detect whether a unit is one of the local player's active quest objectives
--- with progress still incomplete, by reading its unit tooltip. The client tags
--- quest lines with QuestTitle / QuestPlayer / QuestObjective types; in a group
--- the tooltip lists each member's objectives beneath a QuestPlayer header, so
--- only objectives under the local player's header are scored (solo, every
--- objective is the player's). All tooltip text is treated as potentially secret
--- (12.1): reads run behind pcall and any value surfaced to the UI is
--- issecretvalue-checked and shape-validated first. Cached per unit; the cache
--- clears on QUEST_LOG_UPDATE and plate removal.
-
--- Evaluate one objective line's progress. Returns a clean "n/m" or "p%" string
--- for an INCOMPLETE objective when wantText is set, true for an incomplete
--- objective whose string is unreadable/secret, or nil when the objective is
--- complete or carries no progress. A string is only ever returned once it is
--- issecretvalue-clean and matches its expected shape, so a secret value can
--- never leak out.
-local function EvalObjective(text, wantText)
-    text = text or ""
-    local have, need = text:match("(%d+)/(%d+)")
-    if have and have ~= need then
-        if not wantText then return true end
-        local s = have .. "/" .. need
-        if (not issecretvalue or not issecretvalue(s)) and s:match("^%d+/%d+$") then
-            return s
-        end
-        return true
-    end
-    local pct = text:match("(%d+)%%")
-    if pct and pct ~= "100" then
-        if not wantText then return true end
-        local s = pct .. "%"
-        if (not issecretvalue or not issecretvalue(s)) and s:match("^%d+%%$") then
-            return s
-        end
-        return true
-    end
-    return nil
-end
-
+-- with work remaining, from its unit tooltip. Blizzard tags the tooltip's quest
+-- lines with structured data: a QuestObjective line carries a `completed` flag
+-- plus numFulfilled/numRequired counts, and a QuestTitle line carries the quest
+-- id -- so completion is read straight from those fields, with no progress
+-- string to parse. Ownership is resolved through the player's own quest log
+-- (only their quests answer C_QuestLog.IsOnQuest), so a group member's objective
+-- is ignored without inspecting player-name lines. Every structured value is
+-- treated as possibly secret (12.1) and issecretvalue-checked before use.
+-- Cached per unit; the cache clears on QUEST_LOG_UPDATE and plate removal.
 local function IsQuestMob(unit)
     if not (C_TooltipInfo and Enum and Enum.TooltipDataLineType) then return false end
     local cached = questMobCache[unit]
@@ -4724,34 +4695,34 @@ local function IsQuestMob(unit)
     end
 
     local LT = Enum.TooltipDataLineType
-    local playerName = UnitName("player")
-    local grouped = IsInGroup()
+    local onQuest = C_QuestLog and C_QuestLog.IsOnQuest
     local wantText = (p and p.replaceQuestIconWithObjective == true) or false
-    -- Whether objectives beneath the header we are currently inside count toward
-    -- the local player. A QuestTitle opens a new quest (scored by default); a
-    -- QuestPlayer header, in a group, narrows scoring to that one member.
-    local scoreForPlayer = true
+    local questID  -- id carried by the most recent QuestTitle line
     local isQuest, objText = false, nil
 
     for _, line in ipairs(info.lines) do
         local kind = line.type
         if kind == LT.QuestTitle then
-            scoreForPlayer = true
-        elseif kind == LT.QuestPlayer then
-            if grouped then
-                -- leftText may be a secret string; compare behind pcall and
-                -- fail open (unknown ownership is scored, so nothing is lost).
-                local ok, mine = pcall(function() return line.leftText == playerName end)
-                scoreForPlayer = (not ok) or mine
+            local id = line.id
+            if id and not (issecretvalue and issecretvalue(id)) then
+                questID = id
+            else
+                questID = nil
             end
-        elseif kind == LT.QuestObjective and scoreForPlayer then
-            -- leftText may be secret; EvalObjective runs behind pcall and only
-            -- returns a value once it is verified clean.
-            local ok, remaining = pcall(EvalObjective, line.leftText, wantText)
-            if ok and remaining then
+        elseif kind == LT.QuestObjective then
+            local done = line.completed
+            -- An incomplete objective the player is actually on: their quest log
+            -- scopes out a group member's objectives. Fail open when the id is
+            -- unreadable so a real quest mob is never silently skipped.
+            if not (issecretvalue and issecretvalue(done)) and done == false
+               and (not questID or not onQuest or onQuest(questID)) then
                 isQuest = true
-                if wantText and type(remaining) == "string" then
-                    objText = remaining
+                if wantText then
+                    local have, need = line.numFulfilled, line.numRequired
+                    if have and need
+                       and not (issecretvalue and (issecretvalue(have) or issecretvalue(need))) then
+                        objText = have .. "/" .. need
+                    end
                 end
                 break
             end
@@ -5175,30 +5146,25 @@ local function HideBlizzardFrame(nameplate, unit)
     -- the entire block and leaves Blizzard's UnitFrame visible behind ours
     -- as a giant black box.
     uf:SetAlpha(0)
-    if uf.healthBar then
-        uf.healthBar:SetParent(npOffscreenParent)
-    end
-    -- Move visual children off the UnitFrame so Blizzard's layout engine
-    -- stops recalculating bounds from them.
-    MoveToOffscreen(uf.HealthBarsContainer, unit)
-    MoveToOffscreen(uf.castBar, unit)
-    MoveToOffscreen(uf.name, unit)
-    MoveToOffscreen(uf.selectionHighlight, unit)
-    MoveToOffscreen(uf.aggroHighlight, unit)
-    MoveToOffscreen(uf.softTargetFrame, unit)
-    MoveToOffscreen(uf.SoftTargetFrame, unit)
-    MoveToOffscreen(uf.ClassificationFrame, unit)
-    MoveToOffscreen(uf.RaidTargetFrame, unit)
-    MoveToOffscreen(uf.PlayerLevelDiffFrame, unit)
-    if uf.BuffFrame then uf.BuffFrame:SetAlpha(0) end
-    -- Move AurasFrame list frames offscreen -- we query C_UnitAuras
-    -- directly for debuff/CC data so these visual lists are unused.
+    -- One Blizzard child stays live rather than riding the frame offscreen:
+    -- the AurasFrame, which our RefreshAuras hook below reads. Re-home it on
+    -- the nameplate and alpha it out so Blizzard keeps updating it while its
+    -- rows stay invisible. (The WidgetContainer is likewise kept, further down.)
     if uf.AurasFrame then
-        MoveToOffscreen(uf.AurasFrame.DebuffListFrame, unit)
-        MoveToOffscreen(uf.AurasFrame.BuffListFrame, unit)
-        MoveToOffscreen(uf.AurasFrame.CrowdControlListFrame, unit)
-        MoveToOffscreen(uf.AurasFrame.LossOfControlFrame, unit)
+        if not storedParents[uf.AurasFrame] then
+            storedParents[uf.AurasFrame] = uf.AurasFrame:GetParent()
+        end
+        uf.AurasFrame:SetParent(nameplate)
+        uf.AurasFrame:SetAlpha(0)
     end
+    -- Park Blizzard's entire UnitFrame on the hidden holder in a single move.
+    -- Every health/cast/name/marker child rides with it, so the nameplate's
+    -- layout engine no longer measures bounds from the Blizzard art we replace,
+    -- and there is no per-widget list to maintain as Blizzard adds fields.
+    if not storedParents[uf] then
+        storedParents[uf] = uf:GetParent()
+    end
+    uf:SetParent(npOffscreenParent)
     -- All visual children are reparented offscreen so layout
     -- recalculations won't shift bounds.
     -- Only silence the castBar events (we render our own cast bar).
@@ -5319,32 +5285,22 @@ local function RestoreBlizzardFrame(nameplate)
     if not nameplate then return end
     local uf = nameplate.UnitFrame
     if not uf then return end
-    -- Restore reparented children
-    if uf.healthBar and storedParents[uf.healthBar] then
-        uf.healthBar:SetParent(storedParents[uf.healthBar])
-        storedParents[uf.healthBar] = nil
+    -- Un-park the UnitFrame and re-home the children we kept live, returning the
+    -- recycled nameplate to a clean state for its next unit.
+    if storedParents[uf] then
+        uf:SetParent(storedParents[uf])
+        storedParents[uf] = nil
     end
-    RestoreFromOffscreen(uf.HealthBarsContainer)
-    RestoreFromOffscreen(uf.castBar)
-    RestoreFromOffscreen(uf.name)
-    RestoreFromOffscreen(uf.selectionHighlight)
-    RestoreFromOffscreen(uf.aggroHighlight)
-    RestoreFromOffscreen(uf.softTargetFrame)
-    RestoreFromOffscreen(uf.SoftTargetFrame)
-    RestoreFromOffscreen(uf.ClassificationFrame)
-    RestoreFromOffscreen(uf.RaidTargetFrame)
-    RestoreFromOffscreen(uf.PlayerLevelDiffFrame)
-    -- Restore WidgetContainer
+    uf:SetAlpha(1)
+    if uf.AurasFrame then
+        if storedParents[uf.AurasFrame] then
+            uf.AurasFrame:SetParent(storedParents[uf.AurasFrame])
+            storedParents[uf.AurasFrame] = nil
+        end
+        uf.AurasFrame:SetAlpha(1)
+    end
     if uf.WidgetContainer then
         uf.WidgetContainer:SetParent(uf)
-    end
-    -- Restore AurasFrame children
-    if uf.AurasFrame then
-        local af = uf.AurasFrame
-        RestoreFromOffscreen(af.DebuffListFrame)
-        RestoreFromOffscreen(af.BuffListFrame)
-        RestoreFromOffscreen(af.CrowdControlListFrame)
-        RestoreFromOffscreen(af.LossOfControlFrame)
     end
 end
 ns.HideBlizzardFrame = HideBlizzardFrame
@@ -8227,20 +8183,23 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
 
-    -- Resolve the interrupter's name + class from the GUID.
+    -- Resolve the interrupter's name + class from the GUID. For a player GUID,
+    -- GetPlayerInfoByGUID returns both in one call (class = 2nd return, name =
+    -- 6th return).
     local interrupterName
     local interrupterClass
     if interrupterGUID then
-        if UnitNameFromGUID then
-            interrupterName = UnitNameFromGUID(interrupterGUID)
-            local _, class = GetPlayerInfoByGUID(interrupterGUID)
-            interrupterClass = class
-        else
-            local unitToken = UnitTokenFromGUID(interrupterGUID)
-            if unitToken then
-                interrupterName = UnitName(unitToken)
-                interrupterClass = UnitClassBase(unitToken)
-            end
+        local _, class, _, _, _, name = GetPlayerInfoByGUID(interrupterGUID)
+        interrupterClass = class
+        interrupterName = name
+        if not interrupterName then
+            -- Fallback for a NON-player interrupter GUID (a pet or an NPC):
+            -- GetPlayerInfoByGUID only resolves players, so it returns nothing
+            -- above and the name is pulled from the GUID's live unit token
+            -- instead. Non-players have no class, so interrupterClass stays nil
+            -- and the class-color path below is simply skipped for them.
+            local token = UnitTokenFromGUID(interrupterGUID)
+            if token then interrupterName = UnitName(token) end
         end
     end
     local cfg = p or defaults
