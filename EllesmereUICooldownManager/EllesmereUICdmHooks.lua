@@ -5192,11 +5192,15 @@ local function CollectAndReanchor()
                         end
                     end
                     for _, sid in ipairs(spellList) do
-                        if sid and ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid) then
-                            -- Hosted-buff marker: the buff renders via the reparent
-                            -- path (route map -> cdFrames), never as an injected
-                            -- custom frame. Must be tested before the item-preset
-                            -- branch (markers are also <= -100).
+                        if sid and ((ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid))
+                                 or (ns.CdClaimMarkerToCdID and ns.CdClaimMarkerToCdID(sid))) then
+                            -- Hosted-buff OR cd-claim (collided-buff slot) marker: the
+                            -- buff renders via the reparent/diversion path (route map ->
+                            -- cdFrames), never as an injected custom frame. Must be tested
+                            -- before the item-preset branch: both marker kinds are also
+                            -- <= -100, so -sid would otherwise be taken as an itemID and
+                            -- fed to GetItemCooldown, which errors outside int32 range
+                            -- (cd-claim markers are -(CD_CLAIM_MARKER_BASE + cooldownID)).
                         elseif sid and ns.SlotIDFromKey(sid) then
                             -- Equipment slot (trinkets -13/-14, user-added slots)
                             local slot = ns.SlotIDFromKey(sid)
