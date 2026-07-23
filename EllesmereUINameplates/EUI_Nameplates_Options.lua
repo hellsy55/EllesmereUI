@@ -1388,7 +1388,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                 end
-                nameFS:SetWidth(pvNameMarkerEnabled and 0 or math.max((barW - usedWidth) * pvNameWPct / 100, 20))
+                nameFS:SetWidth(math.max((barW - usedWidth - pvNameMarkerReserve) * pvNameWPct / 100, 20))
                 nameFS:SetTextColor(cr, cg, cb, 1)
                 nameFS:Show()
             end
@@ -1411,7 +1411,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if showCL and clPos ~= "none" then
                     nameW = nameW - (reIconSz + 4)
                 end
-                nameFS:SetWidth(pvNameMarkerEnabled and 0 or math.max(nameW * pvNameWPct / 100, 20))
+                nameFS:SetWidth(math.max(nameW * pvNameWPct / 100, 20))
                 nameFS:SetTextColor(topC.r, topC.g, topC.b, 1)
                 nameFS:Show()
             else

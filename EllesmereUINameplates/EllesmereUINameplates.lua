@@ -6505,14 +6505,11 @@ function NameplateFrame:UpdateNameWidth()
     -- Width % scales the computed (bar-derived) width; 100 = historical behaviour.
     local pct = (p and p.enemyNameWidthPct) or defaults.enemyNameWidthPct
     local nameSlot = FindSlotForElement("enemyName")
-    -- Auto-size marked names so the client can position the marker without exposing secret text width.
-    if self._nameRaidMarkerShown == true then
-        self.name:SetWidth(0)
-        return
-    end
+    local nameMarkerReserve = self._nameRaidMarkerShown == true
+        and (((p and p.nameRaidMarkerSize) or defaults.nameRaidMarkerSize or 14) + 3) or 0
     if nameSlot == "textSlotTop" then
-        -- Above the bar: full bar width
-        local nameW = barW
+        -- Above the bar: reserve a fixed slot for the inline raid marker.
+        local nameW = barW - nameMarkerReserve
         local rmPos = GetRaidMarkerPos()
         if rmPos ~= "none" and self.raidFrame:IsShown() then
             nameW = nameW - 2 * (GetRaidMarkerSize() - 2) - 7
@@ -6535,7 +6532,7 @@ function NameplateFrame:UpdateNameWidth()
                 end
             end
         end
-        local nameW = barW - usedWidth
+        local nameW = barW - usedWidth - nameMarkerReserve
         PP.Width(self.name, math.max(nameW * pct / 100, 20))
     else
         -- Name not in any slot, use minimal width
