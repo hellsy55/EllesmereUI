@@ -1215,6 +1215,22 @@ function EllesmereUI.ApplyProfileData(profileData)
                         mm.omniumFolioMode = (mm.showOmniumFolio == false) and "never" or "always"
                     end
                 end
+                -- Pre-enum imports carry the legacy anchorFirstRow boolean but
+                -- no rowGrowDirection. The conversion migration
+                -- (cdm_row_grow_direction_v1) is SKIPPED for imported profiles
+                -- (inherited migration flags), so forward-copy here so the
+                -- pinned-row behavior survives the import.
+                if entry.folder == "EllesmereUICooldownManager"
+                    and type(profile.cdmBars) == "table" and type(profile.cdmBars.bars) == "table" then
+                    for _, bar in ipairs(profile.cdmBars.bars) do
+                        if bar.anchorFirstRow then
+                            if bar.rowGrowDirection == nil then
+                                bar.rowGrowDirection = bar.verticalOrientation and "RIGHT" or "DOWN"
+                            end
+                            bar.anchorFirstRow = nil
+                        end
+                    end
+                end
                 if db._profileDefaults then
                     EllesmereUI.Lite.DeepMergeDefaults(profile, db._profileDefaults)
                 end

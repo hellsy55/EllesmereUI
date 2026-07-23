@@ -887,6 +887,7 @@ EllesmereUI.RegisterSyncExclusions("EllesmereUICooldownManager", {
     "cdmBars.bars.*.iconSize",
     "cdmBars.bars.*.numRows",
     "cdmBars.bars.*.anchorFirstRow",
+    "cdmBars.bars.*.rowGrowDirection",
     "cdmBars.bars.*.spacing",
     "cdmBars.bars.*.verticalOrientation",
     "cdmBars.bars.*.anchorTo",
