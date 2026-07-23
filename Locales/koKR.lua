@@ -5845,6 +5845,7 @@ L["Enable Idle Fade"] = "대기 시 투명도 활성화"
 L["Fade Delay"] = "투명도 전환 지연 시간"
 L["Fade Strength"] = "투명도 강도"
 L["Separate Sidebar"] = "사이드바 분리"
+L["External Defensives"] = "외부 방어기"
 
 L["Separates the sidebar from the chat panel and gives it its own background and border."] = "사이드바를 대화창 패널에서 분리하여 독자적인 배경과 테두리를 부여합니다."
 L["Forces which way the default screen-anchored tooltip expands as lines are added. Default lets Blizzard decide from the tooltip's screen position."] = "줄이 추가될 때 화면 고정 기본 툴팁이 어느 방향으로 확장될지 강제로 지정합니다. 기본값은 툴팁의 화면 위치에 따라 블리자드 기본 설정으로 결정됩니다."
