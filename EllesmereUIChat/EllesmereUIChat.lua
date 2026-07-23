@@ -2907,7 +2907,15 @@ function ECHAT.ApplyTabLayout()
             -- tainted UpdateHeader's secret width math (2026-07-21).
             if cfOwner and cfOwner.isDocked and not cfOwner.isStaticDocked then
                 local pt, rel, relPt, x, y = tab:GetPoint(1)
-                if pt == "LEFT" and relPt == "LEFT" and y and y ~= 0 then
+                -- A docked temp WHISPER tab whose target is secret (in
+                -- instances / M+) has SECRET geometry: comparing pt/relPt or
+                -- doing arithmetic on x/y under our taint errors, and this pass
+                -- runs on the whisper path. Skip such tabs entirely -- the seat
+                -- normalize is cosmetic. Same issecretvalue belt as the width
+                -- record above (2893).
+                if not (issecretvalue and (issecretvalue(pt) or issecretvalue(relPt)
+                        or issecretvalue(x) or issecretvalue(y)))
+                    and pt == "LEFT" and relPt == "LEFT" and y and y ~= 0 then
                     local es = tab:GetEffectiveScale()
                     local onePhys = PP and PP.SnapForES and PP.SnapForES(1, es) or 1
                     tab:SetPoint(pt, rel, relPt, (x or 0) + onePhys, 0)
