@@ -770,9 +770,6 @@ local function ProcessBlockChildren(frame, depth)
     end
 end
 
--- Weak-keyed so pooled/recycled poiButtons don't leak or get double-hooked.
-local _hookedPOIButtons = setmetatable({}, { __mode = "k" })
-
 local function SuppressPOI(block)
     if EQT.Cfg("showQuestIcons") then return end
     local pb = block and block.poiButton
@@ -780,18 +777,10 @@ local function SuppressPOI(block)
     if pb:IsShown() then pb:Hide() end
     pb:EnableMouse(false)
 
-    -- Re-hide synchronously whenever Blizzard shows this button again (e.g.
-    -- on SUPER_TRACKING_CHANGED from clicking a quest) so there's no visible
-    -- flash before the next SkinBlock/suppression pass. Hide() only, never
-    -- SetParent -- that's the taint-safe version of this pattern (see
-    -- InstallShowHook's otf Show-hook above, which does the same thing).
-    if not _hookedPOIButtons[pb] then
-        _hookedPOIButtons[pb] = true
-        hooksecurefunc(pb, "Show", function(self)
-            if EQT.Cfg("showQuestIcons") then return end
-            self:Hide()
-        end)
-    end
+    -- Do not hook Show on this Blizzard-owned pooled button. A post-hook runs
+    -- addon code synchronously inside Blizzard's native POI show/update path,
+    -- allowing taint to escape into later quest/map refresh work. Re-suppress
+    -- on each existing SkinBlock pass instead of injecting into Show itself.
 end
 
 local function SkinBlock(block)
