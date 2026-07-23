@@ -5139,16 +5139,29 @@ local function CollectAndReanchor()
                                     end
                                 else
                                     if not spellOrder[sid] then spellOrder[sid] = idx end
-                                    if _FindOverride then
-                                        local ovr = _FindOverride(sid)
-                                        if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
-                                            spellOrder[ovr] = idx
+                                    -- Resolve override/base forms only for a REAL
+                                    -- spellID. sid can be a cd-claim marker here (a
+                                    -- collided-buff slot, -(CD_CLAIM_MARKER_BASE+cdID),
+                                    -- well outside int32): FindSpellOverrideByID errors
+                                    -- outright on an out-of-range id, and a marker has no
+                                    -- override/base anyway (its frame routes by cooldownID
+                                    -- and orders via the buff-family "c"..cdID key). Same
+                                    -- sid>0 guard the sibling order loops already use; this
+                                    -- one branch was missed, so hosting a collided buff
+                                    -- (Diabolist Diabolic Ritual) on a CD/util bar threw
+                                    -- every RefreshLayout and broke CDM.
+                                    if sid > 0 then
+                                        if _FindOverride then
+                                            local ovr = _FindOverride(sid)
+                                            if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
+                                                spellOrder[ovr] = idx
+                                            end
                                         end
-                                    end
-                                    if C_Spell and C_Spell.GetBaseSpell then
-                                        local base = C_Spell.GetBaseSpell(sid)
-                                        if base and base > 0 and base ~= sid and not spellOrder[base] then
-                                            spellOrder[base] = idx
+                                        if C_Spell and C_Spell.GetBaseSpell then
+                                            local base = C_Spell.GetBaseSpell(sid)
+                                            if base and base > 0 and base ~= sid and not spellOrder[base] then
+                                                spellOrder[base] = idx
+                                            end
                                         end
                                     end
                                 end
