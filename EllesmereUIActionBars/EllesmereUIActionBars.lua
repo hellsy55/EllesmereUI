@@ -6233,20 +6233,30 @@ function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, supp
     local suppressKey = (reason == "petbattle") and "suppressedByPetBattle" or "suppressedByVisibility"
     local shownKey = (reason == "petbattle") and "wasShownBeforePetBattle" or "wasShownBeforeVisibility"
 
+    -- These are EditMode-managed frames (MicroMenuContainer, BagsBar); their
+    -- Hide()/Show() route through the protected HideBase/ShowBase and are blocked
+    -- in combat. Only issue the protected call on a real state transition (a
+    -- redundant re-Hide on an already-hidden frame still trips ADDON_ACTION_BLOCKED
+    -- each refresh -- SPELLS_CHANGED fires often mid-rotation), and never during
+    -- combat: RefreshRuntimeVisibility re-runs from ApplyAll on PLAYER_REGEN_ENABLED
+    -- and completes the deferred transition once lockdown clears.
     if suppressed then
         if not ffd[suppressKey] then
             ffd[shownKey] = frame:IsShown()
         end
         ffd[suppressKey] = true
-        frame:Hide()
+        if frame:IsShown() and not InCombatLockdown() then
+            frame:Hide()
+        end
         return
     end
 
     if ffd[suppressKey] then
+        if InCombatLockdown() then return end -- keep bookkeeping; re-apply after combat
         local wasShown = ffd[shownKey]
         ffd[suppressKey] = nil
         ffd[shownKey] = nil
-        if wasShown then
+        if wasShown and not frame:IsShown() then
             frame:Show()
         end
     end
