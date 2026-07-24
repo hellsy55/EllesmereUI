@@ -691,7 +691,9 @@ end
 local function UpdateCachedCharges()
     if inCombat or InCombatLockdown() then return end
     for _, entry in ipairs(cachedMovementSpells) do
-        if entry.isChargeSpell then
+        if entry.checkType == "buffActive" then
+            -- Aura-tracked: no cooldown and no charges to cache.
+        elseif entry.isChargeSpell then
             local chargeId = entry.baseSpellId or entry.spellId
             local chargeInfo = C_Spell.GetSpellCharges(chargeId)
             if chargeInfo and chargeInfo.currentCharges and not IsSecret(chargeInfo.currentCharges) then
