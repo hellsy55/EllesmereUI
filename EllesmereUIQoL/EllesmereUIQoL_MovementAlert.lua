@@ -62,10 +62,15 @@ local MOVEMENT_ABILITIES = {
     WARRIOR = {[71] = {6544}, [72] = {6544}, [73] = {6544}},
 }
 
--- Buff-active spells (label shown while the aura is up instead of a
--- cooldown countdown). Currently empty -- Burning Rush was removed from
--- tracking -- but the machinery stays for future aura-style mobility spells.
-local BUFF_ACTIVE_SPELLS = {}
+-- Buff-active spells (label shown while the aura is up instead of a cooldown
+-- countdown). Membership here does NOT add a spell to any class's defaults --
+-- those come from MOVEMENT_ABILITIES above -- it only says how a spell is
+-- tracked once it is in the list. Burning Rush is not a warlock default, but
+-- users add it manually, and it has no cooldown and no duration to count down,
+-- so it can only be tracked by the presence of its aura.
+local BUFF_ACTIVE_SPELLS = {
+    [111400] = "Burning Rush Active!",
+}
 
 local SPELL_ALIAS_GROUPS = {
     {102401, 16979, 102417, 252216},
@@ -644,21 +649,36 @@ local function GetPlayerMovementSpells()
                     local baseId = (displayId ~= spellId) and spellId or nil
                     if not isCharge and baseId then isCharge, maxCh, rechDur = SafeGetChargeInfo(baseId) end
                     if spellInfo then
-                        local rawBaseDur = SafeGetBaseDuration(displayId)
-                        if rawBaseDur <= 0 and baseId then rawBaseDur = SafeGetBaseDuration(baseId) end
-                        if not isCharge and rawBaseDur <= 0 and rechDur > 0 then rawBaseDur = rechDur end
-                        if rawBaseDur <= 0 then rawBaseDur = GetKnownCategoryDuration(displayId) end
-                        table.insert(result, {
-                            spellId = displayId,
-                            baseSpellId = baseId,
-                            spellName = spellInfo.name,
-                            spellIcon = spellInfo.iconID,
-                            customText = override.customText ~= "" and override.customText or nil,
-                            isChargeSpell = isCharge,
-                            maxCharges = maxCh,
-                            rechargeDuration = rechDur,
-                            baseDuration = isCharge and rechDur or rawBaseDur,
-                        })
+                        -- Same buff-active branch the default path takes above.
+                        -- Without it a user-added aura-toggle spell was always
+                        -- built as a cooldown entry, and since it has no cooldown
+                        -- the display loop had nothing to show.
+                        local defaultCustom = BUFF_ACTIVE_SPELLS[displayId] or BUFF_ACTIVE_SPELLS[spellId]
+                        if defaultCustom then
+                            table.insert(result, {
+                                spellId = displayId,
+                                spellName = spellInfo.name,
+                                spellIcon = spellInfo.iconID,
+                                customText = override.customText ~= "" and override.customText or defaultCustom,
+                                checkType = "buffActive",
+                            })
+                        else
+                            local rawBaseDur = SafeGetBaseDuration(displayId)
+                            if rawBaseDur <= 0 and baseId then rawBaseDur = SafeGetBaseDuration(baseId) end
+                            if not isCharge and rawBaseDur <= 0 and rechDur > 0 then rawBaseDur = rechDur end
+                            if rawBaseDur <= 0 then rawBaseDur = GetKnownCategoryDuration(displayId) end
+                            table.insert(result, {
+                                spellId = displayId,
+                                baseSpellId = baseId,
+                                spellName = spellInfo.name,
+                                spellIcon = spellInfo.iconID,
+                                customText = override.customText ~= "" and override.customText or nil,
+                                isChargeSpell = isCharge,
+                                maxCharges = maxCh,
+                                rechargeDuration = rechDur,
+                                baseDuration = isCharge and rechDur or rawBaseDur,
+                            })
+                        end
                     end
                 end
             end
