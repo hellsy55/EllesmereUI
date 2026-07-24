@@ -1053,6 +1053,7 @@ local defaults = {
             showCastIcon = true,
             castbarIconInWidth = true,
             castReverseFill = false,
+            castFillOpacity = 100,
             castbarHideWhenInactive = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
@@ -1069,6 +1070,11 @@ local defaults = {
             showCastDuration = true,
             showCastTarget = false,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
+            castbarInterruptReadyColor = { r = 0.92, g = 0.35, b = 0.20 },
+            castbarKickTickEnabled = true,
+            castbarInterruptMidCastEnabled = false,
+            castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
+            castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
             castbarClassColored = false,
             healthDisplay = "perhp",
             showPortrait = false,
@@ -4983,7 +4989,7 @@ local function ComputeCastBarTint(readyTint, baseTint)
     return baseTint.r, baseTint.g, baseTint.b
 end
 local function IsKickCastbarUnit(unit)
-    return unit == "target" or unit == "focus"
+    return unit == "target" or unit == "focus" or (unit and unit:match("^boss") ~= nil)
 end
 local function GetCastbarKickTickEnabled(settings)
     if not settings then return true end
@@ -5635,8 +5641,6 @@ local function SetupShowOnCastBar(frame, unit)
     -- reflect the current setting rather than a value captured at
     -- frame-creation time.
     local function shouldHideWhenInactive()
-        -- Boss frames always hide castbar when inactive (no user toggle)
-        if unit and unit:match("^boss") then return true end
         local s = GetSettingsForUnit(unit)
         if not s then return true end
         local v = s.castbarHideWhenInactive
@@ -8837,11 +8841,11 @@ local function ReloadFrames()
                 end
             end
             -- The cast bar is a child of the frame, so the SetFrameStrata above
-            -- reset it to the frame's strata. Lift player/target/focus cast bars
+            -- reset it to the frame's strata. Lift cast bars
             -- to HIGH so they never hide behind other MEDIUM-strata frames -- unless
             -- the global "Raise Cast Bar Strata (All)" toggle is off, in which case the
             -- cast bar is explicitly left at the frame's strata.
-            if frame.Castbar and (unitKey == "player" or unitKey == "target" or unitKey == "focus") then
+            if frame.Castbar and (unitKey == "player" or IsKickCastbarUnit(unitKey)) then
                 local cbg = frame.Castbar:GetParent()
                 if cbg then
                     if profile.raiseCastbarStrata ~= false then
@@ -10465,7 +10469,13 @@ local function ReloadFrames()
                     if settings.castbarFillColor then
                         bCbColor = settings.castbarFillColor
                     end
-                    frame.Castbar:SetStatusBarColor(bCbColor.r, bCbColor.g, bCbColor.b, castbarOpacity)
+                    frame.Castbar:SetStatusBarColor(bCbColor.r, bCbColor.g, bCbColor.b,
+                        ((settings.castFillOpacity or 100) < 100) and 0 or castbarOpacity)
+                    ns.ApplyCastFillOpacity(frame.Castbar, settings)
+                    if frame.Castbar:IsShown() then
+                        ApplyUnitFrameCastColor(frame.Castbar)
+                        UpdateUnitFrameKickTick(frame.Castbar)
+                    end
                     if frame.Castbar.Text then
                         local snSz = settings.castSpellNameSize or 11
                         SetFSFont(frame.Castbar.Text, snSz)
@@ -12104,11 +12114,11 @@ function InitializeFrames()
                 end
             end
             -- The cast bar is a child of the frame, so the SetFrameStrata above
-            -- reset it to the frame's strata. Lift player/target/focus cast bars
+            -- reset it to the frame's strata. Lift cast bars
             -- to HIGH so they never hide behind other MEDIUM-strata frames -- unless
             -- the global "Raise Cast Bar Strata (All)" toggle is off, in which case the
             -- cast bar is explicitly left at the frame's strata.
-            if frame.Castbar and (unitKey == "player" or unitKey == "target" or unitKey == "focus") then
+            if frame.Castbar and (unitKey == "player" or IsKickCastbarUnit(unitKey)) then
                 local cbg = frame.Castbar:GetParent()
                 if cbg then
                     if db.profile.raiseCastbarStrata ~= false then
@@ -13172,7 +13182,7 @@ function SetupOptionsPanel()
         end
         -- Active-cast tint -- same path a real cast uses.
         if castbar.castTintLayer then
-            castbar.castTintLayer:SetAlpha(1)
+            castbar.castTintLayer:SetAlpha(castbar._fillOp or 1)
             ApplyUnitFrameCastColor(castbar)
         end
         castbarBg:Show()
