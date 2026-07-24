@@ -56,18 +56,17 @@ local MOVEMENT_ABILITIES = {
     ROGUE = {[259] = {36554, 2983}, [260] = {195457, 2983}, [261] = {36554, 2983}},
     SHAMAN = {[262] = {79206, 90328, 192063, 58875}, [263] = {90328, 192063, 58875}, [264] = {79206, 90328, 192063, 58875}},
     WARLOCK = {
-        [265] = {48020}, [266] = {48020}, [267] = {48020},
+        [265] = {48020, 111400}, [266] = {48020, 111400}, [267] = {48020, 111400},
         filter = {[385899] = {385899}},
     },
     WARRIOR = {[71] = {6544}, [72] = {6544}, [73] = {6544}},
 }
 
--- Buff-active spells (label shown while the aura is up instead of a cooldown
--- countdown). Membership here does NOT add a spell to any class's defaults --
--- those come from MOVEMENT_ABILITIES above -- it only says how a spell is
--- tracked once it is in the list. Burning Rush is not a warlock default, but
--- users add it manually, and it has no cooldown and no duration to count down,
--- so it can only be tracked by the presence of its aura.
+-- Buff-active spells: the label shown while the aura is up, in place of a
+-- cooldown countdown. Membership here decides HOW a spell is tracked, never
+-- whether it is on -- Burning Rush ships unchecked via MOVEMENT_DEFAULT_OFF
+-- below. It has no cooldown and no duration to count down, so the presence of
+-- its aura is the only thing there is to track.
 local BUFF_ACTIVE_SPELLS = {
     [111400] = "Burning Rush Active!",
 }
@@ -107,6 +106,7 @@ local MOVEMENT_DEFAULT_OFF = {
     [212552] = true,               -- Wraith Walk
     [79206]  = true,               -- Spiritwalker's Grace
     [58875]  = true, [90328] = true, -- Spirit Walk
+    [111400] = true,               -- Burning Rush (off by default since 8.5.3)
 }
 EllesmereUI._MovementDefaultOff = MOVEMENT_DEFAULT_OFF
 
