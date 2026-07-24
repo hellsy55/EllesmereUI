@@ -2238,9 +2238,29 @@ local function EnsureArrows(plate)
     -- after Show(). An unanchored hidden texture has no rect and draws
     -- nothing, so the creation state is safe. Rendering outside the bar rect
     -- is fine (health runs SetClipsChildren(false)).
-    plate.leftArrow = plate.health:CreateTexture(nil, "OVERLAY")
+    local arrowParent = plate.health
+    if EllesmereUI.IS_121 then
+        -- 68914: aura containers carry UntrustedLayoutScriptExecution once
+        -- they hold a group, and only aspect-bearing objects may anchor to
+        -- them. Aspects cannot be gained later (SetParent/SetPoint
+        -- inheritance is deliberately blocked), so the arrows must be BORN
+        -- inside a template holder: regions inherit the holder's aspect at
+        -- creation, letting the containers file anchor them to the side
+        -- aura containers while the legacy writers keep anchoring them to
+        -- readable frames. Stale builds without the template keep the
+        -- plain parent (their containers carry no aspect either).
+        local ok, holder = pcall(CreateFrame, "Frame", nil, plate.health,
+            "DisableUntrustedLayoutScriptsTemplate")
+        if ok and holder then
+            holder:SetAllPoints(plate.health)
+            holder:SetFrameLevel(plate.health:GetFrameLevel())
+            plate.arrowHost = holder
+            arrowParent = holder
+        end
+    end
+    plate.leftArrow = arrowParent:CreateTexture(nil, "OVERLAY")
     plate.leftArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.l .. ".png")
-    plate.rightArrow = plate.health:CreateTexture(nil, "OVERLAY")
+    plate.rightArrow = arrowParent:CreateTexture(nil, "OVERLAY")
     plate.rightArrow:SetTexture(ns.TARGET_ARROW_DIR .. st.r .. ".png")
     PP.Size(plate.leftArrow, aw, ah)
     plate.leftArrow:Hide()
@@ -4835,7 +4855,15 @@ local function GetReactionColor(unit)
                     -- Only show no-aggro warning if a non-tank has it.
                     -- If another tank holds aggro, this is normal offtank positioning.
                     local unitTarget = unit .. "target"
-                    local targetRole = UnitExists(unitTarget) and UnitGroupRolesAssigned(unitTarget) or "NONE"
+                    -- Role reads on identity-restricted units return SECRET
+                    -- values (68914): never truthiness-chain or compare one.
+                    -- Unreadable role reads as non-tank, matching the
+                    -- unknown-target behavior.
+                    local targetRole = "NONE"
+                    if UnitExists(unitTarget) then
+                        local r = UnitGroupRolesAssigned(unitTarget)
+                        if not issecretvalue(r) and r then targetRole = r end
+                    end
                     if targetRole ~= "TANK" then
                         local c = _C("tankNoAggro")
                         return c.r, c.g, c.b
@@ -4892,6 +4920,9 @@ local function GetReactionColor(unit)
     -- 6. Enemy player class colors
     if UnitIsPlayer(unit) and UnitCanAttack("player", unit) then
         local _, class = UnitClass(unit)
+        -- Secret class token (identity-restricted, 68914) cannot key a
+        -- color table -- fall through to the reaction color.
+        if issecretvalue(class) then class = nil end
         local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
         if c then
             return c.r, c.g, c.b
@@ -4948,6 +4979,9 @@ local function GetReactionColor(unit)
         end
     end
     local unitClass = UnitClassBase and UnitClassBase(unit)
+    -- Identity-restricted units return a SECRET token (68914); comparing
+    -- one errors, so an unreadable class is just not a caster.
+    if issecretvalue(unitClass) then unitClass = nil end
     local _isCaster = not owBasic and (unitClass == "PALADIN")
     -- DPS/healer No Aggro override state (mirrors the tank has-aggro overrides at
     -- 6b). Each override independently promotes the No Aggro color above a single
@@ -5159,14 +5193,25 @@ local function HideBlizzardFrame(nameplate, unit)
         uf.AurasFrame:SetParent(nameplate)
         uf.AurasFrame:SetAlpha(0)
     end
-    -- Park Blizzard's entire UnitFrame on the hidden holder in a single move.
-    -- Every health/cast/name/marker child rides with it, so the nameplate's
-    -- layout engine no longer measures bounds from the Blizzard art we replace,
-    -- and there is no per-widget list to maintain as Blizzard adds fields.
-    if not storedParents[uf] then
-        storedParents[uf] = uf:GetParent()
+    -- Park the UnitFrame's child frames on the hidden holder, discovered
+    -- generically -- whatever Blizzard parents under the UnitFrame is swept, so
+    -- there is no per-widget list to maintain as Blizzard adds fields. The
+    -- UnitFrame ITSELF stays on the nameplate exactly as Blizzard placed it
+    -- (alpha 0 from above): parking the whole frame under a hidden holder
+    -- flipped every plate's content to IsVisible()==false and broke click
+    -- target selection between overlapping plates in packs (8.5.5 regression,
+    -- Semage report) -- the plate's hit-test context must keep its live,
+    -- on-plate UnitFrame like it always had. Exclusions: the two kept-live
+    -- frames above/below, and protected or forbidden children are never
+    -- touched (alpha 0 hides them anyway).
+    for i = 1, uf:GetNumChildren() do
+        local child = select(i, uf:GetChildren())
+        if child and child ~= uf.WidgetContainer and child ~= uf.AurasFrame
+           and not child:IsForbidden() and not child:IsProtected() then
+            if not storedParents[child] then storedParents[child] = uf end
+            child:SetParent(npOffscreenParent)
+        end
     end
-    uf:SetParent(npOffscreenParent)
     -- All visual children are reparented offscreen so layout
     -- recalculations won't shift bounds.
     -- Only silence the castBar events (we render our own cast bar).
@@ -5287,8 +5332,19 @@ local function RestoreBlizzardFrame(nameplate)
     if not nameplate then return end
     local uf = nameplate.UnitFrame
     if not uf then return end
-    -- Un-park the UnitFrame and re-home the children we kept live, returning the
-    -- recycled nameplate to a clean state for its next unit.
+    -- Return this UnitFrame's parked children from the hidden holder (the
+    -- holder is shared by every plate, so filter by recorded owner), then
+    -- re-home the kept-live frames, returning the recycled nameplate to a
+    -- clean state for its next unit.
+    for i = npOffscreenParent:GetNumChildren(), 1, -1 do
+        local child = select(i, npOffscreenParent:GetChildren())
+        if child and storedParents[child] == uf then
+            child:SetParent(uf)
+            storedParents[child] = nil
+        end
+    end
+    -- Safety for a mid-session state where the whole UnitFrame was parked
+    -- (transitional builds); normally a no-op.
     if storedParents[uf] then
         uf:SetParent(storedParents[uf])
         storedParents[uf] = nil
@@ -5445,7 +5501,19 @@ function NameplateFrame:UpdateCastText(spellName)
         if type(spellTargetClass) ~= "nil" and C_ClassColor then
             targetColor = C_ClassColor.GetClassColor(spellTargetClass)
         end
-        targetHex = targetColor and targetColor.GenerateHexColor and targetColor:GenerateHexColor() or "ffffffff"
+        -- spellTargetClass may be SECRET in instanced content, and the color
+        -- object's components are then secret too: GenerateHexColor runs
+        -- arithmetic + string.format on them (errors under our taint), and
+        -- the hex is concatenated into the combined-mode format string below,
+        -- where a secret string would also error. Combined mode falls back to
+        -- white for secret-class targets; the separate castTarget FontString
+        -- keeps full class color either way via SetTextColor, whose setter
+        -- accepts secret components.
+        if targetColor and targetColor.GenerateHexColor
+            and not (issecretvalue and issecretvalue(spellTargetClass)) then
+            targetHex = targetColor:GenerateHexColor()
+        end
+        targetHex = targetHex or "ffffffff"
     else
         local c = db.castTargetColor or defaults.castTargetColor
         targetHex = string.format("ff%02x%02x%02x",
@@ -8986,6 +9054,13 @@ manager:SetScript("OnEvent", function(self, event, unit)
         for _, plate in pairs(ns.plates) do
             plate:UpdateRaidIcon()
             if p and p.nameRaidMarkerEnabled == true then plate:RefreshNamePosition(true) end
+            -- A marker appearing or clearing in a side slot changes the side
+            -- extents the target arrows sit outside of; re-run arrow
+            -- positioning (no-op on plates not showing arrows). On 12.1 the
+            -- container reanchor then re-points container-bearing sides,
+            -- same order as the target-swap path.
+            ns.PositionArrowsOutsideAuras(plate)
+            if ns.NPC_ReanchorArrows then ns.NPC_ReanchorArrows(plate) end
         end
     elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
         for _, plate in pairs(ns.plates) do

@@ -10872,7 +10872,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.5.6"
+EllesmereUI.VERSION = "8.5.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11946,6 +11946,31 @@ initFrame:SetScript("OnEvent", function(self, event)
                 end
             end
             return false
+        end
+
+        -- 12.1 ONLY: aura spell IDs during combat. The Lua hooks below can
+        -- never render them there -- under aura restrictions the tooltip's
+        -- id is a SECRET value -- but the engine-side tooltipShowAuraSpellIDs
+        -- CVar (68824+) formats the ID itself and works under full secrecy,
+        -- including the forbidden container tooltips. The CVar is
+        -- session-only, so it re-asserts every login and on toggle edits.
+        -- Modifier-gated configs skip it: the engine renders always-on,
+        -- which would override the user's hold-a-modifier preference (their
+        -- combat aura IDs stay unavailable -- inherent trade).
+        function EllesmereUI.SyncAuraSpellIDCVar()
+            if not EllesmereUI.IS_121 then return end
+            local db = EllesmereUIDB
+            local on = db and db.showSpellID
+                and (db.spellIDModifier or "none") == "none"
+            pcall(C_CVar.SetCVar, "tooltipShowAuraSpellIDs", on and "1" or "0")
+        end
+        do
+            local cvarBoot = CreateFrame("Frame")
+            cvarBoot:RegisterEvent("PLAYER_LOGIN")
+            cvarBoot:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_LOGIN")
+                EllesmereUI.SyncAuraSpellIDCVar()
+            end)
         end
 
         local function SpellIDTooltipHook(tooltip, data)

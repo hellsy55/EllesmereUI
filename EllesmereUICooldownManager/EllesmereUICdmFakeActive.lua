@@ -590,7 +590,14 @@ if EllesmereUI and EllesmereUI.IS_121 then
                             (ss and ss.cooldownTextY) or (bd and bd.cooldownTextY) or 0)
                         local AK2 = EllesmereUI.AuraKit
                         local fmt = AK2 and AK2.GetDurationFormatter and AK2.GetDurationFormatter()
-                        local opts = { formatter = fmt }
+                        -- 68914 schema key (textFormatter); BuildDurationTextOpts
+                        -- when available, bare table fallback otherwise.
+                        local opts
+                        if AK2 and AK2.BuildDurationTextOpts then
+                            opts = AK2.BuildDurationTextOpts(fmt)
+                        else
+                            opts = { textFormatter = fmt }
+                        end
                         if AK2 and AK2.SetDurationTextSafe then
                             AK2.SetDurationTextSafe(button, fs, opts)
                         else
@@ -619,7 +626,7 @@ if EllesmereUI and EllesmereUI.IS_121 then
             st.queued = nil
             Build(rule, st)
             if st.armed then FA121.Rescan() end
-        end, "cdm:fa121-shell", true)
+        end, "cdm:fa121-shell")
     end
 
     function FA121.Rescan()

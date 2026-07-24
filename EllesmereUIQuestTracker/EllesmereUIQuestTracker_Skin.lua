@@ -779,6 +779,12 @@ local function SuppressPOI(block)
     if pb:IsShown() then pb:Hide() end
     pb:EnableMouse(false)
 
+    -- Config-gated Show hook: without it, Blizzard re-shows the pooled button
+    -- for a frame when the user tracks a quest via the context menu (visible
+    -- blink) before the next SkinBlock suppress pass runs. Hooked once per
+    -- pooled button (weak-keyed cache); no-op while Show Quest Icons is on,
+    -- so enabling the setting restores default behavior without a reload.
+    -- Taint-verified clean with the tracker's field-write injector removed.
     if not _hookedPOIs[pb] then
         _hookedPOIs[pb] = true
 
@@ -788,10 +794,6 @@ local function SuppressPOI(block)
             end
         end)
     end
-    -- Do not hook Show on this Blizzard-owned pooled button. A post-hook runs
-    -- addon code synchronously inside Blizzard's native POI show/update path,
-    -- allowing taint to escape into later quest/map refresh work. Re-suppress
-    -- on each existing SkinBlock pass instead of injecting into Show itself.
 end
 
 local function SkinBlock(block)

@@ -8237,7 +8237,12 @@ end
 
 function ECME:OnCDMFirstLogin()
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-    CDMFirstLoginCapture()
+    -- A profile import can stamp the capture flag mid-session (imported data
+    -- is a chosen layout). Honor the stamp here so a still-pending capture
+    -- never overwrites the imported profile; just finish the deferred setup.
+    if not self.db.sv._capturedOnce_CDM then
+        CDMFirstLoginCapture()
+    end
     self._needsCapture = false
     self:CDMFinishSetup()
 end

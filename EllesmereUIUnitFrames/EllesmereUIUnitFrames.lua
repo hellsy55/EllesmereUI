@@ -1588,8 +1588,70 @@ local function ClassColorSourceUnit(unitKey, unit)
     return unit or unitKey
 end
 
+-- TEMPORARY oUF SHIM -- REMOVE when upstream oUF ships its own secret-safe
+-- class coloring (expected soon; check during the standing per-bump lib
+-- re-diff, like the DisableBlizzard copy). 12.1 build 68914 makes UnitClass
+-- return a SECRET token for identity-restricted units, and the vendored
+-- health element's UpdateColor indexes colors.class with it (secret table
+-- keys error -- 193x storms on ToT frames). Vendored-lib edits are not an
+-- option (the packager re-pulls oUF tag:latest at release, wiping them),
+-- so this rides the element's documented Health.UpdateColor override hook:
+-- a faithful copy of the lib function with ONLY the class tier guarded
+-- (unreadable class degrades to the reaction/health tiers). Installed under
+-- IS_121 via ApplyDarkTheme below -- the one chokepoint every health
+-- element passes through at creation -- so retail keeps the untouched lib
+-- path. colorSelection is the one lib tier not carried over (needs
+-- oUF-private unitSelectionType; no EUI health element enables it).
+local function UF_SecretSafeHealthColor(self, event, unit)
+    if not unit or self.unit ~= unit then return end
+    local element = self.Health
+
+    local color
+    if element.colorDisconnected and not UnitIsConnected(unit) then
+        color = self.colors.disconnected
+    elseif element.colorTapping and not UnitPlayerControlled(unit) and UnitIsTapDenied(unit) then
+        color = self.colors.tapped
+    elseif element.colorThreat and not UnitPlayerControlled(unit) and UnitThreatSituation("player", unit) then
+        color = self.colors.threat[UnitThreatSituation("player", unit)]
+    elseif (element.colorClass and (UnitIsPlayer(unit) or UnitInPartyIsAI(unit)))
+        or (element.colorClassNPC and not (UnitIsPlayer(unit) or UnitInPartyIsAI(unit)))
+        or (element.colorClassPet and UnitPlayerControlled(unit) and not UnitIsPlayer(unit)) then
+        local _, class = UnitClass(unit)
+        if issecretvalue(class) then class = nil end
+        color = class and self.colors.class[class]
+        if not color then
+            -- Unreadable class: fall to the tiers the lib chain would have
+            -- reached had the class branch not matched.
+            if element.colorReaction and UnitReaction(unit, "player") then
+                color = self.colors.reaction[UnitReaction(unit, "player")]
+            elseif element.colorHealth then
+                color = self.colors.health
+            end
+        end
+    elseif element.colorReaction and UnitReaction(unit, "player") then
+        color = self.colors.reaction[UnitReaction(unit, "player")]
+    elseif element.colorSmooth and self.colors.health:GetCurve() then
+        color = element.values:EvaluateCurrentHealthPercent(self.colors.health:GetCurve())
+    elseif element.colorHealth then
+        color = self.colors.health
+    end
+
+    if color then
+        element:SetStatusBarColor(color:GetRGB())
+    end
+
+    if element.PostUpdateColor then
+        element:PostUpdateColor(unit, color)
+    end
+end
+
 local function ApplyDarkTheme(health)
     if not health then return end
+    -- TEMPORARY (see UF_SecretSafeHealthColor above). Idempotent: this
+    -- function re-runs on settings changes; re-assigning is harmless.
+    if EllesmereUI.IS_121 then
+        health.UpdateColor = UF_SecretSafeHealthColor
+    end
     local isDark = db and db.profile and db.profile.darkTheme
     if isDark then
         health.colorClass = false
@@ -1703,7 +1765,8 @@ local function ApplyDarkTheme(health)
                     if classUnit then
                         local _, ct = UnitClass(classUnit)
                         -- ct can be a secret value (out-of-range/uninspectable units); skip if so.
-                        local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
+                        -- issecretvalue FIRST: truthiness-testing a secret is itself an error.
+                        local cc = not issecretvalue(ct) and ct and EllesmereUI.GetClassColor(ct)
                         if cc then bgClassR, bgClassG, bgClassB = cc.r, cc.g, cc.b end
                     end
                 end
@@ -1736,7 +1799,8 @@ local function ApplyDarkTheme(health)
                 if classUnit then
                     local _, ct = UnitClass(classUnit)
                     -- ct can be a secret value (out-of-range/uninspectable units); skip if so.
-                    local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
+                    -- issecretvalue FIRST: truthiness-testing a secret is itself an error.
+                    local cc = not issecretvalue(ct) and ct and EllesmereUI.GetClassColor(ct)
                     if cc then bgClassR, bgClassG, bgClassB = cc.r, cc.g, cc.b end
                 end
             end
@@ -2011,7 +2075,7 @@ ns.ResolveUnitNameColor = function(unit)
     if not unit then return nil end
     if UnitIsPlayer(unit) or (UnitInPartyIsAI and UnitInPartyIsAI(unit)) then
         local _, class = UnitClass(unit)
-        if class and not issecretvalue(class) then
+        if not issecretvalue(class) and class then
             local c = (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
             if c then return c.r, c.g, c.b end
         end
@@ -2891,7 +2955,7 @@ local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
             -- Non-dark: use the unit's health bar color (class for players,
             -- reaction for NPCs, tapped grey, etc.)
             local _, classToken = UnitClass(unitToken)
-            if UnitIsPlayer(unitToken) and classToken then
+            if UnitIsPlayer(unitToken) and not issecretvalue(classToken) and classToken then
                 local c = (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classToken]
                 if c then bR, bG, bB = c.r, c.g, c.b end
             elseif UnitIsTapDenied and UnitIsTapDenied(unitToken) then
@@ -3232,7 +3296,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         local style = s.btbClassIcon or "none"
         if style == "none" then classIconTex:Hide(); return end
         local _, classToken = UnitClass(unit)
-        if not classToken then classIconTex:Hide(); return end
+        if issecretvalue(classToken) or not classToken then classIconTex:Hide(); return end
         if not ApplyClassIconTexture(classIconTex, classToken, style) then classIconTex:Hide(); return end
         local sz = s.btbClassIconSize or 14
         PP.Size(classIconTex, sz, sz)
@@ -4682,7 +4746,9 @@ local function CreatePowerBar(frame, unit, settings)
             local lvlOk = lvl and not (issecretvalue and issecretvalue(lvl))
             local pLvlOk = pLvl and not (issecretvalue and issecretvalue(pLvl))
             if isElite and lvlOk and (lvl == -1 or (pLvlOk and lvl >= pLvl + 1)) then return false end
-            if UnitClassBase and UnitClassBase(u) == "PALADIN" then return false end
+            local uCls = UnitClassBase and UnitClassBase(u)
+            if issecretvalue(uCls) then uCls = nil end
+            if uCls == "PALADIN" then return false end
             return true
         end)
         if not ok then return end
@@ -4879,6 +4945,7 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     PP.Point(texClass, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", -classInset, classInset)
     texClass:SetAlpha(0.8)
     local _, classToken = UnitClass(unit)
+    if issecretvalue(classToken) then classToken = nil end
     local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
     ApplyClassIconTexture(texClass, classToken or "WARRIOR", classStyle)
     texClass:Hide()
@@ -4890,6 +4957,7 @@ local function CreatePortrait(frame, side, frameHeight, unit)
         if not evUnit or not UnitIsUnit(f.unit, evUnit) then return end
         local targetUnit = f.unit
         local _, ct = UnitClass(targetUnit)
+        if issecretvalue(ct) then ct = nil end
         local uS = db.profile[UnitToSettingsKey(targetUnit)] or db.profile.player
         local cStyle = (uS and uS.classThemeStyle) or "modern"
         ApplyClassIconTexture(self, ct or "WARRIOR", cStyle)
@@ -5024,6 +5092,7 @@ local function ApplyUnitFrameCastColor(castbar)
     if settings and settings.castbarClassColored and ownerUnit == "player" then
         if ownerUnit then
             local _, classToken = UnitClass(ownerUnit)
+            if issecretvalue(classToken) then classToken = nil end
             if classToken and EllesmereUI.GetClassColor then
                 cc = EllesmereUI.GetClassColor(classToken)
             end
@@ -8139,6 +8208,7 @@ local function SwapPortraitMode(frame)
         local s2 = uKey2 and db.profile[uKey2]
         local classStyle = (s2 and s2.classThemeStyle) or "modern"
         local _, ct = UnitClass(unit)
+        if issecretvalue(ct) then ct = nil end
         ApplyClassIconTexture(bd._class, ct or "WARRIOR", classStyle)
         bd._class:Show()
         bd._2d:Hide()
@@ -9055,6 +9125,7 @@ local function ReloadFrames()
                 if isClassMode then
                     local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
                     local _, ct = UnitClass(unit)
+                    if issecretvalue(ct) then ct = nil end
                     ApplyClassIconTexture(frame.Portrait.backdrop._class, ct or "WARRIOR", classStyle)
                 end
             end
@@ -9235,7 +9306,7 @@ local function ReloadFrames()
                                 local lvlOk = lvl and not (issecretvalue and issecretvalue(lvl))
                                 local pLvlOk = pLvl and not (issecretvalue and issecretvalue(pLvl))
                                 local isMB = isElite and lvlOk and (lvl == -1 or (pLvlOk and lvl >= pLvl + 1))
-                                local isCst = (UnitClassBase and UnitClassBase(unit) == "PALADIN")
+                                local isCst = UnitClassBase and UnitClassBase(unit); if issecretvalue(isCst) then isCst = nil end; isCst = (isCst == "PALADIN")
                                 if not isBoss and not isMB and not isCst then shouldGray = true end
                             end
                             if shouldGray then
@@ -9652,7 +9723,7 @@ local function ReloadFrames()
                                 local lvlOk = lvl and not (issecretvalue and issecretvalue(lvl))
                                 local pLvlOk = pLvl and not (issecretvalue and issecretvalue(pLvl))
                                 local isMB = isElite and lvlOk and (lvl == -1 or (pLvlOk and lvl >= pLvl + 1))
-                                local isCst = (UnitClassBase and UnitClassBase(unit) == "PALADIN")
+                                local isCst = UnitClassBase and UnitClassBase(unit); if issecretvalue(isCst) then isCst = nil end; isCst = (isCst == "PALADIN")
                                 if not isBoss and not isMB and not isCst then shouldGray = true end
                             end
                             if shouldGray then
@@ -10399,7 +10470,7 @@ local function ReloadFrames()
                             local lvl = UnitLevel(unit)
                             local pLvl = UnitLevel("player")
                             local isMB = isElite and (lvl == -1 or (pLvl and lvl >= pLvl + 1))
-                            local isCst = (UnitClassBase and UnitClassBase(unit) == "PALADIN")
+                            local isCst = UnitClassBase and UnitClassBase(unit); if issecretvalue(isCst) then isCst = nil end; isCst = (isCst == "PALADIN")
                             if not isBoss and not isMB and not isCst then shouldGray = true end
                         end
                         if shouldGray then
@@ -11835,6 +11906,7 @@ function InitializeFrames()
             -- Class theming resolves the FRAME's unit (player class on the
             -- player frame, current target's class on the target frame).
             local _, classToken = UnitClass(ciUnit)
+            if issecretvalue(classToken) then classToken = nil end
             -- All custom combat icons (Arcade/Dungeoneer/Classic/Cross/Circle/Square =
             -- combat0..5) are shown exactly as authored: no class theming, no tint, no
             -- desaturation. Standard/Class Theme below are tinted by the colour mode.
@@ -12639,6 +12711,7 @@ function InitializeFrames()
         -- Refresh class icon texture so it shows the actual unit class (not WARRIOR fallback)
         if backdrop._class and uSettings and (uSettings.portraitMode or "2d") == "class" then
             local _, ct = UnitClass(unitKey)
+            if issecretvalue(ct) then ct = nil end
             if ct then
                 local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
                 ApplyClassIconTexture(backdrop._class, ct, classStyle)
@@ -12737,6 +12810,7 @@ function InitializeFrames()
                     local uSettings = db.profile[unitKey]
                     if uSettings and (uSettings.portraitMode or "2d") == "class" then
                         local _, ct = UnitClass(unitKey)
+                        if issecretvalue(ct) then ct = nil end
                         if ct then
                             local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
                             ApplyClassIconTexture(backdrop._class, ct, classStyle)

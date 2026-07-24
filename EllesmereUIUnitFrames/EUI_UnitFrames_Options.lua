@@ -13208,6 +13208,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.ShowWidgetTooltip(swatch, "Border Color")
                 end)
                 swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                rgn._lastInline = swatch
                 RegisterWidgetRefresh(updateSwatch)
             end
         end

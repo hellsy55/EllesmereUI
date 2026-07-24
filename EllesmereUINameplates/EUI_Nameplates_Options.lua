@@ -2864,18 +2864,24 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_AURA, y);  y = y - h
 
-        -- Show All Your Player Debuffs | Max Debuffs
+        -- 12.0: Show All Your Player Debuffs | Max Debuffs. On 12.1 the
+        -- per-kind Edit Filters popups (Core Positions) own Show All -- the
+        -- legacy key seeded the new defaults once -- so the row becomes
+        -- Max Debuffs | blank (row 1 slot 1 per spec).
         local maxDbfOriginal = DBVal("maxDebuffs") or defaults.maxDebuffs
         local maxDbfPendingPopup
-        local debuffRow1
-        debuffRow1, h = W:DualRow(parent, y,
+        local npShowAllCfg
+        if not EllesmereUI.IS_121 then
+            npShowAllCfg =
             { type="toggle", text="Show All Your Player Debuffs",
               getValue=function() return DBVal("showAllDebuffs") == true end,
               setValue=function(v)
                 DB().showAllDebuffs = v
                 RefreshAllAuras()
               end,
-              tooltip="This will display ALL of your debuffs on enemy nameplates, rather than only the important ones." },
+              tooltip="This will display ALL of your debuffs on enemy nameplates, rather than only the important ones." }
+        end
+        local maxDbfCfg =
             { type="slider", text="Max Debuffs", min=1, max=10, step=1,
               getValue=function() return DBVal("maxDebuffs") or defaults.maxDebuffs end,
               setValue=function(v)
@@ -2904,7 +2910,13 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
               end,
-              tooltip="Maximum number of debuff icons shown on enemy nameplates." });  y = y - h
+              tooltip="Maximum number of debuff icons shown on enemy nameplates." }
+        local debuffRow1
+        if EllesmereUI.IS_121 then
+            debuffRow1, h = W:DualRow(parent, y, maxDbfCfg, { type="label", text="" });  y = y - h
+        else
+            debuffRow1, h = W:DualRow(parent, y, npShowAllCfg, maxDbfCfg);  y = y - h
+        end
 
         -- Helper: pandemic glow is off when style is "None"
         local function pandemicOff()
@@ -5508,6 +5520,355 @@ initFrame:SetScript("OnEvent", function(self)
 
         local DISABLED_TIP = "This option requires an aura or indicator to be assigned"
 
+        -- Per-kind slot filter popup (12.1): Show All Debuffs toggle |
+        -- Filters checkbox dropdown, on the standard dimmer/panel chrome.
+        -- The containers file owns the configs and record groups
+        -- (ns.NPF_Config / NPC_ReloadAll); this is pure UI over them.
+        local NPF_KIND_TITLES = {
+            debuffs = "Debuff Filters", cc = "CC Filters", dcc = "Debuffs + CC Filters",
+        }
+        local NPF_CAT_ITEMS = {
+            { key = "priority",   label = "Important" },
+            { key = "cc",         label = "Crowd Control" },
+            { key = "boss",       label = "Boss" },
+            { key = "role",       label = "Role" },
+            { key = "raid",       label = "Raid" },
+            { key = "raidcombat", label = "Raid While In Combat" },
+            { key = "dispel",     label = "Dispellable By You" },
+        }
+        function ns.NPP_ShowFilterPopup(kind)
+            if not (EllesmereUI.IS_121 and ns.NPF_Config) then return end
+            local cfg = ns.NPF_Config(kind)
+            if not cfg then return end
+            if ns._npfPopup then ns._npfPopup:Hide(); ns._npfPopup = nil end
+            local fp2 = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
+
+            local ppScale = (EllesmereUI.GetPopupScale and EllesmereUI.GetPopupScale()) or 1
+            local EG = EllesmereUI.ELLESMERE_GREEN
+
+            local dimmer = CreateFrame("Button", "EUINPFilterDimmer", UIParent)
+            dimmer:SetAllPoints(UIParent)
+            dimmer:SetFrameStrata("FULLSCREEN_DIALOG")
+            dimmer:SetScale(ppScale)
+            dimmer:EnableMouseWheel(true)
+            dimmer:SetScript("OnMouseWheel", function() end)
+            local dim = dimmer:CreateTexture(nil, "BACKGROUND")
+            dim:SetAllPoints(); dim:SetColorTexture(0, 0, 0, 0.35)
+            dimmer:SetScript("OnClick", function()
+                dimmer:Hide(); ns._npfPopup = nil
+            end)
+            ns._npfPopup = dimmer
+
+            local panel = CreateFrame("Frame", "EUINPFilterPopup", dimmer)
+            panel:SetSize(440, 470)
+            panel:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+            panel:SetFrameLevel(dimmer:GetFrameLevel() + 10)
+            panel:EnableMouse(true)
+            local pbg = panel:CreateTexture(nil, "BACKGROUND")
+            pbg:SetAllPoints(); pbg:SetColorTexture(0.06, 0.08, 0.10, 1)
+            -- One-physical-pixel border (announcement-popup chrome): four
+            -- edge textures, snap disabled, scale-derived thickness.
+            do
+                local onePhys = 1 / (panel:GetEffectiveScale() or 1)
+                local function Edge()
+                    local t = panel:CreateTexture(nil, "BORDER")
+                    t:SetColorTexture(1, 1, 1, 0.15)
+                    if t.SetSnapToPixelGrid then
+                        t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0)
+                    end
+                    return t
+                end
+                local eT = Edge(); eT:SetPoint("TOPLEFT", 0, 0); eT:SetPoint("TOPRIGHT", 0, 0); eT:SetHeight(onePhys)
+                local eB = Edge(); eB:SetPoint("BOTTOMLEFT", 0, 0); eB:SetPoint("BOTTOMRIGHT", 0, 0); eB:SetHeight(onePhys)
+                local eL = Edge(); eL:SetPoint("TOPLEFT", eT, "BOTTOMLEFT"); eL:SetPoint("BOTTOMLEFT", eB, "TOPLEFT"); eL:SetWidth(onePhys)
+                local eR = Edge(); eR:SetPoint("TOPRIGHT", eT, "BOTTOMRIGHT"); eR:SetPoint("BOTTOMRIGHT", eB, "TOPRIGHT"); eR:SetWidth(onePhys)
+            end
+            -- Header: accent eyebrow + large title (announcement style).
+            local eyebrow = panel:CreateFontString(nil, "OVERLAY")
+            eyebrow:SetFont(fp2, 11, "")
+            eyebrow:SetPoint("TOP", panel, "TOP", 0, -16)
+            eyebrow:SetTextColor(EG.r, EG.g, EG.b, 0.9)
+            eyebrow:SetText(EllesmereUI.L("NAMEPLATE AURA FILTERS"))
+            local title = panel:CreateFontString(nil, "OVERLAY")
+            title:SetFont(fp2, 20, "")
+            title:SetPoint("TOP", panel, "TOP", 0, -32)
+            title:SetTextColor(1, 1, 1, 0.95)
+            title:SetText(EllesmereUI.L(NPF_KIND_TITLES[kind] or "Filters"))
+
+            local function ClosePopup()
+                dimmer:Hide()
+                ns._npfPopup = nil
+            end
+
+            -- Escape closes (consume Escape only; other keys propagate so
+            -- chat/UI shortcuts keep working behind the dimmer).
+            panel:EnableKeyboard(true)
+            panel:SetScript("OnKeyDown", function(self, key)
+                self:SetPropagateKeyboardInput(key ~= "ESCAPE")
+                if key == "ESCAPE" then ClosePopup() end
+            end)
+
+            -- X close (standard popup chrome: borderless eui-close, top right)
+            local closeBtn = CreateFrame("Button", nil, panel)
+            closeBtn:SetSize(19, 19)
+            closeBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
+            local closeTex = closeBtn:CreateTexture(nil, "OVERLAY")
+            closeTex:SetAllPoints()
+            closeTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png")
+            closeBtn:SetAlpha(0.5)
+            closeBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.9) end)
+            closeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.5) end)
+            closeBtn:SetScript("OnClick", ClosePopup)
+
+            -- LEFT: Show All Debuffs (checkbox-dropdown box visuals)
+            local tog = CreateFrame("Button", nil, panel)
+            tog:SetSize(170, 20)
+            tog:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -68)
+            local box = CreateFrame("Frame", nil, tog)
+            box:SetSize(16, 16); box:SetPoint("LEFT", tog, "LEFT", 0, 0)
+            local bbg = box:CreateTexture(nil, "BACKGROUND")
+            bbg:SetAllPoints(); bbg:SetColorTexture(0.12, 0.12, 0.14, 1)
+            local bbrd = EllesmereUI.MakeBorder(box, 0.4, 0.4, 0.4, 0.6, PP)
+            local chk = box:CreateTexture(nil, "ARTWORK")
+            PP.SetInside(chk, box, 2, 2)
+            chk:SetColorTexture(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g,
+                EllesmereUI.ELLESMERE_GREEN.b, 1)
+            local tl = tog:CreateFontString(nil, "OVERLAY")
+            tl:SetFont(fp2, 13, "")
+            tl:SetPoint("LEFT", box, "RIGHT", 8, 0)
+            tl:SetTextColor(0.85, 0.85, 0.85)
+            tl:SetText(EllesmereUI.L("Show All Debuffs"))
+
+            -- RIGHT: filter categories (RF debuff set)
+            local dd = EllesmereUI.BuildVisOptsCBDropdown(panel, 170, panel:GetFrameLevel() + 3,
+                NPF_CAT_ITEMS,
+                function(k) return (cfg.f or {})[k] == true end,
+                function(k, v)
+                    cfg.f = cfg.f or {}
+                    cfg.f[k] = v or nil
+                    if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                end,
+                nil, 10, false)
+            dd:ClearAllPoints()
+            dd:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -24, -63)
+
+            local function UpdAll()
+                chk:SetShown(cfg.all == true)
+                if bbrd and bbrd.SetColor then
+                    if cfg.all then
+                        bbrd:SetColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g,
+                            EllesmereUI.ELLESMERE_GREEN.b, 0.8)
+                    else
+                        bbrd:SetColor(0.4, 0.4, 0.4, 0.6)
+                    end
+                end
+                -- Filters are inert while Show All is on (DM parity).
+                dd:SetAlpha(cfg.all and 0.4 or 1)
+                dd:EnableMouse(not cfg.all)
+            end
+            tog:SetScript("OnClick", function()
+                cfg.all = not cfg.all
+                UpdAll()
+                if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+            end)
+            UpdAll()
+
+            -- BLACKLIST: the shared exclude list (all three kinds; real
+            -- engine excludeSpellIDs on every debuff-side group). Add via
+            -- spell ID; rows are name-sorted with a remove X.
+            local div = panel:CreateTexture(nil, "ARTWORK")
+            div:SetHeight(1)
+            div:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, -104)
+            div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -20, -104)
+            div:SetColorTexture(1, 1, 1, 0.08)
+
+            -- Section label (options-page section style: small gray caps).
+            local exTitle = panel:CreateFontString(nil, "OVERLAY")
+            exTitle:SetFont(fp2, 11, "")
+            exTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -120)
+            exTitle:SetTextColor(1, 1, 1, 0.45)
+            exTitle:SetText(EllesmereUI.L("EXCLUDED DEBUFFS"))
+
+            -- Add Spell ID: the announcement popup's bordered accent button,
+            -- secondary weight (dim border that brightens on hover).
+            local addBtn = CreateFrame("Button", nil, panel)
+            addBtn:SetSize(110, 26)
+            addBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -24, -112)
+            local abg = addBtn:CreateTexture(nil, "BACKGROUND")
+            abg:SetAllPoints(); abg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+            local abrd = EllesmereUI.MakeBorder and EllesmereUI.MakeBorder(addBtn, EG.r, EG.g, EG.b, 0.35, PP)
+            local al = addBtn:CreateFontString(nil, "OVERLAY")
+            al:SetFont(fp2, 12, "")
+            al:SetPoint("CENTER")
+            al:SetTextColor(EG.r, EG.g, EG.b, 0.7)
+            al:SetText(EllesmereUI.L("Add Spell ID"))
+            addBtn:SetScript("OnEnter", function()
+                al:SetTextColor(EG.r, EG.g, EG.b, 1)
+                if abrd and abrd.SetColor then abrd:SetColor(EG.r, EG.g, EG.b, 0.8) end
+            end)
+            addBtn:SetScript("OnLeave", function()
+                al:SetTextColor(EG.r, EG.g, EG.b, 0.7)
+                if abrd and abrd.SetColor then abrd:SetColor(EG.r, EG.g, EG.b, 0.35) end
+            end)
+
+            local scroll = CreateFrame("ScrollFrame", nil, panel)
+            scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -148)
+            scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -24, 62)
+            local child = CreateFrame("Frame", nil, scroll)
+            child:SetWidth(392)
+            scroll:SetScrollChild(child)
+            scroll:EnableMouseWheel(true)
+            scroll:SetScript("OnMouseWheel", function(self, delta)
+                local maxS = math.max(0, child:GetHeight() - self:GetHeight())
+                local cur = self:GetVerticalScroll() - delta * 30
+                if cur < 0 then cur = 0 elseif cur > maxS then cur = maxS end
+                self:SetVerticalScroll(cur)
+            end)
+
+            -- Exclude rows: checkbox (enable/disable the entry without
+            -- deleting it) + spell icon + name with the spell ID in gray
+            -- parentheses + delete X. Disabled entries stay stored (false)
+            -- and dim the whole row; only true entries reach the engine.
+            local exRows = {}
+            local function RefreshList()
+                for i = 1, #exRows do exRows[i]:Hide() end
+                local ex = (ns.NPF_Exclude and ns.NPF_Exclude()) or {}
+                local sorted = {}
+                for id, v in pairs(ex) do
+                    local nm = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                    sorted[#sorted + 1] = { id = id, on = v == true, name = nm or tostring(id) }
+                end
+                table.sort(sorted, function(a, b) return a.name < b.name end)
+                for i = 1, #sorted do
+                    local row = exRows[i]
+                    if not row then
+                        row = CreateFrame("Button", nil, child)
+                        row:SetSize(392, 28)
+                        row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -(i - 1) * 29)
+                        row.hl = row:CreateTexture(nil, "BACKGROUND")
+                        row.hl:SetAllPoints()
+                        row.hl:SetColorTexture(1, 1, 1, 0)
+                        -- Checkbox (checkbox-dropdown visuals)
+                        row.box = CreateFrame("Frame", nil, row)
+                        row.box:SetSize(16, 16)
+                        row.box:SetPoint("LEFT", row, "LEFT", 2, 0)
+                        local bxbg = row.box:CreateTexture(nil, "BACKGROUND")
+                        bxbg:SetAllPoints(); bxbg:SetColorTexture(0.12, 0.12, 0.14, 1)
+                        row.boxBrd = EllesmereUI.MakeBorder(row.box, 0.4, 0.4, 0.4, 0.6, PP)
+                        row.chk = row.box:CreateTexture(nil, "ARTWORK")
+                        PP.SetInside(row.chk, row.box, 2, 2)
+                        row.chk:SetColorTexture(EG.r, EG.g, EG.b, 1)
+                        row.icon = row:CreateTexture(nil, "ARTWORK")
+                        row.icon:SetSize(20, 20)
+                        row.icon:SetPoint("LEFT", row.box, "RIGHT", 8, 0)
+                        row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                        row.name = row:CreateFontString(nil, "OVERLAY")
+                        row.name:SetFont(fp2, 13, "")
+                        row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+                        row.name:SetPoint("RIGHT", row, "RIGHT", -32, 0)
+                        row.name:SetJustifyH("LEFT")
+                        row.name:SetWordWrap(false)
+                        row.x = CreateFrame("Button", nil, row)
+                        row.x:SetSize(14, 14)
+                        row.x:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+                        row.x:SetFrameLevel(row:GetFrameLevel() + 2)
+                        row.x.tex = row.x:CreateTexture(nil, "OVERLAY")
+                        row.x.tex:SetAllPoints()
+                        row.x.tex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png")
+                        row.x:SetAlpha(0.5)
+                        row.x:SetScript("OnEnter", function(self)
+                            self:SetAlpha(0.9)
+                            EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Remove"))
+                        end)
+                        row.x:SetScript("OnLeave", function(self)
+                            self:SetAlpha(0.5)
+                            EllesmereUI.HideWidgetTooltip()
+                        end)
+                        row:SetScript("OnEnter", function(self) self.hl:SetColorTexture(1, 1, 1, 0.04) end)
+                        row:SetScript("OnLeave", function(self) self.hl:SetColorTexture(1, 1, 1, 0) end)
+                        exRows[i] = row
+                    end
+                    local entry = sorted[i]
+                    row._id = entry.id
+                    local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.id)
+                    row.icon:SetTexture(tex or 134400)
+                    row.name:SetText(entry.name .. " |cff808080(" .. entry.id .. ")|r")
+                    -- Checked = actively excluded; unchecked entries dim.
+                    row.chk:SetShown(entry.on)
+                    if row.boxBrd and row.boxBrd.SetColor then
+                        if entry.on then
+                            row.boxBrd:SetColor(EG.r, EG.g, EG.b, 0.8)
+                        else
+                            row.boxBrd:SetColor(0.4, 0.4, 0.4, 0.6)
+                        end
+                    end
+                    row.icon:SetDesaturated(not entry.on)
+                    row.icon:SetAlpha(entry.on and 1 or 0.45)
+                    row.name:SetAlpha(entry.on and 0.9 or 0.45)
+                    row:SetScript("OnClick", function()
+                        local ex2 = ns.NPF_Exclude and ns.NPF_Exclude()
+                        if ex2 then
+                            ex2[row._id] = not (ex2[row._id] == true)
+                            if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                            RefreshList()
+                        end
+                    end)
+                    row.x:SetScript("OnClick", function()
+                        local ex2 = ns.NPF_Exclude and ns.NPF_Exclude()
+                        if ex2 then ex2[row._id] = nil end
+                        if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                        RefreshList()
+                    end)
+                    row:Show()
+                end
+                child:SetHeight(math.max(1, #sorted * 29))
+            end
+            addBtn:SetScript("OnClick", function()
+                EllesmereUI:ShowInputPopup({
+                    title = EllesmereUI.L("Add Spell ID"),
+                    message = EllesmereUI.L("Enter the spell ID to exclude from nameplates."),
+                    confirmText = EllesmereUI.L("Add"),
+                    cancelText = EllesmereUI.L("Cancel"),
+                    onConfirm = function(text)
+                        local id = tonumber(text or "")
+                        local ex2 = id and ns.NPF_Exclude and ns.NPF_Exclude()
+                        if ex2 then
+                            ex2[id] = true
+                            if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                            RefreshList()
+                        end
+                    end,
+                })
+            end)
+
+            -- Done (standard popup button chrome: dark fill, subtle border,
+            -- brighten on hover). Everything applies live, so Done = close.
+            -- Done: the announcement popup's primary action button (green
+            -- border and label, brighten on hover).
+            local doneBtn = CreateFrame("Button", nil, panel)
+            doneBtn:SetSize(150, 32)
+            doneBtn:SetPoint("BOTTOM", panel, "BOTTOM", 0, 14)
+            local dbg2 = doneBtn:CreateTexture(nil, "BACKGROUND")
+            dbg2:SetAllPoints(); dbg2:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+            local dbrd = EllesmereUI.MakeBorder and EllesmereUI.MakeBorder(doneBtn, EG.r, EG.g, EG.b, 0.9, PP)
+            local dl2 = doneBtn:CreateFontString(nil, "OVERLAY")
+            dl2:SetFont(fp2, 14, "")
+            dl2:SetPoint("CENTER")
+            dl2:SetTextColor(EG.r, EG.g, EG.b, 0.9)
+            dl2:SetText(EllesmereUI.L("Done"))
+            doneBtn:SetScript("OnEnter", function()
+                dl2:SetTextColor(EG.r, EG.g, EG.b, 1)
+                if dbrd and dbrd.SetColor then dbrd:SetColor(EG.r, EG.g, EG.b, 1) end
+            end)
+            doneBtn:SetScript("OnLeave", function()
+                dl2:SetTextColor(EG.r, EG.g, EG.b, 0.9)
+                if dbrd and dbrd.SetColor then dbrd:SetColor(EG.r, EG.g, EG.b, 0.9) end
+            end)
+            doneBtn:SetScript("OnClick", ClosePopup)
+
+            RefreshList()
+        end
+
         local function MakeCogIcon(row, regionKey, posKey, slotLabel)
             local rgn = row[regionKey]
             local btn = CreateFrame("Button", nil, rgn)
@@ -5610,6 +5971,44 @@ initFrame:SetScript("OnEvent", function(self)
                 btn:SetAlpha(off and 0.15 or (cogPopupOwner == btn and 0.7 or 0.4))
             end)
             if CorePosOffDisabled(posKey) then btn:SetAlpha(0.15) end
+
+            -- Edit Filters (12.1 slot filters): accent link left of the cog
+            -- whenever this row holds a debuff-side aura element; opens the
+            -- per-kind filter popup. Refreshes on the same widget-refresh
+            -- channel as the cog alpha.
+            if EllesmereUI.IS_121 then
+                local link = CreateFrame("Button", nil, rgn)
+                link:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                local lfp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
+                local lfs = link:CreateFontString(nil, "OVERLAY")
+                lfs:SetFont(lfp, 12, "")
+                local ar, ag, ab = 1, 0.82, 0.30
+                if EllesmereUI.GetAccentColor then ar, ag, ab = EllesmereUI.GetAccentColor() end
+                lfs:SetTextColor(ar, ag, ab)
+                lfs:SetAlpha(0.85)
+                lfs:SetPoint("CENTER")
+                lfs:SetText(EllesmereUI.L("Edit Filters"))
+                link:SetSize(lfs:GetStringWidth() + 6, 16)
+                link:SetPoint("RIGHT", btn, "LEFT", -6, 0)
+                rgn._lastInline = link
+                local function LinkKind()
+                    local el = GetElementAtPosition(posKey)
+                    if el == "debuffs" then return "debuffs"
+                    elseif el == "ccs" then return "cc"
+                    elseif el == "debuffsccs" then return "dcc" end
+                end
+                local function UpdLink()
+                    link:SetShown(LinkKind() ~= nil)
+                end
+                link:SetScript("OnEnter", function() lfs:SetAlpha(1) end)
+                link:SetScript("OnLeave", function() lfs:SetAlpha(0.85) end)
+                link:SetScript("OnClick", function()
+                    local k = LinkKind()
+                    if k and ns.NPP_ShowFilterPopup then ns.NPP_ShowFilterPopup(k) end
+                end)
+                EllesmereUI.RegisterWidgetRefresh(UpdLink)
+                UpdLink()
+            end
             return btn
         end
 

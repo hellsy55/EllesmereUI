@@ -159,8 +159,15 @@ local function Build()
                         fs:SetTextColor(rbText:GetTextColor())
                     end
                     fs:SetPoint(tPoint or "CENTER", button, tRelP or tPoint or "CENTER", tX or 0, tY or 0)
-                    local dopts = { formatter = GetTimeFormatter() }
+                    -- 68914 schema key (textFormatter); BuildDurationTextOpts
+                    -- when available, bare table fallback otherwise.
                     local AK2 = EllesmereUI.AuraKit
+                    local dopts
+                    if AK2 and AK2.BuildDurationTextOpts then
+                        dopts = AK2.BuildDurationTextOpts(GetTimeFormatter())
+                    else
+                        dopts = { textFormatter = GetTimeFormatter() }
+                    end
                     if AK2 and AK2.SetDurationTextSafe then
                         AK2.SetDurationTextSafe(button, fs, dopts)
                     else
@@ -189,7 +196,7 @@ local function EnsureBuilt()
         if S.built and S.armed and S.rbBar then
             ns.EMB121_Sync(S.rbBar, S.pp, S.pc)
         end
-    end, "erb:emb121-shell", true)
+    end, "erb:emb121-shell")
 end
 
 -- Called from UpdatePrimaryBar whenever the primary power type resolves:

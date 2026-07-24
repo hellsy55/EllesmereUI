@@ -108,44 +108,13 @@ end
 -- Settings access
 -------------------------------------------------------------------------------
 local function DM()
+    -- The user-editable exclude list is retired (2026-07-23): the exclude
+    -- set is internal now -- the hardcoded sated/always-hide presets are
+    -- the only blacklistable debuffs (merged in BuildRecords). Stale
+    -- dm.excludeSpellIDs / dm.excludeSeedV keys in saved profiles are
+    -- inert orphans: never read, never written.
     local p = ns.db and ns.db.profile
-    local dm = p and p.dmDebuff
-    if dm and dm.excludeSpellIDs == nil then
-        -- One-shot seed of the user exclude list from the live blacklists
-        -- (68824: never-secret spells are exempt from the identity gate,
-        -- so these spellID excludes now actually work on friendlies).
-        -- Sated set: a live opt-out (hideLustDebuff = false) skips it --
-        -- that user chose to see their sated debuffs and keeps seeing
-        -- them. The always-hide pair (Arcane Empowerment / Time Trial
-        -- Practice) seeds unconditionally; the list OWNS the whole
-        -- exclude set on 12.1, so removing an entry genuinely unhides it.
-        local t = {}
-        if p.hideLustDebuff ~= false and ns.RFC_SatedDebuffs then
-            for id in pairs(ns.RFC_SatedDebuffs) do t[id] = true end
-        end
-        if ns.RFC_AlwaysHideDebuffs then
-            for id in pairs(ns.RFC_AlwaysHideDebuffs) do t[id] = true end
-        end
-        dm.excludeSpellIDs = t
-        dm.excludeSeedV = 2
-    elseif dm and dm.excludeSpellIDs and (dm.excludeSeedV or 1) < 2 then
-        -- v1 lists predate the always-hide entries moving out of the
-        -- hardcoded merge: add them (ADDITIVE only -- these were force-
-        -- hidden before, so behavior is unchanged; removed sated ids are
-        -- never re-added).
-        dm.excludeSeedV = 2
-        if ns.RFC_AlwaysHideDebuffs then
-            for id in pairs(ns.RFC_AlwaysHideDebuffs) do dm.excludeSpellIDs[id] = true end
-        end
-    end
-    return dm
-end
-
--- The seeded user exclude list (Excluded Debuffs popup edits this; the
--- record synthesis merges it into every debuff record's candidates).
-function ns.DM_ExcludeList()
-    local dm = DM()
-    return dm and dm.excludeSpellIDs
+    return p and p.dmDebuff
 end
 
 -- One-shot per-profile migration: maps the retired Auras-tab state onto the
@@ -369,21 +338,11 @@ function ns.DM_FxFP()
     return FxListFP(dm and dm.fxList)
 end
 
--- User exclude-list fingerprint (order-stable): edits in the Excluded
--- Debuffs popup must re-drive the candidate filters on every record.
-local function ExcludeFP(dm)
-    local t = dm.excludeSpellIDs
-    if not t or next(t) == nil then return "x-" end
-    local o = {}
-    for id in pairs(t) do o[#o + 1] = id end
-    table.sort(o)
-    return "x" .. table.concat(o, ",")
-end
-
 function ns.DM_CfgFP()
     EnsureMigrated() -- profile switches re-fingerprint before rendering
     local dm = DM() or {}
     FxHeal(dm)
+    local prof = ns.db and ns.db.profile
     local parts = {
         "on",
         dm.all ~= false and 1 or 0, dm.boss and 1 or 0, dm.role and 1 or 0,
@@ -391,7 +350,9 @@ function ns.DM_CfgFP()
         dm.raidcombat and 1 or 0, dm.dispel and 1 or 0,
         (dm.dispelMode == "typed") and "typed" or "you",
         FxListFP(dm.fxList), -- base effects force records
-        ExcludeFP(dm),
+        -- The internal exclude set varies only with the retail lust-debuff
+        -- opt-out (the hardcoded lists are load-constant).
+        (not prof or prof.hideLustDebuff ~= false) and "lx1" or "lx0",
     }
     local tiles = dm.tiles
     if tiles then
@@ -401,7 +362,7 @@ function ns.DM_CfgFP()
                 "t", tostring(t.id), t.enabled and 1 or 0, tostring(t.type),
                 tostring(t.cat), tostring(t.position), tostring(t.growDirection),
                 tostring(t.offsetX), tostring(t.offsetY), tostring(t.size),
-                tostring(t.spacing), tostring(t.cap),
+                tostring(t.spacing), tostring(t.cap), tostring(t.iconsPerRow),
                 tostring(t.width), tostring(t.height),
                 t.color and string.format("%.2f,%.2f,%.2f,%.2f",
                     t.color.r or 1, t.color.g or 1, t.color.b or 1, t.color.a or 1) or "-",
@@ -506,17 +467,19 @@ local function BuildRecords(s, dm)
     local typedMap = dispelOn and dispelMode == "typed"
         and ((claims.dispel or fxCats.dispel or not (dm.all ~= false)) and true or false)
 
-    -- User exclude list = the WHOLE exclude set on 12.1 (Excluded Debuffs
-    -- popup edits it; DM() seeds it from the live sated set -- gated on the
-    -- hideLustDebuff opt-out -- plus the always-hide pair). 68824's
-    -- never-secret identity-gate exemption makes these excludes real on
-    -- friendly units for never-secret spells; a secret-flagged entry is
-    -- accepted but inert (the engine drops it silently). No hardcoded
-    -- merge here: removing a popup entry genuinely unhides that debuff.
+    -- Internal exclude set (user editing retired): the hardcoded sated
+    -- list -- honoring the retail Show Lust Debuff opt-out -- plus the
+    -- always-hide pair. 68824's never-secret identity-gate exemption makes
+    -- these excludes real on friendly units for never-secret spells; a
+    -- secret-flagged entry is accepted but inert (the engine drops it
+    -- silently).
     local ex = {}
-    local uex = dm.excludeSpellIDs
-    if uex then
-        for id in pairs(uex) do ex[id] = true end
+    if ns.RFC_AlwaysHideDebuffs then
+        for id in pairs(ns.RFC_AlwaysHideDebuffs) do ex[id] = true end
+    end
+    local prof = ns.db and ns.db.profile
+    if (not prof or prof.hideLustDebuff ~= false) and ns.RFC_SatedDebuffs then
+        for id in pairs(ns.RFC_SatedDebuffs) do ex[id] = true end
     end
 
     local function Cand(important, extra)
@@ -931,22 +894,49 @@ local function AnchorTileContainer(container, health, s, t)
     local offX = t.offsetX or 0
     local offY = t.offsetY or 0
 
+    AK = AK or EllesmereUI.AuraKit
+    -- Grid wrap (12.1): Icons Per Row >= 2 wraps lines away from the
+    -- anchored edge (simple-grid convention; lowercase position tokens
+    -- here); vertical growth flips the flow axis so lines are columns.
+    -- Below 2 = the legacy single run, corner pick untouched.
+    local per = tonumber(t.iconsPerRow) or 0
+    local pl = t.position or "top"
+    local wrapUp = pl:find("bottom", 1, true) ~= nil
+    local wrapLeft = pl:find("right", 1, true) ~= nil
     container:ClearAllPoints()
     if grow == "CENTER" then
         container:SetPoint("CENTER", health, corner, offX, offY)
-        container:SetAuraLayoutAnchorPoint("TOPLEFT")
-        container:SetAuraLayoutGrowthDirection(FlowDir("RIGHT"), FlowDir("DOWN"))
+        local gV = (per >= 2 and wrapUp) and "UP" or "DOWN"
+        AK.SetContainerAnchor(container, (gV == "UP") and "BOTTOMLEFT" or "TOPLEFT")
+        AK.SetContainerGrowth(container, FlowDir("RIGHT"), FlowDir(gV))
     else
         container:SetPoint(corner, health, corner, offX, offY)
-        container:SetAuraLayoutAnchorPoint(corner)
         local gV = (grow == "UP" or grow == "DOWN") and grow or "DOWN"
         local gH = (grow == "LEFT" or grow == "RIGHT") and grow or "RIGHT"
-        container:SetAuraLayoutGrowthDirection(FlowDir(gH), FlowDir(gV))
+        if per >= 2 then
+            if grow == "UP" or grow == "DOWN" then
+                gH = wrapLeft and "LEFT" or "RIGHT"
+            else
+                gV = wrapUp and "UP" or "DOWN"
+            end
+            AK.SetContainerAnchor(container,
+                ((gV == "UP") and "BOTTOM" or "TOP") .. ((gH == "LEFT") and "RIGHT" or "LEFT"))
+        else
+            AK.SetContainerAnchor(container, corner)
+        end
+        AK.SetContainerGrowth(container, FlowDir(gH), FlowDir(gV))
     end
 
     local size = t.size or 18
+    local spacing = t.spacing or 1
     local vertical = (grow == "UP" or grow == "DOWN")
-    container:SetAuraLayoutRowWidth(vertical and (size + 0.4) or nil)
+    if per >= 2 then
+        AK.SetContainerAxis(container, vertical)
+        AK.SetContainerRowWidth(container, per * size + (per - 1) * spacing + 0.4)
+    else
+        AK.SetContainerAxis(container, false)
+        AK.SetContainerRowWidth(container, vertical and (size + 0.4) or nil)
+    end
 end
 
 -- Per-class tile fingerprints (style/geometry), keyed class .. ":" .. id.
@@ -1214,7 +1204,7 @@ local function EnsureTileContainer(d, t)
         if c2 then
             ns.DM_ApplyDebuffConfig(c2, d, s2, StyleKeyFor(d))
         end
-    end, "rf:dm-tile", true)
+    end, "rf:dm-tile")
     return nil
 end
 
@@ -1233,7 +1223,7 @@ function ns.DM_ApplyDebuffConfig(container, d, s, styleKey)
     local size = s.debuffSize or 18
     local layout = {
         elementWidth = size, elementHeight = size,
-        elementSpacingX = s.debuffSpacing or 1, elementSpacingY = s.debuffSpacing or 1,
+        elementSpacing = s.debuffSpacing or 1, lineSpacing = s.debuffSpacing or 1,
     }
 
     local recs, ccCand, claims, _, fxCats = BuildRecords(s, dm)
@@ -1300,8 +1290,8 @@ function ns.DM_ApplyDebuffConfig(container, d, s, styleKey)
                 EnsureBaseSizeStyle(d, s, r.key, r.fxSize)
                 container:SetAuraGroupLayout(gkey, {
                     elementWidth = r.fxSize, elementHeight = r.fxSize,
-                    elementSpacingX = s.debuffSpacing or 1,
-                    elementSpacingY = s.debuffSpacing or 1,
+                    elementSpacing = s.debuffSpacing or 1,
+                    lineSpacing = s.debuffSpacing or 1,
                 })
             else
                 container:SetAuraGroupLayout(gkey, layout)
@@ -1475,7 +1465,7 @@ function ns.DM_ApplyDebuffConfig(container, d, s, styleKey)
                         local tSize = t.size or 18
                         local tLayout = {
                             elementWidth = tSize, elementHeight = tSize,
-                            elementSpacingX = t.spacing or 1, elementSpacingY = t.spacing or 1,
+                            elementSpacing = t.spacing or 1, lineSpacing = t.spacing or 1,
                         }
                         for gkey, r in pairs(tWanted) do
                             if tDecl[gkey] then
@@ -1493,8 +1483,8 @@ function ns.DM_ApplyDebuffConfig(container, d, s, styleKey)
                                     EnsureTileStyle(d, s, t, r.fxSize, r.key)
                                     tc:SetAuraGroupLayout(gkey, {
                                         elementWidth = r.fxSize, elementHeight = r.fxSize,
-                                        elementSpacingX = t.spacing or 1,
-                                        elementSpacingY = t.spacing or 1,
+                                        elementSpacing = t.spacing or 1,
+                                        lineSpacing = t.spacing or 1,
                                     })
                                 else
                                     tc:SetAuraGroupLayout(gkey, tLayout)

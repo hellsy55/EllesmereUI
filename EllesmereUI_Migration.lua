@@ -177,7 +177,27 @@ end
 -- Public: run all registered migrations. Called once from the parent
 -- ADDON_LOADED handler (the legacy beta-wipe that used to precede it is gone).
 function EllesmereUI.RunRegisteredMigrations()
-    if not EllesmereUIDB then return end
+    if not EllesmereUIDB then
+        -- Truly fresh install: SavedVariables do not exist yet, so there is
+        -- nothing to migrate. Do NOT just skip: leaving the catalog unstamped
+        -- means the ENTIRE chain runs its first pass at the NEXT load, over
+        -- whatever exists by then -- e.g. a profile imported during this
+        -- first session -- treating current-format data as legacy (the CDM
+        -- consolidate/detach pair rebuilt an imported spell store, the
+        -- pixel-rounding pass floored imported positions/sizes, the colors
+        -- seed replaced imported palettes). A fresh install is current-format
+        -- by definition: create the store and stamp every global migration
+        -- as already done. Profile-scoped stamps live inside each profile
+        -- (and ride exports), so they need no genesis pass.
+        EllesmereUIDB = {}
+        local flags = GetFlagTable(EllesmereUIDB)
+        for _, spec in ipairs(_migrations) do
+            if spec.scope == "global" then
+                flags[spec.id] = true
+            end
+        end
+        return
+    end
     for _, spec in ipairs(_migrations) do
         RunMigration(spec)
     end

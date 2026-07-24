@@ -5459,12 +5459,26 @@ initFrame:SetScript("OnEvent", function(self)
             leftRgn._control = cbDD
         end
 
-        -- Row 6: Flip Frame Growth
+        -- Row 6: Frame Growth. View over the tri-state partyFlipGrowth key
+        -- (false=Default, true=Reversed, "centered"=Centered) -- the same key
+        -- the old Flip Frame Growth toggle wrote, so stored profiles, exports,
+        -- and spec-override entries carry over with no migration.
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Flip Frame Growth",
-              tooltip="Flips the direction the frames grow in: vertical frames grow up instead of down, horizontal frames grow left instead of right.",
-              getValue=function() return db.profile.partyFlipGrowth or false end,
-              setValue=function(v) db.profile.partyFlipGrowth = v; PartyReloadAndUpdate() end },
+            { type="dropdown", text="Frame Growth",
+              tooltip="Default grows down or right, Reversed grows up or left, and Centered keeps the frames centered as the party size changes.",
+              values={ default="Default", reversed="Reversed", centered="Centered" },
+              order={ "default", "reversed", "centered" },
+              getValue=function()
+                  local v = db.profile.partyFlipGrowth
+                  if v == "centered" then return "centered" end
+                  return v == true and "reversed" or "default"
+              end,
+              setValue=function(v)
+                  if v == "centered" then db.profile.partyFlipGrowth = "centered"
+                  elseif v == "reversed" then db.profile.partyFlipGrowth = true
+                  else db.profile.partyFlipGrowth = false end
+                  PartyReloadAndUpdate()
+              end },
             { type="label", text="" });  y = y - h
 
         -------------------------------------------------------------------

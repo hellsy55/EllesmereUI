@@ -9453,11 +9453,19 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- spell (recreates its pre-apply own value) instead
                                 -- of a silent reset.
                                 if (ctx.scalarApply or ctx.payloadValue) and ss and scopeT then
+                                    -- EnsureSS, not ss directly: the apply's member
+                                    -- sweep prunes an entry it empties from the
+                                    -- store (a spell whose ONLY settings were the
+                                    -- swept keys), leaving this closure's ss
+                                    -- orphaned -- a seed into it would be lost.
+                                    -- EnsureSS re-persists the same table (no-op
+                                    -- when it is still in the store).
+                                    local target = EnsureSS()
                                     for _, k in ipairs(keys) do
                                         local own
                                         if allSpecs then own = scopeT[k]
                                         else own = rawget(scopeT, k) end
-                                        if own ~= nil then rawset(ss, k, own) end
+                                        if own ~= nil then rawset(target, k, own) end
                                     end
                                 end
                                 AB.RunBarUnapply(keys, allSpecs)

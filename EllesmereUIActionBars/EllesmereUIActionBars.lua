@@ -9471,6 +9471,15 @@ end
 function EAB:OnFirstLogin()
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 
+    -- A profile import can stamp the capture flag mid-session (imported data
+    -- is a chosen layout). Honor the stamp here so a still-pending capture
+    -- never overwrites the imported profile; just run the normal setup.
+    if self.db.sv._capturedOnce_EAB then
+        self._needsCapture = false
+        self:FinishSetup()
+        return
+    end
+
     -- Capture Blizzard layout while bars are still visible
     local captured = CaptureBlizzardDefaults()
     for barKey, data in pairs(captured) do

@@ -987,6 +987,17 @@ local function BuildBaseDetailDM(frame, fontPath)
         cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
     end
 
+    -- Row: Icons Per Row (end of CORE). The key predates this UI (its row
+    -- died with the Auras tab): >= 2 wraps -- rows for horizontal growth,
+    -- COLUMNS for vertical (12.1 flow axis) -- with the stored
+    -- debuffWrapDirection convention deciding the stack side.
+    _, hh = W:DualRow(frame, sy,
+        { type = "slider", text = "Icons Per Row", min = 0, max = 20, step = 1, trackWidth = 120,
+          tooltip = "Wraps into a new row (or column for vertical growth) after this many icons; below 2 keeps one continuous run.",
+          getValue = function() return p.debuffPerRow or 5 end,
+          setValue = function(v) p.debuffPerRow = v; DmApply() end },
+        { type = "label", text = "" }); sy = sy - hh
+
     -- Display: the legacy debuff style keys (retired Auras tab), which the
     -- base grid and icon tiles read directly. CC glow settings are
     -- deliberately NOT surfaced here (separate follow-up). Party frames
@@ -1235,6 +1246,17 @@ local function BuildTileDetail(frame, fontPath, t)
             cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
         end
+
+        -- Row: Icons Per Row (end of CORE). Tile-local key, no base
+        -- inheritance: >= 2 wraps the tile's run -- rows for horizontal
+        -- growth, COLUMNS for vertical -- stacking away from the anchored
+        -- edge (position rule).
+        _, hh = W:DualRow(frame, sy,
+            { type = "slider", text = "Icons Per Row", min = 0, max = 20, step = 1, trackWidth = 120,
+              tooltip = "Wraps into a new row (or column for vertical growth) after this many icons; below 2 keeps one continuous run.",
+              getValue = function() return t.iconsPerRow or 0 end,
+              setValue = function(v) TSet("iconsPerRow", v) end },
+            { type = "label", text = "" }); sy = sy - hh
 
         _, hh = W:SectionHeader(frame, "DISPLAY", sy); sy = sy - hh
 
@@ -1754,6 +1776,11 @@ function ns.DMP_RefreshPreview()
         local dir = cfg.grow or "LEFT"
         local cursor = 0
         local selfPoint = anchor
+        -- Grid wrap preview: >= 2 wraps lines exactly like live (base rows
+        -- follow debuffWrapDirection, tiles the anchored-edge rule -- both
+        -- arrive here as cfg.wrapV/cfg.wrapH from the caller).
+        local per = cfg.perRow or 0
+        if per < 2 then per = 0 end
         if dir == "CENTER" then
             -- Live parity: CENTER growth centers the run ON the position
             -- point (the base grid pins the container's row-edge midpoint
@@ -1766,22 +1793,34 @@ function ns.DMP_RefreshPreview()
             -- the caller's vertical seat (cfg.vAlign -- tiles center on
             -- the point, base rows hang off it in the wrap direction).
             selfPoint = cfg.vAlign or "CENTER"
-            cursor = -((cfg.count - 1) * (sz + gap)) / 2
+            local lineN = cfg.count
+            if per > 0 and per < lineN then lineN = per end
+            cursor = -((lineN - 1) * (sz + gap)) / 2
         end
+        local lineStart = cursor
         for i = 1, cfg.count do
             local fr = GetIcon()
             fr._dmSel = cfg.selKey
             fr:SetSize(sz, sz)
             fr:ClearAllPoints()
+            local lineOff = 0
+            if per > 0 then
+                if i > 1 and (i - 1) % per == 0 then cursor = lineStart end
+                lineOff = math.floor((i - 1) / per) * (sz + gap)
+            end
             local gx, gy = 0, 0
             if dir == "RIGHT" or dir == "CENTER" then
                 gx = cursor; cursor = cursor + sz + gap
+                gy = (cfg.wrapV == "UP") and lineOff or -lineOff
             elseif dir == "LEFT" then
                 gx = -cursor; cursor = cursor + sz + gap
+                gy = (cfg.wrapV == "UP") and lineOff or -lineOff
             elseif dir == "DOWN" then
                 gy = -cursor; cursor = cursor + sz + gap
+                gx = (cfg.wrapH == "LEFT") and -lineOff or lineOff
             elseif dir == "UP" then
                 gy = cursor; cursor = cursor + sz + gap
+                gx = (cfg.wrapH == "LEFT") and -lineOff or lineOff
             end
             fr:SetPoint(selfPoint, host, anchor, (cfg.offX or 0) + gx, (cfg.offY or 0) + gy)
             if cfg.color then
@@ -1859,6 +1898,12 @@ function ns.DMP_RefreshPreview()
             -- BOTTOM edge midpoint at the corner per wrap direction, so the
             -- first row hangs off the point (unlike tiles, which center).
             vAlign = (p.debuffWrapDirection == "DOWN") and "TOP" or "BOTTOM",
+            -- Base wrap: rows follow the stored debuffWrapDirection (the
+            -- runtime's cross-axis source); vertical growth wraps columns
+            -- by its LEFT/RIGHT reading.
+            perRow = p.debuffPerRow or 5,
+            wrapV = (p.debuffWrapDirection == "DOWN") and "DOWN" or "UP",
+            wrapH = (p.debuffWrapDirection == "LEFT") and "LEFT" or "RIGHT",
             offX = p.debuffOffsetX or 0,
             offY = p.debuffOffsetY or 0,
             alpha = (sel or allVis) and 1 or 0.5,
@@ -1879,6 +1924,11 @@ function ns.DMP_RefreshPreview()
                     spacing = t.spacing or 1,
                     pos = t.position or "top",
                     grow = t.growDirection or "CENTER",
+                    -- Tile wrap: away from the anchored edge (position rule,
+                    -- matching AnchorTileContainer).
+                    perRow = t.iconsPerRow or 0,
+                    wrapV = string.find(t.position or "top", "bottom", 1, true) and "UP" or "DOWN",
+                    wrapH = string.find(t.position or "top", "right", 1, true) and "LEFT" or "RIGHT",
                     offX = t.offsetX or 0,
                     offY = t.offsetY or 0,
                     alpha = alpha,
@@ -2394,29 +2444,11 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
         end)
     end
 
-    -- "Edit Excluded Debuffs" accent link under the preview (replaced the
-    -- dismissible click-hint): opens the spellID blacklist popup.
-    do
-        local xBtn = CreateFrame("Button", nil, leftFixed)
-        xBtn:SetPoint("TOP", pvFrame, "BOTTOM", 0, -8)
-        local xar, xag, xab = 1, 0.82, 0.30
-        if EllesmereUI.GetAccentColor then xar, xag, xab = EllesmereUI.GetAccentColor() end
-        local xFS = xBtn:CreateFontString(nil, "OVERLAY")
-        xFS:SetFont(fontPath, 14, "")
-        xFS:SetAllPoints(xBtn)
-        xFS:SetJustifyH("CENTER")
-        xFS:SetWordWrap(false)
-        xFS:SetTextColor(xar, xag, xab)
-        xFS:SetAlpha(0.85)
-        xFS:SetText(L("Edit Excluded Debuffs"))
-        xBtn:SetSize(xFS:GetStringWidth() + 8, 16)
-        xBtn:SetScript("OnEnter", function() xFS:SetAlpha(1) end)
-        xBtn:SetScript("OnLeave", function() xFS:SetAlpha(0.85) end)
-        xBtn:SetScript("OnClick", function()
-            if ns.DMP_ShowExcludePopup then ns.DMP_ShowExcludePopup() end
-        end)
-        ly = ly - sectionH - 10
-    end
+    -- No text under the DM preview (user call 2026-07-24): the "Edit
+    -- Excluded Debuffs" link is retired (exclude list is internal now) and
+    -- the BM-style click-hint was dropped the next day. The band-height
+    -- accounting stays so the divider seats where it always did.
+    ly = ly - sectionH - 10
 
     -------------------------------------------------------------------
     --  DIVIDER (below preview, above settings title) -- BM parity
@@ -3249,6 +3281,55 @@ function ns.BMP_ShowFilterEditor()
         end)
     end
 
+    -- Preset-universe spell search (identical list to the Extra Spells
+    -- dropdown: curated primaries, name-sorted, spell icons, searchable):
+    -- every spell already ON this filter is excluded -- checked or
+    -- unchecked, curated or custom alike. Picking one adds it to the
+    -- filter's Custom group (the same landing as Add Spell ID) and the
+    -- editor rebuild re-lists without it.
+    local searchDD = EllesmereUI.BuildVisOptsCBDropdown(
+        left, 170, left:GetFrameLevel() + 5,
+        function()
+            local f = (ns.BM2_GetFilter and ns.BM2_GetFilter(sel.id)) or sel
+            local universe = (ns.BM2_AllPresetSpells and ns.BM2_AllPresetSpells()) or {}
+            local out = {}
+            for i = 1, #universe do
+                local id = universe[i]
+                local onFilter = (f.spells and f.spells[id] ~= nil)
+                    or (f.custom and f.custom[id])
+                if not onFilter then
+                    local nm = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                    out[#out + 1] = {
+                        key = id, label = nm or tostring(id), noCheck = true,
+                        icon = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id),
+                    }
+                end
+            end
+            table.sort(out, function(a, b)
+                return tostring(a.label or a.key) < tostring(b.label or b.key)
+            end)
+            return out
+        end,
+        function() return false end, -- nothing listed is ever on the filter
+        function(k, v)
+            if v and ns.BM2_AddCustomSpell and ns.BM2_AddCustomSpell(sel.id, k) then
+                Apply()
+                Rebuild()
+            end
+        end,
+        nil, 10, true)
+    searchDD:ClearAllPoints()
+    searchDD:SetPoint("TOPLEFT", left, "TOPLEFT", 2, -23)
+    -- One-shot title: the checked-count summary a checkbox dropdown shows
+    -- ("None") reads wrong for an action search, and every add rebuilds
+    -- the editor, so the label never needs re-asserting.
+    for _, r in ipairs({ searchDD:GetRegions() }) do
+        if r.SetText and r.GetText then
+            r:SetText(EllesmereUI.L("Search Spells"))
+            break
+        end
+    end
+
     local addSpellBtn = PopupButton(left, 110, 24, "Add Spell ID", function()
         EditorInput({
             title = EllesmereUI.L("Add Spell ID"),
@@ -3264,7 +3345,7 @@ function ns.BMP_ShowFilterEditor()
             end,
         })
     end)
-    addSpellBtn:SetPoint("TOPLEFT", left, "TOPLEFT", 2, -26)
+    addSpellBtn:SetPoint("LEFT", searchDD, "RIGHT", 8, 0)
 
     -- Spell checkbox list: rows mirror the checkbox-dropdown widget's
     -- visuals exactly (16px box at 0.12/0.12/0.14, gray 0.4 border, accent
