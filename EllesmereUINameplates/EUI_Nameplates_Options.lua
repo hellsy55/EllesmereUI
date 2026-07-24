@@ -4950,7 +4950,7 @@ initFrame:SetScript("OnEvent", function(self)
                 spLabel:Hide()
                 pf._spLabel = spLabel
                 local spTrack, spValBox = BuildSliderCore(pf, SLIDER_W, 4, 12, INPUT_W, SLIDER_H, 11, SL_INPUT_A,
-                    0, 20, 1,
+                    -5, 20, 1,
                     function() return pf._spGet and pf._spGet() or 0 end,
                     function(v) if pf._spSet then pf._spSet(v) end end, true)
                 spTrack:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, SP_ROW_Y - 2)
@@ -7680,7 +7680,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 3: Bar Spacing + Background Color (with alpha)
         local classResourceRow3
         classResourceRow3, h = W:DualRow(parent, y,
-            { type="slider", pixel=true, text="Bar Spacing", min=0, max=10, step=1,
+            { type="slider", pixel=true, text="Bar Spacing", min=-5, max=10, step=1,
               getValue=function() return DBVal("classPowerGap") or defaults.classPowerGap end,
               setValue=function(v)
                 DB().classPowerGap = v
