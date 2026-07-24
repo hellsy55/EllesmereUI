@@ -5139,16 +5139,29 @@ local function CollectAndReanchor()
                                     end
                                 else
                                     if not spellOrder[sid] then spellOrder[sid] = idx end
-                                    if _FindOverride then
-                                        local ovr = _FindOverride(sid)
-                                        if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
-                                            spellOrder[ovr] = idx
+                                    -- Resolve override/base forms only for a REAL
+                                    -- spellID. sid can be a cd-claim marker here (a
+                                    -- collided-buff slot, -(CD_CLAIM_MARKER_BASE+cdID),
+                                    -- well outside int32): FindSpellOverrideByID errors
+                                    -- outright on an out-of-range id, and a marker has no
+                                    -- override/base anyway (its frame routes by cooldownID
+                                    -- and orders via the buff-family "c"..cdID key). Same
+                                    -- sid>0 guard the sibling order loops already use; this
+                                    -- one branch was missed, so hosting a collided buff
+                                    -- (Diabolist Diabolic Ritual) on a CD/util bar threw
+                                    -- every RefreshLayout and broke CDM.
+                                    if sid > 0 then
+                                        if _FindOverride then
+                                            local ovr = _FindOverride(sid)
+                                            if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
+                                                spellOrder[ovr] = idx
+                                            end
                                         end
-                                    end
-                                    if C_Spell and C_Spell.GetBaseSpell then
-                                        local base = C_Spell.GetBaseSpell(sid)
-                                        if base and base > 0 and base ~= sid and not spellOrder[base] then
-                                            spellOrder[base] = idx
+                                        if C_Spell and C_Spell.GetBaseSpell then
+                                            local base = C_Spell.GetBaseSpell(sid)
+                                            if base and base > 0 and base ~= sid and not spellOrder[base] then
+                                                spellOrder[base] = idx
+                                            end
                                         end
                                     end
                                 end
@@ -5179,11 +5192,15 @@ local function CollectAndReanchor()
                         end
                     end
                     for _, sid in ipairs(spellList) do
-                        if sid and ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid) then
-                            -- Hosted-buff marker: the buff renders via the reparent
-                            -- path (route map -> cdFrames), never as an injected
-                            -- custom frame. Must be tested before the item-preset
-                            -- branch (markers are also <= -100).
+                        if sid and ((ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(sid))
+                                 or (ns.CdClaimMarkerToCdID and ns.CdClaimMarkerToCdID(sid))) then
+                            -- Hosted-buff OR cd-claim (collided-buff slot) marker: the
+                            -- buff renders via the reparent/diversion path (route map ->
+                            -- cdFrames), never as an injected custom frame. Must be tested
+                            -- before the item-preset branch: both marker kinds are also
+                            -- <= -100, so -sid would otherwise be taken as an itemID and
+                            -- fed to GetItemCooldown, which errors outside int32 range
+                            -- (cd-claim markers are -(CD_CLAIM_MARKER_BASE + cooldownID)).
                         elseif sid and ns.SlotIDFromKey(sid) then
                             -- Equipment slot (trinkets -13/-14, user-added slots)
                             local slot = ns.SlotIDFromKey(sid)
