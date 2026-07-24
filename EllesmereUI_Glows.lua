@@ -203,9 +203,9 @@ local DASH_V = [[Interface\AddOns\EllesmereUI\media\glow-dash-v.tga]]
 
 -- Resolve the wrapper's pixel-snapped size and precompute the per-edge phase
 -- endpoints (invariant until the next resize). Returns false while the size is
--- still 0 or the scale chain is degenerate (layout not resolved), so the
--- caller retries on a later tick. Shared
--- by the animated (_AntsOnUpdate) and static (_AntsStaticSettle) paths.
+-- still 0, the scale chain is degenerate, or the pixel grid is unusable, so the
+-- caller retries on a later tick. Shared by the animated (_AntsOnUpdate) and
+-- static (_AntsStaticSettle) paths.
 local function _AntsResolveSize(self, d)
     local w, h = self:GetSize()
     -- Taint-strip (reparented frames can return secret-number sizes).
@@ -233,6 +233,12 @@ local function _AntsResolveSize(self, d)
     -- floor both dimensions at one pixel so (w + h) is always a real divisor.
     if w < onePixel then w = onePixel end
     if h < onePixel then h = onePixel end
+    -- Total sanity gate before anything is cached. An infinite onePixel (a
+    -- bogus PP.physicalHeight makes PP.perfect infinite) snaps w and h to NaN,
+    -- which slips past every comparison above and then poisons the k divide
+    -- below. NaN and inf both fail this test, so the phase endpoints are always
+    -- real numbers and SetTexCoord can never be handed a value it rejects.
+    if not (w > 0 and h > 0 and w + h < math.huge) then return false end
     local sTh = floor(d.th / onePixel + 0.5) * onePixel
     if sTh < onePixel then sTh = onePixel end
     d.top:SetHeight(sTh); d.bottom:SetHeight(sTh)
