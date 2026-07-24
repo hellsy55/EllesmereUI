@@ -97,6 +97,23 @@ local function ShouldAutoHide()
     return false
 end
 
+-- Single source of truth for "is the tracker visually on screen right now".
+-- otf:IsShown() alone is not enough: HardHide() (below) falls back to
+-- SetAlpha(0) in combat because Show()/Hide() are protected on this
+-- EditMode frame, so IsShown() stays true while the frame is invisible.
+-- Every place that decides whether to show/hide our BG chrome must read
+-- this instead of re-deriving its own partial view of "visible" -- that
+-- drift (some checks knew about alpha/ShouldAutoHide, some didn't) is what
+-- caused the BG to flicker back in during combat.
+local function TrackerIsVisible(otf)
+    if not otf then return false end
+    if not otf:IsShown() then return false end
+    if otf:GetAlpha() <= 0 then return false end
+    if ShouldAutoHide() then return false end
+    return true
+end
+EQT.TrackerIsVisible = TrackerIsVisible
+
 -- Suspend/resume all QT event frames in raids/arenas/M+. Prevents quest
 -- events (QUEST_LOG_UPDATE etc.) from doing skin/resize/classify work when
 -- the tracker is hidden anyway. Re-registers on zone-out / unsuppress.
@@ -377,8 +394,9 @@ local function ResizeBGToContent()
     local bg = _bgFrame
     local otf = GetTracker()
     if not bg or not otf then return end
-    -- Tracker hidden (e.g. raid/arena auto-hide, Blizzard hide): BG follows.
-    if not otf:IsShown() then
+    -- Tracker hidden (e.g. raid/arena auto-hide, Blizzard hide, or the
+    -- combat alpha-fallback in HardHide): BG follows.
+    if not TrackerIsVisible(otf) then
         if bg:IsShown() then bg:Hide() end
         return
     end
@@ -486,7 +504,7 @@ function EQT.InitVisibility()
     -- and OnHide won't fire again, leaving BG + divider visible alone.
     local function SyncBGToTracker()
         if not _bgFrame then return end
-        if otf:IsShown() then _bgFrame:Show() else _bgFrame:Hide() end
+        if TrackerIsVisible(otf) then _bgFrame:Show() else _bgFrame:Hide() end
     end
     SyncBGToTracker()
     C_Timer.After(0.1, SyncBGToTracker)
@@ -525,7 +543,7 @@ function EQT.InitVisibility()
     if EllesmereUI.RegisterMouseoverTarget then
         local moProxy = {}
         moProxy.IsShown = function()
-            return otf and otf:IsShown() and not ShouldAutoHide()
+            return TrackerIsVisible(otf)
         end
         moProxy.IsMouseOver = function()
             if otf and otf:IsMouseOver() then return true end
