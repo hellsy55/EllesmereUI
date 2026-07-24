@@ -6,6 +6,12 @@
 local L = EllesmereUI.RegisterLocale("deDE")
 if not L then return end
 
+L["BLIZZARD POPUPS & GAME MENU"] = "BLIZZARD-POP-UPS & SPIELMENÜ"
+L["Resurrect Accept Glow"] = "Leuchten der Wiederbelebungsannahme"
+L["Adds a glowing, pulsating border around the Accept button of resurrection popups so a pending resurrect is hard to miss. Follows the Element & Text Color setting. Applies instantly, no reload needed."] = "Fügt der Annehmen-Schaltfläche von Wiederbelebungsfenstern einen leuchtenden, pulsierenden Rahmen hinzu, damit eine ausstehende Wiederbelebung nicht übersehen wird. Verwendet die Einstellung für Element- und Textfarbe. Wird sofort ohne Neuladen angewendet."
+L["Button Border Size"] = "Rahmengröße der Schaltfläche"
+L["Element & Text Color"] = "Element- & Textfarbe"
+
 L["    Enemy Units"] = "    Feindliche Einheiten"
 L["    Friendly Units"] = "    Freundliche Einheiten"
 L["  ... and %d more"]  = "  ... und %d weitere"
