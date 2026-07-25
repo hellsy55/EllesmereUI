@@ -5274,6 +5274,23 @@ local function RestoreFromOffscreen(element)
         storedParents[element] = nil
     end
 end
+-- Blizzard's plate aura item frames are created mouse-enabled with tooltip
+-- handlers (Blizzard_NamePlateAuras.xml), so an alpha-0 aura row kept on the
+-- plate still shows tooltips and takes the clicks aimed through it at the
+-- plate or the world. Sweep the kept-alive row's subtree mouse-dead; pool
+-- frames persist, so one write per frame sticks, and the recursion re-runs
+-- per refresh only to catch newly pooled items.
+local mouseDeadAuraItems = setmetatable({}, { __mode = "k" })
+local function KillAuraRowMouse(frame)
+    if not frame or frame:IsForbidden() then return end
+    if not mouseDeadAuraItems[frame] then
+        mouseDeadAuraItems[frame] = true
+        frame:EnableMouse(false)
+    end
+    for i = 1, frame:GetNumChildren() do
+        KillAuraRowMouse((select(i, frame:GetChildren())))
+    end
+end
 local function HideBlizzardFrame(nameplate, unit)
     if not nameplate then return end
     local uf = nameplate.UnitFrame
@@ -5288,12 +5305,23 @@ local function HideBlizzardFrame(nameplate, unit)
     -- the AurasFrame, which our RefreshAuras hook below reads. Re-home it on
     -- the nameplate and alpha it out so Blizzard keeps updating it while its
     -- rows stay invisible. (The WidgetContainer is likewise kept, further down.)
+    -- 12.1: our containers own plate auras and these lists are taint-locked
+    -- and unused (see the RefreshAuras gate below), so nothing needs the frame
+    -- live -- and its item frames are mouse-enabled Blizzard templates with
+    -- tooltip handlers, which made the alpha-0 keep-alive an invisible
+    -- tooltip/click trap parked above every plate (/fstack-convicted:
+    -- BuffListFrame). Park it offscreen with the other children instead.
     if uf.AurasFrame then
-        if not storedParents[uf.AurasFrame] then
-            storedParents[uf.AurasFrame] = uf.AurasFrame:GetParent()
+        if ns.NPC_OwnsAuras then
+            MoveToOffscreen(uf.AurasFrame, unit)
+        else
+            if not storedParents[uf.AurasFrame] then
+                storedParents[uf.AurasFrame] = uf.AurasFrame:GetParent()
+            end
+            uf.AurasFrame:SetParent(nameplate)
+            uf.AurasFrame:SetAlpha(0)
+            KillAuraRowMouse(uf.AurasFrame)
         end
-        uf.AurasFrame:SetParent(nameplate)
-        uf.AurasFrame:SetAlpha(0)
     end
     -- Park the UnitFrame's child frames on the hidden holder, discovered
     -- generically -- whatever Blizzard parents under the UnitFrame is swept, so
@@ -5357,6 +5385,9 @@ local function HideBlizzardFrame(nameplate, unit)
         hookedAurasFrames[uf.AurasFrame] = true
         hooksecurefunc(uf.AurasFrame, "RefreshAuras", function(af)
             if af:IsForbidden() then return end
+            -- Newly pooled item frames arrive mouse-enabled; keep the
+            -- kept-alive row mouse-dead as it grows.
+            KillAuraRowMouse(af)
             local parent = af:GetParent()
             if not parent then return end
             local ufUnit = parent.unit or (parent.GetUnit and parent:GetUnit())
