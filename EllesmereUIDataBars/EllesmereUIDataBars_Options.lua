@@ -2656,7 +2656,13 @@ initFrame:SetScript("OnEvent", function(self)
                 }
             elseif b.type == "ms" then
                 typeRows = {
-                    MkToggle("World Latency", "useWorldLatency", "Show world latency instead of home latency."),
+                    { type = "dropdown", text = "Latency",
+                      tooltip = "Which latency to show: home, world, or both side by side.",
+                      values = { home = "Home", world = "World", both = "Both" },
+                      order = { "home", "world", "both" },
+                      getValue = function() return ns.LatencyMode(s) end,
+                      setValue = function(v) s.latencyMode = v; Apply() end },
+                    MkToggle("Show Icon", "showIcon", "Shows a house or globe icon marking which latency each value is."),
                 }
             elseif b.type == "gold" then
                 typeRows = {
