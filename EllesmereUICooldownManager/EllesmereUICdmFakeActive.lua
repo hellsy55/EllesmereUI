@@ -585,7 +585,8 @@ if EllesmereUI and EllesmereUI.IS_121 then
                             (ss and ss.cooldownTextR) or (bd and bd.cooldownTextR) or 1,
                             (ss and ss.cooldownTextG) or (bd and bd.cooldownTextG) or 1,
                             (ss and ss.cooldownTextB) or (bd and bd.cooldownTextB) or 1)
-                        fs:SetPoint("CENTER", cd, "CENTER",
+                        ns.AnchorCooldownText(fs, cd,
+                            (ss and ss.cooldownTextPosition) or (bd and bd.cooldownTextPosition) or "center",
                             (ss and ss.cooldownTextX) or (bd and bd.cooldownTextX) or 0,
                             (ss and ss.cooldownTextY) or (bd and bd.cooldownTextY) or 0)
                         local AK2 = EllesmereUI.AuraKit

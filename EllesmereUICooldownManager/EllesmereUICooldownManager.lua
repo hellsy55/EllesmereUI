@@ -510,7 +510,8 @@ local DEFAULTS = {
                     barVisibility = "always", housingHideEnabled = true,
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
-                    showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
+                    showCooldownText = true, cooldownTextPosition = "center",
+                    showItemCount = true, showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2, keybindAlign = "left",
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
@@ -529,7 +530,8 @@ local DEFAULTS = {
                     barVisibility = "always", housingHideEnabled = true,
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
-                    showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
+                    showCooldownText = true, cooldownTextPosition = "center",
+                    showItemCount = true, showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2, keybindAlign = "left",
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
@@ -554,7 +556,8 @@ local DEFAULTS = {
                     barVisibility = "always", housingHideEnabled = true,
                     visHideHousing = true, visOnlyInstances = false,
                     visHideMounted = false, visHideNoTarget = false, visHideNoEnemy = false,
-                    showCooldownText = true, showItemCount = true, showTooltip = false, showKeybind = false,
+                    showCooldownText = true, cooldownTextPosition = "center",
+                    showItemCount = true, showTooltip = false, showKeybind = false,
                     keybindSize = 10, keybindOffsetX = 2, keybindOffsetY = -2, keybindAlign = "left",
                     keybindR = 1, keybindG = 1, keybindB = 1, keybindA = 0.9,
                 },
@@ -5053,10 +5056,25 @@ end
 -------------------------------------------------------------------------------
 --  Style a fake-active overlay's own countdown number to match Duration Text
 -------------------------------------------------------------------------------
+local COOLDOWN_TEXT_POINTS = {
+    center = { "CENTER", "CENTER", "CENTER" },
+    top = { "BOTTOM", "TOP", "CENTER" },
+    bottom = { "TOP", "BOTTOM", "CENTER" },
+    left = { "RIGHT", "LEFT", "RIGHT" },
+    right = { "LEFT", "RIGHT", "LEFT" },
+}
+
+function ns.AnchorCooldownText(text, owner, position, x, y)
+    local points = COOLDOWN_TEXT_POINTS[position] or COOLDOWN_TEXT_POINTS.center
+    text:ClearAllPoints()
+    text:SetPoint(points[1], owner, points[2], x or 0, y or 0)
+    text:SetJustifyH(points[3])
+end
+
 -- The overlay (EllesmereUICdmFakeActive.lua) runs its own Cooldown widget, whose
 -- number would otherwise render in Blizzard's default font. Mirror the same
 -- Duration Text styling the real icon gets in RefreshCDMIconAppearance: font,
--- size (scale-compensated), colour, centre offset, and the show/hide toggle. ssb
+-- size (scale-compensated), colour, position, offset, and the show/hide toggle. ssb
 -- is the resolved per-icon settings and falls back to the bar's values (nil is
 -- fine). Call AFTER SetCooldown so Blizzard's countdown FontString exists.
 function ns.StyleOverlayCooldownText(oCd, barData, ssb, iconScale)
@@ -5075,14 +5093,15 @@ function ns.StyleOverlayCooldownText(oCd, barData, ssb, iconScale)
     local cdR = (ssb and ssb.cooldownTextR) or (barData and barData.cooldownTextR) or 1
     local cdG = (ssb and ssb.cooldownTextG) or (barData and barData.cooldownTextG) or 1
     local cdB = (ssb and ssb.cooldownTextB) or (barData and barData.cooldownTextB) or 1
+    local cdPosition = (ssb and ssb.cooldownTextPosition)
+        or (barData and barData.cooldownTextPosition) or "center"
     local cdX = (ssb and ssb.cooldownTextX) or (barData and barData.cooldownTextX) or 0
     local cdY = (ssb and ssb.cooldownTextY) or (barData and barData.cooldownTextY) or 0
     for _, rgn in pairs({ oCd:GetRegions() }) do
         if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
             EllesmereUI.ApplyIconTextFont(rgn, cdFont, cdSize, "cdm")
             rgn:SetTextColor(cdR, cdG, cdB)
-            rgn:ClearAllPoints()
-            rgn:SetPoint("CENTER", oCd, "CENTER", cdX, cdY)
+            ns.AnchorCooldownText(rgn, oCd, cdPosition, cdX, cdY)
         end
     end
 end
@@ -5498,6 +5517,8 @@ local function RefreshCDMIconAppearance(barKey)
                 local cdR = (ssb and ssb.cooldownTextR) or barData.cooldownTextR or 1
                 local cdG = (ssb and ssb.cooldownTextG) or barData.cooldownTextG or 1
                 local cdB = (ssb and ssb.cooldownTextB) or barData.cooldownTextB or 1
+                local cdPosition = (ssb and ssb.cooldownTextPosition)
+                    or barData.cooldownTextPosition or "center"
                 local cdX = (ssb and ssb.cooldownTextX) or barData.cooldownTextX or 0
                 local cdY = (ssb and ssb.cooldownTextY) or barData.cooldownTextY or 0
                 -- Find Blizzard's countdown text FontString on the Cooldown widget.
@@ -5509,8 +5530,7 @@ local function RefreshCDMIconAppearance(barKey)
                     if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
                         EllesmereUI.ApplyIconTextFont(rgn, cdFont, cdSize, "cdm")
                         rgn:SetTextColor(cdR, cdG, cdB)
-                        rgn:ClearAllPoints()
-                        rgn:SetPoint("CENTER", cd, "CENTER", cdX, cdY)
+                        ns.AnchorCooldownText(rgn, cd, cdPosition, cdX, cdY)
                     end
                 end
             end
@@ -5880,7 +5900,8 @@ local function EnsureFocusKickBar()
         iconZoom = 0.08, iconShape = "none",
         verticalOrientation = false, barBgEnabled = false,
         barBgR = 0, barBgG = 0, barBgB = 0,
-        showCooldownText = true, showItemCount = true, cooldownFontSize = 12,
+        showCooldownText = true, cooldownTextPosition = "center",
+        showItemCount = true, cooldownFontSize = 12,
         showCharges = true, chargeFontSize = 11,
         desaturateOnCD = true, swipeAlpha = 0.7,
         suppressGCD = true,
