@@ -3776,7 +3776,7 @@ L["Show a reminder when you don't have an active pet summoned. Only applies to p
 L["Show a reminder when your active pet is set to Passive stance. Only applies to pet classes (Hunter, Warlock, Death Knight, Mage)."] = "소환 중인 소환수의 태세가 수동적으로 설정되어 있을 때 알림을 표시합니다. 소환수 직업(사냥꾼, 흑마법사, 죽음의 기사, 마법사)에만 적용됩니다."
 L["Show a reminder when your Demonology Warlock has the wrong pet summoned (not Felguard)."] = "악마 흑마법사가 잘못된 소환수(지옥수호병이 아닌)를 소환했을 때 알림을 표시합니다."
 L["Show special reminders while out in the open world."] = "야외에 있을 때 특수 알림을 표시합니다."
-L["Show special reminders while out in the open world.\nReminders are always hidden in rested areas (cities and inns)."] = "일반 필드에서 특별한 알림을 표시합니다.\n대도시나 여관 같은 휴식 구역에서는 알림이 표시되지 않습니다."
+L["Show special reminders while out in the open world.\nReminders are always hidden in rested areas (cities and inns)."] = "야외에 있을 때 특수 알림을 표시합니다.\n대도시나 여관 같은 휴식 구역에서는 알림이 항상 숨겨집니다."
 L["This option only affects Raid Buffs and Paladin Beacons"] = "이 설정은 공격대 강화 효과와 성기사 등불에만 적용됩니다"
 L["This option requires a Glow Type other than None"] = "이 설정은 발광 유형을 '없음' 이외로 설정해야 합니다."
 -- add AuraBuffReminders Popup (오라/강화 효과 알림 팝업)
