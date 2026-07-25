@@ -4574,7 +4574,7 @@ L["Blizzard tracker skin, visibility rules, auto-accept/turn-in, quest-item hotk
 L["Boss Combat"] = "우두머리 전투"
 L["Completed Color"] = "완료 색상"
 L["Focused Color"] = "집중 색상"
-L["Force Quest Tracker on Screen"] = "추척기 창 화면 안 고정"
+L["Force Quest Tracker on Screen"] = "퀘스트 추적기 화면 강제 고정"
 L["Hide When In Raid"] = "공격대 시 숨기기"
 L["Hide All Objectives"] = "모든 목표 숨기기"
 L["Hold Shift to Skip"] = "쉬프트 누른 채로 건너뛰기"
