@@ -9657,6 +9657,17 @@ initFrame:SetScript("OnEvent", function(self)
                         { charge = "chargeHideCdText", label = "+ Hide Duration (Charges > 0)",
                           applyKeys  = { "chargeHideCdText" },
                           applyWrite = function(t, v) t.chargeHideCdText = v and true or false end },
+                        -- Charge reading for the two Hidden (CD Ready) modes only.
+                        -- They normally treat a charge spell as ready at MAX charges,
+                        -- so the icon appears on the first spent charge and tracks the
+                        -- recharge; this opts the spell back into the older reading --
+                        -- stay hidden while any charge is still in hand, i.e. show up
+                        -- only once the ability is fully spent. No effect on the other
+                        -- effects (they already read "no charges left") or on
+                        -- non-charge spells.
+                        { charge = "chargeHideUntilSpent", label = "+ Stay Hidden While Charges Remain",
+                          applyKeys  = { "chargeHideUntilSpent" },
+                          applyWrite = function(t, v) t.chargeHideUntilSpent = v and true or false end },
                         -- Same logic as Hidden (On CD) but with a customizable opacity
                         -- instead of a hard 0. Click prompts for the percent; the label
                         -- shows it (e.g. "50% Lower Alpha (On CD)") while it is selected.
@@ -10062,7 +10073,11 @@ initFrame:SetScript("OnEvent", function(self)
                                                 sLbl:SetTextColor(acR, acG, acB, 1)
                                                 if item.charge == "chargeHideCdText" then
                                                     ns._cdmAnyChargeHideCdText = true
-                                                else
+                                                elseif item.charge ~= "chargeHideUntilSpent" then
+                                                    -- chargeHideUntilSpent needs no session
+                                                    -- gate: it is read inside the cd-state
+                                                    -- evaluator, which only runs for icons
+                                                    -- that have a Hidden (CD Ready) effect.
                                                     ns._cdmAnyChargeStyle = true
                                                 end
                                             else
@@ -11851,7 +11866,7 @@ initFrame:SetScript("OnEvent", function(self)
                             EnsureSS(); SetOwn("cdStateEffect", v)
                             if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
                         end,
-                        function() return ss.cdStateEffect == nil and not ss.chargeHideSwipe and not ss.hideRechargeEdge and not ss.chargeHideCdText end,
+                        function() return ss.cdStateEffect == nil and not ss.chargeHideSwipe and not ss.hideRechargeEdge and not ss.chargeHideCdText and not ss.chargeHideUntilSpent end,
                         function(si, item, sub)
                             -- Lower Alpha (On CD): clicking prompts for the opacity
                             -- percent, then selects the effect (mirrors the setVal above).
