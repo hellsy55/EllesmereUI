@@ -386,25 +386,31 @@ local function ApplyStyleToRegions(button, style)
     -- overrides from the 4-state tooltip mode (style.tooltipCombatHide /
     -- style.tooltipAnchor = "cursor"). Button-surface calls: change-guarded,
     -- stamped on success only, deferred to the restriction lift when denied.
-    -- API-existence guards keep stale builds inert.
-    if button.SetHideTooltipInCombat then
-        local wantCombat = style.tooltipCombatHide and true or false
-        if d.akTipCombat ~= wantCombat then
-            if pcall(button.SetHideTooltipInCombat, button, wantCombat) then
-                d.akTipCombat = wantCombat
-            elseif d.styleKey and AK.AurasRestricted() then
-                deferredRestyles[d.styleKey] = true
+    -- API-existence guards keep stale builds inert. Skipped entirely for
+    -- noTooltips styles: these buttons must never show a tooltip, and
+    -- configuring tooltip behaviour re-arms the button's mouse as a side
+    -- effect (the nameplate click/tooltip eater), so never touch the tooltip
+    -- surface of a button that has no tooltip to configure.
+    if not style.noTooltips then
+        if button.SetHideTooltipInCombat then
+            local wantCombat = style.tooltipCombatHide and true or false
+            if d.akTipCombat ~= wantCombat then
+                if pcall(button.SetHideTooltipInCombat, button, wantCombat) then
+                    d.akTipCombat = wantCombat
+                elseif d.styleKey and AK.AurasRestricted() then
+                    deferredRestyles[d.styleKey] = true
+                end
             end
         end
-    end
-    if button.SetTooltipAnchorPoint then
-        local wantAnchor = (style.tooltipAnchor == "cursor")
-            and "ANCHOR_CURSOR" or "ANCHOR_BOTTOMLEFT"
-        if d.akTipAnchor ~= wantAnchor then
-            if pcall(button.SetTooltipAnchorPoint, button, wantAnchor) then
-                d.akTipAnchor = wantAnchor
-            elseif d.styleKey and AK.AurasRestricted() then
-                deferredRestyles[d.styleKey] = true
+        if button.SetTooltipAnchorPoint then
+            local wantAnchor = (style.tooltipAnchor == "cursor")
+                and "ANCHOR_CURSOR" or "ANCHOR_BOTTOMLEFT"
+            if d.akTipAnchor ~= wantAnchor then
+                if pcall(button.SetTooltipAnchorPoint, button, wantAnchor) then
+                    d.akTipAnchor = wantAnchor
+                elseif d.styleKey and AK.AurasRestricted() then
+                    deferredRestyles[d.styleKey] = true
+                end
             end
         end
     end
