@@ -159,7 +159,6 @@ local defaults = {
     profile = {
         nextBarId  = 0,   -- monotonic bar id counter; only ever incremented
         bars       = {},  -- ordered array of barCfg
-        characters = {},  -- cross-character gold store, keyed "Name-Realm"
     },
 }
 
@@ -3046,6 +3045,13 @@ end
 -------------------------------------------------------------------------------
 function WB:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIDataBarsDB", defaults)
+    -- The cross-character gold ledger used to live in the profile, which put
+    -- every character's name, realm and balance into shared export strings and
+    -- gave each profile its own separate ledger. It is account data now
+    -- (EllesmereUIDB.dataBarsGold, see GoldStore). Drop the old copy rather
+    -- than migrate it: on anyone who imported a profile it holds the exporter's
+    -- characters, not their own, and the account store refills from live play.
+    self.db.profile.characters = nil
 end
 
 function WB:OnEnable()
