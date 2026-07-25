@@ -5629,34 +5629,38 @@ function NameplateFrame:UpdateCastText(spellName)
     local useClassColor = defaults.castTargetClassColor
     if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
 
-    local targetColor, targetHex
+    local targetColor
     if useClassColor then
         if type(spellTargetClass) ~= "nil" and C_ClassColor then
             targetColor = C_ClassColor.GetClassColor(spellTargetClass)
         end
-        -- spellTargetClass may be SECRET in instanced content, and the color
-        -- object's components are then secret too: GenerateHexColor runs
-        -- arithmetic + string.format on them (errors under our taint), and
-        -- the hex is concatenated into the combined-mode format string below,
-        -- where a secret string would also error. Combined mode falls back to
-        -- white for secret-class targets; the separate castTarget FontString
-        -- keeps full class color either way via SetTextColor, whose setter
-        -- accepts secret components.
-        if targetColor and targetColor.GenerateHexColor
-            and not (issecretvalue and issecretvalue(spellTargetClass)) then
-            targetHex = targetColor:GenerateHexColor()
+    end
+
+    local nameColor = db.castNameColor or defaults.castNameColor
+    local targetText = combine and hasTarget and self.castName or self.castTarget
+    if useClassColor then
+        if targetColor then
+            targetText:SetTextColor(targetColor:GetRGB())
+        else
+            targetText:SetTextColor(1, 1, 1, 1)
         end
-        targetHex = targetHex or "ffffffff"
     else
         local c = db.castTargetColor or defaults.castTargetColor
-        targetHex = string.format("ff%02x%02x%02x",
-            math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
+        targetText:SetTextColor(c.r, c.g, c.b, 1)
+    end
+    if not combine or not hasTarget then
+        self.castName:SetTextColor(nameColor.r, nameColor.g, nameColor.b, 1)
     end
 
     if type(spellName) == "nil" then
         self.castName:SetText("")
     elseif combine and hasTarget then
-        self.castName:SetFormattedText("%s - |c" .. targetHex .. "%s|r", spellName, spellTarget)
+        -- 12.1 class RGB may be SECRET: use it as the FontString's base color,
+        -- then override only the spell prefix with a clean profile-color escape.
+        local nameHex = string.format("ff%02x%02x%02x",
+            math.floor(nameColor.r * 255 + 0.5), math.floor(nameColor.g * 255 + 0.5),
+            math.floor(nameColor.b * 255 + 0.5))
+        self.castName:SetFormattedText("|c" .. nameHex .. "%s - |r%s", spellName, spellTarget)
     else
         self.castName:SetText(spellName)
     end
@@ -5664,17 +5668,6 @@ function NameplateFrame:UpdateCastText(spellName)
         self.castTarget:SetText("")
     else
         self.castTarget:SetText(spellTarget)
-    end
-
-    if useClassColor then
-        if targetColor then
-            self.castTarget:SetTextColor(targetColor:GetRGB())
-        else
-            self.castTarget:SetTextColor(1, 1, 1, 1)
-        end
-    else
-        local c = db.castTargetColor or defaults.castTargetColor
-        self.castTarget:SetTextColor(c.r, c.g, c.b, 1)
     end
 
     local castW = self.cast:GetWidth()
@@ -8428,51 +8421,61 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     local fc = (p and p.interruptedFlashColor) or defaults.interruptedFlashColor
     self.cast:GetStatusBarTexture():SetVertexColor(fc.r, fc.g, fc.b)
 
-    -- Resolve the interrupter's name + class from the GUID. For a player GUID,
-    -- GetPlayerInfoByGUID returns both in one call (class = 2nd return, name =
-    -- 6th return).
+    -- GetPlayerInfoByGUID accepts the event's SECRET interrupter GUID and may
+    -- return a SECRET name/class. Keep those values opaque until native sinks.
     local interrupterName
     local interrupterClass
-    if interrupterGUID then
+    local guidIsSecret
+    if type(interrupterGUID) ~= "nil" then
+        guidIsSecret = issecretvalue and issecretvalue(interrupterGUID)
         local _, class, _, _, _, name = GetPlayerInfoByGUID(interrupterGUID)
         interrupterClass = class
         interrupterName = name
-        if not interrupterName then
+        if type(interrupterName) == "nil" and not guidIsSecret then
             -- Fallback for a NON-player interrupter GUID (a pet or an NPC):
             -- GetPlayerInfoByGUID only resolves players, so it returns nothing
             -- above and the name is pulled from the GUID's live unit token
             -- instead. Non-players have no class, so interrupterClass stays nil
             -- and the class-color path below is simply skipped for them.
             local token = UnitTokenFromGUID(interrupterGUID)
-            if token then interrupterName = UnitName(token) end
+            if type(token) ~= "nil"
+                and not (issecretvalue and issecretvalue(token)) then
+                interrupterName = UnitName(token)
+            end
         end
     end
     local cfg = p or defaults
     local useClassColor = defaults.castTargetClassColor
     if cfg.castTargetClassColor ~= nil then useClassColor = cfg.castTargetClassColor end
+    local castNameColor = cfg.castNameColor or defaults.castNameColor
+    local interrupterColor
+    if useClassColor and type(interrupterClass) ~= "nil" and C_ClassColor then
+        interrupterColor = C_ClassColor.GetClassColor(interrupterClass)
+    end
+    if interrupterColor then
+        self.castName:SetTextColor(interrupterColor:GetRGB())
+    else
+        self.castName:SetTextColor(castNameColor.r, castNameColor.g, castNameColor.b, 1)
+    end
 
     -- Show the interrupter inline as "Interrupted (Name)" in the single cast-name
     -- FontString; the cast-target / timer slots are cleared during the flash.
+    local hasInterrupter = type(interrupterName) ~= "nil"
     local castW = self.cast:GetWidth()
     if castW and castW > 0 then
         local cnWPct = (p and p.castNameWidthPct) or defaults.castNameWidthPct
-        self.castName:SetWidth(interrupterName and math.max(castW - 8, 20) or castW * cnWPct / 100)
+        self.castName:SetWidth(hasInterrupter and math.max(castW - 8, 20) or castW * cnWPct / 100)
     end
 
     local interruptedText = (EllesmereUI and EllesmereUI.L and EllesmereUI.L("Interrupted")) or "Interrupted"
-    if interrupterName then
-        local sourceText = interrupterName
-        if useClassColor and interrupterClass and C_ClassColor then
-            local c = C_ClassColor.GetClassColor(interrupterClass)
-            if c then
-                local hex = (c.GenerateHexColor and c:GenerateHexColor()) or c.colorStr
-                if not hex and c.r and c.g and c.b then
-                    hex = string.format("ff%02x%02x%02x", math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5), math.floor(c.b * 255 + 0.5))
-                end
-                if hex then sourceText = "|c" .. hex .. interrupterName .. "|r" end
-            end
-        end
-        self.castName:SetText(interruptedText .. " (" .. sourceText .. ")")
+    if hasInterrupter then
+        -- The base FontString color carries SECRET class RGB; only the clean
+        -- localized label/punctuation uses an inline profile-color escape.
+        local nameHex = string.format("ff%02x%02x%02x",
+            math.floor(castNameColor.r * 255 + 0.5), math.floor(castNameColor.g * 255 + 0.5),
+            math.floor(castNameColor.b * 255 + 0.5))
+        self.castName:SetFormattedText("|c" .. nameHex .. "%s (|r%s|c" .. nameHex .. ")|r",
+            interruptedText, interrupterName)
     else
         self.castName:SetText(interruptedText)
     end
@@ -8742,7 +8745,8 @@ function NameplateFrame:UNIT_SPELLCAST_FAILED()
 end
 function NameplateFrame:UNIT_SPELLCAST_INTERRUPTED(_, _, _, interrupterGUID)
     local protected = self._kickProtected
-    if interrupterGUID and ((issecretvalue and issecretvalue(protected)) or not protected) then
+    if type(interrupterGUID) ~= "nil"
+        and ((issecretvalue and issecretvalue(protected)) or not protected) then
         self:ShowCastLockout()
     end
     self:ShowInterrupted(interrupterGUID)
