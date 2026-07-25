@@ -12708,9 +12708,38 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
 
     EllesmereUI._GetFFD(blizzBar).castBarSuppressed = false
 
-    if hiddenParent and blizzBar:GetParent() == hiddenParent and EllesmereUI._GetFFD(blizzBar).origParent
+    -- Hand the bar back to the parent EUI took it from -- but never to one that
+    -- is itself hidden. Blizzard parents this bar under PlayerFrame, and Edit
+    -- Mode re-parents it into a layout frame that gets hidden on exit, while EUI
+    -- hides PlayerFrame whenever it renders its own player frame. Restoring
+    -- there leaves Blizzard's cast bar fully armed but permanently invisible,
+    -- which reads exactly like the suppression never lifted. UIParent is where
+    -- Edit Mode positions the bar from anyway, and SetParent keeps the existing
+    -- anchors, so the bar still lands where the user had it.
+    local origParent = EllesmereUI._GetFFD(blizzBar).origParent
+    local currentParent = blizzBar:GetParent()
+    local restoreParent = origParent
+    if not restoreParent or not restoreParent.IsVisible or not restoreParent:IsVisible() then
+        restoreParent = UIParent
+    end
+
+    -- Only ever un-park a bar EUI itself parked: either it is still sitting in
+    -- our hidden parent, or an earlier release handed it back to the captured
+    -- parent and that parent is itself hidden. Matching the captured parent
+    -- exactly is what separates "Blizzard's own parent happens to be hidden"
+    -- from "another addon parked this bar under its own hidden frame" -- the
+    -- latter is left alone, since resurrecting it is the bug this whole
+    -- ownership dance exists to prevent.
+    local parkedByUs = (hiddenParent and currentParent == hiddenParent)
+        or (origParent and currentParent == origParent
+            and currentParent.IsVisible and not currentParent:IsVisible())
+
+    -- The Edit Mode gate can skip this; ApplyBlizzCastbarState re-runs the
+    -- release on PLAYER_ENTERING_WORLD and on Edit Mode close, so a bar left
+    -- parked by a skipped pass is healed as soon as re-parenting is legal.
+    if parkedByUs and currentParent ~= restoreParent
         and not (EditModeManagerFrame and EditModeManagerFrame:IsShown()) then
-        blizzBar:SetParent(EllesmereUI._GetFFD(blizzBar).origParent)
+        blizzBar:SetParent(restoreParent)
     end
 
     local selection = blizzBar.Selection
