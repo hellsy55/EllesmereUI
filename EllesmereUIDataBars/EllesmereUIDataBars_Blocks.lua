@@ -1125,11 +1125,16 @@ local function GoldCharKey()
     return (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or "Unknown")
 end
 
+-- ACCOUNT-level, deliberately not the profile: the ledger is a list of the
+-- player's characters with their balances, and profiles get shared. Held in
+-- the profile it rode every export string, so importers saw the exporter's
+-- alts and gold in their own tooltip. Sits top-level in EllesmereUIDB next to
+-- the Bags module's own gold ledger, which is where it should always have
+-- been -- it also means the ledger no longer resets when profiles switch.
 local function GoldStore()
-    local profile = ns.GetProfile()
-    if not profile then return {} end
-    profile.characters = profile.characters or {}
-    return profile.characters
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    EllesmereUIDB.dataBarsGold = EllesmereUIDB.dataBarsGold or {}
+    return EllesmereUIDB.dataBarsGold
 end
 
 -- Drop a character the player no longer has (renamed, deleted, transferred).
