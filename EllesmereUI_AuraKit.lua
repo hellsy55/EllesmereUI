@@ -409,6 +409,19 @@ local function ApplyStyleToRegions(button, style)
         end
     end
 
+    -- Re-assert the click disable from the initializer. It has to run AFTER the
+    -- tooltip calls above: configuring tooltip behaviour on an engine button
+    -- turns its mouse back on, which silently re-opened the nameplate
+    -- click-eater. Running it here also covers every Restyle, so a settings
+    -- change cannot re-open it either. Same deferral as its neighbours when the
+    -- button is locked down while auras are secret.
+    if not style.cancelButtons and button.SetMouseClickEnabled then
+        if not pcall(button.SetMouseClickEnabled, button, false)
+            and d.styleKey and AK.AurasRestricted() then
+            deferredRestyles[d.styleKey] = true
+        end
+    end
+
     -- Module-specific styling pass; runs at init and on every Restyle.
     if style.applyExtra then
         style.applyExtra(button, d, style)
