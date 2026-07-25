@@ -2524,7 +2524,10 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
         local maxW, yOff
         if title and title ~= "" then
             ns.SetFont(popup._title, fontSize)
-            popup._title:SetText(title); popup._title:SetTextColor(1, 1, 1, 1)
+            -- Localize here: these popups draw through SetText instead of the
+            -- Tip_* helpers, which are what normally route fixed UI strings
+            -- through the shared locale (see ns.Tip_AddLine).
+            popup._title:SetText(EllesmereUI.L(title)); popup._title:SetTextColor(1, 1, 1, 1)
             popup._title:Show()
             maxW = popup._title:GetStringWidth()
             yOff = PAD + LINE + PAD
@@ -2647,8 +2650,8 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
                     popup._foot[i] = fl
                 end
                 ns.SetFont(fl.l, fontSize); ns.SetFont(fl.r, fontSize)
-                fl.l:SetText(footerLines[i][1]); fl.l:SetTextColor(1, 1, 1, 1)
-                fl.r:SetText(footerLines[i][2]); fl.r:SetTextColor(1, 1, 1, 1)
+                fl.l:SetText(EllesmereUI.L(footerLines[i][1])); fl.l:SetTextColor(1, 1, 1, 1)
+                fl.r:SetText(EllesmereUI.L(footerLines[i][2])); fl.r:SetTextColor(1, 1, 1, 1)
                 fl.l:ClearAllPoints()
                 fl.l:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, -yOff)
                 fl.r:ClearAllPoints()
@@ -2771,8 +2774,10 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
         BuildPopup(specPool, specButton, L["CHANGE_SPEC"], entries, function(e)
             C_SpecializationInfo.SetSpecialization(e.specIndex)
         end, true, {
-            { L["LEFT_CLICK"],  L["CHANGE_SPEC_SHORT"] },
-            { L["RIGHT_CLICK"], L["CHANGE_LOOT_SPEC"] },
+            { L["LEFT_CLICK"],       L["CHANGE_SPEC_SHORT"] },
+            { L["CTRL_LEFT_CLICK"],  L["CHANGE_LOADOUT"] },
+            { L["SHIFT_LEFT_CLICK"], L["OPEN_TALENTS"] },
+            { L["RIGHT_CLICK"],      L["CHANGE_LOOT_SPEC"] },
         })
     end
 
