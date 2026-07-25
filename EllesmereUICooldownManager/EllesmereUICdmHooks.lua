@@ -1611,6 +1611,178 @@ function ns.WatchChargeCdTextIfEnabled(frame)
 end
 
 -------------------------------------------------------------------------------
+--  Cooldown State Effect -- charge-aware readiness for Hidden (CD Ready)
+--
+--  For a CHARGE spell "CD Ready" must mean AT MAX CHARGES, not "a charge is in
+--  hand". C_Spell.GetSpellCooldown() reports isActive == false for a charge spell
+--  that still has a charge left (see CdmShouldHideCountdown above), so the plain
+--  cooldown read calls a spell that is still recharging "ready" and the Hidden
+--  (CD Ready) modes dismiss the icon mid-recharge -- exactly the charge and
+--  countdown the player turned the mode on to watch. Read the recharge flag
+--  instead (GetSpellCharges().isActive: true from the first spent charge until
+--  the last one refills -- the clean signal Max Stacks Glow uses). maxCharges > 1
+--  is the charge-spell test, stable through the GCD unlike
+--  HasVisualDataSource_Charges; non-charge spells keep the caller's cooldown
+--  read. The secret currentCharges is never read.
+--
+--  Per-spell "+ Stay Hidden While Charges Remain" (ss.chargeHideUntilSpent) opts
+--  a spell back into the legacy reading, for players who only want the icon once
+--  the ability is fully spent.
+--
+--  Deliberately NOT used by the other cd-state effects: every one of those
+--  answers "can I press this?" -- Hidden (On CD) and Lower Alpha (On CD) suppress
+--  what the player cannot cast, the ready-glows highlight what they can -- and a
+--  charge spell down one stack IS castable, so "no charges left" is already the
+--  right reading there. Hidden (CD Ready) is the only mode whose job is tracking
+--  the countdown itself.
+-------------------------------------------------------------------------------
+function ns.CdmCdStateReady(liveSid, onCD, hideUntilSpent)
+    if hideUntilSpent then return not onCD end
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    if ci and (ci.maxCharges or 0) > 1 then return not ci.isActive end
+    return not onCD
+end
+
+-- Deferred cd-state evaluator for the hide / lower-alpha modes, shared by the
+-- SetDesaturated hook (which fires on every cooldown transition) and the charge
+-- watch below. Deferred by one frame because SetDesaturated fires inside
+-- Blizzard's secure CDM chain, where C_Spell.GetSpellCooldown can briefly
+-- disagree with Blizzard's own evaluation (charge spells report isActive while
+-- charges remain, GCD tail races) -- letting the API settle is what makes the
+-- read trustworthy. The OnUpdate script is installed ONCE per frame object: the
+-- hook fires on every repaint, so the per-arm work stays at plain field writes,
+-- never closure creation.
+local function ArmCdStateEval(frame, fd, cse, cseShift, lowAlpha, hideUntilSpent)
+    local pending = fd._cdStatePending
+    if not pending then
+        pending = CreateFrame("Frame")
+        pending:Hide()
+        fd._cdStatePending = pending
+        pending:SetScript("OnUpdate", function(self)
+            self:Hide()
+            local fc3 = _ecmeFC[frame]
+            local sid3 = fc3 and fc3.spellID
+            local bk3 = fc3 and fc3.barKey
+            if not sid3 or not bk3 then return end
+            local liveSid = sid3
+            if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                liveSid = C_SpellBook.FindSpellOverrideByID(sid3) or sid3
+            end
+            local cseInfo = C_Spell.GetSpellCooldown(liveSid)
+            local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
+            local myCse = self.cse
+            local bd3 = barDataByKey and barDataByKey[bk3]
+            local baseA = ns.IconShownAlpha(fc3, bd3)
+            if myCse == "lowerAlphaOnCD" then
+                -- Lowered (not hidden): reuse _cdStateHidden as the
+                -- "cd-state owns this alpha" flag so the opacity appliers
+                -- leave the lowered value in place, exactly like hiddenOnCD.
+                -- A visibility-hidden bar (baseA 0) stays at 0 in both states.
+                frame:SetAlpha(baseA == 0 and 0
+                    or (onCD and (self.lowAlpha or 0.5) or baseA))
+                if fc3 then
+                    fc3._cdStateHidden = onCD or false
+                    if ns.SetCdStateShiftHidden then
+                        ns.SetCdStateShiftHidden(fc3, false)
+                    end
+                end
+            else
+                local hide
+                if myCse == "hiddenOnCD" then
+                    hide = onCD
+                else
+                    -- Hidden (CD Ready): on a charge spell "ready" is max
+                    -- charges, so the icon keeps tracking the recharge.
+                    hide = ns.CdmCdStateReady(liveSid, onCD, self.hideUntilSpent)
+                end
+                frame:SetAlpha(hide and 0 or baseA)
+                if fc3 then
+                    fc3._cdStateHidden = hide or false
+                    if ns.SetCdStateShiftHidden then
+                        ns.SetCdStateShiftHidden(fc3, self.shift and hide or false)
+                    end
+                end
+            end
+        end)
+    end
+    -- All captured at arm time (settings, not volatile state); only
+    -- lowerAlphaOnCD reads lowAlpha, only the CD-Ready modes read hideUntilSpent.
+    pending.cse = cse
+    pending.lowAlpha = lowAlpha
+    pending.shift = cseShift
+    pending.hideUntilSpent = hideUntilSpent
+    pending:Show()
+end
+
+-------------------------------------------------------------------------------
+--  Hidden (CD Ready) on charge spells: refill-edge coverage
+--
+--  The mode is driven by the SetDesaturated hook, which fires when a charge is
+--  SPENT (Blizzard repaints the icon) but NOT when the last charge REFILLS to max
+--  -- the same gap Max Stacks Glow and Hide CD Text (Charges) already close with
+--  SPELL_UPDATE_CHARGES (that event fires on both charge transitions and nothing
+--  else, so it is far cheaper than SPELL_UPDATE_COOLDOWN). Without it a charge
+--  spell that topped off would stay visible for good: at max charges nothing
+--  repaints the icon again. Only icons actually running the mode on a charge
+--  spell enter the set, and it self-drains -- the eval unwatches a frame whose
+--  effect or spell went away, so each event iterates a tiny table.
+-------------------------------------------------------------------------------
+ns._cdStateChargeWatch = ns._cdStateChargeWatch or setmetatable({}, { __mode = "k" })
+
+local function EvalCdStateChargeFrame(frame, fd)
+    local fcw = _ecmeFC[frame]
+    local sidw = fcw and fcw.spellID
+    local bkw = fcw and fcw.barKey
+    if not sidw or not bkw then
+        ns._cdStateChargeWatch[frame] = nil
+        return
+    end
+    local ssw = ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw))
+    local csew = ssw and ssw.cdStateEffect
+    if csew ~= "hiddenReady" and csew ~= "hiddenReadyShift" then
+        -- Effect changed to something else (or cleared): the desat hook owns
+        -- every other mode, so drop the watch.
+        ns._cdStateChargeWatch[frame] = nil
+        return
+    end
+    ArmCdStateEval(frame, fd, "hiddenReady", csew == "hiddenReadyShift",
+        nil, ssw.chargeHideUntilSpent)
+end
+
+-- Register an icon whose resolved effect is Hidden (CD Ready) -- callers check
+-- that -- when its spell actually has charges. Non-charge spells never enter the
+-- set: their real CD-end edge already fires the desat hook. Called from the
+-- SetDesaturated hook (on spell rebinding) and RefreshCDMIconAppearance.
+function ns.WatchCdStateChargeIfEnabled(frame)
+    local fd = hookFrameData[frame]
+    if not fd then return end
+    local fcw = _ecmeFC[frame]
+    local sidw = fcw and fcw.spellID
+    if not sidw then return end
+    local liveSid = sidw
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        liveSid = C_SpellBook.FindSpellOverrideByID(sidw) or sidw
+    end
+    -- Charge-spell test via static charge data (stable through the GCD).
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    if not (ci and (ci.maxCharges or 0) > 1) then
+        ns._cdStateChargeWatch[frame] = nil
+        return
+    end
+    ns._cdStateChargeWatch[frame] = fd
+    if not ns._cdStateChargeEventFrame then
+        local ef = CreateFrame("Frame")
+        ef:RegisterEvent("SPELL_UPDATE_CHARGES")
+        ef:SetScript("OnEvent", function()
+            for f, d in pairs(ns._cdStateChargeWatch) do
+                EvalCdStateChargeFrame(f, d)
+            end
+        end)
+        ns._cdStateChargeEventFrame = ef
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Swiftmend brightness: Blizzard dims the icon via SetVertexColor when
 --  Efflorescence / HoTs drop. Hook the icon texture once to force bright.
 --  Recursion guard only -- never compare incoming args (secret values).
@@ -2797,68 +2969,23 @@ local function DecorateFrame(frame, barData)
                         ns.SetCdStateShiftHidden(fc2, false)
                     end
                 end
-                -- For hidden cdState modes, defer the evaluation by one
-                -- frame. Blizzard's SetDesaturated fires inside the secure
-                -- CDM chain where C_Spell.GetSpellCooldown can briefly
-                -- disagree with Blizzard's own evaluation (charge spells
-                -- report isActive while charges remain, GCD tail races).
-                -- Deferring lets the API settle before we query it.
+                -- Hidden / lower-alpha modes: hand off to the shared deferred
+                -- evaluator (ArmCdStateEval -- see the comment on it for why the
+                -- read has to wait a frame). cse is normalized, so the Shift
+                -- variants arrive here as their base mode plus cseShift.
                 if cse == "hiddenOnCD" or cse == "hiddenReady" or cse == "lowerAlphaOnCD" then
-                    if not fd._cdStatePending then
-                        fd._cdStatePending = CreateFrame("Frame")
-                        fd._cdStatePending:Hide()
+                    ArmCdStateEval(frame, fd, cse, cseShift,
+                        (ss2 and ss2.cdStateLowerAlpha) or 0.5,
+                        ss2 and ss2.chargeHideUntilSpent)
+                    -- Hidden (CD Ready) on a charge spell also needs the
+                    -- refill-to-max edge, which this hook never fires. Registered
+                    -- once per spell binding (a pooled frame can be handed a
+                    -- different spell), so the steady-state cost stays one field
+                    -- compare per repaint.
+                    if cse == "hiddenReady" and fd._cdStateChargeBoundSid ~= sid2 then
+                        fd._cdStateChargeBoundSid = sid2
+                        ns.WatchCdStateChargeIfEnabled(frame)
                     end
-                    fd._cdStatePending.cse = cse
-                    -- Captured at arm time (a setting, not volatile); only lowerAlphaOnCD reads it.
-                    fd._cdStatePending.lowAlpha = (ss2 and ss2.cdStateLowerAlpha) or 0.5
-                    -- Shift-Icons variant: the evaluator also maintains the
-                    -- bar-relayout flag (cleared for the non-shift modes).
-                    fd._cdStatePending.shift = cseShift
-                    fd._cdStatePending:SetScript("OnUpdate", function(self)
-                        self:Hide()
-                        local fc3 = _ecmeFC[frame]
-                        local sid3 = fc3 and fc3.spellID
-                        local bk3 = fc3 and fc3.barKey
-                        if not sid3 or not bk3 then return end
-                        local liveSid = sid3
-                        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-                            liveSid = C_SpellBook.FindSpellOverrideByID(sid3) or sid3
-                        end
-                        local cseInfo = C_Spell.GetSpellCooldown(liveSid)
-                        local onCD = cseInfo and cseInfo.isActive and not cseInfo.isOnGCD
-                        local myCse = self.cse
-                        local bd3 = barDataByKey and barDataByKey[bk3]
-                        local baseA = ns.IconShownAlpha(fc3, bd3)
-                        if myCse == "lowerAlphaOnCD" then
-                            -- Lowered (not hidden): reuse _cdStateHidden as the
-                            -- "cd-state owns this alpha" flag so the opacity appliers
-                            -- leave the lowered value in place, exactly like hiddenOnCD.
-                            -- A visibility-hidden bar (baseA 0) stays at 0 in both states.
-                            frame:SetAlpha(baseA == 0 and 0
-                                or (onCD and (self.lowAlpha or 0.5) or baseA))
-                            if fc3 then
-                                fc3._cdStateHidden = onCD or false
-                                if ns.SetCdStateShiftHidden then
-                                    ns.SetCdStateShiftHidden(fc3, false)
-                                end
-                            end
-                        else
-                            local hide
-                            if myCse == "hiddenOnCD" then
-                                hide = onCD
-                            else
-                                hide = not onCD
-                            end
-                            frame:SetAlpha(hide and 0 or baseA)
-                            if fc3 then
-                                fc3._cdStateHidden = hide or false
-                                if ns.SetCdStateShiftHidden then
-                                    ns.SetCdStateShiftHidden(fc3, self.shift and hide or false)
-                                end
-                            end
-                        end
-                    end)
-                    fd._cdStatePending:Show()
                     return
                 end
                 -- Query cooldown on the live override (e.g. Shimmer, not
