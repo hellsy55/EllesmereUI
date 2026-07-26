@@ -1489,6 +1489,24 @@ function ns.RescanCustomIconFlag()
     end)
 end
 
+-- Active State Glow gate: set ns._cdmAnyActiveGlow once if any saved spell (any
+-- spec) has the per-spell activeGlow style set. The buff ticker's active-glow
+-- integrity pass -- the safety net that lights the glow when Blizzard skips the
+-- SetSwipeColor call that normally drives it -- is skipped entirely for anyone
+-- who never enables it. Monotonic, scanned-once contract identical to the flags
+-- above (the swipe hook and the options setter flip the flag live on enable).
+function ns.RescanActiveGlowFlag()
+    if ns._cdmAnyActiveGlow or ns._activeGlowFlagScanned then return end
+    if not EllesmereUIDB then return end
+    ns._activeGlowFlagScanned = true
+    ns.ForEachSavedSettingsBlock(function(ss)
+        if (tonumber(ss.activeGlow) or 0) > 0 then
+            ns._cdmAnyActiveGlow = true
+            return true
+        end
+    end)
+end
+
 -------------------------------------------------------------------------------
 --  Spec helpers
 --
@@ -7290,6 +7308,7 @@ BuildAllCDMBars = function()
     ns.RescanReverseSwipeFlag()   -- set the Reverse Swipe gate (once) before refresh
     ns.RescanThresholdTextFlag()  -- set the Threshold Text gate (once) before refresh
     ns.RescanCustomIconFlag()     -- set the per-spell Custom Icon gate (once) before refresh
+    ns.RescanActiveGlowFlag()     -- set the Active State Glow gate (once) before refresh
 
     local p = ECME.db.profile
 

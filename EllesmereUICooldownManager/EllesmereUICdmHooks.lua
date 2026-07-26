@@ -2337,6 +2337,7 @@ local function DecorateFrame(frame, barData)
                 -- it. Covers /reload (runs for every icon).
                 if ss2 and (ss2.chargeHideSwipe or ss2.hideRechargeEdge) then ns._cdmAnyChargeStyle = true end
                 if ss2 and ss2.maxStacksGlow and ss2.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
+                if ss2 and ss2.activeGlow and ss2.activeGlow > 0 then ns._cdmAnyActiveGlow = true end
                 if ss2 and ss2.chargeHideCdText then ns._cdmAnyChargeHideCdText = true end
                 if ss2 and ss2.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                 if ss2 and ss2.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
@@ -7149,20 +7150,49 @@ function ns.SetupViewerHooks()
                                     end
                                 end
 
-                                -- Stale active glow cleanup: when a DoT
-                                -- expires naturally, Blizzard may not call
-                                -- SetSwipeColor until the next GCD. Check
-                                -- the current swipe color and clear the glow
-                                -- if the spell is no longer active.
-                                if fd and fd._activeGlowOn then
+                                -- Active State Glow integrity, BOTH edges. The
+                                -- glow is normally driven as a side effect of
+                                -- Blizzard calling Cooldown:SetSwipeColor, and
+                                -- Blizzard skips that call on either aura edge
+                                -- (a DoT expiring naturally pushes no swipe
+                                -- until the next GCD; an aura landing outside a
+                                -- cooldown refresh pushes none at all). The rise
+                                -- edge additionally breaks when another owner of
+                                -- the shared glowOverlay -- the CD-state glow or
+                                -- proc glow -- stops the texture without
+                                -- clearing fd._activeGlowOn: the hook's
+                                -- idempotence check then believes the glow is
+                                -- still running and never restarts it, leaving
+                                -- the icon dark for the rest of the session.
+                                -- Re-assert from the same swipe colour the hook
+                                -- reads so both edges self-heal within a tick.
+                                if fd and not fd._isBuffViewerFrame
+                                   and (fd._activeGlowOn or ns._cdmAnyActiveGlow) then
                                     local swipeColor = frame.cooldownSwipeColor
+                                    local r
                                     if swipeColor and type(swipeColor) ~= "number" and swipeColor.GetRGBA then
-                                        local r = swipeColor:GetRGBA()
-                                        -- Only clear if we can confirm r is a clean 0 (not active).
-                                        -- If r is secret or unavailable, leave the glow alone.
-                                        if r and type(r) == "number" and not issecretvalue(r) and r == 0 then
+                                        r = swipeColor:GetRGBA()
+                                        -- Secret or unavailable reads as "no
+                                        -- data" -- neither edge acts on it.
+                                        if type(r) ~= "number" or issecretvalue(r) then r = nil end
+                                    end
+                                    if r == 0 then
+                                        -- Clean 0: not active. Clear a glow we own.
+                                        if fd._activeGlowOn then
                                             if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
                                             fd._activeGlowOn = false
+                                        end
+                                    elseif r and ns._cdmAnyActiveGlow
+                                       and not (fd._activeGlowOn and fd.glowOverlay
+                                                and fd.glowOverlay._glowActive) then
+                                        -- Active, but no glow is actually running
+                                        -- on the overlay. Drop any orphaned flag
+                                        -- so ApplyActiveOverlays really restarts,
+                                        -- then let it re-resolve style + colour.
+                                        fd._activeGlowOn = false
+                                        local ssA = ns._ResolveCdmSS(frame)
+                                        if ssA and (tonumber(ssA.activeGlow) or 0) > 0 then
+                                            ns.ApplyActiveOverlays(frame, fd, ssA, true, bd)
                                         end
                                     end
                                 end
