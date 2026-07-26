@@ -3784,14 +3784,22 @@ end
 --  ResolveFontName -> SlugFlag -> IsSlugDisabled -- and were walking it from
 --  scratch on every single text update. Instrumented profiling put roughly 44%
 --  of this addon's entire CPU cost in that chain, recomputing an answer that
---  had not changed. The results depend only on the fonts DB and the addon key,
---  so they are memoized per key here.
+--  had not changed. The results depend on the fonts DB, the addon key, AND the
+--  SharedMedia path lookup (_smFontPaths, which ResolveFontName reads), so they
+--  are memoized per key here.
 --
 --  Invalidation is explicit and deliberately coarse (drop everything):
 --    * every font setting funnels through the options page's FontReload()
 --    * applying or importing a profile rewrites the fonts DB in place
 --    * the fonts reset nils the table outright
---  Anything else that writes the fonts DB must call InvalidateFontCache().
+--    * a late LibSharedMedia_Registered font updates _smFontPaths
+--  Anything else that writes the fonts DB OR _smFontPaths must call
+--  InvalidateFontCache(). Naming only the fonts DB here is what let a real bug
+--  through: an SM font registering after a module had already resolved left the
+--  Expressway fallback cached for the session. Note that memoizing in front of
+--  ResolveFontName also DISABLES its own late-load LSM re-fetch (the early
+--  cache-hit return never reaches it), so the cache is the only thing that can
+--  recover from a late registration.
 --  Mirrors the _colorCache / InvalidateColorCache pattern further up this file.
 --
 --  Stored as table fields rather than file-scope locals: this file sits on
@@ -11077,7 +11085,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.6.2"
+EllesmereUI.VERSION = "8.6.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

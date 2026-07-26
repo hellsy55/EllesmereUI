@@ -489,7 +489,16 @@ local function GetSecondaryResource()
         return { power = "BREWMASTER_STAGGER", max = mx, type = "bar" }
     elseif classFile == "WARLOCK" then
         local mx = UnitPowerMax("player", PT.SOUL_SHARDS)
-        return { power = PT.SOUL_SHARDS, max = (not issecretvalue or not issecretvalue(mx)) and mx or 5, type = "points" }
+        -- frac: this resource renders SUB-UNIT values, so its value can move
+        -- without the whole-unit count changing. Destruction (spec index 3 =
+        -- specID 267, the same spec the partial-pip render checks) spends and
+        -- gains shard FRAGMENTS in tenths. The flag drives three things that
+        -- would otherwise each need their own special case: the value guard in
+        -- UpdateSecondaryResource compares the fragment read, and ArmTick /
+        -- PollTick keep polling, because fragment DECAY out of combat is not
+        -- reliably event-driven (the poll's original no-event mandate).
+        return { power = PT.SOUL_SHARDS, max = (not issecretvalue or not issecretvalue(mx)) and mx or 5,
+                 type = "points", frac = (spec == 3) or nil }
     elseif classFile == "DEATHKNIGHT" then
         return { power = PT.RUNES, max = 6, type = "runes" }
     elseif classFile == "EVOKER" then
@@ -4527,8 +4536,26 @@ local function UpdateSecondaryResource()
     -- changes on aura events while the value stands still, so an early-out
     -- would strand the bar on the wrong colour. Secret values bail out too --
     -- they cannot be compared. Non-"points" resources never reach this branch.
+    --
+    -- THE GUARD MUST COMPARE THE VALUE THE RENDER CONSUMES, not merely the
+    -- whole-unit count. Destruction soul shards move in tenths (fragments) and
+    -- the partial-pip fill below is driven by the fragment read, so guarding on
+    -- the whole count swallowed every fragment change: fragments never appeared
+    -- in combat and never drained out of combat (tester-reported). Reading the
+    -- unmodified value is correct for all three warlock specs -- Affliction and
+    -- Demonology step it in whole shards, making it strictly no less sensitive
+    -- than the plain read. Essence is the other fractional resource and cannot
+    -- use this (UnitPower has no partial for it), hence its timer exemption
+    -- below. Any future fractional resource belongs here, not in a new
+    -- exemption.
     if cachedSecondary.type == "points" then
-        local _evCur = UnitPower("player", powerType)
+        local _evCur
+        if cachedSecondary.frac then
+            _evCur = UnitPower("player", powerType, true)
+            if _evCur == nil then _evCur = UnitPower("player", powerType) end
+        else
+            _evCur = UnitPower("player", powerType)
+        end
         if not (issecretvalue and issecretvalue(_evCur)) then
             local stb = ns.STB
             if not stb or stb.gen ~= ns.CfgGen then
@@ -5915,7 +5942,11 @@ ns.PollTick = EllesmereUI.Tick.NewAnimTicker(CreateFrame("Frame"), function()   
     end
     ns._pollFlip = not ns._pollFlip
     if ns._pollFlip then return true end
-    if typ == "runes" or typ == "custom" or typ == "bar" then
+    if typ == "runes" or typ == "custom" or typ == "bar" or cs.frac then
+        -- cs.frac (Destruction shard fragments): sub-unit movement, including
+        -- out-of-combat decay, is not reliably event-driven. The fragment-aware
+        -- value guard makes an unchanged read cheap, so this costs one
+        -- UnitPower per fire when nothing moved.
         UpdateSecondaryResource()
         return true
     end
@@ -5952,7 +5983,7 @@ function ns.ArmTick()
         if pwr == "IRONFUR_BAR" or pwr == "IGNOREPAIN_BAR" then
             ns.MotionTick.Start()
         end
-        if typ == "runes" or typ == "custom" or typ == "bar"
+        if typ == "runes" or typ == "custom" or typ == "bar" or cs.frac
            or (_essenceNextTick and pwr == PT.ESSENCE) then
             ns.PollTick.Start()
         else
