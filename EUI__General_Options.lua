@@ -407,7 +407,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.6.1",
+        version = "8.6.2",
         heroes = {
             {
                 -- Static on purpose: a suite-wide CPU pass has no single

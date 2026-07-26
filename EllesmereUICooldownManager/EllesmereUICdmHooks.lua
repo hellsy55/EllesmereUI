@@ -7232,9 +7232,29 @@ function ns.SetupViewerHooks()
             -- PLAYER_ENTERING_WORLD's second arg is the isReconnect BOOLEAN
             -- (true on /reload), so the payload must never be indexed for
             -- the other events.
-            if event ~= "UNIT_AURA"
-               or (updateInfo and (updateInfo.isFullUpdate or updateInfo.removedAuraInstanceIDs)) then
+            if event ~= "UNIT_AURA" then
                 ns._acGen = (ns._acGen or 0) + 1
+            elseif updateInfo then
+                -- SECRET-SAFE (12.1): the payload TABLE and each of its fields
+                -- can all arrive secret in instanced content, and a secret can
+                -- never be boolean-tested in Lua -- that is a hard error, not a
+                -- falsy read. So: guard the table before indexing it, bind the
+                -- fields to locals (reading a secret is always legal), then
+                -- issecretvalue-gate every test. When the payload cannot be
+                -- read, assume churn -- one extra pool rebuild costs far less
+                -- than a cache still holding released frames. On 12.0 the
+                -- fields are plain and this is the original fast path.
+                -- Same guard shape as the lust listener in CdmBuffBars.
+                if issecretvalue(updateInfo) then
+                    ns._acGen = (ns._acGen or 0) + 1
+                else
+                    local full    = updateInfo.isFullUpdate
+                    local removed = updateInfo.removedAuraInstanceIDs
+                    if issecretvalue(full) or issecretvalue(removed)
+                       or full or removed then
+                        ns._acGen = (ns._acGen or 0) + 1
+                    end
+                end
             end
             if not _btTicker then
                 _btTicker = EllesmereUI.Tick.NewAnimTicker(cdmBuffTickFrame, _btBody, 0.1)
