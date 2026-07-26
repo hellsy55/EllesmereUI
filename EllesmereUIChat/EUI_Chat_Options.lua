@@ -875,15 +875,94 @@ initFrame:SetScript("OnEvent", function(self)
             local function FontColorSwatch(active)
                 local key = active and "tabFontColorActive" or "tabFontColor"
                 local fallback = active and {r=1,g=1,b=1,a=1} or {r=1,g=1,b=1,a=.65}
+                if active then
+                    local function SetMode(mode)
+                        Set("tabFontColorActiveMode", mode)
+                        if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                        EllesmereUI:RefreshPage()
+                    end
+                    return {
+                        { tooltip="Custom Color", hasAlpha=true,
+                          getValue=function()
+                              local c=Cfg(key) or fallback
+                              return c.r,c.g,c.b,c.a == nil and fallback.a or c.a
+                          end,
+                          setValue=function(r,g,b,a)
+                              Set(key,{r=r,g=g,b=b,a=a})
+                              Set("tabFontColorActiveMode","custom")
+                              if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                          end,
+                          onClick=function(self)
+                              if (Cfg("tabFontColorActiveMode") or "custom") ~= "custom" then
+                                  SetMode("custom"); return
+                              end
+                              if self._eabOrigClick then self._eabOrigClick(self) end
+                          end,
+                          refreshAlpha=function()
+                              return (Cfg("tabFontColorActiveMode") or "custom") == "custom" and 1 or .3
+                          end },
+                        { tooltip="Accent Color", hasAlpha=false,
+                          getValue=function() return EllesmereUI.GetAccentColor() end,
+                          setValue=function() end,
+                          onClick=function() SetMode("accent") end,
+                          refreshAlpha=function()
+                              return (Cfg("tabFontColorActiveMode") or "custom") == "accent" and 1 or .3
+                          end },
+                        { tooltip="Class Color", hasAlpha=false,
+                          getValue=function()
+                              local _,class=UnitClass("player")
+                              local c=class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+                              return c and c.r or 1,c and c.g or 1,c and c.b or 1
+                          end,
+                          setValue=function() end,
+                          onClick=function() SetMode("class") end,
+                          refreshAlpha=function()
+                              return (Cfg("tabFontColorActiveMode") or "custom") == "class" and 1 or .3
+                          end },
+                    }
+                end
+                local function SetMode(mode)
+                    Set("tabFontColorMode", mode)
+                    if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                    EllesmereUI:RefreshPage()
+                end
                 return {
-                    { tooltip=active and "Active Tab Font Color" or "Tab Font Color", hasAlpha=true,
+                    { tooltip="Custom Color", hasAlpha=true,
                       getValue=function()
                           local c=Cfg(key) or fallback
                           return c.r,c.g,c.b,c.a == nil and fallback.a or c.a
                       end,
                       setValue=function(r,g,b,a)
                           Set(key,{r=r,g=g,b=b,a=a})
+                          Set("tabFontColorMode","custom")
                           if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                      end,
+                      onClick=function(self)
+                          if (Cfg("tabFontColorMode") or "custom") ~= "custom" then
+                              SetMode("custom"); return
+                          end
+                          if self._eabOrigClick then self._eabOrigClick(self) end
+                      end,
+                      refreshAlpha=function()
+                          return (Cfg("tabFontColorMode") or "custom") == "custom" and 1 or .3
+                      end },
+                    { tooltip="Accent Color", hasAlpha=false,
+                      getValue=function() return EllesmereUI.GetAccentColor() end,
+                      setValue=function() end,
+                      onClick=function() SetMode("accent") end,
+                      refreshAlpha=function()
+                          return (Cfg("tabFontColorMode") or "custom") == "accent" and 1 or .3
+                      end },
+                    { tooltip="Class Color", hasAlpha=false,
+                      getValue=function()
+                          local _,class=UnitClass("player")
+                          local c=class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+                          return c and c.r or 1,c and c.g or 1,c and c.b or 1
+                      end,
+                      setValue=function() end,
+                      onClick=function() SetMode("class") end,
+                      refreshAlpha=function()
+                          return (Cfg("tabFontColorMode") or "custom") == "class" and 1 or .3
                       end },
                 }
             end
@@ -893,60 +972,127 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
 
             _, h = W:SectionHeader(parent, "APPEARANCE", y); y = y - h
-            -- Tab background: opacity slider + inline RGB swatch per state.
-            -- Same stored tables as the old picker rows ({r,g,b,a} in
-            -- tabBackgroundColor / tabBackgroundColorActive): the slider edits
-            -- .a, the swatch edits rgb. No migration -- these keys have only
-            -- ever existed in tester builds of PR #841, never in a release.
+            -- The inactive background is a single custom color picker. The
+            -- active background uses the common Custom, Accent, Class order;
+            -- both reuse the existing color tables without new defaults.
             local TAB_BG_FALLBACK = {
                 [false] = { r=.03, g=.045, b=.05, a=.44 },
                 [true]  = { r=.03, g=.045, b=.05, a=.65 },
             }
-            local function TabBgSliderCfg(active)
-                local key = active and "tabBackgroundColorActive" or "tabBackgroundColor"
-                local fallback = TAB_BG_FALLBACK[active]
+            local function InactiveTabBgSwatches()
+                local fallback = TAB_BG_FALLBACK[false]
                 return {
-                    type="slider",
-                    text=active and "Tab Background Color Active" or "Tab Background Color",
-                    min=0, max=100, step=1, trackWidth=120,
-                    getValue=function()
-                        local c = Cfg(key) or fallback
-                        local a = c.a == nil and fallback.a or c.a
-                        return math.floor(a * 100 + 0.5)
-                    end,
-                    setValue=function(v)
-                        local c = Cfg(key) or fallback
-                        Set(key, { r=c.r, g=c.g, b=c.b, a=v/100 })
-                        if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
-                    end,
+                    { tooltip="Custom Color", hasAlpha=false,
+                      getValue=function()
+                          local c=Cfg("tabBackgroundColor") or fallback
+                          return c.r,c.g,c.b,c.a == nil and fallback.a or c.a
+                      end,
+                      setValue=function(r,g,b)
+                          local c=Cfg("tabBackgroundColor") or fallback
+                          local a=c.a == nil and fallback.a or c.a
+                          Set("tabBackgroundColor",{r=r,g=g,b=b,a=a})
+                          if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                      end },
+                }
+            end
+            local function ActiveTabBgSwatches()
+                local key = "tabBackgroundColorActive"
+                local modeKey = "tabBackgroundColorActiveMode"
+                local fallback = TAB_BG_FALLBACK[true]
+                local function SetMode(mode)
+                    Set(modeKey, mode)
+                    if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                    EllesmereUI:RefreshPage()
+                end
+                return {
+                    { tooltip="Custom Color", hasAlpha=false,
+                      getValue=function()
+                          local c=Cfg(key) or fallback
+                          return c.r,c.g,c.b,c.a == nil and fallback.a or c.a
+                      end,
+                      setValue=function(r,g,b)
+                          local c=Cfg(key) or fallback
+                          local a=c.a == nil and fallback.a or c.a
+                          Set(key,{r=r,g=g,b=b,a=a}); Set(modeKey,"custom")
+                          if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                      end,
+                      onClick=function(self)
+                          if (Cfg(modeKey) or "custom") ~= "custom" then
+                              SetMode("custom"); return
+                          end
+                          if self._eabOrigClick then self._eabOrigClick(self) end
+                      end,
+                      refreshAlpha=function()
+                          return (Cfg(modeKey) or "custom") == "custom" and 1 or .3
+                      end },
+                    { tooltip="Accent Color", hasAlpha=false,
+                      getValue=function() return EllesmereUI.GetAccentColor() end,
+                      setValue=function() end,
+                      onClick=function() SetMode("accent") end,
+                      refreshAlpha=function()
+                          return (Cfg(modeKey) or "custom") == "accent" and 1 or .3
+                      end },
+                    { tooltip="Class Color", hasAlpha=false,
+                      getValue=function()
+                          local _,class=UnitClass("player")
+                          local c=class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+                          return c and c.r or 1,c and c.g or 1,c and c.b or 1
+                      end,
+                      setValue=function() end,
+                      onClick=function() SetMode("class") end,
+                      refreshAlpha=function()
+                          return (Cfg(modeKey) or "custom") == "class" and 1 or .3
+                      end },
                 }
             end
             local tabBgRow
-            tabBgRow, h = W:DualRow(parent, y, TabBgSliderCfg(false), TabBgSliderCfg(true))
-            local function AttachTabBgSwatch(rgn, active)
+            tabBgRow, h = W:DualRow(parent, y,
+                { type="multiSwatch", text="Tab Background Color",
+                  swatches=InactiveTabBgSwatches() },
+                { type="multiSwatch", text="Tab Background Color Active",
+                  swatches=ActiveTabBgSwatches() })
+            local function AttachTabBgOpacityCog(rgn, active)
                 local key = active and "tabBackgroundColorActive" or "tabBackgroundColor"
                 local fallback = TAB_BG_FALLBACK[active]
-                local swatch, refresh = EllesmereUI.BuildColorSwatch(
-                    rgn, tabBgRow:GetFrameLevel() + 3,
-                    function()
-                        local c = Cfg(key) or fallback
-                        return c.r, c.g, c.b, 1
-                    end,
-                    function(r, g, b)
-                        local c = Cfg(key) or fallback
-                        local a = c.a == nil and fallback.a or c.a
-                        Set(key, { r=r, g=g, b=b, a=a })
-                        if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
-                    end,
-                    false, 20)
-                PP.Point(swatch, "RIGHT", rgn._control, "LEFT", -8, 0)
-                rgn._lastInline = swatch
-                EllesmereUI.RegisterWidgetRefresh(refresh)
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title=active and "Active Tab Background" or "Tab Background",
+                    captureRegion=rgn,
+                    rows={
+                        { type="slider", label="Opacity", min=0, max=100, step=1,
+                          get=function()
+                              local c=Cfg(key) or fallback
+                              local a=c.a == nil and fallback.a or c.a
+                              return math.floor(a*100+0.5)
+                          end,
+                          set=function(v)
+                              local c=Cfg(key) or fallback
+                              Set(key,{r=c.r,g=c.g,b=c.b,a=v/100})
+                              if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                          end },
+                    },
+                })
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26,26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel()+5)
+                cogBtn:SetAlpha(0.4)
+                local tex = cogBtn:CreateTexture(nil,"OVERLAY")
+                tex:SetAllPoints(); tex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter",function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave",function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick",function(self) cogShow(self) end)
             end
-            AttachTabBgSwatch(tabBgRow._leftRegion, false)
-            AttachTabBgSwatch(tabBgRow._rightRegion, true)
+            AttachTabBgOpacityCog(tabBgRow._leftRegion, false)
+            AttachTabBgOpacityCog(tabBgRow._rightRegion, true)
             y = y - h
 
+            local function UnderlineMode()
+                local mode = Cfg("activeUnderlineColorMode") or "accent"
+                -- Legacy "border" profiles render and display as Custom,
+                -- without rewriting the saved profile during initialization.
+                return mode == "border" and "custom" or mode
+            end
             local function UnderlineSwatches()
                 return {
                     { tooltip="Custom Color", hasAlpha=true,
@@ -960,14 +1106,14 @@ initFrame:SetScript("OnEvent", function(self)
                           if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
                       end,
                       onClick=function(self)
-                          if (Cfg("activeUnderlineColorMode") or "accent") ~= "custom" then
+                          if UnderlineMode() ~= "custom" then
                               Set("activeUnderlineColorMode","custom")
                               if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
                               EllesmereUI:RefreshPage(); return
                           end
                           if self._eabOrigClick then self._eabOrigClick(self) end
                       end,
-                      refreshAlpha=function() return (Cfg("activeUnderlineColorMode") or "accent") == "custom" and 1 or .3 end },
+                      refreshAlpha=function() return UnderlineMode() == "custom" and 1 or .3 end },
                     { tooltip="Accent Color", hasAlpha=false,
                       getValue=function() return EllesmereUI.GetAccentColor() end,
                       setValue=function() end,
@@ -976,34 +1122,59 @@ initFrame:SetScript("OnEvent", function(self)
                           if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
                           EllesmereUI:RefreshPage()
                       end,
-                      refreshAlpha=function() return (Cfg("activeUnderlineColorMode") or "accent") == "accent" and 1 or .3 end },
-                    { tooltip="Border Color", hasAlpha=false,
+                      refreshAlpha=function() return UnderlineMode() == "accent" and 1 or .3 end },
+                    { tooltip="Class Color", hasAlpha=false,
                       getValue=function()
-                          local mode=Cfg("panelBorderColorMode") or "custom"
-                          if mode=="accent" then return EllesmereUI.GetAccentColor() end
-                          if mode=="class" then
-                              local _,cl=UnitClass("player"); local c=cl and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cl]
-                              return c and c.r or 1,c and c.g or 1,c and c.b or 1
-                          end
-                          local c=Cfg("panelBorderColor") or {r=1,g=1,b=1}; return c.r,c.g,c.b
+                          local _,cl=UnitClass("player")
+                          local c=cl and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cl]
+                          return c and c.r or 1,c and c.g or 1,c and c.b or 1
                       end,
                       setValue=function() end,
                       onClick=function()
-                          Set("activeUnderlineColorMode","border")
+                          Set("activeUnderlineColorMode","class")
                           if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
                           EllesmereUI:RefreshPage()
                       end,
-                      refreshAlpha=function() return (Cfg("activeUnderlineColorMode") or "accent") == "border" and 1 or .3 end },
+                      refreshAlpha=function() return UnderlineMode() == "class" and 1 or .3 end },
                 }
             end
-            _, h = W:DualRow(parent, y,
+
+            -- Texture belongs to the tab appearance controls, alongside the
+            -- combined underline toggle and its inline color choices.
+            if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
+            local btValues, btOrder = {}, {}
+            do
+                local texNames = ns.chatBgTextureNames or {}
+                for _, key in ipairs(ns.chatBgTextureOrder or {}) do
+                    if key ~= "---" then
+                        btValues[key] = texNames[key] or key
+                        btOrder[#btOrder + 1] = key
+                    end
+                end
+                local texLookup = ns.chatBgTextures or {}
+                btValues._menuOpts = {
+                    itemHeight = 28,
+                    background = function(key) return texLookup[key] end,
+                }
+            end
+            local underlineRow
+            underlineRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Active Underline",
                   getValue=function() return Cfg("activeUnderline") ~= false end,
                   setValue=function(v)
                       Set("activeUnderline",v)
                       if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
                   end },
-                { type="multiSwatch", text="Underline Color", swatches=UnderlineSwatches() })
+                { type="dropdown", text="Tab Texture",
+                  tooltip="Texture drawn over the tab background colors.",
+                  values=btValues, order=btOrder,
+                  getValue=function() return Cfg("tabBackgroundTexture") or "none" end,
+                  setValue=function(v)
+                      Set("tabBackgroundTexture", v)
+                      if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
+                  end })
+            EllesmereUI.BuildInlineSwatches(
+                underlineRow._leftRegion, UnderlineSwatches())
             y = y - h
 
             -- (No tab idle-fade section: the per-tab fade layer was removed
@@ -1014,8 +1185,10 @@ initFrame:SetScript("OnEvent", function(self)
             _, h = W:SectionHeader(parent, "BORDER", y); y = y - h
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Sync Border with Chat Panel",
+                  tooltip="For tabs outside the chat panel, uses the chat panel's border style and color instead of separate tab border settings.",
                   disabled=function() return Cfg("extendBgBehindTabs") == true end,
                   disabledTooltip="Tabs Inside Chat Panel",
+                  requireState="disabled",
                   getValue=function() return Cfg("syncTabBorder") ~= false end,
                   setValue=function(v)
                       Set("syncTabBorder", v)
@@ -1141,27 +1314,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(Refresh); Refresh()
             end
 
-            -- Row: Active Tab Border (+ inline color swatch) | Tab Background Texture
-            -- Texture catalogue (same build as the Chat page's Background
-            -- Texture dropdown -- that local is scoped to the isChat block).
-            if ECHAT.RefreshBgTextureCatalogue then ECHAT.RefreshBgTextureCatalogue() end
-            local btValues, btOrder = {}, {}
-            do
-                local texNames = ns.chatBgTextureNames or {}
-                for _, key in ipairs(ns.chatBgTextureOrder or {}) do
-                    if key ~= "---" then
-                        btValues[key] = texNames[key] or key
-                        btOrder[#btOrder + 1] = key
-                    end
-                end
-                local texLookup = ns.chatBgTextures or {}
-                btValues._menuOpts = {
-                    itemHeight = 28,
-                    background = function(key)
-                        return texLookup[key]
-                    end,
-                }
-            end
+            -- Row: Active Tab Border (+ inline color swatch)
             local activeBorderRow
             activeBorderRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Active Tab Border",
@@ -1173,16 +1326,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="dropdown", text="Tab Background Texture",
-                  tooltip="Texture drawn over the tab background colors.",
-                  values=btValues, order=btOrder,
-                  disabled=function() return Cfg("syncTabBorder") ~= false end,
-                  disabledTooltip="Requires Sync Style with Chat Panel disabled",
-                  getValue=function() return Cfg("tabBackgroundTexture") or "none" end,
-                  setValue=function(v)
-                      Set("tabBackgroundTexture", v)
-                      if ECHAT.ApplyTabAppearance then ECHAT.ApplyTabAppearance() end
-                  end })
+                { type="label", text="" })
             do
                 local rgn = activeBorderRow._leftRegion
                 local swatch, refreshSwatch = EllesmereUI.BuildColorSwatch(
