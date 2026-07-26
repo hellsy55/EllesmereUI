@@ -805,16 +805,97 @@ qolFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- Junk sweep. C_MerchantFrame.SellAllJunkItems() is fire-and-forget: the
+    -- server drops sell requests past its rate limit, and slots whose item data
+    -- has not been cached yet at MERCHANT_SHOW are skipped entirely, so a single
+    -- call routinely strands grays in the bags. Re-count after each pass and
+    -- fire again while the number is still falling.
+    -- MERCHANT_SHOW/MERCHANT_CLOSED, not MerchantFrame:IsShown(): the vendor
+    -- interaction is what allows selling, and at MERCHANT_SHOW the frame may not
+    -- have been shown yet depending on handler order.
+    local merchantOpen = false
+    local SellJunk, StopJunkSweep
+    do
+        local PASS_DELAY = 0.4
+        local MAX_PASSES = 12
+        local ticker, passes, lastCount, stalls, warned
+
+        local function CountJunk()
+            local junk, unknown = 0, 0
+            for bag = BACKPACK_CONTAINER, NUM_BAG_SLOTS do
+                for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                    local info = C_Container.GetContainerItemInfo(bag, slot)
+                    if info and info.itemID then
+                        if info.quality == nil then
+                            unknown = unknown + 1
+                        elseif info.quality == Enum.ItemQuality.Poor and not info.hasNoValue then
+                            junk = junk + 1
+                        end
+                    end
+                end
+            end
+            return junk, unknown
+        end
+
+        StopJunkSweep = function()
+            if ticker then ticker:Cancel(); ticker = nil end
+        end
+
+        local function Pass()
+            if not merchantOpen then return StopJunkSweep() end
+            if EllesmereUIDB and EllesmereUIDB.autoSellJunk == false then return StopJunkSweep() end
+
+            local junk, unknown = CountJunk()
+            if junk == 0 and unknown == 0 then return StopJunkSweep() end
+
+            passes = passes + 1
+            -- Two passes in a row that shave nothing off mean the rest cannot be
+            -- sold from here (still-refundable purchases open a confirm popup
+            -- instead), so stop rather than hammering the vendor. One stall is
+            -- tolerated because the bag update can trail the sell by a tick.
+            if junk >= lastCount then
+                stalls = stalls + 1
+                if stalls >= 2 then
+                    StopJunkSweep()
+                    if junk > 0 and not warned then
+                        warned = true
+                        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r " ..
+                            EllesmereUI.Lf("%d junk item(s) could not be sold.", junk))
+                    end
+                    return
+                end
+            else
+                stalls = 0
+            end
+
+            lastCount = junk
+            C_MerchantFrame.SellAllJunkItems()
+            if passes >= MAX_PASSES then StopJunkSweep() end
+        end
+
+        SellJunk = function()
+            if not (C_MerchantFrame and C_MerchantFrame.SellAllJunkItems) then return end
+            StopJunkSweep()
+            passes, lastCount, stalls, warned = 0, math.huge, 0, false
+            Pass()
+            ticker = C_Timer.NewTicker(PASS_DELAY, Pass)
+        end
+    end
+
     local merchantFrame = CreateFrame("Frame", "EUI_MerchantHandler", UIParent)
     merchantFrame:RegisterEvent("MERCHANT_SHOW")
-    merchantFrame:SetScript("OnEvent", function()
+    merchantFrame:RegisterEvent("MERCHANT_CLOSED")
+    merchantFrame:SetScript("OnEvent", function(_, event)
+        if event == "MERCHANT_CLOSED" then
+            merchantOpen = false
+            return StopJunkSweep()
+        end
+        merchantOpen = true
         if not EllesmereUIDB then return end
 
         -- Auto sell junk
         if EllesmereUIDB.autoSellJunk ~= false then
-            if C_MerchantFrame and C_MerchantFrame.SellAllJunkItems then
-                C_MerchantFrame.SellAllJunkItems()
-            end
+            SellJunk()
         end
 
         -- Auto repair
