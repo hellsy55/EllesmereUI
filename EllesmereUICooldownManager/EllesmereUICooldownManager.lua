@@ -3069,6 +3069,53 @@ end
 -------------------------------------------------------------------------------
 --  Hide / Restore Blizzard CDM
 -------------------------------------------------------------------------------
+
+-- Suppress the secondary buff-bar viewer (BuffBarCooldownViewer).
+--
+-- It is parked offscreen rather than Hidden because TBB mirrors min/max/value
+-- straight off Blizzard's Bar frames -- a hidden viewer stops updating them.
+-- The park, not the alpha, is what actually holds: Blizzard's hide-when-
+-- inactive fade animates the viewer's alpha back to 1 whenever a tracked buff
+-- goes active, through a path no hook can see (the same lesson as the
+-- unclaimed-frame park in CollectAndReanchor). So once anything re-anchors the
+-- viewer back to its Edit Mode position -- a layout apply, SaveLayouts, a
+-- zone-in -- the next buff proc in combat draws Blizzard's bars on top of ours.
+--
+-- The SetPoint hook makes the park self-healing, mirroring the one the
+-- unclaimed CD/utility pool frames already get.
+function ns.ParkSecondaryBuffViewer(frame)
+    if not frame then return end
+    local fc = FC(frame)
+    frame:SetAlpha(0)
+    if InCombatLockdown() then
+        -- Flushed on PLAYER_REGEN_ENABLED.
+        ns._secondaryParkPending = true
+    else
+        ns._secondaryParkPending = nil
+        fc.parkGuard = true
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
+        fc.parkGuard = nil
+    end
+    if not fc.parkHooked then
+        fc.parkHooked = true
+        -- Deferred by a frame: Blizzard re-anchors this viewer from inside its
+        -- Edit Mode layout pass, which goes on to move protected systems
+        -- (action bars). Re-parking inline would carry our taint into the rest
+        -- of that pass. The delay also coalesces ClearAllPoints + SetPoint
+        -- bursts into one park, and a single frame of a stray bar is invisible.
+        hooksecurefunc(frame, "SetPoint", function(self)
+            local c = _ecmeFC[self]
+            if not c or not c.hidden or c.parkGuard or c.restoring or c.parkQueued then return end
+            c.parkQueued = true
+            C_Timer.After(0, function()
+                c.parkQueued = nil
+                if c.hidden and not c.restoring then ns.ParkSecondaryBuffViewer(self) end
+            end)
+        end)
+    end
+end
+
 HideBlizzardCDM = function()
     -- Anchor each viewer to our corresponding bar container.
     -- Frames stay parented to viewers (no reparenting = no taint).
@@ -3096,15 +3143,12 @@ HideBlizzardCDM = function()
             end
             -- Don't reposition primary viewers (Essential/Utility/BuffIcon) --
             -- individual icon anchoring handles positioning.
-            -- BuffBarCooldownViewer is secondary: hide it via alpha since
-            -- TBB renders its own bars and we don't hook its Cooldown widgets.
+            -- BuffBarCooldownViewer is secondary: alpha + offscreen park,
+            -- since TBB renders its own bars and we don't hook its Cooldown
+            -- widgets.
             local isSecondary = (frameName == BLIZZ_CDM_FRAMES_SECONDARY.buffs)
             if isSecondary then
-                frame:SetAlpha(0)
-                if not InCombatLockdown() then
-                    frame:ClearAllPoints()
-                    frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
-                end
+                ns.ParkSecondaryBuffViewer(frame)
             end
             if not InCombatLockdown() then
                 frame:EnableMouse(false)
@@ -3123,6 +3167,7 @@ RestoreBlizzardCDM = function()
         local fc = frame and _ecmeFC[frame]
         if fc and fc.hidden then
             fc.restoring = true
+            ns._secondaryParkPending = nil
             -- Restore original anchor points
             if fc.origPoints then
                 frame:ClearAllPoints()
@@ -3130,9 +3175,16 @@ RestoreBlizzardCDM = function()
                     frame:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5])
                 end
             end
-            -- Restore mouse interaction
-            frame:EnableMouse(true)
-            if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+            -- The secondary viewer is the only one suppressed by alpha, and
+            -- its Blizzard default is EnableMouse(false) -- restoring it true
+            -- leaves an invisible click-catcher (same reasoning as
+            -- RestoreBlizzardBuffFrame).
+            if frameName == BLIZZ_CDM_FRAMES_SECONDARY.buffs then
+                frame:SetAlpha(1)
+            else
+                frame:EnableMouse(true)
+                if frame.EnableMouseMotion then frame:EnableMouseMotion(true) end
+            end
             fc.hidden = false
             fc.restoring = nil
         end
@@ -3149,6 +3201,7 @@ local function RestoreBlizzardBuffFrame()
     local fc = frame and _ecmeFC[frame]
     if fc and fc.hidden then
         fc.restoring = true
+        ns._secondaryParkPending = nil
         if fc.origPoints then
             frame:ClearAllPoints()
             for _, pt in ipairs(fc.origPoints) do
@@ -8896,6 +8949,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if event == "PLAYER_REGEN_ENABLED" and ns.IsTBBRebuildPending and ns.IsTBBRebuildPending() then
             if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
         end
+        -- Flush a secondary buff-viewer park that was blocked during combat
+        if event == "PLAYER_REGEN_ENABLED" and ns._secondaryParkPending then
+            ns._secondaryParkPending = nil
+            local sv = _G[BLIZZ_CDM_FRAMES_SECONDARY.buffs]
+            local svc = sv and _ecmeFC[sv]
+            if svc and svc.hidden then ns.ParkSecondaryBuffViewer(sv) end
+        end
         -- Flush deferred roster reanchor that was blocked during combat
         if event == "PLAYER_REGEN_ENABLED" and _rosterRebuildPending then
             _rosterRebuildPending = false
@@ -8974,6 +9034,35 @@ SlashCmdList.ECME = function(msg)
     if InCombatLockdown and InCombatLockdown() then return end
     if EllesmereUI and EllesmereUI.ShowModule then
         EllesmereUI:ShowModule("EllesmereUICooldownManager")
+    end
+end
+
+-------------------------------------------------------------------------------
+-- /cdmbb -- state of Blizzard's BuffBarCooldownViewer.
+-- Answers "why are Blizzard's tracking bars drawing on top of mine": while
+-- Tracked Buff Bars own the display the viewer should read alpha 0 and sit
+-- parked at -10000, 10000. A real on-screen anchor means something re-anchored
+-- it and the park did not heal.
+-------------------------------------------------------------------------------
+SLASH_CDMBB1 = "/cdmbb"
+SlashCmdList.CDMBB = function()
+    local function P(s) print("|cff0cd29f[CDM]|r " .. s) end
+    local frame = _G[BLIZZ_CDM_FRAMES_SECONDARY.buffs]
+    if not frame then P("BuffBarCooldownViewer does not exist") return end
+    local cb = ECME.db and ECME.db.profile and ECME.db.profile.cdmBars
+    local fc = _ecmeFC[frame]
+    P(string.format("hideBlizzard=%s useBlizzardBuffBars=%s suppressed=%s parkPending=%s",
+        tostring(cb and cb.hideBlizzard), tostring(cb and cb.useBlizzardBuffBars),
+        tostring(fc and fc.hidden or false), tostring(ns._secondaryParkPending or false)))
+    P(string.format("shown=%s alpha=%.2f effective=%.2f",
+        tostring(frame:IsShown()), frame:GetAlpha(), frame:GetEffectiveAlpha()))
+    local n = frame:GetNumPoints()
+    if n == 0 then P("points: none") end
+    for i = 1, n do
+        local pt, rel, relPt, x, y = frame:GetPoint(i)
+        P(string.format("point %d: %s -> %s %s (%.0f, %.0f)", i, tostring(pt),
+            tostring(rel and rel.GetName and rel:GetName()), tostring(relPt),
+            x or 0, y or 0))
     end
 end
 

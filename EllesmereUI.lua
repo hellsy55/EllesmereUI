@@ -2459,12 +2459,10 @@ do
             return
         end
 
-        -- Seam suppression for the cast-bar wrap border: a container can flag its
-        -- TOP or BOTTOM edge to stay hidden AND have the side strips run all the way
-        -- to that corner (no inset), so two stacked borders fuse into one outline
-        -- with no edge line and no corner notch. The flags live on the container, so
-        -- they survive every re-snap (the 2-tick OnUpdate, PP.SetBorderSize,
-        -- ResnapAllBorders) -- a one-shot :Hide() gets clobbered by the next snap.
+        -- Edge suppression for joined bars: flags live on the container so they
+        -- survive every re-snap; a one-shot :Hide() gets clobbered by the next snap.
+        -- Hidden top/bottom edges also remove the matching side-strip inset so two
+        -- stacked borders fuse with no corner notch.
         local topInset, botInset = -edgeSize, edgeSize
         if container._hideTop then topInset = 0 end
         if container._hideBottom then botInset = 0 end
@@ -2484,14 +2482,22 @@ do
             b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
             b:SetHeight(edgeSize); b:Show()
         end
-        l:ClearAllPoints()
-        l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, topInset)
-        l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, botInset)
-        l:SetWidth(edgeSize); l:Show()
-        r:ClearAllPoints()
-        r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, topInset)
-        r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, botInset)
-        r:SetWidth(edgeSize); r:Show()
+        if container._hideLeft then
+            l:Hide()
+        else
+            l:ClearAllPoints()
+            l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, topInset)
+            l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, botInset)
+            l:SetWidth(edgeSize); l:Show()
+        end
+        if container._hideRight then
+            r:Hide()
+        else
+            r:ClearAllPoints()
+            r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, topInset)
+            r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, botInset)
+            r:SetWidth(edgeSize); r:Show()
+        end
 
         local bc = container._bdColor
         if bc then
@@ -12549,13 +12555,27 @@ function EllesmereUI._BlizzCastBars()
     for i = 1, #bars do
         local bar = bars[i]
         -- An UnregisterAllEvents outside one of our own Capture/Restore windows
-        -- is another addon claiming the frame, so EUI drops its claim and stops
-        -- treating that silence as something it may undo.
+        -- is another addon claiming the frame: EUI drops its claim and records
+        -- the claim as foreign. "Foreign" is tracked separately from "not ours"
+        -- because those are very different states -- see RestoreBlizzCastBarEvents.
         hooksecurefunc(bar.frame, "UnregisterAllEvents", function()
-            if not EllesmereUI._blizzCastBarSnapshot then bar.owned = false end
+            if not EllesmereUI._blizzCastBarSnapshot then
+                bar.owned = false
+                bar.foreign = true
+                EllesmereUI._CastBarDbg("foreign claim", bar.unit)
+            end
         end)
     end
     return bars
+end
+
+-- Opt-in trace for cast bar ownership. Persisted in EllesmereUIDB so it can be
+-- armed before a relog, which is when the interesting decisions happen:
+--   /run EllesmereUIDB._CBDEBUG = true
+function EllesmereUI._CastBarDbg(...)
+    if EllesmereUIDB and EllesmereUIDB._CBDEBUG then
+        print("|cff33ff99[CastBar]|r", ...)
+    end
 end
 
 function EllesmereUI.CaptureBlizzCastBarEvents()
@@ -12579,29 +12599,68 @@ function EllesmereUI.RestoreBlizzCastBarEvents()
         if live ~= snapshot[i] then
             if not live then
                 bar.owned = true
+                EllesmereUI._CastBarDbg("claimed", bar.unit)
             elseif bar.owned then
                 bar.owned = false
-            else
-                -- Someone else silenced this frame; put it back the way we
-                -- found it instead of resurrecting Blizzard's cast bar.
+                EllesmereUI._CastBarDbg("handed back", bar.unit)
+            elseif bar.foreign then
+                -- Another addon silenced this frame and we just re-registered it
+                -- on the way past; put it back the way we found it instead of
+                -- resurrecting Blizzard's cast bar next to theirs.
+                EllesmereUI._CastBarDbg("re-silencing foreign claim", bar.unit)
                 bar.frame:UnregisterAllEvents()
                 bar.frame:Hide()
+            else
+                -- Registered inside our own window with nobody claiming it.
+                -- That is EUI's own bookkeeping having lost track (a silence
+                -- that produced no transition to observe), NOT another addon,
+                -- so re-silencing here would kill Blizzard's cast bar for the
+                -- session with no way back short of a reload. Leave it armed:
+                -- a visible Blizzard bar is something the user can turn off, a
+                -- dead one is not.
+                EllesmereUI._CastBarDbg("left armed, unclaimed", bar.unit)
             end
         end
     end
 end
 
--- Give Blizzard's player cast bar its own event wiring back, but only when EUI
--- is the one that took it away.
-function EllesmereUI.RearmBlizzPlayerCastBar()
+-- The cast events Blizzard's bars listen on, registered per unit. Mirrors the
+-- set oUF's Castbar element restores when it disables, which is the only path
+-- that has ever successfully re-armed these frames.
+--
+-- SetUnit is deliberately NOT used to re-arm. Its body is guarded on
+-- `self.unit ~= unit`, and the frame still holds the unit Blizzard assigned at
+-- load, so passing that same unit registers nothing at all. Forcing the guard
+-- open is worse: SetUnit runs StopAnims -> StopFinishAnims, which iterates a
+-- table that cannot be accessed while tainted, so from addon execution it
+-- throws outright ("attempted to iterate a table that cannot be accessed while
+-- tainted") and takes down whatever called it. Registering the events directly
+-- is what oUF does, is taint-clean, and touches no Blizzard code at all.
+local BLIZZ_CAST_EVENTS = {
+    "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_EMPOWER_START",
+    "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_EMPOWER_STOP",
+    "UNIT_SPELLCAST_DELAYED", "UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_EMPOWER_UPDATE",
+    "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED",
+    "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
+}
+
+-- Give Blizzard's cast bars their event wiring back, unless another addon has
+-- claimed them. Covers the pet bar too: oUF silences both and only re-arms them
+-- from its Castbar element's Disable, so any release path that does not run
+-- that (the element was never enabled to begin with) leaves both dead.
+function EllesmereUI.RearmBlizzCastBars()
     local bars = EllesmereUI._blizzCastBarList
     if not bars then return end
     for i = 1, #bars do
         local bar = bars[i]
-        if bar.unit == "player" and bar.owned and bar.frame.SetUnit
-            and not bar.frame:IsEventRegistered("UNIT_SPELLCAST_START") then
+        if not bar.foreign and not bar.frame:IsEventRegistered("UNIT_SPELLCAST_START") then
             bar.owned = false
-            bar.frame:SetUnit("player", bar.frame.showTradeSkills, bar.frame.showShield)
+            for j = 1, #BLIZZ_CAST_EVENTS do
+                bar.frame:RegisterUnitEvent(BLIZZ_CAST_EVENTS[j], bar.unit)
+            end
+            bar.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+            if bar.unit == "pet" then bar.frame:RegisterEvent("UNIT_PET") end
+            EllesmereUI._CastBarDbg("re-armed", bar.unit)
         end
     end
 end
@@ -12708,9 +12767,38 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
 
     EllesmereUI._GetFFD(blizzBar).castBarSuppressed = false
 
-    if hiddenParent and blizzBar:GetParent() == hiddenParent and EllesmereUI._GetFFD(blizzBar).origParent
+    -- Hand the bar back to the parent EUI took it from -- but never to one that
+    -- is itself hidden. Blizzard parents this bar under PlayerFrame, and Edit
+    -- Mode re-parents it into a layout frame that gets hidden on exit, while EUI
+    -- hides PlayerFrame whenever it renders its own player frame. Restoring
+    -- there leaves Blizzard's cast bar fully armed but permanently invisible,
+    -- which reads exactly like the suppression never lifted. UIParent is where
+    -- Edit Mode positions the bar from anyway, and SetParent keeps the existing
+    -- anchors, so the bar still lands where the user had it.
+    local origParent = EllesmereUI._GetFFD(blizzBar).origParent
+    local currentParent = blizzBar:GetParent()
+    local restoreParent = origParent
+    if not restoreParent or not restoreParent.IsVisible or not restoreParent:IsVisible() then
+        restoreParent = UIParent
+    end
+
+    -- Only ever un-park a bar EUI itself parked: either it is still sitting in
+    -- our hidden parent, or an earlier release handed it back to the captured
+    -- parent and that parent is itself hidden. Matching the captured parent
+    -- exactly is what separates "Blizzard's own parent happens to be hidden"
+    -- from "another addon parked this bar under its own hidden frame" -- the
+    -- latter is left alone, since resurrecting it is the bug this whole
+    -- ownership dance exists to prevent.
+    local parkedByUs = (hiddenParent and currentParent == hiddenParent)
+        or (origParent and currentParent == origParent
+            and currentParent.IsVisible and not currentParent:IsVisible())
+
+    -- The Edit Mode gate can skip this; ApplyBlizzCastbarState re-runs the
+    -- release on PLAYER_ENTERING_WORLD and on Edit Mode close, so a bar left
+    -- parked by a skipped pass is healed as soon as re-parenting is legal.
+    if parkedByUs and currentParent ~= restoreParent
         and not (EditModeManagerFrame and EditModeManagerFrame:IsShown()) then
-        blizzBar:SetParent(EllesmereUI._GetFFD(blizzBar).origParent)
+        blizzBar:SetParent(restoreParent)
     end
 
     local selection = blizzBar.Selection
@@ -12726,7 +12814,7 @@ function EllesmereUI.SetPlayerCastBarSuppressed(owner, suppressed)
     -- the first place: a standalone cast bar addon silences the same frame, and
     -- re-registering its events is what pops Blizzard's cast bar back on screen
     -- next to theirs once EUI's own cast bar is switched off.
-    EllesmereUI.RearmBlizzPlayerCastBar()
+    EllesmereUI.RearmBlizzCastBars()
 end
 
 -------------------------------------------------------------------------------

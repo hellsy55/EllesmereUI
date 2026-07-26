@@ -4439,14 +4439,13 @@ function ns.UpdatePowerBorder(power, settings)
     EllesmereUI.ApplyBorderStyle(border, size, c.r, c.g, c.b, alpha, style,
         settings.powerBorderOffsetX, settings.powerBorderOffsetY,
         settings.powerBorderShiftX, settings.powerBorderShiftY, "unitframes", size)
-    if isAttached then
-        local edges = PP.GetBorders(border)
-        if edges then
-            if edges._left then edges._left:SetAlpha(0) end
-            if edges._right then edges._right:SetAlpha(0) end
-            if edges._top then edges._top:SetAlpha(pos == "below" and alpha or 0) end
-            if edges._bottom then edges._bottom:SetAlpha(pos == "above" and alpha or 0) end
-        end
+    local edges = PP.GetBorders(border)
+    if edges then
+        edges._hideLeft = isAttached or nil
+        edges._hideRight = isAttached or nil
+        edges._hideTop = (isAttached and pos == "above") or nil
+        edges._hideBottom = (isAttached and pos == "below") or nil
+        PP.SetBorderSize(border, size)
     end
     local borderLevel = settings.powerBorderBehind
         and math.max(0, power:GetFrameLevel() - 1) or (power:GetFrameLevel() + 5)
@@ -11284,7 +11283,14 @@ function InitializeFrames()
         frames.player = oUF:Spawn("player", "EllesmereUIUnitFrames_Player")
         EllesmereUI.RestoreBlizzCastBarEvents()
     elseif playerFrameSource == "hidden" then
+        -- Wrapped for the same reason as the spawn above: DisableBlizzard
+        -- unregisters PlayerFrame's cast bar child, and an unregister seen
+        -- outside a capture window is read as a third-party addon claiming the
+        -- frame -- EUI would mark its own silence as somebody else's and never
+        -- hand the bar back.
+        EllesmereUI.CaptureBlizzCastBarEvents()
         oUF:DisableBlizzard("player")
+        EllesmereUI.RestoreBlizzCastBarEvents()
     end
 
     -- Visibility wrapper for the player frame only. Parent the player frame
