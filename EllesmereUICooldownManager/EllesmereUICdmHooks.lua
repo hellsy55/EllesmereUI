@@ -5315,15 +5315,20 @@ local function CollectAndReanchor()
                 -- change (spec swap, talent change, user edits). During
                 -- combat rotation, the assigned list is static so the cache
                 -- hit rate is ~100%.
-                local spellOrder, hostedOrder
+                -- hasCdKeys: this bar holds at least one cd-claim slot, so the
+                -- sort probe below must check cooldownID. Cached alongside the
+                -- maps -- the cache-hit path never re-walks the list.
+                local spellOrder, hostedOrder, hasCdKeys
                 if not ns._spellOrderDirty and container._cachedSpellOrder then
                     spellOrder = container._cachedSpellOrder
                     hostedOrder = container._cachedHostedOrder
+                    hasCdKeys = container._cachedSpellOrderCdKeys
                 else
                     if not container._cachedSpellOrder then container._cachedSpellOrder = {} end
                     if not container._cachedHostedOrder then container._cachedHostedOrder = {} end
                     spellOrder = container._cachedSpellOrder
                     hostedOrder = container._cachedHostedOrder
+                    hasCdKeys = false
                     wipe(spellOrder)
                     wipe(hostedOrder)
                     if spellList then
@@ -5350,29 +5355,41 @@ local function CollectAndReanchor()
                                         end
                                     end
                                 else
-                                    if not spellOrder[sid] then spellOrder[sid] = idx end
-                                    -- Resolve override/base forms only for a REAL
-                                    -- spellID. sid can be a cd-claim marker here (a
-                                    -- collided-buff slot, -(CD_CLAIM_MARKER_BASE+cdID),
-                                    -- well outside int32): FindSpellOverrideByID errors
-                                    -- outright on an out-of-range id, and a marker has no
-                                    -- override/base anyway (its frame routes by cooldownID
-                                    -- and orders via the buff-family "c"..cdID key). Same
-                                    -- sid>0 guard the sibling order loops already use; this
-                                    -- one branch was missed, so hosting a collided buff
-                                    -- (Diabolist Diabolic Ritual) on a CD/util bar threw
-                                    -- every RefreshLayout and broke CDM.
-                                    if sid > 0 then
-                                        if _FindOverride then
-                                            local ovr = _FindOverride(sid)
-                                            if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
-                                                spellOrder[ovr] = idx
+                                    -- Cd-claim marker (collided-buff slot hosted on
+                                    -- this CD/util bar, -(CD_CLAIM_MARKER_BASE+cdID)):
+                                    -- rank it by the stable "c"..cooldownID key, the
+                                    -- same convention the buff-family order loop and
+                                    -- ResolveBuffDisplaySortIndex use. Keying by the
+                                    -- marker value matched no frame, so the slot fell
+                                    -- through to spillover and sorted by Blizzard
+                                    -- layoutIndex -- reordering it did nothing.
+                                    local cdClaim = ns.CdClaimMarkerToCdID and ns.CdClaimMarkerToCdID(sid)
+                                    if cdClaim then
+                                        local ckey = "c" .. cdClaim
+                                        if not spellOrder[ckey] then spellOrder[ckey] = idx end
+                                        hasCdKeys = true
+                                    else
+                                        if not spellOrder[sid] then spellOrder[sid] = idx end
+                                        -- Resolve override/base forms only for a REAL
+                                        -- spellID. sid can still be an item/slot marker
+                                        -- here (negative): FindSpellOverrideByID errors
+                                        -- outright on an out-of-range id, and a marker
+                                        -- has no override/base anyway. Same sid>0 guard
+                                        -- the sibling order loops use; this branch was
+                                        -- missed once already, which threw every
+                                        -- RefreshLayout and broke CDM.
+                                        if sid > 0 then
+                                            if _FindOverride then
+                                                local ovr = _FindOverride(sid)
+                                                if ovr and ovr > 0 and ovr ~= sid and not spellOrder[ovr] then
+                                                    spellOrder[ovr] = idx
+                                                end
                                             end
-                                        end
-                                        if C_Spell and C_Spell.GetBaseSpell then
-                                            local base = C_Spell.GetBaseSpell(sid)
-                                            if base and base > 0 and base ~= sid and not spellOrder[base] then
-                                                spellOrder[base] = idx
+                                            if C_Spell and C_Spell.GetBaseSpell then
+                                                local base = C_Spell.GetBaseSpell(sid)
+                                                if base and base > 0 and base ~= sid and not spellOrder[base] then
+                                                    spellOrder[base] = idx
+                                                end
                                             end
                                         end
                                     end
@@ -5380,6 +5397,7 @@ local function CollectAndReanchor()
                             end
                         end
                     end
+                    container._cachedSpellOrderCdKeys = hasCdKeys
                 end
 
                 -- Inject custom frames (trinkets, items, racials)
@@ -5623,6 +5641,18 @@ local function CollectAndReanchor()
                 -- instead of being mistaken for a brand-new spillover.
                 local function OrderKeyFor(frame, fc, sid, map)
                     if not map then return nil end
+                    -- Cd-claimed collided-buff slot: both frames of the pair share
+                    -- one spellID, so every probe below would match the same rank
+                    -- (or none). cooldownID is unique per slot -- check it first,
+                    -- same stable-key convention as ResolveBuffDisplaySortIndex.
+                    -- Skipped outright (no concat) on bars holding no claim.
+                    if hasCdKeys then
+                        local cd = frame and frame.cooldownID
+                        if type(cd) == "number" then
+                            local ckey = map["c" .. cd]
+                            if ckey then return ckey end
+                        end
+                    end
                     local key = sid and map[sid]
                     -- Check cached baseSpellID (stable across transforms)
                     if not key and fc and fc.baseSpellID then
