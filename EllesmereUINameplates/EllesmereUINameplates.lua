@@ -2226,9 +2226,10 @@ do
         -- EXEC_CLASSES below) to bring it back. Assassination only, and only
         -- with its gate talent; Outlaw and Subtlety have none.
         -- [259] = { requires = { 381798 }, base = 0.35 },
-        -- Warlock -- Affliction and Destruction; Demonology has none.
-        [265] = { base = 0.20 },
-        [267] = { base = 0.20 },
+        -- Warlock -- Affliction and Destruction, each only with its gate
+        -- talent (Drain Soul / Shadowburn); Demonology has none.
+        [265] = { requires = { 388667 }, base = 0.20 },
+        [267] = { requires = { 17877 }, base = 0.20 },
         -- Warrior -- all three specs; either talent raises the window.
         [71]  = { base = 0.20, talents = { 281001, 206315 }, talentPct = 0.35 },
         [72]  = { base = 0.20, talents = { 281001, 206315 }, talentPct = 0.35 },
@@ -6256,6 +6257,12 @@ function NameplateFrame:SetUnit(unit, nameplate)
     if ns.NPC_AttachPlate then ns.NPC_AttachPlate(self, unit) end
     -- Non-Target Opacity (zero cost while off: one numeric compare).
     if ns._ntAlpha < 1 then ns.NT_Apply(self) end
+    -- Execute glow is per-spawn state, not appearance: ApplyAppearance is
+    -- generation-cached (skipped on recycled pool plates) and the threshold
+    -- watcher only reaches plates active at flip time, so a plate hidden
+    -- during a no-execute window and then pooled would come back glowless.
+    -- Re-assert here; costs two compares when the setting is off.
+    ns.ApplyLowHpGlow(self)
     -- Critical: health bar must display immediately
     self:UpdateHealth()
     -- PERF: defer non-critical work 1 frame. Stacking bounds, name, cast bar,
@@ -6696,7 +6703,7 @@ function NameplateFrame:UpdateHealthValues()
             if UnitIsDeadOrGhost(unit) then
                 for i = 1, #lg do lg[i]:SetVertexColor(0, 0, 0, 1) end
             else
-                local ok, col = pcall(UnitHealthPercent, unit, false, curve)
+                local ok, col = pcall(UnitHealthPercent, unit, true, curve)
                 if ok and col and col.GetRGBA then
                     local r, g, b, a = col:GetRGBA()
                     for i = 1, #lg do lg[i]:SetVertexColor(r, g, b, a) end

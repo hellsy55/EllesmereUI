@@ -2456,6 +2456,9 @@ do
 
         if edgeSize == 0 then
             t:Hide(); b:Hide(); l:Hide(); r:Hide()
+            -- Clears the geometry key so the next non-zero pass cannot match a
+            -- stale one and skip the Show() that brings these back.
+            container._snapEdge = nil
             return
         end
 
@@ -2466,37 +2469,75 @@ do
         local topInset, botInset = -edgeSize, edgeSize
         if container._hideTop then topInset = 0 end
         if container._hideBottom then botInset = 0 end
-        if container._hideTop then
-            t:Hide()
-        else
-            t:ClearAllPoints()
-            t:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
-            t:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
-            t:SetHeight(edgeSize); t:Show()
-        end
-        if container._hideBottom then
-            b:Hide()
-        else
-            b:ClearAllPoints()
-            b:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
-            b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-            b:SetHeight(edgeSize); b:Show()
-        end
-        if container._hideLeft then
-            l:Hide()
-        else
-            l:ClearAllPoints()
-            l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, topInset)
-            l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, botInset)
-            l:SetWidth(edgeSize); l:Show()
-        end
-        if container._hideRight then
-            r:Hide()
-        else
-            r:ClearAllPoints()
-            r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, topInset)
-            r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, botInset)
-            r:SetWidth(edgeSize); r:Show()
+
+        -- Geometry is idempotent: re-issuing the same anchors and sizes changes
+        -- nothing, and this was ~30 frame API calls per invocation on a path
+        -- that runs per aura per refresh -- the single most expensive function
+        -- in the addon. Skip it when the resulting layout is identical.
+        --
+        -- The comparison is against the POST-transform values actually applied
+        -- (edgeSize and the two insets), never the borderSize argument that
+        -- produced them. A guard that compares an input against an applied value
+        -- can never match when the transform between them is non-trivial, so it
+        -- re-fires forever -- exactly the convergence bug that made unlock-mode
+        -- anchors loop every frame.
+        --
+        -- Scale changes flow through: es feeds onePixel feeds edgeSize, so a
+        -- real scale change alters the key. If it rounds to the same edgeSize
+        -- the skip is correct anyway, because every SetPoint here is
+        -- anchor-relative with only the insets as offsets.
+        --
+        -- The colour block at the end is deliberately OUTSIDE this guard: the
+        -- textured border path zeroes strip alpha directly, and that
+        -- SetVertexColor is what restores it.
+        -- The side-strip hidden flags are part of the applied layout too: they
+        -- do not move an inset, so they need their own slots in the key or a
+        -- left/right-only flag flip at unchanged geometry would be skipped.
+        local hideL = container._hideLeft or false
+        local hideR = container._hideRight or false
+        local geomSame = container._snapEdge == edgeSize
+            and container._snapTop == topInset
+            and container._snapBot == botInset
+            and container._snapHideL == hideL
+            and container._snapHideR == hideR
+            and container._snapFrame == frame
+        if not geomSame then
+            container._snapEdge, container._snapTop = edgeSize, topInset
+            container._snapBot, container._snapFrame = botInset, frame
+            container._snapHideL, container._snapHideR = hideL, hideR
+
+            if container._hideTop then
+                t:Hide()
+            else
+                t:ClearAllPoints()
+                t:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+                t:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+                t:SetHeight(edgeSize); t:Show()
+            end
+            if container._hideBottom then
+                b:Hide()
+            else
+                b:ClearAllPoints()
+                b:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+                b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+                b:SetHeight(edgeSize); b:Show()
+            end
+            if container._hideLeft then
+                l:Hide()
+            else
+                l:ClearAllPoints()
+                l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, topInset)
+                l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, botInset)
+                l:SetWidth(edgeSize); l:Show()
+            end
+            if container._hideRight then
+                r:Hide()
+            else
+                r:ClearAllPoints()
+                r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, topInset)
+                r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, botInset)
+                r:SetWidth(edgeSize); r:Show()
+            end
         end
 
         local bc = container._bdColor
@@ -2696,8 +2737,38 @@ do
         local bd = _ppBorderData[frame]
         if not bd then return end
         a = a or 1
-        bd.borderColor = { r, g, b, a }
-        bd.container._bdColor = bd.borderColor
+
+        -- Mutated in place rather than replaced. This is called per aura per
+        -- refresh, and allocating a fresh {r,g,b,a} each time made it the single
+        -- largest source of garbage in the addon (1.2 MB per minute of tracing).
+        -- container._bdColor aliases this same table, so writing through it
+        -- keeps both views in sync exactly as the old reassignment did.
+        --
+        -- SECRET color components (RaidFrames dispel colors in combat) can be
+        -- WRITTEN to textures but never compared or cached: the change-guard
+        -- compare errors on a secret, and a secret stored in the cache would
+        -- make the NEXT clean call's compare error too. Secrets skip the guard
+        -- and leave the cache holding the last CLEAN color (so style
+        -- re-appliers reading _bdColor stay error-free), marked dirty so the
+        -- next clean color always repaints.
+        local col = bd.borderColor
+        local secret = issecretvalue
+            and (issecretvalue(r) or issecretvalue(g) or issecretvalue(b) or issecretvalue(a))
+        if secret then
+            bd.colDirty = true
+        elseif col then
+            if not bd.colDirty
+               and col[1] == r and col[2] == g and col[3] == b and col[4] == a then
+                return   -- unchanged; the four texture writes below are redundant
+            end
+            bd.colDirty = nil
+            col[1], col[2], col[3], col[4] = r, g, b, a
+        else
+            col = { r, g, b, a }
+            bd.borderColor = col
+        end
+        if col then bd.container._bdColor = col end
+
         local c = bd.container
         if c._top then c._top:SetVertexColor(r, g, b, a) end
         if c._bottom then c._bottom:SetVertexColor(r, g, b, a) end
@@ -3216,16 +3287,20 @@ do
         if not borderFrame or not state then return end
         size, textureKey = size or 0, textureKey or "solid"
         local edges = state._secretBorderEdges
-        local function HideEdges()
-            if edges then for _, tex in pairs(edges) do tex:Hide() end end
-        end
+        -- Inlined rather than a local closure. This runs per aura per refresh,
+        -- and the closure was being built on entry -- before either early-out
+        -- below could return -- making it pure garbage on the common path.
         if textureKey == "" or textureKey == "solid" or size <= 0 then
-            HideEdges()
+            if edges then for _, tex in pairs(edges) do tex:Hide() end end
             EllesmereUI.ApplyBorderStyle(borderFrame, size, r, g, b, a, "solid")
             return
         end
         local path = EllesmereUI.ResolveBorderTexture(textureKey)
-        if not path then HideEdges(); EllesmereUI.ApplyBorderStyle(borderFrame, 0, 0, 0, 0, 0, "solid"); return end
+        if not path then
+            if edges then for _, tex in pairs(edges) do tex:Hide() end end
+            EllesmereUI.ApplyBorderStyle(borderFrame, 0, 0, 0, 0, 0, "solid")
+            return
+        end
         -- Also hides any BackdropTemplate child left by an older live version.
         EllesmereUI.ApplyBorderStyle(borderFrame, 0, 0, 0, 0, 0, "solid")
         borderFrame:Show()
@@ -3663,6 +3738,13 @@ EllesmereUI.FONT_DISPLAY_NAMES = {
 -- cannot render the script. Resolves to LOCALE_FONT_FALLBACK in ResolveFontName.
 EllesmereUI.SYSTEM_FONT_KEY = "__system"
 
+-- Sentinel forcing bundled Expressway in glyph-restricted locales. Distinct
+-- from the stored name "Expressway" ON PURPOSE: untouched defaults keep
+-- mapping to the system font, and only an explicit pick of this entry uses
+-- the Latin face (non-Latin script renders unglyphed under it -- an informed
+-- tradeoff for players who want the EUI look on numbers/Latin text).
+EllesmereUI.EXPRESSWAY_FORCED_KEY = "__expressway"
+
 -- Register our bundled fonts with LibSharedMedia so other addons can use them
 -- and so SM's HashTable("font") includes them for our own dropdown lookups.
 -- Also populate _smFontPaths so ResolveFontName can resolve SM fonts at runtime.
@@ -3693,6 +3775,47 @@ do
     end
 end
 
+-------------------------------------------------------------------------------
+--  Font resolution cache
+--
+--  GetFontPath / GetFontName / GetFontOutlineFlag / GetIconTextOutlineFlag all
+--  resolve through the same chain -- GetFontsDB -> GetModuleFontEntry ->
+--  ResolveFontName -> SlugFlag -> IsSlugDisabled -- and were walking it from
+--  scratch on every single text update. Instrumented profiling put roughly 44%
+--  of this addon's entire CPU cost in that chain, recomputing an answer that
+--  had not changed. The results depend only on the fonts DB and the addon key,
+--  so they are memoized per key here.
+--
+--  Invalidation is explicit and deliberately coarse (drop everything):
+--    * every font setting funnels through the options page's FontReload()
+--    * applying or importing a profile rewrites the fonts DB in place
+--    * the fonts reset nils the table outright
+--  Anything else that writes the fonts DB must call InvalidateFontCache().
+--  Mirrors the _colorCache / InvalidateColorCache pattern further up this file.
+--
+--  Stored as table fields rather than file-scope locals: this file sits on
+--  Lua 5.1's 200-local limit.
+-------------------------------------------------------------------------------
+EllesmereUI._fontCache = { path = {}, name = {}, outline = {}, icon = {} }
+EllesmereUI._fontCacheDirty = true
+-- Stand-in key for a nil addonKey (the global font), which cannot index a table.
+EllesmereUI._FONT_KEY_GLOBAL = "\1global"
+
+function EllesmereUI.InvalidateFontCache()
+    EllesmereUI._fontCacheDirty = true
+end
+
+--- Returns the cache, cleared first if a font setting changed since last use.
+function EllesmereUI._FontCacheReady()
+    local c = EllesmereUI._fontCache
+    if EllesmereUI._fontCacheDirty then
+        wipe(c.path); wipe(c.name); wipe(c.outline); wipe(c.icon)
+        c.slug = nil
+        EllesmereUI._fontCacheDirty = false
+    end
+    return c
+end
+
 -- Get the fonts DB table (lazy-init)
 function EllesmereUI.GetFontsDB()
     if not EllesmereUIDB then EllesmereUIDB = {} end
@@ -3709,6 +3832,11 @@ end
 -- Resolve a font name to a full file path for a given addon
 -- addonDir: the addon's Interface\AddOns\<name> path (used to build EllesmereUI/media/fonts/ path)
 local function ResolveFontName(fontName)
+    -- Explicit Expressway override: bypasses the glyph-restriction mapping
+    -- below (see EXPRESSWAY_FORCED_KEY). Resolves the same everywhere.
+    if fontName == EllesmereUI.EXPRESSWAY_FORCED_KEY then
+        return MEDIA_PATH .. "fonts\\Expressway.TTF"
+    end
     -- Glyph-restricted locales (CJK, Cyrillic): our bundled fonts are Latin-only,
     -- so they -- and the default / System Default sentinel -- map to the system
     -- glyph font. Only an external SharedMedia font the user installed may
@@ -3818,28 +3946,53 @@ end
 -- Get the resolved font path for an addon key.
 -- Falls back to the global font when no per-module override is configured.
 function EllesmereUI.GetFontPath(addonKey)
+    local c = EllesmereUI._FontCacheReady().path
+    local k = addonKey or EllesmereUI._FONT_KEY_GLOBAL
+    local hit = c[k]
+    if hit then return hit end
+
     local db = EllesmereUI.GetFontsDB()
     local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    local path
     if override and override.font and override.font ~= "__global" then
-        return ResolveFontName(override.font)
+        path = ResolveFontName(override.font)
+    else
+        path = ResolveFontName(db.global or "Expressway")
     end
-    return ResolveFontName(db.global or "Expressway")
+    c[k] = path
+    return path
 end
 
 -- Get the font name (not path) for an addon key.
 function EllesmereUI.GetFontName(addonKey)
+    local c = EllesmereUI._FontCacheReady().name
+    local k = addonKey or EllesmereUI._FONT_KEY_GLOBAL
+    local hit = c[k]
+    if hit then return hit end
+
     local db = EllesmereUI.GetFontsDB()
     local override = EllesmereUI.GetModuleFontEntry(addonKey)
+    local name
     if override and override.font and override.font ~= "__global" then
-        return override.font
+        name = override.font
+    else
+        name = db.global or "Expressway"
     end
-    return db.global or "Expressway"
+    c[k] = name
+    return name
 end
 
 -- Get the WoW font flag string for the outline mode.
 -- Pass an addonKey to get per-module override; nil returns the global setting.
 -- Returns: "OUTLINE, SLUG", "THICKOUTLINE, SLUG", or "" (none/shadow)
 function EllesmereUI.GetFontOutlineFlag(addonKey)
+    local c = EllesmereUI._FontCacheReady().outline
+    local k = addonKey or EllesmereUI._FONT_KEY_GLOBAL
+    -- "" is a legitimate result (no outline) and is truthy in Lua, so a plain
+    -- presence test is a correct cache hit here.
+    local hit = c[k]
+    if hit then return hit end
+
     local db = EllesmereUI.GetFontsDB()
     local override = EllesmereUI.GetModuleFontEntry(addonKey)
     local mode
@@ -3852,7 +4005,9 @@ function EllesmereUI.GetFontOutlineFlag(addonKey)
     if mode == "outline" then flag = "OUTLINE, SLUG"
     elseif mode == "thick" then flag = "THICKOUTLINE, SLUG"
     else flag = "" end
-    return EllesmereUI.SlugFlag(flag)
+    flag = EllesmereUI.SlugFlag(flag)
+    c[k] = flag
+    return flag
 end
 
 -- Per-profile "Never Show Slug" toggle. When ON, the SLUG token is stripped from
@@ -3862,10 +4017,16 @@ end
 -- account-global EllesmereUIDB.neverShowSlug key for installs that set it before
 -- the move. OFF by default (slug outlines render as normal).
 function EllesmereUI.IsSlugDisabled()
+    local c = EllesmereUI._FontCacheReady()
+    -- Cached value is a boolean, so nil is the only safe "not yet computed".
+    if c.slug ~= nil then return c.slug end
+
     local f = EllesmereUI.GetFontsDB()
     local v = f and f.neverShowSlug
     if v == nil then v = EllesmereUIDB and EllesmereUIDB.neverShowSlug end
-    return v == true
+    v = (v == true)
+    c.slug = v
+    return v
 end
 
 -- Strip the SLUG token from a font outline flag:
@@ -4032,16 +4193,25 @@ end
 -- user's global/per-module outline choice (each of the five modules has its
 -- own per-module font key registered in _addonKeyToFolder).
 function EllesmereUI.GetIconTextOutlineFlag(moduleKey)
+    local c = EllesmereUI._FontCacheReady().icon
+    local k = moduleKey or EllesmereUI._FONT_KEY_GLOBAL
+    local hit = c[k]
+    if hit then return hit end
+
     -- Per-profile now (rides profile export); the legacy account-global table is
     -- the read-time fallback for installs that set it before the move.
     local f = EllesmereUI.GetFontsDB()
     local t = (f and f.outlineIconText) or (EllesmereUIDB and EllesmereUIDB.outlineIconText)
+    local flag
     if t and t[moduleKey] == false then
         -- Follows the outline mode, which is already slug-gated at the source.
-        return (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag(moduleKey)) or ""
+        flag = (EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag(moduleKey)) or ""
+    else
+        -- Forced crisp outline; "Never Show Slug" still drops the slug token.
+        flag = EllesmereUI.SlugFlag("OUTLINE, SLUG")
     end
-    -- Forced crisp outline; "Never Show Slug" still drops the slug token.
-    return EllesmereUI.SlugFlag("OUTLINE, SLUG")
+    c[k] = flag
+    return flag
 end
 
 -- Applies the icon-text outline flag AND the matching shadow in one call.
@@ -4065,8 +4235,10 @@ function EllesmereUI.BuildFontDropdownData()
     -- external SharedMedia -- matching the global font picker.
     if EllesmereUI.LOCALE_FONT_FALLBACK then
         local values = { ["__global"] = { text = "EUI Global Font" },
-                         [EllesmereUI.SYSTEM_FONT_KEY] = { text = "System Default", font = EllesmereUI.LOCALE_FONT_FALLBACK } }
-        local order  = { "__global", EllesmereUI.SYSTEM_FONT_KEY }
+                         [EllesmereUI.SYSTEM_FONT_KEY] = { text = "System Default", font = EllesmereUI.LOCALE_FONT_FALLBACK },
+                         [EllesmereUI.EXPRESSWAY_FORCED_KEY] = { text = "Expressway (Latin only)",
+                             font = EllesmereUI.MEDIA_PATH .. "fonts\\Expressway.TTF" } }
+        local order  = { "__global", EllesmereUI.SYSTEM_FONT_KEY, EllesmereUI.EXPRESSWAY_FORCED_KEY }
         if EllesmereUI.AppendExternalSharedMediaFonts then
             EllesmereUI.AppendExternalSharedMediaFonts(values, order)
         end
@@ -10904,7 +11076,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.6"
+EllesmereUI.VERSION = "8.6.1"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12562,20 +12734,10 @@ function EllesmereUI._BlizzCastBars()
             if not EllesmereUI._blizzCastBarSnapshot then
                 bar.owned = false
                 bar.foreign = true
-                EllesmereUI._CastBarDbg("foreign claim", bar.unit)
             end
         end)
     end
     return bars
-end
-
--- Opt-in trace for cast bar ownership. Persisted in EllesmereUIDB so it can be
--- armed before a relog, which is when the interesting decisions happen:
---   /run EllesmereUIDB._CBDEBUG = true
-function EllesmereUI._CastBarDbg(...)
-    if EllesmereUIDB and EllesmereUIDB._CBDEBUG then
-        print("|cff33ff99[CastBar]|r", ...)
-    end
 end
 
 function EllesmereUI.CaptureBlizzCastBarEvents()
@@ -12599,15 +12761,12 @@ function EllesmereUI.RestoreBlizzCastBarEvents()
         if live ~= snapshot[i] then
             if not live then
                 bar.owned = true
-                EllesmereUI._CastBarDbg("claimed", bar.unit)
             elseif bar.owned then
                 bar.owned = false
-                EllesmereUI._CastBarDbg("handed back", bar.unit)
             elseif bar.foreign then
                 -- Another addon silenced this frame and we just re-registered it
                 -- on the way past; put it back the way we found it instead of
                 -- resurrecting Blizzard's cast bar next to theirs.
-                EllesmereUI._CastBarDbg("re-silencing foreign claim", bar.unit)
                 bar.frame:UnregisterAllEvents()
                 bar.frame:Hide()
             else
@@ -12618,7 +12777,6 @@ function EllesmereUI.RestoreBlizzCastBarEvents()
                 -- session with no way back short of a reload. Leave it armed:
                 -- a visible Blizzard bar is something the user can turn off, a
                 -- dead one is not.
-                EllesmereUI._CastBarDbg("left armed, unclaimed", bar.unit)
             end
         end
     end
@@ -12660,9 +12818,21 @@ function EllesmereUI.RearmBlizzCastBars()
             end
             bar.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
             if bar.unit == "pet" then bar.frame:RegisterEvent("UNIT_PET") end
-            EllesmereUI._CastBarDbg("re-armed", bar.unit)
         end
     end
+end
+
+-- Arm the ownership hooks at load rather than on first capture. Rearm's only
+-- shield against resurrecting a bar a standalone cast bar addon silenced is the
+-- foreign flag, and that flag can only be set once the UnregisterAllEvents
+-- hooks exist -- a lazy first capture at PLAYER_LOGIN leaves every earlier
+-- silence unattributed. File scope runs during the ADDON_LOADED sequence,
+-- before any addon's PLAYER_LOGIN handler, so this closes the window to
+-- everything except file-scope silences in addons that load before EUI.
+-- Guarded on BOTH frames: the list is cached on first build, so building it
+-- while either frame is missing would drop that bar for the whole session.
+if PlayerCastingBarFrame and PetCastingBarFrame then
+    EllesmereUI._BlizzCastBars()
 end
 
 -------------------------------------------------------------------------------

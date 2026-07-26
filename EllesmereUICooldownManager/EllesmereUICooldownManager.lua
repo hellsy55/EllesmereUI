@@ -7,6 +7,34 @@
 -------------------------------------------------------------------------------
 local _, ns = ...
 
+-- CPU-attribution shell pool. The engine bills a script handler's ENTIRE
+-- call tree to the addon whose execution context CREATED the frame the
+-- engine entered through -- and build/enable/hook code runs under the
+-- parent's lifecycle dispatch, so a frame born there bills the PARENT
+-- forever (probe-verified; see EllesmereUI_Ticker.lua). These shells are
+-- born HERE, in the first-loading file's main chunk, which stamps them to
+-- CooldownManager. Runtime code in ANY of this addon's files adopts one via
+-- ns.TakeShell() instead of CreateFrame("Frame") whenever the frame will
+-- carry event registrations or script handlers.
+-- Plain unnamed Frames only, persistent hosts only: the pool has no
+-- release, so transient throwaway frames keep using CreateFrame.
+do
+    local pool = {}
+    local n = 32
+    for i = 1, n do pool[i] = CreateFrame("Frame") end
+    ns.TakeShell = function()
+        if n > 0 then
+            local f = pool[n]
+            pool[n] = nil
+            n = n - 1
+            return f
+        end
+        -- Pool exhausted (not expected): everything still works, the frame
+        -- just bills the parent. Bump the pool size if this ever happens.
+        return CreateFrame("Frame")
+    end
+end
+
 -- EMERGENCY CONFLICT GUARD: Ayije_CDM hooks the exact same Blizzard frames we do.
 -- Running both together crashes the client on the loading screen. Detect Ayije_CDM
 -- and no-op our entire module so the user can at least log in.
@@ -99,7 +127,7 @@ do
             end)
         end
 
-        local warnFrame = CreateFrame("Frame")
+        local warnFrame = ns.TakeShell()
         warnFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
         warnFrame:SetScript("OnEvent", function(self)
             self:UnregisterAllEvents()
@@ -3538,6 +3566,10 @@ BuildCDMBar = function(barIndex)
     if not barData.enabled then
         if frame._mouseTrack then
             frame:SetScript("OnUpdate", nil)
+            if frame._mouseShell then
+                frame._mouseShell:SetScript("OnUpdate", nil)
+                frame._mouseShell:Hide()
+            end
             frame._mouseTrack = nil
             if frame._preMousePos and not p.cdmBarPositions[key] then
                 p.cdmBarPositions[key] = frame._preMousePos
@@ -3562,6 +3594,10 @@ BuildCDMBar = function(barIndex)
     -- Clear any previous mouse-tracking OnUpdate
     if frame._mouseTrack then
         frame:SetScript("OnUpdate", nil)
+        if frame._mouseShell then
+            frame._mouseShell:SetScript("OnUpdate", nil)
+            frame._mouseShell:Hide()
+        end
         frame._mouseTrack = nil
         -- Restore saved position from before mouse anchor
         if frame._preMousePos and not p.cdmBarPositions[key] then
@@ -3639,7 +3675,17 @@ BuildCDMBar = function(barIndex)
         frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", 0, 0)
         frame._mouseTrack = true
         frame._mouseHiddenByPanel = false
-        frame:SetScript("OnUpdate", function()
+        -- Cursor-follow runs per RENDER FRAME on a pool shell. The shell is
+        -- born in this addon's main chunk so the work bills CooldownManager
+        -- (frame-birth attribution). Rate experiment (2026-07-27): a 60 Hz
+        -- anim ticker visibly stepped against a gliding cursor -- position
+        -- has no engine easing (unlike SetValue fills), so cursor glue needs
+        -- one reposition per rendered frame. The body keeps that cheap:
+        -- unmoved-cursor frames early-out on a raw-pixel compare, and moves
+        -- replace SetPoint offsets in place (no ClearAllPoints).
+        if not frame._mouseShell then frame._mouseShell = ns.TakeShell() end
+        frame._mouseShell:Show()
+        frame._mouseShell:SetScript("OnUpdate", function()
             -- Hide cursor-anchored bar while EUI options panel or unlock mode is open
             local panelOpen = (EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown())
                 or EllesmereUI._unlockActive
@@ -3656,7 +3702,7 @@ BuildCDMBar = function(barIndex)
                         end
                     end
                 end
-                return
+                return true
             elseif frame._mouseHiddenByPanel then
                 -- Panel just closed: restore visibility and icon strata
                 frame._mouseHiddenByPanel = false
@@ -3692,7 +3738,7 @@ BuildCDMBar = function(barIndex)
                     frame:ClearAllPoints()
                     frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", -10000, -10000)
                 end
-                return
+                return true
             end
             frame._mouseParked = false
             -- Throttled mouse-through re-assert: the Decorate/Show/Cooldown
@@ -3715,14 +3761,22 @@ BuildCDMBar = function(barIndex)
                     end
                 end
             end
-            local s = UIParent:GetEffectiveScale()
+            -- Raw-pixel early-out: GetCursorPosition returns raw pixels, so
+            -- comparing RAW coords skips the scale fetch and divisions on
+            -- every fire where the cursor has not moved. lastMX/lastMY hold
+            -- raw values; nil (install and the park above) forces the next
+            -- move to re-assert the full anchor spec.
             local cx, cy = GetCursorPosition()
-            cx = floor(cx / s + 0.5)
-            cy = floor(cy / s + 0.5)
             if cx ~= lastMX or cy ~= lastMY then
+                local firstMove = lastMX == nil
                 lastMX, lastMY = cx, cy
-                frame:ClearAllPoints()
-                frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT", cx + baseOX, cy + baseOY)
+                local s = UIParent:GetEffectiveScale()
+                -- Steady tracking replaces offsets in place: SetPoint with an
+                -- unchanged point spec needs no ClearAllPoints, halving the
+                -- layout churn of every reposition.
+                if firstMove then frame:ClearAllPoints() end
+                frame:SetPoint(pointFrom, UIParent, "BOTTOMLEFT",
+                    floor(cx / s + 0.5) + baseOX, floor(cy / s + 0.5) + baseOY)
             end
         end)
     elseif anchorKey == "partyframe" then
@@ -6073,7 +6127,7 @@ local _focusKickTickAccum = 0
 local _FOCUSKICK_TICK_INTERVAL = 0.1
 local function EnsureFocusKickProxy()
     if _focusKickProxy then return _focusKickProxy end
-    _focusKickProxy = CreateFrame("Frame")
+    _focusKickProxy = ns.TakeShell()
     _focusKickProxy:RegisterEvent("PLAYER_FOCUS_CHANGED")
     _focusKickProxy:RegisterEvent("PLAYER_TARGET_CHANGED")
     _focusKickProxy:RegisterEvent("NAME_PLATE_UNIT_ADDED")
@@ -6193,7 +6247,7 @@ end
 ns.RefreshFocusCastProxyUnit = RefreshFocusCastProxyUnit
 local function EnsureFocusCastProxy()
     if _focusCastProxy then return _focusCastProxy end
-    _focusCastProxy = CreateFrame("Frame")
+    _focusCastProxy = ns.TakeShell()
     local unit = GetFocusKickUnit()
     _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_START", unit)
     _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
@@ -6551,7 +6605,7 @@ local function EnsureFocusReminderProxy()
     -- Initialize focus + context state once at proxy creation
     _focusKickHasFocus = UnitExists("focus") and true or false
     UpdateFocusKickContext()
-    _focusReminderProxy = CreateFrame("Frame")
+    _focusReminderProxy = ns.TakeShell()
     _focusReminderProxy:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     _focusReminderProxy:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
     _focusReminderProxy:RegisterEvent("PLAYER_FOCUS_CHANGED")
@@ -8276,7 +8330,7 @@ function ECME:OnEnable()
     -- spec data is now available and try again. The handler is idempotent
     -- via _cdmSetupStarted so multiple wakeups are harmless.
     if not _cdmSetupStarted then
-        local wakeFrame = CreateFrame("Frame")
+        local wakeFrame = ns.TakeShell()
         wakeFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         wakeFrame:RegisterEvent("PLAYER_LOGIN")
         wakeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -8436,7 +8490,8 @@ function ECME:CDMFinishSetup()
     -- No validation/removal: TBB bars can track any buff (procs,
     -- external buffs, food, etc.) not just CDM viewer spells.
     -- Bars with no active aura simply stay hidden at runtime.
-    ns.GetTrackedBuffBars()
+    -- Nil-guarded so the TBB file can be bisect-disabled wholesale.
+    if ns.GetTrackedBuffBars then ns.GetTrackedBuffBars() end
 
     -- (BuildTrackedBuffBars not called here -- FullCDMRebuild("init") above
     -- already called it. M1 cleanups also deleted: AddSpellToBar's variant-
