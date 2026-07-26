@@ -3132,16 +3132,74 @@ function ns.ParkSecondaryBuffViewer(frame)
         -- (action bars). Re-parking inline would carry our taint into the rest
         -- of that pass. The delay also coalesces ClearAllPoints + SetPoint
         -- bursts into one park, and a single frame of a stray bar is invisible.
-        hooksecurefunc(frame, "SetPoint", function(self)
+        local function QueueRepark(self, method)
             local c = _ecmeFC[self]
             if not c or not c.hidden or c.parkGuard or c.restoring or c.parkQueued then return end
+            ns.NoteBuffViewerUnpark(method)
             c.parkQueued = true
             C_Timer.After(0, function()
                 c.parkQueued = nil
                 if c.hidden and not c.restoring then ns.ParkSecondaryBuffViewer(self) end
             end)
-        end)
+        end
+        hooksecurefunc(frame, "SetPoint", function(self) QueueRepark(self, "SetPoint") end)
+        -- SetPoint is not the only way off the park. SetAllPoints and
+        -- SetParent strand the viewer on screen without ever calling it, and
+        -- nothing heals that until an unrelated SetPoint happens to fire.
+        hooksecurefunc(frame, "SetAllPoints", function(self) QueueRepark(self, "SetAllPoints") end)
+        hooksecurefunc(frame, "SetParent", function(self) QueueRepark(self, "SetParent") end)
     end
+end
+
+-- Park integrity check, driven by the CDM buff ticker (10 Hz).
+--
+-- The hooks above cover the movers we can see. A scale change, a mover that
+-- swaps anchors through a path we do not hook, or simply the one-frame gap the
+-- deferred re-park leaves open all put Blizzard's bars back on screen. This
+-- closes the loop from the other end: it reads where the viewer actually IS
+-- and re-parks whatever moved it.
+--
+-- Position only. Alpha is deliberately not checked -- Blizzard's
+-- hide-when-inactive fade animates it back to 1 through a path no hook sees,
+-- and re-asserting alpha every tick would fight that animation for no gain
+-- while the frame is offscreen anyway.
+function ns.CheckSecondaryBuffViewerPark()
+    local frame = _G[BLIZZ_CDM_FRAMES_SECONDARY.buffs]
+    if not frame then return end
+    local fc = _ecmeFC[frame]
+    if not fc or not fc.hidden or fc.restoring or fc.parkQueued then return end
+    local pt, rel, relPt, x, y
+    -- Indexing past the last point errors; an unanchored viewer counts as
+    -- drifted and falls through to the re-park.
+    if frame:GetNumPoints() > 0 then pt, rel, relPt, x, y = frame:GetPoint(1) end
+    if pt == "TOPLEFT" and rel == UIParent and relPt == "TOPLEFT"
+       and x == -10000 and y == 10000 then
+        fc.driftNoted = nil
+        return
+    end
+    -- Counted on the edge, not per tick: a combat drift cannot be re-parked
+    -- until PLAYER_REGEN_ENABLED, so this path repeats at 10 Hz until then.
+    if not fc.driftNoted then
+        fc.driftNoted = true
+        ns.NoteBuffViewerUnpark("ticker")
+    end
+    -- In combat this re-asserts alpha 0 and defers the park itself; the frame
+    -- is protected, so alpha is the only lever until PLAYER_REGEN_ENABLED.
+    ns.ParkSecondaryBuffViewer(frame)
+end
+
+-- Un-park bookkeeping for /cdmbb. The count alone answers "is the park still
+-- coming undone in the field"; watch mode adds the caller so a third-party
+-- mover names itself.
+function ns.NoteBuffViewerUnpark(method)
+    ns._bbUnparkCount = (ns._bbUnparkCount or 0) + 1
+    ns._bbUnparkLast = method
+    if not ns._cdmbbWatch then return end
+    local now = GetTime()
+    if now - (ns._bbWatchLast or 0) < 1 then return end
+    ns._bbWatchLast = now
+    print("|cff0cd29f[CDM]|r unpark via " .. tostring(method) .. ":")
+    print(debugstack(3, 4, 0))
 end
 
 HideBlizzardCDM = function()
@@ -9100,8 +9158,14 @@ end
 -- it and the park did not heal.
 -------------------------------------------------------------------------------
 SLASH_CDMBB1 = "/cdmbb"
-SlashCmdList.CDMBB = function()
+SlashCmdList.CDMBB = function(msg)
     local function P(s) print("|cff0cd29f[CDM]|r " .. s) end
+    if msg and msg:lower():match("watch") then
+        ns._cdmbbWatch = not ns._cdmbbWatch or nil
+        P("unpark watch " .. (ns._cdmbbWatch and "ON -- move/zone/fight and watch for 'unpark via'"
+            or "OFF"))
+        return
+    end
     local frame = _G[BLIZZ_CDM_FRAMES_SECONDARY.buffs]
     if not frame then P("BuffBarCooldownViewer does not exist") return end
     local cb = ECME.db and ECME.db.profile and ECME.db.profile.cdmBars
@@ -9109,6 +9173,11 @@ SlashCmdList.CDMBB = function()
     P(string.format("hideBlizzard=%s useBlizzardBuffBars=%s suppressed=%s parkPending=%s",
         tostring(cb and cb.hideBlizzard), tostring(cb and cb.useBlizzardBuffBars),
         tostring(fc and fc.hidden or false), tostring(ns._secondaryParkPending or false)))
+    -- A nonzero count with the park intact means it came undone and healed;
+    -- that is the case a single-moment dump cannot show.
+    P(string.format("unparks=%d lastMover=%s watch=%s",
+        ns._bbUnparkCount or 0, tostring(ns._bbUnparkLast or "none"),
+        tostring(ns._cdmbbWatch or false)))
     P(string.format("shown=%s alpha=%.2f effective=%.2f",
         tostring(frame:IsShown()), frame:GetAlpha(), frame:GetEffectiveAlpha()))
     local n = frame:GetNumPoints()
