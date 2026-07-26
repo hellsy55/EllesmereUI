@@ -3770,6 +3770,7 @@ do
                 if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
                 local path = LSM:Fetch("font", key)
                 if path then EllesmereUI._smFontPaths[key] = path end
+                EllesmereUI.InvalidateFontCache()
             end
         end)
     end
