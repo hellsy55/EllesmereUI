@@ -274,12 +274,17 @@ function WSkin.Shell(winKey, frame, opts)
 
         -- Black top bar behind the window title. Sits above both style
         -- backdrops (-8/-7/-6) and below all content and the border overlay.
-        local topBar = frame:CreateTexture(nil, "BACKGROUND", nil, -5)
-        topBar:SetColorTexture(0, 0, 0, 0.5)
-        topBar:SetPoint("TOPLEFT")
-        topBar:SetPoint("TOPRIGHT")
-        topBar:SetHeight(25)
-        d.topBar = topBar
+        -- opts.noTopBar skips it for shells with no title row of their own
+        -- (loot toasts and other small popups), where a 25px bar would just be
+        -- a dark stripe across the top.
+        if not (opts and opts.noTopBar) then
+            local topBar = frame:CreateTexture(nil, "BACKGROUND", nil, -5)
+            topBar:SetColorTexture(0, 0, 0, 0.5)
+            topBar:SetPoint("TOPLEFT")
+            topBar:SetPoint("TOPRIGHT")
+            topBar:SetHeight(25)
+            d.topBar = topBar
+        end
     end
     if not (opts and opts.noBorder) then WSkin.AtlasBorder(frame) end
     WSkin.AdoptShell(winKey, frame)
@@ -1254,6 +1259,13 @@ end
 -- page nav, scroll bars.
 function WSkin.CommonChrome(frame, prefix)
     if frame.CloseButton then WSkin.CloseButton(frame.CloseButton) end
+    -- Newer templates hang the X off the title bar (or name it ClosePanelButton)
+    -- instead of putting it on the frame -- the loot window is one of them, and
+    -- it kept Blizzard's red X until these two paths were added.
+    if frame.TitleContainer and frame.TitleContainer.CloseButton then
+        WSkin.CloseButton(frame.TitleContainer.CloseButton)
+    end
+    if frame.ClosePanelButton then WSkin.CloseButton(frame.ClosePanelButton) end
     if prefix then
         local cb = _G[prefix .. "CloseButton"]
         if cb then WSkin.CloseButton(cb) end
