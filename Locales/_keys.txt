@@ -215,9 +215,6 @@ Duration (seconds)
 Dynamic Rez
 EXCLUDED DEBUFFS
 Edit
-Edit Box Font
-Edit Box Font Size
-Edit Box Height
 Edit Filters
 Edit Group
 Edit Tab Settings
@@ -287,7 +284,6 @@ Hover Top Bar\nDisabled
 Hover Top Bar\nEnabled
 Hovercast is not available for unmodified left/right click
 INDEPENDENT BARS
-INPUT FIELD
 Icon ID always shown for this spell (empty removes)
 Icon opacity while on cooldown (1-100%)
 Icon:
@@ -310,7 +306,6 @@ Include your Cooldown Manager spell layout (which spells sit on which bars) plus
 Include:
 Independent
 Indicator
-Input on Top
 Inky
 Interrupted
 Invalid import string.
@@ -488,8 +483,6 @@ Select a spec above.
 Select a talent...
 Select or add an entry
 Select which specs you want %1$s to be assigned to
-Separate Sidebar
-Separates the sidebar from the chat panel and gives it its own background and border.
 Server Time
 Settings
 Shift + Left-Click Drag to permanently save a panel's position.
@@ -505,8 +498,6 @@ Show a pulsing dot on the Patch Notes button whenever EllesmereUI updates to a n
 Size
 Size matched to %1$s. Unmatch in Unlock Mode to edit.
 Size matching is unavailable with Blizzard Style Action Bars.
-Sidebar Spacing
-Sidebar Width
 Skipped
 Slot ID
 Snap Elements\nDisabled
