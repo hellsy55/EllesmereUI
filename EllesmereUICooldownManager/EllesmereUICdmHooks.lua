@@ -6911,6 +6911,12 @@ function ns.SetupViewerHooks()
             -- e.g. secret procs; in practice those arrive as pool churn, so
             -- the net is insurance). A clean fire costs three reads.
             local _btNow = GetTime()
+            -- Park integrity for Blizzard's tracked-bar viewer. Runs ahead of
+            -- the dirty gate: the movers that strand it on screen (Edit Mode
+            -- layout passes, third-party frame movers) do not dirty the
+            -- ticker, so a gated check would leave the duplicate bars up until
+            -- the next buff proc. Three reads on an intact park.
+            if ns.CheckSecondaryBuffViewerPark then ns.CheckSecondaryBuffViewerPark() end
             if not ns._btDirty and _btNow - (ns._btLastFull or 0) < 0.5 then
                 -- Preset cooldowns drain independently on clean fires, capped
                 -- at 1 Hz: the dirty flag re-arms ~22x/sec from the racial/
