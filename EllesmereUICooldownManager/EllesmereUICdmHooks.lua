@@ -2330,6 +2330,7 @@ local function DecorateFrame(frame, barData)
                 -- single check for everyone who never enables it. The swipe block
                 -- runs for every icon on login, so this also covers /reload.
                 if ss2 and ss2.desatNotActive then ns._cdmAnyDesatNotActive = true end
+                if ss2 and ss2.noDesatOnCD then ns._cdmAnyNoDesatOnCD = true end
                 -- Same one-shot gate for the per-spell charge Hide Swipe so the
                 -- SetDrawSwipe hook can early-out for everyone who never enables
                 -- it. Covers /reload (runs for every icon).
@@ -3155,6 +3156,41 @@ local function DecorateFrame(frame, barData)
             end
         end
 
+        -- Keep Colored (On CD): additive hook on SetDesaturated AND SetDesaturation,
+        -- the mirror of the block above. Desaturating on cooldown is BLIZZARD's own
+        -- behaviour (it greys the icon on every CD tick), so suppressing it means
+        -- re-saturating right after each of those calls rather than skipping a call
+        -- of our own. Deliberately does NOT clear fd._desatNA -- Desaturate When Not
+        -- Active is the more specific, explicitly-asked-for greying, so it wins when
+        -- both are on (bail below) and this setting only ever removes the implicit
+        -- cooldown grey.
+        --
+        -- ZERO-COST WHEN UNUSED: same shape as the block above -- the first line is a
+        -- single flag check, and ns._cdmAnyNoDesatOnCD is flipped on only when a spell
+        -- actually uses the setting (swipe block / options setValue).
+        if fd.tex and not fd._noDesatOnCDHooked then
+            fd._noDesatOnCDHooked = true
+            local function _keepColored()
+                if not ns._cdmAnyNoDesatOnCD then return end
+                if fd._isProcessingOverride then return end
+                local fc2 = _ecmeFC[frame]
+                local sid2 = fc2 and fc2.spellID
+                local bk2 = fc2 and fc2.barKey
+                if not sid2 or not bk2 then return end
+                local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+                if not (ss2 and ss2.noDesatOnCD) then return end
+                if ss2.desatNotActive then return end
+                fd._isProcessingOverride = true
+                fd.tex:SetDesaturated(false)
+                if fd.tex.SetDesaturation then fd.tex:SetDesaturation(0) end
+                fd._isProcessingOverride = false
+            end
+            hooksecurefunc(fd.tex, "SetDesaturated", _keepColored)
+            if fd.tex.SetDesaturation then
+                hooksecurefunc(fd.tex, "SetDesaturation", _keepColored)
+            end
+        end
+
         -- Audio Effect on CD Ready (cd/utility per-icon) is driven purely by the
         -- authoritative SPELL_UPDATE_COOLDOWN / SPELL_UPDATE_CHARGES events via
         -- WatchCdReadySoundIfEnabled (called from DecorateFrame) -- deliberately NOT
@@ -3385,13 +3421,31 @@ local function UpdateTrinketFrame(slotID)
 end
 ns.UpdateTrinketFrame = UpdateTrinketFrame
 
+-- Keep Colored (On CD) for PRESET frames (trinket slots, racials, potions and
+-- user-injected custom spells). Those never run Blizzard's cooldown desaturation
+-- -- the Fake-Active engine greys them itself (UpdateTrinketCooldown below and
+-- ApplySpellDesaturation further down), so there is no SetDesaturated call for
+-- the per-spell hook in DecorateFrame to ride. They read the setting from their
+-- own cas entry instead, at the two points where they would grey the icon.
+-- Zero-cost when unused: the session gate is checked first (flipped by
+-- AddUserRule during the Fake-Active rebuild, so it survives /reload).
+local function PresetKeepsColor(f)
+    if not ns._cdmAnyNoDesatOnCD then return false end
+    local fc = f and _ecmeFC[f]
+    local sid = fc and fc.spellID
+    if not sid or not ns.GetEffectiveCustomActiveState then return false end
+    local cas = ns.GetEffectiveCustomActiveState(sid)
+    return (cas and cas.noDesatOnCD) and true or false
+end
+ns.PresetKeepsColor = PresetKeepsColor
+
 local function UpdateTrinketCooldown(slotID)
     local f = _trinketFrames[slotID]
     if not f or not f._trinketIsOnUse then return false end
     local start, dur, enable = GetInventoryItemCooldown("player", slotID)
     if start and dur and dur > 1.5 and enable == 1 then
         f._cooldown:SetCooldown(start, dur)
-        if f._tex then f._tex:SetDesaturated(true) end
+        if f._tex then f._tex:SetDesaturated(not PresetKeepsColor(f)) end
         return true
     else
         f._cooldown:Clear()
@@ -3647,6 +3701,7 @@ end
 
 local function ApplySpellDesaturation(f, durObj)
     if not f._tex then return end
+    if PresetKeepsColor(f) then f._tex:SetDesaturation(0); return end
     if durObj and _desatCurve and durObj.EvaluateRemainingDuration then
         local val = durObj:EvaluateRemainingDuration(_desatCurve, 0)
         f._tex:SetDesaturation(val or 0)
