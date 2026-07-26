@@ -8277,7 +8277,43 @@ SpecHasClassPower = function()
     return specID and entry[specID] ~= nil
 end
 
+-- Fixed child-born shells for the class-power event driver and the
+-- class-power castbar watcher. The class-power bar is destroyed and
+-- rebuilt on spec switches through the profile system, whose dispatch
+-- runs under the PARENT addon's execution context -- and the engine
+-- bills a handler's entire call tree to the addon whose context created
+-- the frame, so drivers recreated there would bill the parent's CPU row
+-- for their polling. Creating them ONCE here (child main chunk) and
+-- reconfiguring per build keeps every rebuild attribution-safe.
+ns._cpDriver = CreateFrame("Frame")
+ns._cpDriver:Hide()
+ns._cpCastWatcher = CreateFrame("Frame")
+ns._cpCastWatcher:Hide()
+
+-- 10 Hz anim tickers for the two class-power polls. A per-frame OnUpdate
+-- that early-outs to a 0.1s cadence still pays a full Lua entry every
+-- render frame (pure dispatch tax at high fps); a looping Animation fires
+-- the body at the real cadence and the C engine sleeps between fires.
+-- Created HERE (child main chunk) because the AnimationGroup is the
+-- engine's entry object and bills its creation context. Bodies read a
+-- swappable ns function so per-build closures stay per-build; a ticker
+-- runs only between Start()/Stop() and pauses while its host is hidden.
+ns._cpDriverTick = EllesmereUI.Tick.NewAnimTicker(ns._cpDriver, function()
+    local fn = ns._cpTickFn
+    if fn then fn() end
+    return true
+end, 0.1)
+ns._cpWatchTick = EllesmereUI.Tick.NewAnimTicker(ns._cpCastWatcher, function()
+    local fn = ns._cpWatchFn
+    if fn then fn() end
+    return true
+end, 0.1)
+
 local function DestroyCustomClassPower()
+    ns._cpTickFn = nil
+    ns._cpDriverTick.Stop()
+    ns._cpWatchFn = nil
+    ns._cpWatchTick.Stop()
     if frames._customClassPower then
         frames._customClassPower:Hide()
         -- Unregister events on all children to prevent leaks
@@ -8641,8 +8677,16 @@ local function CreateCustomClassPower(playerFrame, style)
         end
     end
 
-    -- Event driver
-    local eventFrame = CreateFrame("Frame", nil, container)
+    -- Event driver: the shared child-born shell (see ns._cpDriver above),
+    -- fully reset here because the previous spec's build may have left
+    -- registrations or an OnUpdate poll on it.
+    local eventFrame = ns._cpDriver
+    eventFrame:UnregisterAllEvents()
+    eventFrame:SetScript("OnEvent", nil)
+    ns._cpTickFn = nil
+    ns._cpDriverTick.Stop()
+    eventFrame:SetParent(container)
+    eventFrame:Show()
     if isCustom then
         -- Per-resource event registration: only register what each resource
         -- actually needs to avoid unnecessary event traffic.
@@ -8656,13 +8700,11 @@ local function CreateCustomClassPower(playerFrame, style)
                                or powerType == "SWEEPING_STRIKES")
 
         if needsOnUpdate then
-            local elapsed = 0
-            eventFrame:SetScript("OnUpdate", function(_, dt)
-                elapsed = elapsed + dt
-                if elapsed < 0.1 then return end
-                elapsed = 0
-                UpdatePips()
-            end)
+            -- 10 Hz poll on the shared anim ticker (see ns._cpDriverTick):
+            -- same cadence as the old OnUpdate accumulator without the
+            -- per-render-frame entry tax.
+            ns._cpTickFn = UpdatePips
+            ns._cpDriverTick.Start()
         end
 
         eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -11487,7 +11529,8 @@ function InitializeFrames()
 
         -- Stop castbar watcher by default; only re-enabled in the "bottom" branch
         if bar._castbarWatcher then
-            bar._castbarWatcher:SetScript("OnUpdate", nil)
+            ns._cpWatchFn = nil
+            ns._cpWatchTick.Stop()
             bar._castbarWatcher:Hide()
         end
 
@@ -11594,14 +11637,16 @@ function InitializeFrames()
             -- Only run the castbar watcher if the player castbar is enabled
             if db.profile.player.showPlayerCastbar then
                 if not bar._castbarWatcher then
-                    bar._castbarWatcher = CreateFrame("Frame", nil, bar)
+                    -- Shared child-born shell (see ns._cpCastWatcher): a
+                    -- frame created here would be born in whatever context
+                    -- triggered this rebuild and could bill the parent for
+                    -- the 10 Hz poll below.
+                    bar._castbarWatcher = ns._cpCastWatcher
+                    bar._castbarWatcher:SetParent(bar)
                 end
-                local cbElapsed = 0
                 local playerFrame = frames.player
-                bar._castbarWatcher:SetScript("OnUpdate", function(_, dt)
-                    cbElapsed = cbElapsed + dt
-                    if cbElapsed < 0.1 then return end
-                    cbElapsed = 0
+                -- 10 Hz body on the shared anim ticker (see ns._cpWatchTick).
+                ns._cpWatchFn = function()
                     local cb = playerFrame and playerFrame.Castbar
                     local castbarBg = cb and cb:GetParent()
                     local nowVis = castbarBg and castbarBg:IsShown() and db.profile.player.showPlayerCastbar
@@ -11609,8 +11654,9 @@ function InitializeFrames()
                         bar._lastCastVis = nowVis
                         AnchorBottom()
                     end
-                end)
+                end
                 bar._castbarWatcher:Show()
+                ns._cpWatchTick.Start()
             end
             ResizeFrameForClassPower(0)
         end
@@ -14172,12 +14218,32 @@ function EllesmereUF:OnInitialize()
     -- Blizzard options panel is registered centrally in EllesmereUI.lua
 end
 
-function EllesmereUF:OnEnable()
+-- Enable-body router. OnEnable runs under the parent addon's lifecycle
+-- dispatch, and the engine bills a script handler's whole call tree to
+-- the addon whose execution context created the frame the engine entered
+-- through -- so every frame born inside the build (oUF buttons, event
+-- drivers, castbar watchers) would bill the PARENT's CPU row forever.
+-- Routing the body through this file-scope frame's PLAYER_LOGIN handler
+-- runs the build in this child's context instead. Ordering is safe: the
+-- parent's lifecycle frame registered PLAYER_LOGIN first (parent loads
+-- before children), so OnEnable has always set the pending flag by the
+-- time this frame's handler fires -- within the SAME event dispatch, and
+-- therefore still inside the combat-reload pre-lockdown window.
+local function EnableBody()
     InitializeFrames()
     -- Register with unlock mode synchronously: on a combat reload this runs
     -- inside the pre-lockdown window, so the login position pass can resolve
     -- and place anchored unit frames before SetPoint gets blocked.
     RegisterUFUnlockElements()
+    -- The parent's synchronous PLAYER_LOGIN position pass (EUI_UnlockMode)
+    -- fires BEFORE this router drains, so unit frame elements were not yet
+    -- registered when it ran. Re-fire it now -- still inside the same
+    -- PLAYER_LOGIN dispatch, so anchored unit frames are placed within the
+    -- combat-reload pre-lockdown window exactly as before. The pass is
+    -- re-entrant by design (CDM and the PEW fallback both re-fire it).
+    if EllesmereUI and EllesmereUI._applySavedPositions then
+        EllesmereUI._applySavedPositions()
+    end
     C_Timer.After(0, SetupOptionsPanel)
     C_Timer.After(0, function()
         if EllesmereUI and EllesmereUI.ApplyColorsToOUF then
@@ -14195,8 +14261,35 @@ function EllesmereUF:OnEnable()
             ns.PlayerPA_Apply()
         end
     end)
+end
 
-    -- Incompatible addon detection is handled globally by EllesmereUI
+do
+    local loginFired = false
+    local router = CreateFrame("Frame")
+    router:RegisterEvent("PLAYER_LOGIN")
+    -- Backstop only: PLAYER_LOGIN always fires for a startup-loaded addon,
+    -- but if it were ever missed the next world entry drains the flag.
+    router:RegisterEvent("PLAYER_ENTERING_WORLD")
+    router:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_LOGIN")
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        loginFired = true
+        if ns._eufEnablePending then
+            ns._eufEnablePending = nil
+            EnableBody()
+        end
+    end)
+
+    function EllesmereUF:OnEnable()
+        if loginFired then
+            -- Runtime re-enable long after login: run directly (rare; any
+            -- parent-context billing lasts only until the next reload).
+            EnableBody()
+        else
+            ns._eufEnablePending = true
+        end
+        -- Incompatible addon detection is handled globally by EllesmereUI
+    end
 end
 
 -------------------------------------------------------------------------------

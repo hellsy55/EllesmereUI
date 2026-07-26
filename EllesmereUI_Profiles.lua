@@ -859,6 +859,8 @@ local function RepointAllDBs(profileName)
         for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
         if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
         if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
+        -- The fonts DB was just rewritten in place; drop the resolution cache.
+        EllesmereUI.InvalidateFontCache()
     end
     -- Custom colors: with "Apply to All Profiles" ON (default) the shared palette
     -- doesn't change with the active profile, so nothing to re-apply on switch.
@@ -1294,6 +1296,8 @@ function EllesmereUI.ApplyProfileData(profileData)
         for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
         if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
         if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
+        -- The fonts DB was just rewritten in place; drop the resolution cache.
+        EllesmereUI.InvalidateFontCache()
     end
     -- Custom colors are GLOBAL appearance, not per-profile: never wipe or
     -- restore EllesmereUIDB.customColors from a profile snapshot. (See the
