@@ -2459,12 +2459,10 @@ do
             return
         end
 
-        -- Seam suppression for the cast-bar wrap border: a container can flag its
-        -- TOP or BOTTOM edge to stay hidden AND have the side strips run all the way
-        -- to that corner (no inset), so two stacked borders fuse into one outline
-        -- with no edge line and no corner notch. The flags live on the container, so
-        -- they survive every re-snap (the 2-tick OnUpdate, PP.SetBorderSize,
-        -- ResnapAllBorders) -- a one-shot :Hide() gets clobbered by the next snap.
+        -- Edge suppression for joined bars: flags live on the container so they
+        -- survive every re-snap; a one-shot :Hide() gets clobbered by the next snap.
+        -- Hidden top/bottom edges also remove the matching side-strip inset so two
+        -- stacked borders fuse with no corner notch.
         local topInset, botInset = -edgeSize, edgeSize
         if container._hideTop then topInset = 0 end
         if container._hideBottom then botInset = 0 end
@@ -2484,14 +2482,22 @@ do
             b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
             b:SetHeight(edgeSize); b:Show()
         end
-        l:ClearAllPoints()
-        l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, topInset)
-        l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, botInset)
-        l:SetWidth(edgeSize); l:Show()
-        r:ClearAllPoints()
-        r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, topInset)
-        r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, botInset)
-        r:SetWidth(edgeSize); r:Show()
+        if container._hideLeft then
+            l:Hide()
+        else
+            l:ClearAllPoints()
+            l:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, topInset)
+            l:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, botInset)
+            l:SetWidth(edgeSize); l:Show()
+        end
+        if container._hideRight then
+            r:Hide()
+        else
+            r:ClearAllPoints()
+            r:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, topInset)
+            r:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, botInset)
+            r:SetWidth(edgeSize); r:Show()
+        end
 
         local bc = container._bdColor
         if bc then

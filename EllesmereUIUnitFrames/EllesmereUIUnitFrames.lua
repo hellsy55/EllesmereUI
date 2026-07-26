@@ -4439,14 +4439,13 @@ function ns.UpdatePowerBorder(power, settings)
     EllesmereUI.ApplyBorderStyle(border, size, c.r, c.g, c.b, alpha, style,
         settings.powerBorderOffsetX, settings.powerBorderOffsetY,
         settings.powerBorderShiftX, settings.powerBorderShiftY, "unitframes", size)
-    if isAttached then
-        local edges = PP.GetBorders(border)
-        if edges then
-            if edges._left then edges._left:SetAlpha(0) end
-            if edges._right then edges._right:SetAlpha(0) end
-            if edges._top then edges._top:SetAlpha(pos == "below" and alpha or 0) end
-            if edges._bottom then edges._bottom:SetAlpha(pos == "above" and alpha or 0) end
-        end
+    local edges = PP.GetBorders(border)
+    if edges then
+        edges._hideLeft = isAttached or nil
+        edges._hideRight = isAttached or nil
+        edges._hideTop = (isAttached and pos == "above") or nil
+        edges._hideBottom = (isAttached and pos == "below") or nil
+        PP.SetBorderSize(border, size)
     end
     local borderLevel = settings.powerBorderBehind
         and math.max(0, power:GetFrameLevel() - 1) or (power:GetFrameLevel() + 5)
