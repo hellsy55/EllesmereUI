@@ -6121,33 +6121,37 @@ local function BuildVisibilityString(info, s, visOverride)
     -- Pet bar has unique logic: it only shows when a pet is active and
     -- the player is not in a vehicle/override/possess state.
     if info.isPetBar then
+        -- Both paths fold the mode's AND terms INTO the pet wrapper bracket.
+        -- Adjacent bracket groups are OR in macro grammar, so a mode clause
+        -- placed beside the wrapper ("[...pet...] [combat] show") matched on
+        -- the pet term alone and ignored the mode entirely -- which inverted
+        -- the two dragonriding modes. A negated axis has no AND token, so it
+        -- becomes a leading hide gate instead (same technique as visOptHide).
+        local conj, negGate
         if vm then
-            -- Multi path: combat/dragon conjuncts join the pet wrapper
-            -- bracket (AND); group modes are structurally unsupported here
-            -- (locked in the UI, stripped by sync copies).
-            local conj, negGate = EAB.BuildVisModeConjuncts(vm)
-            local bracket = "[novehicleui,pet,nooverridebar,nopossessbar"
-            if conj ~= "" then bracket = bracket .. "," .. conj:sub(1, -2) end
-            bracket = bracket .. "]"
-            return "[petbattle] hide; " .. visOptHide .. negGate .. bracket .. " show; hide"
-        end
-        local petShow
-        if vis == "in_combat" then
-            petShow = "[combat] show; hide"
-        elseif vis == "out_of_combat" then
-            petShow = "[nocombat] show; hide"
-        elseif vis == "show_dragonriding" then
-            petShow = "[advflyable,flying] show; hide"
-        elseif vis == "show_not_dragonriding" then
-            petShow = "[advflyable,flying] hide; show"
-        elseif s.combatShowEnabled then
-            petShow = "[combat] show; hide"
-        elseif s.combatHideEnabled then
-            petShow = "[combat] hide; show"
+            -- Group modes are structurally unsupported here (locked in the
+            -- UI, stripped by sync copies).
+            conj, negGate = EAB.BuildVisModeConjuncts(vm)
         else
-            petShow = "show"
+            conj, negGate = "", ""
+            if vis == "in_combat" then
+                conj = "combat,"
+            elseif vis == "out_of_combat" then
+                conj = "nocombat,"
+            elseif vis == "show_dragonriding" then
+                conj = "advflyable,flying,"
+            elseif vis == "show_not_dragonriding" then
+                negGate = "[advflyable,flying] hide; "
+            elseif s.combatShowEnabled then
+                conj = "combat,"
+            elseif s.combatHideEnabled then
+                negGate = "[combat] hide; "
+            end
         end
-        return "[petbattle] hide; " .. visOptHide .. "[novehicleui,pet,nooverridebar,nopossessbar] " .. petShow .. "; hide"
+        local bracket = "[novehicleui,pet,nooverridebar,nopossessbar"
+        if conj ~= "" then bracket = bracket .. "," .. conj:sub(1, -2) end
+        bracket = bracket .. "]"
+        return "[petbattle] hide; " .. visOptHide .. negGate .. bracket .. " show; hide"
     end
 
     -- Build the hide-prefix based on bar type
