@@ -358,6 +358,20 @@ local function GetFrameFontSize(id)
     end
     return 12
 end
+local function GetEditBoxHeight()
+    return min(60, max(18, ECHAT.DB().editBoxHeight or 23))
+end
+local function GetEditBoxFont()
+    local key = ECHAT.DB().editBoxFont
+    if not key or key == "__chat" then return GetFont() end
+    if key == "__global" then
+        return (EUI.GetFontPath and EUI.GetFontPath("chat")) or STANDARD_TEXT_FONT
+    end
+    return (EUI.ResolveFontName and EUI.ResolveFontName(key)) or GetFont()
+end
+local function GetEditBoxFontSize(id)
+    return ECHAT.DB().editBoxFontSize or GetFrameFontSize(id)
+end
 -- GetTabFontSize removed: tab font size hardcoded to 11
 
 -- Chat background texture catalogue: the same set as the Unit Frames bar
@@ -700,6 +714,7 @@ end
 -- font family + outline. Tab size is our own setting.
 function ECHAT.ApplyFonts()
     local font = GetFont()
+    local editFont = GetEditBoxFont()
     local outline = GetOutlineFlag()
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
@@ -709,11 +724,11 @@ function ECHAT.ApplyFonts()
         end
         local eb = _G["ChatFrame" .. i .. "EditBox"]
         if eb then
-            local size = GetFrameFontSize(i)
-            eb:SetFont(font, size, outline)
+            local size = GetEditBoxFontSize(i)
+            eb:SetFont(editFont, size, outline)
             if i <= 10 then
-                if eb.header then eb.header:SetFont(font, size, outline) end
-                if eb.headerSuffix then eb.headerSuffix:SetFont(font, size, outline) end
+                if eb.header then eb.header:SetFont(editFont, size, outline) end
+                if eb.headerSuffix then eb.headerSuffix:SetFont(editFont, size, outline) end
             end
         end
     end
@@ -1763,6 +1778,7 @@ end
 function ECHAT.ApplyInputPosition()
     local cfg = ECHAT.DB()
     local onTop = cfg.inputOnTop
+    local inputHeight = GetEditBoxHeight()
 
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
@@ -1778,19 +1794,22 @@ function ECHAT.ApplyInputPosition()
             if eb and (i <= 10 or not BISECT_EB_ANCHORS_OFF) then
                 eb:ClearAllPoints()
                 if onTop then
-                    eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
-                    eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, 3)
+                    -- Grow the shared panel upward instead of placing the
+                    -- input inside the chat frame and reducing its text area.
+                    eb:SetPoint("BOTTOMLEFT", cf, "TOPLEFT", -10, 3)
+                    eb:SetPoint("BOTTOMRIGHT", cf, "TOPRIGHT", 5, 3)
                 else
                     eb:SetPoint("TOPLEFT", cf, "BOTTOMLEFT", -10, -8)
                     eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
                 end
+                eb:SetHeight(inputHeight)
             end
 
             if div then
                 div:ClearAllPoints()
                 if onTop then
-                    div:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, -20)
-                    div:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 10, -20)
+                    div:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
+                    div:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 10, 3)
                 else
                     div:SetPoint("BOTTOMLEFT", cf, "BOTTOMLEFT", -10, -8)
                     div:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 10, -8)
@@ -1799,35 +1818,42 @@ function ECHAT.ApplyInputPosition()
 
             if bg then
                 bg:ClearAllPoints()
-                bg:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 3)
+                -- Keep the horizontal panel geometry independent from the
+                -- input position/height. Only the vertical edge may expand.
+                bg:SetPoint("LEFT", cf, "LEFT", -10, 0)
+                bg:SetPoint("RIGHT", cf, "RIGHT", 10, 0)
                 if onTop then
-                    bg:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 10, -6)
+                    bg:SetPoint("TOP", cf, "TOP", 0, 3 + inputHeight)
+                    bg:SetPoint("BOTTOM", cf, "BOTTOM", 0, -6)
                 else
-                    bg:SetPoint("BOTTOMRIGHT", eb or cf, "BOTTOMRIGHT", 5, eb and -4 or -6)
+                    bg:SetPoint("TOP", cf, "TOP", 0, 3)
+                    bg:SetPoint("BOTTOM", cf, "BOTTOM", 0, eb and -(12 + inputHeight) or -6)
                 end
             end
 
             if fsc then
                 fsc:ClearAllPoints()
-                if onTop then
-                    fsc:SetPoint("TOPLEFT", cf, "TOPLEFT", 0, -22)
-                else
-                    fsc:SetPoint("TOPLEFT", cf, "TOPLEFT", 0, -6)
-                end
+                -- The chat text keeps the full ChatFrame height regardless of
+                -- input placement or input height.
+                fsc:SetPoint("TOPLEFT", cf, "TOPLEFT", 0, -6)
                 fsc:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 0, 0)
             end
 
             if bar and (i <= 10 or not BISECT_EB_ANCHORS_OFF) then
                 bar:ClearAllPoints()
-                if onTop then
-                    bar:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -22)
-                else
-                    bar:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -2)
-                end
+                bar:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -2)
                 bar:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 5, 2)
             end
         end
     end
+end
+
+function ECHAT.ApplySidebarWidth()
+    local cf1 = _G.ChatFrame1
+    local sidebar = cf1 and CFD(cf1).sidebar
+    if not sidebar then return end
+    sidebar:SetWidth(min(100, max(30, ECHAT.DB().sidebarWidth or 40)))
+    if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
 end
 
 -- Internal: immediately apply alpha to all chat elements
@@ -3130,15 +3156,15 @@ local function SkinEditBox(cf)
         eb:ClearAllPoints()
         eb:SetPoint("TOPLEFT", cf, "BOTTOMLEFT", -10, -8)
         eb:SetPoint("TOPRIGHT", cf, "BOTTOMRIGHT", 5, -8)
-        eb:SetHeight(23)
+        eb:SetHeight(GetEditBoxHeight())
     end
 
     -- Font: use the SAME outline as the chat frames + ECHAT.ApplyFonts (which
     -- reads GetOutlineFlag too), so the input box always matches the rest of
     -- chat. Hardcoding "" here left it un-outlined (drop shadow showed through)
     -- whenever the user picked an outline for chat.
-    local ebSize = GetFrameFontSize(cf:GetID())
-    eb:SetFont(GetFont(), ebSize, GetOutlineFlag())
+    local ebSize = GetEditBoxFontSize(cf:GetID())
+    eb:SetFont(GetEditBoxFont(), ebSize, GetOutlineFlag())
     eb:SetTextInsets(8, 8, 0, 0)
 
     -- Apply custom font to the header ("Say:", "Party:", etc.) and suffix.
@@ -3146,13 +3172,13 @@ local function SkinEditBox(cf)
     -- switches). Never from inside UpdateHeader -- calling SetFont in that
     -- secure chain taints the execution context and blocks SendChatMessage.
     local function ApplyEditBoxHeaderFont(editBox)
-        local sz = GetFrameFontSize(editBox:GetParent():GetID())
+        local sz = GetEditBoxFontSize(editBox:GetParent():GetID())
         local ol = GetOutlineFlag()
         if editBox.header then
-            editBox.header:SetFont(GetFont(), sz, ol)
+            editBox.header:SetFont(GetEditBoxFont(), sz, ol)
         end
         if editBox.headerSuffix then
-            editBox.headerSuffix:SetFont(GetFont(), sz, ol)
+            editBox.headerSuffix:SetFont(GetEditBoxFont(), sz, ol)
         end
     end
     if idx <= 10 or not BISECT_EB_ANCHORS_OFF then
@@ -3268,7 +3294,7 @@ local function SkinChatFrame(cf)
     -- Parented to UIParent so it stays visible regardless of active tab.
     if name == "ChatFrame1" and not CFD(cf).sidebar then
         local sidebar = CreateFrame("Frame", nil, UIParent)
-        sidebar:SetWidth(40)
+        sidebar:SetWidth(min(100, max(30, ECHAT.DB().sidebarWidth or 40)))
         sidebar:SetPoint("TOPRIGHT", CFD(cf).bg, "TOPLEFT", 0, 0)
         sidebar:SetPoint("BOTTOMRIGHT", CFD(cf).bg, "BOTTOMLEFT", 0, 0)
         sidebar:SetFrameStrata(cf:GetFrameStrata())
@@ -4102,6 +4128,31 @@ initFrame:SetScript("OnEvent", function(self)
         tabPassFrame:RegisterEvent("UPDATE_FLOATING_CHAT_WINDOWS")
         tabPassFrame:SetScript("OnEvent", QueueTabPass)
     end
+    -- Blizzard Edit Mode can rebuild the chat dock and tab geometry after a
+    -- panel resize. Re-assert the complete tab appearance only after that
+    -- update has left Blizzard's event/script stack; the short second pass
+    -- covers the final size commit performed while Edit Mode closes.
+    do
+        local editModeStyleGeneration = 0
+        local function QueueEditModeTabStyle()
+            editModeStyleGeneration = editModeStyleGeneration + 1
+            local generation = editModeStyleGeneration
+            QueueTabPass()
+            C_Timer.After(0.10, function()
+                if generation == editModeStyleGeneration then QueueTabPass() end
+            end)
+        end
+        local editModeStyleFrame = CreateFrame("Frame")
+        editModeStyleFrame:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+        editModeStyleFrame:SetScript("OnEvent", function()
+            C_Timer.After(0, QueueEditModeTabStyle)
+        end)
+        if EditModeManagerFrame then
+            EditModeManagerFrame:HookScript("OnHide", function()
+                C_Timer.After(0, QueueEditModeTabStyle)
+            end)
+        end
+    end
     -- Tab close: Blizzard resets all tab colors via FCFTab_UpdateColors
     -- but FCFDock_SelectWindow only fires if the ACTIVE tab was closed.
     -- Closing a non-active tab skips our color refresh. FCF_Close is a
@@ -4521,6 +4572,7 @@ initFrame:SetScript("OnEvent", function(self)
             if _sbd.settingsBtn then _sbd.settingsBtn:SetShown(_cfg.showSettings ~= false) end
         end
     end
+    ECHAT.ApplySidebarWidth()
     ECHAT.ApplySidebarPosition()
     ECHAT.ApplyIconColor()
     ECHAT.ApplyInputPosition()
@@ -4553,6 +4605,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if _sbd.settingsBtn then _sbd.settingsBtn:SetShown(_cfg.showSettings ~= false) end
             end
         end
+        ECHAT.ApplySidebarWidth()
         ECHAT.ApplySidebarPosition()
         ECHAT.ApplyIconColor()
         ECHAT.ApplyInputPosition()

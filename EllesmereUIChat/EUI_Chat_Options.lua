@@ -495,7 +495,7 @@ initFrame:SetScript("OnEvent", function(self)
         if isSidebar then
         _, h = W:SectionHeader(parent, "SIDEBAR", y); y = y - h
 
-        -- Row 1: Sidebar Visibility (+ cog) | Sidebar Icons
+        -- Row 1: Sidebar Visibility (+ cog) | Sidebar Background
         local sidebarVisValues = {
             always    = { text = "Always" },
             mouseover = { text = "Mouseover" },
@@ -529,10 +529,12 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("sidebarVisibility", v)
                   if ECHAT.ApplySidebarVisibility then ECHAT.ApplySidebarVisibility() end
               end },
-            { type="dropdown", text="Sidebar Icons",
-              values={ __placeholder = "..." }, order={ "__placeholder" },
-              getValue=function() return "__placeholder" end,
-              setValue=function() end })
+            { type="toggle", text="Hide Sidebar Background",
+              getValue=function() return Cfg("hideSidebarBg") or false end,
+              setValue=function(v)
+                  Set("hideSidebarBg", v)
+                  if ECHAT.ApplySidebarBackground then ECHAT.ApplySidebarBackground() end
+              end })
         -- Cog for Sidebar Visibility
         do
             local lrgn = sidebarRow._leftRegion
@@ -560,56 +562,60 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
             cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
         end
-        -- Sidebar Icons checkbox dropdown (drag rows to reorder). Visibility
-        -- toggles of already-created icons apply live; a new order -- and
-        -- newly-added icons -- take effect on reload, so a single reload
-        -- prompt fires when the dropdown closes with pending changes.
+        y = y - h
+
+        local sidebarLayoutRow
+        sidebarLayoutRow, h = W:DualRow(parent, y,
+            { type="slider", text="Sidebar Width", min=30, max=100, step=1,
+              getValue=function() return Cfg("sidebarWidth") or 40 end,
+              setValue=function(v)
+                  Set("sidebarWidth", v)
+                  if ECHAT.ApplySidebarWidth then ECHAT.ApplySidebarWidth() end
+              end },
+            { type="toggle", text="Separate Sidebar",
+              tooltip="Separates the sidebar from the chat panel and gives it its own background and border.",
+              getValue=function() return Cfg("sidebarSeparate") or false end,
+              setValue=function(v)
+                  Set("sidebarSeparate", v)
+                  if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
+                  if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                  EllesmereUI:RefreshPage()
+              end })
         do
-            local rightRgn = sidebarRow._rightRegion
-            if rightRgn._control then rightRgn._control:Hide() end
-            local pendingIconReload = false
-            local cbDD, cbDDRefresh = EllesmereUI.BuildReorderCBDropdown(
-                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
-                sidebarIconItems,
-                function(k) return Cfg(k) ~= false end,
-                function(k, v)
-                    -- Enabling an icon whose button was not created at login
-                    -- (it was disabled then) needs a sidebar rebuild to show it.
-                    -- Disabling, or re-enabling an already-created icon, applies
-                    -- live with no reload.
-                    if v and ECHAT.SidebarIconExists and not ECHAT.SidebarIconExists(k) then
-                        pendingIconReload = true
-                    end
-                    Set(k, v)
-                    if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
-                end,
-                {
-                    hint2 = "Reload required - close dropdown to reload",
-                    setOrder = function(orderedKeys)
-                        local map = {}
-                        for i, key in ipairs(orderedKeys) do map[key] = i end
-                        Set("sidebarIconOrder", map)
-                        -- Applied at the next reload via the creation-order
-                        -- snapshot; nothing re-anchors live.
-                    end,
-                    onClose = function(orderChanged)
-                        if not orderChanged and not pendingIconReload then return end
-                        pendingIconReload = false
-                        EllesmereUI:ShowConfirmPopup({
-                            title       = "Reload Required",
-                            message     = "A UI reload is needed to apply your sidebar icon changes.",
-                            confirmText = "Reload Now",
-                            cancelText  = "Later",
-                            onConfirm   = function() ReloadUI() end,
-                        })
-                    end,
-                })
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
-            rightRgn._control = cbDD
-            rightRgn._lastInline = nil
-            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+            local lrgn = sidebarLayoutRow._rightRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title="Separate Sidebar",
+                rows={
+                    { type="slider", pixel=true, label="Sidebar Spacing",
+                      min=0, max=30, step=1,
+                      get=function() return Cfg("sidebarSeparateSpacing") or 8 end,
+                      set=function(v)
+                          Set("sidebarSeparateSpacing", v)
+                          if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
+                          if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, lrgn)
+            cogBtn:SetSize(26,26)
+            cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
+            lrgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(lrgn:GetFrameLevel()+5)
+            local function UpdateCogAlpha()
+                cogBtn:SetAlpha(Cfg("sidebarSeparate") and 0.4 or 0.15)
+            end
+            UpdateCogAlpha(); EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
+            local cogTex = cogBtn:CreateTexture(nil,"OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter",function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave",function() UpdateCogAlpha() end)
+            cogBtn:SetScript("OnClick",function(s)
+                if Cfg("sidebarSeparate") then cogShow(s) end
+            end)
         end
         y = y - h
+
+        _, h = W:SectionHeader(parent, "ICONS", y); y = y - h
 
         -- Row 2: Sidebar Icons Color | (empty)
         local function MakeIconColorSwatches()
@@ -652,15 +658,52 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
             }
         end
-        _, h = W:DualRow(parent, y,
+        local iconOptionsRow
+        iconOptionsRow, h = W:DualRow(parent, y,
             { type="multiSwatch", text="Sidebar Icons Color",
               swatches = MakeIconColorSwatches() },
-            { type="toggle", text="Hide Sidebar Background",
-              getValue=function() return Cfg("hideSidebarBg") or false end,
-              setValue=function(v)
-                  Set("hideSidebarBg", v)
-                  if ECHAT.ApplySidebarBackground then ECHAT.ApplySidebarBackground() end
-              end })
+            { type="dropdown", text="Sidebar Icons",
+              values={ __placeholder = "..." }, order={ "__placeholder" },
+              getValue=function() return "__placeholder" end,
+              setValue=function() end })
+        do
+            local rightRgn = iconOptionsRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local pendingIconReload = false
+            local cbDD, cbDDRefresh = EllesmereUI.BuildReorderCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                sidebarIconItems,
+                function(k) return Cfg(k) ~= false end,
+                function(k, v)
+                    if v and ECHAT.SidebarIconExists and not ECHAT.SidebarIconExists(k) then
+                        pendingIconReload = true
+                    end
+                    Set(k, v)
+                    if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
+                end,
+                {
+                    hint2 = "Reload required - close dropdown to reload",
+                    setOrder = function(orderedKeys)
+                        local map = {}
+                        for i, key in ipairs(orderedKeys) do map[key] = i end
+                        Set("sidebarIconOrder", map)
+                    end,
+                    onClose = function(orderChanged)
+                        if not orderChanged and not pendingIconReload then return end
+                        pendingIconReload = false
+                        EllesmereUI:ShowConfirmPopup({
+                            title="Reload Required",
+                            message="A UI reload is needed to apply your sidebar icon changes.",
+                            confirmText="Reload Now", cancelText="Later",
+                            onConfirm=function() ReloadUI() end,
+                        })
+                    end,
+                })
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
         y = y - h
 
         -- Row 3: Sidebar Icon Size (+ cog: Icon Spacing) | Free Move Icons
@@ -732,55 +775,6 @@ initFrame:SetScript("OnEvent", function(self)
             end
             UpdateResetVis()
             EllesmereUI.RegisterWidgetRefresh(UpdateResetVis)
-        end
-        y = y - h
-
-        -- Row 4: Separate Sidebar (+ cog: Sidebar Spacing) | (empty)
-        local sepRow
-        sepRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Separate Sidebar",
-              tooltip="Separates the sidebar from the chat panel and gives it its own background and border.",
-              getValue=function() return Cfg("sidebarSeparate") or false end,
-              setValue=function(v)
-                  Set("sidebarSeparate", v)
-                  if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
-                  if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
-                  EllesmereUI:RefreshPage()
-              end },
-            { type = "label", text = "" })
-        do
-            local lrgn = sepRow._leftRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Separate Sidebar",
-                rows = {
-                    { type="slider", pixel=true, label="Sidebar Spacing",
-                      min = 0, max = 30, step = 1,
-                      get=function() return Cfg("sidebarSeparateSpacing") or 8 end,
-                      set=function(v)
-                          Set("sidebarSeparateSpacing", v)
-                          if ECHAT.ApplySidebarPosition then ECHAT.ApplySidebarPosition() end
-                          if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
-                      end },
-                },
-            })
-            local cogBtn = CreateFrame("Button", nil, lrgn)
-            cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
-            lrgn._lastInline = cogBtn
-            cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
-            local function UpdateCogAlpha()
-                cogBtn:SetAlpha(Cfg("sidebarSeparate") and 0.4 or 0.15)
-            end
-            UpdateCogAlpha()
-            EllesmereUI.RegisterWidgetRefresh(UpdateCogAlpha)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-            cogTex:SetAllPoints()
-            cogTex:SetTexture(EllesmereUI.COGS_ICON)
-            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
-            cogBtn:SetScript("OnLeave", function(s) UpdateCogAlpha() end)
-            cogBtn:SetScript("OnClick", function(s)
-                if Cfg("sidebarSeparate") then cogShow(s) end
-            end)
         end
         y = y - h
 
@@ -1357,8 +1351,51 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
         end -- isTabs
 
-        -- -- EXTRAS ------------------------------------------------------------
         if isChat then
+        -- -- INPUT FIELD -------------------------------------------------------
+        _, h = W:SectionHeader(parent, "INPUT FIELD", y); y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Input on Top",
+              getValue=function() return Cfg("inputOnTop") or false end,
+              setValue=function(v)
+                  Set("inputOnTop", v)
+                  if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
+              end },
+            { type="slider", text="Edit Box Height", min=18, max=60, step=1,
+              getValue=function() return Cfg("editBoxHeight") or 23 end,
+              setValue=function(v)
+                  Set("editBoxHeight", v)
+                  if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
+              end })
+        y = y - h
+
+        do
+            local fontValues, fontOrder = EllesmereUI.BuildFontDropdownData()
+            fontValues.__chat = "Chat Font"
+            table.insert(fontOrder, 1, "__chat")
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Edit Box Font",
+                  values=fontValues, order=fontOrder,
+                  getValue=function() return Cfg("editBoxFont") or "__chat" end,
+                  setValue=function(v)
+                      Set("editBoxFont", v)
+                      if ECHAT.ApplyFonts then ECHAT.ApplyFonts() end
+                  end },
+                { type="slider", text="Edit Box Font Size", min=8, max=24, step=1,
+                  getValue=function()
+                      if Cfg("editBoxFontSize") then return Cfg("editBoxFontSize") end
+                      local _, size = FCF_GetChatWindowInfo and FCF_GetChatWindowInfo(1)
+                      return size or 12
+                  end,
+                  setValue=function(v)
+                      Set("editBoxFontSize", v)
+                      if ECHAT.ApplyFonts then ECHAT.ApplyFonts() end
+                  end })
+            y = y - h
+        end
+
+        -- -- EXTRAS ------------------------------------------------------------
         _, h = W:SectionHeader(parent, "EXTRAS", y); y = y - h
 
         -- Row 1: Remember Last Chat Lines (+ cog: Max Lines) | Hide Tooltip on Hover
@@ -1481,24 +1518,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Row 2: Input on Top | Lock Main Chat Size
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Input on Top",
-              getValue=function() return Cfg("inputOnTop") or false end,
-              setValue=function(v)
-                  Set("inputOnTop", v)
-                  if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
-              end },
-            { type="toggle", text="Lock Main Chat Size",
-              tooltip="Hides the resize handle on the main chat frame, preventing accidental resizing.",
-              getValue=function() return Cfg("lockChatSize") or false end,
-              setValue=function(v)
-                  Set("lockChatSize", v)
-                  if ECHAT.ApplyLockChatSize then ECHAT.ApplyLockChatSize() end
-              end })
-        y = y - h
-
-        -- Row 3: Whisper Sound | (empty)
         -- Sound dropdown: shallow-copy the runtime tables so _menuOpts
         -- (preview icon) doesn't pollute the shared tables.
         local whisperSoundValues = {}
@@ -1525,12 +1544,20 @@ initFrame:SetScript("OnEvent", function(self)
             end,
             iconTooltip = function() return "Preview Sound" end,
         }
+
+        -- Row 2: Lock Main Chat Size | Whisper Sound
         _, h = W:DualRow(parent, y,
+            { type="toggle", text="Lock Main Chat Size",
+              tooltip="Hides the resize handle on the main chat frame, preventing accidental resizing.",
+              getValue=function() return Cfg("lockChatSize") or false end,
+              setValue=function(v)
+                  Set("lockChatSize", v)
+                  if ECHAT.ApplyLockChatSize then ECHAT.ApplyLockChatSize() end
+              end },
             { type="dropdown", text="Whisper Sound",
               values=whisperSoundValues, order=whisperSoundOrder,
               getValue=function() return Cfg("whisperSoundKey") or "none" end,
-              setValue=function(v) Set("whisperSoundKey", v) end },
-            { type="label", text="" })
+              setValue=function(v) Set("whisperSoundKey", v) end })
         y = y - h
 
         end -- isChat
