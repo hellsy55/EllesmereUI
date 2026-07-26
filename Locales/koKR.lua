@@ -5841,3 +5841,9 @@ if GetLocale() == "koKR" and EllesmereUI then
         ["윈첨"] = "첨탑",
     }
 end
+-- Chat: sidebar and input field
+L["INPUT FIELD"] = "입력창"
+L["Sidebar Width"] = "사이드바 너비"
+L["Edit Box Height"] = "입력창 높이"
+L["Edit Box Font"] = "입력창 글꼴"
+L["Edit Box Font Size"] = "입력창 글꼴 크기"
