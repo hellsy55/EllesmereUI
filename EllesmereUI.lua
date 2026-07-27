@@ -5656,6 +5656,14 @@ end
 --   fallback  - path to use if nothing resolves (optional)
 function EllesmereUI.ResolveTexturePath(texTable, key, fallback)
     if not key then return fallback end
+    -- A non-string key is legacy data, not a lookup miss: several settings were
+    -- boolean toggles before they became style dropdowns (showPlayerAbsorb is
+    -- one). Callers gate on truthiness, so a stored `true` passes their check
+    -- and arrives here, where the :match below raises. That error fires inside
+    -- unit frame initialisation and aborts the whole build -- a white player
+    -- frame and a settings tab that will not open, from one stale boolean.
+    -- Treat it as unset and let the caller's fallback stand.
+    if type(key) ~= "string" then return fallback end
     local path = texTable and texTable[key]
     if path then return path end
     -- If the key has an "sm:" prefix, try LSM directly
