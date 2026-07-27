@@ -118,6 +118,43 @@ local ResolveCastSpells
 local PresetOnCD, ApplyCdState, RestoreAllCdState, EnsureCdStateTicker, EvalCdStateNow
 
 -- ---------------------------------------------------------------------------
+--  Icon identity: slot key <-> equipped item key
+-- ---------------------------------------------------------------------------
+-- The same icon can be named by two different tokens. An equipped trinket is
+-- -itemID in the settings store (ResolveCustomActiveKey maps a slot frame to
+-- the equipped item so each item tracks separately) and -13/-14 on the slot
+-- frame itself. Which token a RULE ends up with depends on whether equipment
+-- data was readable at re-arm -- and at login it is not: GetInventoryItemID
+-- returns nil, the equipped-trinket skip in Rearm does not fire, and the rule
+-- is keyed -itemID while the frame that renders moments later carries -13.
+-- Nothing reconciled them, so the rule sat armed against an icon that did not
+-- exist for the rest of the session; any settings touch re-armed with
+-- equipment present and it started working, which is the "dead until I open
+-- the setting again" report.
+--
+-- Comparing through this map fixes every ordering variant at once, because it
+-- resolves at MATCH time (frames render long after equipment is available)
+-- rather than at arm time. Kept as a table so the hot loops below cost a
+-- lookup rather than an API call per frame per rule.
+local _slotItemKey = {}
+
+local function RefreshSlotItemKeys()
+    wipe(_slotItemKey)
+    for slot = 13, 14 do
+        local id = GetInventoryItemID and GetInventoryItemID("player", slot)
+        if id then _slotItemKey[-slot] = -id end
+    end
+end
+
+-- Refreshed lazily while empty (covers the login window, where re-arm ran
+-- before equipment was readable) and on every equipment change.
+local function KeyMatches(ruleKey, frameKey)
+    if ruleKey == frameKey then return true end
+    if not next(_slotItemKey) then RefreshSlotItemKeys() end
+    return _slotItemKey[frameKey] == ruleKey or _slotItemKey[ruleKey] == frameKey
+end
+
+-- ---------------------------------------------------------------------------
 --  Overlay icon: one per underlying icon frame, pooled. Toggled by alpha only.
 -- ---------------------------------------------------------------------------
 GetOverlay = function(iconFrame)
@@ -331,7 +368,7 @@ ApplyRule = function(rule, win)
         for i = 1, #list do
             local f = list[i]
             local fc = f and FCt[f]
-            if fc and fc.spellID == sid and (not rule.barKey or fc.barKey == rule.barKey) then
+            if fc and KeyMatches(sid, fc.spellID) and (not rule.barKey or fc.barKey == rule.barKey) then
                 ApplyToFrame(f, rule, win)
                 if ns._fakeActiveDebug then
                     print(("|cff0cd29fEUI FakeActive|r %s sid=%s"):format(
@@ -460,7 +497,7 @@ if EllesmereUI and EllesmereUI.IS_121 then
                     for i = 1, #list do
                         local f = list[i]
                         local fc = f and FCt[f]
-                        if fc and fc.spellID == rule.spellID then
+                        if fc and KeyMatches(rule.spellID, fc.spellID) then
                             local barKey = fc.barKey
                             bd = barKey and ns.barDataByKey and ns.barDataByKey[barKey]
                             ss = rule.cas
@@ -810,6 +847,7 @@ OnEvent = function(self, event, unit, _, spellID)
         -- A trinket swap re-points a slot's settings to a different item; re-arm
         -- so the slot picks up the newly-equipped trinket's rule (or none).
         if unit == 13 or unit == 14 then
+            RefreshSlotItemKeys()
             ns.FakeActive_Rearm()
         end
     end
@@ -1111,7 +1149,7 @@ EvalCdStateNow = function()
                 for i = 1, #list do
                     local f = list[i]
                     local fc = f and FCt[f]
-                    if fc and fc.spellID == sid then
+                    if fc and KeyMatches(sid, fc.spellID) then
                         hasIcon = true
                         if eff then ApplyCdState(f, fc, cas, eff, onCD, ready) end
                     end
@@ -1257,6 +1295,9 @@ function ns.FakeActive_Rearm()
     RestoreAllCdState()  -- un-hide / un-glow icons from the outgoing rule set
     CloseAll()
     wipe(_rules); wipe(_auraRules); wipe(_customRules); wipe(_castMap); wipe(_cdStateRules)
+    -- Re-read rather than wipe: a re-arm during the login window would leave
+    -- the map empty and the lazy refresh in KeyMatches would just rebuild it.
+    RefreshSlotItemKeys()
     _needAura, _needCast, _armed, _hasUserRules = false, false, false, false
     if FA121 then FA121.BeginSweep() end
 
