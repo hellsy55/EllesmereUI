@@ -2485,8 +2485,12 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                 local mItems = {}
                 for _, m in ipairs(macros) do mItems[#mItems + 1] = { name = m.name, icon = m.icon, macroName = m.name } end
                 PopulateGridG(mItems, function(itm)
+                    -- Macros default to BOTH reactions, unlike a spell binding
+                    -- (friendly only, the click-cast healing case). A macro is
+                    -- general purpose and commonly a mouseover focus/target one,
+                    -- so a friendly-only default would leave it dead on enemies.
                     ns.CC_AddGlobalBinding({ type = "macro", macroName = itm.macroName, icon = itm.icon,
-                        enabled = true, oocOnly = false, hovercast = false, hoverFriendly = true, hoverEnemy = false })
+                        enabled = true, oocOnly = false, hovercast = false, hoverFriendly = true, hoverEnemy = true })
                     ns._ccSelSide = "global"; ns._ccSelIndex = #(GetGlobalBindings()); RebuildPage()
                 end)
             else
@@ -3100,7 +3104,8 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                     ns.CC_AddSpecBinding({
                         type = "macro", macroName = item.macroName, icon = item.icon,
                         enabled = true, oocOnly = false, hovercast = false,
-                        hoverFriendly = true, hoverEnemy = false,
+                        -- Both reactions: see the global macro add above.
+                        hoverFriendly = true, hoverEnemy = true,
                     })
                     ns._ccSelSide = "spec"; ns._ccSelIndex = #(GetSpecBindings()); RebuildPage()
                 end)
