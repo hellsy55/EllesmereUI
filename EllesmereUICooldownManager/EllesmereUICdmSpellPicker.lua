@@ -677,6 +677,16 @@ function ns.MigrateSpecToBarFilterModelV6()
 
     local prof = sp[specKey]
     if not prof or prof._barFilterModelV6 then return end
+    -- Never consume import ghosting in the session that performed the import.
+    -- This pass reads the LIVE Blizzard CDM tracked set, and an installer that
+    -- also rewrites Blizzard's own CDM layout leaves that set unlaundered until
+    -- a reload -- so ghosting computed here would be against the pre-import
+    -- tracked set, then stamped one-shot. Return WITHOUT stamping so the next
+    -- session runs it against settled state. Fail-open: until then the layout's
+    -- unplaced spells simply stay visible on the default bars.
+    if prof._importGhostMode and EllesmereUI and EllesmereUI._cdmImportGhostDeferred then
+        return
+    end
     if not prof.barSpells then prof._barFilterModelV6 = true; return end
 
     local p = ECME.db and ECME.db.profile

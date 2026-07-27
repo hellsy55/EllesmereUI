@@ -144,7 +144,7 @@ local function Register(frame, keep)
 end
 WSkin.Register = Register
 
-local PROTECT_KEYS = { "bg", "bgOverlay", "modernBg", "hover", "selBar", "rightShade", "fill", "x", "topBar", "arrow", "caret" }
+local PROTECT_KEYS = { "bg", "bgOverlay", "modernBg", "hover", "selBar", "rightShade", "fill", "x", "topBar", "bottomBar", "arrow", "caret" }
 local function Restrip()
     for frame, keep in pairs(_restrip) do
         if frame and not frame:IsForbidden() then
@@ -284,6 +284,20 @@ function WSkin.Shell(winKey, frame, opts)
             topBar:SetPoint("TOPRIGHT")
             topBar:SetHeight(25)
             d.topBar = topBar
+        end
+        -- Matching bar along the BOTTOM, opt-in via opts.bottomBar (pass a
+        -- number for a height other than the top bar's 25). For windows that
+        -- carry a footer strip -- a currency row, a total, an action bar --
+        -- so it reads as a deliberate band rather than content floating on
+        -- the backdrop. Same layer and color as the top bar, so the two match.
+        local bb = opts and opts.bottomBar
+        if bb then
+            local bottomBar = frame:CreateTexture(nil, "BACKGROUND", nil, -5)
+            bottomBar:SetColorTexture(0, 0, 0, 0.5)
+            bottomBar:SetPoint("BOTTOMLEFT")
+            bottomBar:SetPoint("BOTTOMRIGHT")
+            bottomBar:SetHeight(type(bb) == "number" and bb or 25)
+            d.bottomBar = bottomBar
         end
     end
     if not (opts and opts.noBorder) then WSkin.AtlasBorder(frame) end

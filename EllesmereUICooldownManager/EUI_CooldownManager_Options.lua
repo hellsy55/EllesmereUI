@@ -11850,11 +11850,14 @@ initFrame:SetScript("OnEvent", function(self)
                     -- 3. Active State Glow (default = nil / none)
                     local glowRow = MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
                         function() return ss.activeGlow end,
-                        function(v) EnsureSS(); SetOwn("activeGlow", v) end,
+                        function(v) EnsureSS(); SetOwn("activeGlow", v); if v and v > 0 then ns._cdmAnyActiveGlow = true end end,
                         function() return ss.activeGlow == nil end,
                         nil,
                         { apply = { keys = { "activeGlow" },
-                                    write = function(t, v) t.activeGlow = v end } })
+                                    write = function(t, v)
+                                        t.activeGlow = v
+                                        if v and v > 0 then ns._cdmAnyActiveGlow = true end
+                                    end } })
                     if isCustomInjected and glowRow then
                         glowRow:SetAlpha(0.35)
                         glowRow:SetScript("OnEnter", function()
@@ -18743,11 +18746,23 @@ initFrame:SetScript("OnEvent", function(self)
             local _, scCogShow = EllesmereUI.BuildCogPopup({
                 title = "Charge/Stack Text",
                 rows = {
-                    { type="toggle", label="Show Item Count",
-                      get=function() return BD().showItemCount ~= false end,
+                    -- View over the legacy showItemCount boolean (Never = false,
+                    -- Always = true/nil) plus the itemCountOOC flag for the new
+                    -- Out of Combat mode. OOC keeps showItemCount = true so every
+                    -- legacy reader treats it as "on"; the combat gate lives in
+                    -- the icon restyle. Zero migration.
+                    { type="dropdown", label="Show Item Count",
+                      values={ never="Never", always="Always", ooc="Out of Combat" },
+                      order={ "never", "always", "ooc" },
+                      get=function()
+                          if BD().itemCountOOC then return "ooc" end
+                          return (BD().showItemCount ~= false) and "always" or "never"
+                      end,
                       set=function(v)
-                          BD().showItemCount = v
-                          ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                          local bd = BD()
+                          bd.itemCountOOC = (v == "ooc") or nil
+                          bd.showItemCount = (v ~= "never")
+                          ns.RefreshCDMIconAppearance(bd.key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                       end },
                     { type="dropdown", label="Position",
                       values={ bottomright="Bottom Right", bottom="Bottom", bottomleft="Bottom Left", left="Left", topleft="Top Left", top="Top", topright="Top Right", right="Right", center="Center" },

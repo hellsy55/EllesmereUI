@@ -1492,6 +1492,24 @@ function ns.RescanCustomIconFlag()
     end)
 end
 
+-- Active State Glow gate: set ns._cdmAnyActiveGlow once if any saved spell (any
+-- spec) has the per-spell activeGlow style set. The buff ticker's active-glow
+-- integrity pass -- the safety net that lights the glow when Blizzard skips the
+-- SetSwipeColor call that normally drives it -- is skipped entirely for anyone
+-- who never enables it. Monotonic, scanned-once contract identical to the flags
+-- above (the swipe hook and the options setter flip the flag live on enable).
+function ns.RescanActiveGlowFlag()
+    if ns._cdmAnyActiveGlow or ns._activeGlowFlagScanned then return end
+    if not EllesmereUIDB then return end
+    ns._activeGlowFlagScanned = true
+    ns.ForEachSavedSettingsBlock(function(ss)
+        if (tonumber(ss.activeGlow) or 0) > 0 then
+            ns._cdmAnyActiveGlow = true
+            return true
+        end
+    end)
+end
+
 -------------------------------------------------------------------------------
 --  Spec helpers
 --
@@ -5687,10 +5705,15 @@ local function RefreshCDMIconAppearance(barKey)
                 local cdX = (ssb and ssb.cooldownTextX) or barData.cooldownTextX or 0
                 local cdY = (ssb and ssb.cooldownTextY) or barData.cooldownTextY or 0
                 -- Find Blizzard's countdown text FontString on the Cooldown widget.
-                -- Keep it on the Cooldown widget (anchored to cd) so the user's
-                -- X/Y offset works -- reparenting it makes Blizzard's engine
-                -- re-center and ignore the offset. CENTER anchor also overrides
-                -- the engine's stale baseline (raw SetFont vs SetCountdownFont).
+                -- Keep it ON the Cooldown widget (anchored to cd) so the user's
+                -- position and X/Y offset work -- REPARENTING it makes Blizzard's
+                -- engine re-center and ignore both. Setting our own anchor also
+                -- overrides the engine's stale baseline (raw SetFont vs
+                -- SetCountdownFont); that held when every anchor was CENTER and
+                -- should still hold off-center, but off-center is where a missed
+                -- or stomped anchor first becomes VISIBLE -- with CENTER, our
+                -- result and Blizzard's default were indistinguishable, so this
+                -- pass could silently no-op and nobody could tell.
                 for _, rgn in pairs({ cd:GetRegions() }) do
                     if rgn and rgn.GetObjectType and rgn:GetObjectType() == "FontString" then
                         EllesmereUI.ApplyIconTextFont(rgn, cdFont, cdSize, "cdm")
@@ -5737,6 +5760,13 @@ local function RefreshCDMIconAppearance(barKey)
         else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
         local showItemCount = barData.showItemCount ~= false
         if ssb and ssb.showItemCount ~= nil then showItemCount = ssb.showItemCount end
+        -- Show Item Count "Out of Combat" mode: bar-level combat gate applied
+        -- on top of the resolved per-spell value. Combat edges re-run this
+        -- restyle for OOC bars (ns.RefreshItemCountOOCBars), so the gate only
+        -- ever reads the event-tracked combat flag.
+        if showItemCount and barData.itemCountOOC and _inCombat then
+            showItemCount = false
+        end
         -- Text must render above borders. Levels are relative to the
         -- icon's own frame level (CdmHooks: border +13, text +23).
         local textLvl = icon:GetFrameLevel() + 23
@@ -7311,6 +7341,7 @@ BuildAllCDMBars = function()
     ns.RescanReverseSwipeFlag()   -- set the Reverse Swipe gate (once) before refresh
     ns.RescanThresholdTextFlag()  -- set the Threshold Text gate (once) before refresh
     ns.RescanCustomIconFlag()     -- set the per-spell Custom Icon gate (once) before refresh
+    ns.RescanActiveGlowFlag()     -- set the Active State Glow gate (once) before refresh
 
     local p = ECME.db.profile
 
@@ -8826,6 +8857,20 @@ local function InstallRotationHook()
     UpdateRotationHighlights()
 end
 
+-- Show Item Count "Out of Combat" mode: re-run the icon restyle for bars
+-- using it whenever combat starts or ends (the gate inside the restyle reads
+-- the event-tracked combat flag). No-ops instantly when no bar uses the mode.
+function ns.RefreshItemCountOOCBars()
+    local p = ECME.db and ECME.db.profile
+    local bars = p and p.cdmBars and p.cdmBars.bars
+    if not bars or not ns.RefreshCDMIconAppearance then return end
+    for _, bd in ipairs(bars) do
+        if bd.itemCountOOC and bd.key then
+            ns.RefreshCDMIconAppearance(bd.key)
+        end
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Event-Driven Runtime Maintenance
 --
@@ -9064,6 +9109,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if event == "PLAYER_REGEN_DISABLED" then
             _inCombat = true
             _CDMApplyVisibility()
+            ns.RefreshItemCountOOCBars()
         elseif event == "PLAYER_REGEN_ENABLED" then
             -- Buffer combat exit: brief out-of-combat blips (mob dies,
             -- re-aggro) shouldn't flash visibility changes.
@@ -9071,6 +9117,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
                 if not InCombatLockdown() then
                     _inCombat = false
                     _CDMApplyVisibility()
+                    ns.RefreshItemCountOOCBars()
                 end
             end)
         else

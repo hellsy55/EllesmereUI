@@ -71,6 +71,7 @@ initFrame:SetScript("OnEvent", function(self)
         clock = 150, fps = 70, ms = 70, gold = 150, xprep = 140, spec = 130,
         profession = 120, travel = 40, micromenu = 340, currency = 90, spacer = 40,
         durability = 70, profession2 = 120, greatvault = 100,
+        location = 140, coords = 70,
     }
 
     ---------------------------------------------------------------------------
@@ -1719,6 +1720,34 @@ initFrame:SetScript("OnEvent", function(self)
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
+        -- Inline cog on the Visibility dropdown: Bar Strata. Lives here rather
+        -- than as a row of its own because it answers the same question the
+        -- visibility controls do -- when and where this bar shows up -- and it
+        -- is a set-once setting that should not cost a row.
+        do
+            local leftRgn = visRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Bar Layer",
+                rows = {
+                    { type = "dropdown", label = "Bar Strata",
+                      tooltip = "Screen layer this bar renders on. Raise it to draw over other frames, lower it to sit behind them.",
+                      values = { BACKGROUND = "Background", LOW = "Low",
+                                 MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" },
+                      order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get = function()
+                          local c = ns.GetBar(barId)
+                          return (c and c.barStrata) or "MEDIUM"
+                      end,
+                      set = function(v)
+                          local c = ns.GetBar(barId)
+                          if not c then return end
+                          c.barStrata = v
+                          ns.ApplyBar(barId)
+                      end },
+                },
+            })
+            MakeCogBtn(leftRgn, cogShow, nil, EllesmereUI.COGS_ICON)
+        end
 
         -- Orientation | Theme (inline cog = EllesmereUI Backdrop Dim)
         local themeRow
@@ -2325,7 +2354,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Optional 4th state-driven swatch on Text Color. Durability gets
             -- the same red->green gradient its icon's Dynamic mode uses; the
             -- location blocks get the zone's PvP ruleset color. NOT the
-            -- default in either case: nothing-stored stays custom/white.
+            -- default in any case: nothing-stored stays custom/white.
             local DYNAMIC_TEXT_BLOCKS = {
                 durability = "Dynamic", location = "Reactive", coords = "Reactive",
             }
@@ -2787,7 +2816,7 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       setValue = function(v) s.precision = v; Apply() end },
                     MkToggleOn("Hide in Instance", "hideInInstance",
-                        "Removes the block from the bar inside dungeons and raids, where there are no player coordinates."),
+                        "Removes the block from the bar in instanced content, where player coordinates are unavailable."),
                 }
             elseif b.type == "gold" then
                 typeRows = {
