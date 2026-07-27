@@ -1142,6 +1142,27 @@ function EllesmereUI.ApplyProfileData(profileData)
                 -- the live accessor + RefreshAllAddons rebuild pick it up.
                 for k in pairs(profile) do profile[k] = nil end
                 for k, v in pairs(snap) do profile[k] = DeepCopy(v) end
+                -- Pre-dropdown imports carry showPlayerAbsorb as the legacy
+                -- boolean toggle. The conversion migrations are SKIPPED for
+                -- imported profiles (inherited migration flags), and a boolean
+                -- reaches the texture resolver as a key -- which used to abort
+                -- unit frame init outright. The resolver now refuses non-string
+                -- keys, so this is no longer fatal, but without the conversion
+                -- the absorb still renders as a fallback texture instead of
+                -- honouring the setting. Normalise on the way in, matching the
+                -- mapping the migrations use.
+                if entry.folder == "EllesmereUIUnitFrames" then
+                    for _, unitCfg in pairs(profile) do
+                        if type(unitCfg) == "table" then
+                            local v = unitCfg.showPlayerAbsorb
+                            if v == true then
+                                unitCfg.showPlayerAbsorb = "striped"
+                            elseif v ~= nil and type(v) ~= "string" then
+                                unitCfg.showPlayerAbsorb = "none"
+                            end
+                        end
+                    end
+                end
                 -- Pre-split imports carry the shared totPet table but no
                 -- targettarget/focustarget. The login split migration is SKIPPED
                 -- for imported profiles (ImportProfile builds merged =
