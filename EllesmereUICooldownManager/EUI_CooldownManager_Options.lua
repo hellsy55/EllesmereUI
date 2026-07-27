@@ -11850,11 +11850,14 @@ initFrame:SetScript("OnEvent", function(self)
                     -- 3. Active State Glow (default = nil / none)
                     local glowRow = MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
                         function() return ss.activeGlow end,
-                        function(v) EnsureSS(); SetOwn("activeGlow", v) end,
+                        function(v) EnsureSS(); SetOwn("activeGlow", v); if v and v > 0 then ns._cdmAnyActiveGlow = true end end,
                         function() return ss.activeGlow == nil end,
                         nil,
                         { apply = { keys = { "activeGlow" },
-                                    write = function(t, v) t.activeGlow = v end } })
+                                    write = function(t, v)
+                                        t.activeGlow = v
+                                        if v and v > 0 then ns._cdmAnyActiveGlow = true end
+                                    end } })
                     if isCustomInjected and glowRow then
                         glowRow:SetAlpha(0.35)
                         glowRow:SetScript("OnEnter", function()
