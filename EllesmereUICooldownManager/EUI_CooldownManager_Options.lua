@@ -6089,6 +6089,14 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     local growValues = { RIGHT = "Right", LEFT = "Left", DOWN = "Down", UP = "Up" }
     local growOrder  = { "RIGHT", "LEFT", "DOWN", "UP" }
+    local durationPositionValues = {
+        center = "Center",
+        top = "Above Icon",
+        bottom = "Below Icon",
+        left = "Left of Icon",
+        right = "Right of Icon",
+    }
+    local durationPositionOrder = { "center", "top", "bottom", "left", "right" }
 
     -- Track which bar is selected in the CDM Bars tab
     local selectedCDMBarIndex = 1
@@ -6211,6 +6219,11 @@ initFrame:SetScript("OnEvent", function(self)
             for _, region in ipairs({ slot._previewCD:GetRegions() }) do
                 if region:GetObjectType() == "FontString" then
                     SetPVFont(region, fontPath, fSize)
+                    if ns.AnchorCooldownText then
+                        ns.AnchorCooldownText(region, slot._previewCD,
+                            bd.cooldownTextPosition or "center",
+                            bd.cooldownTextX or 0, bd.cooldownTextY or 0)
+                    end
                     break
                 end
             end
@@ -10890,6 +10903,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 or valChanged(ss.cooldownFontSize, (b and b.cooldownFontSize) or 12)
                                 or colChanged(ss.cooldownTextR, ss.cooldownTextG, ss.cooldownTextB,
                                     (b and b.cooldownTextR) or 1, (b and b.cooldownTextG) or 1, (b and b.cooldownTextB) or 1)
+                                or valChanged(ss.cooldownTextPosition, (b and b.cooldownTextPosition) or "center")
                                 or valChanged(ss.cooldownTextX, (b and b.cooldownTextX) or 0)
                                 or valChanged(ss.cooldownTextY, (b and b.cooldownTextY) or 0)
                         end, function(row)
@@ -10910,6 +10924,10 @@ initFrame:SetScript("OnEvent", function(self)
                                     { type="colorpicker", label="Color",
                                       get=function() return ss.cooldownTextR or (cdmBd and cdmBd.cooldownTextR) or 1, ss.cooldownTextG or (cdmBd and cdmBd.cooldownTextG) or 1, ss.cooldownTextB or (cdmBd and cdmBd.cooldownTextB) or 1 end,
                                       set=function(r, g, b) EnsureSS(); ss.cooldownTextR = r; ss.cooldownTextG = g; ss.cooldownTextB = b; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
+                                    { type="dropdown", label="Position",
+                                      values=durationPositionValues, order=durationPositionOrder,
+                                      get=function() return ss.cooldownTextPosition or (cdmBd and cdmBd.cooldownTextPosition) or "center" end,
+                                      set=function(v) EnsureSS(); ss.cooldownTextPosition = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
                                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                                       get=function() return ss.cooldownTextX or (cdmBd and cdmBd.cooldownTextX) or 0 end,
                                       set=function(v) EnsureSS(); ss.cooldownTextX = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
@@ -18669,6 +18687,13 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                           BD().showCooldownText = v
                           ns.RefreshCDMIconAppearance(BD().key); Refresh(); EllesmereUI:RefreshPage()
+                      end },
+                    { type="dropdown", label="Position",
+                      values=durationPositionValues, order=durationPositionOrder,
+                      get=function() return BD().cooldownTextPosition or "center" end,
+                      set=function(v)
+                          BD().cooldownTextPosition = v
+                          ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
                       end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return BD().cooldownTextX or 0 end,

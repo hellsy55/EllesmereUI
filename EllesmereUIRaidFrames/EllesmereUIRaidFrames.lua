@@ -879,10 +879,11 @@ ns._ResolveTooltipMode = function(s)
     return "outOfCombat"
 end
 
--- Whether raid-frame hover tooltips are allowed right now, per the "Show Raid
--- Frames Tooltip" mode + current combat state. Shared by the unit tooltip and
--- the buff/debuff aura-icon tooltips so one setting governs every raid-frame
--- tip (an aura tip is still gated by its own "Hide Tooltips" toggle on top).
+-- Whether the raid/party frame's UNIT tooltip is allowed right now, per the
+-- "Show Raid Frames Tooltip" mode + current combat state. Scope is the unit tip
+-- only: the buff/debuff aura-icon tips are governed solely by their own section's
+-- "Hide Tooltips" toggle, so turning the unit tooltip off never silently
+-- overrides an aura tooltip the user enabled elsewhere.
 function ns.RaidFrameTooltipAllowed(button)
     local fd = button and ns.GetFFD and ns.GetFFD(button)
     local s = (fd and (fd._isParty and ns._scaledPartyProxy
@@ -3530,8 +3531,11 @@ local function StyleButton(button)
                 fd._hovered = true
                 if fd.ApplyBorderColor then fd.ApplyBorderColor() end
             end
-            -- Aura tooltip honors the same combat-visibility mode as the unit tip.
-            if not ns.RaidFrameTooltipAllowed(b) then return end
+            -- Governed ONLY by the Debuff Display "Hide Tooltips" toggle (the
+            -- icon is mouse-transparent while that is on, so reaching here means
+            -- the user asked for this tip). The "Show Raid Frames Tooltip" mode
+            -- covers the UNIT tooltip and must not veto an aura tip the user
+            -- explicitly enabled in a different section.
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             if GameTooltip.SetUnitAuraByAuraInstanceID then
                 GameTooltip:SetUnitAuraByAuraInstanceID(u, iid)
@@ -3936,23 +3940,18 @@ local function StyleButton(button)
                 if mf ~= self and mf._tipIID ~= nil then return end
             end
         end
-        -- Read through the party-aware proxy (like every other render path), not
-        -- raw db.profile -- otherwise party_<key> overrides written by a custom
-        -- party "Range & Tooltip" section are never seen and the tooltip mode
-        -- dropdown appears to do nothing on party frames.
-        local s = fd._isParty and ns._scaledPartyProxy or (fd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
-        -- Raid/party frame tooltips are governed by the "Show Raid Frames
+        -- Raid/party frame UNIT tooltips are governed by the "Show Raid Frames
         -- Tooltip" mode, and ONLY these frames -- no other unit tooltips are
-        -- touched. never = no tooltip; outOfCombat = hidden in any combat;
-        -- outOfBossCombat = hidden during an encounter; always = always shown.
-        -- The peek modifier (Blizz UI Enhanced) lifts the mode while held so a
-        -- hidden tip can be read on hover, in step with the global tooltips.
-        if not (EllesmereUI._tooltipPeekHeld and EllesmereUI._tooltipPeekHeld()) then
-            local ttMode = ns._ResolveTooltipMode(s)
-            if ttMode == "never" then return end
-            if ttMode == "outOfCombat" and inCombat then return end
-            if ttMode == "outOfBossCombat" and ns._inBossCombat then return end
-        end
+        -- touched, and the aura-icon tips have their own toggles. never = no
+        -- tooltip; outOfCombat = hidden in any combat; outOfBossCombat = hidden
+        -- during an encounter; always = always shown. The peek modifier (Blizz
+        -- UI Enhanced) lifts the mode while held so a hidden tip can be read on
+        -- hover, in step with the global tooltips. The helper reads through the
+        -- party-aware proxy (like every other render path), not raw db.profile
+        -- -- otherwise party_<key> overrides written by a custom party "Range &
+        -- Tooltip" section are never seen and the dropdown appears to do
+        -- nothing on party frames.
+        if not ns.RaidFrameTooltipAllowed(self) then return end
         local u = self:GetAttribute("unit")
         if u and UnitExists(u) then
             GameTooltip_SetDefaultAnchor(GameTooltip, self)

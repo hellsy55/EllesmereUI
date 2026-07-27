@@ -133,6 +133,8 @@ local L = {
     INVITE               = "Invite",
     NO_FRIENDS_ONLINE    = "No friends online",
     NOT_IN_GUILD         = "Not in a guild",
+    TOGGLE_WORLD_MAP     = "Toggle World Map",
+    SEND_POSITION        = "Send Position to Chat",
 }
 ns.L = L
 
@@ -174,6 +176,8 @@ ns.BLOCK_TYPES = {
     { key = "clock",      label = "Clock" },
     { key = "fps",        label = "FPS" },
     { key = "ms",         label = "Latency" },
+    { key = "location",   label = "Location" },
+    { key = "coords",     label = "Coordinates" },
     { key = "gold",       label = "Gold" },
     { key = "durability", label = "Durability" },
     { key = "xprep",      label = "XP / Reputation Bar" },
@@ -192,6 +196,11 @@ ns.BLOCK_DEFAULTS = {
     clock      = { localTime = true, twentyFour = true, showMail = true, showResting = true, fontSizeClock = nil, fontSizeInfo = nil },
     fps        = {},
     ms         = { showIcon = false },
+    -- widthMode/maxWidth deliberately unset: "auto" is the resolved default
+    -- (ns.LocationWidthMode) and a nil maxWidth is what marks the width as
+    -- never chosen, which is what the options page pulses about.
+    location   = { showIcon = true, showSubZone = true },
+    coords     = { showIcon = true, precision = 0, hideInInstance = true },
     gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false },
     durability = { showIcon = true },
     xprep      = { mode = "auto" },
@@ -2800,6 +2809,15 @@ function ns.AddBlock(barId, typeKey)
     -- ONE value owns the counter position (the old osSocialText offset +
     -- top-bar sign flip are dead; the anchor is plain button-center).
     if typeKey == "micromenu" then b.textYOff = 8 end
+    -- The zone name defaults to the REACTIVE text color: it carries the PvP
+    -- ruleset (blue sanctuary / green friendly / red hostile / yellow
+    -- contested), so the block says something the name alone does not. A
+    -- top-level cfg field, not a setting, hence here rather than in
+    -- BLOCK_DEFAULTS -- same reason the micromenu offset above lives here.
+    -- The coords block keeps a plain readable color on purpose: the danger
+    -- signal belongs on the name, and digits that change twice a second
+    -- should not also change hue.
+    if typeKey == "location" then b.useDynamicColor = true end
     cfg.blocks[#cfg.blocks + 1] = b
     ns.ApplyBar(barId)
     return b
