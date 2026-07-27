@@ -816,9 +816,16 @@ qolFrame:SetScript("OnEvent", function(self)
     local merchantOpen = false
     local SellJunk, StopJunkSweep
     do
-        local PASS_DELAY = 0.4
-        local MAX_PASSES = 12
-        local ticker, passes, lastCount, stalls, warned
+        -- Self-rescheduling timer rather than a ticker, so a stalled pass can
+        -- back the delay off. A fixed retry rate is the wrong tool against the
+        -- very rate limiter this works around: if the limiter is what ate a
+        -- pass, retrying at the same cadence is what it keeps eating, and the
+        -- sweep would give up on items that were perfectly sellable.
+        local BASE_DELAY  = 0.4
+        local MAX_DELAY   = 1.6
+        local MAX_PASSES  = 12
+        local MAX_STALLS  = 3
+        local pending, passes, lastCount, stalls, warned, delay
 
         local function CountJunk()
             local junk, unknown = 0, 0
@@ -838,47 +845,66 @@ qolFrame:SetScript("OnEvent", function(self)
         end
 
         StopJunkSweep = function()
-            if ticker then ticker:Cancel(); ticker = nil end
+            if pending then pending:Cancel(); pending = nil end
         end
 
-        local function Pass()
-            if not merchantOpen then return StopJunkSweep() end
-            if EllesmereUIDB and EllesmereUIDB.autoSellJunk == false then return StopJunkSweep() end
+        local Pass
+        local function Schedule()
+            pending = C_Timer.NewTimer(delay, Pass)
+        end
+
+        Pass = function()
+            pending = nil
+            if not merchantOpen then return end
+            if EllesmereUIDB and EllesmereUIDB.autoSellJunk == false then return end
 
             local junk, unknown = CountJunk()
-            if junk == 0 and unknown == 0 then return StopJunkSweep() end
+            if junk == 0 and unknown == 0 then return end
 
             passes = passes + 1
-            -- Two passes in a row that shave nothing off mean the rest cannot be
-            -- sold from here (still-refundable purchases open a confirm popup
-            -- instead), so stop rather than hammering the vendor. One stall is
-            -- tolerated because the bag update can trail the sell by a tick.
-            if junk >= lastCount then
+            if junk > lastCount then
+                -- Count ROSE: slots whose data had not cached yet resolved into
+                -- newly visible junk. That is the case this sweep exists for, so
+                -- it is discovery, not a stall -- treating it as one would bail
+                -- out precisely when there is more work to do.
+                stalls, delay = 0, BASE_DELAY
+            elseif junk == lastCount then
+                -- Nothing shifted. Could be genuinely unsellable (still-refundable
+                -- purchases open a confirm popup instead of selling), or the rate
+                -- limiter dropping the request. Those are indistinguishable from
+                -- here, so back off and give the limiter room before concluding
+                -- the remainder cannot be sold.
                 stalls = stalls + 1
-                if stalls >= 2 then
-                    StopJunkSweep()
+                delay = math.min(delay * 2, MAX_DELAY)
+                if stalls >= MAX_STALLS then
                     if junk > 0 and not warned then
                         warned = true
-                        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r " ..
+                        EllesmereUI.Print("|cff0cd29dEllesmereUI:|r " ..
                             EllesmereUI.Lf("%d junk item(s) could not be sold.", junk))
                     end
                     return
                 end
             else
-                stalls = 0
+                stalls, delay = 0, BASE_DELAY
             end
 
             lastCount = junk
-            C_MerchantFrame.SellAllJunkItems()
-            if passes >= MAX_PASSES then StopJunkSweep() end
+            -- Only worth a server round trip when there is something to sell;
+            -- a junk-free pass here is just waiting on item data to cache.
+            if junk > 0 then C_MerchantFrame.SellAllJunkItems() end
+            if passes >= MAX_PASSES then return end
+            Schedule()
         end
 
         SellJunk = function()
             if not (C_MerchantFrame and C_MerchantFrame.SellAllJunkItems) then return end
             StopJunkSweep()
             passes, lastCount, stalls, warned = 0, math.huge, 0, false
+            delay = BASE_DELAY
+            -- Pass reschedules itself only when there is more to do, so the
+            -- common case (walking up to a vendor with no grays) costs exactly
+            -- one bag scan and never arms a timer at all.
             Pass()
-            ticker = C_Timer.NewTicker(PASS_DELAY, Pass)
         end
     end
 
