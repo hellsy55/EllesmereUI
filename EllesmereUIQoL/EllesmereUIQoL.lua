@@ -950,15 +950,6 @@ qolFrame:SetScript("OnEvent", function(self)
         EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060" .. EllesmereUI.L("Not enough gold to repair.") .. "|r")
     end
 
-    -- Single exit; the generation bump orphans the pending timeout.
-    local function StopRepairWatch()
-        if not (repairWatcher and repairWatcher.active) then return false end
-        repairWatcher.active = false
-        repairWatchGen = repairWatchGen + 1
-        repairWatcher:UnregisterAllEvents()
-        return true
-    end
-
     local function OnRepairWatchEvent()  -- PLAYER_MONEY: accumulate only, never decide
         local now = GetMoney()
         local spent = repairWatchLast - now
@@ -975,22 +966,22 @@ qolFrame:SetScript("OnEvent", function(self)
             repairWatcher = CreateFrame("Frame", "EUI_RepairWatcher", UIParent)
             repairWatcher:SetScript("OnEvent", OnRepairWatchEvent)
         end
-        StopRepairWatch()  -- discard a stale watch from a previous merchant
 
+        -- The bump is the whole cancellation mechanism: a timeout still pending
+        -- from a previous merchant sees a stale gen and dies.
+        repairWatchGen = repairWatchGen + 1
         repairWatchLast = moneyBefore
         repairWatchOut = 0
-        repairWatcher.active = true
         repairWatcher:RegisterEvent("PLAYER_MONEY")
 
         local gen = repairWatchGen
         C_Timer.After(0.5, function()
             if gen ~= repairWatchGen then return end
+            repairWatcher:UnregisterAllEvents()
             local remainCost, stillNeed = GetRepairAllCost()
-            if not StopRepairWatch() then return end
             if not (stillNeed and remainCost > 0) then remainCost = 0 end
 
             local own = repairWatchOut
-            if own < 0 then own = 0 end
 
             -- The funds can run dry mid-bill; settle the rest, but only if the
             -- merchant is still open to take it.
