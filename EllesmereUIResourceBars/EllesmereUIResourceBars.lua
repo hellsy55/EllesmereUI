@@ -1,4 +1,4 @@
-﻿-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 --  EllesmereUIResourceBars.lua
 --  Custom class resource, health, and mana bar display
 --  Features: Health bar, primary resource bar (mana/rage/energy/etc),
@@ -7670,8 +7670,29 @@ local function LayoutTotemBar()
     -- Reparent and position TotemFrame every call (Blizzard's Update can reset these)
     TotemFrame:SetParent(totemBarFrame)
     TotemFrame:SetFrameStrata("HIGH")
+    -- Grow direction. Horizontal: RIGHT (default, original left-anchored/grows-right)
+    -- / LEFT (fixed right edge, grows left) / CENTER (group centered). Vertical:
+    -- DOWN (default) / UP (fixed bottom edge, grows up) / CENTER. Invalid combos for
+    -- the current orientation fall back to that orientation's default.
+    local _growDir = (tb.growDirection or (vertical and "DOWN" or "RIGHT")):upper()
+    if vertical then
+        if _growDir ~= "UP" and _growDir ~= "DOWN" and _growDir ~= "CENTER" then _growDir = "DOWN" end
+    else
+        if _growDir ~= "LEFT" and _growDir ~= "RIGHT" and _growDir ~= "CENTER" then _growDir = "RIGHT" end
+    end
+    -- Persist the clamped value so a set-but-stale direction (e.g. RIGHT left over
+    -- after switching to vertical) is corrected once; readers can then trust it.
+    if tb.growDirection and tb.growDirection:upper() ~= _growDir then
+        tb.growDirection = _growDir
+    end
     TotemFrame:ClearAllPoints()
-    TotemFrame:SetPoint(vertical and "TOP" or "LEFT", totemBarFrame, vertical and "TOP" or "LEFT", 0, 0)
+    if vertical then
+        TotemFrame:SetPoint(_growDir == "UP" and "BOTTOM" or "TOP", totemBarFrame,
+            _growDir == "UP" and "BOTTOM" or "TOP", 0, 0)   -- DOWN/CENTER anchored TOP (CENTER re-anchored below)
+    else
+        TotemFrame:SetPoint(_growDir == "LEFT" and "RIGHT" or "LEFT", totemBarFrame,
+            _growDir == "LEFT" and "RIGHT" or "LEFT", 0, 0)  -- RIGHT/CENTER anchored LEFT (CENTER re-anchored below)
+    end
     TotemFrame:Show()
 
     -- Only re-apply scale when setting changed
@@ -7694,6 +7715,18 @@ local function LayoutTotemBar()
     -- Trim stale entries
     for i = count + 1, #buttons do buttons[i] = nil end
 
+    -- CENTER grow: re-anchor TotemFrame so the icon group is centered on the frame.
+    -- Total visual width is in frame (screen) space: count icons + gaps.
+    if _growDir == "CENTER" and count > 0 then
+        local total = count * iconSize + math.max(0, count - 1) * spacing
+        TotemFrame:ClearAllPoints()
+        if vertical then
+            TotemFrame:SetPoint("TOP", totemBarFrame, "CENTER", 0, total / 2)
+        else
+            TotemFrame:SetPoint("LEFT", totemBarFrame, "CENTER", -total / 2, 0)
+        end
+    end
+
     local scaledSpacing = spacing / iconScale
     local zoom = 0.055
     local timerSize = tb.timerSize or 11
@@ -7707,9 +7740,21 @@ local function LayoutTotemBar()
 
         btn:ClearAllPoints()
         if i == 1 then
-            btn:SetPoint(vertical and "TOP" or "LEFT", TotemFrame, vertical and "TOP" or "LEFT", 0, 0)
+            if vertical then
+                local a = (_growDir == "UP") and "BOTTOM" or "TOP"
+                btn:SetPoint(a, TotemFrame, a, 0, 0)
+            else
+                local a = (_growDir == "LEFT") and "RIGHT" or "LEFT"
+                btn:SetPoint(a, TotemFrame, a, 0, 0)
+            end
         elseif vertical then
-            btn:SetPoint("TOP", buttons[i - 1], "BOTTOM", 0, -scaledSpacing)
+            if _growDir == "UP" then
+                btn:SetPoint("BOTTOM", buttons[i - 1], "TOP", 0, scaledSpacing)
+            else
+                btn:SetPoint("TOP", buttons[i - 1], "BOTTOM", 0, -scaledSpacing)
+            end
+        elseif _growDir == "LEFT" then
+            btn:SetPoint("RIGHT", buttons[i - 1], "LEFT", -scaledSpacing, 0)
         else
             btn:SetPoint("LEFT", buttons[i - 1], "RIGHT", scaledSpacing, 0)
         end
@@ -7803,6 +7848,10 @@ local function LayoutTotemBar()
         totemBarFrame:SetSize(maxDim, iconSize)
     end
 end
+
+-- Expose so unlock-mode's grow-direction menu can re-run the layout after
+-- changing totemBar.growDirection (LayoutTotemBar is file-local).
+EllesmereUI.LayoutTotemBar = LayoutTotemBar
 
 local function BuildTotemBar()
     local tb = GetTotemSettings()
