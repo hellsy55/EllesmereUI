@@ -138,9 +138,17 @@ local PresetOnCD, ApplyCdState, RestoreAllCdState, EnsureCdStateTicker, EvalCdSt
 -- lookup rather than an API call per frame per rule.
 local _slotItemKey = {}
 
+-- EVERY equipment slot, not just the trinkets. ns.SlotIDFromKey accepts any
+-- key in ns.INV_SLOT_NAMES (18 slots), ResolveCustomActiveKey resolves any of
+-- them to the equipped item, and the per-spell menu chains per-item settings
+-- over any of them -- so an on-use head piece or weapon has the identical
+-- two-token problem a trinket does. Driving off the same table the rest of the
+-- module uses keeps the two from drifting apart again.
 local function RefreshSlotItemKeys()
     wipe(_slotItemKey)
-    for slot = 13, 14 do
+    local slots = ns.INV_SLOT_NAMES
+    if not slots then return end
+    for slot in pairs(slots) do
         local id = GetInventoryItemID and GetInventoryItemID("player", slot)
         if id then _slotItemKey[-slot] = -id end
     end
@@ -148,9 +156,24 @@ end
 
 -- Refreshed lazily while empty (covers the login window, where re-arm ran
 -- before equipment was readable) and on every equipment change.
+--
+-- The throttle matters because an EMPTY map re-reads on EVERY call, and the
+-- callers are hot: EvalCdStateNow runs on a 0.12s ticker and asks once per
+-- icon per rule. Unthrottled that is a wipe plus a slot sweep hundreds of
+-- times a second for as long as the map stays empty. It only ever engages
+-- while empty, so a character wearing anything at all never reaches it --
+-- which is also why widening the sweep above shrinks this window to the brief
+-- login gap it was written for.
+local _slotKeyNextTry = 0
 local function KeyMatches(ruleKey, frameKey)
     if ruleKey == frameKey then return true end
-    if not next(_slotItemKey) then RefreshSlotItemKeys() end
+    if not next(_slotItemKey) then
+        local now = GetTime()
+        if now >= _slotKeyNextTry then
+            _slotKeyNextTry = now + 0.2
+            RefreshSlotItemKeys()
+        end
+    end
     return _slotItemKey[frameKey] == ruleKey or _slotItemKey[ruleKey] == frameKey
 end
 
@@ -844,10 +867,17 @@ OnEvent = function(self, event, unit, _, spellID)
         end
         for i = 1, #_customRules do EvalCustom(_customRules[i]) end
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
-        -- A trinket swap re-points a slot's settings to a different item; re-arm
-        -- so the slot picks up the newly-equipped trinket's rule (or none).
+        -- The key map covers every equipment slot, so ANY swap can stale it --
+        -- refresh unconditionally. It is a wipe plus one lookup per slot on an
+        -- event that fires only when gear actually changes.
+        RefreshSlotItemKeys()
+        -- Re-arm stays TRINKET-ONLY on purpose. A trinket swap re-points a
+        -- slot's settings to a different item, so the slot must pick up the
+        -- newly-equipped trinket's rule (or none). Re-arming on every gear
+        -- change would tear down and rebuild the whole rule set mid-gearing
+        -- for no benefit -- the refreshed map above already keeps matching
+        -- correct for the other slots.
         if unit == 13 or unit == 14 then
-            RefreshSlotItemKeys()
             ns.FakeActive_Rearm()
         end
     end

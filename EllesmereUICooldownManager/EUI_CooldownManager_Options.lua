@@ -18746,11 +18746,23 @@ initFrame:SetScript("OnEvent", function(self)
             local _, scCogShow = EllesmereUI.BuildCogPopup({
                 title = "Charge/Stack Text",
                 rows = {
-                    { type="toggle", label="Show Item Count",
-                      get=function() return BD().showItemCount ~= false end,
+                    -- View over the legacy showItemCount boolean (Never = false,
+                    -- Always = true/nil) plus the itemCountOOC flag for the new
+                    -- Out of Combat mode. OOC keeps showItemCount = true so every
+                    -- legacy reader treats it as "on"; the combat gate lives in
+                    -- the icon restyle. Zero migration.
+                    { type="dropdown", label="Show Item Count",
+                      values={ never="Never", always="Always", ooc="Out of Combat" },
+                      order={ "never", "always", "ooc" },
+                      get=function()
+                          if BD().itemCountOOC then return "ooc" end
+                          return (BD().showItemCount ~= false) and "always" or "never"
+                      end,
                       set=function(v)
-                          BD().showItemCount = v
-                          ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                          local bd = BD()
+                          bd.itemCountOOC = (v == "ooc") or nil
+                          bd.showItemCount = (v ~= "never")
+                          ns.RefreshCDMIconAppearance(bd.key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                       end },
                     { type="dropdown", label="Position",
                       values={ bottomright="Bottom Right", bottom="Bottom", bottomleft="Bottom Left", left="Left", topleft="Top Left", top="Top", topright="Top Right", right="Right", center="Center" },

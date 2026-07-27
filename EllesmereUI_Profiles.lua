@@ -1811,6 +1811,7 @@ do
         "reskinPlayerSpells", "reskinAdventureGuide", "reskinProfessionsBook",
         "reskinProfessions", "reskinWorldMap", "reskinGuild", "reskinCalendar",
         "reskinAchievements", "reskinMail", "reskinCatalyst", "reskinSocket",
+        "reskinItemUpgrade", "reskinLoot", "reskinLootToast", "lootToastQualityStrip",
         "reskinMicroMenu", "reskinHousing", "reskinDressUp", "reskinTransmog",
         "reskinMerchant", "reskinAuctionHouse", "reskinMacros",
         "reskinSettings", "reskinAddonList", "reskinCraftOrders",
@@ -2861,6 +2862,17 @@ local function BuildImportedCDMSpellBucket(profileName, activeName, incomingSpec
     end
     bucket.specProfiles = inherited
     if type(incomingSpecs) ~= "table" then return end
+    -- Import-authoritative ghosting is computed against the player's LIVE
+    -- Blizzard CDM tracked set (viewer pools + category API). That set is only
+    -- guaranteed settled after a reload, and the ghost pass is a ONE-SHOT that
+    -- stamps _barFilterModelV6 the first time it succeeds -- so a pass that
+    -- runs against a mid-change tracked set writes a permanently wrong ghost
+    -- list. Runtime-only flag (dies with the session) telling the pass to wait
+    -- for a later session. The interactive import flow never noticed because
+    -- its caller ReloadUI()s in the same frame ImportProfile returns, which
+    -- kills the queued reanchor that would have run the pass; a caller that
+    -- defers its reload (installer wizards) gets the pass mid-session instead.
+    if EllesmereUI then EllesmereUI._cdmImportGhostDeferred = true end
     for specKey, specProf in pairs(DeepCopy(incomingSpecs)) do
         bucket.specProfiles[specKey] = specProf
         if type(specProf) == "table" then

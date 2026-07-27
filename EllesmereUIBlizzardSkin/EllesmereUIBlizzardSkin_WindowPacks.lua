@@ -5674,23 +5674,24 @@ local function Skin_RepCurrency()
         if tok.filterDropdown then WSkin.Dropdown(tok.filterDropdown) end
         WSkin.ScrollBarsIn(tok)
         HookRCScrollBox(tok.ScrollBox, true)  -- currency rows: band-fade only, no collapse/content skin (taints transfer)
-        -- Currency transfer entry points: the log toggle on the tab itself and
-        -- the transfer button on the currency detail popup. These BUTTONS are
-        -- outside the taint path and skin normally (verified in game).
+        -- NOTHING IN THE CURRENCY-TRANSFER PATH GETS SKINNED. Not the two entry
+        -- buttons (tok.CurrencyTransferLogToggleButton below and
+        -- pop.CurrencyTransferToggleButton further down), and not the
+        -- CurrencyTransferMenu window, which has no pack at all.
         --
-        -- The CurrencyTransferMenu WINDOW itself is deliberately NOT skinned and
-        -- has no pack. Writing to it taints the protected
-        -- RequestCurrencyFromAccountCharacter() at
-        -- Blizzard_TokenUI/Blizzard_CurrencyTransfer.lua:403, and the failure
-        -- hides itself -- the FIRST transfer of a session succeeds and only
-        -- later ones return ADDON_ACTION_FORBIDDEN, so one successful test
-        -- proves nothing. A no-write external-shell version was built and did
-        -- work, but it needed a per-frame driver to track the window, and that
-        -- was not worth the overhead for one dialog. Leave it stock.
-        if tok.CurrencyTransferLogToggleButton then
-            WSkin.Button(tok.CurrencyTransferLogToggleButton)
-            WSkin.WhiteButtonLabel(tok.CurrencyTransferLogToggleButton)
-        end
+        -- Any write here taints the protected RequestCurrencyFromAccountCharacter()
+        -- at Blizzard_TokenUI/Blizzard_CurrencyTransfer.lua:403. Skinning
+        -- pop.CurrencyTransferToggleButton with WSkin.Button SHIPPED exactly that:
+        -- ADDON_ACTION_FORBIDDEN for users who actually transfer warband currency.
+        --
+        -- READ THIS BEFORE RE-SKINNING THEM: the failure hides itself. The FIRST
+        -- transfer of a session succeeds and only later ones are forbidden, so
+        -- opening the window and moving currency once proves NOTHING -- that test
+        -- passes on the broken build. This has now been re-added and reverted
+        -- once on the strength of exactly that test. A no-write external-shell
+        -- version of the menu was built and did work, but it needed a per-frame
+        -- driver to track the window, which is not worth the overhead for one
+        -- dialog. Leave all of it stock.
         local pop = _G.TokenFramePopup
         if pop then
             -- Currency Options popup. Deliberately NOT SkinGuildPopup: that lays
@@ -5735,10 +5736,9 @@ local function Skin_RepCurrency()
             for _, k in ipairs({ "InactiveCheckbox", "BackpackCheckbox" }) do
                 if pop[k] then WSkin.Checkbox(pop[k], { borderInset = 4 }) end
             end
-            if pop.CurrencyTransferToggleButton then
-                WSkin.Button(pop.CurrencyTransferToggleButton)
-                WSkin.WhiteButtonLabel(pop.CurrencyTransferToggleButton)
-            end
+            -- pop.CurrencyTransferToggleButton stays 100% stock -- see the
+            -- transfer-path note at the top of this function. The popup around
+            -- it is skinned (it always has been); the button is not.
         end
     end
 end
@@ -10869,7 +10869,11 @@ WSkin.RegisterWindow({
 local function Skin_ItemUpgrade()
     local f = _G.ItemUpgradeFrame
     if not f then return end
-    WSkin.Shell("itemupgrade", f)
+    -- bottomBar: the window has a currency strip along its foot, and the art
+    -- kill below strips the plate that used to sit behind it. The shell's
+    -- matching bottom band puts that footer back, in the same black 0.5 as the
+    -- title bar at the top.
+    WSkin.Shell("itemupgrade", f, { bottomBar = true })
     WSkin.RemovePortrait(f)
     WSkin.CommonChrome(f, "ItemUpgradeFrame")   -- close, ItemInfo.Dropdown, scrollbars
     if f.NineSlice then WSkin.FadeNineSlice(f.NineSlice) end
@@ -10883,7 +10887,11 @@ local function Skin_ItemUpgrade()
     -- child frames. Our own shell textures are spared.
     local fd = GetFFD(f)
     local keepArt = {}
-    for _, k in ipairs({ "bg", "bgOverlay", "modernBg", "topBar", "rightShade" }) do
+    -- bottomBar is load-bearing in this list twice: KillArt below clears every
+    -- direct region of the window, and FadeBottomPlates further down fades any
+    -- texture in the bottom 60px spanning over half the width -- which is
+    -- exactly the shape of our own bottom band.
+    for _, k in ipairs({ "bg", "bgOverlay", "modernBg", "topBar", "bottomBar", "rightShade" }) do
         if fd[k] then keepArt[fd[k]] = true end
     end
     local function KillArt(r)
@@ -10955,6 +10963,9 @@ local function Skin_ItemUpgrade()
     local function FadeArtTree(host, depth)
         depth = depth or 0
         if not host or depth > 3 or host:IsForbidden() then return end
+        -- Provenance gate: another addon parented into this window keeps its
+        -- whole subtree. depth > 0 so an explicit root call always runs.
+        if depth > 0 and WSkin.IsForeignFrame(host) then return end
         if host.IsObjectType and host:IsObjectType("Texture") then
             if host.SetAlpha then host:SetAlpha(0) end
             return
@@ -11005,6 +11016,10 @@ local function Skin_ItemUpgrade()
     local function FadeBottomPlates(host, depth)
         depth = depth or 0
         if not host or depth > 5 or host:IsForbidden() then return end
+        -- Provenance gate, and this one earns it twice over: the match below is
+        -- a pure GEOMETRY heuristic (bottom 60px, over half the window wide),
+        -- which would happily blank an addon's own bar parented into this frame.
+        if depth > 0 and WSkin.IsForeignFrame(host) then return end
         local fb, fw = Num(f:GetBottom()), Num(f:GetWidth())
         if not fb or not fw then return end
         if host.GetRegions then
@@ -11180,7 +11195,7 @@ local function Skin_LootToast()
         if icon then keep[icon] = true end
         -- Every texture the shell owns, or the art kill below would wipe our
         -- own backdrop along with Blizzard's.
-        for _, k in ipairs({ "bg", "bgOverlay", "modernBg", "topBar", "selBar" }) do
+        for _, k in ipairs({ "bg", "bgOverlay", "modernBg", "topBar", "bottomBar", "selBar" }) do
             if d[k] then keep[d[k]] = true end
         end
         -- Frames of OURS that hang off the toast: the shell's atlas border and
@@ -11192,6 +11207,9 @@ local function Skin_LootToast()
             depth = depth or 0
             if not host or depth > 2 or not host.IsForbidden or host:IsForbidden() then return end
             if host == d.atlasBorderFrame or host == ourBorder then return end
+            -- Provenance gate: this clears textures outright (SetAtlas/SetTexture
+            -- "" then alpha 0), which is unrecoverable for a frame we do not own.
+            if depth > 0 and WSkin.IsForeignFrame(host) then return end
             if host.GetRegions then
                 for i = 1, select("#", host:GetRegions()) do
                     local r = select(i, host:GetRegions())
@@ -11293,14 +11311,22 @@ local function Skin_LootToast()
         -- anonymous (fstack: UIParent.<addr> at FULLSCREEN_DIALOG, carrying
         -- .Background + .ItemName, from AlertFrameSystems.xml). Walking
         -- AlertFrame alone never reached it. Scan UIParent's own children too,
-        -- narrowed to shown FULLSCREEN_DIALOG frames so this stays cheap, with
-        -- SkinToast's shape test rejecting everything that is not a toast.
+        -- narrowed to shown FULLSCREEN_DIALOG frames so this stays cheap.
+        --
+        -- PROVENANCE GATE IS LOAD-BEARING HERE, more than anywhere else in this
+        -- file: this is the only sweep that walks UIParent rather than the
+        -- inside of a Blizzard window, and SkinToast's shape test is broad (any
+        -- .ItemName/.Label/.Title that can GetText). Plenty of ADDON dialogs sit
+        -- at FULLSCREEN_DIALOG with a .Title -- ours included -- and a match
+        -- gets a shell plus a recursive texture kill. Without this gate the
+        -- sweep silently blanks other addons' windows.
         local up = _G.UIParent
         if deep and up and up.GetChildren then
             for i = 1, select("#", up:GetChildren()) do
                 local ch = select(i, up:GetChildren())
                 if ch and ch.GetFrameStrata and ch.IsForbidden and not ch:IsForbidden()
-                   and ch:IsShown() and ch:GetFrameStrata() == "FULLSCREEN_DIALOG" then
+                   and ch:IsShown() and ch:GetFrameStrata() == "FULLSCREEN_DIALOG"
+                   and not WSkin.IsForeignFrame(ch, up) then
                     if SkinToast(ch) then known[ch] = true end
                 end
             end

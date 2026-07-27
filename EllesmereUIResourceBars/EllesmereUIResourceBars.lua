@@ -7633,6 +7633,32 @@ local function GetTotemSettings()
     return ERB.db and ERB.db.profile and ERB.db.profile.totemBar
 end
 
+-- Effective totem-bar grow direction, clamped to the CURRENT orientation.
+-- Horizontal: RIGHT (default, the original left-anchored/grows-right layout) /
+-- LEFT (fixed right edge, grows left) / CENTER (group centred). Vertical: DOWN
+-- (default, the original top-to-bottom) / UP (fixed bottom edge) / CENTER.
+--
+-- The clamp is applied on READ and never written back. A direction that is
+-- valid for the other orientation -- LEFT while vertical, say -- is stale, not
+-- wrong: persisting the clamp would overwrite it, so flipping orientation and
+-- back would silently destroy the user's horizontal choice. Reading through
+-- one helper instead keeps the stored value intact and stops the layout and
+-- unlock mode's menu from ever disagreeing about what is in effect.
+--
+-- Unset (the state every existing profile is in) resolves to the orientation
+-- default, which reproduces the pre-setting layout exactly.
+function EllesmereUI.GetTotemGrowDir()
+    local tb = GetTotemSettings()
+    local vertical = tb and tb.orientation == "VERTICAL"
+    local dir = (tb and tb.growDirection or (vertical and "DOWN" or "RIGHT")):upper()
+    if vertical then
+        if dir ~= "UP" and dir ~= "DOWN" and dir ~= "CENTER" then dir = "DOWN" end
+    else
+        if dir ~= "LEFT" and dir ~= "RIGHT" and dir ~= "CENTER" then dir = "RIGHT" end
+    end
+    return dir, vertical
+end
+
 -- Cached layout state to avoid redundant work on every Update hook
 local _totemLayoutCache = {}
 local _totemActiveSet = {}  -- reusable set for O(1) cleanup lookups
@@ -7670,21 +7696,9 @@ local function LayoutTotemBar()
     -- Reparent and position TotemFrame every call (Blizzard's Update can reset these)
     TotemFrame:SetParent(totemBarFrame)
     TotemFrame:SetFrameStrata("HIGH")
-    -- Grow direction. Horizontal: RIGHT (default, original left-anchored/grows-right)
-    -- / LEFT (fixed right edge, grows left) / CENTER (group centered). Vertical:
-    -- DOWN (default) / UP (fixed bottom edge, grows up) / CENTER. Invalid combos for
-    -- the current orientation fall back to that orientation's default.
-    local _growDir = (tb.growDirection or (vertical and "DOWN" or "RIGHT")):upper()
-    if vertical then
-        if _growDir ~= "UP" and _growDir ~= "DOWN" and _growDir ~= "CENTER" then _growDir = "DOWN" end
-    else
-        if _growDir ~= "LEFT" and _growDir ~= "RIGHT" and _growDir ~= "CENTER" then _growDir = "RIGHT" end
-    end
-    -- Persist the clamped value so a set-but-stale direction (e.g. RIGHT left over
-    -- after switching to vertical) is corrected once; readers can then trust it.
-    if tb.growDirection and tb.growDirection:upper() ~= _growDir then
-        tb.growDirection = _growDir
-    end
+    -- Effective grow direction, resolved through the shared helper below so the
+    -- layout and unlock mode's menu can never disagree about it.
+    local _growDir = EllesmereUI.GetTotemGrowDir()
     TotemFrame:ClearAllPoints()
     if vertical then
         TotemFrame:SetPoint(_growDir == "UP" and "BOTTOM" or "TOP", totemBarFrame,
@@ -7715,15 +7729,21 @@ local function LayoutTotemBar()
     -- Trim stale entries
     for i = count + 1, #buttons do buttons[i] = nil end
 
-    -- CENTER grow: re-anchor TotemFrame so the icon group is centered on the frame.
-    -- Total visual width is in frame (screen) space: count icons + gaps.
+    -- CENTER grow: re-anchor TotemFrame so the icon group is centred on the frame.
+    -- `total` is the group's VISUAL extent (iconSize and spacing are both screen
+    -- units), but SetPoint offsets land in the anchored frame's own scale space
+    -- and TotemFrame carries SetScale(iconScale) -- so the offset must be divided
+    -- by that scale, exactly like `spacing / iconScale` below. Without it the
+    -- group sits at iconScale of the intended shift (~81% at the default 30/37),
+    -- off-centre by an error that grows with every extra totem.
     if _growDir == "CENTER" and count > 0 then
         local total = count * iconSize + math.max(0, count - 1) * spacing
+        local half = (iconScale > 0) and (total / (2 * iconScale)) or (total / 2)
         TotemFrame:ClearAllPoints()
         if vertical then
-            TotemFrame:SetPoint("TOP", totemBarFrame, "CENTER", 0, total / 2)
+            TotemFrame:SetPoint("TOP", totemBarFrame, "CENTER", 0, half)
         else
-            TotemFrame:SetPoint("LEFT", totemBarFrame, "CENTER", -total / 2, 0)
+            TotemFrame:SetPoint("LEFT", totemBarFrame, "CENTER", -half, 0)
         end
     end
 
@@ -8457,10 +8477,20 @@ function ERB:OnInitialize()
         if mode ~= "Up" and mode ~= "Down" then return 0 end
         -- Fires whenever the class resource bar leaves an empty slot: hidden via
         -- the "Show Class Resource" toggle (enabled == false), disabled for the
-        -- CURRENT spec via the spec picker, or the spec has no class resource.
+        -- CURRENT spec via the spec picker, disabled for the CURRENT DRUID FORM
+        -- via the per-stance toggles, or the spec has no class resource.
         -- The frame is now created unconditionally (zero alpha when off), so there
         -- is always a target to anchor to -- mirrors ResolveShiftDirPower.
-        if sp.enabled ~= false and not IsSpecDisabled(sp) and GetSecondaryResource() then return 0 end
+        --
+        -- The form test must match the visibility pass EXACTLY, second argument
+        -- included: isClassResource exempts Moonkin forms, whose Astral Power IS
+        -- this bar. Omitting it here was the bug -- a form-hidden bar left its
+        -- empty slot behind because the shift never fired. Non-druids and druids
+        -- with no per-form disables short-circuit to false inside the helper, so
+        -- nothing changes for them.
+        if sp.enabled ~= false and not IsSpecDisabled(sp)
+           and not _G._ERB_BarHiddenByForm(sp, true)
+           and GetSecondaryResource() then return 0 end
         return (mode == "Up") and 1 or -1
     end
     local function ResolveShiftDirPower()
@@ -8469,12 +8499,20 @@ function ERB:OnInitialize()
         local mode = pp.shiftElementsIfNoPower
         if mode ~= "Up" and mode ~= "Down" then return 0 end
         -- Fires whenever the power bar leaves an empty slot: globally disabled,
-        -- disabled for the CURRENT spec via the spec picker, or the spec has no
+        -- disabled for the CURRENT spec via the spec picker, disabled for the
+        -- CURRENT DRUID FORM via the per-form toggles, or the spec has no
         -- primary power. The power frame is created unconditionally and kept at
         -- full height / zero alpha when not shown, so anchored children and the
         -- shift magnitude (target height) stay correct. Only an enabled,
-        -- spec-allowed bar that actually has power suppresses the shift.
-        if pp.enabled ~= false and not IsSpecDisabled(pp) and GetPrimaryPowerType() then return 0 end
+        -- spec-allowed, form-allowed bar that actually has power suppresses the
+        -- shift.
+        --
+        -- No isClassResource argument here: the Moonkin exemption belongs to the
+        -- class resource bar, not the power bar -- again matching the visibility
+        -- pass verbatim. Non-druids short-circuit inside the helper.
+        if pp.enabled ~= false and not IsSpecDisabled(pp)
+           and not _G._ERB_BarHiddenByForm(pp)
+           and GetPrimaryPowerType() then return 0 end
         return (mode == "Up") and 1 or -1
     end
     -- Consulted inside ApplyAnchorPosition. Returns 0 while unlock mode is

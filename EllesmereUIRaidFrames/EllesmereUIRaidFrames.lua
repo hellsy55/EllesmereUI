@@ -6042,8 +6042,9 @@ end
 
 function ERF:UpdateAllFrames()
     UpdateAllButtons()
-    -- Party / Extra / Boss frames are NOT in `allButtons`, so UpdateAllButtons
-    -- misses them. Repaint their health (fill + background) too, so colour and
+    -- Party and Boss frames are NOT in `allButtons` (Extra frames ARE, see
+    -- XF.EnsureBuilt), so UpdateAllButtons misses them. Repaint their health
+    -- (fill + background) too, so colour and
     -- Dark Mode changes pushed through ApplyColorsToOUF reach every frame type,
     -- not just raid. _UpdateButtonHealth is lightweight + combat-safe and self-
     -- guards on unstyled / non-existent units.
@@ -9563,6 +9564,9 @@ local function UpdateVisibility()
     end
     local wasVisible = framesVisible
     framesVisible = visible
+    -- Raid frames coming or going is the one change a tracker cannot learn from
+    -- its own roster events (mirrors the party call in _UpdatePartyVisibility).
+    if ns._NotifyTrackerProviders then ns._NotifyTrackerProviders() end
 
     -- Update showSolo attribute on all headers, but ONLY when it actually
     -- differs from the header's current value. Re-setting a SecureGroupHeader
@@ -15727,18 +15731,35 @@ end
 -- from a public provider API. EUI frames are custom, so where a provider API
 -- exists we hand it our buttons. The unit lives on the secure "unit" attribute
 -- (read via GetAttribute), so no plain field on the button is required.
+--
+-- Name-scanning trackers (anything on LibGetFrame) need nothing from us: our
+-- raid, party, boss and unit-frame name patterns are in that library's default
+-- priority list upstream, so they resolve our frames on their own.
 
--- Currently-visible EUI party unit buttons that have a unit assigned. Party
--- only by design -- raid frames are intentionally not exposed to trackers.
+-- Currently-visible EUI unit buttons that have a unit assigned -- party AND
+-- raid. Both sets are pre-created once (the startingIndex -4 / Show / 1 trick)
+-- and never destroyed or recycled: the secure header only reassigns the "unit"
+-- attribute and shows or hides. So a collected list is exactly as stable for
+-- raid as it is for party, and the IsVisible + unit test is what keeps a button
+-- the header has parked out of the result.
+--
+-- Extra frames are skipped. They are deliberate DUPLICATES of units already
+-- shown on a real raid button, so handing a tracker both leaves it choosing
+-- between two frames claiming one unit. Boss frames never join allButtons and
+-- stay out for the same reason: they are not party/raid unit frames.
 ns._CollectTrackerFrames = function()
     local out = {}
-    if ns._partyAllButtons then
-        for _, btn in ipairs(ns._partyAllButtons) do
-            if btn:IsVisible() and btn:GetAttribute("unit") then
+    local function Collect(list)
+        if not list then return end
+        for _, btn in ipairs(list) do
+            if btn:IsVisible() and btn:GetAttribute("unit")
+               and not GetFFD(btn)._isExtra then
                 out[#out + 1] = btn
             end
         end
     end
+    Collect(ns._partyAllButtons)
+    Collect(allButtons)
     return out
 end
 

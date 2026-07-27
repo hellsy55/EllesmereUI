@@ -17,7 +17,8 @@
 -- All frames created here are OURS (CreateFrame by this file), so SetScript
 -- and custom fields are allowed. The only Blizzard frames touched are the
 -- micro menu containers (via a SecureHandlerStateTemplate hider) and the
--- Blizzard MicroButtons / ProfessionMicroButton (via secure attributes).
+-- Blizzard MicroButtons / ProfessionMicroButton / QuestLogMicroButton (via
+-- secure attributes).
 
 local ADDON_NAME, ns = ...
 local L = ns.L
@@ -277,12 +278,11 @@ local ICON_DEFAULTS = {
     currency    = { 0.886, 0.675, 0.478 },  -- E2AC7A
     greatvault  = { 0.569, 0.502, 1 },  -- 9180FF
     audio       = { 1, 1, 1 },
-    -- The map-marker red every mapping app uses (this is Google Maps' pin
-    -- red). Deliberately NOT the module's soft red (1, 0.35, 0.35): at 65%
-    -- saturation that one reads salmon, where a pin has to read unmistakably
-    -- red. Pure #FF0000 is the other wrong end -- it blooms at icon size.
-    -- A plain stored default: unlike the text beside it, the pin never
-    -- follows the zone.
+    -- Map-marker red. Deliberately NOT the module's soft red (1, 0.35, 0.35):
+    -- at 65% saturation that one reads salmon, where a pin has to read
+    -- unmistakably red. Pure #FF0000 is the other wrong end -- it blooms at
+    -- icon size. A plain stored default: unlike the text beside it, the pin
+    -- never follows the zone.
     location    = { 0.918, 0.263, 0.208 },  -- EA4335
     -- Map-marker yellow for the coordinate readout. Distinct from gold's
     -- peachy E2AC7A so the two never read as the same block at a glance.
@@ -1326,11 +1326,6 @@ end
 -- carry them are hand-maintained Classic-era tables whose numbers say very
 -- little once level scaling is in play.
 
--- Chat posts always carry one decimal, whatever the block displays: sharing a
--- position is a "come find me" action, and whole percents of a map are a long
--- walk apart. Fixed so both blocks post an identical string.
-local CHAT_COORD_PRECISION = 1
-
 -- Width the location block holds in Manual mode, in px. Wide enough for a
 -- typical "Zone: Subzone" pair at the default font without clipping. Exported
 -- because the options slider must report the same number the block renders at
@@ -1423,23 +1418,6 @@ local function LocZoneStatus()
     return CONTESTED_TERRITORY
 end
 
-local function LocPostPosition()
-    if not ChatEdit_ChooseBoxForSend then return end
-    local edit = ChatEdit_ChooseBoxForSend()
-    if not edit then return end
-    local zone = GetRealZoneText() or ""
-    local sub = GetSubZoneText() or ""
-    local coords = LocCoordText(CHAT_COORD_PRECISION)
-    local msg
-    if sub ~= "" and sub ~= zone then
-        msg = format("%s: %s (%s)", zone, sub, coords)
-    else
-        msg = format("%s (%s)", zone, coords)
-    end
-    if ChatEdit_ActivateChat then ChatEdit_ActivateChat(edit) end
-    edit:Insert(msg)
-end
-
 -- One tooltip for both blocks: they name the same place, so they say the same
 -- thing. Blizzard globals for the labels, module keys for the click hints.
 local function LocTooltip(ownerFrame)
@@ -1454,17 +1432,7 @@ local function LocTooltip(ownerFrame)
     ns.Tip_AddDouble(STATUS, LocZoneStatus(), 0.6, 0.6, 0.6, sr, sg, sb)
     ns.Tip_AddLine(" ")
     ns.Tip_AddDouble(L["LEFT_CLICK"], L["TOGGLE_WORLD_MAP"], 1, 1, 1, ar, ag, ab)
-    ns.Tip_AddDouble(L["SHIFT_LEFT_CLICK"], L["SEND_POSITION"], 1, 1, 1, ar, ag, ab)
     ns.Tip_Show()
-end
-
-local function LocOnClick(_, button)
-    if button ~= "LeftButton" then return end
-    -- Posting to chat is combat-legal; toggling the map is guarded like every
-    -- other frame toggle in this file.
-    if IsShiftKeyDown() then LocPostPosition(); return end
-    if InCombatLockdown() then return end
-    if WorldMapFrame then ToggleFrame(WorldMapFrame) end
 end
 
 -- Shared single-line text block. opts:
@@ -1477,7 +1445,7 @@ end
 --                    setting (default on)
 --   events        -> event list driving Refresh
 --   tickSeconds   -> dedicated ticker period, for values no event announces
--- The tooltip and the click actions are the same for both blocks -- they name
+-- The tooltip and the click action are the same for both blocks -- they name
 -- the same place -- so they are wired straight in rather than passed.
 local function MakeLocationBlock(blockCfg, slot, content, barCtx, opts)
     local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
@@ -1527,16 +1495,79 @@ local function MakeLocationBlock(blockCfg, slot, content, barCtx, opts)
         end
     end
 
+    local function HoverIn()
+        mouseOver = true
+        ApplyColors()
+        LocTooltip(frame)
+    end
+    local function HoverOut()
+        mouseOver = false
+        ns.Tip_Hide(frame)
+        ApplyColors()
+    end
+
+    -- Secure click passthrough to Blizzard's Quest Log micro button, which is
+    -- what opens the map. The click runs inside Blizzard's own handler, so
+    -- nothing here ever enters the map's panel flow -- the same mechanism the
+    -- micro menu block uses for every button it hosts.
+    --
+    -- Lazily created and never in lockdown (secure frames cannot be configured
+    -- there). Until it exists the block still displays and still shows its
+    -- tooltip, it just does not click; PLAYER_REGEN_ENABLED drives Refresh,
+    -- which retries. Both blocks listen for it, so a block built during a
+    -- fight becomes clickable the moment the fight ends.
+    local clickBtn
+    local function EnsureClickButton()
+        if clickBtn or InCombatLockdown() then return clickBtn end
+        local micro = _G.QuestLogMicroButton
+        if not micro then return nil end
+        clickBtn = CreateFrame("Button", "EWB_LOC_" .. inst.key, frame,
+            "SecureActionButtonTemplate,SecureHandlerStateTemplate")
+        clickBtn:SetAllPoints(frame)
+        clickBtn:SetAttribute("*clickbutton1", micro)
+        -- Without this, the ActionButtonUseKeyDown CVar makes the secure
+        -- handler act on key-down only, discarding our "AnyUp" clicks.
+        clickBtn:SetAttribute("useOnKeyDown", false)
+        clickBtn:SetAttribute("*type1", "click")
+        clickBtn:EnableMouse(true)
+        clickBtn:RegisterForClicks("AnyUp")
+        -- Combat: drop the click ACTION only, from within the secure
+        -- environment. The button stays mouse-enabled so hover keeps working;
+        -- a click while *type1 is nil simply does nothing.
+        RegisterStateDriver(clickBtn, "combatlock", "[combat] combat; nocombat")
+        clickBtn:SetAttribute("_onstate-combatlock", [[
+            if newstate == 'combat' then
+                self:SetAttribute('*type1', nil)
+            else
+                self:SetAttribute('*type1', 'click')
+            end
+        ]])
+        -- The overlay covers the display frame, so it owns hover from here on.
+        -- Same handlers, and the tooltip still anchors to the display frame so
+        -- its position does not shift when the button materialises.
+        clickBtn:SetScript("OnEnter", HoverIn)
+        clickBtn:SetScript("OnLeave", HoverOut)
+        return clickBtn
+    end
+
     function inst:Refresh(pre)
-        -- Collapsed (coordinates inside an instance): hide, and let
-        -- GetAutoLength report 0 so the solver drops the slot and its gaps.
-        if opts.collapse and opts.collapse() then
+        EnsureClickButton()
+
+        local collapsed = (opts.collapse and opts.collapse()) or false
+        -- Show/Hide are protected calls: the secure click button above puts
+        -- this block's whole bar under protection, so flip only on a real
+        -- state change and never in lockdown. The collapse edges are all
+        -- event-driven and PLAYER_REGEN_ENABLED re-runs this pass.
+        if content:IsShown() == collapsed and not InCombatLockdown() then
+            if collapsed then content:Hide() else content:Show() end
+        end
+        -- Collapsed (coordinates inside an instance): GetAutoLength reports 0
+        -- so the solver drops the slot and its gaps.
+        if collapsed then
             lastText = nil
-            content:Hide()
             MaybeRelayout(inst)
             return
         end
-        content:Show()
 
         local barCfg = BC()
         local barH = barCtx.GetThickness()
@@ -1623,25 +1654,20 @@ local function MakeLocationBlock(blockCfg, slot, content, barCtx, opts)
         MaybeRelayout(inst)
     end
 
-    frame:SetScript("OnEnter", function()
-        mouseOver = true
-        ApplyColors()
-        LocTooltip(frame)
-    end)
-    frame:SetScript("OnLeave", function()
-        mouseOver = false
-        ns.Tip_Hide(frame)
-        ApplyColors()
-    end)
-    frame:SetScript("OnClick", LocOnClick)
+    -- Fallback hover surface: used until the secure overlay exists (a block
+    -- built mid-combat), and harmless afterwards -- the overlay sits on top,
+    -- so only one of the two ever fires.
+    frame:SetScript("OnEnter", HoverIn)
+    frame:SetScript("OnLeave", HoverOut)
 
     inst.eventFrame = MakeEventFrame(inst, function(self)
         self:Refresh()
     end)
 
     function inst:Enable()
-        content:Show()
+        if not content:IsShown() and not InCombatLockdown() then content:Show() end
         lastText = nil
+        EnsureClickButton()
         RegisterInstEvents(self)
         -- Movement raises no event, and the engine heartbeat is 1s -- coarse
         -- enough that the numbers visibly jump while running. Same 0.5s period
@@ -1670,7 +1696,10 @@ local function MakeLocationBlock(blockCfg, slot, content, barCtx, opts)
     function inst:Disable()
         UnregisterInstEvents(self)
         if ticker then ticker:Cancel(); ticker = nil end
-        content:Hide()
+        -- Protected once the secure click button exists; the engine's own
+        -- combat gate defers the ApplyBar that reaches here, so this only
+        -- guards the paths that do not go through it.
+        if not InCombatLockdown() then content:Hide() end
     end
 
     function inst:GetAutoLength()
@@ -1684,7 +1713,13 @@ local function MakeLocationBlock(blockCfg, slot, content, barCtx, opts)
     function inst:Destroy()
         self._dead = true
         if ticker then ticker:Cancel(); ticker = nil end
-        content:Hide()
+        if clickBtn then
+            ParkSecureFrame(clickBtn, self.key .. "_loc")
+            clickBtn = nil
+        end
+        -- Same protected-call guard as Disable: parking the secure child is
+        -- itself deferred in combat, so the bar is still protected here.
+        if not InCombatLockdown() then content:Hide() end
     end
 
     return inst
@@ -1721,7 +1756,10 @@ ns.BlockFactories.coords = function(blockCfg, slot, content, barCtx)
     end
 
     return MakeLocationBlock(blockCfg, slot, content, barCtx, {
-        events = { "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" },
+        -- PLAYER_REGEN_ENABLED: geometry, the collapse flip and the secure
+        -- click button all wait for regen, so the block needs a pass there.
+        events = { "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD",
+                   "PLAYER_REGEN_ENABLED" },
         tickSeconds = 0.5,
         texture = MEDIA .. "coordinates.png",
         text = function() return LocCoordText(Precision()) end,

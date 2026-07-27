@@ -927,8 +927,11 @@ end
 
 -- Stash the hover target (unit + aura instance) as a frame is assigned an aura,
 -- and toggle mouse interactivity to match the buff "Hide Tooltips" setting. Read
--- live so a combat-time toggle applies on the next aura event. Default (nil) =
--- tooltips shown. A missing/secret instance id disables the hover.
+-- live so a combat-time toggle applies on the next aura event. The default is
+-- HIDDEN (buffHideTooltips = true in the defaults table), so the frame stays
+-- mouse-transparent until the user opts in -- which is what makes the tooltip
+-- handler's own gate the only one it needs. The `not prof` fallback only covers
+-- a profile-less early call. A missing/secret instance id disables the hover.
 local function BM_SetTipTarget(f, unit, iid)
     f._tipUnit = unit
     f._tipIID  = iid

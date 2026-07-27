@@ -2161,6 +2161,12 @@ local function DecorateFrame(frame, barData)
         go:SetFrameLevel(baseLvl + 16)
     end
 
+    -- Re-arm the buff ticker's active-glow "nothing configured here" latch.
+    -- This function re-runs on rebuilds and settings changes, which is exactly
+    -- when the answer it caches can have changed, so a newly enabled glow is
+    -- picked up on the next pass instead of waiting for the aura to fall off.
+    fd._activeGlowNoCfg = nil
+
     if not fd.textOverlay then
         local txo = CreateFrame("Frame", nil, frame)
         txo:SetAllPoints(frame)
@@ -4153,6 +4159,12 @@ local function ProcessPresetCooldowns()
                     local bk = fc and fc.barKey
                     local bd = bk and barDataByKey[bk]
                     local showIC = not bd or bd.showItemCount ~= false
+                    -- Show Item Count "Out of Combat" mode: this update path
+                    -- force-Shows on count changes, so it must respect the
+                    -- combat gate or it would re-show the text mid-combat.
+                    if showIC and bd and bd.itemCountOOC and InCombatLockdown() then
+                        showIC = false
+                    end
                     local displayCount = showIC
                         and ((total > 1) and total
                         or (total == 1 and f._presetData and f._presetData.combatLockout) and total
@@ -7178,11 +7190,15 @@ function ns.SetupViewerHooks()
                                     end
                                     if r == 0 then
                                         -- Clean 0: not active. Clear a glow we own.
+                                        -- Also re-arm the no-config latch below so
+                                        -- the next activation re-checks settings.
+                                        fd._activeGlowNoCfg = nil
                                         if fd._activeGlowOn then
                                             if fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
                                             fd._activeGlowOn = false
                                         end
                                     elseif r and ns._cdmAnyActiveGlow
+                                       and not fd._activeGlowNoCfg
                                        and not (fd._activeGlowOn and fd.glowOverlay
                                                 and fd.glowOverlay._glowActive) then
                                         -- Active, but no glow is actually running
@@ -7193,6 +7209,26 @@ function ns.SetupViewerHooks()
                                         local ssA = ns._ResolveCdmSS(frame)
                                         if ssA and (tonumber(ssA.activeGlow) or 0) > 0 then
                                             ns.ApplyActiveOverlays(frame, fd, ssA, true, bd)
+                                        else
+                                            -- No active glow configured for THIS
+                                            -- icon, so the resolve can only answer
+                                            -- "no" again for the rest of this
+                                            -- active window. Latch it off.
+                                            --
+                                            -- ns._cdmAnyActiveGlow is a GLOBAL gate
+                                            -- -- one spell anywhere with a glow arms
+                                            -- it for every frame -- so without this
+                                            -- every active icon in the profile pays
+                                            -- a full settings resolve on every pass
+                                            -- purely to rediscover it has nothing to
+                                            -- do. Icons that DO have a glow never
+                                            -- reach here, so the repair this pass
+                                            -- exists for is untouched. Re-armed on
+                                            -- the falloff edge above and by
+                                            -- DecorateFrame, so a newly enabled glow
+                                            -- is picked up without waiting for the
+                                            -- aura to drop.
+                                            fd._activeGlowNoCfg = true
                                         end
                                     end
                                 end

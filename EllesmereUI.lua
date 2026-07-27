@@ -5656,6 +5656,8 @@ end
 --   fallback  - path to use if nothing resolves (optional)
 function EllesmereUI.ResolveTexturePath(texTable, key, fallback)
     if not key then return fallback end
+    local path = texTable and texTable[key]
+    if path then return path end
     -- A non-string key is legacy data, not a lookup miss: several settings were
     -- boolean toggles before they became style dropdowns (showPlayerAbsorb is
     -- one). Callers gate on truthiness, so a stored `true` passes their check
@@ -5663,9 +5665,13 @@ function EllesmereUI.ResolveTexturePath(texTable, key, fallback)
     -- unit frame initialisation and aborts the whole build -- a white player
     -- frame and a settings tab that will not open, from one stale boolean.
     -- Treat it as unset and let the caller's fallback stand.
+    --
+    -- Deliberately placed AFTER the direct lookup, not before it: the raise is
+    -- in the :match below, so guarding here keeps this a pure crash fix and
+    -- cannot turn a table hit into a fallback. Every texture table today is
+    -- string-keyed, so the two orders behave identically -- this one just stays
+    -- correct if one ever is not.
     if type(key) ~= "string" then return fallback end
-    local path = texTable and texTable[key]
-    if path then return path end
     -- If the key has an "sm:" prefix, try LSM directly
     local smName = key:match("^sm:(.+)")
     if smName then
@@ -11093,7 +11099,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.6.3"
+EllesmereUI.VERSION = "8.6.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

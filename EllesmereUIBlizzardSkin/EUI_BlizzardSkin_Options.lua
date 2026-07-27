@@ -2745,6 +2745,10 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinMail = nil
                 EllesmereUIDB.reskinCatalyst = nil
                 EllesmereUIDB.reskinSocket = nil
+                EllesmereUIDB.reskinItemUpgrade = nil
+                EllesmereUIDB.reskinLoot = nil
+                EllesmereUIDB.reskinLootToast = nil
+                EllesmereUIDB.lootToastQualityStrip = nil
                 EllesmereUIDB.reskinMicroMenu = nil
                 EllesmereUIDB.reskinHousing = nil
                 EllesmereUIDB.reskinProfessions = nil
