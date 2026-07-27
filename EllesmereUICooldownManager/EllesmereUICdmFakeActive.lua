@@ -1427,5 +1427,35 @@ if EllesmereUI then
         ns._fakeActiveDebug = not ns._fakeActiveDebug
         print(("|cff0cd29fEUI FakeActive|r debug %s | armed=%s rules=%d"):format(
             ns._fakeActiveDebug and "ON" or "off", tostring(_armed), #_rules))
+
+        -- Per-rule dump. "armed with N rules" reads true in every broken report,
+        -- so on its own it separates nothing. What matters per rule is whether
+        -- its trigger resolved to a cast spell at all, and whether any live icon
+        -- carries its key -- the two independent ways a rule goes inert.
+        local FCt, icons = ns._ecmeFC, ns.cdmBarIcons
+        for i = 1, #_rules do
+            local rule = _rules[i]
+            local triggers = {}
+            for sp, list in pairs(_castMap) do
+                for j = 1, #list do
+                    if list[j] == rule then triggers[#triggers + 1] = sp end
+                end
+            end
+            local matched = 0
+            if FCt and icons then
+                for _, list in pairs(icons) do
+                    for j = 1, #list do
+                        local f = list[j]
+                        local fc = f and FCt[f]
+                        if fc and KeyMatches(rule.spellID, fc.spellID) then matched = matched + 1 end
+                    end
+                end
+            end
+            print(("  rule%d key=%s src=%s dur=%s trigger=%s casts=[%s] frames=%d%s"):format(
+                i, tostring(rule.spellID), tostring(rule.srcKey), tostring(rule.duration),
+                tostring(rule.trigger),
+                (#triggers > 0) and table.concat(triggers, ",") or "|cffff4444NONE|r",
+                matched, (matched == 0) and " |cffff4444<- no icon|r" or ""))
+        end
     end
 end
