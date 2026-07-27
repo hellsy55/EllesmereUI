@@ -3704,8 +3704,11 @@ local function HideAllInjectedCustomBuffs()
 end
 ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 
-local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID)
-    local fkey = barKey .. ":ph:" .. spellID
+-- identKey: optional pooling identity, defaulting to spellID. Buff
+-- placeholders pass one so two viewer slots that collide on spellID do not
+-- share a single pooled frame (see the collision note at the call site).
+local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID, identKey)
+    local fkey = barKey .. ":ph:" .. tostring(identKey or spellID)
     local f = _placeholderFrames[fkey]
     if not f then
         f = CreateFrame("Frame", nil, UIParent)
@@ -4663,6 +4666,35 @@ local function CollectAndReanchor()
                                     -- toggle on. We never touch Blizzard's hidden frame, so nothing
                                     -- fights its hide state.
                                     local bd = barDataByKey[targetBar]
+                                    -- Placeholder identity. Two viewer slots on one bar can
+                                    -- resolve to the SAME realSID. For split-form talents that
+                                    -- is correct (one live spell, one icon) and the dedup below
+                                    -- must collapse them. But it is ALSO what a viewer-level
+                                    -- COLLISION looks like: Blizzard hands the Demonic Art slot
+                                    -- Diabolic Ritual's id, so unlike the split-identity twins
+                                    -- the clean-read cache above cannot separate them either --
+                                    -- both reads return the same id. Keyed on realSID alone the
+                                    -- second slot is skipped and shares the first's pooled frame,
+                                    -- so the pair renders two icons while active and one while
+                                    -- missing, and the bar's icon count swings as the buffs come
+                                    -- and go.
+                                    -- cooldownID is distinct per viewer slot, which is why the
+                                    -- enumeration dedup was moved onto it; this is the same
+                                    -- identity rule arriving in the placeholder path. The FIRST
+                                    -- claimer keeps the plain realSID key, so every non-colliding
+                                    -- spec (unique sid <=> unique cooldownID) is byte-identical
+                                    -- to before; only a later slot carrying a DIFFERENT
+                                    -- cooldownID takes an id of its own instead of vanishing.
+                                    local phIdent = realSID
+                                    do
+                                        local claimKey = "phsid:" .. tostring(realSID)
+                                        local firstCD = barSeen[claimKey]
+                                        if firstCD == nil then
+                                            barSeen[claimKey] = dedupKey or true
+                                        elseif dedupKey and firstCD ~= dedupKey then
+                                            phIdent = "c" .. tostring(dedupKey)
+                                        end
+                                    end
                                     -- Effective Always Show for THIS buff: a per-icon
                                     -- override (ss.alwaysShow "on"/"off") beats the bar
                                     -- toggle. Lookup only when per-icon settings exist
@@ -4695,7 +4727,7 @@ local function CollectAndReanchor()
                                     -- Icons) for cooldowns).
                                     local hostedMissingVis
                                     if hostCD then
-                                        local phMV = GetOrCreatePlaceholderFrame(targetBar, realSID, nil)
+                                        local phMV = GetOrCreatePlaceholderFrame(targetBar, realSID, nil, phIdent)
                                         local ssMV = ns.ResolveSpellSettings(phMV, realSID, ns.GetBarSpellData(targetBar), targetBar)
                                         local mv = ssMV and ssMV.hostedMissingVis
                                         if mv == "hidden" or mv == "hiddenShift" then hostedMissingVis = mv end
@@ -4728,11 +4760,11 @@ local function CollectAndReanchor()
                                         -- against injecting that single frame twice (a second
                                         -- AcquireEntry reserves a phantom slot and over-sizes the
                                         -- bar). Dedup placeholders per bar by resolved spell.
-                                        local phKey = "ph:" .. realSID
+                                        local phKey = "ph:" .. tostring(phIdent)
                                         if not barSeen[phKey] then
                                             barSeen[phKey] = true
                                             local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(realSID)
-                                            local ph = GetOrCreatePlaceholderFrame(targetBar, realSID, icon)
+                                            local ph = GetOrCreatePlaceholderFrame(targetBar, realSID, icon, phIdent)
                                             -- Per-spell missing-visibility mark (our own
                                             -- frame): "hidden" renders alpha-0 via the
                                             -- opacity passes while the slot stays
