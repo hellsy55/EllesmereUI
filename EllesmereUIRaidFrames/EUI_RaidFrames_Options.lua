@@ -4331,8 +4331,10 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSet("tooltipMode", v) end });  y = y - h
         -- Cog: buff/HoT aura-icon tooltips (Buff Manager). Hidden by default --
         -- matches the long-standing behavior where buff icons showed no tooltip;
-        -- opt in here. When shown, the aura tip still follows the tooltip mode
-        -- on this dropdown (mode governs when, this governs whether).
+        -- opt in here. This is the ONLY gate on the aura tip: the tooltip mode
+        -- on this dropdown governs the UNIT tooltip and must not veto an aura
+        -- tip enabled here (it used to, so a hidden unit tip also killed the
+        -- aura tip -- see ns.RaidFrameTooltipAllowed).
         do
             local rgn = row._rightRegion
             local tipRows

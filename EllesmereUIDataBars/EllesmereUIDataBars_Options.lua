@@ -48,6 +48,14 @@ initFrame:SetScript("OnEvent", function(self)
     local _edbHeldGlowY          -- its section offset when last shown: sections
                                  -- follow bar order, so a change means the row
                                  -- moved and the view has to follow it
+    -- Location blocks whose Width was just switched to Manual, keyed by the
+    -- block cfg table. Marks a choice the player made SECONDS ago, not a
+    -- setting -- so it is transient by design and never saved. Set on the
+    -- switch, cleared by the first Max Width drag and by switching back to
+    -- Automatic. Keying the pulse off "maxWidth == nil" instead would fire
+    -- once per block ever, and never again on a later mode change.
+    -- Weak keys: a deleted block must not be held alive by this marker.
+    local _edbWidthPulse = setmetatable({}, { __mode = "k" })
     local _cardsExpanded = false -- template card strip open/closed
     local _dividerDragging = false
 
@@ -2314,10 +2322,14 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                     refreshAlpha = function() return b.useCoinColor and 1 or 0.3 end }
             end
-            -- Durability: optional 4th "Dynamic" swatch on Text Color --
-            -- the same red->green durability gradient the icon's Dynamic
-            -- mode uses. NOT the default: nothing-stored stays custom/white.
-            if b.type == "durability" then
+            -- Optional 4th state-driven swatch on Text Color. Durability gets
+            -- the same red->green gradient its icon's Dynamic mode uses; the
+            -- location blocks get the zone's PvP ruleset color. NOT the
+            -- default in either case: nothing-stored stays custom/white.
+            local DYNAMIC_TEXT_BLOCKS = {
+                durability = "Dynamic", location = "Reactive", coords = "Reactive",
+            }
+            if DYNAMIC_TEXT_BLOCKS[b.type] then
                 local sw = colorCfg.swatches
                 local origCustomClick = sw[1].onClick
                 sw[1].onClick = function(self)
@@ -2340,8 +2352,8 @@ initFrame:SetScript("OnEvent", function(self)
                         return origClick(...)
                     end
                 end
-                sw[4] = { tooltip = "Dynamic", hasAlpha = false,
-                    getValue = function() return ns.BlockIconDefault("durability") end,
+                sw[4] = { tooltip = DYNAMIC_TEXT_BLOCKS[b.type], hasAlpha = false,
+                    getValue = function() return ns.BlockTextDynamic(b.type) end,
                     setValue = function() end,
                     onClick = function()
                         b.useDynamicColor = true
@@ -2409,13 +2421,25 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdateState()
             end
 
+            -- Toggle row for a setting whose default is ON: nil has to read as
+            -- true, which the `== true` of MkToggle (further down) cannot
+            -- express. Declared here because the icon row below needs it too.
+            local function MkToggleOn(label, key, tip)
+                return { type = "toggle", text = label, tooltip = tip,
+                    getValue = function() return s[key] ~= false end,
+                    setValue = function(v)
+                        s[key] = v and true or false
+                        Apply()
+                    end }
+            end
+
             -- Icon Color (icon-bearing blocks only): the same three swatches
             -- as Text Color plus a "Default" swatch. Nothing stored resolves
             -- to the block's themed default (ns.BlockIconDefault).
             local ICON_COLOR_BLOCKS = {
                 durability = true, gold = true, travel = true, spec = true,
                 profession = true, profession2 = true, currency = true,
-                greatvault = true, audio = true,
+                greatvault = true, audio = true, location = true, coords = true,
             }
             if ICON_COLOR_BLOCKS[b.type] then
                 local function IconFlagsOff()
@@ -2574,6 +2598,13 @@ initFrame:SetScript("OnEvent", function(self)
                           Apply()
                       end }
                 end
+                if b.type == "location" then
+                    iconRowRight = MkToggleOn("Show Icon", "showIcon",
+                        "Shows the map pin next to the zone name.")
+                elseif b.type == "coords" then
+                    iconRowRight = MkToggleOn("Show Icon", "showIcon",
+                        "Shows the marker icon next to the coordinates.")
+                end
                 if b.type == "durability" then
                     iconRowRight = { type = "toggle", text = "Show Icon",
                       tooltip = "Shows the icon next to the durability readout.",
@@ -2672,6 +2703,91 @@ initFrame:SetScript("OnEvent", function(self)
                           s.showIcon = v and true or false
                           Apply(); EllesmereUI:RefreshPage()
                       end },
+                }
+            elseif b.type == "location" then
+                -- Width only reaches the layout when the solver actually reads
+                -- this block's measured extent. Even Split hands every block an
+                -- equal share, and the Fill Remaining block gets the leftover:
+                -- in both the setting would silently do nothing, so say so
+                -- rather than shipping a control that lies.
+                -- EnsureFillBlock, not the raw cfg.fillBlockId: an unset or
+                -- stale id heals to the last block, and reading the field
+                -- directly would leave the control enabled on a block that IS
+                -- the fill -- the very case this guards.
+                local function WidthInert()
+                    if ns.BarSizingMode(cfg) ~= "auto" then return true end
+                    return ns.EnsureFillBlock(cfg) == blockId
+                end
+                local INERT_TIP = "This bar sizes its blocks itself, so the width is not this block's to choose."
+                typeRows = {
+                    { type = "dropdown", text = "Width",
+                      tooltip = "Automatic follows the zone name. Manual holds the block at a fixed width and clips longer names, so it never shifts the blocks beside it.",
+                      values = { auto = "Automatic", manual = "Manual" },
+                      order = { "auto", "manual" },
+                      disabled = WidthInert,
+                      disabledTooltip = INERT_TIP,
+                      getValue = function() return ns.LocationWidthMode(s) end,
+                      setValue = function(v)
+                          s.widthMode = v
+                          -- Every switch to Manual re-arms the pulse, whether
+                          -- the block is new or was already configured: the
+                          -- slider is the control that just took over, so it
+                          -- has to announce itself each time.
+                          _edbWidthPulse[b] = (v == "manual") or nil
+                          Apply()
+                          -- The slider's disabled state keys off this value.
+                          EllesmereUI:RefreshPage()
+                          -- Deferred so the REBUILT row is the one that lights
+                          -- up, not the one this handler is running on.
+                          if v == "manual" then
+                              C_Timer.After(0, function()
+                                  if _edbNavigateFn then
+                                      _edbNavigateFn("block:" .. blockId .. ":maxwidth")
+                                  end
+                              end)
+                          end
+                      end },
+                    { type = "slider", pixel = true, text = "Max Width", min = 60, max = 400, step = 5,
+                      tooltip = "How wide the block stays, whatever the zone is called.",
+                      disabled = function()
+                          if WidthInert() then return true end
+                          return ns.LocationWidthMode(s) ~= "manual"
+                      end,
+                      -- Two reasons to be disabled, two different sentences:
+                      -- a fixed "Manual width is required." would be plainly
+                      -- wrong on an Even Split bar.
+                      disabledTooltip = function()
+                          if WidthInert() then return INERT_TIP end
+                          return "Manual width is required."
+                      end,
+                      getValue = function()
+                          local v = s.maxWidth
+                          if v == nil then v = ns.LOC_MAX_WIDTH_DEFAULT end
+                          return v
+                      end,
+                      setValue = function(v)
+                          s.maxWidth = v
+                          -- Touched: the pulse has done its job.
+                          _edbWidthPulse[b] = nil
+                          Apply()
+                      end },
+                    MkToggleOn("Zone and Subzone", "showSubZone",
+                        "Shows the zone and the subzone together instead of the subzone alone."),
+                }
+            elseif b.type == "coords" then
+                typeRows = {
+                    { type = "dropdown", text = "Decimals",
+                      tooltip = "How precise the coordinates read. More decimals make the block wider.",
+                      values = { [0] = "None", [1] = "One", [2] = "Two" },
+                      order = { 0, 1, 2 },
+                      getValue = function()
+                          local p = s.precision
+                          if p == nil then p = 0 end
+                          return p
+                      end,
+                      setValue = function(v) s.precision = v; Apply() end },
+                    MkToggleOn("Hide in Instance", "hideInInstance",
+                        "Removes the block from the bar inside dungeons and raids, where there are no player coordinates."),
                 }
             elseif b.type == "gold" then
                 typeRows = {
@@ -2842,6 +2958,16 @@ initFrame:SetScript("OnEvent", function(self)
                         { section = secHdr, target = row, slotSide = "left",
                           -- Pulse until the player actually picks one.
                           holdWhile = function() return s.currencyId == nil end }
+                end
+                -- Same contract for the location block's Max Width: switching
+                -- Width to Manual hands the decision to a slider the player has
+                -- never touched, so point at it and hold the pulse until they
+                -- do. k == 1 is the Width dropdown; the slider rides its right
+                -- slot. Released by the first drag (maxWidth stops being nil).
+                if b.type == "location" and k == 1 then
+                    parent._edbClickTargets["block:" .. blockId .. ":maxwidth"] =
+                        { section = secHdr, target = row, slotSide = "right",
+                          holdWhile = function() return _edbWidthPulse[b] == true end }
                 end
             end
 
