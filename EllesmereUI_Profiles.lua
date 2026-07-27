@@ -1807,6 +1807,7 @@ do
         "charSheetIconZoom", "charSheetEnchantNames", "charSheetEnchantSize",
         "flyoutItemLevels", "showSecondaryRaw", "showSecondaryBoth",
         "showTertiaryRaw", "showTertiaryBoth", "showAdjustedStats",
+        "showManaStat",
         -- Inspect card
         "inspectShowEnchants", "inspectShowItemLevel", "inspectShowUpgradeTrack",
         -- LFG / Merchant cards
