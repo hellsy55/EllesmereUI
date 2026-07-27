@@ -908,6 +908,116 @@ qolFrame:SetScript("OnEvent", function(self)
         end
     end
 
+    -- Auto-repair result watcher. Three things here are not inferable from the
+    -- code:
+    --   * RepairAllItems(true) never fails for want of guild funds -- the server
+    --     pays whatever the guild allowance still covers and silently charges
+    --     the player the rest, so "nothing left to repair" says nothing about
+    --     who paid.
+    --   * The guild's usable funds are readable (GuildRepairFunds below), but
+    --     GetGuildBankMoney() reads 0 until the player opens a guild bank this
+    --     session, so the figure cannot be trusted on its own -- it serves as a
+    --     ceiling on the deduced share, never as the source of it.
+    --   * Hence the guild share is deduced from the player's ledger, and only
+    --     outgoing amounts are summed: junk sales from the same MERCHANT_SHOW
+    --     land in this window and a net figure would cancel against them. In
+    --     practice they never share a PLAYER_MONEY -- SellAllJunkItems sells one
+    --     item per round trip, so its credits trail the repair debit.
+    local repairWatcher, repairWatchLast, repairWatchOut
+    local repairWatchGen = 0
+
+    -- Mirrors the arithmetic behind Blizzard's own guild-repair tooltip: today's
+    -- remaining allowance, bounded by the balance; -1 means an unlimited rank.
+    local function GuildRepairFunds()
+        local allowance = GetGuildBankWithdrawMoney()
+        local balance = GetGuildBankMoney()
+        if allowance < 0 or allowance > balance then return balance end
+        return allowance
+    end
+
+    -- Total, then the guild's share -- spelled out only on a split bill, since a
+    -- wholly guild-funded one is unambiguous from the suffix alone.
+    local function ReportRepairOutcome(guildPart, ownPart)
+        local line = EllesmereUI.Lf("Repaired all items for %s", RepairCostString(guildPart + ownPart))
+        if guildPart > 0 then
+            line = line .. EllesmereUI.L(" (guild bank)")
+            if ownPart > 0 then line = line .. " " .. RepairCostString(guildPart) end
+        end
+        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r " .. line)
+    end
+
+    local function ReportRepairBroke()
+        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060" .. EllesmereUI.L("Not enough gold to repair.") .. "|r")
+    end
+
+    -- Single exit; the generation bump orphans the pending timeout.
+    local function StopRepairWatch()
+        if not (repairWatcher and repairWatcher.active) then return false end
+        repairWatcher.active = false
+        repairWatchGen = repairWatchGen + 1
+        repairWatcher:UnregisterAllEvents()
+        return true
+    end
+
+    local function OnRepairWatchEvent()  -- PLAYER_MONEY: accumulate only, never decide
+        local now = GetMoney()
+        local spent = repairWatchLast - now
+        if spent > 0 then repairWatchOut = repairWatchOut + spent end
+        repairWatchLast = now
+    end
+
+    -- One timer settles everything. Resolving early on a big enough deduction
+    -- would misread an unrelated purchase in the same window as the player
+    -- having paid the whole bill, and MERCHANT_CLOSED would settle before a
+    -- deduction still in flight had landed.
+    local function StartRepairWatch(cost, moneyBefore, guildFunds)
+        if not repairWatcher then
+            repairWatcher = CreateFrame("Frame", "EUI_RepairWatcher", UIParent)
+            repairWatcher:SetScript("OnEvent", OnRepairWatchEvent)
+        end
+        StopRepairWatch()  -- discard a stale watch from a previous merchant
+
+        repairWatchLast = moneyBefore
+        repairWatchOut = 0
+        repairWatcher.active = true
+        repairWatcher:RegisterEvent("PLAYER_MONEY")
+
+        local gen = repairWatchGen
+        C_Timer.After(0.5, function()
+            if gen ~= repairWatchGen then return end
+            local remainCost, stillNeed = GetRepairAllCost()
+            if not StopRepairWatch() then return end
+            if not (stillNeed and remainCost > 0) then remainCost = 0 end
+
+            local own = repairWatchOut
+            if own < 0 then own = 0 end
+
+            -- The funds can run dry mid-bill; settle the rest, but only if the
+            -- merchant is still open to take it.
+            if remainCost > 0 and CanMerchantRepair() and GetMoney() >= remainCost then
+                RepairAllItems(false)
+                own = own + remainCost
+                remainCost = 0
+            end
+
+            local paid = cost - remainCost
+            if own > paid then own = paid end
+            local guildPart = paid - own
+
+            -- A junk sale sharing one PLAYER_MONEY with the repair nets against
+            -- it and inflates the deduced guild share; the pre-repair funds cap
+            -- it back. A stale read is either too high to bind or zero and
+            -- skipped, so it can only ever tighten a wrong answer.
+            if guildFunds > 0 and guildPart > guildFunds then
+                guildPart = guildFunds
+                own = paid - guildPart
+            end
+
+            if paid > 0 then ReportRepairOutcome(guildPart, own) end
+            if remainCost > 0 and GetMoney() < remainCost then ReportRepairBroke() end
+        end)
+    end
+
     local merchantFrame = CreateFrame("Frame", "EUI_MerchantHandler", UIParent)
     merchantFrame:RegisterEvent("MERCHANT_SHOW")
     merchantFrame:RegisterEvent("MERCHANT_CLOSED")
@@ -929,32 +1039,33 @@ qolFrame:SetScript("OnEvent", function(self)
             if CanMerchantRepair() then
                 local cost, canRepair = GetRepairAllCost()
                 if canRepair and cost > 0 then
+                    -- No affordability test on purpose: Blizzard's own guild
+                    -- repair button just calls RepairAllItems(true) and lets the
+                    -- server split the bill. Gating on "the guild covers it all"
+                    -- threw that split away and billed the player the lot.
                     local useGuild = (EllesmereUIDB.autoRepairGuild ~= false)
                         and IsInGuild()
                         and CanGuildBankRepair()
-                        and cost <= GetGuildBankWithdrawMoney()
 
                     -- Check if we can actually afford the repair
                     if not useGuild and GetMoney() < cost then
-                        EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060" .. EllesmereUI.L("Not enough gold to repair.") .. "|r")
+                        ReportRepairBroke()
                         return
                     end
 
+                    -- Both readings must predate the repair, and neither is of
+                    -- any use unless the guild bank is in play.
+                    local moneyBefore, guildFunds
+                    if useGuild then
+                        moneyBefore, guildFunds = GetMoney(), GuildRepairFunds()
+                    end
                     RepairAllItems(useGuild)
 
                     if useGuild then
-                        C_Timer.After(0.5, function()
-                            local remainCost, stillNeed = GetRepairAllCost()
-                            if stillNeed and remainCost > 0 then
-                                if GetMoney() >= remainCost then
-                                    RepairAllItems(false)
-                                end
-                            end
-                        end)
+                        StartRepairWatch(cost, moneyBefore, guildFunds)  -- reports once the real payer is known
+                    else
+                        ReportRepairOutcome(0, cost)  -- own gold: no ambiguity, report now
                     end
-
-                    local src = useGuild and EllesmereUI.L(" (guild bank)") or ""
-                    EllesmereUI.Print("|cff0CD29DEllesmereUI:|r " .. EllesmereUI.Lf("Repaired all items for %s", RepairCostString(cost)) .. src)
                 end
             end
         end
