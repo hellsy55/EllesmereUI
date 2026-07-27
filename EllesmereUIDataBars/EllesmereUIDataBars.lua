@@ -63,6 +63,7 @@ local L = {
     RIGHT_CLICK          = "|cffFFFFFFRight Click:|r",
     SHIFT_MIDDLE_CLICK   = "|cffFFFFFFShift + Middle Click:|r",
     SHIFT_LEFT_CLICK     = "|cffFFFFFFShift + Left Click:|r",
+    CTRL_LEFT_CLICK      = "|cffFFFFFFCtrl + Left Click:|r",
     CTRL_RIGHT_CLICK     = "|cffFFFFFFCtrl + Right Click:|r",
     CTRL_ALT_LEFT_CLICK  = "|cffFFFFFFCtrl + Alt + Left Click:|r",
     YOU_HAVE_MAIL        = "You've Got Mail!",
@@ -76,6 +77,9 @@ local L = {
     FPS                  = "FPS",
     HOME                 = "Home",
     WORLD                = "World",
+    DOWNLOAD             = "Download",
+    UPLOAD               = "Upload",
+    KB_PER_SEC           = "KB/s",
     MEMORY_USAGE         = "Memory Usage",
     REFRESH_STATS        = "Refresh stats / print memory snapshot",
     FORCE_GC             = "Force garbage collection",
@@ -103,6 +107,7 @@ local L = {
     CHANGE_SPEC          = "Change Specialization",
     CHANGE_SPEC_SHORT    = "Change Spec",
     CHANGE_LOOT_SPEC     = "Change Loot Spec",
+    OPEN_TALENTS         = "Open Talents",
     CANNOT_USE_COMBAT    = "Cannot Use While In Combat",
     AUDIO                = "Audio",
     AUDIO_MASTER         = "Master",
@@ -128,6 +133,8 @@ local L = {
     INVITE               = "Invite",
     NO_FRIENDS_ONLINE    = "No friends online",
     NOT_IN_GUILD         = "Not in a guild",
+    TOGGLE_WORLD_MAP     = "Toggle World Map",
+    SEND_POSITION        = "Send Position to Chat",
 }
 ns.L = L
 
@@ -159,7 +166,6 @@ local defaults = {
     profile = {
         nextBarId  = 0,   -- monotonic bar id counter; only ever incremented
         bars       = {},  -- ordered array of barCfg
-        characters = {},  -- cross-character gold store, keyed "Name-Realm"
     },
 }
 
@@ -170,6 +176,8 @@ ns.BLOCK_TYPES = {
     { key = "clock",      label = "Clock" },
     { key = "fps",        label = "FPS" },
     { key = "ms",         label = "Latency" },
+    { key = "location",   label = "Location" },
+    { key = "coords",     label = "Coordinates" },
     { key = "gold",       label = "Gold" },
     { key = "durability", label = "Durability" },
     { key = "xprep",      label = "XP / Reputation Bar" },
@@ -187,7 +195,12 @@ ns.BLOCK_TYPES = {
 ns.BLOCK_DEFAULTS = {
     clock      = { localTime = true, twentyFour = true, showMail = true, showResting = true, fontSizeClock = nil, fontSizeInfo = nil },
     fps        = {},
-    ms         = { useWorldLatency = false },
+    ms         = { showIcon = false },
+    -- widthMode/maxWidth deliberately unset: "auto" is the resolved default
+    -- (ns.LocationWidthMode) and a nil maxWidth is what marks the width as
+    -- never chosen, which is what the options page pulses about.
+    location   = { showIcon = true, showSubZone = true },
+    coords     = { showIcon = true, precision = 0, hideInInstance = true },
     gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false },
     durability = { showIcon = true },
     xprep      = { mode = "auto" },
@@ -2796,6 +2809,15 @@ function ns.AddBlock(barId, typeKey)
     -- ONE value owns the counter position (the old osSocialText offset +
     -- top-bar sign flip are dead; the anchor is plain button-center).
     if typeKey == "micromenu" then b.textYOff = 8 end
+    -- The zone name defaults to the REACTIVE text color: it carries the PvP
+    -- ruleset (blue sanctuary / green friendly / red hostile / yellow
+    -- contested), so the block says something the name alone does not. A
+    -- top-level cfg field, not a setting, hence here rather than in
+    -- BLOCK_DEFAULTS -- same reason the micromenu offset above lives here.
+    -- The coords block keeps a plain readable color on purpose: the danger
+    -- signal belongs on the name, and digits that change twice a second
+    -- should not also change hue.
+    if typeKey == "location" then b.useDynamicColor = true end
     cfg.blocks[#cfg.blocks + 1] = b
     ns.ApplyBar(barId)
     return b
@@ -3046,6 +3068,13 @@ end
 -------------------------------------------------------------------------------
 function WB:OnInitialize()
     self.db = EllesmereUI.Lite.NewDB("EllesmereUIDataBarsDB", defaults)
+    -- The cross-character gold ledger used to live in the profile, which put
+    -- every character's name, realm and balance into shared export strings and
+    -- gave each profile its own separate ledger. It is account data now
+    -- (EllesmereUIDB.dataBarsGold, see GoldStore). Drop the old copy rather
+    -- than migrate it: on anyone who imported a profile it holds the exporter's
+    -- characters, not their own, and the account store refills from live play.
+    self.db.profile.characters = nil
 end
 
 function WB:OnEnable()

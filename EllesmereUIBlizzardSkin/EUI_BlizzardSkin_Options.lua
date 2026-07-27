@@ -263,6 +263,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.customTooltips = v
+                  if EllesmereUI.SyncAuraTooltipSkin then EllesmereUI.SyncAuraTooltipSkin() end
                   EllesmereUI:RefreshPage()  -- gray/ungray the rest of the section now
                   if EllesmereUI.ShowConfirmPopup then
                       EllesmereUI:ShowConfirmPopup({
@@ -478,6 +479,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(r, g, b)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipBgColor = { r = r, g = g, b = b }
+                  if EllesmereUI.SyncAuraTooltipSkin then EllesmereUI.SyncAuraTooltipSkin() end
               end },
             { type="slider", text="Background Opacity", min=0, max=100, step=1,
               disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
@@ -488,6 +490,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.tooltipBgOpacity = v / 100
+                  if EllesmereUI.SyncAuraTooltipSkin then EllesmereUI.SyncAuraTooltipSkin() end
               end });  y = y - h
 
         local ttModeRow
@@ -633,8 +636,8 @@ initFrame:SetScript("OnEvent", function(self)
             local texValues,texOrder=EllesmereUI.GetBorderTextureDropdown()
             local tooltipBorder
             tooltipBorder,h=W:DualRow(parent,y,
-                {type="dropdown",text="Border Style",disabled=ttReskinOff,values=texValues,order=texOrder,getValue=function() return EllesmereUIDB.tooltipBorderTexture or "solid" end,setValue=function(v) local c,b=EllesmereUI.GetBorderStyleSelectDefaults(v); EllesmereUIDB.tooltipBorderTexture=v; EllesmereUIDB.tooltipBorderOffsetX=nil; EllesmereUIDB.tooltipBorderOffsetY=nil; EllesmereUIDB.tooltipBorderBehind=b; EllesmereUIDB.tooltipBorderColor=c end},
-                {type="dropdown",text="Border Size",disabled=ttReskinOff,values=BORDER_VALUES,order=BORDER_ORDER,getValue=function() return EllesmereUIDB.tooltipBorderThickness or ({[0]="none",[1]="thin",[2]="normal",[3]="heavy",[4]="strong"})[EllesmereUIDB.tooltipBorderSize or 1] or "thin" end,setValue=function(v) EllesmereUIDB.tooltipBorderThickness=v end}); y=y-h
+                {type="dropdown",text="Border Style",disabled=ttReskinOff,values=texValues,order=texOrder,getValue=function() return EllesmereUIDB.tooltipBorderTexture or "solid" end,setValue=function(v) local c,b=EllesmereUI.GetBorderStyleSelectDefaults(v); EllesmereUIDB.tooltipBorderTexture=v; EllesmereUIDB.tooltipBorderOffsetX=nil; EllesmereUIDB.tooltipBorderOffsetY=nil; EllesmereUIDB.tooltipBorderBehind=b; EllesmereUIDB.tooltipBorderColor=c; if EllesmereUI.SyncAuraTooltipSkin then EllesmereUI.SyncAuraTooltipSkin() end end},
+                {type="dropdown",text="Border Size",disabled=ttReskinOff,values=BORDER_VALUES,order=BORDER_ORDER,getValue=function() return EllesmereUIDB.tooltipBorderThickness or ({[0]="none",[1]="thin",[2]="normal",[3]="heavy",[4]="strong"})[EllesmereUIDB.tooltipBorderSize or 1] or "thin" end,setValue=function(v) EllesmereUIDB.tooltipBorderThickness=v; if EllesmereUI.SyncAuraTooltipSkin then EllesmereUI.SyncAuraTooltipSkin() end end}); y=y-h
             AttachBorderControls(tooltipBorder,"tooltip",ttReskinOff,true)
         end
 
@@ -1350,6 +1353,29 @@ initFrame:SetScript("OnEvent", function(self)
         return y
     end
 
+    local function BuildLootToastContent(parent, y)
+        local W = EllesmereUI.Widgets
+        local _, h
+
+        _, h = WSCardSection(parent, "QUALITY OF LIFE", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Quality Strip",
+              tooltip="Adds a strip down the left edge of a loot toast in the item's quality color. The flat skin drops Blizzard's quality ring around the icon, so this puts that rarity cue back.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lootToastQualityStrip == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lootToastQualityStrip = v
+                  if EllesmereUI._LootToast_Refresh then EllesmereUI._LootToast_Refresh() end
+              end },
+            { type="label", text="" }
+        ); y = y - h
+
+        return y
+    end
+
     ---------------------------------------------------------------------------
     --  Blizzard Window Skins page: one expandable card per reskinned window.
     --  Card headers are custom chrome, but every sub-setting ROW is a standard
@@ -1649,6 +1675,37 @@ initFrame:SetScript("OnEvent", function(self)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.reskinSocket = v
             end,
+        },
+        {
+            key   = "itemupgrade",
+            title = "Item Upgrades",
+            desc  = "The item upgrade window: upgrade slot, track selector, cost, and the currency strip.",
+            reloadMsg = "Changing the Item Upgrades reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinItemUpgrade = v
+            end,
+        },
+        {
+            key   = "loot",
+            title = "Loot Window",
+            desc  = "The loot window: item rows with squared icons, kept item quality colors.",
+            reloadMsg = "Changing the Loot Window reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinLoot = v
+            end,
+        },
+        {
+            key   = "loottoast",
+            title = "Loot Toasts",
+            desc  = "The \"You received\" popups for loot, currency, and upgrades.",
+            reloadMsg = "Changing the Loot Toasts reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinLootToast = v
+            end,
+            buildContent = BuildLootToastContent,
         },
         {
             key   = "housing",
@@ -2596,7 +2653,7 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIBlizzardSkin", {
         title       = "Blizz UI Enhanced",
         description = "Themed Blizzard frames: window skins, tooltips, menus, popups, Dragon Riding HUD.",
-        searchTerms = "blizzard skin character sheet tooltip menu popup dragon riding skyriding window skins lfg group finder premade queue pause game menu great vault inspect collections mounts pets toys spellbook talents adventure guide encounter journal professions guild communities calendar achievements mail catalyst gem socket micro menu modern delves companion brann",
+        searchTerms = "blizzard skin character sheet tooltip menu popup dragon riding skyriding window skins lfg group finder premade queue pause game menu great vault inspect collections mounts pets toys spellbook talents adventure guide encounter journal professions guild communities calendar achievements mail catalyst gem socket item upgrade upgrades crest loot window loot toast you received popup micro menu modern delves companion brann",
         pages       = { PAGE_WINDOWSKINS, PAGE_TOOLTIPS, PAGE_DRAGONRIDING },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_WINDOWSKINS then
@@ -2668,6 +2725,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Legacy numeric key the tooltip Border Size still falls back
                 -- to when tooltipBorderThickness is unset.
                 EllesmereUIDB.tooltipBorderSize = nil
+                if EllesmereUI.SyncAuraTooltipSkin then EllesmereUI.SyncAuraTooltipSkin() end
                 EllesmereUIDB.reskinGreatVault = nil
                 EllesmereUIDB.reskinLFGMenu = nil
                 EllesmereUIDB.showQueueTimer = nil

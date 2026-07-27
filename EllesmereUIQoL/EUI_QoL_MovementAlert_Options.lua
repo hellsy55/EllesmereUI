@@ -87,6 +87,7 @@ local MOVEMENT_PRESETS = {
     { class = "SHAMAN", ids = { 192063 } },                -- Gust of Wind
     { class = "SHAMAN", ids = { 58875, 90328 } },          -- Spirit Walk
     { class = "WARLOCK", ids = { 48020 } },                -- Demonic Circle: Teleport
+    { class = "WARLOCK", ids = { 111400 } },               -- Burning Rush (buff-active, ships unchecked)
     { class = "WARRIOR", ids = { 6544 } },                 -- Heroic Leap
 }
 
@@ -1135,7 +1136,7 @@ local function BuildMovementAlertPage(pageName, parent, yOffset)
                   set=function(v) ma.tsTextFormat = v; Refresh() end },
                 { type="colorpicker", label="Color",
                   disabled=function() return ma.tsColorUseClass end,
-                  disabledTooltip="Disable Class Color to pick a custom color.",
+                  disabledTooltip="Disable Class Color to pick a custom color.", rawTooltip=true,
                   get=function() return ma.tsColorR or 0.53, ma.tsColorG or 1, ma.tsColorB or 0 end,
                   set=function(r, g, b) ma.tsColorR, ma.tsColorG, ma.tsColorB = r, g, b; Refresh() end },
                 { type="toggle", label="Use Class Color",
@@ -1212,7 +1213,7 @@ local function BuildMovementAlertPage(pageName, parent, yOffset)
                   set=function(v) ma.gwText = v; Refresh() end },
                 { type="colorpicker", label="Color",
                   disabled=function() return ma.gwColorUseClass end,
-                  disabledTooltip="Disable Class Color to pick a custom color.",
+                  disabledTooltip="Disable Class Color to pick a custom color.", rawTooltip=true,
                   get=function() return ma.gwColorR or 0.7, ma.gwColorG or 0, ma.gwColorB or 1 end,
                   set=function(r, g, b) ma.gwColorR, ma.gwColorG, ma.gwColorB = r, g, b; Refresh() end },
                 { type="toggle", label="Use Class Color",

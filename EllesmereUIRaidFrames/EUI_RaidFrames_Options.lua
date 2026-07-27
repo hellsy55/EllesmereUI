@@ -233,7 +233,7 @@ initFrame:SetScript("OnEvent", function(self)
                 menuFrame:Hide()
             end)
 
-            rl:SetText(ri.label)
+            rl:SetText(EllesmereUI.L(ri.label))
             radioRows[#radioRows + 1] = rr
             mY = mY - MH
         end
@@ -295,7 +295,7 @@ initFrame:SetScript("OnEvent", function(self)
             rl:SetFont(FONT, 13, "")
             rl:SetPoint("LEFT", row, "LEFT", 20, 0)
             rl:SetJustifyH("LEFT")
-            rl:SetText(cb.label)
+            rl:SetText(EllesmereUI.L(cb.label))
             rl:SetTextColor(0.75, 0.75, 0.75, 1)
             row._lbl = rl
 
@@ -1023,6 +1023,8 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return SVal("healthColorMode", "class") end,
               setValue=function(v)
                   SSet("healthColorMode", v)
+                  -- "dark" here feeds the Dark Mode conditional-override condition.
+                  if EllesmereUI.Conditions_Recheck then EllesmereUI.Conditions_Recheck() end
                   EllesmereUI:RefreshPage()
               end },
             { type="slider", text="Background", min=0, max=100, step=1,
@@ -1030,6 +1032,15 @@ initFrame:SetScript("OnEvent", function(self)
               disabledTooltip="Not available in Dark Mode", rawTooltip=true,
               getValue=function() return SVal("bgDarkness", 50) end,
               setValue=function(v) SSet("bgDarkness", v) end });  y = y - h
+        -- Fill Color's "dark" choice IS the Dark Mode condition's input for
+        -- Raid Frames: lock the dropdown while a Dark Mode conditional is
+        -- being edited, or the override could capture a mode change that
+        -- flips its own condition.
+        if EllesmereUI.SpecOverrides_AttachEditLock then
+            EllesmereUI.SpecOverrides_AttachEditLock(row._leftRegion,
+                "Fill Color's Dark Mode choice drives a Dark Mode override condition, so it can't be changed while editing an override",
+                EllesmereUI.SpecOverrides_DarkCondEditActive)
+        end
         -- Inline color swatch for custom fill color, plus the three Custom Dynamic
         -- Colors stop swatches (100% / 50% / 0%). Only one set is interactive at a
         -- time depending on the Fill Color mode; they share the same inline slot.
@@ -4320,18 +4331,44 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSet("tooltipMode", v) end });  y = y - h
         -- Cog: buff/HoT aura-icon tooltips (Buff Manager). Hidden by default --
         -- matches the long-standing behavior where buff icons showed no tooltip;
-        -- opt in here. When shown, the aura tip still follows the tooltip mode
-        -- on this dropdown (mode governs when, this governs whether).
+        -- opt in here. This is the ONLY gate on the aura tip: the tooltip mode
+        -- on this dropdown governs the UNIT tooltip and must not veto an aura
+        -- tip enabled here (it used to, so a hidden unit tip also killed the
+        -- aura tip -- see ns.RaidFrameTooltipAllowed).
         do
             local rgn = row._rightRegion
-            local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Tooltip Settings",
-                rows = {
+            local tipRows
+            if EllesmereUI.IS_121 then
+                -- 4-state on the same key: true/nil = hidden, false = shown,
+                -- "cursor" = shown at the cursor, "combat" = hidden during combat.
+                tipRows = {
+                    { type="dropdown", label="Buff Tooltips",
+                      tooltip="Tooltip behavior when hovering a buff/HoT icon on a raid or party frame.",
+                      values={ hidden="Hidden", shown="Shown", cursor="Shown At Cursor", combat="Hidden In Combat" },
+                      order={ "hidden", "shown", "cursor", "combat" },
+                      get=function()
+                          local v = SVal("buffHideTooltips", true)
+                          if v == false then return "shown" end
+                          if v == "cursor" or v == "combat" then return v end
+                          return "hidden"
+                      end,
+                      set=function(k)
+                          local v = k
+                          if k == "shown" then v = false elseif k == "hidden" then v = true end
+                          SSet("buffHideTooltips", v); if ns.ReloadFrames then ns.ReloadFrames() end
+                      end },
+                }
+            else
+                tipRows = {
                     { type="toggle", label="Hide Buff Tooltips",
                       tooltip="Hide the tooltip when hovering a buff/HoT icon on a raid or party frame.",
                       get=function() return SVal("buffHideTooltips", true) end,
                       set=function(v) SSet("buffHideTooltips", v); if ns.ReloadFrames then ns.ReloadFrames() end end },
-                },
+                }
+            end
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Tooltip Settings",
+                rows = tipRows,
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
             cogBtn:SetSize(26, 26)
@@ -5236,7 +5273,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogDis:SetFrameLevel(cogBtn:GetFrameLevel() + 5)
             cogDis:EnableMouse(true)
             cogDis:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Raid Frames Show When Solo"))
+                EllesmereUI.ShowWidgetTooltip(cogBtn, EllesmereUI.DisabledTooltip("Raid Frames Show When Solo", "disabled"))
             end)
             cogDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateSoloCogDis()
@@ -6620,7 +6657,7 @@ initFrame:SetScript("OnEvent", function(self)
                               ReloadAndUpdate()
                           end,
                           disabled=function() return SVal("debuffCCGlowBackground", false) ~= true end,
-                          disabledTooltip=EllesmereUI.DisabledTooltip("Pixel Glow Background") },
+                          disabledTooltip="Pixel Glow Background" },
                     },
                 })
                 local cogBtn = CreateFrame("Button", nil, leftRgn)

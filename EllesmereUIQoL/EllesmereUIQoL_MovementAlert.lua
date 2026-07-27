@@ -26,6 +26,13 @@ local function IsSecret(value)
     return issecretvalue and issecretvalue(value) or false
 end
 
+-- Secret values throw on any comparison (==, <, ...) once execution is
+-- tainted, so route a payload field through this before comparing it.
+local function PlainValue(value)
+    if IsSecret(value) then return nil end
+    return value
+end
+
 local inCombat = false
 
 -------------------------------------------------------------------------------
@@ -56,16 +63,20 @@ local MOVEMENT_ABILITIES = {
     ROGUE = {[259] = {36554, 2983}, [260] = {195457, 2983}, [261] = {36554, 2983}},
     SHAMAN = {[262] = {79206, 90328, 192063, 58875}, [263] = {90328, 192063, 58875}, [264] = {79206, 90328, 192063, 58875}},
     WARLOCK = {
-        [265] = {48020}, [266] = {48020}, [267] = {48020},
+        [265] = {48020, 111400}, [266] = {48020, 111400}, [267] = {48020, 111400},
         filter = {[385899] = {385899}},
     },
     WARRIOR = {[71] = {6544}, [72] = {6544}, [73] = {6544}},
 }
 
--- Buff-active spells (label shown while the aura is up instead of a
--- cooldown countdown). Currently empty -- Burning Rush was removed from
--- tracking -- but the machinery stays for future aura-style mobility spells.
-local BUFF_ACTIVE_SPELLS = {}
+-- Buff-active spells: the label shown while the aura is up, in place of a
+-- cooldown countdown. Membership here decides HOW a spell is tracked, never
+-- whether it is on -- Burning Rush ships unchecked via MOVEMENT_DEFAULT_OFF
+-- below. It has no cooldown and no duration to count down, so the presence of
+-- its aura is the only thing there is to track.
+local BUFF_ACTIVE_SPELLS = {
+    [111400] = "Burning Rush Active!",
+}
 
 local SPELL_ALIAS_GROUPS = {
     {102401, 16979, 102417, 252216},
@@ -102,6 +113,7 @@ local MOVEMENT_DEFAULT_OFF = {
     [212552] = true,               -- Wraith Walk
     [79206]  = true,               -- Spiritwalker's Grace
     [58875]  = true, [90328] = true, -- Spirit Walk
+    [111400] = true,               -- Burning Rush (off by default since 8.5.3)
 }
 EllesmereUI._MovementDefaultOff = MOVEMENT_DEFAULT_OFF
 
@@ -644,21 +656,36 @@ local function GetPlayerMovementSpells()
                     local baseId = (displayId ~= spellId) and spellId or nil
                     if not isCharge and baseId then isCharge, maxCh, rechDur = SafeGetChargeInfo(baseId) end
                     if spellInfo then
-                        local rawBaseDur = SafeGetBaseDuration(displayId)
-                        if rawBaseDur <= 0 and baseId then rawBaseDur = SafeGetBaseDuration(baseId) end
-                        if not isCharge and rawBaseDur <= 0 and rechDur > 0 then rawBaseDur = rechDur end
-                        if rawBaseDur <= 0 then rawBaseDur = GetKnownCategoryDuration(displayId) end
-                        table.insert(result, {
-                            spellId = displayId,
-                            baseSpellId = baseId,
-                            spellName = spellInfo.name,
-                            spellIcon = spellInfo.iconID,
-                            customText = override.customText ~= "" and override.customText or nil,
-                            isChargeSpell = isCharge,
-                            maxCharges = maxCh,
-                            rechargeDuration = rechDur,
-                            baseDuration = isCharge and rechDur or rawBaseDur,
-                        })
+                        -- Same buff-active branch the default path takes above.
+                        -- Without it a user-added aura-toggle spell was always
+                        -- built as a cooldown entry, and since it has no cooldown
+                        -- the display loop had nothing to show.
+                        local defaultCustom = BUFF_ACTIVE_SPELLS[displayId] or BUFF_ACTIVE_SPELLS[spellId]
+                        if defaultCustom then
+                            table.insert(result, {
+                                spellId = displayId,
+                                spellName = spellInfo.name,
+                                spellIcon = spellInfo.iconID,
+                                customText = override.customText ~= "" and override.customText or defaultCustom,
+                                checkType = "buffActive",
+                            })
+                        else
+                            local rawBaseDur = SafeGetBaseDuration(displayId)
+                            if rawBaseDur <= 0 and baseId then rawBaseDur = SafeGetBaseDuration(baseId) end
+                            if not isCharge and rawBaseDur <= 0 and rechDur > 0 then rawBaseDur = rechDur end
+                            if rawBaseDur <= 0 then rawBaseDur = GetKnownCategoryDuration(displayId) end
+                            table.insert(result, {
+                                spellId = displayId,
+                                baseSpellId = baseId,
+                                spellName = spellInfo.name,
+                                spellIcon = spellInfo.iconID,
+                                customText = override.customText ~= "" and override.customText or nil,
+                                isChargeSpell = isCharge,
+                                maxCharges = maxCh,
+                                rechargeDuration = rechDur,
+                                baseDuration = isCharge and rechDur or rawBaseDur,
+                            })
+                        end
                     end
                 end
             end
@@ -671,7 +698,9 @@ end
 local function UpdateCachedCharges()
     if inCombat or InCombatLockdown() then return end
     for _, entry in ipairs(cachedMovementSpells) do
-        if entry.isChargeSpell then
+        if entry.checkType == "buffActive" then
+            -- Aura-tracked: no cooldown and no charges to cache.
+        elseif entry.isChargeSpell then
             local chargeId = entry.baseSpellId or entry.spellId
             local chargeInfo = C_Spell.GetSpellCharges(chargeId)
             if chargeInfo and chargeInfo.currentCharges and not IsSecret(chargeInfo.currentCharges) then
@@ -736,7 +765,7 @@ local function OnPlayerBuffActiveAuraUpdate(updateInfo)
                 local state = buffActiveState[key]
                 if state and state.instanceID then
                     for _, instanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
-                        if instanceID == state.instanceID then
+                        if PlainValue(instanceID) == state.instanceID then
                             SetBuffActiveState(key, false, nil)
                             expectingBuffAura[key] = nil
                             break
@@ -751,24 +780,30 @@ local function OnPlayerBuffActiveAuraUpdate(updateInfo)
             if entry.checkType == "buffActive" then
                 local key = BuffActiveKey(entry)
                 if expectingBuffAura[key] then
-                    -- Prefer an exact spellId match. Only fall back to
-                    -- accepting a nil/secret spellId (can't compare it
-                    -- directly) when it's the ONLY aura in this batch --
-                    -- otherwise an unrelated aura landing in the same batch
-                    -- as the real one could get matched instead.
-                    local unambiguous = #updateInfo.addedAuras == 1
+                    -- Prefer an exact spellId match, but in combat the field is
+                    -- a secret value we can't read at all. Fall back to the
+                    -- batch's only unreadable aura -- with more than one there
+                    -- is no way to tell which is ours, so leave the expectation
+                    -- standing rather than latch onto an unrelated aura.
+                    local match, unreadable, unreadableCount = nil, nil, 0
                     for _, aura in ipairs(updateInfo.addedAuras) do
-                        local matches = (aura.spellId == key)
-                            or (unambiguous and (not aura.spellId or IsSecret(aura.spellId)))
-                        if matches and aura.auraInstanceID then
-                            SetBuffActiveState(key, true, aura.auraInstanceID)
-                            expectingBuffAura[key] = nil
-                            break
+                        local sid = PlainValue(aura.spellId)
+                        if sid then
+                            if sid == key then match = aura; break end
+                        else
+                            unreadable = aura
+                            unreadableCount = unreadableCount + 1
                         end
+                    end
+                    if not match and unreadableCount == 1 then match = unreadable end
+                    if match and match.auraInstanceID then
+                        SetBuffActiveState(key, true, match.auraInstanceID)
+                        expectingBuffAura[key] = nil
                     end
                 end
                 for _, aura in ipairs(updateInfo.addedAuras) do
-                    if aura.spellId and not IsSecret(aura.spellId) and aura.spellId == key and aura.auraInstanceID then
+                    local sid = PlainValue(aura.spellId)
+                    if sid and sid == key and aura.auraInstanceID then
                         SetBuffActiveState(key, true, aura.auraInstanceID)
                     end
                 end

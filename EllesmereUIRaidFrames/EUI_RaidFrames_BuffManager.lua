@@ -897,9 +897,10 @@ local BMSIMPLE_CAP   = 10  -- max buffs the Simple Setup grid can show per butto
 local function BM_TooltipOnEnter(self)
     local u, iid = self._tipUnit, self._tipIID
     if not u or not iid or issecretvalue(iid) then return end
-    -- Honor the same "Show Raid Frames Tooltip" combat-visibility mode as the
-    -- unit/debuff tooltips so one setting governs every raid-frame hover tip.
-    if ns.RaidFrameTooltipAllowed and not ns.RaidFrameTooltipAllowed(self._ownerButton) then return end
+    -- Governed ONLY by the buff "Hide Tooltips" toggle (BM_SetTipTarget leaves
+    -- the frame mouse-transparent while that is on). The "Show Raid Frames
+    -- Tooltip" mode covers the UNIT tooltip and must not veto an aura tip the
+    -- user explicitly enabled in a different section.
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     if GameTooltip.SetUnitAuraByAuraInstanceID then
         GameTooltip:SetUnitAuraByAuraInstanceID(u, iid)

@@ -235,9 +235,8 @@ end
 -- precedence at their sites.
 local function BlockColorOf(b)
     if b.useDynamicColor then
-        -- Opt-in Dynamic text mode (durability's Text Color 4th swatch):
-        -- resolves through the block's themed/dynamic default.
-        return ns.BlockIconDefault(b.type)
+        -- Opt-in state-driven text mode (the Text Color row's 4th swatch).
+        return ns.BlockTextDynamic(b.type)
     end
     if b.useClassColor then
         local _, classFile = UnitClass("player")
@@ -249,6 +248,21 @@ local function BlockColorOf(b)
     local c = b.color
     if c then return c.r or 1, c.g or 1, c.b or 1 end
     return 1, 1, 1
+end
+
+-- Reactive zone coloring by the current zone's PvP ruleset. Kept identical
+-- to EllesmereUIMinimap's GetZoneReactionColor so the bar's location text and
+-- the minimap's zone text never disagree about the zone they both name.
+local function ZoneReactionColor()
+    local pvpType = C_PvP and C_PvP.GetZonePVPInfo and C_PvP.GetZonePVPInfo()
+    if pvpType == "friendly" then
+        return 0.05, 0.85, 0.03
+    elseif pvpType == "sanctuary" then
+        return 0.035, 0.58, 0.84
+    elseif pvpType == "arena" or pvpType == "hostile" or pvpType == "combat" then
+        return 0.84, 0.03, 0.03
+    end
+    return 0.9, 0.85, 0.05
 end
 
 -- Themed per-block icon defaults (the Icon Color row's "Default" swatch).
@@ -263,6 +277,16 @@ local ICON_DEFAULTS = {
     currency    = { 0.886, 0.675, 0.478 },  -- E2AC7A
     greatvault  = { 0.569, 0.502, 1 },  -- 9180FF
     audio       = { 1, 1, 1 },
+    -- The map-marker red every mapping app uses (this is Google Maps' pin
+    -- red). Deliberately NOT the module's soft red (1, 0.35, 0.35): at 65%
+    -- saturation that one reads salmon, where a pin has to read unmistakably
+    -- red. Pure #FF0000 is the other wrong end -- it blooms at icon size.
+    -- A plain stored default: unlike the text beside it, the pin never
+    -- follows the zone.
+    location    = { 0.918, 0.263, 0.208 },  -- EA4335
+    -- Map-marker yellow for the coordinate readout. Distinct from gold's
+    -- peachy E2AC7A so the two never read as the same block at a glance.
+    coords      = { 0.961, 0.784, 0.259 },  -- F5C842
 }
 -- Lowest equipped-durability percent, written by the durability block's
 -- sampler; read by the dynamic tint below (and its swatch preview).
@@ -290,6 +314,22 @@ function ns.BlockIconDefault(bType)
     local d = ICON_DEFAULTS[bType]
     if d then return d[1], d[2], d[3] end
     return 1, 1, 1
+end
+
+-- Per-block STATE-DRIVEN TEXT color (the Text Color row's 4th swatch).
+-- Normally the same source as the icon's themed default -- durability tints
+-- both from its red->green gradient -- so the fallback is BlockIconDefault.
+-- Types listed here override that: the location blocks split the two
+-- deliberately: the zone name follows the PvP ruleset while the map pin keeps
+-- a plain user-owned color.
+local TEXT_DYNAMIC = {
+    location = ZoneReactionColor,
+    coords   = ZoneReactionColor,
+}
+function ns.BlockTextDynamic(bType)
+    local fn = TEXT_DYNAMIC[bType]
+    if fn then return fn() end
+    return ns.BlockIconDefault(bType)
 end
 
 -- Per-block ICON color (options Icon Color row: Custom/Class/Accent/Default
@@ -782,17 +822,27 @@ local sysMemTable = {}
 local function sysMemSort(a, b) return a.mem > b.mem end
 local sysLastMemScanTime = 0
 
-local FPS_THRESHOLD, LAT_THRESHOLD = 60, 60
+local FPS_THRESHOLD = 60
 local function GetFPSColor(fps)
     local lb = FPS_THRESHOLD * 0.5
     local perc = 1
     if fps < FPS_THRESHOLD then perc = (fps - lb) / lb end
     return ns.SlowColorGradient(perc)
 end
+
+-- Latency quality, three discrete bands the way a ping meter reads: green good,
+-- yellow fair, red poor. Colours are the client's own font-colour globals so
+-- they match the rest of the UI (with plain fallbacks if one is ever absent);
+-- thresholds are in ms and live here for easy retuning.
+local LAT_GOOD, LAT_FAIR = 100, 250
+local function BandColor(fontColor, dr, dg, db)
+    if fontColor and fontColor.GetRGB then return fontColor:GetRGB() end
+    return dr, dg, db
+end
 local function GetLatColor(lat)
-    local perc = 1
-    if lat > LAT_THRESHOLD then perc = 1 - (lat - LAT_THRESHOLD) / LAT_THRESHOLD end
-    return ns.SlowColorGradient(perc)
+    if lat <= LAT_GOOD then return BandColor(GREEN_FONT_COLOR,  0.1, 1.0, 0.1) end
+    if lat <= LAT_FAIR then return BandColor(YELLOW_FONT_COLOR, 1.0, 0.82, 0.0) end
+    return BandColor(RED_FONT_COLOR, 1.0, 0.1, 0.1)
 end
 
 -- Shared single-line stat block (icon + value text). opts:
@@ -1050,30 +1100,181 @@ ns.BlockFactories.fps = function(blockCfg, slot, content, barCtx)
     })
 end
 
+-- LATENCY. Its own factory rather than the shared MakeStatBlock: it shows one
+-- OR two links (home / world / both), each labelled by its own house/globe
+-- icon, which the single-icon stat helper cannot do. The bar stays in the
+-- block colour like every other module; criticality green/yellow/red lives in
+-- the tooltip only (GetLatColor).
+local LAT_ICON = { home = MEDIA .. "home_latency.png", world = MEDIA .. "world_latency.png" }
+
+-- home | world | both. Reads the old useWorldLatency boolean as a fallback so
+-- an existing block keeps its link. Shared by the block and its options row,
+-- which must agree on what "selected" means.
+function ns.LatencyMode(s)
+    if s.latencyMode then return s.latencyMode end
+    if s.useWorldLatency then return "world" end
+    return "home"
+end
+
 ns.BlockFactories.ms = function(blockCfg, slot, content, barCtx)
+    local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
+    inst.key = InstKey(barCtx, blockCfg)
+
+    local mouseOver = false
+    local lastSig                    -- skip the relayout when nothing changed
+
+    local function D() return blockCfg.settings or {} end
+    local function BC() return barCtx.cfg end
+
+    local button = CreateFrame("Button", nil, content)
+    button:EnableMouse(true)
+    button:RegisterForClicks("AnyUp")
+
+    -- Two reusable segments (icon + value); the second stays hidden unless the
+    -- block is in "both" mode.
+    local seg = {}
+    for i = 1, 2 do
+        local s = { icon = button:CreateTexture(nil, "OVERLAY"), text = button:CreateFontString(nil, "OVERLAY") }
+        AttachTextOffset(inst, s.text)
+        seg[i] = s
+    end
+
     local function MsTooltip()
         ns.Tip_Begin(content)
-        local _, _, home, world = GetNetStats()
+        local inKB, outKB, home, world = GetNetStats()
         home = floor(home); world = floor(world)
+        -- The colours the bar deliberately does not carry, plus the bandwidth
+        -- that is on no bar at all: the tooltip is the full quality read.
         local hr, hg, hb = GetLatColor(home)
         local wr, wg, wb = GetLatColor(world)
-        ns.Tip_AddDouble(L["HOME"],  home .. ns.GetMSSuffix(), 0.6, 0.6, 0.6, hr, hg, hb)
-        ns.Tip_AddDouble(L["WORLD"], world .. ns.GetMSSuffix(), 0.6, 0.6, 0.6, wr, wg, wb)
+        local ms = ns.GetMSSuffix()
+        ns.Tip_AddDouble(L["HOME"],  home  .. ms, 0.6, 0.6, 0.6, hr, hg, hb)
+        ns.Tip_AddDouble(L["WORLD"], world .. ms, 0.6, 0.6, 0.6, wr, wg, wb)
+        local kb = " " .. L["KB_PER_SEC"]
+        ns.Tip_AddDouble(L["DOWNLOAD"], format("%.1f", inKB or 0) .. kb, 0.6, 0.6, 0.6, 1, 1, 1)
+        ns.Tip_AddDouble(L["UPLOAD"],   format("%.1f", outKB or 0) .. kb, 0.6, 0.6, 0.6, 1, 1, 1)
         ns.Tip_Show()
     end
 
-    return MakeStatBlock(blockCfg, slot, content, barCtx, {
-        hbPrefix = "ms",
-        interval = 1,
-        sample   = function()
-            local d = blockCfg.settings or {}
-            local _, _, home, world = GetNetStats()
-            if d.useWorldLatency then return floor(world) end
-            return floor(home)
-        end,
-        suffix   = function() return ns.GetMSSuffix() end,
-        tooltip  = MsTooltip,
-    })
+    function inst:Refresh()
+        local barCfg = BC()
+        local barH = barCtx.GetThickness()
+        local fontSize = max(9, floor(CONTENT_BASE * 0.4333 + 0.5))
+        local isSide = barCtx.IsVertical()
+        local showIcon = D().showIcon == true
+        local m = ns.LatencyMode(D())
+        local links
+        if m == "both" then links = { "home", "world" }
+        elseif m == "world" then links = { "world" }
+        else links = { "home" } end
+        local n = #links
+        local iconSz = showIcon and (fontSize + 2) or 0
+
+        local _, _, home, world = GetNetStats()
+        local vals = { home = floor(home), world = floor(world) }
+        local suffix = ns.GetMSSuffix()
+
+        local tr, tg, tb, ir, ig, ib
+        if mouseOver then
+            tr, tg, tb = ns.GetAccent(); ir, ig, ib = tr, tg, tb
+        else
+            tr, tg, tb = BlockColorOf(blockCfg); ir, ig, ib = IconColorOf(blockCfg)
+        end
+
+        -- Fill each segment; every value carries the unit ("45ms  92ms"), so a
+        -- lone number never reads as unitless in "both" mode.
+        for i = 1, 2 do
+            local s, link = seg[i], links[i]
+            if link then
+                ns.SetFont(s.text, fontSize, barCfg)
+                ns.ResetInlineText(s.text, "LEFT")
+                s.text:SetText(vals[link] .. suffix)
+                s.text:SetTextColor(tr, tg, tb, 1)
+                s.text:Show()
+                if showIcon then
+                    s.icon:SetTexture(LAT_ICON[link])
+                    s.icon:SetVertexColor(ir, ig, ib, 1)
+                    s.icon:SetSize(iconSz, iconSz)
+                    s.icon:Show()
+                else
+                    s.icon:Hide()
+                end
+            else
+                s.text:Hide(); s.icon:Hide()
+            end
+        end
+
+        local lineH = max(fontSize + 4, iconSz)
+        if isSide then
+            -- Stack the links, each a centred "icon value" line.
+            local slotW = VSlotW(inst)
+            local innerW = max(24, slotW - 8)
+            local y = -4
+            for i = 1, n do
+                local s = seg[i]
+                local tw = ns.SnapToPixelGrid(s.text:GetStringWidth())
+                local grpW = (showIcon and (iconSz + ICON_GAP) or 0) + tw
+                local x0 = max(0, floor((innerW - grpW) / 2))
+                s.icon:ClearAllPoints(); s.text:ClearAllPoints()
+                if showIcon then
+                    s.icon:SetPoint("TOPLEFT", button, "TOPLEFT", x0, y - floor((lineH - iconSz) / 2))
+                    s.text:SetPoint("LEFT", s.icon, "RIGHT", ICON_GAP, 0)
+                else
+                    s.text:SetPoint("TOPLEFT", button, "TOPLEFT", x0, y)
+                end
+                y = y - lineH - 2
+            end
+            local totalH = max(-y + 2, barH)
+            content:SetSize(slotW, totalH); button:SetSize(slotW, totalH)
+        else
+            local x, segGap = 0, 8
+            for i = 1, n do
+                local s = seg[i]
+                s.icon:ClearAllPoints(); s.text:ClearAllPoints()
+                if showIcon then
+                    s.icon:SetPoint("LEFT", button, "LEFT", x, 0)
+                    x = x + iconSz + ICON_GAP
+                end
+                s.text:SetPoint("LEFT", button, "LEFT", x, 0)
+                x = x + ns.SnapToPixelGrid(s.text:GetStringWidth())
+                if i < n then x = x + segGap end
+            end
+            local totalW = max(x + 4, 10)
+            content:SetSize(totalW, barH); button:SetSize(totalW, barH)
+        end
+        button:ClearAllPoints(); button:SetPoint("CENTER", content, "CENTER", 0, 0)
+        MaybeRelayout(inst)
+    end
+
+    -- Latency only moves every ~30s (GetNetStats is cached), so re-lay-out only
+    -- when the shown value, mode or icon state actually changes.
+    local function Tick()
+        local _, _, home, world = GetNetStats()
+        local sig = ns.LatencyMode(D()) .. (D().showIcon and "I" or "") .. floor(home) .. "/" .. floor(world)
+        if sig == lastSig then return end
+        lastSig = sig
+        inst:Refresh()
+    end
+
+    button:SetScript("OnEnter", function() mouseOver = true; inst:Refresh(); MsTooltip() end)
+    button:SetScript("OnLeave", function() mouseOver = false; ns.Tip_Hide(content); inst:Refresh() end)
+
+    function inst:Enable()
+        content:Show()
+        lastSig = nil
+        ns.RegisterHeartbeat("ms:" .. self.key, Tick)
+    end
+    function inst:Disable()
+        ns.UnregisterHeartbeat("ms:" .. self.key)
+        content:Hide()
+    end
+    function inst:GetAutoLength()
+        if barCtx.IsVertical() then return max(content:GetHeight() or 40, 30) end
+        return max(content:GetWidth() or 60, 24)
+    end
+    function inst:Destroy() self._dead = true; content:Hide() end
+
+    return inst
 end
 
 ns.BlockFactories.durability = function(blockCfg, slot, content, barCtx)
@@ -1113,6 +1314,431 @@ ns.BlockFactories.durability = function(blockCfg, slot, content, barCtx)
 end
 
 -------------------------------------------------------------------------------
+--  LOCATION + COORDINATES (two block types on one text renderer)
+-------------------------------------------------------------------------------
+-- Where the player is, in two blocks: the zone name, and the coordinates.
+-- Split because they are placed independently -- a bar commonly wants the
+-- coordinates alone, or the name centred with the numbers off to one side --
+-- and because only one of them can be sized from its text (see below).
+--
+-- Everything reads live client APIs. There is no zone level range or battle
+-- pet range here: the client exposes neither, and the data libraries that do
+-- carry them are hand-maintained Classic-era tables whose numbers say very
+-- little once level scaling is in play.
+
+-- Chat posts always carry one decimal, whatever the block displays: sharing a
+-- position is a "come find me" action, and whole percents of a map are a long
+-- walk apart. Fixed so both blocks post an identical string.
+local CHAT_COORD_PRECISION = 1
+
+-- Width the location block holds in Manual mode, in px. Wide enough for a
+-- typical "Zone: Subzone" pair at the default font without clipping. Exported
+-- because the options slider must report the same number the block renders at
+-- while maxWidth is still unset -- two literals would drift.
+local LOC_MAX_WIDTH_DEFAULT = 200
+ns.LOC_MAX_WIDTH_DEFAULT = LOC_MAX_WIDTH_DEFAULT
+
+-- Icon size above the text size. The map pin is a tall, narrow glyph, so it
+-- needs less headroom than the wide icons (durability's forge runs at +7).
+local LOC_ICON_EXTRA = 4
+
+-- Effective width mode, resolved in one place so the block and the options
+-- page can never disagree (same reason ns.LatencyMode is exported).
+function ns.LocationWidthMode(s)
+    return s.widthMode or "auto"
+end
+
+local COORD_FMT = {
+    [0] = "%.0f, %.0f",
+    [1] = "%.1f, %.1f",
+    [2] = "%.2f, %.2f",
+}
+-- Width rulers: the readout changes every step, so the coords block reserves
+-- its width from the widest value each precision can produce, never from the
+-- live one (same rule as the stat blocks' "888" template).
+local COORD_TEMPLATE = {
+    [0] = "88, 88",
+    [1] = "88.8, 88.8",
+    [2] = "88.88, 88.88",
+}
+
+local CONTINENT_MAP_TYPE = (Enum and Enum.UIMapType and Enum.UIMapType.Continent) or 2
+
+local function LocDisplayText(showSubZone)
+    -- Two different reads on purpose: the real zone name builds the
+    -- "Zone: Subzone" form, while the minimap zone already falls back to the
+    -- zone name wherever there is no subzone -- which IS the subzone-only
+    -- form, with no extra branch needed.
+    local zone = GetRealZoneText() or ""
+    local sub = GetMinimapZoneText() or ""
+    if showSubZone and sub ~= "" and sub ~= zone then
+        return zone .. ": " .. sub
+    end
+    if sub ~= "" then return sub end
+    return zone
+end
+
+local function LocPlayerPosition()
+    if not (C_Map and C_Map.GetBestMapForUnit) then return nil end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if not mapID then return nil end
+    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+    if not pos then return nil end
+    local x, y = pos:GetXY()
+    -- Instances with no player map report a flat 0,0 rather than nothing.
+    if not (x and y) or (x == 0 and y == 0) then return nil end
+    return x * 100, y * 100
+end
+
+local function LocCoordText(precision)
+    local x, y = LocPlayerPosition()
+    if not x then return "-" end
+    return format(COORD_FMT[precision] or COORD_FMT[0], x, y)
+end
+
+local function LocContinentName()
+    if not (C_Map and C_Map.GetBestMapForUnit) then return nil end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    while mapID and mapID ~= 0 do
+        local info = C_Map.GetMapInfo(mapID)
+        if not info then return nil end
+        if info.mapType == CONTINENT_MAP_TYPE then return info.name end
+        mapID = info.parentMapID
+    end
+    return nil
+end
+
+-- Status label. The COLOR comes from ZoneReactionColor so the tooltip's status
+-- line and the block's Dynamic text mode never disagree; the labels themselves
+-- are Blizzard globals and are already localized by the client.
+local function LocZoneStatus()
+    local pvpType = C_PvP and C_PvP.GetZonePVPInfo and C_PvP.GetZonePVPInfo()
+    if pvpType == "sanctuary" then return SANCTUARY_TERRITORY end
+    if pvpType == "arena" then return ARENA end
+    if pvpType == "friendly" then return FRIENDLY end
+    if pvpType == "hostile" then return HOSTILE end
+    if pvpType == "combat" then return COMBAT end
+    if pvpType == "contested" then return CONTESTED_TERRITORY end
+    if IsInInstance() then return AGGRO_WARNING_IN_INSTANCE end
+    return CONTESTED_TERRITORY
+end
+
+local function LocPostPosition()
+    if not ChatEdit_ChooseBoxForSend then return end
+    local edit = ChatEdit_ChooseBoxForSend()
+    if not edit then return end
+    local zone = GetRealZoneText() or ""
+    local sub = GetSubZoneText() or ""
+    local coords = LocCoordText(CHAT_COORD_PRECISION)
+    local msg
+    if sub ~= "" and sub ~= zone then
+        msg = format("%s: %s (%s)", zone, sub, coords)
+    else
+        msg = format("%s (%s)", zone, coords)
+    end
+    if ChatEdit_ActivateChat then ChatEdit_ActivateChat(edit) end
+    edit:Insert(msg)
+end
+
+-- One tooltip for both blocks: they name the same place, so they say the same
+-- thing. Blizzard globals for the labels, module keys for the click hints.
+local function LocTooltip(ownerFrame)
+    local ar, ag, ab = ns.GetAccent()
+    ns.Tip_Begin(ownerFrame)
+    ns.Tip_AddDouble(ZONE, LocDisplayText(true), 0.6, 0.6, 0.6, 1, 1, 1)
+    local continent = LocContinentName()
+    if continent then
+        ns.Tip_AddDouble(CONTINENT, continent, 0.6, 0.6, 0.6, 1, 1, 1)
+    end
+    local sr, sg, sb = ZoneReactionColor()
+    ns.Tip_AddDouble(STATUS, LocZoneStatus(), 0.6, 0.6, 0.6, sr, sg, sb)
+    ns.Tip_AddLine(" ")
+    ns.Tip_AddDouble(L["LEFT_CLICK"], L["TOGGLE_WORLD_MAP"], 1, 1, 1, ar, ag, ab)
+    ns.Tip_AddDouble(L["SHIFT_LEFT_CLICK"], L["SEND_POSITION"], 1, 1, 1, ar, ag, ab)
+    ns.Tip_Show()
+end
+
+local function LocOnClick(_, button)
+    if button ~= "LeftButton" then return end
+    -- Posting to chat is combat-legal; toggling the map is guarded like every
+    -- other frame toggle in this file.
+    if IsShiftKeyDown() then LocPostPosition(); return end
+    if InCombatLockdown() then return end
+    if WorldMapFrame then ToggleFrame(WorldMapFrame) end
+end
+
+-- Shared single-line text block. opts:
+--   text()        -> string to display
+--   template()    -> stable width-reservation string; nil sizes from the live
+--                    text instead
+--   width()       -> fixed width in px, or nil to size from the text
+--   collapse()    -> true drops the block from the bar entirely
+--   texture       -> optional icon file, gated by the block's own showIcon
+--                    setting (default on)
+--   events        -> event list driving Refresh
+--   tickSeconds   -> dedicated ticker period, for values no event announces
+-- The tooltip and the click actions are the same for both blocks -- they name
+-- the same place -- so they are wired straight in rather than passed.
+local function MakeLocationBlock(blockCfg, slot, content, barCtx, opts)
+    local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
+    inst.key = InstKey(barCtx, blockCfg)
+    inst.events = opts.events
+
+    local function BC() return barCtx.cfg end
+    local function D() return blockCfg.settings or {} end
+
+    local mouseOver = false
+    local ticker
+    local lastText
+
+    local frame = CreateFrame("Button", nil, content)
+    frame:SetSize(60, 20); frame:EnableMouse(true); frame:RegisterForClicks("AnyUp")
+    -- Icon is optional: blocks without opts.texture are text-only.
+    local icon
+    if opts.texture then
+        icon = frame:CreateTexture(nil, "OVERLAY")
+        icon:SetTexture(opts.texture); icon:SetPoint("LEFT")
+    end
+    local text = frame:CreateFontString(nil, "OVERLAY")
+    AttachTextOffset(inst, text)
+    text:SetPoint("LEFT")
+    -- Hidden ruler, only for the block that reserves width from a template.
+    local measureFS
+    if opts.template then
+        measureFS = frame:CreateFontString(nil, "OVERLAY")
+        measureFS:Hide()
+    end
+
+    local function ApplyColors()
+        local r, g, b
+        if mouseOver then
+            r, g, b = ns.GetAccent()
+        else
+            r, g, b = BlockColorOf(blockCfg)
+        end
+        text:SetTextColor(r, g, b, 1)
+        if icon then
+            if mouseOver then
+                icon:SetVertexColor(r, g, b, 1)
+            else
+                local ir, ig, ib = IconColorOf(blockCfg)
+                icon:SetVertexColor(ir, ig, ib, 1)
+            end
+        end
+    end
+
+    function inst:Refresh(pre)
+        -- Collapsed (coordinates inside an instance): hide, and let
+        -- GetAutoLength report 0 so the solver drops the slot and its gaps.
+        if opts.collapse and opts.collapse() then
+            lastText = nil
+            content:Hide()
+            MaybeRelayout(inst)
+            return
+        end
+        content:Show()
+
+        local barCfg = BC()
+        local barH = barCtx.GetThickness()
+        local fontSize = max(9, floor(CONTENT_BASE * 0.4333 + 0.5))
+        local isSide = barCtx.IsVertical()
+        local gap = ICON_GAP
+
+        -- `pre` is the string the caller already computed (the ticker tests it
+        -- before deciding to refresh at all). Re-reading it here would double
+        -- the position lookups -- and every C_Map.GetPlayerMapPosition hands
+        -- back a fresh table -- twice a second, forever.
+        local str = pre or opts.text()
+        lastText = str
+        ns.SetFont(text, fontSize, barCfg)
+        text:SetText(str)
+        ApplyColors()
+
+        local iconSz = 0
+        if icon and D().showIcon ~= false then
+            iconSz = fontSize + LOC_ICON_EXTRA
+            icon:SetSize(iconSz, iconSz)
+            icon:Show()
+        elseif icon then
+            icon:Hide()
+        end
+
+        if InCombatLockdown() then return end
+
+        if isSide then
+            local slotW = VSlotW(inst)
+            local innerW = max(36, slotW - 8)
+            text:ClearAllPoints()
+            if iconSz > 0 then
+                icon:ClearAllPoints(); icon:SetPoint("LEFT", frame, "LEFT", 0, 0)
+                text:SetPoint("LEFT", icon, "RIGHT", gap, 0)
+                ns.SetWrappedText(text, max(16, innerW - iconSz - gap - 2), "LEFT")
+            else
+                text:SetPoint("CENTER", frame, "CENTER", 0, 0)
+                ns.SetWrappedText(text, innerW, "CENTER")
+            end
+            local lineH = max(fontSize + 4, iconSz,
+                ns.SnapToPixelGrid(text:GetStringHeight() or fontSize))
+            frame:SetSize(innerW, lineH)
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", content, "CENTER", 0, 0)
+            content:SetSize(slotW, max(lineH + 8, barH))
+        else
+            ns.ResetInlineText(text, "LEFT")
+            local iconPad = 0
+            if iconSz > 0 then
+                iconPad = iconSz + gap
+                icon:ClearAllPoints(); icon:SetPoint("LEFT", frame, "LEFT", 0, 0)
+            end
+            text:ClearAllPoints()
+            text:SetPoint("LEFT", frame, "LEFT", iconPad, 0)
+            -- Manual width: the block is exactly this wide whatever the zone
+            -- is called, and a longer name is clipped. It is the only mode
+            -- that never moves its neighbours. The value deliberately does NOT
+            -- come from the assigned slot: under auto sizing the slot IS this
+            -- block's own measured width, so deriving it from there would
+            -- shrink the block a little further on every pass. Icon included.
+            local w = opts.width and opts.width()
+            if w then
+                text:SetWidth(max(20, w - iconPad - 2))
+                text:SetWordWrap(false)
+            else
+                -- Measured only when the width is not already decided: a
+                -- GetStringWidth forces a FontString layout.
+                local tpl = opts.template and opts.template()
+                if tpl then
+                    ns.SetFont(measureFS, fontSize, barCfg)
+                    measureFS:SetText(tpl)
+                    w = iconPad + ns.SnapToPixelGrid(measureFS:GetStringWidth() or 40) + 2
+                else
+                    w = iconPad + ns.SnapToPixelGrid(text:GetStringWidth() or 40) + 2
+                end
+            end
+            if w < 24 then w = 24 end
+            frame:SetSize(w, barH)
+            frame:ClearAllPoints()
+            frame:SetPoint("CENTER", content, "CENTER", 0, 0)
+            content:SetSize(w, barH)
+        end
+        MaybeRelayout(inst)
+    end
+
+    frame:SetScript("OnEnter", function()
+        mouseOver = true
+        ApplyColors()
+        LocTooltip(frame)
+    end)
+    frame:SetScript("OnLeave", function()
+        mouseOver = false
+        ns.Tip_Hide(frame)
+        ApplyColors()
+    end)
+    frame:SetScript("OnClick", LocOnClick)
+
+    inst.eventFrame = MakeEventFrame(inst, function(self)
+        self:Refresh()
+    end)
+
+    function inst:Enable()
+        content:Show()
+        lastText = nil
+        RegisterInstEvents(self)
+        -- Movement raises no event, and the engine heartbeat is 1s -- coarse
+        -- enough that the numbers visibly jump while running. Same 0.5s period
+        -- and lazy lifecycle as EllesmereUIMinimap's own coordinate ticker.
+        if opts.tickSeconds and not ticker then
+            ticker = C_Timer.NewTicker(opts.tickSeconds, function()
+                -- Collapsed: nothing to render, and the un-collapse edge is
+                -- event-driven (PLAYER_ENTERING_WORLD / ZONE_CHANGED_NEW_AREA
+                -- both fire on instance entry and exit). Leaving it to the
+                -- guard below instead would re-enter the whole hide path twice
+                -- a second for as long as the player is in the dungeon.
+                if opts.collapse and opts.collapse() then return end
+                -- Same guard as the stat blocks' heartbeat: a full Refresh
+                -- re-sets the font, re-measures the ruler, re-anchors and
+                -- re-sizes every frame -- all invariant between ticks. Standing
+                -- still now costs one position read instead of that whole pass,
+                -- and a moving player hands the string straight on rather than
+                -- paying for it twice.
+                local str = opts.text()
+                if str == lastText then return end
+                inst:Refresh(str)
+            end)
+        end
+    end
+
+    function inst:Disable()
+        UnregisterInstEvents(self)
+        if ticker then ticker:Cancel(); ticker = nil end
+        content:Hide()
+    end
+
+    function inst:GetAutoLength()
+        if not content:IsShown() then return 0 end
+        if barCtx.IsVertical() then
+            return max(content:GetHeight() or 40, 30)
+        end
+        return max(content:GetWidth() or 60, 24)
+    end
+
+    function inst:Destroy()
+        self._dead = true
+        if ticker then ticker:Cancel(); ticker = nil end
+        content:Hide()
+    end
+
+    return inst
+end
+
+ns.BlockFactories.location = function(blockCfg, slot, content, barCtx)
+    local function D() return blockCfg.settings or {} end
+
+    return MakeLocationBlock(blockCfg, slot, content, barCtx, {
+        -- PLAYER_REGEN_ENABLED: Refresh can only re-anchor and resize out of
+        -- combat, so a zone change mid-fight leaves stale geometry until the
+        -- fight ends. Same reason the clock block listens for it.
+        events = { "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
+                   "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED" },
+        texture = MEDIA .. "location.png",
+        text = function() return LocDisplayText(D().showSubZone ~= false) end,
+        -- No template: the block sizes from the live name. Zone changes are
+        -- rare, so one relayout each is cheaper than permanently reserving
+        -- room for the longest zone name in the game.
+        width = function()
+            local d = D()
+            if ns.LocationWidthMode(d) ~= "manual" then return nil end
+            return d.maxWidth or LOC_MAX_WIDTH_DEFAULT
+        end,
+    })
+end
+
+ns.BlockFactories.coords = function(blockCfg, slot, content, barCtx)
+    local function D() return blockCfg.settings or {} end
+    local function Precision()
+        local p = D().precision
+        if p == nil then p = 0 end
+        return p
+    end
+
+    return MakeLocationBlock(blockCfg, slot, content, barCtx, {
+        events = { "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD" },
+        tickSeconds = 0.5,
+        texture = MEDIA .. "coordinates.png",
+        text = function() return LocCoordText(Precision()) end,
+        template = function() return COORD_TEMPLATE[Precision()] or COORD_TEMPLATE[0] end,
+        collapse = function()
+            if D().hideInInstance == false then return false end
+            if not IsInInstance() then return false end
+            -- Housing counts as an instance but has a real player map, so its
+            -- coordinates work and are worth keeping. Sanctuary is what tells
+            -- it apart from a dungeon or a raid.
+            local pvpType = C_PvP and C_PvP.GetZonePVPInfo and C_PvP.GetZonePVPInfo()
+            return pvpType ~= "sanctuary"
+        end,
+    })
+end
+
+-------------------------------------------------------------------------------
 --  GOLD (engine-level session ledger + cross-character store)
 -------------------------------------------------------------------------------
 -- One PLAYER_MONEY ledger shared by every gold instance; instances render
@@ -1125,11 +1751,22 @@ local function GoldCharKey()
     return (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or "Unknown")
 end
 
+-- ACCOUNT-level, deliberately not the profile: the ledger is a list of the
+-- player's characters with their balances, and profiles get shared. Held in
+-- the profile it rode every export string, so importers saw the exporter's
+-- alts and gold in their own tooltip. Sits top-level in EllesmereUIDB next to
+-- the Bags module's own gold ledger, which is where it should always have
+-- been -- it also means the ledger no longer resets when profiles switch.
 local function GoldStore()
-    local profile = ns.GetProfile()
-    if not profile then return {} end
-    profile.characters = profile.characters or {}
-    return profile.characters
+    -- Throwaway fallback if the parent DB is somehow absent: never assign the
+    -- global here, or a pre-SavedVariables call could shadow the real table.
+    if type(EllesmereUIDB) ~= "table" then return {} end
+    local store = EllesmereUIDB.dataBarsGold
+    if type(store) ~= "table" then
+        store = {}
+        EllesmereUIDB.dataBarsGold = store
+    end
+    return store
 end
 
 -- Drop a character the player no longer has (renamed, deleted, transferred).
@@ -2519,7 +3156,10 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
         local maxW, yOff
         if title and title ~= "" then
             ns.SetFont(popup._title, fontSize)
-            popup._title:SetText(title); popup._title:SetTextColor(1, 1, 1, 1)
+            -- Localize here: these popups draw through SetText instead of the
+            -- Tip_* helpers, which are what normally route fixed UI strings
+            -- through the shared locale (see ns.Tip_AddLine).
+            popup._title:SetText(EllesmereUI.L(title)); popup._title:SetTextColor(1, 1, 1, 1)
             popup._title:Show()
             maxW = popup._title:GetStringWidth()
             yOff = PAD + LINE + PAD
@@ -2642,8 +3282,8 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
                     popup._foot[i] = fl
                 end
                 ns.SetFont(fl.l, fontSize); ns.SetFont(fl.r, fontSize)
-                fl.l:SetText(footerLines[i][1]); fl.l:SetTextColor(1, 1, 1, 1)
-                fl.r:SetText(footerLines[i][2]); fl.r:SetTextColor(1, 1, 1, 1)
+                fl.l:SetText(EllesmereUI.L(footerLines[i][1])); fl.l:SetTextColor(1, 1, 1, 1)
+                fl.r:SetText(EllesmereUI.L(footerLines[i][2])); fl.r:SetTextColor(1, 1, 1, 1)
                 fl.l:ClearAllPoints()
                 fl.l:SetPoint("TOPLEFT", popup, "TOPLEFT", PAD, -yOff)
                 fl.r:ClearAllPoints()
@@ -2766,8 +3406,10 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
         BuildPopup(specPool, specButton, L["CHANGE_SPEC"], entries, function(e)
             C_SpecializationInfo.SetSpecialization(e.specIndex)
         end, true, {
-            { L["LEFT_CLICK"],  L["CHANGE_SPEC_SHORT"] },
-            { L["RIGHT_CLICK"], L["CHANGE_LOOT_SPEC"] },
+            { L["LEFT_CLICK"],       L["CHANGE_SPEC_SHORT"] },
+            { L["CTRL_LEFT_CLICK"],  L["CHANGE_LOADOUT"] },
+            { L["SHIFT_LEFT_CLICK"], L["OPEN_TALENTS"] },
+            { L["RIGHT_CLICK"],      L["CHANGE_LOOT_SPEC"] },
         })
     end
 
