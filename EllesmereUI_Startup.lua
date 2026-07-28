@@ -167,8 +167,11 @@ local function ApplyUnitNameFont()
     local fonts = EllesmereUIDB and EllesmereUIDB.fonts
     local name = fonts and fonts.unitNameFont
     if not name or name == "" then return end
-    if not (EllesmereUI and EllesmereUI.ResolveFontName) then return end
-    local path = EllesmereUI.ResolveFontName(name)
+    local path = fonts.unitNameFontPath
+    if (type(path) ~= "string" or path == "")
+       and EllesmereUI and EllesmereUI.ResolveFontName then
+        path = EllesmereUI.ResolveFontName(name)
+    end
     if type(path) == "string" and path ~= "" then
         _G.UNIT_NAME_FONT = path
     end

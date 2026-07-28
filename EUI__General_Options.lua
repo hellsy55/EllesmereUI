@@ -2538,6 +2538,8 @@ initFrame:SetScript("OnEvent", function(self)
                       -- nil, not the sentinel, so the startup code can tell
                       -- "leave Blizzard alone" without knowing the key.
                       fdb.unitNameFont = (v ~= NAME_FONT_DEFAULT) and v or nil
+                      fdb.unitNameFontPath = (v ~= NAME_FONT_DEFAULT)
+                          and nameFontValues[v].font or nil
                       -- No apply call here: the engine has already cached the
                       -- global by this point, so the change lands on the next
                       -- login either way. Same as Combat Text Font above.
