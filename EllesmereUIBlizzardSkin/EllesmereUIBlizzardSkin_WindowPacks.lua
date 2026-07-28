@@ -6254,28 +6254,36 @@ local function Skin_Professions()
         if bf then
             -- Order-type tabs populate LAZILY -- some aren't created until you
             -- click through the types -- so a one-time pass leaves the
-            -- later-created ones unstyled until a full re-skin. Re-run after
-            -- each tab click (deferred, once the new tabs exist) and on the
-            -- browse OnShow. WSkin.Tab is guarded, so re-runs only skin NEW
-            -- tabs; each tab's OnClick is hooked once to trigger the re-run.
+            -- later-created ones unstyled until a full re-skin. WSkin.Tab is
+            -- guarded, so re-runs only skin NEW tabs.
             local ORDER_TAB_KEYS = { "PublicOrdersButton", "NpcOrdersButton",
                                      "GuildOrdersButton", "PersonalOrdersButton" }
             local function SkinOrderTabs()
                 for _, k in ipairs(ORDER_TAB_KEYS) do
                     local b = bf[k]
-                    if b then
-                        WSkin.Tab(b, { darkActive = true })
-                        if not GetFFD(b).clickReskin then
-                            GetFFD(b).clickReskin = true
-                            b:HookScript("OnClick", function()
-                                if C_Timer then C_Timer.After(0, SkinOrderTabs) end
-                            end)
-                        end
-                    end
+                    if b then WSkin.Tab(b, { darkActive = true }) end
                 end
             end
             SkinOrderTabs()
             if C_Timer then C_Timer.After(0, SkinOrderTabs) end
+            -- Re-skin AND repaint selection on every order-type switch. These
+            -- tabs carry no tabID and BrowseFrame is no TabSystem, so nothing
+            -- tied to an order-type switch reaches them: the engine's global
+            -- PanelTemplates / TabSystem hooks only repaint them incidentally,
+            -- when something ELSE in the UI happens to fire them. A per-tab
+            -- OnClick hook doesn't survive either -- Blizzard's
+            -- InitOrderTypeTabs() re-SetScript's each tab's OnClick, and it
+            -- re-runs on PLAYER_ENTERING_WORLD / PLAYER_GUILD_UPDATE (both in
+            -- its always-listen set), so the hook is wiped for good and the
+            -- underline freezes on whichever type was live at skin time
+            -- (Public, from OnLoad). Hook the authoritative setter instead: a
+            -- method hook survives SetScript and also catches programmatic
+            -- switches (the leave-guild fallback to Public). hooksecurefunc
+            -- runs after the original, so isSelected is already current.
+            if op.SetCraftingOrderType and not GetFFD(op).orderTypeHook then
+                GetFFD(op).orderTypeHook = true
+                hooksecurefunc(op, "SetCraftingOrderType", SkinOrderTabs)
+            end
             -- Tab row starts where the sort header starts: shift the chain
             -- root right by the measured delta (one-shot; the other three
             -- tabs chain off it). Rects only exist once the browse frame has
