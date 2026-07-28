@@ -2108,11 +2108,34 @@ local function RegisterUnlockElements()
             key = "ERB_Health", label = "Health Bar", group = "Resource Bars", order = 500,
             getFrame = function() return healthBar end,
             isHidden = function() local s = S(); return not s.enabled or IsSpecDisabled(s) end,
+            -- Reported through the ON-SCREEN axes, not the stored ones. A
+            -- vertical bar renders through OrientedSize, so stored width is
+            -- what the player sees as height; handing the unlock mover and the
+            -- W/H match the raw stored pair made both act on a bar that is
+            -- still horizontal.
             getSize  = function()
-                local s = SS(); return s.width, s.height
+                local s, g = SS(), ERB.db.profile.general
+                return OrientedSize(s.width, s.height,
+                    s.orientation or (g and g.orientation) or "HORIZONTAL")
             end,
-            setWidth = function(_, w) SS().width = PP.Snap(w); Rebuild() end,
-            setHeight = function(_, h) SS().height = PP.Snap(h); Rebuild() end,
+            setWidth = function(_, w)
+                local s, g = SS(), ERB.db.profile.general
+                if IsVerticalOrientation(s.orientation or (g and g.orientation)) then
+                    s.height = PP.Snap(w)
+                else
+                    s.width = PP.Snap(w)
+                end
+                Rebuild()
+            end,
+            setHeight = function(_, h)
+                local s, g = SS(), ERB.db.profile.general
+                if IsVerticalOrientation(s.orientation or (g and g.orientation)) then
+                    s.width = PP.Snap(h)
+                else
+                    s.height = PP.Snap(h)
+                end
+                Rebuild()
+            end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
@@ -2129,11 +2152,30 @@ local function RegisterUnlockElements()
             key = "ERB_Power", label = "Power Bar", group = "Resource Bars", order = 501,
             getFrame = function() return primaryBar end,
             isHidden = function() local s = S(); return s.enabled == false or IsSpecDisabled(s) end,
+            -- On-screen axes, as with the health bar above.
             getSize  = function()
-                local s = SS(); return s.width or 214, s.height or 14
+                local s, g = SS(), ERB.db.profile.general
+                return OrientedSize(s.width or 214, s.height or 14,
+                    s.orientation or (g and g.orientation) or "HORIZONTAL")
             end,
-            setWidth = function(_, w) SS().width = PP.Snap(w); Rebuild() end,
-            setHeight = function(_, h) SS().height = PP.Snap(h); Rebuild() end,
+            setWidth = function(_, w)
+                local s, g = SS(), ERB.db.profile.general
+                if IsVerticalOrientation(s.orientation or (g and g.orientation)) then
+                    s.height = PP.Snap(w)
+                else
+                    s.width = PP.Snap(w)
+                end
+                Rebuild()
+            end,
+            setHeight = function(_, h)
+                local s, g = SS(), ERB.db.profile.general
+                if IsVerticalOrientation(s.orientation or (g and g.orientation)) then
+                    s.width = PP.Snap(h)
+                else
+                    s.height = PP.Snap(h)
+                end
+                Rebuild()
+            end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             keepMoverWhenAnchored = true,
             onLiveMove = LiveMove,
@@ -2149,16 +2191,34 @@ local function RegisterUnlockElements()
         elements[#elements + 1] = MK({
             key = "ERB_ClassResource", label = "Class Resource", group = "Resource Bars", order = 502,
             getFrame = function() return secondaryFrame end,
+            -- On-screen axes. This bar carries its OWN orientation key
+            -- (pipOrientation, what the dropdown writes) and takes no fallback
+            -- from general, and its renderer treats anything that is not
+            -- HORIZONTAL as vertical -- both mirrored here so the mover and the
+            -- W/H match agree with what is drawn.
             getSize  = function()
                 local s = SS()
-                return s.pipWidth, s.pipHeight
+                return OrientedSize(s.pipWidth, s.pipHeight,
+                    (s.pipOrientation or "HORIZONTAL") ~= "HORIZONTAL" and "VERTICAL_UP" or "HORIZONTAL")
             end,
             setWidth = function(_, w)
                 local s = SS()
-                s.pipWidth = PP.Snap(w)
+                if (s.pipOrientation or "HORIZONTAL") ~= "HORIZONTAL" then
+                    s.pipHeight = PP.Snap(w)
+                else
+                    s.pipWidth = PP.Snap(w)
+                end
                 Rebuild()
             end,
-            setHeight = function(_, h) SS().pipHeight = PP.Snap(h); Rebuild() end,
+            setHeight = function(_, h)
+                local s = SS()
+                if (s.pipOrientation or "HORIZONTAL") ~= "HORIZONTAL" then
+                    s.pipWidth = PP.Snap(h)
+                else
+                    s.pipHeight = PP.Snap(h)
+                end
+                Rebuild()
+            end,
             isHidden = function() local s = S(); return s.enabled == false or IsSpecDisabled(s) end,
             isAnchored = function() local s = S(); return s.anchorTo and s.anchorTo ~= "none" end,
             keepMoverWhenAnchored = true,
