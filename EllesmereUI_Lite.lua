@@ -34,6 +34,30 @@ local initQueue = {}       -- addons waiting for OnInitialize
 local enableQueue = {}     -- addons waiting for OnEnable
 local statuses = {}        -- name -> true if enabled
 
+-- Per-addon event frame. Defined ABOVE NewAddon because NewAddon creates it
+-- EAGERLY, and that timing is load-bearing for CPU attribution: the engine
+-- bills an event handler's entire call tree to the addon whose execution
+-- context called CreateFrame for the frame (probe-verified 2026-07-26; see
+-- EllesmereUI_Ticker.lua). NewAddon runs in the child's MAIN CHUNK, so the
+-- frame is stamped to the child and its event work bills that addon. The old
+-- lazy creation happened at first RegisterEvent -- usually inside
+-- OnInitialize/OnEnable, which run under the parent's lifecycle dispatch --
+-- so every mixin event frame in the suite was parent-stamped and the whole
+-- suite's event handling was billed to the parent addon.
+local function GetOrCreateEventFrame(addon)
+    if addon._eventFrame then return addon._eventFrame end
+    local f = CreateFrame("Frame")
+    f._handlers = {}
+    f:SetScript("OnEvent", function(self, event, ...)
+        local handler = self._handlers[event]
+        if handler then
+            handler(addon, event, ...)
+        end
+    end)
+    addon._eventFrame = f
+    return f
+end
+
 --- Create a new addon object. Replaces AceAddon:NewAddon().
 -- Returns a table with :RegisterEvent / :UnregisterEvent mixed in.
 function EUILite.NewAddon(name)
@@ -43,6 +67,9 @@ function EUILite.NewAddon(name)
     local addon = { name = name, enabledState = true }
     addons[name] = addon
     tinsert(initQueue, addon)
+
+    -- Eager, on purpose -- see the attribution note on GetOrCreateEventFrame.
+    GetOrCreateEventFrame(addon)
 
     -- Mix in event methods
     addon.RegisterEvent   = EUILite._RegisterEvent
@@ -68,19 +95,8 @@ end
 -- OnEvent script. No securecallfunction dispatch loop, no registry tables.
 --------------------------------------------------------------------------------
 
-local function GetOrCreateEventFrame(addon)
-    if addon._eventFrame then return addon._eventFrame end
-    local f = CreateFrame("Frame")
-    f._handlers = {}
-    f:SetScript("OnEvent", function(self, event, ...)
-        local handler = self._handlers[event]
-        if handler then
-            handler(addon, event, ...)
-        end
-    end)
-    addon._eventFrame = f
-    return f
-end
+-- (GetOrCreateEventFrame lives above NewAddon -- creation is eager at
+-- NewAddon time for CPU-attribution reasons documented there.)
 
 --- Register for a Blizzard event. Compatible with AceEvent calling conventions:
 --   addon:RegisterEvent("EVENT_NAME", function(self, event, ...) end)

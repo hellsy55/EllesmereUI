@@ -5,6 +5,16 @@
 -- for filter-string normalization (exact-string dedup inside the engine),
 -- decoration presets, the restyle registry, and combat-safe creation.
 
+-- LIVE GATE: everything below drives the 12.1 aura container engine
+-- (AuraContainer templates, engine bindings, restriction state). Pre-12.1
+-- clients get no AuraKit at all: EllesmereUI.AuraKit stays nil, every
+-- consumer either nil-guards or is itself a 12.1-gated file (audited
+-- 2026-07-27), and none of the workers/watchers below are created -- the
+-- restyler, build worker, lift watcher and burst frame simply never exist,
+-- so live pays zero and profiling never shows AuraKit again. Standard
+-- dual-client gate; dissolves with the 12.1 cleanup pass.
+if not (EllesmereUI and EllesmereUI.IS_121) then return end
+
 local AK = {}
 EllesmereUI.AuraKit = AK
 
@@ -392,6 +402,19 @@ local function ApplyStyleToRegions(button, style)
     -- effect (the nameplate click/tooltip eater), so never touch the tooltip
     -- surface of a button that has no tooltip to configure.
     if not style.noTooltips then
+        -- Style flip noTooltips -> tooltips (e.g. the unit-frame aura-tooltip
+        -- toggle re-enabled): this button's motion was disabled by the pass
+        -- below, and the tooltip-config calls underneath are change-guarded by
+        -- stamps that still match, so nothing else would re-arm it. Re-enable
+        -- explicitly, only for buttons we ourselves turned off (akMotionOff),
+        -- so buttons that were never noTooltips see zero new calls.
+        if d.akMotionOff and button.SetMouseMotionEnabled then
+            if pcall(button.SetMouseMotionEnabled, button, true) then
+                d.akMotionOff = nil
+            elseif d.styleKey and AK.AurasRestricted() then
+                deferredRestyles[d.styleKey] = true
+            end
+        end
         if button.SetHideTooltipInCombat then
             local wantCombat = style.tooltipCombatHide and true or false
             if d.akTipCombat ~= wantCombat then
@@ -432,8 +455,12 @@ local function ApplyStyleToRegions(button, style)
         end
     end
     if style.noTooltips and button.SetMouseMotionEnabled then
-        if not pcall(button.SetMouseMotionEnabled, button, false)
-            and d.styleKey and AK.AurasRestricted() then
+        if pcall(button.SetMouseMotionEnabled, button, false) then
+            -- Deliberately re-asserted every pass (the engine re-arms motion
+            -- as a side effect of tooltip config); the stamp only records
+            -- that WE own the off state, for the flip-back re-arm above.
+            d.akMotionOff = true
+        elseif d.styleKey and AK.AurasRestricted() then
             deferredRestyles[d.styleKey] = true
         end
     end

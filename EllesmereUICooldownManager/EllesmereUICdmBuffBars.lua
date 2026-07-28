@@ -129,29 +129,46 @@ end
 local _pandemicState  = {}   -- frame -> true when in pandemic
 local _pandemicHooked = {}   -- frame -> true once hooks are installed
 ns._pandemicState = _pandemicState
+ns._pandemicHooked = _pandemicHooked
 
+-- Hook bodies live at FILE SCOPE on purpose: hooksecurefunc callbacks bill
+-- the addon whose execution context CREATED the closure (bisect-verified
+-- 2026-07-27; the same dynamic stamping rule as frames -- login-installed
+-- inline closures billed the PARENT ~0.05% for every pandemic repaint).
+-- Bodies born in this file's main chunk bill CooldownManager no matter
+-- which code path later installs the hook.
+local function _PandemicShow(self)
+    _pandemicState[self] = true
+    ns._btDirty = true
+    -- Hide Blizzard's PandemicIcon unless "Blizzard Default" (-1).
+    -- Custom glow styles (>0) replace it; None (0/false) suppresses it.
+    local fc = ns._ecmeFC and ns._ecmeFC[self]
+    local bk = fc and fc.barKey
+    if bk then
+        local bd = ns.barDataByKey and ns.barDataByKey[bk]
+        local style = bd and bd.pandemicGlow and bd.pandemicGlowStyle
+        if not style or style ~= -1 then
+            if self.PandemicIcon then self.PandemicIcon:Hide() end
+        end
+    end
+end
+
+local function _PandemicHide(self)
+    _pandemicState[self] = nil
+    ns._btDirty = true
+end
+
+-- Installed LAZILY from the buff tick, per icon, only when that icon's bar
+-- uses a custom pandemic style (style ~= -1). With the default config
+-- ("Blizzard Default") nothing is ever hooked: Blizzard's native
+-- PandemicIcon does the whole job and pandemic costs zero. Idempotent.
 function ns.HookPandemicState(frame)
     if not frame or _pandemicHooked[frame] then return end
     if not frame.ShowPandemicStateFrame then return end
     _pandemicHooked[frame] = true
-    hooksecurefunc(frame, "ShowPandemicStateFrame", function(self)
-        _pandemicState[self] = true
-        -- Hide Blizzard's PandemicIcon unless "Blizzard Default" (-1).
-        -- Custom glow styles (>0) replace it; None (0/false) suppresses it.
-        local fc = ns._ecmeFC and ns._ecmeFC[self]
-        local bk = fc and fc.barKey
-        if bk then
-            local bd = ns.barDataByKey and ns.barDataByKey[bk]
-            local style = bd and bd.pandemicGlow and bd.pandemicGlowStyle
-            if not style or style ~= -1 then
-                if self.PandemicIcon then self.PandemicIcon:Hide() end
-            end
-        end
-    end)
+    hooksecurefunc(frame, "ShowPandemicStateFrame", _PandemicShow)
     if frame.HidePandemicStateFrame then
-        hooksecurefunc(frame, "HidePandemicStateFrame", function(self)
-            _pandemicState[self] = nil
-        end)
+        hooksecurefunc(frame, "HidePandemicStateFrame", _PandemicHide)
     end
 end
 
@@ -247,6 +264,7 @@ local TBB_DEFAULT_BAR = {
     name      = "New Bar",
     enabled   = true,
     hideWhenInactive = true,  -- hide the bar unless the tracked aura is active
+    onlyInCombat = false,     -- keep the bar hidden entirely while out of combat
     grouped   = true,   -- per-bar "Group Tracking Bars" checkbox; checked bars chain + share width/height
     height    = 24,
     width     = 270,
@@ -1462,7 +1480,7 @@ local TBB_STYLE_KEYS = {
     "fillColorMode", "fillR", "fillG", "fillB", "fillA",
     "bgR", "bgG", "bgB", "bgA",
     "gradientEnabled", "gradientR", "gradientG", "gradientB", "gradientA", "gradientDir",
-    "opacity", "hideWhenInactive",
+    "opacity", "hideWhenInactive", "onlyInCombat",
     "showTimer", "timerPosition", "timerSize", "timerX", "timerY",
     "timerDecimals", "timerDecimalThreshold",
     "showName", "namePosition", "nameSize", "nameX", "nameY",
@@ -3469,7 +3487,7 @@ end
 local function _ensureLustListener(enable)
     if enable then
         if not _lustListener then
-            _lustListener = CreateFrame("Frame")
+            _lustListener = ns.TakeShell()
             _lustListener:SetScript("OnEvent", function(_, event, _, updateInfo)
                 if event == "PLAYER_ENTERING_WORLD" then
                     -- Zone/login aura refresh: re-baseline WITHOUT arming and
@@ -3646,7 +3664,7 @@ end
 local function _ensureTimeSpiralListener(enable)
     if enable then
         if not _ts.frame then
-            _ts.frame = CreateFrame("Frame")
+            _ts.frame = ns.TakeShell()
             _ts.frame:SetScript("OnEvent", function(_, event, ...)
                 if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
                     local sid = ...
@@ -3737,7 +3755,7 @@ local _potionActive = false
 local function _ensurePotionCastListener(enable)
     if enable then
         if not _potionFrame then
-            _potionFrame = CreateFrame("Frame")
+            _potionFrame = ns.TakeShell()
             -- UNIT_SPELLCAST_SUCCEEDED (player): the same edge the CDM buff-bar
             -- potions fire on. arg4 is the cast spellID (clean, never secret).
             _potionFrame:SetScript("OnEvent", function(_, _, _, _, spellID)
@@ -4097,7 +4115,7 @@ end
 local function _ensureCooldownCastListener(enable)
     if enable then
         if not _cdFrame then
-            _cdFrame = CreateFrame("Frame")
+            _cdFrame = ns.TakeShell()
             _cdFrame:SetScript("OnEvent", function(_, event, _, _, castSid)
                 _cdGen = _cdGen + 1
                 if event ~= "UNIT_SPELLCAST_SUCCEEDED" then return end
@@ -4607,6 +4625,39 @@ local function _UpdateCooldownBar(bar, cfg)
 end
 
 -------------------------------------------------------------------------------
+--  "Only In Combat" gate
+--
+--  Combat state comes from the main module's event-tracked flag (debounced
+--  combat exit, so a mob dying between pulls doesn't flash every bar away).
+--  InCombatLockdown() is only the fallback for a load order that hasn't
+--  published the shared read yet.
+-------------------------------------------------------------------------------
+local function TBBInCombat()
+    if ns.CDMInCombat then return ns.CDMInCombat() end
+    return InCombatLockdown() and true or false
+end
+
+-- Park a bar the combat gate hides. Drops the same transient render state the
+-- inactive branches drop, so the next in-combat show re-resolves icon, name and
+-- fill from scratch instead of mirroring a stale frame.
+local function HideTBBBarForCombat(bar)
+    -- Already parked: nothing to tear down, and clearing _nameSet here would
+    -- make the deferred name-fill pass below re-resolve the spell every frame
+    -- for the whole time the player is out of combat.
+    if not bar:IsShown() then return end
+    if bar._pandemicGlowActive then ClearPandemic(bar) end
+    if bar._stacksText then bar._stacksText:Hide() end
+    bar._stackCount = 0
+    bar._cachedBlizzFillTex   = nil
+    bar._cachedOurFillTex     = nil
+    bar._cachedBlizzIconTex   = nil
+    bar._cachedBlizzIconOwner = nil
+    bar._lastIconSID = nil
+    bar._nameSet     = nil
+    bar:Hide()
+end
+
+-------------------------------------------------------------------------------
 --  Main Tick: UpdateTrackedBuffBarTimers
 --  Direct reskin of Blizzard's BuffBarCooldownViewer StatusBars.
 --  Reads min/max/value from Blizzard's Bar -- zero duration computation.
@@ -4653,6 +4704,10 @@ function ns.UpdateTrackedBuffBarTimers()
             if not bar:IsShown() then bar:Show() end
         elseif cfg.enabled == false then
             bar:Hide()
+        elseif cfg.onlyInCombat and not TBBInCombat() then
+            -- "Only In Combat": out of combat the bar is gone regardless of
+            -- aura/cooldown state, and regardless of Hide When Inactive.
+            HideTBBBarForCombat(bar)
         elseif cfg.popularKey == "bloodlust" then
             -- Self-driven 40s lust bar; no Blizzard frame to mirror.
             UpdateLustBar(bar, cfg)
@@ -5313,7 +5368,7 @@ function ns.BuildTrackedBuffBars()
     -- Tick frame (every frame -- bar fill + spark need smooth updates)
     if anyEnabled then
         if not tbbTickFrame then
-            tbbTickFrame = CreateFrame("Frame")
+            tbbTickFrame = ns.TakeShell()
             local tbbAccum = 0
             tbbTickFrame:SetScript("OnUpdate", function(self, elapsed)
                 tbbAccum = tbbAccum + elapsed
