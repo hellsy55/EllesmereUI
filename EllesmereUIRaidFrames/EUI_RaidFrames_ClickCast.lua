@@ -143,7 +143,7 @@ local KEY_DISPLAY = {
 -------------------------------------------------------------------------------
 --  State
 -------------------------------------------------------------------------------
-local header           = nil   -- SecureHandlerBaseTemplate (frame bindings)
+local header           = nil   -- SecureHandlerStateTemplate (frame bindings + eui_cc driver)
 local bindProxy          = nil   -- SecureActionButtonTemplate (unnamed frame fallback)
 local globalBtn        = nil   -- SecureActionButtonTemplate (hovercast bindings)
 local registeredFrames = {}
@@ -459,6 +459,17 @@ local function BuildBaseMacroText(binding)
         end
         if isHC then
             body = "/stopmacro [mounted][flying]\n" .. body
+            -- The body is the user's macro, so the friendly/enemy filter cannot be
+            -- folded into its conditionals the way the /cast above is assembled.
+            -- Gate the whole macro instead. Same net effect, and a missing
+            -- mouseover also stops it, matching the spell path's exists check.
+            -- Without this the two Hovercast target toggles were built and shown
+            -- for macro bindings but silently did nothing.
+            if binding.hoverFriendly and not binding.hoverEnemy then
+                body = "/stopmacro [@mouseover,nohelp]\n" .. body
+            elseif binding.hoverEnemy and not binding.hoverFriendly then
+                body = "/stopmacro [@mouseover,noharm]\n" .. body
+            end
         end
         return body
     elseif binding.type == "item" then
@@ -1370,8 +1381,8 @@ function ns.CC_ApplyBindings()
     --    never lose the race against the binding being set. (This is the part the
     --    old design lacked: it relied solely on the state driver to set, which
     --    lags on arrival and -- worse -- could stay stuck cleared.)
-    --  * The state driver also SETS on "1", covering NON-EUI mouseover targets
-    --    (nameplates / Blizzard frames that have no OnEnter wrap), and on "0"
+    --  * The state driver also SETS on "on", covering NON-EUI mouseover targets
+    --    (nameplates / Blizzard frames that have no OnEnter wrap), and on "off"
     --    CLEARS the hover bindings AND runs the frame-based keyboard failsafe.
     --  * The "0" clear is GUARDED: skipped while the last-hovered EUI frame is
     --    still physically under the cursor, so a transient [@mouseover,exists]==0
@@ -1456,7 +1467,7 @@ function ns.CC_ApplyBindings()
     if #hoverSetLines > 0 or #kbClearLines > 0 then
         local fbFailsafe = table.concat(kbClearLines, "\n")
         header:SetAttribute("_onstate-eui_cc", [[
-            if newstate == "1" then
+            if newstate == "on" then
                 if not eui_hoveractive then
                     self:RunAttribute("eui_hover_set")
                     eui_hoveractive = true
@@ -1468,7 +1479,12 @@ function ns.CC_ApplyBindings()
 
             end
         ]])
-        RegisterStateDriver(header, "eui_cc", "[@mouseover,exists] 1; 0")
+        -- State values are deliberately non-numeric. Blizzard's driver runs
+        -- newValue = tonumber(newValue) or newValue before setting the state, so a
+        -- "1; 0" driver arrives as the NUMBER 1 and never matches a quoted "1" --
+        -- which silently made the set branch above unreachable, leaving nameplates
+        -- (no OnEnter wrap, so the driver is their only path) permanently unbound.
+        RegisterStateDriver(header, "eui_cc", "[@mouseover,exists] on; off")
     end
 
     -- Store for next cleanup
@@ -1742,7 +1758,14 @@ function ns.CC_Init()
     if not ns.db then return end
     GetClickCastDB()
 
-    header = CreateFrame("Frame", "EUIClickCastHeader", UIParent, "SecureHandlerBaseTemplate")
+    -- StateTemplate, not BaseTemplate: only the state template carries the
+    -- OnAttributeChanged script (SecureHandler_StateOnAttributeChanged) that
+    -- dispatches "_onstate-<id>" snippets. Under BaseTemplate the eui_cc driver
+    -- still wrote state-eui_cc, but nothing listened, so the hover set/clear
+    -- handler never ran and hovercast worked only where the OnEnter wrap set the
+    -- binding directly -- i.e. everywhere except nameplates. It inherits the same
+    -- SecureHandler_OnLoad, so Execute / WrapScript / RunAttribute are unchanged.
+    header = CreateFrame("Frame", "EUIClickCastHeader", UIParent, "SecureHandlerStateTemplate")
     ns._ccHeader = header
 
     bindProxy = CreateFrame("Button", "EUIClickCastBindProxy", UIParent,
@@ -2462,8 +2485,12 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                 local mItems = {}
                 for _, m in ipairs(macros) do mItems[#mItems + 1] = { name = m.name, icon = m.icon, macroName = m.name } end
                 PopulateGridG(mItems, function(itm)
+                    -- Macros default to BOTH reactions, unlike a spell binding
+                    -- (friendly only, the click-cast healing case). A macro is
+                    -- general purpose and commonly a mouseover focus/target one,
+                    -- so a friendly-only default would leave it dead on enemies.
                     ns.CC_AddGlobalBinding({ type = "macro", macroName = itm.macroName, icon = itm.icon,
-                        enabled = true, oocOnly = false, hovercast = false, hoverFriendly = true, hoverEnemy = false })
+                        enabled = true, oocOnly = false, hovercast = false, hoverFriendly = true, hoverEnemy = true })
                     ns._ccSelSide = "global"; ns._ccSelIndex = #(GetGlobalBindings()); RebuildPage()
                 end)
             else
@@ -3077,7 +3104,8 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                     ns.CC_AddSpecBinding({
                         type = "macro", macroName = item.macroName, icon = item.icon,
                         enabled = true, oocOnly = false, hovercast = false,
-                        hoverFriendly = true, hoverEnemy = false,
+                        -- Both reactions: see the global macro add above.
+                        hoverFriendly = true, hoverEnemy = true,
                     })
                     ns._ccSelSide = "spec"; ns._ccSelIndex = #(GetSpecBindings()); RebuildPage()
                 end)

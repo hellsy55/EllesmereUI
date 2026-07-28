@@ -203,6 +203,43 @@ function EllesmereUI.RunRegisteredMigrations()
     end
 end
 
+--------------------------------------------------------------------------------
+--  Registered migrations
+--------------------------------------------------------------------------------
+
+-- Hovercast macro bindings ignored their own Friendly/Enemy toggles: the
+-- friend/harm filter was only ever applied when building a spell binding, so a
+-- macro fired on whatever was under the cursor regardless of what the two
+-- toggles said. Now that the filter is honored, a stored binding left at the
+-- creation defaults (hoverFriendly = true, hoverEnemy = false) would suddenly
+-- stop working on enemies -- a silent regression on data the user never touched,
+-- e.g. every mouseover focus macro. Seed both flags so existing bindings keep
+-- the unfiltered behavior they have actually had, and let the toggles take
+-- effect from here on.
+EllesmereUI.RegisterMigration({
+    id          = "clickcast_macro_hover_reaction_v1",
+    scope       = "profile",
+    description = "Keep existing hovercast macro bindings unfiltered now that Friendly/Enemy applies to them",
+    body        = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        local cc = rf and rf.clickCast
+        if type(cc) ~= "table" then return end
+        local function seed(list)
+            if type(list) ~= "table" then return end
+            for _, b in ipairs(list) do
+                if type(b) == "table" and b.type == "macro" and b.hovercast then
+                    b.hoverFriendly = true
+                    b.hoverEnemy    = true
+                end
+            end
+        end
+        seed(cc.globals)
+        if type(cc.specs) == "table" then
+            for _, list in pairs(cc.specs) do seed(list) end
+        end
+    end,
+})
+
 -- Inspection helper for the slash command.
 function EllesmereUI.GetMigrationStatus()
     local out = {
