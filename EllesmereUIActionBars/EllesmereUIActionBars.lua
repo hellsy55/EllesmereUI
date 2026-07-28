@@ -3408,6 +3408,17 @@ do
                                     if (active ~= (fd.cdWasActive or false)) or chargeShown or fd.chargeWasLive
                                        or (active and fd.visGen ~= ns._gcdGen) then
                                         if active then fd.visGen = ns._gcdGen end
+                                        -- durObj is only fetched on the once-per-cast
+                                        -- swipe push above, but charge buttons re-enter
+                                        -- here on EVERY walk (chargeShown). Passing the
+                                        -- stale nil made the shared function read the
+                                        -- live cooldown as inactive and snap a
+                                        -- recharging charge spell back to full color,
+                                        -- then the next cast generation re-desaturated
+                                        -- it: grey-color-grey flicker on every press.
+                                        if active and not durObj then
+                                            durObj = C_ActionBar.GetActionCooldownDuration(action)
+                                        end
                                         RefreshCooldownVisuals(btn, action, cdInfo or false, durObj, chargeInfo or false)
                                     end
                                     -- Count text rides the ~2s sub-pass; charge
