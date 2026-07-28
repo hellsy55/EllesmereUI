@@ -613,6 +613,14 @@ local _divertedSpellsCD   = {}
 -- Checked by ResolveCDIDToBar BEFORE the sid-level map so the cd-level claim
 -- outranks a whole-pair sid claim.
 local _divertedBuffCdIDs  = {}
+-- EXACT assigned ids, split out of the maps above. The sid maps also hold keys
+-- derived from each assignment's variant family, and one cooldown slot can carry
+-- several family members the player put on different bars (Divine Toll and its
+-- Lightsmith override Holy Bulwark share cooldownID 29342 and base 375576).
+-- Resolution consults these first so the slot follows the bar the player
+-- actually assigned, instead of flipping bars each time the spell transforms.
+local _divertedDirectBuff = {}
+local _divertedDirectCD   = {}
 ns._divertedSpellsBuff = _divertedSpellsBuff
 ns._divertedSpellsCD   = _divertedSpellsCD
 
@@ -655,6 +663,8 @@ function ns.RebuildSpellRouteMap()
     wipe(_cdidRouteMap)
     wipe(_divertedSpellsBuff)
     wipe(_divertedSpellsCD)
+    wipe(_divertedDirectBuff)
+    wipe(_divertedDirectCD)
     wipe(_divertedBuffCdIDs)
     _routeMapBuilt = false
 
@@ -672,7 +682,8 @@ function ns.RebuildSpellRouteMap()
         local targetMap = IsBuffFamily and IsBuffFamily(bd) and _divertedSpellsBuff or _divertedSpellsCD
         for _, sid in ipairs(sd.assignedSpells) do
             if type(sid) == "number" and sid > 0 then
-                SVV(targetMap, sid, bd.key, false)
+                SVV(targetMap, sid, bd.key, false,
+                    targetMap == _divertedSpellsBuff and _divertedDirectBuff or _divertedDirectCD)
             end
         end
     end
@@ -689,7 +700,7 @@ function ns.RebuildSpellRouteMap()
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
                     if type(sid) == "number" and sid > 0 then
-                        SVV(_divertedSpellsBuff, sid, bd.key, false)
+                        SVV(_divertedSpellsBuff, sid, bd.key, false, _divertedDirectBuff)
                     end
                 end
             end
@@ -743,7 +754,7 @@ function ns.RebuildSpellRouteMap()
                 -- expands variants so any live talent/override form resolves.
                 for sid in pairs(sd.hostedBuffSpellIDs) do
                     if type(sid) == "number" and sid > 0 then
-                        SVV(_divertedSpellsBuff, sid, bd.key, false)
+                        SVV(_divertedSpellsBuff, sid, bd.key, false, _divertedDirectBuff)
                     end
                 end
             end
@@ -820,6 +831,7 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     end
 
     local divertMap = (viewerDefaultBar == "buffs") and _divertedSpellsBuff or _divertedSpellsCD
+    local directMap = (viewerDefaultBar == "buffs") and _divertedDirectBuff or _divertedDirectCD
 
     local info = gci(cdID)
     if not info then
@@ -833,13 +845,39 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     end
     local routedBar = nil
     do
+        -- EXACT assignments first, override form before base. One cooldown slot
+        -- can carry several members of a variant family that the player put on
+        -- different bars, and only the exact ids say where they wanted each. The
+        -- override is checked first because it is the form castable right now,
+        -- so "Holy Bulwark on utility" owns the slot rather than the base
+        -- Divine Toll that a repopulate dropped on cooldowns. Without this the
+        -- winner came from collection order and from whichever override was live
+        -- when the map was built, so the icon changed bars on every transform.
+        -- Every id is gated through CdidIDReadable: on an active viewer frame
+        -- these can be SECRET, and a secret must never index a table.
+        if CdidIDReadable(info.overrideSpellID) then
+            routedBar = directMap[info.overrideSpellID]
+        end
+        if not routedBar and CdidIDReadable(info.spellID) then
+            routedBar = directMap[info.spellID]
+        end
+        if not routedBar and info.linkedSpellIDs then
+            for _, lid in ipairs(info.linkedSpellIDs) do
+                if CdidIDReadable(lid) then
+                    routedBar = directMap[lid]
+                    if routedBar then break end
+                end
+            end
+        end
         -- No raw `> 0` / `~=` comparisons on info.spellID/overrideSpellID here:
         -- on an active CDM viewer frame these can be secret numbers (per
         -- EllesmereUICdmSpellPicker.lua's _IsUsableSID comment), and comparing
         -- a secret value directly taints execution. RVV (ResolveVariantValue)
         -- already gates its input through _IsUsableSID internally, so just
         -- feed it the raw fields and let it reject anything unusable.
-        routedBar = RVV(divertMap, info.spellID)
+        if not routedBar then
+            routedBar = RVV(divertMap, info.spellID)
+        end
         if not routedBar then
             routedBar = RVV(divertMap, info.overrideSpellID)
         end

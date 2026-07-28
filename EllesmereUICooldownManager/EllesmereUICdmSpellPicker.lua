@@ -22,10 +22,13 @@ local ComputeTopRowStride    = ns.ComputeTopRowStride
 --  Heroism (32182) and Bloodlust override variants as the same logical entry
 --  without ever calling them duplicates.
 --
---  StoreVariantValue(target, spellID, value, preserveExisting):
+--  StoreVariantValue(target, spellID, value, preserveExisting, directSet):
 --      Writes value into target under every key in spellID's variant family.
---      If preserveExisting is true, only writes when target[key] is nil
---      (first-write-wins).
+--      preserveExisting applies to the EXACT id only (first-write-wins); the
+--      derived family keys never overwrite an entry that is already there, so
+--      one spell's family expansion cannot displace another spell's exact
+--      assignment. directSet, when given, records the exact id on its own so
+--      callers can tell an explicit assignment from a derived one.
 --
 --  ResolveVariantValue(sourceMap, spellID):
 --      Returns sourceMap[k] for the first k in spellID's variant family
@@ -65,14 +68,24 @@ local function _StoreIfValid(target, id, value, preserveExisting)
     target[id] = value
 end
 
-local function StoreVariantValue(target, spellID, value, preserveExisting)
+-- directSet (optional): records the EXACT id that was stored, separately from
+-- the variant keys derived from it. Two spells of one variant family can be
+-- assigned to different bars (e.g. Divine Toll and its Lightsmith override Holy
+-- Bulwark, which share cooldownID and base 375576), and each expands over the
+-- other's keys. Without knowing which entry was exact, the winner is decided by
+-- collection order and by whichever override happened to be live at build time,
+-- so the slot changes bars as the spell transforms. The derived keys therefore
+-- only ever FILL GAPS, and the exact id always overwrites, so an explicit
+-- assignment can never be clobbered by another spell's family expansion.
+local function StoreVariantValue(target, spellID, value, preserveExisting, directSet)
     if type(target) ~= "table" or not _IsUsableSID(spellID) then return end
     _StoreIfValid(target, spellID, value, preserveExisting)
-    _StoreIfValid(target, _GetOverride(spellID), value, preserveExisting)
+    if type(directSet) == "table" then directSet[spellID] = value end
+    _StoreIfValid(target, _GetOverride(spellID), value, true)
     local baseID = _GetBase(spellID)
     if baseID then
-        _StoreIfValid(target, baseID, value, preserveExisting)
-        _StoreIfValid(target, _GetOverride(baseID), value, preserveExisting)
+        _StoreIfValid(target, baseID, value, true)
+        _StoreIfValid(target, _GetOverride(baseID), value, true)
     end
 end
 
