@@ -6932,6 +6932,12 @@ function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, supp
     -- each refresh -- SPELLS_CHANGED fires often mid-rotation), and never during
     -- combat: RefreshRuntimeVisibility re-runs from ApplyAll on PLAYER_REGEN_ENABLED
     -- and completes the deferred transition once lockdown clears.
+    --
+    -- InCombatLockdown() is the RIGHT gate here, not InProtectedInstance(): the
+    -- restriction being worked around is "protected frame op blocked in combat".
+    -- InProtectedInstance() reports true for a whole keystone run and exists for
+    -- secret-value reads and Blizzard panel toggles; gating this on it would
+    -- strand the micro menu / bag bar unsuppressed for the entire key.
     if suppressed then
         if not ffd[suppressKey] then
             ffd[shownKey] = frame:IsShown()
@@ -8780,12 +8786,29 @@ local function HookButtonCooldownEdge(btn)
         -- Skip only when BOTH cooldown frames carry the applied stamp (set by
         -- ApplyToFrame, cleared on settings change); the charge cooldown can
         -- appear after the main one is already stamped.
-        if not (btn.cooldown and EFD(btn.cooldown).cdFontStamp)
-           or (btn.chargeCooldown and not EFD(btn.chargeCooldown).cdFontStamp) then
-            EAB_VTABLE.CooldownFonts.pending[btn] = true
-            if not EAB_VTABLE.CooldownFonts.timerScheduled then
-                EAB_VTABLE.CooldownFonts.timerScheduled = true
-                C_Timer_After(0, EAB_VTABLE.CooldownFonts.FlushPatch)
+        local chargeCd    = btn.chargeCooldown
+        local mainNeeds   = not (btn.cooldown and EFD(btn.cooldown).cdFontStamp)
+        local chargeNeeds = chargeCd and not EFD(chargeCd).cdFontStamp
+        if mainNeeds or chargeNeeds then
+            -- A cooldown showing no countdown numbers has no FontString for
+            -- ApplyToFrame to find, so it can never take the stamp -- and an
+            -- unconditional queue here would therefore re-arm on EVERY cooldown
+            -- edge for the rest of the session (a flush plus ApplyToButton's
+            -- one-shot retry, per charge button per cast). Chase only frames
+            -- whose numbers are actually on. Nothing is missed: both un-hide
+            -- paths queue the patch themselves -- UpdateChargeNumbersVisibility
+            -- on the charge frame, and for the main frame the next SetCooldown
+            -- after the CVar flips lands here with numbersOn true.
+            -- Deliberately AFTER the stamp test: the steady state (both stamped)
+            -- exits above without paying for the CVar read.
+            local numbersOn = GetCVarBool("countdownForCooldowns")
+            if (mainNeeds and numbersOn)
+               or (chargeNeeds and EFD(chargeCd).rechargeNumbersHidden == false) then
+                EAB_VTABLE.CooldownFonts.pending[btn] = true
+                if not EAB_VTABLE.CooldownFonts.timerScheduled then
+                    EAB_VTABLE.CooldownFonts.timerScheduled = true
+                    C_Timer_After(0, EAB_VTABLE.CooldownFonts.FlushPatch)
+                end
             end
         end
     end

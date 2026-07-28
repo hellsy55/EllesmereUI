@@ -18973,6 +18973,22 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        -- Charges/Stacks Only (cd/utility bars) -- the counterpart to the buff
+        -- bars' "Only Show Numbers" above. Strips the icon down to its charge /
+        -- stack counter: art, swipe, recharge edge and cooldown text all go.
+        if not isBuffGlowBar
+           and (barData.barType == "cooldowns" or barData.barType == "utility") then
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Charges/Stacks Only (No Icon)",
+                  tooltip="Hide this bar's icon art, cooldown swipe, recharge edge and cooldown text, leaving only the charge or stack count.",
+                  getValue=function() return BD().chargesOnly == true end,
+                  setValue=function(v)
+                      BD().chargesOnly = v and true or nil
+                      ns.BuildAllCDMBars(); Refresh()
+                  end },
+                { type="label", text="" });  y = y - h
+        end
+
         _, h = W:Spacer(parent, y, 8);  y = y - h
 
         -------------------------------------------------------------------

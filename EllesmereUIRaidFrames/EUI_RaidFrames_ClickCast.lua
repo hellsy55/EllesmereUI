@@ -121,15 +121,38 @@ end
 
 -- True when a spell binding is a rez spell (by stored ID, with a name
 -- fallback for legacy bindings saved before spell IDs were stored).
+-- Name lookup for the legacy fallback, built ONCE.
+--
+-- This used to walk every rez spell ID calling C_Spell.GetSpellName on each,
+-- for every binding, for every frame registered. CC_RegisterFrame runs per unit
+-- button (40+ in a full raid), and the whole thing happens inside the login
+-- enable-flush -- which is a SINGLE synchronous execution shared by every
+-- module -- so the API calls multiplied out into thousands and helped trip the
+-- "script ran too long" watchdog on /reload.
+local _rezNames
+local function RezNameSet()
+    if _rezNames then return _rezNames end
+    if not (C_Spell and C_Spell.GetSpellName) then return nil end
+    local set, resolved = {}, false
+    for sid in pairs(REZ_SPELL_IDS) do
+        local n = C_Spell.GetSpellName(sid)
+        if n then set[n] = true; resolved = true end
+    end
+    -- Only latch the cache once something actually resolved: spell data can be
+    -- cold this early in login, and freezing an empty set would permanently
+    -- break the fallback for the rest of the session.
+    if resolved then _rezNames = set end
+    return set
+end
+
 local function IsRezSpellBinding(binding)
     if type(binding.spellID) == "number" and REZ_SPELL_IDS[binding.spellID] then
         return true
     end
     local bn = binding.spell
-    if type(bn) == "string" and C_Spell and C_Spell.GetSpellName then
-        for sid in pairs(REZ_SPELL_IDS) do
-            if C_Spell.GetSpellName(sid) == bn then return true end
-        end
+    if type(bn) == "string" then
+        local names = RezNameSet()
+        return names ~= nil and names[bn] == true
     end
     return false
 end

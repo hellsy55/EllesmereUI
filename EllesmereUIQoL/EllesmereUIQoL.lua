@@ -853,6 +853,20 @@ qolFrame:SetScript("OnEvent", function(self)
             pending = C_Timer.NewTimer(delay, Pass)
         end
 
+        -- Verify-and-report, no selling. Used by the pass-cap exit: the sell that
+        -- pass fired is still in flight, so the count it saw cannot say whether
+        -- anything was actually stranded. Re-count once the server has answered.
+        local function Report()
+            pending = nil
+            if not merchantOpen then return end
+            local left = CountJunk()
+            if left > 0 and not warned then
+                warned = true
+                EllesmereUI.Print("|cff0cd29dEllesmereUI:|r " ..
+                    EllesmereUI.Lf("%d junk item(s) could not be sold.", left))
+            end
+        end
+
         Pass = function()
             pending = nil
             if not merchantOpen then return end
@@ -892,7 +906,14 @@ qolFrame:SetScript("OnEvent", function(self)
             -- Only worth a server round trip when there is something to sell;
             -- a junk-free pass here is just waiting on item data to cache.
             if junk > 0 then C_MerchantFrame.SellAllJunkItems() end
-            if passes >= MAX_PASSES then return end
+            if passes >= MAX_PASSES then
+                -- Pass cap hit while the count was still moving, so the sweep is
+                -- giving up mid-progress. Bailing silently here is the exact
+                -- failure this sweep exists to fix (grays left in the bags with
+                -- nothing said), so hand off to one verification pass instead.
+                pending = C_Timer.NewTimer(delay, Report)
+                return
+            end
             Schedule()
         end
 

@@ -2097,6 +2097,14 @@ local function SkinCharacterSheet()
             end
         end
         GetFFD(frame).recalculateSections()
+        -- A row that just came back on screen was skipped by the last
+        -- UpdateAllStats pass, so its value is stale (or never was set at all).
+        -- Repopulate here instead of leaving it wrong until the next stats
+        -- event fires. This runs on toggles, spec changes and collapse/expand
+        -- only, never on the event path. Guarded because the build calls this
+        -- before UpdateAllStats is published; the build runs its own pass right
+        -- after, so nothing is missed there.
+        if EllesmereUI._refreshStatFormats then EllesmereUI._refreshStatFormats() end
     end
     EllesmereUI._refreshStatsVisibility = RefreshStatsVisibility
 
@@ -2741,26 +2749,35 @@ local function SkinCharacterSheet()
         local secondaryBoth = EllesmereUIDB and EllesmereUIDB.showSecondaryBoth
         local tertiaryBoth  = EllesmereUIDB and EllesmereUIDB.showTertiaryBoth
         for _, statEntry in ipairs(GetFFD(frame).statsValues) do
-            local isSec = (statEntry.categoryKey == "SecondaryStats")
-            local isTer = (statEntry.categoryKey == "Tertiary")
-            local useBoth = statEntry.rawFunc and ((isSec and secondaryBoth) or (isTer and tertiaryBoth))
-            local useRaw  = (not useBoth) and ((isSec and secondaryRaw) or (isTer and tertiaryRaw))
-            if useBoth then
-                local rawResult = statEntry.rawFunc()
-                local pctResult = statEntry.func and statEntry.func()
-                if rawResult ~= nil and pctResult ~= nil then
-                    statEntry.value:SetText(format("%d (%.2f%%)", rawResult, pctResult))
+            -- Filtered-off rows are built and kept in this list, but their value
+            -- is not on screen, so querying and formatting it is pure waste on a
+            -- path that fires many times per second while the sheet is open.
+            -- Own shown flag, NOT IsVisible(): the build's first pass runs before
+            -- the panel itself is up, and effective visibility would skip every
+            -- row there and leave the whole sheet reading "0" until the next
+            -- event. RefreshStatsVisibility repopulates when a row comes back.
+            if statEntry.value and statEntry.value:IsShown() then
+                local isSec = (statEntry.categoryKey == "SecondaryStats")
+                local isTer = (statEntry.categoryKey == "Tertiary")
+                local useBoth = statEntry.rawFunc and ((isSec and secondaryBoth) or (isTer and tertiaryBoth))
+                local useRaw  = (not useBoth) and ((isSec and secondaryRaw) or (isTer and tertiaryRaw))
+                if useBoth then
+                    local rawResult = statEntry.rawFunc()
+                    local pctResult = statEntry.func and statEntry.func()
+                    if rawResult ~= nil and pctResult ~= nil then
+                        statEntry.value:SetText(format("%d (%.2f%%)", rawResult, pctResult))
+                    else
+                        statEntry.value:SetText("0")
+                    end
                 else
-                    statEntry.value:SetText("0")
-                end
-            else
-                local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
-                local fmt = useRaw and "%d" or statEntry.format
-                local result = fn and fn()
-                if result ~= nil then
-                    statEntry.value:SetText(format(fmt, result))
-                else
-                    statEntry.value:SetText("0")
+                    local fn  = (useRaw and statEntry.rawFunc) or statEntry.func
+                    local fmt = useRaw and "%d" or statEntry.format
+                    local result = fn and fn()
+                    if result ~= nil then
+                        statEntry.value:SetText(format(fmt, result))
+                    else
+                        statEntry.value:SetText("0")
+                    end
                 end
             end
         end

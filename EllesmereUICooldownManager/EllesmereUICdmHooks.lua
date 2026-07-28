@@ -1021,6 +1021,22 @@ end
 -- fd._isProcessingOverride so the SetDrawSwipe sibling hook does not recurse.
 -- Secret-safe: HasVisualDataSource_Charges is a clean bool, the ss flag is ours.
 local function ApplyCdmChargeStyle(frame, cd)
+    -- Icon art suppressed (Only Show Numbers / Charges/Stacks Only): there is
+    -- nothing for a charge swipe or recharge edge to decorate, and this is the
+    -- ONLY caller of ApplyCdmEdge -- gating here covers the reactive cooldown
+    -- hooks and ReapplyChargeStyle in one place. Report "handled" so callers do
+    -- not fall through to their own swipe/edge defaults. The reentry guard is
+    -- SAVED and restored, never forced false: ReapplyChargeStyle sets it before
+    -- calling us and clearing it here would drop its guard.
+    local fdOsn = hookFrameData[frame]
+    if fdOsn and fdOsn._osnOn then
+        local prevGuard = fdOsn._isProcessingOverride
+        fdOsn._isProcessingOverride = true
+        if cd.SetDrawSwipe then cd:SetDrawSwipe(false) end
+        if cd.SetDrawEdge then cd:SetDrawEdge(false) end
+        fdOsn._isProcessingOverride = prevGuard
+        return true
+    end
     if type(frame.HasVisualDataSource_Charges) ~= "function"
        or not frame:HasVisualDataSource_Charges() then
         return false
@@ -1510,6 +1526,15 @@ end
 -- that is not an enabled charge spell, so callers wrap their current value with no
 -- behaviour change for anyone not using the feature.
 function ns.CdmShouldHideCountdown(frame, baseHide)
+    -- Charges/Stacks Only (No Icon) hides the duration outright, so the charge
+    -- / stack counter is the entire display. Checked AHEAD of the feature gate
+    -- below so it holds for every caller of this resolver -- the appearance
+    -- pass, the reanchor loop and the SPELL_UPDATE_CHARGES watcher all route
+    -- their countdown writes through here, which is why the setting needs no
+    -- per-site force. (Only Show Numbers does the opposite and never sets the
+    -- flag: for buff bars the number IS the display.)
+    local fdc = hookFrameData[frame]
+    if fdc and fdc._osnHideText then return true end
     if not ns._cdmAnyChargeHideCdText then return baseHide end
     if baseHide then return true end  -- already hidden by the bar/per-icon setting
     local ss = ns._ResolveCdmSS(frame)
@@ -1561,7 +1586,10 @@ local function EvalChargeCdTextFrame(frame, fd)
         -- stop watching. (A per-icon showCooldownText override only exists on buff
         -- bars, which never enable this charge toggle, so the bar value is right.)
         ns._chargeCdTextWatch[frame] = nil
-        cd:SetHideCountdownNumbers(baseHide)
+        -- Through the resolver, not raw: it returns baseHide unchanged here
+        -- (the charge toggle is off) but still honours Charges/Stacks Only, so
+        -- unwatching on a no-icon bar cannot flash the duration back.
+        cd:SetHideCountdownNumbers(ns.CdmShouldHideCountdown(frame, baseHide))
         return
     end
     cd:SetHideCountdownNumbers(ns.CdmShouldHideCountdown(frame, baseHide))
@@ -1913,13 +1941,28 @@ end
 ns.ApplyCustomIcon = ApplyCustomIcon
 
 -------------------------------------------------------------------------------
---  Only Show Numbers (bar setting, buff-family bars)
---  Renders a buff icon as just its countdown number: icon texture, background,
---  square border, shape ring, Blizzard debuff border and the duration swipe
---  are all hidden; the Cooldown widget's engine countdown text is forced ON.
+--  Icon-art suppression (two bar settings, one machine)
+--    buff-family bars: "Only Show Numbers"            -> barData.onlyShowNumbers
+--    cd/utility bars:  "Charges/Stacks Only (No Icon)" -> barData.chargesOnly
+--  Both hide the icon texture, background, square border, shape ring, Blizzard
+--  debuff border, the swipe and the recharge edge. They differ in the text they
+--  leave behind: Only Show Numbers FORCES the Cooldown widget's engine
+--  countdown on (the duration number IS the display), while Charges/Stacks Only
+--  forces it OFF, so the charge / stack counter is all that remains.
+--  Swipe, edge and countdown all have writers that re-assert between our
+--  passes, so each is gated on the frame's flags at its own choke point:
+--  the SetDrawSwipe hook and ApplyCdmChargeStyle (which owns ApplyCdmEdge) read
+--  _osnOn, and ns.CdmShouldHideCountdown -- the resolver every countdown writer
+--  funnels through -- reads _osnHideText.
+--  Every hide is REGION-level (the icon texture itself), never frame alpha:
+--  frame.ChargeCount and frame.Applications are siblings of the icon, and on
+--  the frames whose Icon is a container the stack text lives at Icon.
+--  Applications -- so frame:SetAlpha(0) or Icon:SetAlpha(0) would take the
+--  counters with it. fd.tex is already resolved down to the leaf texture in
+--  DecorateFrame (the GetTexture descent), which is what makes this work.
 --  Applied from DecorateFrame on every (re)claim and re-asserted at the end of
 --  RefreshCDMIconAppearance's per-icon pass (which re-applies borders/shapes
---  and would otherwise undo the hides). All hides are alpha/flag based -- the
+--  and would otherwise undo the hides). Hides are alpha/shown/flag based -- the
 --  regions stay live, so turning the bar setting off restores one-shot via
 --  fd._osnOn (pooled frames moving to a bar without the setting restore the
 --  same way) and the normal style passes re-assert everything else. Cost when
@@ -1928,9 +1971,31 @@ ns.ApplyCustomIcon = ApplyCustomIcon
 local function ApplyOnlyNumbers(frame, fd, barData)
     if not barData then return end
     fd = fd or hookFrameData[frame]
-    if barData.onlyShowNumbers then
+    local osn = barData.onlyShowNumbers
+    if osn or barData.chargesOnly then
+        -- Set BEFORE the swipe/edge writes below: the per-frame SetDrawSwipe
+        -- and SetDrawEdge hooks force their defaults for non-charge frames and
+        -- read _osnOn to stand down (buff frames never reached the swipe hook
+        -- -- they early-out on _isBuffViewerFrame -- which is why cd/utility
+        -- needed the gate). _osnHideText additionally tells
+        -- ns.CdmShouldHideCountdown that the duration is suppressed; every
+        -- countdown writer resolves through it.
+        if fd then
+            fd._osnOn = true
+            fd._osnHideText = (not osn) or nil
+        end
         local tex = (fd and fd.tex) or frame._tex
-        if tex then tex:SetAlpha(0) end
+        if tex then
+            tex:SetAlpha(0)
+            -- Hide() as well, and on cd/utility it is the load-bearing half:
+            -- Texture SetAlpha and SetVertexColor share ONE alpha slot on this
+            -- client, and the resource-dim pass writes a three-arg
+            -- SetVertexColor on injected custom-spell icons, which resets alpha
+            -- to 1 and pops the art back. Shown-state is an independent channel
+            -- no colour writer can touch, and nothing in the addon ever calls
+            -- Show/SetShown on an icon texture.
+            tex:Hide()
+        end
         local bg = (fd and fd.bg) or frame._bg
         if bg then bg:SetAlpha(0) end
         if fd and fd.borderFrame then
@@ -1944,13 +2009,18 @@ local function ApplyOnlyNumbers(frame, fd, barData)
         local cd = (fd and fd.cooldown) or frame.Cooldown or frame._cooldown
         if cd then
             if cd.SetDrawSwipe then cd:SetDrawSwipe(false) end
-            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(false) end
+            -- No icon means no recharge edge either.
+            if cd.SetDrawEdge then cd:SetDrawEdge(false) end
+            -- Only Show Numbers FORCES the duration on (the number is the whole
+            -- display); Charges/Stacks Only forces it OFF, leaving the charge /
+            -- stack counter alone on the bar.
+            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(not osn) end
         end
-        if fd then fd._osnOn = true end
     elseif fd and fd._osnOn then
         fd._osnOn = nil
+        fd._osnHideText = nil
         local tex = fd.tex or frame._tex
-        if tex then tex:SetAlpha(1) end
+        if tex then tex:SetAlpha(1); tex:Show() end
         local bg = fd.bg or frame._bg
         if bg then bg:SetAlpha(1) end
         local ifc = _ecmeFC[frame]
@@ -2489,6 +2559,20 @@ local function DecorateFrame(frame, barData)
                 if fd._isProcessingOverride then return end
                 -- Hosted buff: never toggle its duration swipe from our cd logic.
                 if fd._isBuffViewerFrame then return end
+                -- Charges/Stacks Only (No Icon): the art is hidden, so a swipe
+                -- would just draw a dark pie over empty space on every Blizzard
+                -- cooldown re-push. Suppress instead of falling through to the
+                -- force-true below. Ahead of the charge-style call on purpose:
+                -- with no icon there is nothing for a charge swipe or recharge
+                -- edge to decorate either.
+                if fd._osnOn then
+                    if show then
+                        fd._isProcessingOverride = true
+                        cd:SetDrawSwipe(false)
+                        fd._isProcessingOverride = false
+                    end
+                    return
+                end
                 -- Charge spells get the baseline edge (+ per-spell Hide Swipe).
                 -- ApplyCdmChargeStyle returns true and fully owns the swipe + edge
                 -- only for charge spells, so non-charge frames fall through to the
@@ -2538,6 +2622,15 @@ local function DecorateFrame(frame, barData)
                 hooksecurefunc(cd, "SetDrawEdge", function(_, show)
                     if fd._isProcessingOverride then return end
                     if not show then return end
+                    -- No icon art: no recharge edge, for charge and non-charge
+                    -- spells alike. Blizzard re-enables the edge on every
+                    -- cooldown re-push, so this has to live in the hook.
+                    if fd._osnOn then
+                        fd._isProcessingOverride = true
+                        cd:SetDrawEdge(false)
+                        fd._isProcessingOverride = false
+                        return
+                    end
                     if type(frame.HasVisualDataSource_Charges) ~= "function"
                        or not frame:HasVisualDataSource_Charges() then return end
                     if not ns._cdmAnyChargeStyle then return end

@@ -1871,6 +1871,16 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinDelves = v
             end,
         },
+        {
+            key   = "socialui",
+            title = "Friends List",
+            desc  = "The Social window frame, border, title bar, Battle.net bar, search boxes, filter dropdowns and buttons. List contents and the side tab icons stay untouched.",
+            reloadMsg = "Changing the Friends List reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinSocialUI = v
+            end,
+        },
     }
 
     local function WSGetStyle(win)
@@ -2779,6 +2789,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinQuest = nil
                 EllesmereUIDB.reskinInspectRecipe = nil
                 EllesmereUIDB.reskinDelves = nil
+                EllesmereUIDB.reskinSocialUI = nil
                 EllesmereUIDB.lfgRememberRoles = nil
                 EllesmereUIDB.lfgSavedRoles = nil
                 EllesmereUIDB.showMythicRating = nil
