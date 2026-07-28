@@ -9541,7 +9541,14 @@ local function RegisterWithUnlockMode()
             order = orderBase + idx,
             isHidden = function()
                 local s = EAB.db.profile.bars[info.key]
-                return s and s.alwaysHidden
+                if not s then return false end
+                -- Honor the runtime "Toggle Action Bar" override the same way
+                -- RefreshRuntimeVisibility does: a bar saved as Never but
+                -- surfaced by the keybind is on screen, so it needs a mover;
+                -- a saved-Always bar toggled off does not.
+                local ov = EAB._visOverride and EAB._visOverride[info.key]
+                if ov then return ov == "never" end
+                return s.alwaysHidden
             end,
             getFrame = function() return barFrames[info.key] end,
             getSize = function()
@@ -13060,7 +13067,10 @@ local function RegisterExtraBarsWithUnlockMode()
                 noAnchorTarget = isBlizzOwned,
                 isHidden = function()
                     local s = EAB.db.profile.bars[bk]
-                    return s and s.alwaysHidden
+                    if not s then return false end
+                    local ov = EAB._visOverride and EAB._visOverride[bk]
+                    if ov then return ov == "never" end
+                    return s.alwaysHidden
                 end,
                 getFrame = function() return extraBarHolders[bk] end,
                 getSize = function()
