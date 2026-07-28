@@ -7287,6 +7287,17 @@ function ns.SetupViewerHooks()
                                 -- Pandemic glow: Blizzard's ShowPandemicStateFrame
                                 -- hook sets _pandemicState. User must configure
                                 -- pandemic alerts in Blizzard CDM settings.
+                                -- Only the START side is gated on the setting. The
+                                -- STOP side below must stay reachable with the
+                                -- setting OFF, or a glow that is already running
+                                -- when the user disables it is never taken down
+                                -- and stays lit until something else clears it
+                                -- (field report: red pandemic glow with the option
+                                -- off, cured only by switching it back on, letting
+                                -- the aura lapse, then off again -- which is just
+                                -- the stop branch finally becoming reachable). The
+                                -- buff glow directly above already has this shape.
+                                local inPandemic = false
                                 if pandemicOn and fd then
                                     -- Blizzard Default (-1): no custom glow and no
                                     -- hooks -- Blizzard's native PandemicIcon does
@@ -7296,7 +7307,6 @@ function ns.SetupViewerHooks()
                                     -- a CDM shell, so even install-time work bills
                                     -- CooldownManager.
                                     local pStyle = bd.pandemicGlowStyle or 1
-                                    local inPandemic = false
                                     if pStyle ~= -1 then
                                         if ns._pandemicHooked and not ns._pandemicHooked[frame]
                                            and ns.HookPandemicState then
@@ -7304,42 +7314,42 @@ function ns.SetupViewerHooks()
                                         end
                                         inPandemic = ns._pandemicState and ns._pandemicState[frame]
                                     end
-                                    if inPandemic then
-                                        if not fd.pandemicOverlay then
-                                            local ov = CreateFrame("Frame", nil, frame)
-                                            ov:SetAllPoints(frame)
-                                            ov:EnableMouse(false)
-                                            fd.pandemicOverlay = ov
-                                        end
-                                        -- Same base-level tracking as the buff glow, one
-                                        -- level higher so pandemic sits above buff glow.
-                                        fd.pandemicOverlay:SetFrameLevel(frame:GetFrameLevel() + 17)
-                                        if not fd.pandemicGlowActive then
-                                            local c
-                                            if bd.pandemicGlowMode == "class" then
-                                                c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
-                                            elseif bd.pandemicGlowMode == "custom" then
-                                                c = bd.pandemicGlowColor
-                                            end
-                                            local style = bd.pandemicGlowStyle or 1
-                                            local glowOpts = (style == 1) and {
-                                                N      = bd.pandemicGlowLines or 8,
-                                                th     = bd.pandemicGlowThickness or 2,
-                                                period = bd.pandemicGlowSpeed or 4,
-                                                bg     = bd.pandemicGlowBackground and {
-                                                    r = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.r) or 0,
-                                                    g = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.g) or 0,
-                                                    b = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.b) or 0,
-                                                } or nil,
-                                            } or nil
-                                            fd.pandemicOverlay:SetAlpha(1)
-                                            ns.StartNativeGlow(fd.pandemicOverlay, style, c and c.r, c and c.g, c and c.b, glowOpts)
-                                            fd.pandemicGlowActive = true
-                                        end
-                                    elseif fd.pandemicGlowActive and fd.pandemicOverlay then
-                                        ns.StopNativeGlow(fd.pandemicOverlay)
-                                        fd.pandemicGlowActive = false
+                                end
+                                if inPandemic and fd then
+                                    if not fd.pandemicOverlay then
+                                        local ov = CreateFrame("Frame", nil, frame)
+                                        ov:SetAllPoints(frame)
+                                        ov:EnableMouse(false)
+                                        fd.pandemicOverlay = ov
                                     end
+                                    -- Same base-level tracking as the buff glow, one
+                                    -- level higher so pandemic sits above buff glow.
+                                    fd.pandemicOverlay:SetFrameLevel(frame:GetFrameLevel() + 17)
+                                    if not fd.pandemicGlowActive then
+                                        local c
+                                        if bd.pandemicGlowMode == "class" then
+                                            c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                        elseif bd.pandemicGlowMode == "custom" then
+                                            c = bd.pandemicGlowColor
+                                        end
+                                        local style = bd.pandemicGlowStyle or 1
+                                        local glowOpts = (style == 1) and {
+                                            N      = bd.pandemicGlowLines or 8,
+                                            th     = bd.pandemicGlowThickness or 2,
+                                            period = bd.pandemicGlowSpeed or 4,
+                                            bg     = bd.pandemicGlowBackground and {
+                                                r = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.r) or 0,
+                                                g = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.g) or 0,
+                                                b = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.b) or 0,
+                                            } or nil,
+                                        } or nil
+                                        fd.pandemicOverlay:SetAlpha(1)
+                                        ns.StartNativeGlow(fd.pandemicOverlay, style, c and c.r, c and c.g, c and c.b, glowOpts)
+                                        fd.pandemicGlowActive = true
+                                    end
+                                elseif fd and fd.pandemicGlowActive and fd.pandemicOverlay then
+                                    ns.StopNativeGlow(fd.pandemicOverlay)
+                                    fd.pandemicGlowActive = false
                                 end
 
                                 -- Active State Glow integrity, BOTH edges. The
