@@ -8864,6 +8864,7 @@ initFrame:SetScript("OnEvent", function(self)
                         if (tonumber(t.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
                         if t.maxStacksGlow and t.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
                         if t.desatNotActive then ns._cdmAnyDesatNotActive = true end
+                        if t.noDesatOnCD then ns._cdmAnyNoDesatOnCD = true end
                         if t.chargeHideCdText then ns._cdmAnyChargeHideCdText = true end
                         if t.chargeHideSwipe or t.hideRechargeEdge then ns._cdmAnyChargeStyle = true end
                         if t.cdReadySoundKey and t.cdReadySoundKey ~= "none" then ns._cdmAnyCdReadySound = true end
@@ -11315,6 +11316,10 @@ initFrame:SetScript("OnEvent", function(self)
                             { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
                             { val = "buttonGlowReady", label = "Button Glow (CD Ready)" },
                         }
+                        local KEEP_COLORED_ITEMS = {
+                            { val = nil,  label = "None" },
+                            { val = true, label = "Keep Colored (On CD)" },
+                        }
 
                         -- Right-aligned colour swatch on a subnav item.
                         local function MakeColorSwatch(si, getR, getG, getB, onChanged)
@@ -11382,6 +11387,28 @@ initFrame:SetScript("OnEvent", function(self)
                                                 t.cdStateLowerAlpha = nil
                                             end
                                         end } })
+
+                        -- Cooldown Saturation (preset / custom): mirror of the
+                        -- regular-spell row. These icons are greyed by the
+                        -- Fake-Active engine rather than by Blizzard, so the runtime
+                        -- reads this key in PresetKeepsColor instead of the
+                        -- SetDesaturated hook -- same setting, same key name.
+                        MakeSubnavRow("Cooldown Saturation", KEEP_COLORED_ITEMS,
+                            function()
+                                local v = cas.noDesatOnCD
+                                if v == false then v = nil end  -- blocked slot value = None
+                                return v and true or nil
+                            end,
+                            function(v)
+                                SetCasOwn("noDesatOnCD", v or nil)
+                                if v then ns._cdmAnyNoDesatOnCD = true end
+                                if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                            end,
+                            function() return not cas.noDesatOnCD end,
+                            nil,
+                            { apply = { keys = { "noDesatOnCD" },
+                                        write = function(t, v) t.noDesatOnCD = v or false end } })
 
                         -- Threshold Text (preset / custom): decimals / color change
                         -- on this icon's countdowns (item/spell cooldown and the
@@ -11927,6 +11954,37 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end)
                         nonActiveRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
+                    -- 3c. Cooldown Saturation (default = nil / none). Suppresses the
+                    -- grey-out Blizzard applies while the spell is on cooldown --
+                    -- grouped with Non Active State above because both own the
+                    -- icon's saturation.
+                    local KEEP_COLORED_ITEMS = {
+                        { val = nil,  label = "None" },
+                        { val = true, label = "Keep Colored (On CD)" },
+                    }
+                    local cdSatRow = MakeSubnavRow("Cooldown Saturation", KEEP_COLORED_ITEMS,
+                        function() return ss.noDesatOnCD and true or nil end,
+                        function(v)
+                            EnsureSS(); SetOwn("noDesatOnCD", v or nil)
+                            if v then ns._cdmAnyNoDesatOnCD = true end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.noDesatOnCD == nil end,
+                        nil,
+                        { apply = { keys = { "noDesatOnCD" },
+                                    write = function(t, v) t.noDesatOnCD = v or false end } })
+                    if isCustomInjected and cdSatRow then
+                        cdSatRow:SetAlpha(0.35)
+                        cdSatRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(cdSatRow, customDisabledTip)
+                            end
+                        end)
+                        cdSatRow:SetScript("OnLeave", function()
                             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                         end)
                     end
