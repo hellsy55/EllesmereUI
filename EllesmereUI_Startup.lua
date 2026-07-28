@@ -149,6 +149,31 @@ do
     end)
 end
 
+-- Apply the saved unit name font -- the names that float above players, NPCs
+-- and enemies. UNIT_NAME_FONT is a plain path string the engine reads once at
+-- login, so a UI reload is not enough and the change shows after a full relog.
+--
+-- Opt-in: while no name font is chosen the global is never written, so
+-- Blizzard's default is left exactly as it was.
+--
+-- Rides the combat text font's event frame below rather than creating its own.
+-- Both drive a Blizzard global cached at login and want the same timing, and a
+-- feature nobody enabled must not register events or build frames of its own.
+--
+-- Reads EllesmereUIDB.fonts directly rather than going through GetFontsDB():
+-- that helper lazy-creates the table, and this can run at the ADDON_LOADED of
+-- Blizzard_CombatText, before our SavedVariables have been restored.
+local function ApplyUnitNameFont()
+    local fonts = EllesmereUIDB and EllesmereUIDB.fonts
+    local name = fonts and fonts.unitNameFont
+    if not name or name == "" then return end
+    if not (EllesmereUI and EllesmereUI.ResolveFontName) then return end
+    local path = EllesmereUI.ResolveFontName(name)
+    if type(path) == "string" and path ~= "" then
+        _G.UNIT_NAME_FONT = path
+    end
+end
+
 -- Apply the saved combat text font immediately at file scope.
 -- DAMAGE_TEXT_FONT must be set before the engine caches it at login.
 -- CombatTextFont may not exist yet here, so we also hook ADDON_LOADED
@@ -192,6 +217,7 @@ do
         end
 
         ApplyCombatTextFont()
+        ApplyUnitNameFont()
 
         if event == "PLAYER_LOGIN" then
             self:UnregisterEvent("PLAYER_LOGIN")
