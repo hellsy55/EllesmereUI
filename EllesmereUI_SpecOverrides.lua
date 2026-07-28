@@ -69,6 +69,17 @@ local LIST_PAGE = "Overrides"
 -- PruneOrphanEntries (strips persisted paths + drops emptied entries).
 local FOLDER_BLACKLIST = {
     EllesmereUIBlizzardSkin      = true,
+    -- The Skyriding HUD registers its own sub-DB (EllesmereUIDragonRidingDB)
+    -- from inside BlizzardSkin, so its registry folder dodges the
+    -- BlizzardSkin entry above. A width-match write to its width key was
+    -- auto-captured into a user's CDM Icon Scale override; the per-spec
+    -- apply then touched a folder with no REFRESH_FNS entry, and the
+    -- unmapped-folder fallback escalated EVERY such apply into a full
+    -- RefreshAllAddons -- spec-changed event traffic after combat became
+    -- minutes of continuous full-suite refresh (the 2026-07 post-combat
+    -- lag storm). Blacklisting blocks both future captures and the apply
+    -- of already-banked entries; a migration strips those from stores.
+    EllesmereUIDragonRiding      = true,
     EllesmereUIDamageMeters      = true,
     EllesmereUIMythicTimer       = true,
     EllesmereUIQuestTracker      = true,
@@ -105,6 +116,10 @@ local REFRESH_FNS = {
     EllesmereUIDamageMeters      = { "_EDM_Apply" },
     EllesmereUIDataBars          = { "_EDB_Apply" },
     EllesmereUIAuraBuffReminders = { "_EABR_RequestRefresh", "_EABR_ApplyUnlockPos" },
+    -- Folder is capture/apply-blacklisted (see FOLDER_BLACKLIST); this entry
+    -- is insurance so a key that slips through any future path can never hit
+    -- the unmapped-folder fallback and escalate into a full RefreshAllAddons.
+    EllesmereUIDragonRiding      = { "_EDR_Rebuild" },
 }
 
 -- Class glyph sprite (toolbar button) + modern class sprite (group icons)

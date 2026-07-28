@@ -550,6 +550,51 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- The Skyriding HUD's sub-DB registers its own folder
+-- (EllesmereUIDragonRiding), dodging the BlizzardSkin capture blacklist, so
+-- a width-match engine write to its width key could be auto-captured into an
+-- unrelated override entry (field case: riding a CDM Icon Scale capture).
+-- Applying such an entry touches a folder with no targeted refresher, and
+-- the unmapped-folder fallback escalates every apply into a full
+-- RefreshAllAddons -- under spec-changed event traffic that meant minutes of
+-- continuous full-suite refresh after combat. The folder is now
+-- capture-and-apply blacklisted; strip already-banked keys from both stores.
+-- Only the foreign keys are removed -- the entry's own settings survive; an
+-- entry left with an empty default map is dropped whole.
+EllesmereUI.RegisterMigration({
+    id          = "specov_strip_dragonriding_fkeys_v1",
+    scope       = "profile",
+    description = "Strip stowaway Dragon Riding fkeys from spec/conditional override stores (unmapped-folder RefreshAllAddons storm).",
+    body        = function(ctx)
+        local prof = ctx.profile
+        if not prof then return end
+        local PREFIX = "EllesmereUIDragonRiding\31"
+        local function strip(store)
+            if type(store) ~= "table" then return end
+            for i = #store, 1, -1 do
+                local e = store[i]
+                local vals = type(e) == "table" and e.values
+                if type(vals) == "table" then
+                    for _, m in pairs(vals) do
+                        if type(m) == "table" then
+                            for fkey in pairs(m) do
+                                if type(fkey) == "string" and fkey:sub(1, #PREFIX) == PREFIX then
+                                    m[fkey] = nil
+                                end
+                            end
+                        end
+                    end
+                    if type(vals.default) ~= "table" or next(vals.default) == nil then
+                        table.remove(store, i)
+                    end
+                end
+            end
+        end
+        strip(prof.specOverrides)
+        strip(prof.condOverrides)
+    end,
+})
+
 EllesmereUI.RegisterMigration({
     id          = "cdm_per_profile_spell_store_v1",
     scope       = "global",
