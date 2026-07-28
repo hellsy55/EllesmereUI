@@ -919,10 +919,11 @@ qolFrame:SetScript("OnEvent", function(self)
     --     session, so the figure cannot be trusted on its own -- it serves as a
     --     ceiling on the deduced share, never as the source of it.
     --   * Hence the guild share is deduced from the player's ledger, and only
-    --     outgoing amounts are summed: junk sales from the same MERCHANT_SHOW
-    --     land in this window and a net figure would cancel against them. In
-    --     practice they never share a PLAYER_MONEY -- SellAllJunkItems sells one
-    --     item per round trip, so its credits trail the repair debit.
+    --     outgoing amounts are summed. The junk sweep above keeps firing passes
+    --     across this window, so a net before/after figure would cancel its
+    --     credits against the repair debit and invent a guild share. Credits
+    --     arrive in their own PLAYER_MONEY and are ignored; only a sale landing
+    --     in the same event as the debit could still net off.
     local repairWatcher, repairWatchLast, repairWatchOut
     local repairWatchGen = 0
 
