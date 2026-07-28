@@ -1402,6 +1402,36 @@ end
 local function IsVerticalOrientation(ori)
     return ori == "VERTICAL_UP" or ori == "VERTICAL_DOWN"
 end
+-- Shared with the options file, which has to know a bar's drawn axes to grey
+-- the right size slider when a dimension is matched. Exported rather than
+-- duplicated so the two never drift.
+ns.IsVerticalOrientation = IsVerticalOrientation
+
+-- Orientation-aware MatchGuard.
+--
+-- The size sliders are labelled and stored in HORIZONTAL terms, but a match
+-- locks the axis the bar is DRAWN on. On a vertical bar those are swapped, so
+-- guarding by the slider's own label greys the field the match does not write
+-- and leaves the field it does write editable -- the player's change then
+-- disappears on the next apply.
+--
+-- Both guards are built and the right one is chosen when the widget asks, not
+-- when the page is built, so flipping orientation with the panel open is
+-- honoured. getOri returns the bar's effective orientation.
+ns.OrientedMatchGuard = function(barKey, propKey, getOri, existingDisabled, existingTooltip)
+    local hD, hT, hR = EllesmereUI.MatchGuard(barKey, "Height", existingDisabled, existingTooltip)
+    local wD, wT, wR = EllesmereUI.MatchGuard(barKey, "Width",  existingDisabled, existingTooltip)
+    local function pick(sameAxis, swappedAxis)
+        return function(...)
+            if IsVerticalOrientation(getOri and getOri()) then return swappedAxis(...) end
+            return sameAxis(...)
+        end
+    end
+    if propKey == "Height" then
+        return pick(hD, wD), pick(hT, wT), pick(hR, wR)
+    end
+    return pick(wD, hD), pick(wT, hT), pick(wR, hR)
+end
 
 -- Cached empower stage thresholds (set once at empower start, avoids per-frame API call)
 local cachedStageThresholds
