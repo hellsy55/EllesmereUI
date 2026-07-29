@@ -3852,6 +3852,52 @@ local function HideAllInjectedCustomBuffs()
 end
 ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 
+-- Resolve the spell whose ICON an inactive placeholder should paint.
+--
+-- An ACTIVE buff frame renders the live aura, so a talent that REPLACES a spell
+-- shows the replacement (Hellcaller: Wither). An INACTIVE frame has no aura to
+-- read and falls back to cooldownInfo, which still describes the pre-talent
+-- spell -- so the same icon changes art as the aura comes and goes.
+--
+-- The replacement lives in the spellbook override table, but that table is keyed
+-- by CASTABLE spells while a buff slot's resolved id is usually the AURA (the
+-- Destruction Immolate slot resolves to 157736, not castable 348). So try the
+-- slot's whole identity set: the resolved id first, then cooldownInfo's base,
+-- override and linked ids, and take the first entry that is currently overridden
+-- by a different spell. Returns sid untouched when nothing in the set is
+-- overridden, which is every spec without a replacing talent.
+local function ResolvePlaceholderIconSID(sid, cdID)
+    local FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+    if not FO or type(sid) ~= "number" or sid <= 0 then return sid end
+    if issecretvalue and issecretvalue(sid) then return sid end
+
+    local function TryID(id)
+        if type(id) ~= "number" or id <= 0 then return nil end
+        if issecretvalue and issecretvalue(id) then return nil end
+        local o = FO(id)
+        if type(o) == "number" and o > 0 and o ~= id then return o end
+        return nil
+    end
+
+    local hit = TryID(sid)
+    if hit then return hit end
+
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    local info = (cdID ~= nil and gci) and gci(cdID) or nil
+    if not info then return sid end
+
+    hit = TryID(info.spellID) or TryID(info.overrideSpellID)
+    if hit then return hit end
+    if info.linkedSpellIDs then
+        for _, lid in ipairs(info.linkedSpellIDs) do
+            hit = TryID(lid)
+            if hit then return hit end
+        end
+    end
+    return sid
+end
+ns.ResolvePlaceholderIconSID = ResolvePlaceholderIconSID
+
 -- identKey: optional pooling identity, defaulting to spellID. Buff
 -- placeholders pass one so two viewer slots that collide on spellID do not
 -- share a single pooled frame (see the collision note at the call site).
@@ -4915,20 +4961,11 @@ local function CollectAndReanchor()
                                         local phKey = "ph:" .. tostring(phIdent)
                                         if not barSeen[phKey] then
                                             barSeen[phKey] = true
-                                            -- Paint the LIVE castable form. realSID is read off
-                                            -- the INACTIVE frame, where Blizzard falls back to
-                                            -- cooldownInfo -- and a hero-talent slot's
-                                            -- cooldownInfo can still name the pre-talent spell
-                                            -- (observed: Hellcaller's Wither slot reports
-                                            -- Immolate 348). The ACTIVE frame renders the
-                                            -- override form, so without this bridge the icon
-                                            -- swaps art as the aura comes and goes. Pooling and
+                                            -- Paint the form the ACTIVE frame would show, so a
+                                            -- replacing talent (Hellcaller's Wither) does not
+                                            -- flip art as the aura comes and goes. Pooling and
                                             -- dedup stay keyed on realSID/phIdent.
-                                            local dispSID = realSID
-                                            if _FindOverride and type(dispSID) == "number" and dispSID > 0 then
-                                                local ovr = _FindOverride(dispSID)
-                                                if type(ovr) == "number" and ovr > 0 then dispSID = ovr end
-                                            end
+                                            local dispSID = ResolvePlaceholderIconSID(realSID, dedupKey)
                                             local _GetTex = C_Spell and C_Spell.GetSpellTexture
                                             local icon = _GetTex and _GetTex(dispSID)
                                             if not icon and _GetTex and dispSID ~= realSID then

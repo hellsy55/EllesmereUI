@@ -9660,6 +9660,12 @@ SlashCmdList.CDMBUFFID = function()
     local enumByCdID    = {}   -- cdID -> enum index
     local enumSidByCdID = {}   -- cdID -> canonical sid
     local enumCount     = 0
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    -- This section works with NOTHING currently rendering, so it is the one to
+    -- read for a replacing-talent icon report (Hellcaller Wither). "icon=" is the
+    -- form an inactive placeholder paints, straight from the runtime resolver: it
+    -- differing from sid= is the override bridge firing.
+    local nBridged = 0
     P(ACCENT .. "--- EnumerateCDMViewerSpells(true) [preview + settings id = e.sid] ---" .. OFF)
     if ns.EnumerateCDMViewerSpells then
         local entries = ns.EnumerateCDMViewerSpells(true)
@@ -9670,16 +9676,37 @@ SlashCmdList.CDMBUFFID = function()
                 enumSidByCdID[e.cdID] = e.sid
                 enumCount = enumCount + 1
             end
-            P(string.format("  [%d] sid=%s cdID=%s name=%s",
-                i, SN(e.sid), SN(e.cdID), NM(e.sid)))
+            local infoSpell, infoOvr, linked
+            if e.cdID ~= nil and gci then
+                local info = gci(e.cdID)
+                if info then
+                    infoSpell, infoOvr = info.spellID, info.overrideSpellID
+                    if info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+                        local t = {}
+                        for _, lid in ipairs(info.linkedSpellIDs) do t[#t + 1] = SN(lid) end
+                        linked = table.concat(t, ",")
+                    end
+                end
+            end
+            local iconSID = ns.ResolvePlaceholderIconSID
+                and ns.ResolvePlaceholderIconSID(e.sid, e.cdID) or e.sid
+            local bridgeTag = ""
+            if type(iconSID) == "number" and type(e.sid) == "number" and iconSID ~= e.sid then
+                nBridged = nBridged + 1
+                bridgeTag = "  " .. GOOD .. "BRIDGED" .. OFF
+            end
+            P(string.format("  [%d] sid=%s cdID=%s info.sID=%s info.ovr=%s linked=%s icon=%s(%s) name=%s%s",
+                i, SN(e.sid), SN(e.cdID), SN(infoSpell), SN(infoOvr),
+                linked or "none", SN(iconSID), NM(iconSID), NM(e.sid), bridgeTag))
         end
+        P(string.format("  placeholder icon bridge: %d of %d entr%s resolve to a replacing spell",
+            nBridged, #entries, nBridged == 1 and "y" or "ies"))
     end
 
     -- C. Live rendered icons: walk cdmBarIcons["buffs"] in render order and
     --    compare SEED/SORT id (fc.spellID) vs PREVIEW/SETTINGS id (canonical),
     --    and render order vs preview-enum order.
     P(ACCENT .. "--- live cdmBarIcons[\"buffs\"] [seed + sort id = fc.spellID] ---" .. OFF)
-    local gci      = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
     local fcCache  = ns._ecmeFC
     local icons    = ns.cdmBarIcons and ns.cdmBarIcons["buffs"]
     local nDiverge, nTotal = 0, 0
@@ -9750,7 +9777,8 @@ SlashCmdList.CDMBUFFID = function()
     P(ACCENT .. "--- verdict ---" .. OFF)
     P(string.format("  rendered icons=%d  diverge=%d  preview entries=%d", nTotal, nDiverge, enumCount))
     if nTotal == 0 then
-        P("  " .. DIM .. "inconclusive: no rendered buffs to sample" .. OFF)
+        P("  " .. DIM .. "inconclusive for id-collapse: no rendered buffs to sample" .. OFF)
+        P("  " .. DIM .. "(the icon bridge above does NOT need rendered buffs -- read that line instead)" .. OFF)
     elseif nDiverge == 0 then
         P("  " .. GOOD .. "id-collapse: ALL buffs agree (seed/sort == preview/settings). Default-bar reorder is safe with the simple approach." .. OFF)
     else
