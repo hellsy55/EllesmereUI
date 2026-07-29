@@ -859,6 +859,8 @@ local function RepointAllDBs(profileName)
         for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
         if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
         if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
+        -- The fonts DB was just rewritten in place; drop the resolution cache.
+        EllesmereUI.InvalidateFontCache()
     end
     -- Custom colors: with "Apply to All Profiles" ON (default) the shared palette
     -- doesn't change with the active profile, so nothing to re-apply on switch.
@@ -1140,6 +1142,27 @@ function EllesmereUI.ApplyProfileData(profileData)
                 -- the live accessor + RefreshAllAddons rebuild pick it up.
                 for k in pairs(profile) do profile[k] = nil end
                 for k, v in pairs(snap) do profile[k] = DeepCopy(v) end
+                -- Pre-dropdown imports carry showPlayerAbsorb as the legacy
+                -- boolean toggle. The conversion migrations are SKIPPED for
+                -- imported profiles (inherited migration flags), and a boolean
+                -- reaches the texture resolver as a key -- which used to abort
+                -- unit frame init outright. The resolver now refuses non-string
+                -- keys, so this is no longer fatal, but without the conversion
+                -- the absorb still renders as a fallback texture instead of
+                -- honouring the setting. Normalise on the way in, matching the
+                -- mapping the migrations use.
+                if entry.folder == "EllesmereUIUnitFrames" then
+                    for _, unitCfg in pairs(profile) do
+                        if type(unitCfg) == "table" then
+                            local v = unitCfg.showPlayerAbsorb
+                            if v == true then
+                                unitCfg.showPlayerAbsorb = "striped"
+                            elseif v ~= nil and type(v) ~= "string" then
+                                unitCfg.showPlayerAbsorb = "none"
+                            end
+                        end
+                    end
+                end
                 -- Pre-split imports carry the shared totPet table but no
                 -- targettarget/focustarget. The login split migration is SKIPPED
                 -- for imported profiles (ImportProfile builds merged =
@@ -1294,6 +1317,8 @@ function EllesmereUI.ApplyProfileData(profileData)
         for k, v in pairs(profileData.fonts) do fontsDB[k] = DeepCopy(v) end
         if fontsDB.global      == nil then fontsDB.global      = "Expressway" end
         if fontsDB.outlineMode == nil then fontsDB.outlineMode = "shadow"     end
+        -- The fonts DB was just rewritten in place; drop the resolution cache.
+        EllesmereUI.InvalidateFontCache()
     end
     -- Custom colors are GLOBAL appearance, not per-profile: never wipe or
     -- restore EllesmereUIDB.customColors from a profile snapshot. (See the
@@ -1786,6 +1811,7 @@ do
         "reskinPlayerSpells", "reskinAdventureGuide", "reskinProfessionsBook",
         "reskinProfessions", "reskinWorldMap", "reskinGuild", "reskinCalendar",
         "reskinAchievements", "reskinMail", "reskinCatalyst", "reskinSocket",
+        "reskinItemUpgrade", "reskinLoot", "reskinLootToast", "lootToastQualityStrip",
         "reskinMicroMenu", "reskinHousing", "reskinDressUp", "reskinTransmog",
         "reskinMerchant", "reskinAuctionHouse", "reskinMacros",
         "reskinSettings", "reskinAddonList", "reskinCraftOrders",
@@ -1803,6 +1829,7 @@ do
         "charSheetIconZoom", "charSheetEnchantNames", "charSheetEnchantSize",
         "flyoutItemLevels", "showSecondaryRaw", "showSecondaryBoth",
         "showTertiaryRaw", "showTertiaryBoth", "showAdjustedStats",
+        "showManaStat",
         -- Inspect card
         "inspectShowEnchants", "inspectShowItemLevel", "inspectShowUpgradeTrack",
         -- LFG / Merchant cards
@@ -2039,6 +2066,170 @@ function EllesmereUI.EncodePayload(payload)
     local compressed = LibDeflate:CompressDeflate(serialized)
     local encoded = LibDeflate:EncodeForPrint(compressed)
     return EXPORT_PREFIX .. encoded
+end
+
+-------------------------------------------------------------------------------
+--  FULL ACCOUNT EXPORT  (separate format, purely additive)
+--
+--  A string that carries the WHOLE central store: every account-global key
+--  plus the ACTIVE profile. The recipient ends up with the exporter's entire
+--  setup, including everything a normal profile string deliberately refuses
+--  to carry -- HoverCast bindings, CDM spell assignments, Quality of Life
+--  account settings, unlock anchors and size matches, UI scale, profile
+--  keybinds, spec assignments, first-install state.
+--
+--  It shares NOTHING with ExportProfile / ImportProfile: no include toggles,
+--  no per-module filtering, no canonical re-keying, no store merging, no
+--  partial/override stamps. Those functions are untouched and never see a
+--  full-account payload -- the import UI routes on the `fullExport` stamp
+--  before the normal flow is reached.
+--
+--  The builder copies the store WHOLESALE and subtracts, rather than listing
+--  what to include: any account key added in a future version rides
+--  automatically instead of being silently missed.
+--
+--  Excluded by design -- per-character data that is nobody else's:
+--    dataBarsGold         cross-character gold ledger
+--    qolUpgradeCalcChars  Upgrade Calculator per-character cache
+--  (The same two blobs PRIVATE_ADDON_KEYS strips from normal strings, at
+--  their current top-level homes.)
+-------------------------------------------------------------------------------
+local FULL_EXPORT_TYPE = "fullaccount"
+local FULL_EXPORT_EXCLUDED = {
+    dataBarsGold        = true,
+    qolUpgradeCalcChars = true,
+}
+
+--- Builds a full-account export string, or nil.
+function EllesmereUI.ExportFullAccountData()
+    if not EllesmereUIDB then return nil end
+    if not LibDeflate then return nil end
+    -- Same freshness boundary the profile export uses: bank live override
+    -- edits into their stores before snapshotting.
+    if EllesmereUI.SpecOverrides_HarvestCurrent then
+        EllesmereUI.SpecOverrides_HarvestCurrent()
+    end
+    local db = GetProfilesDB()
+    local activeName = db.activeProfile or "Default"
+    local out = {}
+    for k, v in pairs(EllesmereUIDB) do
+        if k ~= "profiles" and not FULL_EXPORT_EXCLUDED[k] then
+            out[k] = DeepCopy(v)
+        end
+    end
+    -- ONLY the active profile travels; the exporter's other profiles are
+    -- their own business and would overwrite same-named profiles on import.
+    out.profiles = {}
+    local prof = db.profiles and db.profiles[activeName]
+    if prof then
+        local copy = DeepCopy(prof)
+        -- Freshen profile-global appearance and the unlock layout from live,
+        -- mirroring what ExportProfile does for the active profile -- but on
+        -- the COPY. A full export never mutates stored data.
+        copy.fonts        = DeepCopy(EllesmereUI.GetFontsDB())
+        copy.customColors = DeepCopy(EllesmereUI.GetCustomColorsDB())
+        copy.darkMode     = DeepCopy(EllesmereUI.GetDarkModeDB())
+        copy.unlockLayout = SnapshotUnlockLayout()
+        -- Recipient-local import bookkeeping never rides a string.
+        copy._importEstablishPending = nil
+        -- The gold ledger and Upgrade Calculator cache also have LEGACY homes
+        -- inside the module profile blobs (see PRIVATE_ADDON_KEYS); an older
+        -- profile can still carry them there, and they are excluded from a
+        -- full export at every address they have ever lived at.
+        StripPrivateAddonData(copy.addons)
+        out.profiles[activeName] = copy
+    end
+    out.activeProfile = activeName
+    out.profileOrder  = { activeName }
+    local payload = {
+        version     = 3,
+        type        = FULL_EXPORT_TYPE,
+        fullExport  = true,     -- the routing stamp the import flow reads
+        profileName = activeName,
+        data        = out,
+    }
+    local serialized = Serializer.Serialize(payload)
+    local compressed = LibDeflate:CompressDeflate(serialized)
+    return EXPORT_PREFIX .. LibDeflate:EncodeForPrint(compressed)
+end
+
+--- True for a decoded payload produced by ExportFullAccountData. The import
+--- UI checks this BEFORE handing anything to the normal profile flow.
+function EllesmereUI.IsFullAccountPayload(payload)
+    return type(payload) == "table"
+        and (payload.fullExport == true or payload.type == FULL_EXPORT_TYPE)
+end
+
+--- Applies a full-account payload and reloads. Replaces every account-global
+--- key the string carries and installs its profile, then reloads so every
+--- module rebuilds from the new store. Caller owns the confirmation.
+function EllesmereUI.ImportFullAccountData(payload)
+    if not EllesmereUI.IsFullAccountPayload(payload) then return false end
+    local data = payload.data
+    if type(data) ~= "table" or not EllesmereUIDB then return false end
+    local activeName = data.activeProfile or payload.profileName or "Default"
+
+    -- 1) Account globals, wholesale. profiles/profileOrder/activeProfile are
+    --    handled below; the excluded per-character blobs are refused on the
+    --    way IN as well, so a hand-edited string cannot plant a gold ledger.
+    for k, v in pairs(data) do
+        if k ~= "profiles" and k ~= "profileOrder" and k ~= "activeProfile"
+           and not FULL_EXPORT_EXCLUDED[k] then
+            EllesmereUIDB[k] = DeepCopy(v)
+        end
+    end
+
+    -- 2) The carried profile. The recipient's OTHER profiles survive; a
+    --    same-named profile is replaced (that is the import).
+    if type(EllesmereUIDB.profiles) ~= "table" then EllesmereUIDB.profiles = {} end
+    if type(data.profiles) == "table" then
+        for name, pdata in pairs(data.profiles) do
+            local copy = DeepCopy(pdata)
+            -- Legacy per-profile homes of the excluded blobs (see the export
+            -- side): refused on the way in too.
+            StripPrivateAddonData(copy.addons)
+            EllesmereUIDB.profiles[name] = copy
+        end
+    end
+    if type(EllesmereUIDB.profiles[activeName]) ~= "table" then
+        EllesmereUIDB.profiles[activeName] = {}
+    end
+
+    -- 3) Order list: keep the recipient's and append, never replace -- a
+    --    wholesale copy would drop their own profiles out of the picker.
+    local order = EllesmereUIDB.profileOrder
+    if type(order) ~= "table" then order = {}; EllesmereUIDB.profileOrder = order end
+    local listed = false
+    for _, n in ipairs(order) do
+        if n == activeName then listed = true; break end
+    end
+    if not listed then order[#order + 1] = activeName end
+    EllesmereUIDB.activeProfile = activeName
+
+    -- 4) Re-point the live db objects at the imported profile's tables before
+    --    reloading. Lite's PLAYER_LOGOUT write-back copies every db.profile
+    --    into profiles[activeProfile].addons[folder]; still pointing at the
+    --    OLD tables it would overwrite the freshly imported blobs with the
+    --    recipient's current values on the way out. Pointer swap ONLY -- no
+    --    defaults merge, no sync handoff, no module refresh: the reload
+    --    rebuilds all of that from the imported store.
+    local registry = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry
+    if registry then
+        local pdata = EllesmereUIDB.profiles[activeName]
+        if type(pdata.addons) ~= "table" then pdata.addons = {} end
+        for _, dbo in ipairs(registry) do
+            if dbo.folder then
+                if type(pdata.addons[dbo.folder]) ~= "table" then
+                    pdata.addons[dbo.folder] = {}
+                end
+                dbo.profile = pdata.addons[dbo.folder]
+                dbo._profileName = activeName
+            end
+        end
+    end
+
+    ReloadUI()
+    return true
 end
 
 --[[ ADDON-SPECIFIC EXPORT DISABLED
@@ -2672,6 +2863,17 @@ local function BuildImportedCDMSpellBucket(profileName, activeName, incomingSpec
     end
     bucket.specProfiles = inherited
     if type(incomingSpecs) ~= "table" then return end
+    -- Import-authoritative ghosting is computed against the player's LIVE
+    -- Blizzard CDM tracked set (viewer pools + category API). That set is only
+    -- guaranteed settled after a reload, and the ghost pass is a ONE-SHOT that
+    -- stamps _barFilterModelV6 the first time it succeeds -- so a pass that
+    -- runs against a mid-change tracked set writes a permanently wrong ghost
+    -- list. Runtime-only flag (dies with the session) telling the pass to wait
+    -- for a later session. The interactive import flow never noticed because
+    -- its caller ReloadUI()s in the same frame ImportProfile returns, which
+    -- kills the queued reanchor that would have run the pass; a caller that
+    -- defers its reload (installer wizards) gets the pass mid-session instead.
+    if EllesmereUI then EllesmereUI._cdmImportGhostDeferred = true end
     for specKey, specProf in pairs(DeepCopy(incomingSpecs)) do
         bucket.specProfiles[specKey] = specProf
         if type(specProf) == "table" then

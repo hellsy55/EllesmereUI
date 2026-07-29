@@ -5715,6 +5715,18 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip = "Only show this bar while the tracked buff/cooldown is active. Turn off to keep an empty bar on screen at all times." }
         );  y = y - h
 
+        -- Only In Combat | empty
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Only In Combat",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.onlyInCombat == true end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.onlyInCombat = v and true or false; RefreshTBB()
+              end,
+              tooltip = "Hide this bar completely while out of combat, even when the tracked buff/cooldown is active." },
+            { type = "label", text = "" }
+        );  y = y - h
+
         -----------------------------------------------------------------------
         --  EXTRAS
         -----------------------------------------------------------------------
@@ -6089,6 +6101,14 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     local growValues = { RIGHT = "Right", LEFT = "Left", DOWN = "Down", UP = "Up" }
     local growOrder  = { "RIGHT", "LEFT", "DOWN", "UP" }
+    local durationPositionValues = {
+        center = "Center",
+        top = "Above Icon",
+        bottom = "Below Icon",
+        left = "Left of Icon",
+        right = "Right of Icon",
+    }
+    local durationPositionOrder = { "center", "top", "bottom", "left", "right" }
 
     -- Track which bar is selected in the CDM Bars tab
     local selectedCDMBarIndex = 1
@@ -6211,6 +6231,11 @@ initFrame:SetScript("OnEvent", function(self)
             for _, region in ipairs({ slot._previewCD:GetRegions() }) do
                 if region:GetObjectType() == "FontString" then
                     SetPVFont(region, fontPath, fSize)
+                    if ns.AnchorCooldownText then
+                        ns.AnchorCooldownText(region, slot._previewCD,
+                            bd.cooldownTextPosition or "center",
+                            bd.cooldownTextX or 0, bd.cooldownTextY or 0)
+                    end
                     break
                 end
             end
@@ -8839,6 +8864,7 @@ initFrame:SetScript("OnEvent", function(self)
                         if (tonumber(t.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
                         if t.maxStacksGlow and t.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
                         if t.desatNotActive then ns._cdmAnyDesatNotActive = true end
+                        if t.noDesatOnCD then ns._cdmAnyNoDesatOnCD = true end
                         if t.chargeHideCdText then ns._cdmAnyChargeHideCdText = true end
                         if t.chargeHideSwipe or t.hideRechargeEdge then ns._cdmAnyChargeStyle = true end
                         if t.cdReadySoundKey and t.cdReadySoundKey ~= "none" then ns._cdmAnyCdReadySound = true end
@@ -10890,6 +10916,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 or valChanged(ss.cooldownFontSize, (b and b.cooldownFontSize) or 12)
                                 or colChanged(ss.cooldownTextR, ss.cooldownTextG, ss.cooldownTextB,
                                     (b and b.cooldownTextR) or 1, (b and b.cooldownTextG) or 1, (b and b.cooldownTextB) or 1)
+                                or valChanged(ss.cooldownTextPosition, (b and b.cooldownTextPosition) or "center")
                                 or valChanged(ss.cooldownTextX, (b and b.cooldownTextX) or 0)
                                 or valChanged(ss.cooldownTextY, (b and b.cooldownTextY) or 0)
                         end, function(row)
@@ -10910,6 +10937,10 @@ initFrame:SetScript("OnEvent", function(self)
                                     { type="colorpicker", label="Color",
                                       get=function() return ss.cooldownTextR or (cdmBd and cdmBd.cooldownTextR) or 1, ss.cooldownTextG or (cdmBd and cdmBd.cooldownTextG) or 1, ss.cooldownTextB or (cdmBd and cdmBd.cooldownTextB) or 1 end,
                                       set=function(r, g, b) EnsureSS(); ss.cooldownTextR = r; ss.cooldownTextG = g; ss.cooldownTextB = b; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
+                                    { type="dropdown", label="Position",
+                                      values=durationPositionValues, order=durationPositionOrder,
+                                      get=function() return ss.cooldownTextPosition or (cdmBd and cdmBd.cooldownTextPosition) or "center" end,
+                                      set=function(v) EnsureSS(); ss.cooldownTextPosition = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
                                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                                       get=function() return ss.cooldownTextX or (cdmBd and cdmBd.cooldownTextX) or 0 end,
                                       set=function(v) EnsureSS(); ss.cooldownTextX = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
@@ -11285,6 +11316,10 @@ initFrame:SetScript("OnEvent", function(self)
                             { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
                             { val = "buttonGlowReady", label = "Button Glow (CD Ready)" },
                         }
+                        local KEEP_COLORED_ITEMS = {
+                            { val = nil,  label = "None" },
+                            { val = true, label = "Keep Colored (On CD)" },
+                        }
 
                         -- Right-aligned colour swatch on a subnav item.
                         local function MakeColorSwatch(si, getR, getG, getB, onChanged)
@@ -11352,6 +11387,28 @@ initFrame:SetScript("OnEvent", function(self)
                                                 t.cdStateLowerAlpha = nil
                                             end
                                         end } })
+
+                        -- Cooldown Saturation (preset / custom): mirror of the
+                        -- regular-spell row. These icons are greyed by the
+                        -- Fake-Active engine rather than by Blizzard, so the runtime
+                        -- reads this key in PresetKeepsColor instead of the
+                        -- SetDesaturated hook -- same setting, same key name.
+                        MakeSubnavRow("Cooldown Saturation", KEEP_COLORED_ITEMS,
+                            function()
+                                local v = cas.noDesatOnCD
+                                if v == false then v = nil end  -- blocked slot value = None
+                                return v and true or nil
+                            end,
+                            function(v)
+                                SetCasOwn("noDesatOnCD", v or nil)
+                                if v then ns._cdmAnyNoDesatOnCD = true end
+                                if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                                if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                            end,
+                            function() return not cas.noDesatOnCD end,
+                            nil,
+                            { apply = { keys = { "noDesatOnCD" },
+                                        write = function(t, v) t.noDesatOnCD = v or false end } })
 
                         -- Threshold Text (preset / custom): decimals / color change
                         -- on this icon's countdowns (item/spell cooldown and the
@@ -11832,11 +11889,14 @@ initFrame:SetScript("OnEvent", function(self)
                     -- 3. Active State Glow (default = nil / none)
                     local glowRow = MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
                         function() return ss.activeGlow end,
-                        function(v) EnsureSS(); SetOwn("activeGlow", v) end,
+                        function(v) EnsureSS(); SetOwn("activeGlow", v); if v and v > 0 then ns._cdmAnyActiveGlow = true end end,
                         function() return ss.activeGlow == nil end,
                         nil,
                         { apply = { keys = { "activeGlow" },
-                                    write = function(t, v) t.activeGlow = v end } })
+                                    write = function(t, v)
+                                        t.activeGlow = v
+                                        if v and v > 0 then ns._cdmAnyActiveGlow = true end
+                                    end } })
                     if isCustomInjected and glowRow then
                         glowRow:SetAlpha(0.35)
                         glowRow:SetScript("OnEnter", function()
@@ -11894,6 +11954,37 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end)
                         nonActiveRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
+                    -- 3c. Cooldown Saturation (default = nil / none). Suppresses the
+                    -- grey-out Blizzard applies while the spell is on cooldown --
+                    -- grouped with Non Active State above because both own the
+                    -- icon's saturation.
+                    local KEEP_COLORED_ITEMS = {
+                        { val = nil,  label = "None" },
+                        { val = true, label = "Keep Colored (On CD)" },
+                    }
+                    local cdSatRow = MakeSubnavRow("Cooldown Saturation", KEEP_COLORED_ITEMS,
+                        function() return ss.noDesatOnCD and true or nil end,
+                        function(v)
+                            EnsureSS(); SetOwn("noDesatOnCD", v or nil)
+                            if v then ns._cdmAnyNoDesatOnCD = true end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.noDesatOnCD == nil end,
+                        nil,
+                        { apply = { keys = { "noDesatOnCD" },
+                                    write = function(t, v) t.noDesatOnCD = v or false end } })
+                    if isCustomInjected and cdSatRow then
+                        cdSatRow:SetAlpha(0.35)
+                        cdSatRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(cdSatRow, customDisabledTip)
+                            end
+                        end)
+                        cdSatRow:SetScript("OnLeave", function()
                             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                         end)
                     end
@@ -15987,7 +16078,13 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI:ShowCDMSpecPickerPopup({
                     title       = "Sync Generic CDs/Buffs",
-                    subtitle    = "Choose which specs sync with " .. srcName .. " (the source is always included)",
+                    -- The grid lists every class, not just the one being played,
+                    -- so an alt's specs are ticked from here. Saying so matters:
+                    -- a profile is shared across characters, and without this
+                    -- the only visible reading is "specs of this character".
+                    -- Kept to one line: the subtitle has room for two before it
+                    -- runs into the Check All / Uncheck All row.
+                    subtitle    = "Choose which specs sync with " .. srcName .. ", including your alts' specs (the source is always included)",
                     confirmText = "Sync",
                     specs       = specs,
                     lockedSpecs = { [sourceKey] = "This is the spec you're syncing from -- it's always included." },
@@ -15996,13 +16093,22 @@ initFrame:SetScript("OnEvent", function(self)
                         local cnt = 0
                         for _, v in pairs(selectedSpecs) do if v then cnt = cnt + 1 end end
                         if cnt <= 1 then
-                            -- Only the source picked -> nothing to sync; clear any sync.
+                            -- Only the source picked -> nothing to sync; clear any
+                            -- sync. Say so: this silently discarded an existing
+                            -- sync, and confirming with one spec ticked is the
+                            -- natural first guess at "sync FROM this spec".
                             if ns.ClearRPTSync then ns.ClearRPTSync() end
+                            EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Sync cleared -- only one spec was selected. Tick at least two specs (including other characters' specs) to sync between them.")
                             EllesmereUI:RefreshPage(true)
                             return
                         end
                         if ns.SetupRPTSync then ns.SetupRPTSync(selectedSpecs, sourceKey) end
                         if ns.FullCDMRebuild then ns.FullCDMRebuild("profile_import") end
+                        -- Which bar each entry sits on is synced; its SLOT is
+                        -- not, so every spec keeps its own ordering. Reported as
+                        -- a bug ("some were right, some were wrong order"), so
+                        -- it is stated where the subtitle has no room for it.
+                        EllesmereUI.Print(("|cff0cd29fEllesmereUI CDM:|r Syncing generic CDs/buffs across %d specs. Icon order is not synced -- each spec keeps its own arrangement."):format(cnt))
                         EllesmereUI:RefreshPage(true)
                     end,
                 })
@@ -16037,7 +16143,10 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, v in pairs(selectedSpecs) do if v then cnt = cnt + 1 end end
                     if cnt <= 1 then
                         -- One or zero specs left -> nothing to sync; clear it.
+                        -- Announced for the same reason as the setup path: the
+                        -- sync is discarded here, not merely left unchanged.
                         if ns.ClearRPTSync then ns.ClearRPTSync() end
+                        EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Sync cleared -- fewer than two specs remained selected.")
                         EllesmereUI:RefreshPage(true)
                         return
                     end
@@ -18667,6 +18776,13 @@ initFrame:SetScript("OnEvent", function(self)
                           BD().showCooldownText = v
                           ns.RefreshCDMIconAppearance(BD().key); Refresh(); EllesmereUI:RefreshPage()
                       end },
+                    { type="dropdown", label="Position",
+                      values=durationPositionValues, order=durationPositionOrder,
+                      get=function() return BD().cooldownTextPosition or "center" end,
+                      set=function(v)
+                          BD().cooldownTextPosition = v
+                          ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                      end },
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return BD().cooldownTextX or 0 end,
                       set=function(v)
@@ -18718,11 +18834,23 @@ initFrame:SetScript("OnEvent", function(self)
             local _, scCogShow = EllesmereUI.BuildCogPopup({
                 title = "Charge/Stack Text",
                 rows = {
-                    { type="toggle", label="Show Item Count",
-                      get=function() return BD().showItemCount ~= false end,
+                    -- View over the legacy showItemCount boolean (Never = false,
+                    -- Always = true/nil) plus the itemCountOOC flag for the new
+                    -- Out of Combat mode. OOC keeps showItemCount = true so every
+                    -- legacy reader treats it as "on"; the combat gate lives in
+                    -- the icon restyle. Zero migration.
+                    { type="dropdown", label="Show Item Count",
+                      values={ never="Never", always="Always", ooc="Out of Combat" },
+                      order={ "never", "always", "ooc" },
+                      get=function()
+                          if BD().itemCountOOC then return "ooc" end
+                          return (BD().showItemCount ~= false) and "always" or "never"
+                      end,
                       set=function(v)
-                          BD().showItemCount = v
-                          ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                          local bd = BD()
+                          bd.itemCountOOC = (v == "ooc") or nil
+                          bd.showItemCount = (v ~= "never")
+                          ns.RefreshCDMIconAppearance(bd.key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                       end },
                     { type="dropdown", label="Position",
                       values={ bottomright="Bottom Right", bottom="Bottom", bottomleft="Bottom Left", left="Left", topleft="Top Left", top="Top", topright="Top Right", right="Right", center="Center" },
@@ -18861,6 +18989,22 @@ initFrame:SetScript("OnEvent", function(self)
                 })
                 MakeCogBtn(leftRgn, pgCogShow, nil, EllesmereUI.RESIZE_ICON)
             end
+        end
+
+        -- Charges/Stacks Only (cd/utility bars) -- the counterpart to the buff
+        -- bars' "Only Show Numbers" above. Strips the icon down to its charge /
+        -- stack counter: art, swipe, recharge edge and cooldown text all go.
+        if not isBuffGlowBar
+           and (barData.barType == "cooldowns" or barData.barType == "utility") then
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Charges/Stacks Only (No Icon)",
+                  tooltip="Hide this bar's icon art, cooldown swipe, recharge edge and cooldown text, leaving only the charge or stack count.",
+                  getValue=function() return BD().chargesOnly == true end,
+                  setValue=function(v)
+                      BD().chargesOnly = v and true or nil
+                      ns.BuildAllCDMBars(); Refresh()
+                  end },
+                { type="label", text="" });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 8);  y = y - h

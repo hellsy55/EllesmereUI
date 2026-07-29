@@ -54,7 +54,12 @@ local EDIT_R, EDIT_G, EDIT_B = 1, 0.72, 0.2
 local GOLD_R, GOLD_G, GOLD_B = 199/255, 166/255, 90/255
 
 local PROFILES_MODULE = "_EUIProfiles"
-local LIST_PAGE = "Spec Overrides"
+-- The management tab under Profiles & Presets. Both override list pages live
+-- behind this ONE tab now (a segmented toggle at the top of the page picks
+-- which builder renders); the page builders themselves stayed separate, so
+-- every SelectPage target and "am I on the list page?" check just follows
+-- this constant.
+local LIST_PAGE = "Overrides"
 
 -- Modules excluded wholesale: CDM has its own native per-spec system; the
 -- rest are account/character-level UI (window skins, social, bags, chat,
@@ -64,6 +69,17 @@ local LIST_PAGE = "Spec Overrides"
 -- PruneOrphanEntries (strips persisted paths + drops emptied entries).
 local FOLDER_BLACKLIST = {
     EllesmereUIBlizzardSkin      = true,
+    -- The Skyriding HUD registers its own sub-DB (EllesmereUIDragonRidingDB)
+    -- from inside BlizzardSkin, so its registry folder dodges the
+    -- BlizzardSkin entry above. A width-match write to its width key was
+    -- auto-captured into a user's CDM Icon Scale override; the per-spec
+    -- apply then touched a folder with no REFRESH_FNS entry, and the
+    -- unmapped-folder fallback escalated EVERY such apply into a full
+    -- RefreshAllAddons -- spec-changed event traffic after combat became
+    -- minutes of continuous full-suite refresh (the 2026-07 post-combat
+    -- lag storm). Blacklisting blocks both future captures and the apply
+    -- of already-banked entries; a migration strips those from stores.
+    EllesmereUIDragonRiding      = true,
     EllesmereUIDamageMeters      = true,
     EllesmereUIMythicTimer       = true,
     EllesmereUIQuestTracker      = true,
@@ -100,6 +116,10 @@ local REFRESH_FNS = {
     EllesmereUIDamageMeters      = { "_EDM_Apply" },
     EllesmereUIDataBars          = { "_EDB_Apply" },
     EllesmereUIAuraBuffReminders = { "_EABR_RequestRefresh", "_EABR_ApplyUnlockPos" },
+    -- Folder is capture/apply-blacklisted (see FOLDER_BLACKLIST); this entry
+    -- is insurance so a key that slips through any future path can never hit
+    -- the unmapped-folder fallback and escalate into a full RefreshAllAddons.
+    EllesmereUIDragonRiding      = { "_EDR_Rebuild" },
 }
 
 -- Class glyph sprite (toolbar button) + modern class sprite (group icons)
@@ -1141,8 +1161,16 @@ function EllesmereUI.SpecOverrides_HarvestCurrent()
     -- would diff-clear the spec's entire map (every value equals its
     -- default). Fall through to the _defaultView branch below instead; it
     -- re-banks the defaults and restores the spec's values.
+    -- noRecheck: this is shared banking plumbing (logout, export, profile
+    -- switch), never "the user finished editing". A conditional transition
+    -- resolved from here would run ApplyUnlock, whose flush is scheduled two
+    -- frames out -- at LOGOUT it never lands, leaving the advanced active
+    -- pointer to early-out the next login's apply with the module position
+    -- stores still on the OLD layer. The session's values still bank
+    -- (Cond.HarvestEdit inside); only the flip waits for the next login or
+    -- event.
     if EllesmereUI._CondOv and EllesmereUI._CondOv._edit then
-        EllesmereUI._CondOv.ExitEdit()
+        EllesmereUI._CondOv.ExitEdit(nil, true)
         if not _defaultView then
             Harvest(_activeSpec or CurrentSpecID())
             return
@@ -2622,7 +2650,7 @@ function EllesmereUI.Conditions_EnterUnlockForGroup(g)
         if EllesmereUI.Conditions_Recheck then EllesmereUI.Conditions_Recheck() end
         if GetUnlockStore().active ~= ("cond:" .. g.id) then return end
     end
-    if _editGroup then ExitGroupEdit() end
+    if _editGroup then ExitGroupEdit(true) end
     local panel = EllesmereUI._mainFrame
     if panel and panel:IsShown() then panel:Hide() end
     C_Timer.After(0, function()
@@ -2723,7 +2751,7 @@ function EllesmereUI.SpecOverrides_EnterUnlockForGroup(g)
     end
     -- Editing-as and unlock sessions never coexist. Banking the panel
     -- session first also restores canonical live values.
-    if _editGroup then ExitGroupEdit() end
+    if _editGroup then ExitGroupEdit(true) end
     local panel = EllesmereUI._mainFrame
     if panel and panel:IsShown() then panel:Hide() end
     C_Timer.After(0, function()
@@ -3067,6 +3095,43 @@ function Cond.WriteValues(gid, forSession)
         end
     end
     return touched
+end
+
+--- Writes an entry's recorded DEFAULT values back to live. Called right
+--- BEFORE a conditional entry is removed: a conditional's values sit in the
+--- live profile for as long as its condition holds -- including while the
+--- options panel is open, because the Default Editing Mode swap covers the
+--- SPEC store only (see EnterDefaultView / WriteDefaultValues). Drop the
+--- entry without this and nothing can ever write the default back: the
+--- override's values silently become the profile's own settings. The spec
+--- delete flow needs no equivalent (with the panel open live already holds
+--- the shared defaults); its one path that CAN hit this -- the orphan drop
+--- in PruneOrphanEntries -- carries the same restore.
+--- Guards mirror Cond.WriteValues exactly, so this only ever writes keys the
+--- conditional overlay itself could have written: blacklisted paths and
+--- match-owned size keys are never applied from here, a SPEC-owned fkey
+--- belongs to the spec system (spec wins at runtime -- live is its value,
+--- not ours), an unloaded module cannot be written, and a NIL_SENT marker on
+--- a defaults-backed key is harvest residue, not a real removal.
+--- touched: folder-set accumulator; the caller refreshes once.
+function Cond.RestoreEntryDefaults(entry, touched)
+    local def = entry.values and entry.values.default
+    if not def then return end
+    for fkey, dv in pairs(def) do
+        if not BlacklistedFKey(fkey) and not MatchOwnedFKey(fkey)
+           and not EntryOwning(fkey) and FKeyLoaded(fkey) then
+            local v = (dv == NIL_SENT) and nil or dv
+            local nilPoison = (v == nil) and HasRegisteredDefault(fkey)
+            local cur = ReadLive(fkey)
+            if not nilPoison and type(v) ~= "table" and type(cur) ~= "table"
+               and cur ~= v then
+                if WriteLive(fkey, v) then
+                    local folder = SplitFKey(fkey)
+                    if folder then touched[folder] = true end
+                end
+            end
+        end
+    end
 end
 
 --- Garbage-collects conditional fkeys no group map holds a value for (the
@@ -3635,8 +3700,15 @@ end
 --- retries on its next signal (spec Apply tail calls Conditions_Recheck).
 local _condBusy = false   -- re-entrancy latch (see below)
 
+-- _defaultView is deliberately NOT a refusal reason: the engine steps OUT of
+-- the Default view for the duration of a real flip (Conditions_Recheck ->
+-- SpecOverrides_SuspendDefaultView) and back in once the applied pointer has
+-- advanced, so live is canonical here exactly as it is on every other
+-- boundary. Refusing instead stranded the flip whenever the panel was open --
+-- which, for the Dark Mode condition, is ALWAYS (its only inputs are options
+-- widgets). See SpecOverrides_SuspendDefaultView for the full failure story.
 function EllesmereUI.SpecOverrides_CondTransition(oldGid, newGid, establish)
-    if _inTransition or _editGroup or _defaultView or Cond._edit then return false end
+    if _inTransition or _editGroup or Cond._edit then return false end
     -- NON-RE-ENTRANT: the refresh fan-out below can reach RefreshAllAddons
     -- (unmapped-folder fallback, module internals), whose tail calls
     -- Conditions_MarkStale + Recheck -- re-entering this handler mid-flight
@@ -4832,7 +4904,55 @@ ExitDefaultView = function(restore)
     UpdateIndicator()
 end
 
-ExitGroupEdit = function()
+--- Steps OUT of the Default view for the duration of a CONDITIONAL flip, and
+--- back in afterwards. Returns true when the view was actually suspended (the
+--- caller must then resume it).
+---
+--- Why: SpecOverrides_CondTransition used to REFUSE while the Default view was
+--- up, and the Dark Mode condition's only inputs -- the two Fonts & Colors
+--- masters and the Unit Frames / Raid Frames dark toggles -- all live INSIDE
+--- the options panel, so a dark-mode flip was raised with the view up every
+--- single time and was therefore ALWAYS deferred. Nothing re-drives a deferred
+--- flip when the panel closes (only a zone change, roster update, combat end
+--- or /reload does), so it could stay pending for a whole configuration
+--- session. While pending, the outgoing conditional stayed APPLIED and kept
+--- reporting itself as the applied group, so every later bank (Cond.Harvest
+--- through HarvestCurrent at logout / export / profile switch) attributed the
+--- user's plain baseline edits to that override's map instead of the recorded
+--- defaults -- and the moment the flip finally converged, Cond.WriteValues(nil)
+--- repainted the untouched recorded defaults straight over them. The edits
+--- were not corrupted, they were filed under an override that was no longer
+--- active: "changes made after toggling Dark Mode off never save unless you
+--- /reload first". Toggling ON was only cosmetic (the overlay simply never
+--- applied), which is exactly the reported asymmetry.
+---
+--- Suspending is the same shape a SPEC transition already uses: the view banks
+--- its edits and restores canonical live values on the way out
+--- (OnSpecChanged / HarvestCurrent), and SpecOverrides_Apply's tail re-enters
+--- it. Resuming AFTER the engine's applied pointer advances is load-bearing:
+--- EnterDefaultView harvests through HarvestCurrent, which resolves the
+--- applied gid -- re-entering first would bank the INCOMING conditional's live
+--- values into the OUTGOING group's maps.
+function EllesmereUI.SpecOverrides_SuspendDefaultView()
+    if not _defaultView then return false end
+    ExitDefaultView()
+    return true
+end
+
+function EllesmereUI.SpecOverrides_ResumeDefaultView()
+    if PanelShown() then EnterDefaultView() end
+end
+
+--- noRecheck: this exit is a PREAMBLE inside another operation (entering a
+--- different session, a membership/delete rewrite, opening unlock mode, a
+--- profile apply) rather than the user finishing. Those callers drive their
+--- own choreography and must not have a conditional transition wedged into
+--- the middle of it -- most sharply the unlock and profile paths, where the
+--- transition's ApplyUnlock schedules its flush TWO FRAMES out
+--- (ScheduleUnlockFlush) and it would land inside unlock mode's snapshot
+--- window, or after a profile swap has already refilled the live tables.
+--- Mirror of Cond.ExitEdit's own noRecheck.
+ExitGroupEdit = function(noRecheck)
     if not _editGroup then return end
     WatchTick()   -- catch trailing edits from the last sub-tick window
     local g = _editGroup
@@ -4849,6 +4969,12 @@ ExitGroupEdit = function()
     RequestGoldWalk()
     -- Back to Default Editing Mode: the open panel returns to the baseline.
     if PanelShown() then EnterDefaultView() end
+    -- A condition flip raised mid-session was deferred (the transition handler
+    -- bails while an editing-as session holds swapped values live); resolve it
+    -- now, exactly like Cond.ExitEdit's tail.
+    if not noRecheck and EllesmereUI.Conditions_Recheck then
+        EllesmereUI.Conditions_Recheck()
+    end
 end
 
 --- Force-closes every editing-as session (spec group, conditional, Default
@@ -4871,8 +4997,18 @@ function EllesmereUI.SpecOverrides_CloseEditSessions()
             _unlockRoundtrip = { kind = "cond", id = Cond._edit.id }
         end
     end
-    if _editGroup and ExitGroupEdit then ExitGroupEdit() end
-    if Cond._edit and Cond.ExitEdit then Cond.ExitEdit() end
+    if _editGroup and ExitGroupEdit then ExitGroupEdit(true) end
+    -- noRecheck: every caller here drives its own choreography and must NOT
+    -- have a conditional transition wedged into the middle of it. A deferred
+    -- flip resolved from this exit would run ApplyUnlock, whose flush is
+    -- scheduled TWO FRAMES out (ScheduleUnlockFlush) -- on the profile
+    -- apply/switch callers that lands AFTER the live tables are wiped and
+    -- refilled, writing the OUTGOING profile's layer geometry into the
+    -- INCOMING profile's module stores (the audit's finding-19 shape). Not
+    -- stranding: the profile paths run Conditions_MarkStale + Recheck
+    -- immediately after the swap, unlock open re-resolves on close, and
+    -- PromoteGroupToProfile ends in a ReloadUI.
+    if Cond._edit and Cond.ExitEdit then Cond.ExitEdit(nil, true) end
     if _defaultView and ExitDefaultView then ExitDefaultView() end
 end
 
@@ -4897,8 +5033,10 @@ EnterGroupEdit = function(group)
             return
         end
     end
-    if _editGroup then ExitGroupEdit() end
-    if Cond.ExitEdit then Cond.ExitEdit() end   -- sessions never coexist
+    -- Preamble teardown, not the user finishing: no conditional recheck (a
+    -- deferred flip resolves at the session end that actually ends editing).
+    if _editGroup then ExitGroupEdit(true) end
+    if Cond.ExitEdit then Cond.ExitEdit(nil, true) end   -- sessions never coexist
     -- Leave the Default view (banks default edits, restores spec values),
     -- then bank the real spec's live edits and swap the group in.
     ExitDefaultView()
@@ -5008,7 +5146,9 @@ end
 --- written back first -- the session swapped shared defaults over the
 --- spec-owned fkeys, and the transition's Harvest(oldSpec) must bank real
 --- spec values, never the session's default baseline.
-Cond.ExitEdit = function(noRestore)
+--- noRecheck: the caller drives its own choreography and must not have a
+--- conditional transition interleaved (see SpecOverrides_CloseEditSessions).
+Cond.ExitEdit = function(noRestore, noRecheck)
     if not Cond._edit then return end
     WatchTick()   -- catch trailing edits from the last sub-tick window
     -- Release the Buff Manager session swap FIRST: banks the session's BM
@@ -5039,7 +5179,9 @@ Cond.ExitEdit = function(noRestore)
         if PanelShown() then EnterDefaultView() end
         -- A condition flip that occurred mid-session was deferred (the
         -- transition handler bails during edit sessions); resolve it now.
-        if EllesmereUI.Conditions_Recheck then EllesmereUI.Conditions_Recheck() end
+        if not noRecheck and EllesmereUI.Conditions_Recheck then
+            EllesmereUI.Conditions_Recheck()
+        end
     end
     -- noRestore: store writes only -- the transition applies + refreshes.
     if Cond.UpdateButton then Cond.UpdateButton() end
@@ -5067,8 +5209,10 @@ Cond.EnterEdit = function(g)
             return
         end
     end
-    if Cond._edit then Cond.ExitEdit() end
-    if _editGroup then ExitGroupEdit() end
+    -- Preamble teardown, not the user finishing: no conditional recheck (a
+    -- deferred flip resolves at the session end that actually ends editing).
+    if Cond._edit then Cond.ExitEdit(nil, true) end
+    if _editGroup then ExitGroupEdit(true) end
     -- The session's baseline is the SHARED DEFAULT view: a conditional is
     -- its own override system layered on the defaults, so a fresh one must
     -- look exactly like "no overrides" -- never like the current spec's
@@ -5667,7 +5811,7 @@ end
 -- baseline on their next apply). The live profile re-syncs immediately so a
 -- current-spec join/leave takes effect without a spec swap.
 local function SetGroupSpecs(g, newSpecs)
-    if _editGroup == g then ExitGroupEdit() end
+    if _editGroup == g then ExitGroupEdit(true) end
     local oldSet, newSet = {}, {}
     for _, id in ipairs(g.specs or {}) do oldSet[id] = true end
     for _, id in ipairs(newSpecs) do newSet[id] = true end
@@ -5899,7 +6043,7 @@ RefreshCardsPopup = function()
                     confirmText = L("Delete"),
                     cancelText = L("Cancel"),
                     onConfirm = function()
-                        if _editGroup == g then ExitGroupEdit() end
+                        if _editGroup == g then ExitGroupEdit(true) end
                         local groups = GetGroups()
                         if groups then
                             for i, gg in ipairs(groups) do
@@ -6055,9 +6199,22 @@ RefreshCardsPopup = function()
                         end
                         local st = Cond.GetStore()
                         if st then
+                            -- Put each entry's recorded default back on the
+                            -- live profile BEFORE dropping it. While this
+                            -- conditional is applied its values ARE the live
+                            -- values (the Default view swap covers the spec
+                            -- store only), and a removed entry has no writer
+                            -- left -- the override's values would silently
+                            -- become the profile's settings. Value-equal
+                            -- no-op when the group was not applied.
+                            local touched = {}
                             for i = #st, 1, -1 do
-                                if st[i].group == g.id then table.remove(st, i) end
+                                if st[i].group == g.id then
+                                    Cond.RestoreEntryDefaults(st[i], touched)
+                                    table.remove(st, i)
+                                end
                             end
+                            if next(touched) then RunRefreshers(touched) end
                         end
                         Cond.RebuildIndex()
                         if EllesmereUI.Conditions_RemoveUnlockLayout then
@@ -6074,10 +6231,15 @@ RefreshCardsPopup = function()
                         if EllesmereUI.Conditions_Recheck then EllesmereUI.Conditions_Recheck() end
                         RequestGoldWalk()
                         RefreshCardsPopup()
-                        local ap = EllesmereUI.GetActivePage and EllesmereUI:GetActivePage()
-                        if ap == LIST_PAGE or ap == "Conditional Overrides" then
-                            EllesmereUI:RefreshPage(true)
-                        end
+                        -- FORCED rebuild, on EVERY page -- not just the two
+                        -- management tabs. Deleting an APPLIED conditional
+                        -- changes live values (the default restore above,
+                        -- plus the transition's own writes for surviving
+                        -- entries), so open widgets are showing the deleted
+                        -- override's values until they re-read. Forced
+                        -- because restored values can change page STRUCTURE
+                        -- too, exactly like the session exits.
+                        if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
                     end,
                 })
             end,
@@ -6357,7 +6519,7 @@ function Cond.ShowNameIconPopup(conds, keyStr, existing)
             if newGroup then Cond.EnterEdit(newGroup) end
             Cond.UpdateButton()
             Cond.RefreshCards()
-            if EllesmereUI.GetActivePage and EllesmereUI:GetActivePage() == "Conditional Overrides" then
+            if EllesmereUI.GetActivePage and EllesmereUI:GetActivePage() == LIST_PAGE then
                 EllesmereUI:RefreshPage(true)
             end
         end)
