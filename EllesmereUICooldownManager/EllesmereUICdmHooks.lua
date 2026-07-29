@@ -3873,8 +3873,7 @@ ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 -- the only available bridge between them. Built on first use and dropped on
 -- talent change, since the override it feeds is talent-dependent.
 local _bookByName
-local function BookIDForName(name)
-    if type(name) ~= "string" or name == "" then return nil end
+local function EnsureBookNameMap()
     if not _bookByName then
         local built = {}
         local ok = pcall(function()
@@ -3896,9 +3895,19 @@ local function BookIDForName(name)
         if not ok then built = {} end
         _bookByName = built
     end
-    return _bookByName[name]
+    return _bookByName
+end
+local function BookIDForName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    return EnsureBookNameMap()[name]
 end
 ns.WipeCdmBookNameCache = function() _bookByName = nil end
+ns.CdmBookIDForName = BookIDForName
+ns.CdmBookNameCount = function()
+    local n = 0
+    for _ in pairs(EnsureBookNameMap()) do n = n + 1 end
+    return n
+end
 
 local function ResolvePlaceholderIconSID(sid, cdID)
     local FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
@@ -3936,11 +3945,28 @@ local function ResolvePlaceholderIconSID(sid, cdID)
     -- link). Bridge to the castable by name and take ITS live override, which is
     -- where the replacement actually shows up. Costs one spellbook scan per
     -- talent change and is a no-op for anyone without a replacing talent.
-    local nm = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+    local NameOf = C_Spell and C_Spell.GetSpellName
+    local nm = NameOf and NameOf(sid)
     local castable = BookIDForName(nm)
     if castable then
         local o = FO(castable)
         if type(o) == "number" and o > 0 and o ~= castable then return o end
+    end
+
+    -- The spellbook lists the REPLACEMENT rather than the base, so a replaced
+    -- spell's name can be absent from it entirely and the lookup above finds
+    -- nothing to follow. In that case the test inverts: when a LINKED variant's
+    -- name is in the book and this slot's own name is not, the linked form is
+    -- what the player actually casts. Requiring the slot's name to be absent
+    -- keeps this from firing while both forms are available.
+    if info and info.linkedSpellIDs and not castable then
+        for _, lid in ipairs(info.linkedSpellIDs) do
+            if type(lid) == "number" and lid > 0
+               and not (issecretvalue and issecretvalue(lid))
+               and BookIDForName(NameOf and NameOf(lid)) then
+                return lid
+            end
+        end
     end
     return sid
 end

@@ -9643,7 +9643,9 @@ SlashCmdList.CDMBUFFID = function(msg)
     end
 
     local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-    P("=== DEFAULT BUFFS BAR ID PROBE (spec " .. tostring(specKey) .. ") ===")
+    -- Bump on every probe change: an unchanged dump is otherwise ambiguous
+    -- between "the fix did nothing" and "the new file never loaded".
+    P("=== DEFAULT BUFFS BAR ID PROBE (spec " .. tostring(specKey) .. ") probe=v4 ===")
 
     -- A. Stored order state for the buffs bar (what reorder would manipulate).
     local sd = ns.GetBarSpellData and ns.GetBarSpellData("buffs")
@@ -9704,6 +9706,29 @@ SlashCmdList.CDMBUFFID = function(msg)
         end
         P(string.format("  placeholder icon bridge: %d of %d entr%s resolve to a replacing spell",
             nBridged, #entries, nBridged == 1 and "y" or "ies"))
+
+        -- Why a non-bridge happened. The bridge resolves an aura NAME against the
+        -- spellbook, so when it silently does nothing the useful facts are how
+        -- many names the scan saw and what each variant's name looked up to. A
+        -- scan count of 0 means the walk itself failed; a name that maps to
+        -- nothing means the book lists the replacement under a different name.
+        if ns.CdmBookNameCount and ns.CdmBookIDForName then
+            P(string.format("  spellbook name map: %d names", ns.CdmBookNameCount()))
+            for i, e in ipairs(entries) do
+                local info = e.cdID ~= nil and gci and gci(e.cdID) or nil
+                if info and info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+                    local parts = {}
+                    local function Look(id, tag)
+                        local nm2 = NM(id)
+                        parts[#parts + 1] = string.format("%s %s(%s)->book=%s",
+                            tag, SN(id), tostring(nm2), SN(ns.CdmBookIDForName(nm2)))
+                    end
+                    Look(e.sid, "self")
+                    for _, lid in ipairs(info.linkedSpellIDs) do Look(lid, "link") end
+                    P("    [" .. i .. "] " .. table.concat(parts, "  "))
+                end
+            end
+        end
     end
 
     -- B2. Focused identity battery: /cdmbuffid <cdID|spellID>.
