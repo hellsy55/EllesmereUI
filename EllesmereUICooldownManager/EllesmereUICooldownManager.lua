@@ -9711,23 +9711,36 @@ SlashCmdList.CDMBUFFID = function(msg)
     -- WHICH linked form the player currently has. This runs every identity API
     -- against the slot's ids and one level of expansion, so the answer is visible
     -- rather than guessed. Prints only this section to keep the output readable.
-    local focus = tonumber(msg and msg:match("%d+") or nil)
-    if focus then
+    local focusList
+    if msg then
+        for n in msg:gmatch("%d+") do
+            focusList = focusList or {}
+            focusList[#focusList + 1] = tonumber(n)
+        end
+    end
+    if focusList then
         local GB  = C_Spell and C_Spell.GetBaseSpell
         local GOS = C_Spell and C_Spell.GetOverrideSpell
         local FO  = C_SpellBook and C_SpellBook.FindSpellOverrideByID
-        P(ACCENT .. "=== IDENTITY BATTERY for " .. focus .. " ===" .. OFF)
+        P(ACCENT .. "=== IDENTITY BATTERY for " .. table.concat(focusList, ", ") .. " ===" .. OFF)
 
         -- Hero talent tree: the whole question is whether the replacing talent is
         -- active, so state it outright instead of inferring it from ids.
+        -- GetSubTreeInfo needs the ACTIVE config id; passing nil silently yields
+        -- nothing, which is why an earlier run could only print the raw number.
         local heroName
         if C_ClassTalents and C_ClassTalents.GetActiveHeroTalentSpec then
             local ok, hid = pcall(C_ClassTalents.GetActiveHeroTalentSpec)
             if ok and hid then
                 heroName = tostring(hid)
-                if C_Traits and C_Traits.GetSubTreeInfo then
-                    local ok2, st = pcall(C_Traits.GetSubTreeInfo, nil, hid)
-                    if ok2 and st and st.name then heroName = st.name .. " (" .. hid .. ")" end
+                local cfg
+                if C_ClassTalents.GetActiveConfigID then
+                    local ok2, c = pcall(C_ClassTalents.GetActiveConfigID)
+                    if ok2 then cfg = c end
+                end
+                if cfg and C_Traits and C_Traits.GetSubTreeInfo then
+                    local ok3, st = pcall(C_Traits.GetSubTreeInfo, cfg, hid)
+                    if ok3 and st and st.name then heroName = st.name .. " (" .. hid .. ")" end
                 end
             end
         end
@@ -9740,19 +9753,27 @@ SlashCmdList.CDMBUFFID = function(msg)
             queue[#queue + 1] = { id = id, why = why }
         end
 
-        local info = gci and gci(focus)
-        if info then
-            P("  (treated as a cooldownID)")
-            Push(info.spellID, "info.spellID")
-            Push(info.overrideSpellID, "info.overrideSpellID")
-            if info.linkedSpellIDs then
-                for _, lid in ipairs(info.linkedSpellIDs) do Push(lid, "linkedSpellID") end
+        -- Each argument is a cooldownID if the viewer knows it, else a raw
+        -- spellID. Passing castable ids explicitly is the point: an aura id has
+        -- no API path back to the spell that applies it, so the castable form
+        -- (Immolate 348 / Wither 445468) can only enter the set by hand.
+        for _, focus in ipairs(focusList) do
+            local info = gci and gci(focus)
+            if info then
+                P("  " .. focus .. " -> cooldownID")
+                Push(info.spellID, "info.spellID of " .. focus)
+                Push(info.overrideSpellID, "info.overrideSpellID of " .. focus)
+                if info.linkedSpellIDs then
+                    for _, lid in ipairs(info.linkedSpellIDs) do
+                        Push(lid, "linkedSpellID of " .. focus)
+                    end
+                end
+                local esid = enumSidByCdID[focus]
+                if esid then Push(esid, "enumerated sid of " .. focus) end
+            else
+                P("  " .. focus .. " -> spellID")
+                Push(focus, "argument")
             end
-            local esid = enumSidByCdID[focus]
-            if esid then Push(esid, "enumerated sid") end
-        else
-            P("  (treated as a spellID)")
-            Push(focus, "argument")
         end
 
         -- One level of expansion: the castable form that owns a replacement often
@@ -9771,13 +9792,26 @@ SlashCmdList.CDMBUFFID = function(msg)
             local isPlayer = IsPlayerSpell and IsPlayerSpell(id)
             local known    = C_SpellBook and C_SpellBook.IsSpellKnown
                              and C_SpellBook.IsSpellKnown(id)
-            local tag = isPlayer and (GOOD .. " PLAYERSPELL" .. OFF) or ""
-            P(string.format("  %s (%s) [%s]  base=%s ovr=%s findOvr=%s player=%s known=%s%s",
+            -- The one that survives a replacement: a base spell the player no
+            -- longer has still reports true here when its override IS known.
+            local knownOvr
+            if C_SpellBook and C_SpellBook.IsSpellKnownOrOverridesKnown then
+                local ok, v = pcall(C_SpellBook.IsSpellKnownOrOverridesKnown, id)
+                if ok then knownOvr = v end
+            end
+            local inBook
+            if C_SpellBook and C_SpellBook.FindSpellBookSlotForSpell then
+                local ok, v = pcall(C_SpellBook.FindSpellBookSlotForSpell, id)
+                if ok and v then inBook = true end
+            end
+            local tag = (isPlayer or knownOvr or inBook) and (GOOD .. " <<HAVE IT" .. OFF) or ""
+            P(string.format("  %s (%s) [%s]  base=%s ovr=%s findOvr=%s player=%s known=%s knownOrOvr=%s book=%s%s",
                 SN(id), NM(id), e.why,
                 SN(GB and GB(id)), SN(GOS and GOS(id)), SN(FO and FO(id)),
-                tostring(isPlayer or false), tostring(known or false), tag))
+                tostring(isPlayer or false), tostring(known or false),
+                tostring(knownOvr or false), tostring(inBook or false), tag))
         end
-        P("  " .. DIM .. "Read: which id is PLAYERSPELL is the form the bar should paint." .. OFF)
+        P("  " .. DIM .. "Read: the id tagged HAVE IT is the form the bar should paint." .. OFF)
         P(ACCENT .. "=== END BATTERY ===" .. OFF)
         return
     end
