@@ -6128,3 +6128,9 @@ L["Style each filter: icon rows, glows, bars, health color"] = "自定义每个�
 L["Got It"] = "知道了"
 L["Find them in Raid Frames: Buff Manager & Debuff Manager."] = "在团队框架中找到它们：增益管理器和减益管理器。"
 L["|cff00ff98EllesmereUI:|r Managers intro reset. The announcement popup fires on your next /reload."] = "|cff00ff98EllesmereUI：|r 管理器介绍已重置。公告弹窗将在您下次/reload时显示。"
+-- Chat: sidebar and input field
+L["INPUT FIELD"] = "输入框"
+L["Sidebar Width"] = "侧边栏宽度"
+L["Edit Box Height"] = "输入框高度"
+L["Edit Box Font"] = "输入框字体"
+L["Edit Box Font Size"] = "输入框字体大小"

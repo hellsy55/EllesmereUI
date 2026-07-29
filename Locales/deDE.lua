@@ -5193,5 +5193,12 @@ L["~%dx  Myth Crest"]  = "~%dx  Wappen des Mythos"
 L["~%dx  Myth Crest\r\n|cff888888Scan at Upgrader for exact costs|r"] = "~%dx  Wappen des Mythos\r\n|cff888888Beim Aufwerter scannen für exakte Kosten|r"
 L["~%dx  Veteran Crest"]  = "~%dx  Wappen des Veterans"
 L["~%dx  Veteran Crest\r\n|cff888888Scan at Upgrader for exact costs|r"] = "~%dx  Wappen des Veterans\r\n|cff888888Beim Aufwerter scannen für exakte Kosten|r"
-
-
+-- Chat: sidebar and input field
+L["INPUT FIELD"] = "EINGABEFELD"
+L["Sidebar Width"] = "Breite der Seitenleiste"
+L["Sidebar Spacing"] = "Abstand der Seitenleiste"
+L["Edit Box Height"] = "Höhe des Eingabefelds"
+L["Edit Box Font"] = "Schriftart des Eingabefelds"
+L["Edit Box Font Size"] = "Schriftgröße des Eingabefelds"
+L["Separate Sidebar"] = "Separate Seitenleiste"
+L["Separates the sidebar from the chat panel and gives it its own background and border."] = "Trennt die Seitenleiste vom Chatfenster und gibt ihr einen eigenen Hintergrund und Rahmen."
