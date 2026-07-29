@@ -2711,6 +2711,18 @@ function ns.RepaintAssistIcons()
                                 icon:SetTexture(tex or GetActionTexture(action))
                                 icon:SetShown(true)
                             end
+                            -- This button's cooldown/charges mirror the
+                            -- suggested spell, so a suggestion change is a
+                            -- content change for THIS button and no other:
+                            -- paint ITS swipe now (two C calls, and immune to
+                            -- the nil-_gcdGen pre-first-cast corner the memo
+                            -- compare has) and drop ITS memos so the next
+                            -- natural walk reconciles charges/desat. Never a
+                            -- bar-wide invalidation or a forced full walk for
+                            -- a one-button change (see ns._ArmAssistTicker).
+                            fd.pushGen = nil
+                            fd.visGen = nil
+                            ns.ForceCooldownPaint(btn)
                         end
                     end
                 end
@@ -2738,26 +2750,26 @@ function ns._ArmAssistTicker()
                 and C_AssistedCombat.GetNextCastSpell()
             if nextSpell ~= ns._assistLastSuggest then
                 ns._assistLastSuggest = nextSpell
+                local prof = ns._evProf
+                if prof then prof["<SuggestChange>"] = (prof["<SuggestChange>"] or 0) + 1 end
                 local n = ns.RepaintAssistIcons()
                 -- Suggestion moved: the shine may need to follow it too.
                 if ns.QueueAssistRescan then ns.QueueAssistRescan() end
-                -- The assist slot's cooldown/charges mirror the SUGGESTED
-                -- spell, so a suggestion change is also a cooldown-content
-                -- change -- the old slot spam fired UPDATE_COOLDOWN in the
-                -- same beat, which is why swipes never lagged before. Open
-                -- the walk gates and run one synthetic cooldown pass now
-                -- (same re-dispatch pattern as the flush timers). Fires only
-                -- on real suggestion changes (~once per rotation step).
-                ns._cdWalkNext = 0
-                ns._cdCountNext = 0
+                -- The assist slot's cooldown mirrors the SUGGESTED spell, so
+                -- a suggestion change is a cooldown-content change for that
+                -- ONE button -- and RepaintAssistIcons just painted its swipe
+                -- directly (ForceCooldownPaint) and dropped its memos. The
+                -- dirty bump below keeps the walker out of idle sleep so the
+                -- next NATURAL walk (<=0.5s mid-storm via the trailing flush,
+                -- <=1s via the idle heartbeat) reconciles its charges/desat.
+                -- Nothing here may invalidate or force work bar-wide: the old
+                -- _gcdGen bump + synthetic full walk + count-pass reset ran a
+                -- second ~140-button storm every GCD on top of the cast's own
+                -- (profiled 8% vs 5% CPU over two minutes of chain-casting vs
+                -- manual rotation; item stacks don't move on suggestion flips,
+                -- so the assist Count text riding the normal ~2s sub-pass is
+                -- correct too).
                 ns._cdDirtyUntil = GetTime() + 2
-                -- New cast-generation: the per-button push memo assumes cd
-                -- content only changes on casts; the assist slot's content
-                -- just changed WITHOUT one, so force a re-push this walk.
-                ns._gcdGen = (ns._gcdGen or 0) + 1
-                local d = ns._cdDispatcher
-                local h = d and d:GetScript("OnEvent")
-                if h then h(d, "ACTIONBAR_UPDATE_COOLDOWN") end
                 if n == 0 then return false end  -- assist left the bars: self-disarm
             end
             return true
@@ -3090,6 +3102,9 @@ do
         -- per-button overhead. With 60 populated buttons, the mixin path
         -- caused visible frame drops on high-frequency events.
         dispatcher:SetScript("OnEvent", function(_, event, arg1)
+            -- /eabprof capture: one nil-check per event while disarmed.
+            local prof = ns._evProf
+            if prof then prof[event] = (prof[event] or 0) + 1 end
             -- Idle sleep for the ~1/sec ACTIONBAR_UPDATE_COOLDOWN heartbeat
             -- (bisect-verified: walking 140 settled buttons per heartbeat was
             -- ALL of ActionBars' idle CPU). The cooldown walk runs only while
@@ -3132,6 +3147,43 @@ do
                     return
                 end
                 ns._stWalkNext = now + 0.3
+            end
+            -- ICON rate cap. SPELL_UPDATE_ICON is a broadcast, and its walk
+            -- is the heaviest in the dispatcher (full mixin UpdateAction per
+            -- button, ~140 buttons, plus the glow frame's rescan rides the
+            -- same event) -- yet it was the ONLY broadcast with no dedupe
+            -- and no cap. /eabprof captures during the One Button Assist
+            -- CPU report showed ZERO fires on a warrior, so this was NOT
+            -- that report's cause -- the cap stays as insurance for the
+            -- setups where the event does storm (form/override morphs,
+            -- spell-morph procs). 0.5s cap + trailing flush so the final
+            -- icon state always paints. Deliberately NO cast-gate reset
+            -- (unlike COOLDOWN/STATE): morph storms are cast-adjacent, so a
+            -- cast-reset would defeat the cap, and the assist slot's icon
+            -- (the one that must track the rotation beat-for-beat) is
+            -- painted directly by RepaintAssistIcons, never this branch.
+            if event == "SPELL_UPDATE_ICON" then
+                local now = GetTime()
+                local nextAt = ns._icoWalkNext or 0
+                if now < nextAt then
+                    if not ns._icoFlushArmed then
+                        ns._icoFlushArmed = true
+                        if not ns._icoFlushFn then
+                            -- Built under this AB-born entry (timer callbacks
+                            -- bill their closure's creation context).
+                            ns._icoFlushFn = function()
+                                ns._icoFlushArmed = nil
+                                ns._icoWalkNext = 0
+                                local d = ns._cdDispatcher
+                                local h = d and d:GetScript("OnEvent")
+                                if h then h(d, "SPELL_UPDATE_ICON") end
+                            end
+                        end
+                        C_Timer.After((nextAt - now) + 0.02, ns._icoFlushFn)
+                    end
+                    return
+                end
+                ns._icoWalkNext = now + 0.5
             end
             -- Same-frame dedupe for the pure-repaint events: one cast fires
             -- COOLDOWN/USABLE/STATE several times in the same frame (cast +
@@ -3255,6 +3307,9 @@ do
             if event == "ACTIONBAR_SLOT_CHANGED" and ns.QueueAssistRescan then
                 ns.QueueAssistRescan()
             end
+            -- /eabprof: time the walk loop for events that got this far
+            -- (capped/deduped fires returned above and cost near-nothing).
+            local _profT0 = prof and debugprofilestop()
             for _, info in ipairs(BAR_CONFIG) do
                 if not info.isStance and not info.isPetBar then
                     local btns = barButtons[info.key]
@@ -3644,6 +3699,10 @@ do
                         end
                     end
                 end
+            end
+            if _profT0 then
+                local k = "ms:" .. event
+                prof[k] = (prof[k] or 0) + (debugprofilestop() - _profT0)
             end
             -- Settled-detection: after a full (unskipped) heartbeat walk with
             -- nothing live, the walks stop until re-armed by activity.
@@ -4756,6 +4815,8 @@ local function MakeButtonSquare(btn)
         hooksecurefunc(btn, "UpdateAssistedCombatRotationFrame", function(self)
             -- Fires at Blizzard's combat cadence while a rotation action is on
             -- a bar: change-guard so steady-state fires cost only the reads.
+            local prof = ns._evProf
+            if prof then prof["<RotHook>"] = (prof["<RotHook>"] or 0) + 1 end
             local rtf = self.AssistedCombatRotationFrame
             if rtf and EFD(self).squared then
                 local s = (self:GetWidth() or 45) / 45
@@ -8291,8 +8352,13 @@ function EAB:HookProcGlow()
     -- on every mouseover flip and fire ACTIONBAR_SLOT_CHANGED storms (dozens per
     -- second sweeping across nameplates). One pending scan covers the whole burst.
     local _glowRescanPending = false
+    local _glowLastScan = 0
     local function GlowRescan()
         _glowRescanPending = false
+        _glowLastScan = GetTime()
+        local prof = ns._evProf
+        if prof then prof["<GlowRescan>"] = (prof["<GlowRescan>"] or 0) + 1 end
+        local _t0 = prof and debugprofilestop()
         -- Clear glows that no longer match, add new ones
         for btn in pairs(_procState.active) do
             local id = GetButtonSpellID(btn)
@@ -8311,14 +8377,23 @@ function EAB:HookProcGlow()
                 end
             end
         end
+        if _t0 then prof["ms:<GlowRescan>"] = (prof["ms:<GlowRescan>"] or 0) + (debugprofilestop() - _t0) end
     end
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
         if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" or event == "SPELL_UPDATE_ICON" then
             -- Defer re-scan: the bar may not have finished paging yet
             -- when the event fires, so slot->spell mappings are stale.
+            -- Min 0.25s between scans on top of the coalescing: the assist
+            -- slot's re-stamp storm (SLOT_CHANGED + SPELL_UPDATE_ICON while
+            -- One Button Assist is in use) otherwise queued a full
+            -- IsSpellOverlayed walk every frame it fired. An isolated event
+            -- still scans next frame, and the trailing scan always sees the
+            -- storm's final state. Proc glow edges stay instant via the
+            -- dedicated GLOW_SHOW/HIDE events below.
             if not _glowRescanPending then
                 _glowRescanPending = true
-                C_Timer_After(0, GlowRescan)
+                local elapsed = GetTime() - _glowLastScan
+                C_Timer_After(elapsed >= 0.25 and 0 or (0.25 - elapsed), GlowRescan)
             end
             return
         end
@@ -8471,6 +8546,9 @@ do
     end
 
     local function UpdateAssistHighlights()
+        local prof = ns._evProf
+        if prof then prof["<AssistRescan>"] = (prof["<AssistRescan>"] or 0) + 1 end
+        local _t0 = prof and debugprofilestop()
         if not AssistCVarOn() then
             for btn in pairs(_assistGlowed) do
                 AssistHide(btn)
@@ -8528,6 +8606,7 @@ do
             if not newSet[btn] then AssistHide(btn) end
         end
         _assistGlowed = newSet
+        if _t0 then prof["ms:<AssistRescan>"] = (prof["ms:<AssistRescan>"] or 0) + (debugprofilestop() - _t0) end
     end
     ns.UpdateAssistHighlights = UpdateAssistHighlights
 
@@ -10184,6 +10263,40 @@ function EAB:OnInitialize()
         if EllesmereUI and EllesmereUI.ShowModule then
             EllesmereUI:ShowModule("EllesmereUIActionBars")
         end
+    end
+
+    -- Diagnostic event-rate capture for cast-time CPU reports: counts
+    -- dispatcher events plus the assist-path entry points (<RotHook>,
+    -- <GlowRescan>, <AssistRescan>, <SuggestChange>) for 10 seconds, then
+    -- prints per-second rates. Zero cost while disarmed (one nil-check per
+    -- counted site). Run it, fight for 10s, read the dump.
+    SLASH_EABPROF1 = "/eabprof"
+    SlashCmdList["EABPROF"] = function()
+        if ns._evProf then
+            print("|cff00c0ffEAB|r event capture already running")
+            return
+        end
+        local t = {}
+        ns._evProf = t
+        print("|cff00c0ffEAB|r capturing event rates for 10s...")
+        C_Timer.After(10, function()
+            ns._evProf = nil
+            local rows = {}
+            for k, v in pairs(t) do rows[#rows + 1] = { k, v } end
+            table.sort(rows, function(a, b) return a[2] > b[2] end)
+            print("|cff00c0ffEAB|r event rates over 10s:")
+            if #rows == 0 then
+                print("  (no events captured)")
+            end
+            for i = 1, #rows do
+                local k, v = rows[i][1], rows[i][2]
+                if k:find("^ms:") then
+                    print(("  %s: %.1f ms total (%.2f ms/sec)"):format(k, v, v / 10))
+                else
+                    print(("  %s: %d (%.1f/sec)"):format(k, v, v / 10))
+                end
+            end
+        end)
     end
 
     SLASH_EABQUICKKEYBIND1 = "/kb"
