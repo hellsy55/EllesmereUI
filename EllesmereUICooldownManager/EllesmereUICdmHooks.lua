@@ -3852,6 +3852,142 @@ local function HideAllInjectedCustomBuffs()
 end
 ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 
+-- Spellbook name -> first known castable id with that name. A tracked-buff slot
+-- holds AURA ids, and an aura carries no link back to the spell that applies it
+-- (every identity API is a fixed point on it), while the CASTABLE side is where
+-- the talent override lives. An aura and its caster share a name, so the book is
+-- the only available bridge between them. Built on first use and dropped on
+-- talent change, since the override it feeds is talent-dependent.
+--
+-- An EMPTY result is treated as "not built yet" rather than cached: the first
+-- placeholder can resolve before the spellbook is populated at login, and
+-- caching that would strand the bridge until the next talent change. A real
+-- character always has spells, so empty only ever means too early. A pcall
+-- failure IS cached, since a missing API will not start working.
+local _bookByName
+local function EnsureBookNameMap()
+    if not _bookByName then
+        local built = {}
+        local ok = pcall(function()
+            local nLines = C_SpellBook.GetNumSpellBookSkillLines()
+            for i = 1, (nLines or 0) do
+                local li = C_SpellBook.GetSpellBookSkillLineInfo(i)
+                if li and li.itemIndexOffset and li.numSpellBookItems then
+                    for j = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
+                        local it = C_SpellBook.GetSpellBookItemInfo(j, Enum.SpellBookSpellBank.Player)
+                        local bsid = it and it.spellID
+                        if bsid then
+                            local nm = C_Spell.GetSpellName(bsid)
+                            if nm and built[nm] == nil then built[nm] = bsid end
+                        end
+                    end
+                end
+            end
+        end)
+        if not ok then
+            _bookByName = {}
+        elseif next(built) then
+            _bookByName = built
+        else
+            return built  -- too early; retry on the next call
+        end
+    end
+    return _bookByName
+end
+local function BookIDForName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    return EnsureBookNameMap()[name]
+end
+ns.WipeCdmBookNameCache = function() _bookByName = nil end
+ns.CdmBookIDForName = BookIDForName
+ns.CdmBookNameCount = function()
+    local n = 0
+    for _ in pairs(EnsureBookNameMap()) do n = n + 1 end
+    return n
+end
+
+-- Resolve the spell whose ICON an inactive placeholder should paint.
+--
+-- An ACTIVE buff frame renders the live aura, so a talent that REPLACES a spell
+-- shows the replacement (Hellcaller: Wither). An INACTIVE frame has no aura to
+-- read and falls back to cooldownInfo, which still names the pre-talent spell,
+-- so the same icon changes art as the aura comes and goes.
+--
+-- Two ways a replacement can show up, tried in order:
+--   1. Something in the slot's identity set (resolved id, cooldownInfo's base,
+--      override or linked ids) is itself overridden. Covers CASTABLE-keyed slots.
+--   2. Nothing is overridden, the normal state for a tracked-buff slot, because
+--      it holds AURA ids and an aura carries no override even when a talent
+--      replaces the spell behind it (Destruction's Immolate slot resolves to
+--      aura 157736, reports overrideSpellID == spellID, and merely LISTS Wither's
+--      aura 445474 as a link). Fall back to the spellbook, matching by name.
+--
+-- Returns sid untouched when neither applies, which is every spec without a
+-- replacing talent. Callers use the result for ART ONLY: identity, pooling and
+-- settings resolution stay keyed on the original id.
+local function ResolvePlaceholderIconSID(sid, cdID)
+    local FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+    if not FO or type(sid) ~= "number" or sid <= 0 then return sid end
+    if issecretvalue and issecretvalue(sid) then return sid end
+
+    local function TryID(id)
+        if type(id) ~= "number" or id <= 0 then return nil end
+        if issecretvalue and issecretvalue(id) then return nil end
+        local o = FO(id)
+        if type(o) == "number" and o > 0 and o ~= id then return o end
+        return nil
+    end
+
+    local hit = TryID(sid)
+    if hit then return hit end
+
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    local info = (cdID ~= nil and gci) and gci(cdID) or nil
+    if info then
+        hit = TryID(info.spellID) or TryID(info.overrideSpellID)
+        if hit then return hit end
+        if info.linkedSpellIDs then
+            for _, lid in ipairs(info.linkedSpellIDs) do
+                hit = TryID(lid)
+                if hit then return hit end
+            end
+        end
+    end
+
+    -- Nothing in the slot is overridden, which is the normal state for a
+    -- tracked-buff slot: it holds aura ids, and auras carry no override even
+    -- when a talent replaces the spell behind them (Hellcaller's Immolate slot
+    -- reports overrideSpellID == spellID and merely LISTS Wither's aura as a
+    -- link). Bridge to the castable by name and take ITS live override, which is
+    -- where the replacement actually shows up. Costs one spellbook scan per
+    -- talent change and is a no-op for anyone without a replacing talent.
+    local NameOf = C_Spell and C_Spell.GetSpellName
+    local nm = NameOf and NameOf(sid)
+    local castable = BookIDForName(nm)
+    if castable then
+        local o = FO(castable)
+        if type(o) == "number" and o > 0 and o ~= castable then return o end
+    end
+
+    -- The spellbook lists the REPLACEMENT rather than the base, so a replaced
+    -- spell's name can be absent from it entirely and the lookup above finds
+    -- nothing to follow. In that case the test inverts: when a LINKED variant's
+    -- name is in the book and this slot's own name is not, the linked form is
+    -- what the player actually casts. Requiring the slot's name to be absent
+    -- keeps this from firing while both forms are available.
+    if info and info.linkedSpellIDs and not castable then
+        for _, lid in ipairs(info.linkedSpellIDs) do
+            if type(lid) == "number" and lid > 0
+               and not (issecretvalue and issecretvalue(lid))
+               and BookIDForName(NameOf and NameOf(lid)) then
+                return lid
+            end
+        end
+    end
+    return sid
+end
+ns.ResolvePlaceholderIconSID = ResolvePlaceholderIconSID
+
 -- identKey: optional pooling identity, defaulting to spellID. Buff
 -- placeholders pass one so two viewer slots that collide on spellID do not
 -- share a single pooled frame (see the collision note at the call site).
@@ -3896,6 +4032,10 @@ local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID, identKey)
         f:SetScript("OnLeave", GameTooltip_Hide)
         _placeholderFrames[fkey] = f
     end
+    -- Re-assert on reuse: a pooled frame outlives a talent swap, so the id it
+    -- was created with can name the pre-talent spell (its tooltip would still
+    -- read Immolate on a Hellcaller Wither slot).
+    f._phSpellID = spellID
     if iconID then f._tex:SetTexture(iconID) end
     return f
 end
@@ -4911,8 +5051,17 @@ local function CollectAndReanchor()
                                         local phKey = "ph:" .. tostring(phIdent)
                                         if not barSeen[phKey] then
                                             barSeen[phKey] = true
-                                            local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(realSID)
-                                            local ph = GetOrCreatePlaceholderFrame(targetBar, realSID, icon, phIdent)
+                                            -- Paint the form the ACTIVE frame would show, so a
+                                            -- replacing talent (Hellcaller's Wither) does not
+                                            -- flip art as the aura comes and goes. Pooling and
+                                            -- dedup stay keyed on realSID/phIdent.
+                                            local dispSID = ResolvePlaceholderIconSID(realSID, dedupKey)
+                                            local _GetTex = C_Spell and C_Spell.GetSpellTexture
+                                            local icon = _GetTex and _GetTex(dispSID)
+                                            if not icon and _GetTex and dispSID ~= realSID then
+                                                icon = _GetTex(realSID)
+                                            end
+                                            local ph = GetOrCreatePlaceholderFrame(targetBar, dispSID, icon, phIdent)
                                             -- Per-spell missing-visibility mark (our own
                                             -- frame): "hidden" renders alpha-0 via the
                                             -- opacity passes while the slot stays

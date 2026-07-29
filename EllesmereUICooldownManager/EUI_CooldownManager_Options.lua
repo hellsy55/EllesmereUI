@@ -6345,6 +6345,25 @@ initFrame:SetScript("OnEvent", function(self)
         return sid
     end
 
+    -- Texture-only sibling. A tracked-buff slot holds AURA ids, which carry no
+    -- override even when a talent replaces the spell behind them, so the icon
+    -- needs the shared resolver's spellbook bridge (and the slot's cdID, without
+    -- which that resolver cannot reach the linked ids carrying the replacement).
+    --
+    -- Deliberately NOT folded into ResolveToLive: that one also feeds
+    -- learned-state and catalog membership tests, including the keep/drop pass
+    -- for stored spells. A bridged id compared against those sets could drop a
+    -- spell from a saved bar, so the wider identity stays untouched and only the
+    -- art moves.
+    local function ResolveIconArt(sid, cdID)
+        if not sid or sid <= 0 then return sid end
+        if ns.ResolvePlaceholderIconSID then
+            local live = ns.ResolvePlaceholderIconSID(sid, cdID)
+            if type(live) == "number" and live > 0 then return live end
+        end
+        return ResolveToLive(sid)
+    end
+
     local function EnsureAssignedSpells(barKeyE)
         local sd = ns.GetBarSpellData(barKeyE)
         if not sd then return sd end
@@ -15546,7 +15565,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end
                             if type(csid) == "number" and csid > 0 then
-                                local displayID = ResolveToLive(csid)
+                                local displayID = ResolveIconArt(csid, cdClaim)
                                 tex = C_Spell.GetSpellTexture(displayID)
                                 if not tex and displayID ~= csid then
                                     tex = C_Spell.GetSpellTexture(csid)
@@ -15559,7 +15578,7 @@ initFrame:SetScript("OnEvent", function(self)
                             -- Hosted-buff marker: previews as its spell, flagged so
                             -- the per-icon menu takes the buff branch while the same
                             -- id's cooldown slot keeps the cd/util one.
-                            local displayID = ResolveToLive(hostedSid)
+                            local displayID = ResolveIconArt(hostedSid)
                             tex = C_Spell.GetSpellTexture(displayID)
                             if not tex and displayID ~= hostedSid then
                                 tex = C_Spell.GetSpellTexture(hostedSid)
@@ -15576,7 +15595,7 @@ initFrame:SetScript("OnEvent", function(self)
                             tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                         else
                             -- Resolve to live override for texture lookup.
-                            local displayID = ResolveToLive(id)
+                            local displayID = ResolveIconArt(id, slot._previewCdID)
                             tex = C_Spell.GetSpellTexture(displayID)
                             if not tex and displayID ~= id then
                                 tex = C_Spell.GetSpellTexture(id)

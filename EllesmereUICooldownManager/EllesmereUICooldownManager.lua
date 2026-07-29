@@ -8964,6 +8964,9 @@ local function ScheduleTalentRebuild()
         -- renders on which bar. A full CDM rebuild + reanchor below picks
         -- up the new routing.
         if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
+        -- The placeholder icon bridge reads the spellbook, and a talent swap is
+        -- exactly what changes which form a name resolves to.
+        if ns.WipeCdmBookNameCache then ns.WipeCdmBookNameCache() end
         -- Clear cached viewer child info so the next tick re-reads from API
         -- (overrideSpellID may have changed with the new talent set)
         for _, vname in ipairs(_cdmViewerNames) do
@@ -9618,7 +9621,7 @@ end
 -------------------------------------------------------------------------------
 SLASH_CDMBUFFID1 = "/cdmbuffid"
 SLASH_CDMBUFFID2 = "/cdmbid"
-SlashCmdList.CDMBUFFID = function()
+SlashCmdList.CDMBUFFID = function(msg)
     local ACCENT = "|cff0cd29f"
     local DIM    = "|cff7f7f7f"
     local BAD    = "|cffff5555"
@@ -9640,7 +9643,9 @@ SlashCmdList.CDMBUFFID = function()
     end
 
     local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-    P("=== DEFAULT BUFFS BAR ID PROBE (spec " .. tostring(specKey) .. ") ===")
+    -- Bump on every probe change: an unchanged dump is otherwise ambiguous
+    -- between "the fix did nothing" and "the new file never loaded".
+    P("=== DEFAULT BUFFS BAR ID PROBE (spec " .. tostring(specKey) .. ") probe=v4 ===")
 
     -- A. Stored order state for the buffs bar (what reorder would manipulate).
     local sd = ns.GetBarSpellData and ns.GetBarSpellData("buffs")
@@ -9660,6 +9665,12 @@ SlashCmdList.CDMBUFFID = function()
     local enumByCdID    = {}   -- cdID -> enum index
     local enumSidByCdID = {}   -- cdID -> canonical sid
     local enumCount     = 0
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    -- This section works with NOTHING currently rendering, so it is the one to
+    -- read for a replacing-talent icon report (Hellcaller Wither). "icon=" is the
+    -- form an inactive placeholder paints, straight from the runtime resolver: it
+    -- differing from sid= is the override bridge firing.
+    local nBridged = 0
     P(ACCENT .. "--- EnumerateCDMViewerSpells(true) [preview + settings id = e.sid] ---" .. OFF)
     if ns.EnumerateCDMViewerSpells then
         local entries = ns.EnumerateCDMViewerSpells(true)
@@ -9670,16 +9681,219 @@ SlashCmdList.CDMBUFFID = function()
                 enumSidByCdID[e.cdID] = e.sid
                 enumCount = enumCount + 1
             end
-            P(string.format("  [%d] sid=%s cdID=%s name=%s",
-                i, SN(e.sid), SN(e.cdID), NM(e.sid)))
+            local infoSpell, infoOvr, linked
+            if e.cdID ~= nil and gci then
+                local info = gci(e.cdID)
+                if info then
+                    infoSpell, infoOvr = info.spellID, info.overrideSpellID
+                    if info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+                        local t = {}
+                        for _, lid in ipairs(info.linkedSpellIDs) do t[#t + 1] = SN(lid) end
+                        linked = table.concat(t, ",")
+                    end
+                end
+            end
+            local iconSID = ns.ResolvePlaceholderIconSID
+                and ns.ResolvePlaceholderIconSID(e.sid, e.cdID) or e.sid
+            local bridgeTag = ""
+            if type(iconSID) == "number" and type(e.sid) == "number" and iconSID ~= e.sid then
+                nBridged = nBridged + 1
+                bridgeTag = "  " .. GOOD .. "BRIDGED" .. OFF
+            end
+            P(string.format("  [%d] sid=%s cdID=%s info.sID=%s info.ovr=%s linked=%s icon=%s(%s) name=%s%s",
+                i, SN(e.sid), SN(e.cdID), SN(infoSpell), SN(infoOvr),
+                linked or "none", SN(iconSID), NM(iconSID), NM(e.sid), bridgeTag))
         end
+        P(string.format("  placeholder icon bridge: %d of %d entries resolve to a replacing spell",
+            nBridged, #entries))
+
+        -- Why a non-bridge happened. The bridge resolves an aura NAME against the
+        -- spellbook, so when it silently does nothing the useful facts are how
+        -- many names the scan saw and what each variant's name looked up to. A
+        -- scan count of 0 means the walk itself failed; a name that maps to
+        -- nothing means the book lists the replacement under a different name.
+        if ns.CdmBookNameCount and ns.CdmBookIDForName then
+            P(string.format("  spellbook name map: %d names", ns.CdmBookNameCount()))
+            for i, e in ipairs(entries) do
+                local info = e.cdID ~= nil and gci and gci(e.cdID) or nil
+                if info and info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+                    local parts = {}
+                    local function Look(id, tag)
+                        local nm2 = NM(id)
+                        parts[#parts + 1] = string.format("%s %s(%s)->book=%s",
+                            tag, SN(id), tostring(nm2), SN(ns.CdmBookIDForName(nm2)))
+                    end
+                    Look(e.sid, "self")
+                    for _, lid in ipairs(info.linkedSpellIDs) do Look(lid, "link") end
+                    P("    [" .. i .. "] " .. table.concat(parts, "  "))
+                end
+            end
+        end
+    end
+
+    -- B2. Focused identity battery: /cdmbuffid <cdID|spellID>.
+    --
+    -- For a slot whose variants live in linkedSpellIDs rather than the spellbook
+    -- override table (Destruction Immolate lists Wither's aura 445474 as a link,
+    -- with overrideSpellID == spellID), the question the runtime must answer is
+    -- WHICH linked form the player currently has. This runs every identity API
+    -- against the slot's ids and one level of expansion, so the answer is visible
+    -- rather than guessed. Prints only this section to keep the output readable.
+    local focusList
+    if msg then
+        for n in msg:gmatch("%d+") do
+            focusList = focusList or {}
+            focusList[#focusList + 1] = tonumber(n)
+        end
+    end
+    if focusList then
+        local GB  = C_Spell and C_Spell.GetBaseSpell
+        local GOS = C_Spell and C_Spell.GetOverrideSpell
+        local FO  = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+        P(ACCENT .. "=== IDENTITY BATTERY for " .. table.concat(focusList, ", ") .. " ===" .. OFF)
+
+        -- Hero talent tree: the whole question is whether the replacing talent is
+        -- active, so state it outright instead of inferring it from ids.
+        -- GetSubTreeInfo needs the ACTIVE config id; passing nil silently yields
+        -- nothing, which is why an earlier run could only print the raw number.
+        local heroName
+        if C_ClassTalents and C_ClassTalents.GetActiveHeroTalentSpec then
+            local ok, hid = pcall(C_ClassTalents.GetActiveHeroTalentSpec)
+            if ok and hid then
+                heroName = tostring(hid)
+                local cfg
+                if C_ClassTalents.GetActiveConfigID then
+                    local ok2, c = pcall(C_ClassTalents.GetActiveConfigID)
+                    if ok2 then cfg = c end
+                end
+                if cfg and C_Traits and C_Traits.GetSubTreeInfo then
+                    local ok3, st = pcall(C_Traits.GetSubTreeInfo, cfg, hid)
+                    if ok3 and st and st.name then heroName = st.name .. " (" .. hid .. ")" end
+                end
+            end
+        end
+        P("  active hero talent tree: " .. (heroName or (BAD .. "unknown/none" .. OFF)))
+
+        local seen, queue = {}, {}
+        local function Push(id, why)
+            if type(id) ~= "number" or id <= 0 or IsSecret(id) or seen[id] then return end
+            seen[id] = true
+            queue[#queue + 1] = { id = id, why = why }
+        end
+
+        -- Each argument is a cooldownID if the viewer knows it, else a raw
+        -- spellID. Passing castable ids explicitly is the point: an aura id has
+        -- no API path back to the spell that applies it, so the castable form
+        -- (Immolate 348 / Wither 445468) can only enter the set by hand.
+        local slotCandidates
+        for _, focus in ipairs(focusList) do
+            local info = gci and gci(focus)
+            if info then
+                P("  " .. focus .. " -> cooldownID")
+                Push(info.spellID, "info.spellID of " .. focus)
+                Push(info.overrideSpellID, "info.overrideSpellID of " .. focus)
+                slotCandidates = slotCandidates or {}
+                slotCandidates[#slotCandidates + 1] = info.spellID
+                if info.linkedSpellIDs then
+                    for _, lid in ipairs(info.linkedSpellIDs) do
+                        Push(lid, "linkedSpellID of " .. focus)
+                        slotCandidates[#slotCandidates + 1] = lid
+                    end
+                end
+                local esid = enumSidByCdID[focus]
+                if esid then Push(esid, "enumerated sid of " .. focus) end
+            else
+                P("  " .. focus .. " -> spellID")
+                Push(focus, "argument")
+            end
+        end
+
+        -- One level of expansion: the castable form that owns a replacement often
+        -- is NOT in the slot's own id set, and that is exactly where the override
+        -- link lives (castable Immolate 348 -> Wither 445468).
+        local n0 = #queue
+        for i = 1, n0 do
+            local id = queue[i].id
+            Push(GB and GB(id), "base of " .. id)
+            Push(GOS and GOS(id), "override of " .. id)
+            Push(FO and FO(id), "findOverride of " .. id)
+        end
+
+        for _, e in ipairs(queue) do
+            local id = e.id
+            local isPlayer = IsPlayerSpell and IsPlayerSpell(id)
+            local known    = C_SpellBook and C_SpellBook.IsSpellKnown
+                             and C_SpellBook.IsSpellKnown(id)
+            local knownOvr
+            if C_SpellBook and C_SpellBook.IsSpellKnownOrOverridesKnown then
+                local ok, v = pcall(C_SpellBook.IsSpellKnownOrOverridesKnown, id)
+                if ok then knownOvr = v end
+            end
+            local inBook
+            if C_SpellBook and C_SpellBook.FindSpellBookSlotForSpell then
+                local ok, v = pcall(C_SpellBook.FindSpellBookSlotForSpell, id)
+                if ok and v then inBook = true end
+            end
+            -- REPLACED marks the live-form test: a spell whose override is some
+            -- OTHER spell is one you no longer cast in that form. Do not read
+            -- player= for this -- a replaced base still reports player=true while
+            -- its replacement reports false, so that field points the wrong way.
+            local liveOvr = FO and FO(id)
+            local tag = (type(liveOvr) == "number" and liveOvr ~= id)
+                and (GOOD .. " <<REPLACED BY " .. NM(liveOvr) .. OFF) or ""
+            P(string.format("  %s (%s) [%s]  base=%s ovr=%s findOvr=%s player=%s known=%s knownOrOvr=%s book=%s%s",
+                SN(id), NM(id), e.why,
+                SN(GB and GB(id)), SN(GOS and GOS(id)), SN(FO and FO(id)),
+                tostring(isPlayer or false), tostring(known or false),
+                tostring(knownOvr or false), tostring(inBook or false), tag))
+        end
+        P("  " .. DIM .. "Read: an id marked REPLACED BY names the form actually cast." .. OFF)
+
+        -- B3. What the shipped bridge sees for this slot. Deliberately calls the
+        -- real helpers rather than reimplementing the lookup, so the probe cannot
+        -- drift from the runtime and quietly report on code that is not running.
+        if slotCandidates and #slotCandidates > 0 then
+            P(ACCENT .. "--- icon bridge (aura -> castable by name) ---" .. OFF)
+
+            -- Do the variants even carry different art? Equal textures would mean
+            -- there is nothing here to fix and the bridge is chasing a non-problem.
+            local GT = C_Spell and C_Spell.GetSpellTexture
+            local texLine = {}
+            for _, cid in ipairs(slotCandidates) do
+                texLine[#texLine + 1] = string.format("%s(%s)=tex%s", SN(cid), NM(cid), SN(GT and GT(cid)))
+            end
+            P("  candidate art: " .. table.concat(texLine, "  "))
+
+            if ns.CdmBookNameCount and ns.CdmBookIDForName then
+                P("  spellbook name map: " .. ns.CdmBookNameCount() .. " names")
+                for _, cid in ipairs(slotCandidates) do
+                    local nm = NM(cid)
+                    local castable = ns.CdmBookIDForName(nm)
+                    local ovr = (castable and FO) and FO(castable) or nil
+                    P(string.format("  %s (%s) -> book=%s -> override=%s(%s)",
+                        SN(cid), tostring(nm), SN(castable), SN(ovr), NM(ovr)))
+                end
+            end
+            for _, focus in ipairs(focusList) do
+                if gci and gci(focus) and ns.ResolvePlaceholderIconSID then
+                    local esid = enumSidByCdID[focus]
+                    if esid then
+                        local painted = ns.ResolvePlaceholderIconSID(esid, focus)
+                        local tag = (painted ~= esid) and ("  " .. GOOD .. "BRIDGED" .. OFF) or ""
+                        P(string.format("  slot %s paints %s(%s)%s",
+                            SN(focus), SN(painted), NM(painted), tag))
+                    end
+                end
+            end
+        end
+        P(ACCENT .. "=== END BATTERY ===" .. OFF)
+        return
     end
 
     -- C. Live rendered icons: walk cdmBarIcons["buffs"] in render order and
     --    compare SEED/SORT id (fc.spellID) vs PREVIEW/SETTINGS id (canonical),
     --    and render order vs preview-enum order.
     P(ACCENT .. "--- live cdmBarIcons[\"buffs\"] [seed + sort id = fc.spellID] ---" .. OFF)
-    local gci      = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
     local fcCache  = ns._ecmeFC
     local icons    = ns.cdmBarIcons and ns.cdmBarIcons["buffs"]
     local nDiverge, nTotal = 0, 0
@@ -9723,10 +9937,23 @@ SlashCmdList.CDMBUFFID = function()
                     enumTag = BAD .. "no-enum(custom/injected?)" .. OFF
                 end
 
+                -- Live override bridge + the form an inactive placeholder paints.
+                -- A hero-talent slot reports its pre-talent id while inactive
+                -- (Hellcaller: info.sID=348 Immolate, fOvr=445468 Wither), so an
+                -- fOvr that differs from canon is the bridge working, and ph=
+                -- should match fOvr rather than canon.
+                local fOvr
+                if type(canon) == "number" and not IsSecret(canon) and canon > 0
+                   and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    fOvr = C_SpellBook.FindSpellOverrideByID(canon)
+                end
+                local phTag = frame._isPlaceholderFrame
+                    and (" ph=" .. SN(frame._phSpellID) .. "(" .. NM(frame._phSpellID) .. ")") or ""
+
                 local shown = frame.IsShown and frame:IsShown()
-                P(string.format("  render#%d %s  fc.spellID=%s fc.base=%s canon=%s | cdID=%s info.sID=%s info.ovr=%s | %s shown=%s name=%s",
-                    j, verdict, SN(fcSpell), SN(fcBase), SN(canon),
-                    SN(cdID), SN(infoSpell), SN(infoOvr), enumTag, tostring(shown), NM(canon)))
+                P(string.format("  render#%d %s  fc.spellID=%s fc.base=%s canon=%s fOvr=%s | cdID=%s info.sID=%s info.ovr=%s | %s shown=%s name=%s%s",
+                    j, verdict, SN(fcSpell), SN(fcBase), SN(canon), SN(fOvr),
+                    SN(cdID), SN(infoSpell), SN(infoOvr), enumTag, tostring(shown), NM(canon), phTag))
             end
         end
     else
@@ -9737,7 +9964,8 @@ SlashCmdList.CDMBUFFID = function()
     P(ACCENT .. "--- verdict ---" .. OFF)
     P(string.format("  rendered icons=%d  diverge=%d  preview entries=%d", nTotal, nDiverge, enumCount))
     if nTotal == 0 then
-        P("  " .. DIM .. "inconclusive: no rendered buffs to sample" .. OFF)
+        P("  " .. DIM .. "inconclusive for id-collapse: no rendered buffs to sample" .. OFF)
+        P("  " .. DIM .. "(the icon bridge above does NOT need rendered buffs -- read that line instead)" .. OFF)
     elseif nDiverge == 0 then
         P("  " .. GOOD .. "id-collapse: ALL buffs agree (seed/sort == preview/settings). Default-bar reorder is safe with the simple approach." .. OFF)
     else
