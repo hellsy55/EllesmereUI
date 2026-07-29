@@ -3069,16 +3069,30 @@ do
             if desatOn then
                 local val = 0
                 if active then
-                    if useRealCurve then
-                        if durObj.EvaluateTotalDuration and desatCurveReal then
-                            val = durObj:EvaluateTotalDuration(desatCurveReal, 0)
-                        elseif durObj.EvaluateRemainingDuration and desatCurveReal then
-                            -- Client without the total evaluator: remaining is
-                            -- start-accurate and the Done edge fixes the tail.
-                            val = durObj:EvaluateRemainingDuration(desatCurveReal, 0)
-                        end
-                    elseif not cdInfo.isOnGCD then
-                        if durObj.EvaluateRemainingDuration and desatCurveAny then
+                    -- A GCD must never classify a charge spell or item as being
+                    -- on cooldown. The 1.6s step was meant to filter the GCD out
+                    -- on its own, but it tests the TOTAL duration of whatever
+                    -- object the engine hands back, and for a charge spell that
+                    -- is the RECHARGE PERIOD (20s on Arcane Orb) even while
+                    -- charges are banked -- so every GCD greyed a spell sitting
+                    -- at FULL charges, flashing back to colour only in the gaps
+                    -- between casts. The non-charge branch below always had this
+                    -- guard; the charge/item branch never did.
+                    -- isOnGCD separates the cases cleanly, measured in game:
+                    -- 0 charges -> isActive=true isOnGCD=false dur=27 (desaturate),
+                    -- banked charge mid-GCD -> isActive=true isOnGCD=true dur=1.05.
+                    -- One guard for BOTH classes, hoisted: a GCD is never a
+                    -- cooldown for these purposes.
+                    if not cdInfo.isOnGCD then
+                        if useRealCurve then
+                            if durObj.EvaluateTotalDuration and desatCurveReal then
+                                val = durObj:EvaluateTotalDuration(desatCurveReal, 0)
+                            elseif durObj.EvaluateRemainingDuration and desatCurveReal then
+                                -- Client without the total evaluator: remaining is
+                                -- start-accurate and the Done edge fixes the tail.
+                                val = durObj:EvaluateRemainingDuration(desatCurveReal, 0)
+                            end
+                        elseif durObj.EvaluateRemainingDuration and desatCurveAny then
                             val = durObj:EvaluateRemainingDuration(desatCurveAny, 0)
                         end
                     end
@@ -3089,11 +3103,13 @@ do
             end
             if alphaOn then
                 if active then
-                    if useRealCurve and durObj.EvaluateTotalDuration then
-                        -- Same total-duration classification as desat. Also
-                        -- fixes banked-charge spells dimming during the GCD:
-                        -- the old IsZero gate had no real-vs-GCD test for the
-                        -- charge/item class.
+                    if useRealCurve and not cdInfo.isOnGCD and durObj.EvaluateTotalDuration then
+                        -- Same total-duration classification as desat, and the
+                        -- same isOnGCD guard for the same reason: the total is
+                        -- the RECHARGE PERIOD for a charge spell, so the 1.6s
+                        -- step alone does not filter out the GCD and a spell at
+                        -- full charges dimmed on every cast. (The old comment
+                        -- here claimed the threshold handled that; it does not.)
                         local curve = GetCdAlphaCurve(cdAlpha)
                         if curve then
                             icon:SetAlpha(durObj:EvaluateTotalDuration(curve, 1) or 1)
@@ -3101,7 +3117,7 @@ do
                             icon:SetAlpha(1)
                         end
                     elseif icon.SetAlphaFromBoolean and durObj.IsZero
-                       and (useRealCurve or not cdInfo.isOnGCD) then
+                       and not cdInfo.isOnGCD then
                         -- IsZero() is a secret boolean; SetAlphaFromBoolean
                         -- consumes it without any Lua comparison.
                         icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
