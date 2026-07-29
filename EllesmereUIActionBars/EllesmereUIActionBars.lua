@@ -2746,6 +2746,10 @@ function ns._ArmAssistTicker()
         local Tick = EllesmereUI and EllesmereUI.Tick
         if not (Tick and Tick.NewAnimTicker) then return end
         t = Tick.NewAnimTicker(CreateFrame("Frame"), function()
+            -- Every tick, not just on a suggestion change: the suggested spell's
+            -- own cooldown can end or be shortened while the suggestion holds
+            -- steady, and nothing else repaints this button for that.
+            ns.RefreshAssistCooldowns()
             local nextSpell = C_AssistedCombat and C_AssistedCombat.GetNextCastSpell
                 and C_AssistedCombat.GetNextCastSpell()
             if nextSpell ~= ns._assistLastSuggest then
@@ -2777,6 +2781,39 @@ function ns._ArmAssistTicker()
         ns._assistTicker = t
     end
     t.Start()
+end
+
+-- Re-assert ONLY the assist button's cooldown swipe. Its cooldown mirrors the
+-- SUGGESTED spell, so its content also changes when that spell's own cooldown
+-- ends or gets shortened -- with no suggestion change, no cast of ours, and no
+-- action-bar event to walk on. Measured at up to 1.38s of visibly stale swipe
+-- on that one button while every other button was correct.
+-- Cost: a raw _eabFD table read per button (no allocation, no API call), then
+-- three C calls for the one or two buttons that actually host the action. At
+-- the 0.2s ticker that is ~700 table reads/sec and caps this button's staleness
+-- at one tick. Deliberately NOT a walk, a memo drop or a dirty bump: the whole
+-- point of the assist path is that a one-button change never invalidates
+-- bar-wide (see ns._ArmAssistTicker).
+function ns.RefreshAssistCooldowns()
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local buttons = barButtons[info.key]
+            if buttons then
+                for i = 1, #buttons do
+                    local btn = buttons[i]
+                    local fd = btn and ns._eabFD[btn]
+                    if fd and fd.assistSpin then
+                        local action = btn.GetAttribute and btn:GetAttribute("action") or btn.action
+                        if action and HasAction(action) and C_ActionBar
+                           and C_ActionBar.IsAssistedCombatAction
+                           and C_ActionBar.IsAssistedCombatAction(action) then
+                            ns.ForceCooldownPaint(btn)
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- Re-apply One Button Assist icon settings (toggle + outset) to every
@@ -3082,6 +3119,8 @@ do
             if btn and btn.GetAttribute then RefreshCooldownVisuals(btn) end
         end
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
+        -- Aliased to ACTIONBAR_UPDATE_COOLDOWN in the handler; see the note there.
+        dispatcher:RegisterEvent("SPELL_UPDATE_COOLDOWN")
         -- Dirty-trigger only (early return in the handler): a player cast is
         -- the reliable herald of new cooldowns, so it re-arms the heartbeat
         -- walk below without ever running button work itself.
@@ -3102,9 +3141,22 @@ do
         -- per-button overhead. With 60 populated buttons, the mixin path
         -- caused visible frame drops on high-frequency events.
         dispatcher:SetScript("OnEvent", function(_, event, arg1)
-            -- /eabprof capture: one nil-check per event while disarmed.
+            -- /eabprof capture: one nil-check per event while disarmed. Counted
+            -- BEFORE the alias below so the profile still separates the two.
             local prof = ns._evProf
             if prof then prof[event] = (prof[event] or 0) + 1 end
+            -- SPELL_UPDATE_COOLDOWN drives the same walk as its action-bar twin.
+            -- Blizzard fires NO action-bar event when a cooldown ends or is
+            -- SHORTENED, so a reduction proc left the widget painting the old
+            -- schedule until the next ~1/sec heartbeat -- measured at 1.37s of
+            -- visible stale swipe. The spell-level event does fire on cooldown
+            -- modification, so aliasing it here closes the gap. Deliberately an
+            -- alias rather than a second branch: it inherits the same-frame
+            -- dedupe, the 0.15s cap and the idle-sleep gate, so a broadcast
+            -- storm cannot add walks beyond the existing budget.
+            if event == "SPELL_UPDATE_COOLDOWN" then
+                event = "ACTIONBAR_UPDATE_COOLDOWN"
+            end
             -- Idle sleep for the ~1/sec ACTIONBAR_UPDATE_COOLDOWN heartbeat
             -- (bisect-verified: walking 140 settled buttons per heartbeat was
             -- ALL of ActionBars' idle CPU). The cooldown walk runs only while
