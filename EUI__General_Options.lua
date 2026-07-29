@@ -2487,6 +2487,28 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
+        -- Name Font: the text floating above characters and NPCs. Deliberately
+        -- independent of Global Font, and modelled on Combat Text Font rather
+        -- than the settings around it: both drive a Blizzard global the engine
+        -- reads once at login (UNIT_NAME_FONT / DAMAGE_TEXT_FONT), so both need
+        -- a logout rather than the reload FontReload offers, and both treat
+        -- "Blizzard Default" as leave-it-alone instead of using a toggle.
+        -- Applied in EllesmereUI_Startup.lua.
+        local NAME_FONT_DEFAULT = "__default"
+        local nameFontValues, nameFontOrder = {}, {}
+        do
+            -- Same faces the Global Font dropdown offers, SharedMedia included,
+            -- but a private copy: prepending the default entry to the shared
+            -- tables would put it in the Global Font list too.
+            nameFontValues[NAME_FONT_DEFAULT] = { text = "Blizzard Default", font = "Fonts\\FRIZQT__.TTF" }
+            nameFontOrder[1] = NAME_FONT_DEFAULT
+            nameFontOrder[2] = "---"
+            for _, k in ipairs(fontDropOrder) do
+                nameFontOrder[#nameFontOrder + 1] = k
+                if k ~= "---" then nameFontValues[k] = fontDropValues[k] end
+            end
+        end
+
         -- Never Show Slug: per-profile toggle (rides profile export/import) that
         -- drops the SLUG token from every outline the UI produces -- body text and
         -- icon/aura text across all modules, plus the global Outline Mode itself.
@@ -2501,7 +2523,33 @@ initFrame:SetScript("OnEvent", function(self)
                       EllesmereUI.GetFontsDB().neverShowSlug = v and true or false
                       FontReload()
                   end },
-                { type="label", text="" }
+                { type="dropdown", text="Name Font",
+                  -- Coloured inline rather than via tooltipOpts.color, which
+                  -- would tint the explanation red along with the warning.
+                  tooltip="Sets the font for the names that float above players, NPCs and enemies in the world.\n\nSeparate from Global Font - changing this does not affect the rest of the UI, and Global Font does not affect it.\n\nBlizzard Default leaves the name text completely untouched.\n\n|cffff4d4dRequires a re-log or restart of WoW to take effect.|r",
+                  values=nameFontValues, order=nameFontOrder,
+                  getValue=function()
+                      local n = EllesmereUI.GetFontsDB().unitNameFont
+                      if not n or not nameFontValues[n] then return NAME_FONT_DEFAULT end
+                      return n
+                  end,
+                  setValue=function(v)
+                      local fdb = EllesmereUI.GetFontsDB()
+                      -- nil, not the sentinel, so the startup code can tell
+                      -- "leave Blizzard alone" without knowing the key.
+                      fdb.unitNameFont = (v ~= NAME_FONT_DEFAULT) and v or nil
+                      fdb.unitNameFontPath = (v ~= NAME_FONT_DEFAULT)
+                          and nameFontValues[v].font or nil
+                      -- No apply call here: the engine has already cached the
+                      -- global by this point, so the change lands on the next
+                      -- login either way. Same as Combat Text Font above.
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Logout Required",
+                          message     = "Name font changes require a logout to character select to take effect. This is a WoW engine limitation.",
+                          confirmText = "Okay",
+                          cancelText  = "Later",
+                      })
+                  end }
             );  y = y - h
         end
 
