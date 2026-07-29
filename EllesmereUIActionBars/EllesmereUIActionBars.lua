@@ -3212,12 +3212,21 @@ do
                         _cdCountPass = true
                     end
                 else
-                    -- Rate cap while live/dirty (timed: ~1.0ms per walk at
-                    -- 3.5/sec while chain-casting = the bulk of cast-time
-                    -- CPU). Leading edge passes immediately; repeats inside
-                    -- the cap defer to ONE trailing flush so the final state
-                    -- always paints. Casts reset the gate above, so
-                    -- cast-adjacent paints are never delayed.
+                    -- Storm cap while live/dirty (timed: ~1.0ms per walk at
+                    -- 3.5/sec while chain-casting). Leading edge passes
+                    -- immediately; repeats inside the cap defer to ONE
+                    -- trailing flush so the final state always paints. Casts
+                    -- reset the gate above.
+                    --
+                    -- 0.15s, not the 0.5s this shipped with: only a cast of
+                    -- OURS reopens the gate, so every cooldown change that is
+                    -- not one -- a proc shortening a cooldown, a reset, a
+                    -- charge refund, the GCD being refunded by a cancelled
+                    -- cast -- ate the full window before it drew, which users
+                    -- read as action bars lagging the game. At the measured
+                    -- 3.5 fires/sec this no longer caps a normal rotation at
+                    -- all (~1.5ms/sec of walks back, ~0.15% of one core); it
+                    -- only still catches pathological storms.
                     local nextAt = ns._cdWalkNext or 0
                     if now < nextAt then
                         if not ns._cdFlushArmed then
@@ -3238,10 +3247,10 @@ do
                         end
                         _cdSkip = true
                     else
-                        ns._cdWalkNext = now + 0.5
+                        ns._cdWalkNext = now + 0.15
                         -- Count-text sub-pass every ~2s: item stacks are not
-                        -- twitch-critical, and charge counts update instantly
-                        -- through the dedicated CHARGES branch.
+                        -- twitch-critical. Charge counts are exempt from it
+                        -- (see the count write in the walk).
                         if now >= (ns._cdCountNext or 0) then
                             _cdCountPass = true
                             ns._cdCountNext = now + 2
@@ -3394,10 +3403,10 @@ do
                             -- ActionBars' idle CPU). A button now pays beyond
                             -- the cheap isActive probe only while its cooldown
                             -- or charge recharge is live, or on the exact
-                            -- rising/falling edge. Duration objects are
-                            -- engine-live, so an applied swipe needs no
-                            -- re-push between edges; re-pushing while ACTIVE
-                            -- covers resets and back-to-back new cooldowns.
+                            -- rising/falling edge. A pushed swipe animates
+                            -- itself, so a cooldown running down on the
+                            -- schedule it was pushed with needs no re-push --
+                            -- but one that gets MODIFIED does (see below).
                             for _, btn in ipairs(btns) do
                                 if _cdSkip then break end
                                 local action = btn:GetAttribute("action")
@@ -3406,19 +3415,30 @@ do
                                     local cd = btn.cooldown
                                     local cdInfo, durObj
                                     local active = false
+                                    -- A REAL (non-GCD) cooldown can be shortened, reset
+                                    -- or refunded by a proc at any time, with no cast of
+                                    -- ours to bump the generation -- so the once-per-cast
+                                    -- memo left the swipe animating on the schedule it
+                                    -- was pushed with until the player's next press ("the
+                                    -- cooldown takes 1-2s to catch up", "the number keeps
+                                    -- ticking on a spell that is already back up"; the
+                                    -- desat path re-derives when it runs, which is why the
+                                    -- swipe and the saturation disagreed). A GCD-only
+                                    -- cooldown cannot be modified, and it is the case the
+                                    -- memo exists for -- during a GCD all ~140 buttons
+                                    -- report active at once -- so it keeps the memo.
+                                    local cdReal, cdMoved, cdClassFlip = false, false, false
                                     if cd then
                                         cdInfo = C_ActionBar.GetActionCooldown(action)
                                         active = (cdInfo and cdInfo.isActive) and true or false
+                                        -- Real <-> GCD-only is its own edge: a recharge
+                                        -- collapsing to ready mid-GCD leaves `active`
+                                        -- true, so nothing else fires one.
+                                        cdReal = active and not cdInfo.isOnGCD
+                                        cdClassFlip = cdReal ~= (fd.cdWasReal or false)
+                                        cdMoved = cdReal or (active and cdClassFlip)
                                         if active then
-                                            -- Push once per cast-generation or on a
-                                            -- rising edge. Duration objects are
-                                            -- engine-live: a pushed swipe animates
-                                            -- itself, and only a new cast can have
-                                            -- changed what this button shows. During
-                                            -- a GCD every button reports active --
-                                            -- this collapses the 140-object re-push
-                                            -- storm to once per cast.
-                                            if fd.pushGen ~= ns._gcdGen or not fd.cdWasActive then
+                                            if cdMoved or fd.pushGen ~= ns._gcdGen or not fd.cdWasActive then
                                                 fd.pushGen = ns._gcdGen
                                                 durObj = C_ActionBar.GetActionCooldownDuration(action)
                                                 if durObj then cd:SetCooldownFromDurationObject(durObj) end
@@ -3482,8 +3502,14 @@ do
                                     -- pass of a new cast-generation. A button
                                     -- sitting mid-cooldown with no new cast
                                     -- cannot change its desat/dim state.
+                                    -- cdClassFlip, not cdMoved: the desat/dim state of a
+                                    -- real cooldown is constant for its whole life (step
+                                    -- curve), so only the flip matters -- a cooldown
+                                    -- shortened to ready mid-GCD never flips `active`,
+                                    -- and the icon stayed desaturated on a spell that
+                                    -- was already back up.
                                     if (active ~= (fd.cdWasActive or false)) or chargeShown or fd.chargeWasLive
-                                       or (active and fd.visGen ~= ns._gcdGen) then
+                                       or cdClassFlip or (active and fd.visGen ~= ns._gcdGen) then
                                         if active then fd.visGen = ns._gcdGen end
                                         -- durObj is only fetched on the once-per-cast
                                         -- swipe push above, but charge buttons re-enter
@@ -3498,10 +3524,14 @@ do
                                         end
                                         RefreshCooldownVisuals(btn, action, cdInfo or false, durObj, chargeInfo or false)
                                     end
-                                    -- Count text rides the ~2s sub-pass; charge
-                                    -- counts update instantly via the CHARGES
-                                    -- branch, so only item stacks wait.
-                                    if _cdCountPass and btn.Count and C_ActionBar.GetActionDisplayCount then
+                                    -- Item stacks ride the ~2s sub-pass. Charge counts
+                                    -- do NOT: SPELL_UPDATE_CHARGES can land a frame or
+                                    -- more after the cooldown event that already
+                                    -- resaturated the icon here, so the count sat at 0
+                                    -- on a spell this walk had just drawn as ready.
+                                    -- Charge buttons are a handful, and lastCountText
+                                    -- keeps the SetText itself off the steady state.
+                                    if (_cdCountPass or chargeShown) and btn.Count and C_ActionBar.GetActionDisplayCount then
                                         local display = C_ActionBar.GetActionDisplayCount(action) or ""
                                         if issecretvalue and issecretvalue(display) then
                                             -- Secret string (combat): write through --
@@ -3519,6 +3549,7 @@ do
                                         _cdLiveSeen = true
                                     end
                                     fd.cdWasActive = active
+                                    fd.cdWasReal = cdReal
                                     fd.chargeWasLive = (chargeInfo and chargeInfo.isActive) and true or false
                                 end
                             end
@@ -3603,6 +3634,25 @@ do
                                     local chargeShown = (chargeInfo and chargeInfo.maxCharges
                                         and chargeInfo.maxCharges > 1) and true or false
                                     if chargeShown then
+                                        -- Hoisted out of the occlusion call below: the MAIN
+                                        -- cooldown mirrors the recharge at 0 charges, so
+                                        -- regaining a charge silently stops it being a real
+                                        -- cooldown -- with no cast of ours to bump the
+                                        -- generation, and no `active` edge while a GCD is
+                                        -- running. A reduction proc that collapses the
+                                        -- recharge lands here first, so repaint this one
+                                        -- button now (push-or-clear, three C calls) rather
+                                        -- than leave the old recharge countdown ticking on a
+                                        -- spell that is back up, and drop its memos so the
+                                        -- next walk re-derives instead of fighting this.
+                                        local ci = C_ActionBar.GetActionCooldown(action)
+                                        local cdReal = (ci and ci.isActive and not ci.isOnGCD) and true or false
+                                        if cdReal ~= (fd.cdWasReal or false) then
+                                            ForceCooldownPaint(btn)
+                                            fd.cdWasReal = cdReal
+                                            fd.pushGen = nil
+                                            fd.visGen = nil
+                                        end
                                         local chargeCd = btn.chargeCooldown
                                         if not chargeCd and chargeInfo.isActive then
                                             chargeCd = ns.EnsureChargeCooldown(btn)
@@ -3611,8 +3661,7 @@ do
                                             -- Off-GCD charge spends can hit 0 charges without a
                                             -- COOLDOWN walk in between; keep the occlusion rule
                                             -- current from the charge tick too.
-                                            ns.UpdateChargeNumbersVisibility(btn, chargeCd,
-                                                C_ActionBar.GetActionCooldown(action))
+                                            ns.UpdateChargeNumbersVisibility(btn, chargeCd, ci)
                                             if chargeInfo.isActive then
                                                 local chargeDur = C_ActionBar.GetActionChargeDuration(action)
                                                 if chargeDur then chargeCd:SetCooldownFromDurationObject(chargeDur) end
