@@ -9618,7 +9618,7 @@ end
 -------------------------------------------------------------------------------
 SLASH_CDMBUFFID1 = "/cdmbuffid"
 SLASH_CDMBUFFID2 = "/cdmbid"
-SlashCmdList.CDMBUFFID = function()
+SlashCmdList.CDMBUFFID = function(msg)
     local ACCENT = "|cff0cd29f"
     local DIM    = "|cff7f7f7f"
     local BAD    = "|cffff5555"
@@ -9701,6 +9701,85 @@ SlashCmdList.CDMBUFFID = function()
         end
         P(string.format("  placeholder icon bridge: %d of %d entr%s resolve to a replacing spell",
             nBridged, #entries, nBridged == 1 and "y" or "ies"))
+    end
+
+    -- B2. Focused identity battery: /cdmbuffid <cdID|spellID>.
+    --
+    -- For a slot whose variants live in linkedSpellIDs rather than the spellbook
+    -- override table (Destruction Immolate lists Wither's aura 445474 as a link,
+    -- with overrideSpellID == spellID), the question the runtime must answer is
+    -- WHICH linked form the player currently has. This runs every identity API
+    -- against the slot's ids and one level of expansion, so the answer is visible
+    -- rather than guessed. Prints only this section to keep the output readable.
+    local focus = tonumber(msg and msg:match("%d+") or nil)
+    if focus then
+        local GB  = C_Spell and C_Spell.GetBaseSpell
+        local GOS = C_Spell and C_Spell.GetOverrideSpell
+        local FO  = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+        P(ACCENT .. "=== IDENTITY BATTERY for " .. focus .. " ===" .. OFF)
+
+        -- Hero talent tree: the whole question is whether the replacing talent is
+        -- active, so state it outright instead of inferring it from ids.
+        local heroName
+        if C_ClassTalents and C_ClassTalents.GetActiveHeroTalentSpec then
+            local ok, hid = pcall(C_ClassTalents.GetActiveHeroTalentSpec)
+            if ok and hid then
+                heroName = tostring(hid)
+                if C_Traits and C_Traits.GetSubTreeInfo then
+                    local ok2, st = pcall(C_Traits.GetSubTreeInfo, nil, hid)
+                    if ok2 and st and st.name then heroName = st.name .. " (" .. hid .. ")" end
+                end
+            end
+        end
+        P("  active hero talent tree: " .. (heroName or (BAD .. "unknown/none" .. OFF)))
+
+        local seen, queue = {}, {}
+        local function Push(id, why)
+            if type(id) ~= "number" or id <= 0 or IsSecret(id) or seen[id] then return end
+            seen[id] = true
+            queue[#queue + 1] = { id = id, why = why }
+        end
+
+        local info = gci and gci(focus)
+        if info then
+            P("  (treated as a cooldownID)")
+            Push(info.spellID, "info.spellID")
+            Push(info.overrideSpellID, "info.overrideSpellID")
+            if info.linkedSpellIDs then
+                for _, lid in ipairs(info.linkedSpellIDs) do Push(lid, "linkedSpellID") end
+            end
+            local esid = enumSidByCdID[focus]
+            if esid then Push(esid, "enumerated sid") end
+        else
+            P("  (treated as a spellID)")
+            Push(focus, "argument")
+        end
+
+        -- One level of expansion: the castable form that owns a replacement often
+        -- is NOT in the slot's own id set, and that is exactly where the override
+        -- link lives (castable Immolate 348 -> Wither 445468).
+        local n0 = #queue
+        for i = 1, n0 do
+            local id = queue[i].id
+            Push(GB and GB(id), "base of " .. id)
+            Push(GOS and GOS(id), "override of " .. id)
+            Push(FO and FO(id), "findOverride of " .. id)
+        end
+
+        for _, e in ipairs(queue) do
+            local id = e.id
+            local isPlayer = IsPlayerSpell and IsPlayerSpell(id)
+            local known    = C_SpellBook and C_SpellBook.IsSpellKnown
+                             and C_SpellBook.IsSpellKnown(id)
+            local tag = isPlayer and (GOOD .. " PLAYERSPELL" .. OFF) or ""
+            P(string.format("  %s (%s) [%s]  base=%s ovr=%s findOvr=%s player=%s known=%s%s",
+                SN(id), NM(id), e.why,
+                SN(GB and GB(id)), SN(GOS and GOS(id)), SN(FO and FO(id)),
+                tostring(isPlayer or false), tostring(known or false), tag))
+        end
+        P("  " .. DIM .. "Read: which id is PLAYERSPELL is the form the bar should paint." .. OFF)
+        P(ACCENT .. "=== END BATTERY ===" .. OFF)
+        return
     end
 
     -- C. Live rendered icons: walk cdmBarIcons["buffs"] in render order and
