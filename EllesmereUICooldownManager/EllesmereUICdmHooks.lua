@@ -3866,6 +3866,40 @@ ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 -- override and linked ids, and take the first entry that is currently overridden
 -- by a different spell. Returns sid untouched when nothing in the set is
 -- overridden, which is every spec without a replacing talent.
+-- Spellbook name -> first known castable id with that name. A tracked-buff slot
+-- holds AURA ids, and an aura carries no link back to the spell that applies it
+-- (every identity API is a fixed point on it), while the CASTABLE side is where
+-- the talent override lives. An aura and its caster share a name, so the book is
+-- the only available bridge between them. Built on first use and dropped on
+-- talent change, since the override it feeds is talent-dependent.
+local _bookByName
+local function BookIDForName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    if not _bookByName then
+        local built = {}
+        local ok = pcall(function()
+            local nLines = C_SpellBook.GetNumSpellBookSkillLines()
+            for i = 1, (nLines or 0) do
+                local li = C_SpellBook.GetSpellBookSkillLineInfo(i)
+                if li and li.itemIndexOffset and li.numSpellBookItems then
+                    for j = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
+                        local it = C_SpellBook.GetSpellBookItemInfo(j, Enum.SpellBookSpellBank.Player)
+                        local bsid = it and it.spellID
+                        if bsid then
+                            local nm = C_Spell.GetSpellName(bsid)
+                            if nm and built[nm] == nil then built[nm] = bsid end
+                        end
+                    end
+                end
+            end
+        end)
+        if not ok then built = {} end
+        _bookByName = built
+    end
+    return _bookByName[name]
+end
+ns.WipeCdmBookNameCache = function() _bookByName = nil end
+
 local function ResolvePlaceholderIconSID(sid, cdID)
     local FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
     if not FO or type(sid) ~= "number" or sid <= 0 then return sid end
@@ -3884,15 +3918,29 @@ local function ResolvePlaceholderIconSID(sid, cdID)
 
     local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
     local info = (cdID ~= nil and gci) and gci(cdID) or nil
-    if not info then return sid end
-
-    hit = TryID(info.spellID) or TryID(info.overrideSpellID)
-    if hit then return hit end
-    if info.linkedSpellIDs then
-        for _, lid in ipairs(info.linkedSpellIDs) do
-            hit = TryID(lid)
-            if hit then return hit end
+    if info then
+        hit = TryID(info.spellID) or TryID(info.overrideSpellID)
+        if hit then return hit end
+        if info.linkedSpellIDs then
+            for _, lid in ipairs(info.linkedSpellIDs) do
+                hit = TryID(lid)
+                if hit then return hit end
+            end
         end
+    end
+
+    -- Nothing in the slot is overridden, which is the normal state for a
+    -- tracked-buff slot: it holds aura ids, and auras carry no override even
+    -- when a talent replaces the spell behind them (Hellcaller's Immolate slot
+    -- reports overrideSpellID == spellID and merely LISTS Wither's aura as a
+    -- link). Bridge to the castable by name and take ITS live override, which is
+    -- where the replacement actually shows up. Costs one spellbook scan per
+    -- talent change and is a no-op for anyone without a replacing talent.
+    local nm = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+    local castable = BookIDForName(nm)
+    if castable then
+        local o = FO(castable)
+        if type(o) == "number" and o > 0 and o ~= castable then return o end
     end
     return sid
 end
