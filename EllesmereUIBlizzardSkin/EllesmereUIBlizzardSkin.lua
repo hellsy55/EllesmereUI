@@ -75,12 +75,36 @@ function EllesmereUI.BlizzWindowSkinsKilled()
 end
 
 function EllesmereUI.GetBlizzWindowStyle(winKey)
+    -- Third-party virtual keys ("tp:<AddonName>", the RegisterSkin API)
+    -- resolve by majority vote and deliberately bypass the kill switch:
+    -- third-party skinning is its own opt-in, and window-skin settings only
+    -- influence WHICH theme it gets, never whether it runs.
+    if type(winKey) == "string" and winKey:sub(1, 3) == "tp:" then
+        return EllesmereUI.GetThirdPartySkinStyle()
+    end
     if EllesmereUI.BlizzWindowSkinsKilled() then return "off" end
     local ek = WINDOW_ENABLE_KEYS[winKey]
     if ek and EllesmereUIDB and EllesmereUIDB[ek] == false then return "off" end
     local styles = EllesmereUIDB and EllesmereUIDB.blizzWindowSkinStyles
     if styles and styles[winKey] == "modern" then return "modern" end
     return "eui"
+end
+
+--- Style for third-party addon skins: majority vote across the user's own
+--- window styles. Most windows Modern -> "modern"; otherwise (EUI majority,
+--- a tie, or no windows skinned at all -- including the kill switch, which
+--- makes every window report "off") -> "eui". Never returns "off": whether
+--- third-party skinning runs at all is decided by its own master/per-addon
+--- toggles in the SkinAPI dispatcher, and off<->on crossings are reload-bound
+--- there, so live style refreshes only ever swap between the two themes.
+function EllesmereUI.GetThirdPartySkinStyle()
+    local eui, modern = 0, 0
+    for winKey in pairs(WINDOW_ENABLE_KEYS) do
+        local s = EllesmereUI.GetBlizzWindowStyle(winKey)
+        if s == "modern" then modern = modern + 1
+        elseif s == "eui" then eui = eui + 1 end
+    end
+    return (modern > eui) and "modern" or "eui"
 end
 
 -- Turn off every window reskin at once (used by the one-time feature-intro
