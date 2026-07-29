@@ -3852,26 +3852,18 @@ local function HideAllInjectedCustomBuffs()
 end
 ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 
--- Resolve the spell whose ICON an inactive placeholder should paint.
---
--- An ACTIVE buff frame renders the live aura, so a talent that REPLACES a spell
--- shows the replacement (Hellcaller: Wither). An INACTIVE frame has no aura to
--- read and falls back to cooldownInfo, which still describes the pre-talent
--- spell -- so the same icon changes art as the aura comes and goes.
---
--- The replacement lives in the spellbook override table, but that table is keyed
--- by CASTABLE spells while a buff slot's resolved id is usually the AURA (the
--- Destruction Immolate slot resolves to 157736, not castable 348). So try the
--- slot's whole identity set: the resolved id first, then cooldownInfo's base,
--- override and linked ids, and take the first entry that is currently overridden
--- by a different spell. Returns sid untouched when nothing in the set is
--- overridden, which is every spec without a replacing talent.
 -- Spellbook name -> first known castable id with that name. A tracked-buff slot
 -- holds AURA ids, and an aura carries no link back to the spell that applies it
 -- (every identity API is a fixed point on it), while the CASTABLE side is where
 -- the talent override lives. An aura and its caster share a name, so the book is
 -- the only available bridge between them. Built on first use and dropped on
 -- talent change, since the override it feeds is talent-dependent.
+--
+-- An EMPTY result is treated as "not built yet" rather than cached: the first
+-- placeholder can resolve before the spellbook is populated at login, and
+-- caching that would strand the bridge until the next talent change. A real
+-- character always has spells, so empty only ever means too early. A pcall
+-- failure IS cached, since a missing API will not start working.
 local _bookByName
 local function EnsureBookNameMap()
     if not _bookByName then
@@ -3892,8 +3884,13 @@ local function EnsureBookNameMap()
                 end
             end
         end)
-        if not ok then built = {} end
-        _bookByName = built
+        if not ok then
+            _bookByName = {}
+        elseif next(built) then
+            _bookByName = built
+        else
+            return built  -- too early; retry on the next call
+        end
     end
     return _bookByName
 end
@@ -3909,6 +3906,25 @@ ns.CdmBookNameCount = function()
     return n
 end
 
+-- Resolve the spell whose ICON an inactive placeholder should paint.
+--
+-- An ACTIVE buff frame renders the live aura, so a talent that REPLACES a spell
+-- shows the replacement (Hellcaller: Wither). An INACTIVE frame has no aura to
+-- read and falls back to cooldownInfo, which still names the pre-talent spell,
+-- so the same icon changes art as the aura comes and goes.
+--
+-- Two ways a replacement can show up, tried in order:
+--   1. Something in the slot's identity set (resolved id, cooldownInfo's base,
+--      override or linked ids) is itself overridden. Covers CASTABLE-keyed slots.
+--   2. Nothing is overridden, the normal state for a tracked-buff slot, because
+--      it holds AURA ids and an aura carries no override even when a talent
+--      replaces the spell behind it (Destruction's Immolate slot resolves to
+--      aura 157736, reports overrideSpellID == spellID, and merely LISTS Wither's
+--      aura 445474 as a link). Fall back to the spellbook, matching by name.
+--
+-- Returns sid untouched when neither applies, which is every spec without a
+-- replacing talent. Callers use the result for ART ONLY: identity, pooling and
+-- settings resolution stay keyed on the original id.
 local function ResolvePlaceholderIconSID(sid, cdID)
     local FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
     if not FO or type(sid) ~= "number" or sid <= 0 then return sid end

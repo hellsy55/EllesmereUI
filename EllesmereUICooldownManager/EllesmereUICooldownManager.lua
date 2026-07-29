@@ -9824,8 +9824,6 @@ SlashCmdList.CDMBUFFID = function(msg)
             local isPlayer = IsPlayerSpell and IsPlayerSpell(id)
             local known    = C_SpellBook and C_SpellBook.IsSpellKnown
                              and C_SpellBook.IsSpellKnown(id)
-            -- The one that survives a replacement: a base spell the player no
-            -- longer has still reports true here when its override IS known.
             local knownOvr
             if C_SpellBook and C_SpellBook.IsSpellKnownOrOverridesKnown then
                 local ok, v = pcall(C_SpellBook.IsSpellKnownOrOverridesKnown, id)
@@ -9836,26 +9834,29 @@ SlashCmdList.CDMBUFFID = function(msg)
                 local ok, v = pcall(C_SpellBook.FindSpellBookSlotForSpell, id)
                 if ok and v then inBook = true end
             end
-            local tag = (isPlayer or knownOvr or inBook) and (GOOD .. " <<HAVE IT" .. OFF) or ""
+            -- REPLACED marks the live-form test: a spell whose override is some
+            -- OTHER spell is one you no longer cast in that form. Do not read
+            -- player= for this -- a replaced base still reports player=true while
+            -- its replacement reports false, so that field points the wrong way.
+            local liveOvr = FO and FO(id)
+            local tag = (type(liveOvr) == "number" and liveOvr ~= id)
+                and (GOOD .. " <<REPLACED BY " .. NM(liveOvr) .. OFF) or ""
             P(string.format("  %s (%s) [%s]  base=%s ovr=%s findOvr=%s player=%s known=%s knownOrOvr=%s book=%s%s",
                 SN(id), NM(id), e.why,
                 SN(GB and GB(id)), SN(GOS and GOS(id)), SN(FO and FO(id)),
                 tostring(isPlayer or false), tostring(known or false),
                 tostring(knownOvr or false), tostring(inBook or false), tag))
         end
-        P("  " .. DIM .. "Read: the id tagged HAVE IT is the form the bar should paint." .. OFF)
+        P("  " .. DIM .. "Read: an id marked REPLACED BY names the form actually cast." .. OFF)
 
-        -- B3. Mechanism probe. The aura ids are provably indistinguishable (every
-        -- API is a fixed point on them), while the CASTABLE side carries the
-        -- override that names the live form. Nothing links the two, so a fix has
-        -- to bridge aura -> castable by some other means. Rather than guess which
-        -- means works, run each candidate against the slot and print what it would
-        -- paint. The one that yields Wither on a Hellcaller lock is the fix.
+        -- B3. What the shipped bridge sees for this slot. Deliberately calls the
+        -- real helpers rather than reimplementing the lookup, so the probe cannot
+        -- drift from the runtime and quietly report on code that is not running.
         if slotCandidates and #slotCandidates > 0 then
-            P(ACCENT .. "--- mechanism probe (aura -> castable bridge) ---" .. OFF)
+            P(ACCENT .. "--- icon bridge (aura -> castable by name) ---" .. OFF)
 
-            -- Do the aura variants even carry different art? If their textures are
-            -- equal, no bridge is needed and the whole approach is wrong.
+            -- Do the variants even carry different art? Equal textures would mean
+            -- there is nothing here to fix and the bridge is chasing a non-problem.
             local GT = C_Spell and C_Spell.GetSpellTexture
             local texLine = {}
             for _, cid in ipairs(slotCandidates) do
@@ -9863,57 +9864,27 @@ SlashCmdList.CDMBUFFID = function(msg)
             end
             P("  candidate art: " .. table.concat(texLine, "  "))
 
-            -- Strategy A: name -> spell identifier -> override.
-            local GSFI = C_Spell and C_Spell.GetSpellIDForSpellIdentifier
-            for _, cid in ipairs(slotCandidates) do
-                local nm = NM(cid)
-                local viaName
-                if GSFI and nm and nm ~= "?" then
-                    local ok, v = pcall(GSFI, nm)
-                    if ok and type(v) == "number" then viaName = v end
-                end
-                local ovr = (viaName and FO) and FO(viaName) or nil
-                P(string.format("  [A] %s name=%s -> identifier=%s -> override=%s(%s)",
-                    SN(cid), tostring(nm), SN(viaName), SN(ovr), NM(ovr)))
-            end
-
-            -- Strategy B: scan the spellbook for a KNOWN castable sharing the
-            -- candidate's name, then follow that castable's override. This is the
-            -- one that should reach 348 -> 445468 without any hardcoded ids.
-            local bookByName = {}
-            local okScan = pcall(function()
-                local nLines = C_SpellBook.GetNumSpellBookSkillLines()
-                for i = 1, (nLines or 0) do
-                    local li = C_SpellBook.GetSpellBookSkillLineInfo(i)
-                    if li and li.itemIndexOffset and li.numSpellBookItems then
-                        for j = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
-                            local it = C_SpellBook.GetSpellBookItemInfo(j, Enum.SpellBookSpellBank.Player)
-                            local bsid = it and it.spellID
-                            if bsid then
-                                local nm = C_Spell.GetSpellName(bsid)
-                                if nm and bookByName[nm] == nil then bookByName[nm] = bsid end
-                            end
-                        end
-                    end
-                end
-            end)
-            if not okScan then
-                P("  [B] " .. BAD .. "spellbook scan failed (API shape changed)" .. OFF)
-            else
-                local nB = 0
-                for _ in pairs(bookByName) do nB = nB + 1 end
-                P("  [B] spellbook names scanned: " .. nB)
+            if ns.CdmBookNameCount and ns.CdmBookIDForName then
+                P("  spellbook name map: " .. ns.CdmBookNameCount() .. " names")
                 for _, cid in ipairs(slotCandidates) do
                     local nm = NM(cid)
-                    local castable = bookByName[nm]
+                    local castable = ns.CdmBookIDForName(nm)
                     local ovr = (castable and FO) and FO(castable) or nil
-                    local tag = (ovr and castable and ovr ~= castable)
-                        and ("  " .. GOOD .. "<<PAINT " .. NM(ovr) .. OFF) or ""
-                    P(string.format("  [B] %s (%s) -> castable=%s -> override=%s(%s)%s",
-                        SN(cid), tostring(nm), SN(castable), SN(ovr), NM(ovr), tag))
+                    P(string.format("  %s (%s) -> book=%s -> override=%s(%s)",
+                        SN(cid), tostring(nm), SN(castable), SN(ovr), NM(ovr)))
                 end
             end
-            P("  " .. DIM .. "Read: whichever strategy prints Wither is the bridge to implement." .. OFF)
+            for _, focus in ipairs(focusList) do
+                if gci and gci(focus) and ns.ResolvePlaceholderIconSID then
+                    local esid = enumSidByCdID[focus]
+                    if esid then
+                        local painted = ns.ResolvePlaceholderIconSID(esid, focus)
+                        local tag = (painted ~= esid) and ("  " .. GOOD .. "BRIDGED" .. OFF) or ""
+                        P(string.format("  slot %s paints %s(%s)%s",
+                            SN(focus), SN(painted), NM(painted), tag))
+                    end
+                end
+            end
         end
         P(ACCENT .. "=== END BATTERY ===" .. OFF)
         return
