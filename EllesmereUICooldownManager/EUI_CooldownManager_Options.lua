@@ -6336,8 +6336,17 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Resolve a base spell ID to its current live version (talent overrides).
     -- E.g. Flame Shock (188389) -> Voltaic Blaze (470057) when talented.
-    local function ResolveToLive(sid)
+    -- cdID is optional but worth passing: a tracked-buff slot holds AURA ids,
+    -- which carry no override even when a talent replaces the spell behind them,
+    -- and the shared resolver needs the slot's linked ids to see the replacement.
+    -- Without it the preview would keep showing the pre-talent art (Immolate)
+    -- while the live bar paints the replacement (Wither).
+    local function ResolveToLive(sid, cdID)
         if not sid or sid <= 0 then return sid end
+        if ns.ResolvePlaceholderIconSID then
+            local live = ns.ResolvePlaceholderIconSID(sid, cdID)
+            if type(live) == "number" and live > 0 then return live end
+        end
         if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
             local ovr = C_SpellBook.FindSpellOverrideByID(sid)
             if ovr and ovr > 0 then return ovr end
@@ -15546,7 +15555,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end
                             if type(csid) == "number" and csid > 0 then
-                                local displayID = ResolveToLive(csid)
+                                local displayID = ResolveToLive(csid, cdClaim)
                                 tex = C_Spell.GetSpellTexture(displayID)
                                 if not tex and displayID ~= csid then
                                     tex = C_Spell.GetSpellTexture(csid)
@@ -15576,7 +15585,7 @@ initFrame:SetScript("OnEvent", function(self)
                             tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                         else
                             -- Resolve to live override for texture lookup.
-                            local displayID = ResolveToLive(id)
+                            local displayID = ResolveToLive(id, slot._previewCdID)
                             tex = C_Spell.GetSpellTexture(displayID)
                             if not tex and displayID ~= id then
                                 tex = C_Spell.GetSpellTexture(id)

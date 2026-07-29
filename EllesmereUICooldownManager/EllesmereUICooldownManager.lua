@@ -9704,8 +9704,8 @@ SlashCmdList.CDMBUFFID = function(msg)
                 i, SN(e.sid), SN(e.cdID), SN(infoSpell), SN(infoOvr),
                 linked or "none", SN(iconSID), NM(iconSID), NM(e.sid), bridgeTag))
         end
-        P(string.format("  placeholder icon bridge: %d of %d entr%s resolve to a replacing spell",
-            nBridged, #entries, nBridged == 1 and "y" or "ies"))
+        P(string.format("  placeholder icon bridge: %d of %d entries resolve to a replacing spell",
+            nBridged, #entries))
 
         -- Why a non-bridge happened. The bridge resolves an aura NAME against the
         -- spellbook, so when it silently does nothing the useful facts are how
