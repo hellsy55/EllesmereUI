@@ -3599,7 +3599,13 @@ do
                                     -- on a spell this walk had just drawn as ready.
                                     -- Charge buttons are a handful, and lastCountText
                                     -- keeps the SetText itself off the steady state.
-                                    if (_cdCountPass or chargeShown) and btn.Count and C_ActionBar.GetActionDisplayCount then
+                                    -- fd.chargeWasShown covers the FALLING edge: a proc can
+                                    -- grant a temporary charge to a spell with none by
+                                    -- default, so maxCharges runs 1 -> 2 -> 1, and gating on
+                                    -- chargeShown alone switched this write off at exactly
+                                    -- the moment the count needed clearing.
+                                    if (_cdCountPass or chargeShown or fd.chargeWasShown)
+                                       and btn.Count and C_ActionBar.GetActionDisplayCount then
                                         local display = C_ActionBar.GetActionDisplayCount(action) or ""
                                         if issecretvalue and issecretvalue(display) then
                                             -- Secret string (combat): write through --
@@ -3618,6 +3624,7 @@ do
                                     end
                                     fd.cdWasActive = active
                                     fd.cdWasReal = cdReal
+                                    fd.chargeWasShown = chargeShown
                                     fd.chargeWasLive = (chargeInfo and chargeInfo.isActive) and true or false
                                 end
                             end
@@ -3741,15 +3748,26 @@ do
                                         -- function re-fetches main-cd state
                                         -- itself for these few charge buttons.
                                         RefreshCooldownVisuals(btn, action, nil, nil, chargeInfo)
-                                        if btn.Count and C_ActionBar.GetActionDisplayCount then
-                                            local display = C_ActionBar.GetActionDisplayCount(action) or ""
-                                            if issecretvalue and issecretvalue(display) then
-                                                btn.Count:SetText(display)
-                                                fd.lastCountText = nil
-                                            elseif fd.lastCountText ~= display then
-                                                fd.lastCountText = display
-                                                btn.Count:SetText(display)
-                                            end
+                                    end
+                                    -- Count write sits OUTSIDE the chargeShown gate. A proc
+                                    -- can grant a TEMPORARY charge to a spell that has none
+                                    -- by default (Shadowy Insights on Mind Blast), so
+                                    -- maxCharges runs 1 -> 2 -> 1. Gating the write on
+                                    -- maxCharges>1 switched it off at exactly the moment the
+                                    -- count needed clearing, stranding the higher number
+                                    -- until the ~2s count sub-pass. With the talent that
+                                    -- gives the spell 2 charges outright the gate stays
+                                    -- true throughout, which is why it only misbehaved
+                                    -- WITHOUT that talent. This event fires ~0.1/sec, so
+                                    -- writing unconditionally here costs nothing.
+                                    if btn.Count and C_ActionBar.GetActionDisplayCount then
+                                        local display = C_ActionBar.GetActionDisplayCount(action) or ""
+                                        if issecretvalue and issecretvalue(display) then
+                                            btn.Count:SetText(display)
+                                            fd.lastCountText = nil
+                                        elseif fd.lastCountText ~= display then
+                                            fd.lastCountText = display
+                                            btn.Count:SetText(display)
                                         end
                                     end
                                     fd.chargeWasLive = (chargeInfo and chargeInfo.isActive) and true or false
