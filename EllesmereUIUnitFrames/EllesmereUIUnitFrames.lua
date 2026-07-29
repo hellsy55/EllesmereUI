@@ -4194,18 +4194,30 @@ local function CreateAbsorbBar(frame, unit, settings)
         Override = function(self, event, updUnit)
             if self.unit ~= updUnit then return end
 
-            -- Drive the "Absorb Short" health-text gate(s) on absorb changes: feed
-            -- the raw absorb so the clip reveals/collapses, AND refresh the text in
-            -- LOCKSTEP so the revealed text never flashes the stale "0" (oUF tags
-            -- update on a throttled cycle, so a bare tag lags the synchronous clip
-            -- reveal by a frame). Only the absorb event moves the gate. Runs before
-            -- the bar-style early return so it works with the absorb BAR disabled.
+            -- Drive the "Absorb Short" health-text gate(s): feed the raw absorb so
+            -- the clip reveals/collapses, AND refresh the text in LOCKSTEP so the
+            -- revealed text never flashes the stale "0" (oUF tags update on a
+            -- throttled cycle, so a bare tag lags the synchronous clip reveal by a
+            -- frame). Runs before the bar-style early return so it works with the
+            -- absorb BAR disabled.
+            -- The gate moves on EVERY update, not only on the absorb events: on
+            -- volatile units (target/focus/boss/pet) the frame is re-pointed at a
+            -- different unit with no absorb event firing at all (target switch,
+            -- OnShow, ForceUpdate), and a unit that dies drops its shield without
+            -- one either. The TAG re-evaluates on those paths and lands on "0", so
+            -- a gate still held open by the PREVIOUS unit's shield leaves a stuck
+            -- "0" on the frame. The player frame never showed this because its unit
+            -- never changes -- every zero it reaches comes from an absorb event.
+            -- Health events skip the text refresh: the absorb text can only change
+            -- on an absorb event, and that path does its own lockstep SetText.
             -- Secret-safe: the absorb is only fed to SetValue and AbbreviateNumbers,
             -- never compared to zero (SetText takes the same value the tag would).
             -- Each gate feeds its own value source: shield gates use total
-            -- absorbs, heal gates (g._euiHealGate) use total heal absorbs. Both
-            -- absorb events drive the loop; each amount is fetched lazily once.
-            if self._absGate and (event == "UNIT_ABSORB_AMOUNT_CHANGED" or event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED") then
+            -- absorbs, heal gates (g._euiHealGate) use total heal absorbs. Each
+            -- amount is fetched lazily once per update.
+            if self._absGate then
+                local syncText = (event ~= "UNIT_HEALTH" and event ~= "UNIT_MAXHEALTH"
+                                  and event ~= "UNIT_HEAL_PREDICTION")
                 local shieldAmt, healAmt, fsZone
                 for zone, g in pairs(self._absGate) do
                     if g:IsShown() then
@@ -4218,11 +4230,13 @@ local function CreateAbsorbBar(frame, unit, settings)
                             amt = shieldAmt
                         end
                         g:SetValue(amt)
-                        fsZone = fsZone or { left = self.LeftText, right = self.RightText, center = self.CenterText, extra = self.ExtraText }
-                        local fs = fsZone[zone]
-                        if fs then
-                            local cfg = _G._EUI_AbbrevDecimalCfg
-                            fs:SetText(cfg and AbbreviateNumbers(amt, cfg) or AbbreviateNumbers(amt))
+                        if syncText then
+                            fsZone = fsZone or { left = self.LeftText, right = self.RightText, center = self.CenterText, extra = self.ExtraText }
+                            local fs = fsZone[zone]
+                            if fs then
+                                local cfg = _G._EUI_AbbrevDecimalCfg
+                                fs:SetText(cfg and AbbreviateNumbers(amt, cfg) or AbbreviateNumbers(amt))
+                            end
                         end
                     end
                 end
