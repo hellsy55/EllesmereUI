@@ -430,7 +430,8 @@ local BUFF_BAR_PRESETS = {
 ns.BUFF_BAR_PRESETS = BUFF_BAR_PRESETS
 
 -- Item presets for CD/utility bars (potions that track cooldowns)
--- displayOrder (combat pots only): dynamic-display priority. The icon resolves
+-- displayOrder (pots with ranked/multi-tier variants): dynamic-display
+-- priority, newest tier first. The icon resolves
 -- to the FIRST id in this list with a bag count and shows that variant's icon,
 -- exact count, and tooltip. Rank 2 before rank 1, Fleeting before regular at
 -- the same rank (cheap pots get burned first). Id-to-rank mapping is
@@ -469,9 +470,21 @@ local CDM_ITEM_PRESETS = {
     {
         key      = "silvermoon_health",
         name     = "Silvermoon Health Potion",
+        -- icon MUST stay the art of itemID: PotSwap.Ensure only paints
+        -- preset.icon when the resolved variant IS the primary, and every other
+        -- variant is painted from C_Item.GetItemIconByID. Putting a newer
+        -- tier's art here shows that art over the primary's bag count.
         icon     = 7548909,
         itemID   = 241304,
-        altItemIDs = { 241305 },
+        altItemIDs = { 241305, 271884 },
+        -- Newest tier leads, then the Silvermoon pair (r2 before r1). itemID
+        -- stays on 241304: it is the identity anchor for saved frames and the
+        -- PotSwap.Ensure primary check, so it must not follow the new tier.
+        displayOrder = {
+            271884,  -- current-tier health potion
+            241304,  -- Silvermoon Health Potion r2
+            241305,  -- Silvermoon Health Potion r1
+        },
     },
     {
         key      = "lightfused_mana",

@@ -9102,6 +9102,30 @@ ns._NormalizeTierOffsetAnchors = function()
     if not s then return end
     local ov = s.raidSizeOverrides
     if not ov then return end
+    -- Heal string-keyed numeric tiers ("25" beside 25): planted by the spec
+    -- override system's container fabrication before it learned to use the
+    -- numeric form. The module reads tiers numerically, so a phantom never
+    -- renders yet captures every override read/write for its tier. With a
+    -- numeric twin the phantom is dropped (the twin is the rendered truth;
+    -- override values re-apply from their store at the next boundary);
+    -- without one it becomes the numeric tier it was meant to be. Must run
+    -- BEFORE the markers early-return below: converted profiles are the
+    -- common carriers.
+    local phantoms
+    for k, v in pairs(ov) do
+        if type(k) == "string" and tonumber(k) ~= nil and type(v) == "table" then
+            phantoms = phantoms or {}
+            phantoms[#phantoms + 1] = k
+        end
+    end
+    if phantoms then
+        for i = 1, #phantoms do
+            local k = phantoms[i]
+            local n = tonumber(k)
+            if ov[n] == nil then ov[n] = ov[k] end
+            ov[k] = nil
+        end
+    end
     if ov._topLeftAnchored and ov._cornerAnchored then return end
     local cs = PixelSnap(s.cellSpacing or 2)
     local gs = PixelSnap(s.groupSpacing or 8)

@@ -1385,7 +1385,7 @@ initFrame:SetScript("OnEvent", function(self)
                 for _, info in ipairs(barSlotInfo) do
                     if info.key ~= nameSlotKey then
                         local el = info.slot
-                        if el ~= "none" and el ~= "enemyName" then
+                        if el ~= "none" and not ns.IsNameElement(el) then
                             usedWidth = usedWidth + ns.EstimateHealthTextWidth(el)
                         end
                     end
@@ -1400,7 +1400,7 @@ initFrame:SetScript("OnEvent", function(self)
             local topYOff = DBVal("textSlotTopYOffset") or 0
             local topFontSz = DBVal("textSlotTopSize") or defaults.textSlotTopSize
             local topC = (DB() and DB().textSlotTopColor) or defaults.textSlotTopColor
-            if slotTop == "enemyName" then
+            if ns.IsNameElement(slotTop) then
                 pvNameSlotKey = "textSlotTop"
                 SetPVFont(nameFS, fontPath, topFontSz, npOutline)
                 nameFS:SetParent(topTextFrame)
@@ -1425,7 +1425,7 @@ initFrame:SetScript("OnEvent", function(self)
             local rightYOff = DBVal("textSlotRightYOffset") or 0
             local rightFontSz = DBVal("textSlotRightSize") or defaults.textSlotRightSize
             local rightC = (DB() and DB().textSlotRightColor) or defaults.textSlotRightColor
-            if slotRight == "enemyName" then
+            if ns.IsNameElement(slotRight) then
                 PlaceNameInBar("RIGHT", "RIGHT", -2, "RIGHT", rightXOff, rightYOff, rightFontSz, rightC.r, rightC.g, rightC.b, "textSlotRight")
             else
                 PlaceHealthInBar(slotRight, "RIGHT", "RIGHT", -2 + rightXOff, rightYOff, rightFontSz, rightC.r, rightC.g, rightC.b, "textSlotRight")
@@ -1436,7 +1436,7 @@ initFrame:SetScript("OnEvent", function(self)
             local leftYOff = DBVal("textSlotLeftYOffset") or 0
             local leftFontSz = DBVal("textSlotLeftSize") or defaults.textSlotLeftSize
             local leftC = (DB() and DB().textSlotLeftColor) or defaults.textSlotLeftColor
-            if slotLeft == "enemyName" then
+            if ns.IsNameElement(slotLeft) then
                 PlaceNameInBar("LEFT", "LEFT", 4, "LEFT", leftXOff, leftYOff, leftFontSz, leftC.r, leftC.g, leftC.b, "textSlotLeft")
             else
                 PlaceHealthInBar(slotLeft, "LEFT", "LEFT", 4 + leftXOff, leftYOff, leftFontSz, leftC.r, leftC.g, leftC.b, "textSlotLeft")
@@ -1447,11 +1447,23 @@ initFrame:SetScript("OnEvent", function(self)
             local centerYOff = DBVal("textSlotCenterYOffset") or 0
             local centerFontSz = DBVal("textSlotCenterSize") or defaults.textSlotCenterSize
             local centerC = (DB() and DB().textSlotCenterColor) or defaults.textSlotCenterColor
-            if slotCenter == "enemyName" then
+            if ns.IsNameElement(slotCenter) then
                 PlaceNameInBar("CENTER", "CENTER", 0, "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             else
                 PlaceHealthInBar(slotCenter, "CENTER", "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             end
+            -- Preview sample for whichever name-family variant is slotted (the
+            -- player's level stands in for the mob level). Runs after the slot
+            -- branches so the text re-lays out under the just-applied justify
+            -- (SetJustifyH alone does not re-flow already-rendered text).
+            ns.SetNameElementText(nameFS,
+                (ns.IsNameElement(slotTop) and slotTop)
+                or (ns.IsNameElement(slotRight) and slotRight)
+                or (ns.IsNameElement(slotLeft) and slotLeft)
+                or (ns.IsNameElement(slotCenter) and slotCenter)
+                or "enemyName",
+                EllesmereUI.L("Enemy Name Text"), "player")
+            ns.ReflowFontString(nameFS)
             if DBVal("hideEnemyNameWhileCasting") == true then nameFS:Hide() end
             LayoutPreviewNameRaidMarker()
 
@@ -1577,7 +1589,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if slotName == "top" then
                     -- Anchor auras to whichever FontString is in the top slot
                     local anchor
-                    if slotTop == "enemyName" then
+                    if ns.IsNameElement(slotTop) then
                         anchor = nameFS
                     elseif slotTop == "healthNumber" then
                         anchor = hpNumber
@@ -4193,8 +4205,16 @@ initFrame:SetScript("OnEvent", function(self)
             local db = DB()
             if element ~= "none" then
                 for _, key in ipairs(textSlotKeys) do
-                    if key ~= slotKey and (db[key] or defaults[key]) == element then
-                        db[key] = "none"
+                    if key ~= slotKey then
+                        local cur = db[key] or defaults[key]
+                        -- Name-family variants (name / level combos / level) all
+                        -- render through the plate's single name FontString, so
+                        -- slotting any of them evicts whichever family member
+                        -- occupies another slot -- same rule as an exact match.
+                        if cur == element
+                           or (ns.IsNameElement(element) and ns.IsNameElement(cur)) then
+                            db[key] = "none"
+                        end
                     end
                 end
             end
@@ -6218,6 +6238,9 @@ initFrame:SetScript("OnEvent", function(self)
 
         local textElementValues = {
             enemyName            = "Enemy Name",
+            levelName            = "Level | Name",
+            nameLevel            = "Name | Level",
+            level                = "Level",
             healthPercent        = "Health %",
             healthPercentNoSign  = "Health % (No Sign)",
             healthNumber         = "Health #",
@@ -6227,7 +6250,7 @@ initFrame:SetScript("OnEvent", function(self)
             healthNumPctDash     = "Health # - %",
             none                 = "None",
         }
-        local textElementOrder = { "none", "---", "enemyName", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash" }
+        local textElementOrder = { "none", "---", "enemyName", "levelName", "nameLevel", "level", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash" }
 
         local function TextSlotSetValue(slotKey, v)
             SetTextElementAtSlot(slotKey, v)
@@ -6297,11 +6320,12 @@ initFrame:SetScript("OnEvent", function(self)
                     sizeFirst = true,
                 }
                 -- Both name and health text in this slot get Width % + Wrap (on the
-                -- dedicated Wrap row). Enemy name uses the GLOBAL enemyName keys (one
-                -- slot holds the name at a time) and its width % scales the computed
+                -- dedicated Wrap row). Name-family variants (name / level combos /
+                -- level) use the GLOBAL enemyName keys (one slot holds the name
+                -- FontString at a time) and their width % scales the computed
                 -- width. Health text uses PER-SLOT keys, width % is of the health bar
                 -- (default 100 = no clip), and it keeps the "Show % Decimal" toggle.
-                if DBVal(slotKey) == "enemyName" then
+                if ns.IsNameElement(DBVal(slotKey)) then
                     cogOpts.widthGet = function() return DBVal("enemyNameWidthPct") or defaults.enemyNameWidthPct end
                     cogOpts.widthSet = function(v) DB().enemyNameWidthPct = v; ns.RefreshAllSettings(); UpdatePreview() end
                     cogOpts.wrapGet = function() return DBVal("enemyNameWrap") == true end
@@ -6378,7 +6402,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return DBVal("textSlotRight") == "none" end,
               disabledTooltip="This option requires a text to be assigned", rawTooltip=true,
               labelOnlyDisabled=true,
-              disabledValues=function(k) if ns.IsComboHealthText(k) and DBVal("textSlotCenter") == "enemyName" then return "Disabled when Enemy Name is centered on the health bar due to overlapping text" end end });  y = y - h
+              disabledValues=function(k) if ns.IsComboHealthText(k) and ns.IsNameElement(DBVal("textSlotCenter")) then return "Disabled when the Name/Level text is centered on the health bar due to overlapping text" end end });  y = y - h
         MakeTextColorSwatch(textRow1, "_leftRegion",  "textSlotTop")
         MakeTextCogIcon(textRow1, "_leftRegion",  "textSlotTop",   "Top Text")
         MakeTextColorSwatch(textRow1, "_rightRegion", "textSlotRight")
@@ -6393,7 +6417,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return DBVal("textSlotLeft") == "none" end,
               disabledTooltip="This option requires a text to be assigned", rawTooltip=true,
               labelOnlyDisabled=true,
-              disabledValues=function(k) if ns.IsComboHealthText(k) and DBVal("textSlotCenter") == "enemyName" then return "Disabled when Enemy Name is centered on the health bar due to overlapping text" end end },
+              disabledValues=function(k) if ns.IsComboHealthText(k) and ns.IsNameElement(DBVal("textSlotCenter")) then return "Disabled when the Name/Level text is centered on the health bar due to overlapping text" end end },
             { type="dropdown", text="Center Text", values=textElementValues,
               getValue=function() return DBVal("textSlotCenter") end,
               setValue=function(v) TextSlotSetValue("textSlotCenter", v) end,
@@ -8755,7 +8779,15 @@ initFrame:SetScript("OnEvent", function(self)
             ccIcon       = function() return ResolveCoreMapping("ccs") end,
             raidMarker   = function() return ResolveCoreMapping("raidmarker") end,
             classIcon    = function() return ResolveCoreMapping("classification") end,
-            enemyName    = function() return ResolveTextMapping("enemyName") end,
+            enemyName    = function()
+                -- The name FontString renders whichever name-family variant is
+                -- slotted; resolve the row for any of them.
+                local slot = FindTextSlotForElement("enemyName") or FindTextSlotForElement("levelName") or FindTextSlotForElement("nameLevel") or FindTextSlotForElement("level")
+                if not slot then return { section = coreTextHeader, target = textRow1 } end
+                local info = textSlotToRow[slot]
+                if not info then return { section = coreTextHeader, target = textRow1 } end
+                return { section = coreTextHeader, target = info.row, slotSide = (info.side == "_leftRegion") and "left" or "right" }
+            end,
             healthText   = function()
                 local slot = FindTextSlotForElement("healthPercent") or FindTextSlotForElement("healthPercentNoSign") or FindTextSlotForElement("healthNumber") or FindTextSlotForElement("healthPctNum") or FindTextSlotForElement("healthNumPct") or FindTextSlotForElement("healthPctNumDash") or FindTextSlotForElement("healthNumPctDash")
                 if not slot then return { section = coreTextHeader, target = textRow1 } end
@@ -9261,7 +9293,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Use the largest text slot size (capped at 13 for mini bars)
                 for _, sk in ipairs({"textSlotRight", "textSlotLeft", "textSlotCenter"}) do
                     local el = DBVal(sk) or defaults[sk]
-                    if el and el ~= "none" and el ~= "enemyName" then
+                    if el and el ~= "none" and not ns.IsNameElement(el) then
                         hpFS = math.min(DBVal(sk .. "Size") or defaults[sk .. "Size"] or 10, 13)
                         break
                     end

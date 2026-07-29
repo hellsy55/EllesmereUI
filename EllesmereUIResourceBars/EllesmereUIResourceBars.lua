@@ -4490,6 +4490,9 @@ IP.HookViewerFS = function(frame, appFS)
                 IP.viewerFrame = nil
                 IP.viewerFS = nil
                 IP.value = nil
+                -- Recapture on the next text tick: the pool rebuild that
+                -- recycled this frame has already re-homed the IP icon.
+                IP.nextScan = 0
                 return
             end
             -- Secrets pass through raw (SetText renders them);
@@ -4520,22 +4523,27 @@ end
 -- carry the stack FontString at frame.Applications.Applications; Tracked
 -- Bars carry it at frame.Icon.Applications (the same child the EUI CDM
 -- buff bars read stacks from). Whichever has IP wins.
-IP.ScanViewer = function()
-    if IP.viewerFrame then return end
+-- force: rescan even while a capture is held (used when the captured FS has
+-- gone invisible -- the capture may be stranded on a released pool frame).
+-- A forced scan that finds nothing leaves the current capture in place.
+IP.ScanViewer = function(force)
+    if IP.viewerFrame and not force then return end
     local function scanPool(viewer, resolve)
         if not viewer or not viewer.itemFramePool then return end
         for frame in viewer.itemFramePool:EnumerateActive() do
             if IP.FrameSpellID(frame) == IP.SPELL then
                 local fs = resolve(frame)
-                if fs then IP.HookViewerFS(frame, fs) end
+                if fs then IP.HookViewerFS(frame, fs); return true end
                 return
             end
         end
     end
-    scanPool(_G.BuffIconCooldownViewer, function(f)
+    local hit = scanPool(_G.BuffIconCooldownViewer, function(f)
         return f.Applications and f.Applications.Applications
     end)
-    if not IP.viewerFrame then
+    -- Icon viewer wins; the bar viewer is only consulted when the icon scan
+    -- captured nothing this pass (a held stale capture must not block it).
+    if not hit and (not IP.viewerFrame or force) then
         scanPool(_G.BuffBarCooldownViewer, function(f)
             return f.Icon and f.Icon.Applications
         end)
@@ -4557,10 +4565,16 @@ IP.UpdateText = function()
         end
         return
     end
-    -- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle)
-    if not IP.viewerFrame and GetTime() >= IP.nextScan then
+    -- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle).
+    -- Also rescan while the captured FS is invisible: a viewer pool rebuild
+    -- (tracked buffs proccing/expiring, e.g. Thunder Blast) can strand the
+    -- capture on a released, hidden frame that never fires SetText to flag
+    -- the recycling. The icon lives on in another pool frame, and without
+    -- this the text sits blank until the orphan happens to be reused.
+    local staleFS = IP.viewerFS and not IP.viewerFS:IsVisible()
+    if (not IP.viewerFrame or staleFS) and GetTime() >= IP.nextScan then
         IP.nextScan = GetTime() + 2
-        IP.ScanViewer()
+        IP.ScanViewer(staleFS)
     end
     -- The captured viewer value is usually a SECRET number (type() says
     -- "number" and truthiness works, but comparisons/format error). SetText

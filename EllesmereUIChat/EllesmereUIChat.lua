@@ -288,8 +288,13 @@ local _euiDockStyled
 -- way instead -- the dock-level GeneralDockManager:SetAlpha in _ApplyAlpha,
 -- which the tabs inherit as children. Do not reintroduce continuous per-tab
 -- SetAlpha enforcement (and NEVER hook tab SetAlpha -- the pre-2026 attempt
--- was a constant hot-path perf hit). DisableBlizzardTabFade instead changes
--- Blizzard's own targets and performs only one deferred initial correction.
+-- was a constant hot-path perf hit). Also NEVER write the six
+-- CHAT_FRAME_TAB_*_ALPHA globals to suppress Blizzard's per-tab fade
+-- (PR #1000's DisableBlizzardTabFade, removed after a field bisect convicted
+-- it 2026-07-28): an addon-written global is a tainted variable, Blizzard
+-- reads those constants inside its dock-update and temp-window chains, and
+-- the tainted execution then hits secret whisper values. There is no timing
+-- or deferral fix -- the variable stays tainted whenever it is written.
 
 -- Height of the tab strip (GeneralDockManager dockH, set in StyleDockManager).
 -- Used by the "Extend Background Behind Tabs" feature to size the strip behind
@@ -2769,9 +2774,10 @@ function ECHAT.ApplyTabSeparators()
                 visibleTabs[#visibleTabs + 1] = tab
             end
         end
-        -- Mark every visible tab except the last one. The lines are only used
-        -- by the unified in-panel strip; standalone tabs use their own border.
-        for i = 1, #visibleTabs - 1 do
+        -- Mark every visible tab, INCLUDING the last one: its divider sits in
+        -- the slot past its right edge and gives the final tab the same clean
+        -- outer edge as the ones between tabs.
+        for i = 1, #visibleTabs do
             dockedTabs[visibleTabs[i]] = true
         end
     end
@@ -2830,8 +2836,10 @@ function ECHAT.ApplyTabSeparators()
         local d = tab and CFD(tab)
         if d and d.tabSeparatorHost then
             d.tabSeparatorBottom:SetColorTexture(r, g, b, a)
-            -- Tab dividers are always a solid, opaque black physical pixel.
-            d.tabSeparatorLeft:SetColorTexture(0, 0, 0, 1)
+            -- Tab dividers follow the Inner Border Color like every other
+            -- internal divider (input, sidebar, tab-strip bottom). At the
+            -- default white @ 6% alpha they read as a plain gap.
+            d.tabSeparatorLeft:SetColorTexture(r, g, b, a)
             d.tabSeparatorBottom:Hide()
             d.tabSeparatorLeft:SetShown(showTabDividers and dockedTabs[tab] == true)
             -- Clip-parented host no longer auto-hides with its tab; couple
@@ -3236,12 +3244,21 @@ local function SkinEditBox(cf)
             -- OnEnterPressed alone is not enough: Blizzard's own handler runs
             -- first and clears the box, so the text is shadowed on change and
             -- committed on send.
-            eb:HookScript("OnTextChanged", function(self)
+            eb:HookScript("OnTextChanged", function(self, userInput)
                 local t = self:GetText()
                 if issecretvalue and issecretvalue(t) then
                     CFD(self).pendingLine = nil
                     return
                 end
+                -- A PROGRAMMATIC empty write must not consume the shadow:
+                -- Blizzard's own OnEnterPressed handler clears the box
+                -- (SetText("")) before our commit hook runs, so honoring that
+                -- clear here would erase the line the commit is about to read.
+                -- User-typed emptiness (select-all + delete) still records ""
+                -- so an empty send commits nothing; programmatic NON-empty
+                -- writes (arrow recall, reply prefill) still shadow normally
+                -- so recall-then-send commits the recalled line.
+                if t == "" and not userInput then return end
                 CFD(self).pendingLine = t
             end)
             eb:HookScript("OnEnterPressed", function(self)
@@ -3984,34 +4001,6 @@ local function UpdateTabColors()
     end
 end
 
--- Blizzard continuously fades individual chat tabs according to mouseover and
--- selection state. Keep those local tab alphas opaque; the dock still inherits
--- EllesmereUI's configured panel/idle alpha, so the whole chat can fade as one
--- unit without tab labels independently pulsing in and out.
-local function DisableBlizzardTabFade()
-    local alphaKeys = {
-        "CHAT_FRAME_TAB_NORMAL_NOMOUSE_ALPHA",
-        "CHAT_FRAME_TAB_NORMAL_MOUSEOVER_ALPHA",
-        "CHAT_FRAME_TAB_SELECTED_NOMOUSE_ALPHA",
-        "CHAT_FRAME_TAB_SELECTED_MOUSEOVER_ALPHA",
-        "CHAT_FRAME_TAB_ALERTING_NOMOUSE_ALPHA",
-        "CHAT_FRAME_TAB_ALERTING_MOUSEOVER_ALPHA",
-    }
-    for _, key in ipairs(alphaKeys) do
-        if _G[key] ~= nil then _G[key] = 1 end
-    end
-
-    -- Existing tabs may already hold Blizzard's old target alpha. Correct them
-    -- once outside the dock update; subsequent Blizzard updates use the opaque
-    -- constants above and no per-frame SetAlpha enforcement is necessary.
-    C_Timer.After(0, function()
-        for i = 1, 20 do
-            local tab = _G["ChatFrame" .. i .. "Tab"]
-            if tab then tab:SetAlpha(1) end
-        end
-    end)
-end
-
 
 -------------------------------------------------------------------------------
 --  Initialization (PLAYER_LOGIN)
@@ -4021,7 +4010,6 @@ initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
     self:UnregisterAllEvents()
     EnsureDB()
-    DisableBlizzardTabFade()
 
     ---------------------------------------------------------------------------
     --  1. Load saved background color/opacity before skinning any frames
@@ -4278,8 +4266,10 @@ initFrame:SetScript("OnEvent", function(self)
             -- text colors. Re-apply the complete tab pass on the next frame
             -- (plus one short delayed pass for slower loading screens) so the
             -- saved padding and font colors are already correct after login.
-            QueueTabPass()
-            C_Timer.After(0.10, QueueTabPass)
+            -- TEMP-TAINT-BISECT (item 3): post-login re-assert passes disabled
+            -- for the field taint pass. Restore by uncommenting.
+            -- QueueTabPass()
+            -- C_Timer.After(0.10, QueueTabPass)
         end)
     end
 

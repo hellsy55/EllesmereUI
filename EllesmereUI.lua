@@ -5376,6 +5376,7 @@ do
         263933, -- Preyseeker's Hearthstone
         265100, -- Corewarden's Hearthstone
         142298, -- Astonishingly Scarlet Slippers
+        264367, -- Mushroom
     }
     local SHAMAN_ASTRAL_RECALL = 556
     local DALARAN_HS = 253629
@@ -11112,7 +11113,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.6.5"
+EllesmereUI.VERSION = "8.6.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11249,7 +11250,6 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "Healers-Have-To-Die",      label = "Healers Have To Die",        targets = { "EllesmereUINameplates" } },
             { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
-            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIQuestTracker" }, },
             { addon = "EditModeExpanded",     label = "Edit Mode Expanded",         targets = { "EllesmereUIQuestTracker", "EllesmereUIChat" } },
             { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIMinimap" }, },
             { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIMinimap" }, },

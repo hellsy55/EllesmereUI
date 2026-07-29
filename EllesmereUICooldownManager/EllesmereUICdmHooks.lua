@@ -2301,11 +2301,12 @@ local function DecorateFrame(frame, barData)
             local cd = fd.cooldown
             hooksecurefunc(cd, "SetSwipeColor", function()
                 if fd._isProcessingOverride then return end
-                -- Buff-viewer frame (buff bar or hosted on a CD/util bar): the swipe
-                -- is the aura DURATION, so skip all cd-style logic (Suppress-GCD,
-                -- active-state). Apply only the per-spell "Cooldown Swipe Color":
-                -- Default = the bar's swipe colour (black), Class / Custom per settings.
-                if fd._isBuffViewerFrame then
+                -- Buff-viewer frame (buff bar or hosted on a CD/util bar) or our own
+                -- preset/custom buff frame (cast-timer driven): the swipe is the aura
+                -- DURATION, so skip all cd-style logic (Suppress-GCD, active-state).
+                -- Apply only the per-spell "Cooldown Swipe Color": Default = the bar's
+                -- swipe colour (black), Class / Custom per settings.
+                if fd._isBuffViewerFrame or frame._isCustomBuffFrame then
                     fd._isProcessingOverride = true
                     local fcB = _ecmeFC[frame]
                     local sidB = fcB and fcB.spellID
@@ -4162,8 +4163,8 @@ end
 ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 
 -- ---------------------------------------------------------------------------
--- Dynamic potion display for the two combat-pot presets (Light's Potential /
--- Potion of Recklessness). The preset icon resolves to the best variant
+-- Dynamic potion display for every pot preset carrying a displayOrder (Light's
+-- Potential, Potion of Recklessness, health). The preset icon resolves to the best variant
 -- actually in bags (preset.displayOrder, best first) and shows THAT variant's
 -- icon, exact bag count, and tooltip -- 2 Fleeting pots show "2" even with 50
 -- regular ones in the bank of another rank. With the profile-level "Swap

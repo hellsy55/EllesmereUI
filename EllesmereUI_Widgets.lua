@@ -972,14 +972,16 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
                 iLbl:SetTextColor(1, 1, 1, 1)
                 if iNote then iNote:SetTextColor(1, 1, 1, 1) end
                 iHl:SetAlpha(DD_ITEM_HL_A)
-                if _moOnItemHover then _moOnItemHover(key) end
+                -- Second arg (the item frame) is additive: existing handlers
+                -- take (key) and ignore it; new ones can anchor tooltips.
+                if _moOnItemHover then _moOnItemHover(key, item) end
             end)
             item:SetScript("OnLeave", function()
                 if disabledValuesFn and disabledValuesFn(key) then HideWidgetTooltip(); return end
                 iLbl:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A)
                 if iNote then iNote:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A) end
                 iHl:SetAlpha((item._key == getValue()) and DD_ITEM_SEL_A or 0)
-                if _moOnItemLeave then _moOnItemLeave(key) end
+                if _moOnItemLeave then _moOnItemLeave(key, item) end
             end)
             item:SetScript("OnClick", function()
                 if disabledValuesFn and disabledValuesFn(key) then return end
@@ -1676,6 +1678,25 @@ local function GetTooltipFrame()
     return tooltipFrame
 end
 
+-- Panel-family check: true when the anchor lives in the options panel or one
+-- of its registered popups (cog/confirm), so its tooltip should ride the
+-- user's panel-scale slider. In-game anchors (bags, minimap, meters) stay 1.
+local function IsPanelFamilyAnchor(region)
+    local mf = EllesmereUI._mainFrame
+    local pops = EllesmereUI._popupFrames
+    local node = region
+    while node do
+        if node == mf then return true end
+        if pops then
+            for i = 1, #pops do
+                if pops[i].popup == node then return true end
+            end
+        end
+        node = node:GetParent()
+    end
+    return false
+end
+
 -- opts (optional table): { color = {r,g,b}, width = number } to override text color or force width
 ShowWidgetTooltip = function(label, text, opts)
     -- Suppress tooltips in M+/raid/PvP combat -- frame APIs return secret
@@ -1711,6 +1732,17 @@ ShowWidgetTooltip = function(label, text, opts)
         tt.text:SetJustifyH("CENTER")
     end
     tt.text:SetText(EllesmereUI.L(text))
+    -- Scale must be set before anchoring: the cursor branch below divides by
+    -- the tooltip's effective scale. Reset to 1 in HideWidgetTooltip.
+    local ttScaleMult = opts and opts.scale
+    if not ttScaleMult then
+        ttScaleMult = 1
+        local us = EllesmereUIDB and EllesmereUIDB.panelScale
+        if us and us ~= 1 and label and label.GetParent and IsPanelFamilyAnchor(label) then
+            ttScaleMult = us
+        end
+    end
+    tt:SetScale(ttScaleMult)
     tt:ClearAllPoints()
     if opts and opts.anchorPoint then
         -- Custom anchor: opts.anchorPoint on tooltip -> opts.anchorTo on label
@@ -1728,8 +1760,6 @@ ShowWidgetTooltip = function(label, text, opts)
     else
         tt:SetPoint("BOTTOM", label, "TOP", 0, 4)
     end
-    -- Apply scale override (reset in HideWidgetTooltip)
-    tt:SetScale(opts and opts.scale or 1)
     -- Show at alpha 0 BEFORE measuring so WoW computes font geometry
     -- on a visible frame (GetStringHeight returns wrong values on hidden frames).
     tt:SetAlpha(0)

@@ -3477,6 +3477,11 @@ L["Quality of life features and custom cursor."] = "Komfortfunktionen und benutz
 L["Quality of Life Font"]       = "Schriftart für Komfortfunktionen"
 L["Quality of Life Outline"]    = "Kontur für Komfortfunktionen"
 L["Quality of Life"]      = "Komfortfunktionen"
+-- QoL page tabs: kept deliberately short, six of them must fit the tab bar.
+L["QoL"]                  = "Komfort"
+L["Raid Tools"]           = "Raid-Tools"
+L["MoveAlert"]            = "Bewegung"
+L["Upgrader"]             = "Aufwertung"
 L["Quel'Danas Rations"]         = "Rationen von Quel'Danas"
 L["Quel'dorei Medley"]          = "Quel'dorei-Allerlei"
 L["Quest Item Hotkey"]          = "Questgegenstand-Tastenbelegung"
