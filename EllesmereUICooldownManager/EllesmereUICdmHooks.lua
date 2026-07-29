@@ -3896,6 +3896,10 @@ local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID, identKey)
         f:SetScript("OnLeave", GameTooltip_Hide)
         _placeholderFrames[fkey] = f
     end
+    -- Re-assert on reuse: a pooled frame outlives a talent swap, so the id it
+    -- was created with can name the pre-talent spell (its tooltip would still
+    -- read Immolate on a Hellcaller Wither slot).
+    f._phSpellID = spellID
     if iconID then f._tex:SetTexture(iconID) end
     return f
 end
@@ -4911,8 +4915,26 @@ local function CollectAndReanchor()
                                         local phKey = "ph:" .. tostring(phIdent)
                                         if not barSeen[phKey] then
                                             barSeen[phKey] = true
-                                            local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(realSID)
-                                            local ph = GetOrCreatePlaceholderFrame(targetBar, realSID, icon, phIdent)
+                                            -- Paint the LIVE castable form. realSID is read off
+                                            -- the INACTIVE frame, where Blizzard falls back to
+                                            -- cooldownInfo -- and a hero-talent slot's
+                                            -- cooldownInfo can still name the pre-talent spell
+                                            -- (observed: Hellcaller's Wither slot reports
+                                            -- Immolate 348). The ACTIVE frame renders the
+                                            -- override form, so without this bridge the icon
+                                            -- swaps art as the aura comes and goes. Pooling and
+                                            -- dedup stay keyed on realSID/phIdent.
+                                            local dispSID = realSID
+                                            if _FindOverride and type(dispSID) == "number" and dispSID > 0 then
+                                                local ovr = _FindOverride(dispSID)
+                                                if type(ovr) == "number" and ovr > 0 then dispSID = ovr end
+                                            end
+                                            local _GetTex = C_Spell and C_Spell.GetSpellTexture
+                                            local icon = _GetTex and _GetTex(dispSID)
+                                            if not icon and _GetTex and dispSID ~= realSID then
+                                                icon = _GetTex(realSID)
+                                            end
+                                            local ph = GetOrCreatePlaceholderFrame(targetBar, dispSID, icon, phIdent)
                                             -- Per-spell missing-visibility mark (our own
                                             -- frame): "hidden" renders alpha-0 via the
                                             -- opacity passes while the slot stays

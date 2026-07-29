@@ -9723,10 +9723,23 @@ SlashCmdList.CDMBUFFID = function()
                     enumTag = BAD .. "no-enum(custom/injected?)" .. OFF
                 end
 
+                -- Live override bridge + the form an inactive placeholder paints.
+                -- A hero-talent slot reports its pre-talent id while inactive
+                -- (Hellcaller: info.sID=348 Immolate, fOvr=445468 Wither), so an
+                -- fOvr that differs from canon is the bridge working, and ph=
+                -- should match fOvr rather than canon.
+                local fOvr
+                if type(canon) == "number" and not IsSecret(canon) and canon > 0
+                   and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    fOvr = C_SpellBook.FindSpellOverrideByID(canon)
+                end
+                local phTag = frame._isPlaceholderFrame
+                    and (" ph=" .. SN(frame._phSpellID) .. "(" .. NM(frame._phSpellID) .. ")") or ""
+
                 local shown = frame.IsShown and frame:IsShown()
-                P(string.format("  render#%d %s  fc.spellID=%s fc.base=%s canon=%s | cdID=%s info.sID=%s info.ovr=%s | %s shown=%s name=%s",
-                    j, verdict, SN(fcSpell), SN(fcBase), SN(canon),
-                    SN(cdID), SN(infoSpell), SN(infoOvr), enumTag, tostring(shown), NM(canon)))
+                P(string.format("  render#%d %s  fc.spellID=%s fc.base=%s canon=%s fOvr=%s | cdID=%s info.sID=%s info.ovr=%s | %s shown=%s name=%s%s",
+                    j, verdict, SN(fcSpell), SN(fcBase), SN(canon), SN(fOvr),
+                    SN(cdID), SN(infoSpell), SN(infoOvr), enumTag, tostring(shown), NM(canon), phTag))
             end
         end
     else
