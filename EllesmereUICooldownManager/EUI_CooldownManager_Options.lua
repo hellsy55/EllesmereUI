@@ -19157,7 +19157,21 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="dropdown", text="Pandemic Glow",
                   values=PAN_GLOW_VALUES, order=PAN_GLOW_ORDER,
                   getValue=function()
-                      if pandemicOff() then return 0 end
+                      -- nil means NEVER CONFIGURED, which renders as Blizzard
+                      -- Default (-1), not None (0). The three built-in bars never
+                      -- seed pandemicGlow, while every template that does seed it
+                      -- ships true + style -1 (custom bars
+                      -- EllesmereUICdmSpellPicker.lua ~1916, tracking bars
+                      -- EllesmereUICdmBuffBars.lua ~313). Reporting nil as None
+                      -- made this control claim the glow was already off while
+                      -- Blizzard's PandemicIcon was plainly still drawing -- and
+                      -- because the dropdown already showed the value the user
+                      -- wanted, picking it fired no change, so there was no way to
+                      -- turn the glow off at all (reported against a tracked Fire
+                      -- Breath buff). Only an explicit false is None.
+                      local pg = BD().pandemicGlow
+                      if pg == false then return 0 end
+                      if pg == nil then return -1 end
                       local raw = BD().pandemicGlowStyle
                       if type(raw) ~= "number" then return 1 end
                       return raw
