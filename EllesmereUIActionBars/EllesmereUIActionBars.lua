@@ -3124,6 +3124,40 @@ end
 do
     local _dispatcherSetup = false
     local _empowerReroutePending = false
+
+    -- Empower keybind reroute, shared by the immediate and the deferred path.
+    -- UpdateKeybinds returns false when the routing signature is unchanged
+    -- (mouseover-conditional macro storms re-fire ACTIONBAR_SLOT_CHANGED on
+    -- every flip without changing any binding or empower state). Skip the
+    -- secure re-trigger in that case: rebuilding bindings and running the
+    -- ChildUpdate snippet on every bar every frame is what tanked FPS while
+    -- hovering across nameplates.
+    local function _EmpowerReroute()
+        if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
+            for _, info in ipairs(BAR_CONFIG) do
+                local frame = barFrames[info.key]
+                if frame then
+                    frame:SetAttribute("eab-empower-trigger", GetTime())
+                end
+            end
+        end
+    end
+
+    -- Deferral shell for that reroute. ACTIONBAR_SLOT_CHANGED fires freely IN
+    -- combat (a single page swap fires 12+), but the reroute cannot run there:
+    -- UpdateKeybinds needs SetOverrideBinding and the re-trigger needs
+    -- SetAttribute on a secure header, both combat-protected. This used to
+    -- `return` and drop the update on the floor with NOTHING to re-arm it --
+    -- ACTIONBAR_SLOT_CHANGED had already fired and would not fire again, and
+    -- the only other UpdateKeybinds callers are load-time, house-editor-close
+    -- and the vehicle/housing handler. So a slot change during a fight could
+    -- leave an empowered spell routed to its native binding, with no
+    -- pressAndHoldAction/typerelease, which presents as the Empowered Spell
+    -- Input setting having flipped from Hold and Release to Press and Tap, and
+    -- it persisted until something unrelated happened to rebuild.
+    -- Both sibling paths (the UPDATE_BINDINGS handler and ApplyKeyDownCVar)
+    -- already defer to PLAYER_REGEN_ENABLED; this now matches them.
+    local _empowerDeferFrame
     function EAB:SetupEventDispatcher()
         if _dispatcherSetup then return end
         _dispatcherSetup = true
@@ -4292,22 +4326,19 @@ do
                 _empowerReroutePending = true
                 C_Timer_After(0, function()
                     _empowerReroutePending = false
-                    if InCombatLockdown() then return end
-                    -- UpdateKeybinds returns false when the routing signature is
-                    -- unchanged (mouseover-conditional macro storms re-fire
-                    -- ACTIONBAR_SLOT_CHANGED every mouseover flip without changing
-                    -- any binding or empower state). Skip the secure empower
-                    -- re-trigger in that case: rebuilding bindings and running the
-                    -- ChildUpdate snippet on every bar every frame is what tanked
-                    -- FPS while hovering across nameplates.
-                    if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
-                        for _, info in ipairs(BAR_CONFIG) do
-                            local frame = barFrames[info.key]
-                            if frame then
-                                frame:SetAttribute("eab-empower-trigger", GetTime())
-                            end
+                    if InCombatLockdown() then
+                        -- Re-arm for leaving combat instead of dropping it.
+                        if not _empowerDeferFrame then
+                            _empowerDeferFrame = ns.TakeShell()
+                            _empowerDeferFrame:SetScript("OnEvent", function(self)
+                                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                                _EmpowerReroute()
+                            end)
                         end
+                        _empowerDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                        return
                     end
+                    _EmpowerReroute()
                 end)
             end
 
