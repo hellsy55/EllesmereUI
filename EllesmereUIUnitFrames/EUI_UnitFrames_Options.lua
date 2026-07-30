@@ -10073,18 +10073,58 @@ initFrame:SetScript("OnEvent", function(self)
         -- When Buff/Debuff Display is "none", everything in that column is disabled.
         local function BuffDisabled()
             local s = UNIT_DB_MAP[selectedUnit]()
-            return s and s.showBuffs == false
+            if not s then return false end
+            -- Anchor Buffs with Debuffs renders the buffs inside the debuff
+            -- stack, so the buff appearance settings stay live while Buff
+            -- Display reads None (visibility belongs to the merge toggle).
+            if s.debuffAnchorBuffs and SValSupported("debuffAnchor", "bottomleft") ~= "none" then
+                return false
+            end
+            return s.showBuffs == false
         end
         local function DebuffDisabled()
             return SValSupported("debuffAnchor", "bottomleft") == "none"
         end
 
+        -- Buff Display gains "Anchor to Debuffs" -- a pure VIEW over the same
+        -- stored keys the merge has always used (debuffAnchorBuffs = true +
+        -- showBuffs = false), so profiles that enabled it through the old cog
+        -- toggle read back identically. The shared anchor tables serve three
+        -- other dropdowns, hence the per-site copy.
+        local buffDispValues = { ["anchor_debuffs"] = "Anchor to Debuffs" }
+        for k, v in pairs(buffAnchorValues) do buffDispValues[k] = v end
+        local buffDispOrder = {}
+        for i = 1, #buffAnchorOrder do buffDispOrder[i] = buffAnchorOrder[i] end
+        buffDispOrder[#buffDispOrder + 1] = "anchor_debuffs"
+        buffDispValues._menuOpts = {
+            onItemHover = function(key, item)
+                if key == "anchor_debuffs" and item then
+                    EllesmereUI.ShowWidgetTooltip(item, "Buffs join the debuff stack as its first rows; debuffs continue on the next row and move as buff rows change.")
+                end
+            end,
+            onItemLeave = function(key)
+                if key == "anchor_debuffs" then EllesmereUI.HideWidgetTooltip() end
+            end,
+        }
+
         -- Buffs: Location | Icon Size + inline directions cog (X/Y)
         local sharedAddRow2
         sharedAddRow2, h = W:DualRow(parent, y,
-            { type="dropdown", text="Buff Display", values=buffAnchorValues, order=buffAnchorOrder,
+            { type="dropdown", text="Buff Display", values=buffDispValues, order=buffDispOrder,
+              itemDisabled=function(v)
+                  return v == "anchor_debuffs" and DebuffDisabled()
+              end,
+              itemDisabledTooltip=function(v)
+                  if v == "anchor_debuffs" then return "Requires a Debuff Display" end
+              end,
               getValue=function()
                   local s = UNIT_DB_MAP[selectedUnit]()
+                  -- Active merge presents as its own display choice; an inert
+                  -- merge (Debuff Display None) falls through to the truthful
+                  -- None readout.
+                  if s.debuffAnchorBuffs and SValSupported("debuffAnchor", "bottomleft") ~= "none" then
+                      return "anchor_debuffs"
+                  end
                   if s.showBuffs == false then return "none" end
                   return SValSupported("buffAnchor", "topleft")
               end,
@@ -10095,11 +10135,20 @@ initFrame:SetScript("OnEvent", function(self)
                   function() return not BuffDisabled() end,
                   function(v)
                       local s = UNIT_DB_MAP[selectedUnit]()
-                      if v == "none" then
+                      if v == "anchor_debuffs" then
+                          -- Same stored shape the old cog toggle wrote: the
+                          -- merge owns visibility, Buff Display stores None.
+                          s.debuffAnchorBuffs = true
                           s.showBuffs = false
+                      elseif v == "none" then
+                          s.showBuffs = false
+                          s.debuffAnchorBuffs = nil
                       else
                           s.showBuffs = true
                           SwapAuraSlot(s, "buffAnchor", v)
+                          -- Choosing a standalone Buff Display exits the
+                          -- merged mode (which forces this dropdown to None).
+                          s.debuffAnchorBuffs = nil
                       end
                       ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
                   end) },
@@ -11218,8 +11267,8 @@ initFrame:SetScript("OnEvent", function(self)
         local absorbBarRow
         absorbBarRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Absorb Bar",
-              values={ none="None", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left" },
-              order={ "none", "aboveRight", "aboveLeft", "topRight", "topLeft" },
+              values={ none="None", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+              order={ "none", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
               getValue=function() return SValSupported("absorbBarPosition", "none") end,
               setValue=function(v) SSetSupported("absorbBarPosition", v); EllesmereUI:RefreshPage() end },
             { type="slider", text="Bar Height", min=1, max=20, step=1,
@@ -11255,8 +11304,8 @@ initFrame:SetScript("OnEvent", function(self)
         local healAbsorbBarRow
         healAbsorbBarRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Heal Absorb Bar",
-              values={ none="None", belowAbsorb="Below Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left" },
-              order={ "none", "belowAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft" },
+              values={ none="None", aboveAbsorb="Above Absorb Bar", belowAbsorb="Below Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+              order={ "none", "aboveAbsorb", "belowAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
               getValue=function() return SValSupported("healAbsorbBarPosition", "none") end,
               setValue=function(v) SSetSupported("healAbsorbBarPosition", v); EllesmereUI:RefreshPage() end },
             { type="slider", text="Bar Height", min=1, max=20, step=1,
@@ -15524,7 +15573,15 @@ initFrame:SetScript("OnEvent", function(self)
     local ufSearchTerms = {}
     for _, label in pairs(unitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
     for _, label in pairs(miniUnitLabels) do ufSearchTerms[#ufSearchTerms + 1] = label end
-    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs", "icon zoom", "private auras", "external defensives", "externals", "pain suppression" }
+    -- "external defensives" stays on both clients: the External Defensive AURA
+    -- FILTER checkbox keeps that name. Only the two terms that exist purely to
+    -- find the retired External Defensives FRAME are dropped on 12.1, so a
+    -- search there cannot land on a section that no longer builds.
+    local _paTerms = { "buff", "debuff", "aura", "player buffs", "player debuffs", "icon zoom", "private auras", "external defensives" }
+    if not EllesmereUI.IS_121 then
+        _paTerms[#_paTerms + 1] = "externals"
+        _paTerms[#_paTerms + 1] = "pain suppression"
+    end
     for _, t in ipairs(_paTerms) do ufSearchTerms[#ufSearchTerms + 1] = t end
 
     -- Rebuild preview when spec changes (class resource pips may appear/disappear)
@@ -15824,6 +15881,10 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         --  External Defensives Frame (our own frame; live enable, no reload)
         -----------------------------------------------------------------------
+        -- 12.1 retires this frame, so the whole block (spacer and section
+        -- header included) is skipped there and nothing renders. The body is
+        -- left unindented so retail stays a byte-for-byte identical diff.
+        if not EllesmereUI.IS_121 then
         local function EDGet(key)
             local p = db and db.profile and db.profile.externalDefensives
             return p and p[key]
@@ -16044,6 +16105,7 @@ initFrame:SetScript("OnEvent", function(self)
         ); y = y - h
 
         end -- EDGet("enabled") section gate
+        end -- not IS_121: External Defensives Frame retired on 12.1
 
         return math.abs(y)
     end

@@ -6345,6 +6345,25 @@ initFrame:SetScript("OnEvent", function(self)
         return sid
     end
 
+    -- Texture-only sibling. A tracked-buff slot holds AURA ids, which carry no
+    -- override even when a talent replaces the spell behind them, so the icon
+    -- needs the shared resolver's spellbook bridge (and the slot's cdID, without
+    -- which that resolver cannot reach the linked ids carrying the replacement).
+    --
+    -- Deliberately NOT folded into ResolveToLive: that one also feeds
+    -- learned-state and catalog membership tests, including the keep/drop pass
+    -- for stored spells. A bridged id compared against those sets could drop a
+    -- spell from a saved bar, so the wider identity stays untouched and only the
+    -- art moves.
+    local function ResolveIconArt(sid, cdID)
+        if not sid or sid <= 0 then return sid end
+        if ns.ResolvePlaceholderIconSID then
+            local live = ns.ResolvePlaceholderIconSID(sid, cdID)
+            if type(live) == "number" and live > 0 then return live end
+        end
+        return ResolveToLive(sid)
+    end
+
     local function EnsureAssignedSpells(barKeyE)
         local sd = ns.GetBarSpellData(barKeyE)
         if not sd then return sd end
@@ -15546,7 +15565,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end
                             if type(csid) == "number" and csid > 0 then
-                                local displayID = ResolveToLive(csid)
+                                local displayID = ResolveIconArt(csid, cdClaim)
                                 tex = C_Spell.GetSpellTexture(displayID)
                                 if not tex and displayID ~= csid then
                                     tex = C_Spell.GetSpellTexture(csid)
@@ -15559,7 +15578,7 @@ initFrame:SetScript("OnEvent", function(self)
                             -- Hosted-buff marker: previews as its spell, flagged so
                             -- the per-icon menu takes the buff branch while the same
                             -- id's cooldown slot keeps the cd/util one.
-                            local displayID = ResolveToLive(hostedSid)
+                            local displayID = ResolveIconArt(hostedSid)
                             tex = C_Spell.GetSpellTexture(displayID)
                             if not tex and displayID ~= hostedSid then
                                 tex = C_Spell.GetSpellTexture(hostedSid)
@@ -15576,7 +15595,7 @@ initFrame:SetScript("OnEvent", function(self)
                             tex = itemID and C_Item.GetItemIconByID(itemID) or nil
                         else
                             -- Resolve to live override for texture lookup.
-                            local displayID = ResolveToLive(id)
+                            local displayID = ResolveIconArt(id, slot._previewCdID)
                             tex = C_Spell.GetSpellTexture(displayID)
                             if not tex and displayID ~= id then
                                 tex = C_Spell.GetSpellTexture(id)
@@ -16078,7 +16097,13 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI:ShowCDMSpecPickerPopup({
                     title       = "Sync Generic CDs/Buffs",
-                    subtitle    = "Choose which specs sync with " .. srcName .. " (the source is always included)",
+                    -- The grid lists every class, not just the one being played,
+                    -- so an alt's specs are ticked from here. Saying so matters:
+                    -- a profile is shared across characters, and without this
+                    -- the only visible reading is "specs of this character".
+                    -- Kept to one line: the subtitle has room for two before it
+                    -- runs into the Check All / Uncheck All row.
+                    subtitle    = "Choose which specs sync with " .. srcName .. ", including your alts' specs (the source is always included)",
                     confirmText = "Sync",
                     specs       = specs,
                     lockedSpecs = { [sourceKey] = "This is the spec you're syncing from -- it's always included." },
@@ -16087,13 +16112,22 @@ initFrame:SetScript("OnEvent", function(self)
                         local cnt = 0
                         for _, v in pairs(selectedSpecs) do if v then cnt = cnt + 1 end end
                         if cnt <= 1 then
-                            -- Only the source picked -> nothing to sync; clear any sync.
+                            -- Only the source picked -> nothing to sync; clear any
+                            -- sync. Say so: this silently discarded an existing
+                            -- sync, and confirming with one spec ticked is the
+                            -- natural first guess at "sync FROM this spec".
                             if ns.ClearRPTSync then ns.ClearRPTSync() end
+                            EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Sync cleared -- only one spec was selected. Tick at least two specs (including other characters' specs) to sync between them.")
                             EllesmereUI:RefreshPage(true)
                             return
                         end
                         if ns.SetupRPTSync then ns.SetupRPTSync(selectedSpecs, sourceKey) end
                         if ns.FullCDMRebuild then ns.FullCDMRebuild("profile_import") end
+                        -- Which bar each entry sits on is synced; its SLOT is
+                        -- not, so every spec keeps its own ordering. Reported as
+                        -- a bug ("some were right, some were wrong order"), so
+                        -- it is stated where the subtitle has no room for it.
+                        EllesmereUI.Print(("|cff0cd29fEllesmereUI CDM:|r Syncing generic CDs/buffs across %d specs. Icon order is not synced -- each spec keeps its own arrangement."):format(cnt))
                         EllesmereUI:RefreshPage(true)
                     end,
                 })
@@ -16128,7 +16162,10 @@ initFrame:SetScript("OnEvent", function(self)
                     for _, v in pairs(selectedSpecs) do if v then cnt = cnt + 1 end end
                     if cnt <= 1 then
                         -- One or zero specs left -> nothing to sync; clear it.
+                        -- Announced for the same reason as the setup path: the
+                        -- sync is discarded here, not merely left unchanged.
                         if ns.ClearRPTSync then ns.ClearRPTSync() end
+                        EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Sync cleared -- fewer than two specs remained selected.")
                         EllesmereUI:RefreshPage(true)
                         return
                     end

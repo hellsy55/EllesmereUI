@@ -685,6 +685,13 @@ end
 -- Live enable/disable + full restyle. Zero footprint while never enabled:
 -- no frames, no font object, no event registration.
 local function EDF_Setup()
+    -- 12.1 retires the External Defensives frame. Bail at the one chokepoint
+    -- that builds it, so on that client no frame, font object, event
+    -- registration or Unlock Mode element is ever created (the module is
+    -- already zero-footprint until first enabled, so this simply keeps it
+    -- there). Saved settings are left untouched, so a retail session on the
+    -- same profile still builds and positions the frame exactly as before.
+    if EllesmereUI.IS_121 then return end
     local cfg = ED()
     local enabled = cfg and cfg.enabled
     if enabled and not edfRoot then

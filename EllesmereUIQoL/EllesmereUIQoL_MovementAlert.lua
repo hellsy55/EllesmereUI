@@ -1298,7 +1298,7 @@ local function PreviewTick()
     local shown = EllesmereUI._mainFrame and EllesmereUI._mainFrame:IsShown()
     local onPage = shown
         and EllesmereUI.GetActiveModule and EllesmereUI:GetActiveModule() == "EllesmereUIQoL"
-        and EllesmereUI.GetActivePage and EllesmereUI:GetActivePage() == "Movement Alerts"
+        and EllesmereUI.GetActivePage and EllesmereUI:GetActivePage() == "MoveAlert"
     if not ma or not onPage then StopMovementPreview(); return end
 
     local now = GetTime()

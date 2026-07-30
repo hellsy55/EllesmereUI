@@ -4,11 +4,15 @@
 --    * Quality of Life -- general QoL features (built by parent general options)
 --    * Cursor          -- cursor skin (built by EUI_QoL_Cursor_Options.lua)
 -------------------------------------------------------------------------------
-local PAGE_QOL      = "Quality of Life"
+-- Page names are DEEP-LINK IDENTIFIERS, not just tab labels: every
+-- NavigateToElementSettings tuple (_ELEMENT_SETTINGS_MAP, What's New nav)
+-- and every GetActivePage() comparison carries them as strings and fails
+-- SILENTLY on a mismatch. Renaming one means updating every consumer.
+local PAGE_QOL      = "QoL"
 local PAGE_CURSOR   = "Cursor"
-local PAGE_UPGCALC  = "Upgrade Calc"
+local PAGE_UPGCALC  = "Upgrader"
 local PAGE_SHIFTER  = "Shifter"
-local PAGE_MOVEMENT = "Movement Alerts"
+local PAGE_MOVEMENT = "MoveAlert"
 local PAGE_RAIDTOOLS = "Raid Tools"
 
 -------------------------------------------------------------------------------
@@ -2366,9 +2370,17 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIQoL", {
         title       = "Quality of Life",
         description = "Quality of life features and custom cursor.",
-        pages       = { PAGE_QOL, PAGE_CURSOR, PAGE_UPGCALC, PAGE_SHIFTER, PAGE_MOVEMENT, PAGE_RAIDTOOLS },
+        pages       = { PAGE_QOL, PAGE_RAIDTOOLS, PAGE_CURSOR, PAGE_SHIFTER, PAGE_MOVEMENT, PAGE_UPGCALC },
         searchTerms = { "brez", "bres", "battle res", "combat res", "cursor", "macro", "fps", "logging", "combat log", "warcraft logs", "upgrade", "ilvl", "item level", "crest", "upgrade calculator", "shifter", "move", "drag", "position", "demodal", "drift", "combat alert", "enter combat", "leave combat", "in combat", "combat text", "combat notification", "transform", "transforms", "costume", "disguise", "chef's hat", "noggenfogger", "target distance", "distance to target", "range text", "yard", "yards", "movement", "mobility", "gap closer", "blink", "gateway", "warlock gateway", "control shard", "time spiral", "free movement", "raid tools", "raid", "pull timer", "pull", "ready check", "role check", "raid marker", "target marker", "world marker", "flare", "disband", "convert to raid", "countdown" },
         buildPage   = function(pageName, parent, yOffset)
+            -- The Raid Tools settings preview ends when any OTHER QoL page
+            -- builds (the CDM tracking-bars placeholder arrangement); window
+            -- close and module switches are handled in the Raid Tools options
+            -- file. Global Search's hidden pre-build never touches it.
+            if pageName ~= PAGE_RAIDTOOLS and not EllesmereUI._prebuilding
+               and _G._EUI_RaidTools_Preview then
+                _G._EUI_RaidTools_Preview(false)
+            end
             if pageName == PAGE_QOL then
                 return BuildQoLPage(pageName, parent, yOffset)
             end
@@ -2386,6 +2398,16 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if pageName == PAGE_RAIDTOOLS and _G._EUI_BuildRaidToolsPage then
                 return _G._EUI_BuildRaidToolsPage(pageName, parent, yOffset)
+            end
+        end,
+        -- Cached pages are restored WITHOUT a rebuild, so buildPage never runs
+        -- on the warm path -- reopening the window onto Raid Tools would leave
+        -- its settings preview off without this (the CDM tracking-bars
+        -- arrangement: mirror the flag on BOTH paths).
+        onPageCacheRestore = function(pageName)
+            if EllesmereUI._prebuilding then return end
+            if _G._EUI_RaidTools_Preview then
+                _G._EUI_RaidTools_Preview(pageName == PAGE_RAIDTOOLS)
             end
         end,
         onReset = function()

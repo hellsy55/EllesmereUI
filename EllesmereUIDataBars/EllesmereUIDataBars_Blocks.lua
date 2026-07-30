@@ -2503,7 +2503,7 @@ end
 -- Static hearthstone pool (all expansions) shared by every instance.
 local HEARTHSTONE_IDS = {
     -- Midnight
-    263933, 265100, 263489,
+    263933, 265100, 263489, 264367,
     -- The War Within
     257736, 246565, 245970, 228940, 212337, 209035, 208704, 210455,
     -- Dragonflight
@@ -4470,8 +4470,8 @@ local mmLastTipRoster = 0
 
 local function MMBuildSocialTip()
     local ar, ag, ab = ns.GetAccent()
-    local totalBN = BNGetNumFriends()
-    local totalWoW = C_FriendList.GetNumOnlineFriends()
+    local totalBN = BNGetNumFriends() or 0
+    local totalWoW = C_FriendList.GetNumOnlineFriends() or 0
     local playerFaction = UnitFactionGroup("player")
 
     ns.Tip_AddLine(" ")
@@ -4900,7 +4900,7 @@ ns.BlockFactories.micromenu = function(blockCfg, slot, content, barCtx)
         local mm = D()
         if mm.hideSocialText or not mm.social or not textFS.social then return end
         local _, bnOnline = BNGetNumFriends()
-        local total = (bnOnline or 0) + C_FriendList.GetNumOnlineFriends()
+        local total = (bnOnline or 0) + (C_FriendList.GetNumOnlineFriends() or 0)
         ns.SetFont(textFS.social, SocialFontSize(), BC())
         -- Keep the hover tint if a roster event repaints mid-hover.
         if frames.social and frames.social:IsMouseOver() then

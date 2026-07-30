@@ -5376,6 +5376,7 @@ do
         263933, -- Preyseeker's Hearthstone
         265100, -- Corewarden's Hearthstone
         142298, -- Astonishingly Scarlet Slippers
+        264367, -- Mushroom
     }
     local SHAMAN_ASTRAL_RECALL = 556
     local DALARAN_HS = 253629
@@ -11112,7 +11113,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.6.5"
+EllesmereUI.VERSION = "8.6.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11249,7 +11250,6 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "Healers-Have-To-Die",      label = "Healers Have To Die",        targets = { "EllesmereUINameplates" } },
             { addon = "Aloft",                    label = "Aloft",                      targets = { "EllesmereUINameplates" } },
             { addon = "SenseiClassResourceBar",   label = "Sensei Class Resource Bar",  targets = { "EllesmereUIResourceBars" } },
-            { addon = "AccWideUILayoutSelection", label = "Account Wide Interface Settings", targets = { "EllesmereUIQuestTracker" }, },
             { addon = "EditModeExpanded",     label = "Edit Mode Expanded",         targets = { "EllesmereUIQuestTracker", "EllesmereUIChat" } },
             { addon = "SexyMap",                  label = "SexyMap",                    targets = { "EllesmereUIMinimap" }, },
             { addon = "MinimapButtonButton",      label = "MinimapButtonButton",        targets = { "EllesmereUIMinimap" }, },
@@ -12717,6 +12717,32 @@ function EllesmereUI._GetFFD(frame)
     local d = EllesmereUI._FFD[frame]
     if not d then d = {}; EllesmereUI._FFD[frame] = d end
     return d
+end
+
+-------------------------------------------------------------------------------
+--  Third-Party Skin Registration (public API)
+--  Other addons call EllesmereUI.RegisterSkin("TheirAddon", function(S) ... end)
+--  to have their frames painted in the EUI house style. This stub only queues:
+--  the Blizz UI Enhanced child addon drains the queue at PLAYER_LOGIN (or
+--  immediately for late/LoD registrations) and passes the skinning facade S.
+--  Queuing keeps registration order-independent -- third-party addons may load
+--  before or after the child -- and the API stays callable (a silent no-op)
+--  when the child addon is disabled. Developer guide: SKINNING_API.md.
+--  Stored on EllesmereUI to avoid the 200-local cap in this file.
+-------------------------------------------------------------------------------
+EllesmereUI._skinRegistry = EllesmereUI._skinRegistry or {}
+function EllesmereUI.RegisterSkin(name, applyFn)
+    if type(name) ~= "string" or name == "" or type(applyFn) ~= "function" then return end
+    local reg = EllesmereUI._skinRegistry
+    for i = 1, #reg do
+        if reg[i].name == name then return end
+    end
+    local entry = { name = name, apply = applyFn }
+    reg[#reg + 1] = entry
+    if EllesmereUI._DispatchSkinRegistration then
+        EllesmereUI._DispatchSkinRegistration(entry)
+    end
+    return true
 end
 
 -------------------------------------------------------------------------------

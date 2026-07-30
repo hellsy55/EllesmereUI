@@ -1200,6 +1200,53 @@ local function SetCombinedHealthText(fs, element, pctText, numText)
 end
 ns.SetCombinedHealthText = SetCombinedHealthText
 
+-- Name-family text elements: display variants all rendered by the plate's
+-- single name FontString (enemy name, level+name combos, standalone level).
+-- Exactly one of these can occupy a slot at a time; the options-side slot
+-- assignment enforces the family-wide exclusivity. Wrapped in do/end + ns
+-- functions so no new main-chunk locals are added (this file is at the Lua
+-- 5.1 local cap).
+do
+    local NAME_FAMILY = {
+        enemyName = true, levelName = true, nameLevel = true, level = true,
+    }
+    function ns.IsNameElement(element)
+        return NAME_FAMILY[element] == true
+    end
+    -- Slot currently holding a name-family element (nil when none is slotted).
+    function ns.FindNameSlot()
+        for _, key in ipairs(textSlotKeys) do
+            if NAME_FAMILY[GetTextSlot(key)] then return key end
+        end
+        return nil
+    end
+    -- Display string for the unit's effective level. "??" for skull-ranked
+    -- (-1) or unreadable (secret) levels, matching the default UI. Effective
+    -- level (not raw) so scaling / Chromie time read like the game ranks them.
+    function ns.GetUnitLevelText(unit)
+        local lvl = UnitEffectiveLevel(unit)
+        if type(lvl) ~= "number" or (issecretvalue and issecretvalue(lvl))
+           or lvl < 0 then
+            return "??"
+        end
+        return tostring(lvl)
+    end
+    -- Write a name-family element's display text into a FontString. name may
+    -- be SECRET: it is only ever passed as a %s display arg, never inspected.
+    -- Shared by the runtime name update and the options preview.
+    function ns.SetNameElementText(fs, element, name, unit)
+        if element == "level" then
+            fs:SetFormattedText("%s", ns.GetUnitLevelText(unit))
+        elseif element == "levelName" then
+            fs:SetFormattedText("%s | %s", ns.GetUnitLevelText(unit), name)
+        elseif element == "nameLevel" then
+            fs:SetFormattedText("%s | %s", name, ns.GetUnitLevelText(unit))
+        else
+            fs:SetText(name)
+        end
+    end
+end
+
 -- Estimate pixel width of health text for a given element type.
 -- We can't read actual rendered widths (WoW secret values), so we use
 -- flat pixel assumptions based on typical worst-case rendered widths.
@@ -1830,7 +1877,7 @@ local function PositionAuraSlot(frames, count, slot, plate, sizeW, sizeH, gap, x
         -- Determine anchor: resolve to whichever FontString is in the top slot
         local topElement = GetTextSlot("textSlotTop")
         local anchor
-        if topElement == "enemyName" then
+        if ns.IsNameElement(topElement) then
             anchor = plate.name
         elseif topElement == "healthNumber" then
             anchor = plate.hpNumber
@@ -5227,11 +5274,11 @@ local function GetReactionColor(unit)
             end
         end
     end
-    local unitClass = UnitClassBase and UnitClassBase(unit)
-    -- Identity-restricted units return a SECRET token (68914); comparing
-    -- one errors, so an unreadable class is just not a caster.
-    if issecretvalue(unitClass) then unitClass = nil end
-    local _isCaster = not owBasic and (unitClass == "PALADIN")
+    -- Caster = the unit actually has a mana pool, rather than a class match.
+    -- The second arg is typed PowerType (an enum NUMBER), not the global MANA,
+    -- which is the localized display string "Mana" and would never match.
+    -- hasPower carries no secrecy flag, so it is safe to branch on directly.
+    local _isCaster = not owBasic and UnitHasPowerType(unit, Enum.PowerType.Mana)
     -- DPS/healer No Aggro override state (mirrors the tank has-aggro overrides at
     -- 6b). Each override independently promotes the No Aggro color above a single
     -- mob-type step (mini-boss step 7, caster step 8). Only active for a non-tank
@@ -5869,8 +5916,8 @@ function NameplateFrame:ApplyAppearance()
     -- Show Spark (Cast Color cog): default on; explicit false hides it.
     self.castSpark:SetShown(not (p and p.castBarSparkEnabled == false))
     self.kickMarker:SetSize(GetHealthBarWidth(), castH)
-    -- Enemy name color (per-slot)
-    local nameSlotKey = FindSlotForElement("enemyName")
+    -- Enemy name color (per-slot; any name-family variant)
+    local nameSlotKey = ns.FindNameSlot()
     if nameSlotKey then
         local nr, ng, nb = GetTextSlotColor(nameSlotKey)
         self.name:SetTextColor(nr, ng, nb, 1)
@@ -6858,9 +6905,21 @@ function NameplateFrame:UpdateName()
             unit = actualUnit
         end
     end
+    -- The slotted name-family variant decides what renders: name, level+name
+    -- combos, or standalone level. nil slot keeps the plain-name write (the
+    -- FontString is hidden by RefreshNamePosition in that case anyway).
+    local el = ns.FindNameSlot()
+    el = el and GetTextSlot(el) or "enemyName"
+    if el == "level" then
+        -- Level needs no unit name, so it renders even for units whose name
+        -- is not yet available.
+        ns.SetNameElementText(self.name, el, nil, unit)
+        if p and p.nameRaidMarkerEnabled == true then self:RefreshNamePosition(true) end
+        return
+    end
     local name = UnitName(unit)
     if type(name) == "string" then
-        self.name:SetText(name)
+        ns.SetNameElementText(self.name, el, name, unit)
         if p and p.nameRaidMarkerEnabled == true then self:RefreshNamePosition(true) end
     end
 end
@@ -6960,7 +7019,7 @@ function NameplateFrame:UpdateNameWidth()
     local barW = GetHealthBarWidth()
     -- Width % scales the computed (bar-derived) width; 100 = historical behaviour.
     local pct = (p and p.enemyNameWidthPct) or defaults.enemyNameWidthPct
-    local nameSlot = FindSlotForElement("enemyName")
+    local nameSlot = ns.FindNameSlot()
     local nameMarkerReserve = self._nameRaidMarkerShown == true
         and (((p and p.nameRaidMarkerSize) or defaults.nameRaidMarkerSize or 14) + 3) or 0
     if nameSlot == "textSlotTop" then
@@ -6983,7 +7042,7 @@ function NameplateFrame:UpdateNameWidth()
         for _, key in ipairs(barKeys) do
             if key ~= nameSlot then
                 local el = GetTextSlot(key)
-                if el ~= "none" and el ~= "enemyName" then
+                if el ~= "none" and not ns.IsNameElement(el) then
                     usedWidth = usedWidth + EstimateHealthTextWidth(el)
                 end
             end
@@ -6999,7 +7058,7 @@ function NameplateFrame:ApplyNameVisibility()
     -- Zero cost when off: the name's shown state is owned by RefreshNamePosition;
     -- only override it (hide while the cast bar is up) when the feature is on.
     if not GetHideEnemyNameWhileCasting() then return end
-    local hasNameSlot = FindSlotForElement("enemyName") ~= nil
+    local hasNameSlot = ns.FindNameSlot() ~= nil
     local shown = hasNameSlot and not self.cast:IsShown()
     self.name:SetShown(shown)
     if self.nameRaidFrame then self.nameRaidFrame:SetShown(shown and self._nameRaidMarkerShown == true) end
@@ -7019,7 +7078,7 @@ function NameplateFrame:RefreshCastIconSideReserve()
 end
 
 function NameplateFrame:RefreshNamePosition(localOnly)
-    local nameSlot = FindSlotForElement("enemyName")
+    local nameSlot = ns.FindNameSlot()
     local nameYOff = GetNameYOffset()
     local nameMarkerShown
     local nameMarkerSize = (p and p.nameRaidMarkerSize) or defaults.nameRaidMarkerSize or 14
@@ -9605,7 +9664,7 @@ do
         local offY = (p and p.rangeTextOffsetY) or 0
         local rightEl = GetTextSlot("textSlotRight")
         local anchorTo
-        if rightEl == "enemyName" then
+        if ns.IsNameElement(rightEl) then
             anchorTo = plate.name
         elseif rightEl and rightEl ~= "none" then
             local ca = plate._cachedHealthSlots

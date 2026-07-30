@@ -2339,11 +2339,12 @@ local function DecorateFrame(frame, barData)
             local cd = fd.cooldown
             hooksecurefunc(cd, "SetSwipeColor", function()
                 if fd._isProcessingOverride then return end
-                -- Buff-viewer frame (buff bar or hosted on a CD/util bar): the swipe
-                -- is the aura DURATION, so skip all cd-style logic (Suppress-GCD,
-                -- active-state). Apply only the per-spell "Cooldown Swipe Color":
-                -- Default = the bar's swipe colour (black), Class / Custom per settings.
-                if fd._isBuffViewerFrame then
+                -- Buff-viewer frame (buff bar or hosted on a CD/util bar) or our own
+                -- preset/custom buff frame (cast-timer driven): the swipe is the aura
+                -- DURATION, so skip all cd-style logic (Suppress-GCD, active-state).
+                -- Apply only the per-spell "Cooldown Swipe Color": Default = the bar's
+                -- swipe colour (black), Class / Custom per settings.
+                if fd._isBuffViewerFrame or frame._isCustomBuffFrame then
                     fd._isProcessingOverride = true
                     local fcB = _ecmeFC[frame]
                     local sidB = fcB and fcB.spellID
@@ -3890,6 +3891,142 @@ local function HideAllInjectedCustomBuffs()
 end
 ns.HideAllInjectedCustomBuffs = HideAllInjectedCustomBuffs
 
+-- Spellbook name -> first known castable id with that name. A tracked-buff slot
+-- holds AURA ids, and an aura carries no link back to the spell that applies it
+-- (every identity API is a fixed point on it), while the CASTABLE side is where
+-- the talent override lives. An aura and its caster share a name, so the book is
+-- the only available bridge between them. Built on first use and dropped on
+-- talent change, since the override it feeds is talent-dependent.
+--
+-- An EMPTY result is treated as "not built yet" rather than cached: the first
+-- placeholder can resolve before the spellbook is populated at login, and
+-- caching that would strand the bridge until the next talent change. A real
+-- character always has spells, so empty only ever means too early. A pcall
+-- failure IS cached, since a missing API will not start working.
+local _bookByName
+local function EnsureBookNameMap()
+    if not _bookByName then
+        local built = {}
+        local ok = pcall(function()
+            local nLines = C_SpellBook.GetNumSpellBookSkillLines()
+            for i = 1, (nLines or 0) do
+                local li = C_SpellBook.GetSpellBookSkillLineInfo(i)
+                if li and li.itemIndexOffset and li.numSpellBookItems then
+                    for j = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
+                        local it = C_SpellBook.GetSpellBookItemInfo(j, Enum.SpellBookSpellBank.Player)
+                        local bsid = it and it.spellID
+                        if bsid then
+                            local nm = C_Spell.GetSpellName(bsid)
+                            if nm and built[nm] == nil then built[nm] = bsid end
+                        end
+                    end
+                end
+            end
+        end)
+        if not ok then
+            _bookByName = {}
+        elseif next(built) then
+            _bookByName = built
+        else
+            return built  -- too early; retry on the next call
+        end
+    end
+    return _bookByName
+end
+local function BookIDForName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    return EnsureBookNameMap()[name]
+end
+ns.WipeCdmBookNameCache = function() _bookByName = nil end
+ns.CdmBookIDForName = BookIDForName
+ns.CdmBookNameCount = function()
+    local n = 0
+    for _ in pairs(EnsureBookNameMap()) do n = n + 1 end
+    return n
+end
+
+-- Resolve the spell whose ICON an inactive placeholder should paint.
+--
+-- An ACTIVE buff frame renders the live aura, so a talent that REPLACES a spell
+-- shows the replacement (Hellcaller: Wither). An INACTIVE frame has no aura to
+-- read and falls back to cooldownInfo, which still names the pre-talent spell,
+-- so the same icon changes art as the aura comes and goes.
+--
+-- Two ways a replacement can show up, tried in order:
+--   1. Something in the slot's identity set (resolved id, cooldownInfo's base,
+--      override or linked ids) is itself overridden. Covers CASTABLE-keyed slots.
+--   2. Nothing is overridden, the normal state for a tracked-buff slot, because
+--      it holds AURA ids and an aura carries no override even when a talent
+--      replaces the spell behind it (Destruction's Immolate slot resolves to
+--      aura 157736, reports overrideSpellID == spellID, and merely LISTS Wither's
+--      aura 445474 as a link). Fall back to the spellbook, matching by name.
+--
+-- Returns sid untouched when neither applies, which is every spec without a
+-- replacing talent. Callers use the result for ART ONLY: identity, pooling and
+-- settings resolution stay keyed on the original id.
+local function ResolvePlaceholderIconSID(sid, cdID)
+    local FO = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+    if not FO or type(sid) ~= "number" or sid <= 0 then return sid end
+    if issecretvalue and issecretvalue(sid) then return sid end
+
+    local function TryID(id)
+        if type(id) ~= "number" or id <= 0 then return nil end
+        if issecretvalue and issecretvalue(id) then return nil end
+        local o = FO(id)
+        if type(o) == "number" and o > 0 and o ~= id then return o end
+        return nil
+    end
+
+    local hit = TryID(sid)
+    if hit then return hit end
+
+    local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+    local info = (cdID ~= nil and gci) and gci(cdID) or nil
+    if info then
+        hit = TryID(info.spellID) or TryID(info.overrideSpellID)
+        if hit then return hit end
+        if info.linkedSpellIDs then
+            for _, lid in ipairs(info.linkedSpellIDs) do
+                hit = TryID(lid)
+                if hit then return hit end
+            end
+        end
+    end
+
+    -- Nothing in the slot is overridden, which is the normal state for a
+    -- tracked-buff slot: it holds aura ids, and auras carry no override even
+    -- when a talent replaces the spell behind them (Hellcaller's Immolate slot
+    -- reports overrideSpellID == spellID and merely LISTS Wither's aura as a
+    -- link). Bridge to the castable by name and take ITS live override, which is
+    -- where the replacement actually shows up. Costs one spellbook scan per
+    -- talent change and is a no-op for anyone without a replacing talent.
+    local NameOf = C_Spell and C_Spell.GetSpellName
+    local nm = NameOf and NameOf(sid)
+    local castable = BookIDForName(nm)
+    if castable then
+        local o = FO(castable)
+        if type(o) == "number" and o > 0 and o ~= castable then return o end
+    end
+
+    -- The spellbook lists the REPLACEMENT rather than the base, so a replaced
+    -- spell's name can be absent from it entirely and the lookup above finds
+    -- nothing to follow. In that case the test inverts: when a LINKED variant's
+    -- name is in the book and this slot's own name is not, the linked form is
+    -- what the player actually casts. Requiring the slot's name to be absent
+    -- keeps this from firing while both forms are available.
+    if info and info.linkedSpellIDs and not castable then
+        for _, lid in ipairs(info.linkedSpellIDs) do
+            if type(lid) == "number" and lid > 0
+               and not (issecretvalue and issecretvalue(lid))
+               and BookIDForName(NameOf and NameOf(lid)) then
+                return lid
+            end
+        end
+    end
+    return sid
+end
+ns.ResolvePlaceholderIconSID = ResolvePlaceholderIconSID
+
 -- identKey: optional pooling identity, defaulting to spellID. Buff
 -- placeholders pass one so two viewer slots that collide on spellID do not
 -- share a single pooled frame (see the collision note at the call site).
@@ -3934,6 +4071,10 @@ local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID, identKey)
         f:SetScript("OnLeave", GameTooltip_Hide)
         _placeholderFrames[fkey] = f
     end
+    -- Re-assert on reuse: a pooled frame outlives a talent swap, so the id it
+    -- was created with can name the pre-talent spell (its tooltip would still
+    -- read Immolate on a Hellcaller Wither slot).
+    f._phSpellID = spellID
     if iconID then f._tex:SetTexture(iconID) end
     return f
 end
@@ -4060,8 +4201,8 @@ end
 ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 
 -- ---------------------------------------------------------------------------
--- Dynamic potion display for the two combat-pot presets (Light's Potential /
--- Potion of Recklessness). The preset icon resolves to the best variant
+-- Dynamic potion display for every pot preset carrying a displayOrder (Light's
+-- Potential, Potion of Recklessness, health). The preset icon resolves to the best variant
 -- actually in bags (preset.displayOrder, best first) and shows THAT variant's
 -- icon, exact bag count, and tooltip -- 2 Fleeting pots show "2" even with 50
 -- regular ones in the bank of another rank. With the profile-level "Swap
@@ -4949,8 +5090,17 @@ local function CollectAndReanchor()
                                         local phKey = "ph:" .. tostring(phIdent)
                                         if not barSeen[phKey] then
                                             barSeen[phKey] = true
-                                            local icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(realSID)
-                                            local ph = GetOrCreatePlaceholderFrame(targetBar, realSID, icon, phIdent)
+                                            -- Paint the form the ACTIVE frame would show, so a
+                                            -- replacing talent (Hellcaller's Wither) does not
+                                            -- flip art as the aura comes and goes. Pooling and
+                                            -- dedup stay keyed on realSID/phIdent.
+                                            local dispSID = ResolvePlaceholderIconSID(realSID, dedupKey)
+                                            local _GetTex = C_Spell and C_Spell.GetSpellTexture
+                                            local icon = _GetTex and _GetTex(dispSID)
+                                            if not icon and _GetTex and dispSID ~= realSID then
+                                                icon = _GetTex(realSID)
+                                            end
+                                            local ph = GetOrCreatePlaceholderFrame(targetBar, dispSID, icon, phIdent)
                                             -- Per-spell missing-visibility mark (our own
                                             -- frame): "hidden" renders alpha-0 via the
                                             -- opacity passes while the slot stays
@@ -7325,6 +7475,17 @@ function ns.SetupViewerHooks()
                                 -- Pandemic glow: Blizzard's ShowPandemicStateFrame
                                 -- hook sets _pandemicState. User must configure
                                 -- pandemic alerts in Blizzard CDM settings.
+                                -- Only the START side is gated on the setting. The
+                                -- STOP side below must stay reachable with the
+                                -- setting OFF, or a glow that is already running
+                                -- when the user disables it is never taken down
+                                -- and stays lit until something else clears it
+                                -- (field report: red pandemic glow with the option
+                                -- off, cured only by switching it back on, letting
+                                -- the aura lapse, then off again -- which is just
+                                -- the stop branch finally becoming reachable). The
+                                -- buff glow directly above already has this shape.
+                                local inPandemic = false
                                 if pandemicOn and fd then
                                     -- Blizzard Default (-1): no custom glow and no
                                     -- hooks -- Blizzard's native PandemicIcon does
@@ -7334,7 +7495,6 @@ function ns.SetupViewerHooks()
                                     -- a CDM shell, so even install-time work bills
                                     -- CooldownManager.
                                     local pStyle = bd.pandemicGlowStyle or 1
-                                    local inPandemic = false
                                     if pStyle ~= -1 then
                                         if ns._pandemicHooked and not ns._pandemicHooked[frame]
                                            and ns.HookPandemicState then
@@ -7342,42 +7502,42 @@ function ns.SetupViewerHooks()
                                         end
                                         inPandemic = ns._pandemicState and ns._pandemicState[frame]
                                     end
-                                    if inPandemic then
-                                        if not fd.pandemicOverlay then
-                                            local ov = CreateFrame("Frame", nil, frame)
-                                            ov:SetAllPoints(frame)
-                                            ov:EnableMouse(false)
-                                            fd.pandemicOverlay = ov
-                                        end
-                                        -- Same base-level tracking as the buff glow, one
-                                        -- level higher so pandemic sits above buff glow.
-                                        fd.pandemicOverlay:SetFrameLevel(frame:GetFrameLevel() + 17)
-                                        if not fd.pandemicGlowActive then
-                                            local c
-                                            if bd.pandemicGlowMode == "class" then
-                                                c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
-                                            elseif bd.pandemicGlowMode == "custom" then
-                                                c = bd.pandemicGlowColor
-                                            end
-                                            local style = bd.pandemicGlowStyle or 1
-                                            local glowOpts = (style == 1) and {
-                                                N      = bd.pandemicGlowLines or 8,
-                                                th     = bd.pandemicGlowThickness or 2,
-                                                period = bd.pandemicGlowSpeed or 4,
-                                                bg     = bd.pandemicGlowBackground and {
-                                                    r = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.r) or 0,
-                                                    g = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.g) or 0,
-                                                    b = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.b) or 0,
-                                                } or nil,
-                                            } or nil
-                                            fd.pandemicOverlay:SetAlpha(1)
-                                            ns.StartNativeGlow(fd.pandemicOverlay, style, c and c.r, c and c.g, c and c.b, glowOpts)
-                                            fd.pandemicGlowActive = true
-                                        end
-                                    elseif fd.pandemicGlowActive and fd.pandemicOverlay then
-                                        ns.StopNativeGlow(fd.pandemicOverlay)
-                                        fd.pandemicGlowActive = false
+                                end
+                                if inPandemic and fd then
+                                    if not fd.pandemicOverlay then
+                                        local ov = CreateFrame("Frame", nil, frame)
+                                        ov:SetAllPoints(frame)
+                                        ov:EnableMouse(false)
+                                        fd.pandemicOverlay = ov
                                     end
+                                    -- Same base-level tracking as the buff glow, one
+                                    -- level higher so pandemic sits above buff glow.
+                                    fd.pandemicOverlay:SetFrameLevel(frame:GetFrameLevel() + 17)
+                                    if not fd.pandemicGlowActive then
+                                        local c
+                                        if bd.pandemicGlowMode == "class" then
+                                            c = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                                        elseif bd.pandemicGlowMode == "custom" then
+                                            c = bd.pandemicGlowColor
+                                        end
+                                        local style = bd.pandemicGlowStyle or 1
+                                        local glowOpts = (style == 1) and {
+                                            N      = bd.pandemicGlowLines or 8,
+                                            th     = bd.pandemicGlowThickness or 2,
+                                            period = bd.pandemicGlowSpeed or 4,
+                                            bg     = bd.pandemicGlowBackground and {
+                                                r = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.r) or 0,
+                                                g = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.g) or 0,
+                                                b = (bd.pandemicGlowBackgroundColor and bd.pandemicGlowBackgroundColor.b) or 0,
+                                            } or nil,
+                                        } or nil
+                                        fd.pandemicOverlay:SetAlpha(1)
+                                        ns.StartNativeGlow(fd.pandemicOverlay, style, c and c.r, c and c.g, c and c.b, glowOpts)
+                                        fd.pandemicGlowActive = true
+                                    end
+                                elseif fd and fd.pandemicGlowActive and fd.pandemicOverlay then
+                                    ns.StopNativeGlow(fd.pandemicOverlay)
+                                    fd.pandemicGlowActive = false
                                 end
 
                                 -- Active State Glow integrity, BOTH edges. The
@@ -7546,8 +7706,20 @@ function ns.SetupViewerHooks()
         cdmBuffTickFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
         cdmBuffTickFrame:SetScript("OnEvent", function(_, event, _, updateInfo)
             ns._btDirty = true
-            -- Gen bump on anything that can RELEASE a pool frame: aura
-            -- removals/full updates, totem drops/despawns, and world entry.
+            -- Gen bump on anything that can CHANGE which auras are active:
+            -- additions (a glow must LIGHT), plus anything that can release a
+            -- pool frame -- removals/full updates, totem drops/despawns, world
+            -- entry.
+            --
+            -- Additions were missing, and an addition does not necessarily churn
+            -- the pool either: a spell tracked in a COOLDOWN viewer keeps its
+            -- frame acquired permanently, so Blizzard merely sets
+            -- wasSetFromAura/auraInstanceID on the frame that is already there.
+            -- No Acquire, no generation bump, so lighting a Bar Glow fell
+            -- through to the 1s staleness net below -- up to a second late, and
+            -- missed entirely when the proc was consumed inside that window.
+            -- (Killing Machine -> Obliterate; regressed in 8.6.1, correct in
+            -- 8.5.3, which rebuilt the cache every tick.)
             -- Only UNIT_AURA carries an updateInfo table in this slot --
             -- PLAYER_ENTERING_WORLD's second arg is the isReconnect BOOLEAN
             -- (true on /reload), so the payload must never be indexed for
@@ -7570,8 +7742,10 @@ function ns.SetupViewerHooks()
                 else
                     local full    = updateInfo.isFullUpdate
                     local removed = updateInfo.removedAuraInstanceIDs
+                    local added   = updateInfo.addedAuras
                     if issecretvalue(full) or issecretvalue(removed)
-                       or full or removed then
+                       or issecretvalue(added)
+                       or full or removed or added then
                         ns._acGen = (ns._acGen or 0) + 1
                     end
                 end
