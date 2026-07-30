@@ -2006,6 +2006,29 @@ end
 --  so it's a no-op (Blizzard's default anchor stands) when toggled back off, and
 --  the cursor-tracking frame only ticks while a tooltip is actually shown.
 -------------------------------------------------------------------------------
+
+-- Is a tooltip owner handed to us by a Blizzard hook safe to anchor to?
+--
+-- It can be a FORBIDDEN frame. Blizzard's nameplate aura buttons are forbidden
+-- and call GameTooltip_SetDefaultAnchor on hover, so passing one straight to
+-- SetOwner from our own (tainted) hook raises "Attempt to access forbidden
+-- object from code tainted by an AddOn" -- reported 25x during a single key.
+--
+-- Testing the tooltip alone was not enough: the tooltip is GameTooltip and
+-- perfectly fine, it is the OWNER that is off limits. Nothing can be anchored
+-- to a forbidden frame, so both anchor modes leave Blizzard's own anchoring
+-- alone in that case. IsForbidden is the only method safe to call on such a
+-- frame, so it is asked first and nothing else is touched.
+--
+-- File scope on purpose: the cursor and fixed anchor modes live in separate
+-- do-blocks and both need it.
+local function TooltipOwnerUsable(parent)
+    if not parent then return false end
+    local fn = parent.IsForbidden
+    if type(fn) == "function" and fn(parent) then return false end
+    return true
+end
+
 do
     -- Selected position = where the tooltip sits relative to the cursor, so the
     -- tooltip corner that touches the cursor is the opposite one.
@@ -2064,7 +2087,9 @@ do
         -- disabling the reskin restores the default tooltip position.
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
         if not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor) then return end
-        if not parent or tooltip:IsForbidden() then return end
+        -- Owner checked as well as the tooltip: a forbidden owner cannot be
+        -- passed to SetOwner below. See TooltipOwnerUsable.
+        if not TooltipOwnerUsable(parent) or tooltip:IsForbidden() then return end
         -- "Show Tooltips" suppression parks the tip in a hidden host (see the
         -- Show Tooltips block below): it stays alive and invisible so the
         -- peek modifier can reveal it. Anchor it normally -- it must already
@@ -2292,7 +2317,16 @@ do
     local function ApplyFixedAnchor(tooltip, parent)
         if tooltip ~= GameTooltip then return end
         if not WantFixed() then return end
-        if not parent or tooltip:IsForbidden() then return end
+        if tooltip:IsForbidden() then return end
+        -- A forbidden owner (a nameplate aura button) cannot be anchored to, so
+        -- leave Blizzard's anchoring alone AND disarm the SetPoint enforcement:
+        -- the arming happens in the SetDefaultAnchor hook before this runs, and
+        -- leaving it armed would let EnforceFixed yank the tooltip into our box
+        -- with no matching SetOwner. See TooltipOwnerUsable.
+        if not TooltipOwnerUsable(parent) then
+            _fixedArmed = false
+            return
+        end
         -- While an Unlock Mode session is open, the session owns the anchor
         -- frame (live drags + uncommitted pending edits); re-parking from the
         -- saved position would snap the frame back mid-session. Pin the
