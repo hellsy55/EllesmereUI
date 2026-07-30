@@ -793,8 +793,17 @@ end
     -- Back-compat full init (data + visual), used by the live re-apply path.
     local function _ttInit() _ttInitData(); _ttInitVisual() end
 
-    -- Context menu skinning
-    local _menuSkinned = {}
+    -- Context menu skinning.
+    --
+    -- Deliberately NOT memoised per frame. Menu frames are pooled: Blizzard
+    -- hands the same frame back for the next menu and rebuilds its textures from
+    -- the new description, which silently undoes our background. An "already
+    -- skinned" flag keyed on the frame therefore skips every reuse and leaves
+    -- Blizzard's background showing with our own border frame still drawn over
+    -- it. _menuSkinFrame is idempotent (it skips regions we own and re-anchors
+    -- relative to the frame, so nothing accumulates), so simply letting every
+    -- pass run is both correct across reuse and self-healing when Blizzard
+    -- writes a texture after our first pass.
 
     local function _menuSkinFrame(frame)
         if not frame or frame:IsForbidden() or not _pmEnabled() then return end
@@ -809,7 +818,6 @@ end
                 region:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
             end
         end
-        _menuSkinned[frame] = true
         _applyConfiguredBorder(frame, "popupMenu", 1)
     end
 
@@ -837,7 +845,7 @@ end
         -- after the open, which is what the callback was there for.
         local function skinOpenMenu()
             local menu = manager.GetOpenMenu and manager:GetOpenMenu()
-            if menu and not _menuSkinned[menu] then
+            if menu then
                 _menuSkinFrame(menu)
             end
         end
