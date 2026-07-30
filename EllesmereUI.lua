@@ -10746,28 +10746,32 @@ function EllesmereUI._applySidebarSearch(text)
         end
     end
 
+    -- Bilingual: index the localized form too, only when it differs from the
+    -- original, so the English haystack stays byte-identical on English clients.
+    local function addLocalized(parts, s)
+        s = tostring(s)
+        parts[#parts + 1] = s:lower()
+        local loc = tostring(EllesmereUI.L(s))
+        if loc ~= s then parts[#parts + 1] = loc:lower() end
+    end
+
     local function childMatches(info)
         if #queryWords == 0 then return true end
-        local parts = { (info.display or ""):lower() }
-        -- Bilingual: index localized module/page names too (only when they differ,
-        -- so the English haystack is byte-identical on English clients).
-        local dispLoc = EllesmereUI.L(info.display or "")
-        if dispLoc ~= (info.display or "") then parts[#parts + 1] = dispLoc:lower() end
+        local parts = {}
+        addLocalized(parts, info.display or "")
         local mod = modules[info.folder]
         if mod and mod.pages then
             for _, p in ipairs(mod.pages) do
-                parts[#parts + 1] = tostring(p):lower()
-                local pLoc = EllesmereUI.L(p)
-                if pLoc ~= p then parts[#parts + 1] = tostring(pLoc):lower() end
+                addLocalized(parts, p)
             end
         end
         if mod and mod.searchTerms then
             if type(mod.searchTerms) == "table" then
                 for _, t in ipairs(mod.searchTerms) do
-                    parts[#parts + 1] = tostring(t):lower()
+                    addLocalized(parts, t)
                 end
             else
-                parts[#parts + 1] = tostring(mod.searchTerms):lower()
+                addLocalized(parts, mod.searchTerms)
             end
         end
         local haystack = table.concat(parts, " ")
