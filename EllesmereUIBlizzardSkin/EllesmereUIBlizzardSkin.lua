@@ -918,13 +918,6 @@ end
         hooksecurefunc(mgr, "OpenContextMenu", function(self, ownerRegion, menuDescription)
             _menuOnOpen(self, ownerRegion, menuDescription)
         end)
-        -- TEMP verification gate for the style-mixin hook, so a tester can A/B
-        -- it with zero rebuilds: /euimenuhook flips the flag, /reload re-runs
-        -- this init. hooksecurefunc cannot be uninstalled, so the decision has
-        -- to be made here at install time -- a no-op hook body would not test
-        -- the "installing the wrapper itself taints" theory. Strip the gate
-        -- (keep the hooks) once verdict is in.
-        if EllesmereUIDB and EllesmereUIDB.menuStyleHookDisabled then return end
         if _G.MenuStyle1Mixin and type(_G.MenuStyle1Mixin.Generate) == "function" then
             hooksecurefunc(_G.MenuStyle1Mixin, "Generate", _onStyleGenerate)
         end
@@ -2786,14 +2779,4 @@ do
         end)
         EllesmereUI._applyTooltipHealthStrip()
     end
-end
-
--- TEMP: A/B switch for the menu style-mixin hook. Remove with the gate above.
-SLASH_EUIMENUHOOK1 = "/euimenuhook"
-SlashCmdList["EUIMENUHOOK"] = function()
-    if not EllesmereUIDB then return end
-    EllesmereUIDB.menuStyleHookDisabled = not EllesmereUIDB.menuStyleHookDisabled or nil
-    print("|cff66ccff[EUI]|r menu style hook "
-        .. (EllesmereUIDB.menuStyleHookDisabled and "|cffff6666DISABLED|r" or "|cff66ff66ENABLED|r")
-        .. " -- /reload to apply")
 end
