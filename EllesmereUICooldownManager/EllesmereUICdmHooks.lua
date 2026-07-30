@@ -621,6 +621,39 @@ local _divertedBuffCdIDs  = {}
 -- actually assigned, instead of flipping bars each time the spell transforms.
 local _divertedDirectBuff = {}
 local _divertedDirectCD   = {}
+-- Base ids claimed by an explicitly assigned VARIANT, keyed base -> bar.
+--
+-- A transforming slot only ever names two ids: its base, and whichever form is
+-- live right now. The OTHER form is invisible to it -- cooldownID 29342 reports
+-- spellID 375576 (Divine Toll) with overrideSpellID alternating between Sacred
+-- Weapon and Holy Bulwark, and carries no linkedSpellIDs at all. So when the
+-- player assigned one armament and a repopulate dropped the base on another bar,
+-- the exact-id lookup hits in one armament state and misses in the other, and the
+-- miss falls through to the base's assignment: the icon still changes bars on
+-- every transform, which is the bug the direct sets were meant to end.
+--
+-- Recording the base an assigned variant belongs to closes that hole, because the
+-- base IS stable across transforms. Consulted after the exact ids and before the
+-- base's own entry, so an assignment the player made by hand outranks one a
+-- repopulate made for them. Only written when the assigned id is not itself the
+-- base, so an ordinary spell never lands here.
+local _divertedVarBaseBuff = {}
+local _divertedVarBaseCD   = {}
+-- Learned variant -> base, and deliberately NEVER wiped.
+--
+-- Which base a variant belongs to is static game data, but the client only
+-- ANSWERS while that variant is the live form. Measured on one character,
+-- one id, minutes apart:
+--
+--   Holy Bulwark live  -> GetBaseSpell(432459) = 375576, book = true
+--   Sacred Weapon live -> GetBaseSpell(432459) = 432459, book = false
+--
+-- Every identity API is a fixed point on the form the client is not currently
+-- in, so deriving this fresh on each rebuild produces the right answer only
+-- half the time -- and these transforms rebuild constantly. Learning it the
+-- moment it IS observable and keeping it is what makes the result stable, and
+-- keeping it is safe precisely because the relationship never changes.
+local _variantBaseLearned = {}
 ns._divertedSpellsBuff = _divertedSpellsBuff
 ns._divertedSpellsCD   = _divertedSpellsCD
 
@@ -665,6 +698,8 @@ function ns.RebuildSpellRouteMap()
     wipe(_divertedSpellsCD)
     wipe(_divertedDirectBuff)
     wipe(_divertedDirectCD)
+    wipe(_divertedVarBaseBuff)
+    wipe(_divertedVarBaseCD)
     wipe(_divertedBuffCdIDs)
     _routeMapBuilt = false
 
@@ -676,14 +711,42 @@ function ns.RebuildSpellRouteMap()
 
     local IsBuffFamily = ns.IsBarBuffFamily
 
+    -- Record an exact assignment, plus the base it belongs to when the assigned
+    -- id is a variant form. Same overwrite semantics as the direct sets, so a
+    -- later pass (ghost bars are last and highest priority) still wins.
+    -- Assigned ids come from stored config and are always plain numbers, so no
+    -- secret gating is needed here; the resolve side does gate.
+    local GetBase = C_Spell and C_Spell.GetBaseSpell
+    local function StoreDirect(targetMap, sid, barKey)
+        local isBuff = (targetMap == _divertedSpellsBuff)
+        SVV(targetMap, sid, barKey, false,
+            isBuff and _divertedDirectBuff or _divertedDirectCD)
+        -- Learn the base while the client will still say, otherwise recall what
+        -- it said last time. Without the recall this claim is only written on
+        -- rebuilds that happen to occur while this exact variant is live, which
+        -- is why routing still flipped with the claim in place.
+        local base
+        if GetBase then
+            local ok, b = pcall(GetBase, sid)
+            if ok and type(b) == "number" and b > 0 and b ~= sid then
+                base = b
+                _variantBaseLearned[sid] = b
+            end
+        end
+        base = base or _variantBaseLearned[sid]
+        if base and base ~= sid then
+            local varMap = isBuff and _divertedVarBaseBuff or _divertedVarBaseCD
+            varMap[base] = barKey
+        end
+    end
+
     local function CollectDiversionsFor(bd)
         local sd = ns.GetBarSpellData(bd.key)
         if not sd or not sd.assignedSpells then return end
         local targetMap = IsBuffFamily and IsBuffFamily(bd) and _divertedSpellsBuff or _divertedSpellsCD
         for _, sid in ipairs(sd.assignedSpells) do
             if type(sid) == "number" and sid > 0 then
-                SVV(targetMap, sid, bd.key, false,
-                    targetMap == _divertedSpellsBuff and _divertedDirectBuff or _divertedDirectCD)
+                StoreDirect(targetMap, sid, bd.key)
             end
         end
     end
@@ -700,7 +763,7 @@ function ns.RebuildSpellRouteMap()
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
                     if type(sid) == "number" and sid > 0 then
-                        SVV(_divertedSpellsBuff, sid, bd.key, false, _divertedDirectBuff)
+                        StoreDirect(_divertedSpellsBuff, sid, bd.key)
                     end
                 end
             end
@@ -754,7 +817,7 @@ function ns.RebuildSpellRouteMap()
                 -- expands variants so any live talent/override form resolves.
                 for sid in pairs(sd.hostedBuffSpellIDs) do
                     if type(sid) == "number" and sid > 0 then
-                        SVV(_divertedSpellsBuff, sid, bd.key, false, _divertedDirectBuff)
+                        StoreDirect(_divertedSpellsBuff, sid, bd.key)
                     end
                 end
             end
@@ -832,6 +895,7 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
 
     local divertMap = (viewerDefaultBar == "buffs") and _divertedSpellsBuff or _divertedSpellsCD
     local directMap = (viewerDefaultBar == "buffs") and _divertedDirectBuff or _divertedDirectCD
+    local varBaseMap = (viewerDefaultBar == "buffs") and _divertedVarBaseBuff or _divertedVarBaseCD
 
     local info = gci(cdID)
     if not info then
@@ -843,6 +907,16 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
         -- info is ready) resolve the real bar.
         return viewerDefaultBar
     end
+    -- Free learning opportunity: a slot always reports its stable base alongside
+    -- whichever variant is live, so every resolve teaches us one more pairing.
+    -- This is what covers a session that starts in the state where the assigned
+    -- variant is NOT live: the first transform makes it observable, and it stays
+    -- known from then on.
+    if CdidIDReadable(info.spellID) and CdidIDReadable(info.overrideSpellID)
+       and info.overrideSpellID ~= info.spellID then
+        _variantBaseLearned[info.overrideSpellID] = info.spellID
+    end
+
     local routedBar = nil
     do
         -- EXACT assignments first, override form before base. One cooldown slot
@@ -855,11 +929,17 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
         -- when the map was built, so the icon changed bars on every transform.
         -- Every id is gated through CdidIDReadable: on an active viewer frame
         -- these can be SECRET, and a secret must never index a table.
+        --
+        -- Order matters, and the base comes LAST of the exact checks. A slot's
+        -- base is typically there because a repopulate put it there, while an
+        -- override or linked form is there because the player chose it, so the
+        -- base must never outrank the others. It used to be checked second,
+        -- which is why the fix above only held in one armament state: with Holy
+        -- Bulwark assigned to utility and Divine Toll left on cooldowns, the
+        -- Sacred Weapon state missed on the override and fell straight into the
+        -- base's entry, sending the icon back to cooldowns on every transform.
         if CdidIDReadable(info.overrideSpellID) then
             routedBar = directMap[info.overrideSpellID]
-        end
-        if not routedBar and CdidIDReadable(info.spellID) then
-            routedBar = directMap[info.spellID]
         end
         if not routedBar and info.linkedSpellIDs then
             for _, lid in ipairs(info.linkedSpellIDs) do
@@ -868,6 +948,17 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
                     if routedBar then break end
                 end
             end
+        end
+        -- The variant this slot is NOT currently transformed into is invisible
+        -- here: cooldownID 29342 names only Divine Toll plus whichever armament
+        -- is live, with no linkedSpellIDs. So an assignment of the other
+        -- armament can only be found through the base it belongs to, which is
+        -- the one id that stays constant across transforms.
+        if not routedBar and CdidIDReadable(info.spellID) then
+            routedBar = varBaseMap[info.spellID]
+        end
+        if not routedBar and CdidIDReadable(info.spellID) then
+            routedBar = directMap[info.spellID]
         end
         -- No raw `> 0` / `~=` comparisons on info.spellID/overrideSpellID here:
         -- on an active CDM viewer frame these can be secret numbers (per
