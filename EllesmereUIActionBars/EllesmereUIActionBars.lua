@@ -7514,6 +7514,47 @@ function EAB_VTABLE.ExtraBars.ShouldShowManagedNonSecureBar(s)
     return vis ~= "never"
 end
 
+-- Deferred completion for a petbattle unsuppress that lands during combat.
+--
+-- Wild pet battles keep the character in combat lockdown for their whole
+-- duration, and the [petbattle] driver flips back to "show" at battle close,
+-- BEFORE PLAYER_REGEN_ENABLED. The unsuppress below then defers on
+-- InCombatLockdown() -- but the driver never fires again (its state is already
+-- "show") and every other caller uses reason "visibility", which is a
+-- different key pair. So without this, the micro menu / bag bar stayed hidden
+-- after every wild pet battle until a /reload.
+--
+-- One shared shell frame; pending frames are re-tried once combat drops. If a
+-- new battle began before regen, the pending set is dropped: the suppression
+-- flags are still set (re-suppressing keeps the ORIGINAL pre-battle shown
+-- state, see the `if not ffd[suppressKey]` guard below), so that battle's own
+-- close transition completes or re-defers as usual.
+-- (In a do-block with the state as block locals: this file's main chunk sits
+-- at the 200-local cap, so the helper is exported on the vtable instead.)
+do
+    local pending, shell
+    EAB_VTABLE.ExtraBars.QueuePetBattleUnsuppress = function(frame)
+        pending = pending or {}
+        pending[frame] = true
+        if not shell then
+            shell = ns.TakeShell()
+            shell:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                local p = pending
+                pending = nil
+                if not p then return end
+                if C_PetBattles and C_PetBattles.IsInBattle and C_PetBattles.IsInBattle() then
+                    return -- back in a battle; its close transition owns the rest
+                end
+                for f in pairs(p) do
+                    EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(f, "petbattle", false)
+                end
+            end)
+        end
+        shell:RegisterEvent("PLAYER_REGEN_ENABLED")
+    end
+end
+
 function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, suppressed)
     if not frame then return end
 
@@ -7550,7 +7591,19 @@ function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, supp
     end
 
     if ffd[suppressKey] then
-        if InCombatLockdown() then ns._eabApplyDeferred = true return end -- keep bookkeeping; re-apply after combat
+        if InCombatLockdown() then
+            -- Keep bookkeeping, and mark the combat-drop ApplyAll as owed.
+            -- That heals "visibility", which RefreshRuntimeVisibility re-issues
+            -- on its own. It cannot heal "petbattle": ApplyAll only ever calls
+            -- back in with reason "visibility", a different key pair, and the
+            -- state driver already sits at "show" so it never fires again.
+            -- That reason needs its own completion on the same event.
+            ns._eabApplyDeferred = true
+            if reason == "petbattle" then
+                EAB_VTABLE.ExtraBars.QueuePetBattleUnsuppress(frame)
+            end
+            return
+        end
         local wasShown = ffd[shownKey]
         ffd[suppressKey] = nil
         ffd[shownKey] = nil
