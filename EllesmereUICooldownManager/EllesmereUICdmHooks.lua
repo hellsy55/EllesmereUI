@@ -4324,6 +4324,42 @@ local function ProcessPresetCooldowns()
                     else
                         ApplySpellDesaturation(f, durObj)
                     end
+                    -- Per-bar "Suppress GCD" for OUR OWN frames. Blizzard's CDM
+                    -- icons get this from the SetSwipeColor hook in DecorateFrame,
+                    -- but a preset frame's swipe COLOUR is written once at decorate
+                    -- time and never again (this pass drives only its GEOMETRY), so
+                    -- that hook never fires here and the GCD swipe stayed on while
+                    -- the rest of the bar suppressed it -- racials were the visible
+                    -- case, Arcane Torrent being the report. Same isOnGCD predicate
+                    -- and same charge carve-out as the hook: a charge spell
+                    -- mid-recharge is showing its recharge, never a GCD.
+                    local fcS = _ecmeFC[f]
+                    local bdS = fcS and fcS.barKey and barDataByKey[fcS.barKey]
+                    local hideGCD = false
+                    if bdS and bdS.suppressGCD and cdInfo and cdInfo.isOnGCD then
+                        local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
+                        hideGCD = not (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true)
+                    end
+                    local cdF = f._cooldown
+                    if cdF and cdF.SetSwipeColor then
+                        local fdS = FD(f)
+                        -- Re-assert while suppressed rather than only on the edge:
+                        -- an appearance refresh repaints the swipe from bar data and
+                        -- would otherwise un-hide it until the next state change.
+                        -- The restore arm fires on the falling edge alone, so a
+                        -- frame we never touched is left entirely to its own paint.
+                        if hideGCD then
+                            f._gcdSwipeHidden = true
+                            fdS._isProcessingOverride = true
+                            cdF:SetSwipeColor(0, 0, 0, 0)
+                            fdS._isProcessingOverride = false
+                        elseif f._gcdSwipeHidden then
+                            f._gcdSwipeHidden = nil
+                            fdS._isProcessingOverride = true
+                            cdF:SetSwipeColor(0, 0, 0, (bdS and bdS.swipeAlpha) or 0.7)
+                            fdS._isProcessingOverride = false
+                        end
+                    end
                     -- Resource check: dim vertex color when not enough resources
                     -- Only for custom spells (not racials -- racials don't cost resources)
                     if f._isCustomSpellFrame and f._tex then
