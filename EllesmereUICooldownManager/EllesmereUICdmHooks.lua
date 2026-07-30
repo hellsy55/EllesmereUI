@@ -3976,12 +3976,23 @@ local function ResolvePlaceholderIconSID(sid, cdID)
     -- name is in the book and this slot's own name is not, the linked form is
     -- what the player actually casts. Requiring the slot's name to be absent
     -- keeps this from firing while both forms are available.
+    --
+    -- Return the BOOK id, not the linked id. A linked id is the variant's AURA
+    -- (Wither's DoT 445474) while the book id is the CASTABLE the player
+    -- actually has (Wither 445468), and the two carry different art. The branch
+    -- above returns a castable too (FindSpellOverrideByID of a castable is a
+    -- castable), so returning an aura here made the two paths paint different
+    -- icons for the same spell. That is visible as a flicker across a hero
+    -- talent swap: until the debounced rebuild wipes the name cache, the
+    -- pre-swap book still lists the base spell, the castable branch above runs
+    -- and paints the right art, then the rebuilt cache drops through to here
+    -- and repaints the aura's art instead.
     if info and info.linkedSpellIDs and not castable then
         for _, lid in ipairs(info.linkedSpellIDs) do
             if type(lid) == "number" and lid > 0
-               and not (issecretvalue and issecretvalue(lid))
-               and BookIDForName(NameOf and NameOf(lid)) then
-                return lid
+               and not (issecretvalue and issecretvalue(lid)) then
+                local book = BookIDForName(NameOf and NameOf(lid))
+                if book then return book end
             end
         end
     end
