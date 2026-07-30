@@ -854,6 +854,60 @@ end
         C_Timer.After(0.15, skinOpenMenu)
     end
 
+    -- Submenu coverage via the style mixin.
+    --
+    -- The manager hooks above only ever see the ROOT menu: GetOpenMenu returns
+    -- the root even while a flyout is open, a submenu frame is a parentless
+    -- SIBLING of the root, and hovering a submenu parent fires neither OpenMenu
+    -- nor OpenContextMenu. But Blizzard styles every menu level through one
+    -- code path (Menu.lua, MenuManagerMixin:AcquireMenu -> SecureGenerate):
+    --
+    --     Mixin(proxy, menuDescription:GetMenuMixin());
+    --     proxy:Generate();
+    --
+    -- GetMenuMixin() resolves to the GLOBAL MenuStyle1Mixin (MenuStyle2Mixin for
+    -- WowStyle2 dropdowns), and the Mixin() copy happens at every open, so a
+    -- hooksecurefunc placed on the mixin's Generate is copied onto each menu
+    -- frame and hands us that exact frame as self -- root and every flyout, with
+    -- no frame identification at all.
+    --
+    -- Why this is NOT the AddMenuAcquiredCallback mistake: that callback was a
+    -- plain insecure closure stored in Blizzard's table and invoked BARE
+    -- (Menu.lua 2354, no securecallfunction), and the same execution then built
+    -- the entry click handlers, which is exactly how the whisper secret-name
+    -- taint happened. Here the containment is double: hooksecurefunc's contract
+    -- is that the hook's taint does not propagate into the calling execution
+    -- (the wrapper it installs is itself secure, so the Mixin() copy stays
+    -- secure), and Blizzard additionally wraps the call site in
+    -- securecallfunction because addon-supplied menu mixins are an anticipated
+    -- input to this pipeline (see MenuUtil.lua's comment on overriding
+    -- GetDefaultContextMenuMixin). Never ASSIGN into the mixin table -- that
+    -- would plant a tainted function value; only hooksecurefunc.
+    --
+    -- The hook body itself still does nothing but collect and schedule; the
+    -- skinning runs from our own timer after the secure execution has finished.
+    -- One compositor constraint on that pass, already satisfied by
+    -- _menuSkinFrame: while a menu is open the compositor replaces the frame's
+    -- metatable and disallows CreateTexture/CreateFontString/CreateLine on it,
+    -- so only the EXISTING background region may be recoloured.
+    local _stylePending, _styleArmed = {}, false
+    local function _styleFlush()
+        _styleArmed = false
+        for i = #_stylePending, 1, -1 do
+            local f = _stylePending[i]
+            _stylePending[i] = nil
+            -- _menuSkinFrame re-checks IsForbidden and the enable toggle.
+            _menuSkinFrame(f)
+        end
+    end
+    local function _onStyleGenerate(menuFrame)
+        _stylePending[#_stylePending + 1] = menuFrame
+        if not _styleArmed then
+            _styleArmed = true
+            C_Timer.After(0, _styleFlush)
+        end
+    end
+
     local function _menuInit()
         if not _G.Menu or not _G.Menu.GetManager then return end
         local mgr = _G.Menu.GetManager()
@@ -864,6 +918,12 @@ end
         hooksecurefunc(mgr, "OpenContextMenu", function(self, ownerRegion, menuDescription)
             _menuOnOpen(self, ownerRegion, menuDescription)
         end)
+        if _G.MenuStyle1Mixin and type(_G.MenuStyle1Mixin.Generate) == "function" then
+            hooksecurefunc(_G.MenuStyle1Mixin, "Generate", _onStyleGenerate)
+        end
+        if _G.MenuStyle2Mixin and type(_G.MenuStyle2Mixin.Generate) == "function" then
+            hooksecurefunc(_G.MenuStyle2Mixin, "Generate", _onStyleGenerate)
+        end
     end
 
     -- Static popup skinning
