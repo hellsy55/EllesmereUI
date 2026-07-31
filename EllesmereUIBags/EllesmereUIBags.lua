@@ -336,7 +336,8 @@ end
 -- guild bank) take one real bag slot at a time, so a merged button only ever
 -- hands over the single slot behind it: a merged count of 3 mails as 1.
 -- Duplicates are left unmerged while any of them is open, so every slot is
--- reachable.
+-- reachable. Players who keep duplicates deliberately apart can also turn
+-- merging off outright (bagMergeDuplicates).
 local _openItemPanels = {}
 local _anyItemPanelOpen = false
 -- Returns true when the aggregate state flipped, so the caller can refresh.
@@ -356,7 +357,7 @@ local function MergeDuplicates(items)
     -- Clear stale _mergedCount from prior merge passes in the same refresh
     -- (the same data table can be merged in multiple sections: category + pinned/recent)
     for _, data in ipairs(items) do data._mergedCount = nil end
-    if _anyItemPanelOpen then return items end
+    if _anyItemPanelOpen or BP().bagMergeDuplicates == false then return items end
     local seen = {}
     local out = {}
     for _, data in ipairs(items) do
@@ -2103,7 +2104,7 @@ local function GetOrCreateSlot(idx)
         if button ~= "LeftButton" and button ~= "RightButton" then return end
         if not IsShiftKeyDown() then return end
         if selectedCategoryIndex == -1 or selectedCategoryIndex == -2 then return end
-        if _anyItemPanelOpen then return end
+        if _anyItemPanelOpen or BP().bagMergeDuplicates == false then return end
         local bagID = self:GetParent():GetID()
         local slotID = self:GetID()
         if not bagID or not slotID or slotID == 0 then return end
