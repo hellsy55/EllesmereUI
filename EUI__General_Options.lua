@@ -520,11 +520,13 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "8.6.9",
+        version = "8.7",
         mini = true,
         fixes = {
             { module = "Cooldown Manager", text = "Hide Active State now greys transformed charge spells (e.g. Judgment under Avenging Wrath) at zero charges in real combat, reading the transformed spell's own cooldown." },
             { module = "Mythic+ Timer", text = "Fixed the floating timer appearing in the wrong place at the start of each key when the timer is scaled, drifting toward the center of the screen until Unlock Mode was opened." },
+            { module = "Nameplates", text = "Pandemic and dispel glows no longer cover the duration and stack text on nameplate auras." },
+            { module = "Quality of Life", text = "Hide Item Transformations no longer hides the Atomically Recalibrator and Atomically Regoblinator toy effects by default." },
             { module = "Raid Frames", text = "Frames now show OFFLINE instead of DEAD when a player is both disconnected and dead." },
             { module = "Raid Frames", text = "Fixed action blocked errors when buff indicators built their icons for the first time during combat, such as on delve trash pulls." },
             { module = "Unit Frames", text = "Fixed buffs and debuffs keeping the previous target's icons when switching targets." },

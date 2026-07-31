@@ -1617,8 +1617,8 @@ local function StartPandemicGlow(slot, slotSize)
         wrapper:SetAllPoints()
         -- Sit ABOVE the cooldown frame (slot.cd at +2) so the duration swipe
         -- can't render on top of the pandemic border and dim it. Matches the
-        -- dispel glow (slot+5); the glow is an edge border, so it doesn't
-        -- meaningfully obscure the corner countdown / stack numbers. (At the old
+        -- dispel glow (slot+5). The countdown / stack text lives on the slot's
+        -- countCarrier at slot+6, so it always draws over the glow. (At the old
         -- slot+1 the swipe drew over the glow, making it hard to see.)
         wrapper:SetFrameLevel(slot:GetFrameLevel() + 5)
         local flipTex = wrapper:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -3382,12 +3382,14 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         if d.cd.SetDrawBling then d.cd:SetDrawBling(false) end
         if d.cd.SetReverse then d.cd:SetReverse(true) end
         if d.cd.SetHideCountdownNumbers then d.cd:SetHideCountdownNumbers(false) end
-        -- Stack count lives on a carrier ABOVE the cooldown so the zero-duration
-        -- alpha mask on d.cd (which kills the permanent-aura swipe strobe) never
-        -- hides the stack number.
+        -- Stack count and countdown text live on a carrier ABOVE the cooldown so
+        -- the zero-duration alpha mask on d.cd (which kills the permanent-aura
+        -- swipe strobe) never hides them. The carrier sits at slot+6, above the
+        -- pandemic/dispel glow wrappers (slot+5), so glow styles never draw over
+        -- the duration or stack text.
         d.countCarrier = CreateFrame("Frame", nil, d)
         d.countCarrier:SetAllPoints(d)
-        d.countCarrier:SetFrameLevel(d.cd:GetFrameLevel() + 1)
+        d.countCarrier:SetFrameLevel(d:GetFrameLevel() + 6)
         d.count = d.countCarrier:CreateFontString(nil, "OVERLAY")
         SetFSFont(d.count, 11, "OUTLINE, SLUG")
         PP.Point(d.count, "BOTTOMRIGHT", d, "BOTTOMRIGHT", 1, 1)
@@ -3396,6 +3398,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         for _, region in ipairs(cdRegions) do
             if region:GetObjectType() == "FontString" then
                 d.cd.text = region
+                region:SetParent(d.countCarrier)
                 SetFSFont(region, 11, "OUTLINE, SLUG")
                 region:ClearAllPoints()
                 PP.Point(region, "TOPLEFT", d, "TOPLEFT", -3, 4)
@@ -3429,11 +3432,13 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         if b.cd.SetDrawBling then b.cd:SetDrawBling(false) end
         if b.cd.SetReverse then b.cd:SetReverse(true) end
         if b.cd.SetHideCountdownNumbers then b.cd:SetHideCountdownNumbers(false) end
-        -- Stack count on a carrier ABOVE the cooldown (see debuff slot) so the
-        -- zero-duration alpha mask on b.cd never hides the stack number.
+        -- Stack count and countdown text on a carrier ABOVE the cooldown (see
+        -- debuff slot) so the zero-duration alpha mask on b.cd never hides them.
+        -- Carrier at slot+6, above the dispel glow wrapper (slot+5), so glow
+        -- styles never draw over the duration or stack text.
         b.countCarrier = CreateFrame("Frame", nil, b)
         b.countCarrier:SetAllPoints(b)
-        b.countCarrier:SetFrameLevel(b.cd:GetFrameLevel() + 1)
+        b.countCarrier:SetFrameLevel(b:GetFrameLevel() + 6)
         b.count = b.countCarrier:CreateFontString(nil, "OVERLAY")
         SetFSFont(b.count, 9, "OUTLINE, SLUG")
         PP.Point(b.count, "BOTTOMRIGHT", b, "BOTTOMRIGHT", 2, -2)
@@ -3441,6 +3446,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         for _, region in ipairs(bCdRegions) do
             if region:GetObjectType() == "FontString" then
                 b.cd.text = region
+                region:SetParent(b.countCarrier)
                 SetFSFont(region, 12, "OUTLINE, SLUG")
                 region:ClearAllPoints()
                 region:SetPoint("CENTER", b, "CENTER", 0, 0)
