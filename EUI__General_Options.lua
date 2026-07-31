@@ -187,6 +187,109 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         end
     end
 
+    -- Tier 1b: a full-width banner hero (entry.banner = true), styled after
+    -- the announcement popups (EllesmereUI_RaidFramesPopup /
+    -- EllesmereUI_PatchNotesPopup): their solid panel fill and white 1px
+    -- border, the 2px green top accent, a small green eyebrow over a LARGE
+    -- centered title and centered description, and -- their signature --
+    -- decorative abstract art built from plain texture bars. Here the art is
+    -- two mirrored mini bar-charts flanking the text: cost stepping DOWN into
+    -- a green bar on the left, framerate stepping UP to a green bar on the
+    -- right. Takes a whole row; height follows the description. Static unless
+    -- the entry carries a nav.
+    local function MakeBannerCard(x, cy, w, entry)
+        local card = CreateFrame("Button", nil, parent)
+        -- Width FIRST, height provisional: the description anchors LEFT+RIGHT
+        -- to the card, so the card must already be its real width when the
+        -- text lays out (and is measured below) -- a width-0 card renders the
+        -- description as one truncated line instead of wrapping it.
+        PP.Size(card, w, 100)
+        PP.Point(card, "TOPLEFT", parent, "TOPLEFT", x, cy)
+        card:SetFrameLevel(parent:GetFrameLevel() + 2)
+
+        local bg = card:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+        local brd = MakeBorder(card, 1, 1, 1, 0.15, PP)
+
+        local accent = card:CreateTexture(nil, "ARTWORK", nil, 7)
+        accent:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
+        PP.Point(accent, "TOPLEFT", card, "TOPLEFT", 1, -1)
+        PP.Point(accent, "TOPRIGHT", card, "TOPRIGHT", -1, -1)
+        accent:SetHeight(2)
+        if PP.DisablePixelSnap then PP.DisablePixelSnap(accent) end
+
+        -- Flanking decorative bar-charts, in the popups' stand-in-texture
+        -- language (dim white steps, the "now" bar green, a faint baseline).
+        local BAR_W, BAR_GAP2 = 8, 4
+        local function MakeChart(anchorSide, inset, heights, alphas)
+            local groupW = #heights * BAR_W + (#heights - 1) * BAR_GAP2
+            local base = card:CreateTexture(nil, "ARTWORK")
+            base:SetColorTexture(1, 1, 1, 0.12)
+            PP.Size(base, groupW, 1)
+            if anchorSide == "LEFT" then
+                PP.Point(base, "LEFT", card, "LEFT", inset, -12)
+            else
+                PP.Point(base, "RIGHT", card, "RIGHT", -inset, -12)
+            end
+            if PP.DisablePixelSnap then PP.DisablePixelSnap(base) end
+            for i = 1, #heights do
+                local bar = card:CreateTexture(nil, "ARTWORK")
+                local a = alphas[i]
+                if a == "green" then
+                    bar:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
+                else
+                    bar:SetColorTexture(1, 1, 1, a)
+                end
+                PP.Size(bar, BAR_W, heights[i])
+                PP.Point(bar, "BOTTOMLEFT", base, "TOPLEFT", (i - 1) * (BAR_W + BAR_GAP2), 1)
+                if PP.DisablePixelSnap then PP.DisablePixelSnap(bar) end
+            end
+        end
+        -- Left: cost falling to a low green bar. Right: fps rising to a tall
+        -- green bar.
+        MakeChart("LEFT",  36, { 34, 26, 19, 13, 8 },  { 0.28, 0.23, 0.18, 0.14, "green" })
+        MakeChart("RIGHT", 36, { 8, 13, 19, 26, 34 },  { 0.14, 0.18, 0.23, 0.28, "green" })
+
+        local eyebrow = MakeFont(card, 11, nil, EG.r, EG.g, EG.b, 0.9)
+        PP.Point(eyebrow, "TOP", card, "TOP", 0, -18)
+        eyebrow:SetJustifyH("CENTER"); eyebrow:SetWordWrap(false)
+        eyebrow:SetText(EllesmereUI.L(entry.eyebrow or "SPECIAL UPDATE"))
+
+        -- Banner titles stand alone: no "Module:" prefix, the card IS the
+        -- event -- and it renders LARGE, like the popups' 26px headline.
+        local titleFs = MakeFont(card, 24, nil, 1, 1, 1, 1)
+        PP.Point(titleFs, "TOP", eyebrow, "BOTTOM", 0, -8)
+        titleFs:SetJustifyH("CENTER"); titleFs:SetWordWrap(false)
+        titleFs:SetText(EllesmereUI.L(entry.title) or "")
+
+        local descFs = MakeFont(card, 13, nil, 1, 1, 1, 0.5)
+        PP.Point(descFs, "TOP", titleFs, "BOTTOM", 0, -10)
+        PP.Point(descFs, "LEFT", card, "LEFT", 110, 0)
+        PP.Point(descFs, "RIGHT", card, "RIGHT", -110, 0)
+        descFs:SetJustifyH("CENTER"); descFs:SetJustifyV("TOP"); descFs:SetWordWrap(true)
+        descFs:SetText(EllesmereUI.L(entry.desc) or "")
+
+        local dh = math.ceil(descFs:GetStringHeight() or 14)
+        local bh = 18 + 11 + 8 + 24 + 10 + dh + 28
+        PP.Size(card, w, bh)
+
+        if entry.nav and entry.nav.module then
+            card:SetScript("OnEnter", function()
+                brd:SetColor(1, 1, 1, 0.30)
+                descFs:SetAlpha(0.65)
+            end)
+            card:SetScript("OnLeave", function()
+                brd:SetColor(1, 1, 1, 0.15)
+                descFs:SetAlpha(0.5)
+            end)
+            card:SetScript("OnClick", function() GoTo(entry.nav) end)
+        else
+            card:EnableMouse(false)
+        end
+        return bh
+    end
+
     -- Tier 2: a clickable small listing -- title + subtitle, no card chrome, a
     -- faint row highlight on hover.
     local function MakeListing(cy, w, entry)
@@ -355,16 +458,26 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         if #heroes > 0 then
             local cardW = math.floor((totalW - CARD_GAP) / 2)
             local CARD_H = 96
-            local rows = math.ceil(#heroes / 2)
-            for i, hero in ipairs(heroes) do
-                local col = (i - 1) % 2
-                local rw  = math.floor((i - 1) / 2)
-                local cx  = PAD + col * (cardW + CARD_GAP)
-                local cy  = y - rw * (CARD_H + CARD_GAP)
-                MakeHeroCard(cx, cy, cardW, CARD_H, hero)
+            -- Sequential layout with column state: normal heroes flow two per
+            -- row in authored order; a `banner` hero takes a full row of its
+            -- own, breaking and then resuming the two-column flow. A patch
+            -- with only two-column heroes consumes exactly the vertical space
+            -- the old rows-times-height math produced.
+            local col = 0
+            for _, hero in ipairs(heroes) do
+                if hero.banner then
+                    if col == 1 then y = y - CARD_H - CARD_GAP; col = 0 end
+                    local bh = MakeBannerCard(PAD, y, totalW, hero)
+                    y = y - bh - CARD_GAP
+                else
+                    local cx = PAD + col * (cardW + CARD_GAP)
+                    MakeHeroCard(cx, y, cardW, CARD_H, hero)
+                    col = col + 1
+                    if col == 2 then y = y - CARD_H - CARD_GAP; col = 0 end
+                end
             end
-            local consumed = rows * CARD_H + (rows - 1) * CARD_GAP
-            y = y - consumed - 18
+            if col == 1 then y = y - CARD_H - CARD_GAP end
+            y = y + CARD_GAP - 18
         end
 
         -- Tier 2: small listings.
@@ -406,6 +519,42 @@ end
 --  EllesmereUI:NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "8.6.8",
+        heroes = {
+            {
+                -- Full-width banner card (banner = true, see MakeBannerCard):
+                -- announcement-style chrome dedicated to the suite-wide
+                -- performance overhaul. Static on purpose -- the speedup is
+                -- automatic, there is no setting to open.
+                banner  = true,
+                eyebrow = "SUITE-WIDE OPTIMIZATION",
+                title   = "The Performance Patch",
+                desc    = "The entire suite has been rebuilt for speed: CPU Usage has been cut by more than 70% while idle, and over 50% during M+/Raid combat. Same look, same features, at a fraction of the cost.",
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "The micro menu and bag bar reappear on their own after wild pet battles." },
+            { module = "Action Bars", text = "Clicking an empty stretch of an action bar no longer flips the main bar to another page." },
+            { module = "Action Bars", text = "Cooldown swipes repaint when a proc modifies them, and an active GCD no longer greys out charge spells." },
+            { module = "Blizz UI Enhanced", text = "Context menus keep their skin after the first menu of the session." },
+            { module = "Blizz UI Enhanced", text = "Submenu flyouts (Loot Specialization, Raid Markers and friends) are skinned again." },
+            { module = "Blizz UI Enhanced", text = "Fixed repeating errors when hovering enemy nameplate auras inside instances." },
+            { module = "Cooldown Manager", text = "Replaced tracked buffs (e.g. Wither for Hellcaller) show the castable spell's icon instead of the aura's." },
+            { module = "Cooldown Manager", text = "Transforming cooldowns like Holy Armaments stay on the bar you assigned them to." },
+            { module = "Cooldown Manager", text = "Custom Active States (e.g. trinket glows) work after login without opening the settings first." },
+            { module = "Cooldown Manager", text = "Pandemic Glow's None option is now selectable and actually hides Blizzard's pandemic glow." },
+            { module = "Cooldown Manager", text = "Suppress GCD now covers racials and user-added spells." },
+            { module = "Cooldown Manager", text = "Transformed charge spells (e.g. Judgment under Avenging Wrath) grey out at zero charges with Hide Active State." },
+            { module = "Cooldown Manager", text = "Bar Glows light up when the aura is gained, not only after one is removed." },
+            { module = "General", text = "Typing a value into a slider's number box now updates dependent controls the same as dragging it." },
+            { module = "General", text = "Many missing translations now translate on non-English clients; Traditional Chinese and Korean translations expanded (community)." },
+            { module = "Quality of Life", text = "The Upgrade Calculator works on non-English clients: crest totals, missing upgrades and the queue no longer read zero." },
+            { module = "Quality of Life", text = "The Raid Tools window keeps its saved position correctly when scaled." },
+            { module = "Unit Frames", text = "More absorb bar position options." },
+            { module = "Unit Frames", text = "With Only Dispellable by You, dwarves now get the dispel overlay for bleeds (Stoneform clears them)." },
+        },
+    },
     {
         version = "8.6.6",
         heroes = {
@@ -929,50 +1078,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Quest Tracker", text = "Fixed Lua errors when opening the world map or hovering map pins during Mythic+ or raid combat." },
             { module = "General", text = "Fixed a wave of errors when reloading the UI during combat." },
             { module = "Click Casting", text = "Fixed right-click spell bindings reverting to the context menu after login or /reload." },
-        },
-    },
-    {
-        version = "8.5.5",
-        features = {
-            {
-                module = "Cooldown Manager",
-                title  = "Row Growth Direction",
-                desc   = "Choose which row stays put when a second row appears",
-                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "BAR LAYOUT", highlight = "Number of Rows",
-                    preSelect = function()
-                        if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("cooldowns") end
-                    end },
-            },
-            {
-                module = "PTR Raid Frames",
-                title  = "Dispel-Type Debuff Rings",
-                desc   = "Colored dispel-type rings on debuff icons, thickness adjustable",
-            },
-        },
-        fixes = {
-            { module = "Action Bars & Cooldown Manager", text = "The Caps Lock keybind now shows as the shorter Caps on action buttons and ability icons instead of the full CAPSLOCK, matching the abbreviations for other long key names." },
-            { module = "Action Bars", text = "Fixed holding a keybind on a Druid or Rogue form bar casting once and then stalling into auto-attack instead of repeat-casting, which also fixes Single Button Assistant and Assisted Combat on those bars." },
-            { module = "Action Bars", text = "Fixed the main action bar showing one ability but casting a different one when a Druid or Rogue manually paged to another bar while in a form or stance." },
-            { module = "Blizzard Skin", text = "Fixed the Achievement window's objectives progress text clipping when a taller custom font was set." },
-            { module = "Blizzard Skin", text = "Fixed Set Note, Set Officer Note, Set Rank, and Whisper on the guild roster throwing an action blocked error while the Guild and Communities skin was on." },
-            { module = "Blizzard Skin", text = "Fixed the quest greeting paragraph shown when an NPC offers multiple quests not picking up the skin's text color." },
-            { module = "Cooldown Manager", text = "Lowered the Base Row Icons slider maximum from 50 to 15, since a base row that wide never worked well with the two-row split layout." },
-            { module = "Cooldown Manager", text = "Reverse Swipe now also applies to Active State overlays, matching the direction used on the icon's normal cooldown swipe." },
-            { module = "Cooldown Manager", text = "Fixed per-spell settings and custom icons for split-identity buffs, like the Evoker's Starweaver, sometimes applying to the wrong form or a slot vanishing once Mythic+ combat starts." },
-            { module = "Cooldown Manager", text = "Fixed a custom spell icon occasionally staying visible after being turned off if the change happened right as bars rebuilt during login." },
-            { module = "Data Bars", text = "Fixed Bar Opacity not working when a custom Bar Texture was set on the Modern background style." },
-            { module = "Quality of Life", text = "Fixed the Movement Alert Show Decimal toggle not turning decimals off for profiles carrying an older saved value, so it now works immediately and stays off after a reload." },
-            { module = "Quality of Life", text = "The Secondary Stats overlay now sizes its Unlock Mode outline to match the actual text, so it lines up whether or not tertiary stats are shown and at any UI scale." },
-            { module = "Raid Frames", text = "The Targeted Spells icon on raid frames now sorts together with the other aura icons instead of sitting underneath the name and health text." },
-            { module = "Unit Frames", text = "Fixed toggling Blizzard's Edit Mode spamming secret value errors in instances and sometimes leaving party frames broken for the rest of the session." },
-            { module = "PTR Blizzard Skin", text = "Fixed a 12.1 forbidden-object error from the Window Skins tooltip skin when a spell tooltip was re-shown by Blizzard's own secure code." },
-            { module = "PTR Cooldown Manager", text = "Fixed the Ebon Might active-state glow and swipe on its Cooldown Manager icon for Augmentation Evokers on the 12.1 client, where the aura's data is hidden from addons." },
-            { module = "PTR Raid Frames", text = "Each Debuff Manager filter can now use its own icon size, independent of the base debuff icons." },
-            { module = "PTR Raid Frames", text = "Fixed the Buff Manager's live preview so center-growth icon groups line up the same way they render on your raid frames." },
-            { module = "PTR Raid Frames", text = "Spells removed from a filter's curated list no longer stick around as an undeletable leftover entry in the Filter Editor." },
-            { module = "PTR Resource Bars", text = "Fixed the Ebon Might power bar so it fills and counts down correctly for Augmentation Evokers on the 12.1 client, where it previously stayed empty because the buff is hidden from addons." },
-            { module = "PTR Unit Frames", text = "Fixed a 12.1 error that could hit Evoker, Monk, and Demon Hunter players from Blizzard's own hidden power bars still reacting to events behind the hidden default player frame." },
-            { module = "PTR Unit Frames", text = "Fixed the Dispel Type Borders toggle on unit frames so it shows your chosen dispel colors instead of default ones on the 12.1 client." },
         },
     },
 }
