@@ -332,6 +332,22 @@ local function IsGearCategory(catIdx)
     return _gearCatSet[catIdx]
 end
 
+-- Item-management panels (mail, trade, auction house, bank, void storage,
+-- guild bank) take one real bag slot at a time, so a merged button only ever
+-- hands over the single slot behind it: a merged count of 3 mails as 1.
+-- Duplicates are left unmerged while any of them is open, so every slot is
+-- reachable.
+local _openItemPanels = {}
+local _anyItemPanelOpen = false
+-- Returns true when the aggregate state flipped, so the caller can refresh.
+local function SetItemPanelOpen(key, open)
+    _openItemPanels[key] = open or nil
+    local any = next(_openItemPanels) ~= nil
+    if any == _anyItemPanelOpen then return false end
+    _anyItemPanelOpen = any
+    return true
+end
+
 -- Merge duplicate non-gear items by itemLink within an already-ordered list.
 -- itemLink encodes stats/bonuses, so items with different stats stay separate.
 -- Must run AFTER ApplySavedOrder so the first occurrence in visual order wins.
@@ -340,6 +356,7 @@ local function MergeDuplicates(items)
     -- Clear stale _mergedCount from prior merge passes in the same refresh
     -- (the same data table can be merged in multiple sections: category + pinned/recent)
     for _, data in ipairs(items) do data._mergedCount = nil end
+    if _anyItemPanelOpen then return items end
     local seen = {}
     local out = {}
     for _, data in ipairs(items) do
@@ -2086,6 +2103,7 @@ local function GetOrCreateSlot(idx)
         if button ~= "LeftButton" and button ~= "RightButton" then return end
         if not IsShiftKeyDown() then return end
         if selectedCategoryIndex == -1 or selectedCategoryIndex == -2 then return end
+        if _anyItemPanelOpen then return end
         local bagID = self:GetParent():GetID()
         local slotID = self:GetID()
         if not bagID or not slotID or slotID == 0 then return end
@@ -6664,6 +6682,23 @@ local function StartAddon()
     -- Replays a refresh that was deferred during combat (secure-button taint guard).
     EUI_Bags:RegisterEvent("PLAYER_REGEN_ENABLED")
 
+    -- Panels that move items one bag slot at a time (see SetItemPanelOpen).
+    local ITEM_PANEL_EVENTS = {
+        MAIL_SHOW             = { "mail",      true  },
+        MAIL_CLOSED           = { "mail",      false },
+        TRADE_SHOW            = { "trade",     true  },
+        TRADE_CLOSED          = { "trade",     false },
+        AUCTION_HOUSE_SHOW    = { "auction",   true  },
+        AUCTION_HOUSE_CLOSED  = { "auction",   false },
+        VOID_STORAGE_OPEN     = { "void",      true  },
+        VOID_STORAGE_CLOSE    = { "void",      false },
+        BANKFRAME_OPENED      = { "bank",      true  },
+        BANKFRAME_CLOSED      = { "bank",      false },
+        GUILDBANKFRAME_OPENED = { "guildbank", true  },
+        GUILDBANKFRAME_CLOSED = { "guildbank", false },
+    }
+    for evt in pairs(ITEM_PANEL_EVENTS) do EUI_Bags:RegisterEvent(evt) end
+
     -- Pre-warm the secure item-button pool while out of combat. Creating a
     -- ContainerFrameItemButtonTemplate button during combat lockdown taints it,
     -- which gets UseContainerItem() blocked in M+/Delves. Building all the
@@ -6765,6 +6800,15 @@ local function StartAddon()
                 if EUI_BagsReagent:IsVisible() and EUI_BagsReagent.RefreshInventory then
                     EUI_BagsReagent:RefreshInventory()
                 end
+            end
+            return
+        end
+        local panel = ITEM_PANEL_EVENTS[event]
+        if panel then
+            -- Tracked even while the bags are hidden: the panel that opens them
+            -- (OpenAllBags) can fire in either order with this event.
+            if SetItemPanelOpen(panel[1], panel[2]) and EUI_Bags:IsVisible() then
+                EUI_Bags:RefreshInventory()
             end
             return
         end
