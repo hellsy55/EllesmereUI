@@ -1463,21 +1463,21 @@ end
 function ns._ApplyHealthBg(d, health, s, unit)
     local EllesmereUI = ns.EllesmereUI  -- upvalue read, not a global read (see taint note at top)
     local bg = d.bg
-    if UnitIsDeadOrGhost(unit) then
-        if bg then
-            local c = s.statusColorDead or { r = 0x24/255, g = 0x17/255, b = 0x17/255 }
-            bg:ClearAllPoints(); bg:SetAllPoints(health)
-            bg:SetColorTexture(c.r, c.g, c.b, 1)
-        end
-        if health then health:SetStatusBarColor(0.3, 0.3, 0.3, 0.5) end
-        return
-    elseif not UnitIsConnected(unit) then
+    if not UnitIsConnected(unit) then
         if bg then
             local c = s.statusColorOffline or { r = 0x66/255, g = 0x66/255, b = 0x66/255 }
             bg:ClearAllPoints(); bg:SetAllPoints(health)
             bg:SetColorTexture(c.r, c.g, c.b, 1)
         end
         if health then health:SetStatusBarColor(0.3, 0.3, 0.3, 0.3) end
+        return
+    elseif UnitIsDeadOrGhost(unit) then
+        if bg then
+            local c = s.statusColorDead or { r = 0x24/255, g = 0x17/255, b = 0x17/255 }
+            bg:ClearAllPoints(); bg:SetAllPoints(health)
+            bg:SetColorTexture(c.r, c.g, c.b, 1)
+        end
+        if health then health:SetStatusBarColor(0.3, 0.3, 0.3, 0.5) end
         return
     end
     if not bg then return end
@@ -4602,15 +4602,15 @@ local function UpdateButton(button)
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
         elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
-            -- Being resurrected: hide DEAD so the incoming-rez icon (shown in the same
+            -- Being resurrected: hide the status text so the incoming-rez icon (shown in the same
             -- spot by UpdateReadyCheck) isn't covered by the status text.
             d.statusText:Hide()
-        elseif UnitIsDeadOrGhost(unit) then
-            d.statusText:SetText(EllesmereUI.L("DEAD"))
-            d.statusText:SetTextColor(stc.r, stc.g, stc.b)
-            d.statusText:Show()
         elseif not UnitIsConnected(unit) then
             d.statusText:SetText(EllesmereUI.L("OFFLINE"))
+            d.statusText:SetTextColor(stc.r, stc.g, stc.b)
+            d.statusText:Show()
+        elseif UnitIsDeadOrGhost(unit) then
+            d.statusText:SetText(EllesmereUI.L("DEAD"))
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
             d.statusText:Show()
         elseif s.statusShowAFK and UnitIsAFK and not issecretvalue(UnitIsAFK(unit)) and UnitIsAFK(unit) then
@@ -6518,14 +6518,14 @@ ns._UpdateButtonHealth = function(button)
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
         elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
-            -- Being resurrected: hide DEAD so the incoming-rez icon isn't covered.
+            -- Being resurrected: hide the status text so the incoming-rez icon isn't covered.
             d.statusText:Hide()
-        elseif UnitIsDeadOrGhost(unit) then
-            d.statusText:SetText(EllesmereUI.L("DEAD"))
-            d.statusText:SetTextColor(stc.r, stc.g, stc.b)
-            d.statusText:Show()
         elseif not UnitIsConnected(unit) then
             d.statusText:SetText(EllesmereUI.L("OFFLINE"))
+            d.statusText:SetTextColor(stc.r, stc.g, stc.b)
+            d.statusText:Show()
+        elseif UnitIsDeadOrGhost(unit) then
+            d.statusText:SetText(EllesmereUI.L("DEAD"))
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
             d.statusText:Show()
         elseif s.statusShowAFK and UnitIsAFK and not issecretvalue(UnitIsAFK(unit)) and UnitIsAFK(unit) then
