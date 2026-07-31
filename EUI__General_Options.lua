@@ -520,6 +520,17 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.6.9",
+        mini = true,
+        fixes = {
+            { module = "Cooldown Manager", text = "Hide Active State now greys transformed charge spells (e.g. Judgment under Avenging Wrath) at zero charges in real combat, reading the transformed spell's own cooldown." },
+            { module = "Mythic+ Timer", text = "Fixed the floating timer appearing in the wrong place at the start of each key when the timer is scaled, drifting toward the center of the screen until Unlock Mode was opened." },
+            { module = "Raid Frames", text = "Frames now show OFFLINE instead of DEAD when a player is both disconnected and dead." },
+            { module = "Raid Frames", text = "Fixed action blocked errors when buff indicators built their icons for the first time during combat, such as on delve trash pulls." },
+            { module = "Unit Frames", text = "Fixed buffs and debuffs keeping the previous target's icons when switching targets." },
+        },
+    },
+    {
         version = "8.6.8",
         heroes = {
             {
@@ -1066,18 +1077,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "PTR Raid Frames", text = "Spells can now be added to a custom Buff Manager filter by searching their name, instead of only by entering a numeric spell ID." },
             { module = "PTR Raid Frames", text = "The Edit Excluded Debuffs list under the Debuff Manager preview has been removed; built-in sated and always-hide debuffs are still filtered automatically." },
             { module = "PTR Cooldown Manager", text = "Tracking Bar decimal duration text no longer gets stuck on an old threshold when the update is briefly blocked; it now retries until it lands." },
-        },
-    },
-    {
-        version = "8.5.6",
-        mini = true,
-        fixes = {
-            { module = "Action Bars", text = "Now appear correctly on a fresh installation." },
-            { module = "Aura & Buff Reminders", text = "Fixed reminders appearing oversized when one was already on screen at login or /reload." },
-            { module = "Cooldown Manager", text = "Now appears correctly on a fresh installation." },
-            { module = "Quest Tracker", text = "Fixed Lua errors when opening the world map or hovering map pins during Mythic+ or raid combat." },
-            { module = "General", text = "Fixed a wave of errors when reloading the UI during combat." },
-            { module = "Click Casting", text = "Fixed right-click spell bindings reverting to the context menu after login or /reload." },
         },
     },
 }

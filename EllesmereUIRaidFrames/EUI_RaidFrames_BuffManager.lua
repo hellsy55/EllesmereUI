@@ -932,11 +932,42 @@ end
 
 -- Wire a pooled aura frame for hover tooltips once, at creation. Mouse starts
 -- disabled (transparent); BM_SetTipTarget toggles it live per the setting.
+--
+-- The propagate calls are PROTECTED in combat, and the lazily built pool can
+-- be born mid-combat (first BM update of a delve/raid pull -- even inside the
+-- secure header's own update chain), where they are blocked and taint
+-- (field-reported ADDON_ACTION_BLOCKED). They are also inert until
+-- BM_SetTipTarget ENABLES mouse (the opt-in tooltip setting): a
+-- mouse-disabled frame passes motion and clicks through natively. So apply
+-- them immediately only out of combat; in combat, queue the frame for one
+-- shared REGEN pass. Until that pass, the worst case is a tooltip-opted-in
+-- hover swallowing motion over one 12px icon for the rest of that combat.
+local _wirePending, _wireFrame
+local function BM_ApplyPropagate(f)
+    if f.SetPropagateMouseMotion then f:SetPropagateMouseMotion(true) end
+    if f.SetPropagateMouseClicks then f:SetPropagateMouseClicks(true) end
+end
 local function BM_WireTooltip(f, button)
     f._ownerButton = button
     f:EnableMouse(false)
-    if f.SetPropagateMouseMotion then f:SetPropagateMouseMotion(true) end
-    if f.SetPropagateMouseClicks then f:SetPropagateMouseClicks(true) end
+    if InCombatLockdown() then
+        _wirePending = _wirePending or {}
+        _wirePending[#_wirePending + 1] = f
+        if not _wireFrame then
+            _wireFrame = (ns.TakeShell and ns.TakeShell()) or CreateFrame("Frame")
+            _wireFrame:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                local p = _wirePending
+                _wirePending = nil
+                if p then
+                    for i = 1, #p do BM_ApplyPropagate(p[i]) end
+                end
+            end)
+        end
+        _wireFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    else
+        BM_ApplyPropagate(f)
+    end
     f:SetScript("OnEnter", BM_TooltipOnEnter)
     f:SetScript("OnLeave", BM_TooltipOnLeave)
 end
