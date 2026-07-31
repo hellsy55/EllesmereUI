@@ -3001,12 +3001,23 @@ local function DecorateFrame(frame, barData)
                 -- in this tainted hook (can't be compared), so use Blizzard's clean
                 -- isOnActualCooldown flag instead -- false means at least one charge
                 -- is usable, so stay saturated until the spell is genuinely out.
+                -- Resolved as a TRI-STATE (true = genuinely out of charges, false =
+                -- a charge is still usable, nil = not a charge frame / unreadable)
+                -- because the transform guard below needs the same answer.
+                local outOfCharges
                 if onRealCD and type(frame.HasVisualDataSource_Charges) == "function"
                    and frame:HasVisualDataSource_Charges() then
                     local actualCD = frame.isOnActualCooldown
-                    if (not issecretvalue or not issecretvalue(actualCD)) and actualCD == false then
-                        onRealCD = false
+                    if not issecretvalue or not issecretvalue(actualCD) then
+                        if actualCD == false then
+                            outOfCharges = false
+                        elseif actualCD == true then
+                            outOfCharges = true
+                        end
                     end
+                end
+                if outOfCharges == false then
+                    onRealCD = false
                 end
                 -- Hero-talent transform to a usable follow-up: while a live spell
                 -- override is showing (e.g. Bestial Wrath -> Wailing Arrow, Trueshot
@@ -3017,7 +3028,17 @@ local function DecorateFrame(frame, barData)
                 -- above: only ever CLEARS onRealCD, never sets it -- so every
                 -- non-transform icon, and every transform whose proc is itself on a
                 -- real CD (oc.isActive), is byte-identical. Clean bools only.
-                if onRealCD and sid2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID
+                -- A CHARGE frame that is genuinely OUT of charges is never a
+                -- castable proc, whatever the override reports about itself, so it
+                -- skips this guard entirely. Judgment -> Hammer of Wrath under
+                -- Wings keeps its charges on the BASE spell, so the override
+                -- answers "no real cooldown of my own" and this cleared onRealCD on
+                -- an icon sitting at zero charges: the transformed button never
+                -- greyed while plain Judgment (no override, guard never reached)
+                -- greyed correctly. outOfCharges is Blizzard's clean
+                -- isOnActualCooldown, the same signal the charge guard above trusts.
+                if onRealCD and outOfCharges ~= true
+                   and sid2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID
                    and C_Spell and C_Spell.GetSpellCooldown then
                     local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
                     if ovrID and ovrID > 0 and ovrID ~= sid2 then
