@@ -1869,6 +1869,65 @@ EllesmereUI.TRIPLE_GAP    = TRIPLE_GAP
 EllesmereUI.CLASS_COLOR_MAP = CLASS_COLOR_MAP
 EllesmereUI.CLASS_ART_MAP   = CLASS_ART_MAP
 
+-- Upgrade track identification (locale-agnostic).
+-- Deliberately NOT gated behind a feature check: the QoL upgrade calculator
+-- needs this even when the skin and bag modules are disabled. The table is
+-- tiny and built once, so there is nothing to lazy-init.
+do
+    -- Every localized C_Item.GetItemUpgradeInfo().trackString we know of,
+    -- mapped back to a canonical English key. The upgrade calculator's
+    -- season tables are keyed by these names.
+    local KEYS = {
+        -- Explorer / Delve
+        Explorer = "Explorer", Expedicionario = "Explorer", Forscher = "Explorer",
+        Explorateur = "Explorer", Esploratore = "Explorer", Explorador = "Explorer",
+        Delve = "Explorer",
+        -- Adventurer
+        Adventurer = "Adventurer", Aventurero = "Adventurer", Abenteurer = "Adventurer",
+        Aventurier = "Adventurer", Avventuriero = "Adventurer", Aventureiro = "Adventurer",
+        -- Veteran
+        Veteran = "Veteran", Veterano = "Veteran", ["V\195\169t\195\169ran"] = "Veteran",
+        -- Champion
+        Champion = "Champion", ["Campe\195\179n"] = "Champion", Campione = "Champion",
+        ["Campe\195\163o"] = "Champion",
+        -- Hero
+        Hero = "Hero", ["H\195\169roe"] = "Hero", Held = "Hero",
+        ["H\195\169ros"] = "Hero", Eroe = "Hero", ["Hero\195\173"] = "Hero",
+        -- Myth
+        Myth = "Myth", Mito = "Myth", Mythos = "Myth", Mythe = "Myth",
+        -- ruRU
+        ["\208\152\209\129\209\129\208\187\208\181\208\180\208\190\208\178\208\176\209\130\208\181\208\187\209\140"] = "Explorer",
+        ["\208\152\209\129\208\186\208\176\209\130\208\181\208\187\209\140 \208\191\209\128\208\184\208\186\208\187\209\142\209\135\208\181\208\189\208\184\208\185"] = "Adventurer",
+        ["\208\146\208\181\209\130\208\181\209\128\208\176\208\189"] = "Veteran",
+        ["\208\151\208\176\209\137\208\184\209\130\208\189\208\184\208\186"] = "Champion",
+        ["\208\147\208\181\209\128\208\190\208\185"] = "Hero",
+        ["\208\155\208\181\208\179\208\181\208\189\208\180\208\176"] = "Myth",
+        -- koKR
+        ["\237\131\144\237\151\152\234\176\128"] = "Explorer", ["\235\170\168\237\151\152\234\176\128"] = "Adventurer",
+        ["\235\133\184\235\160\168\234\176\128"] = "Veteran", ["\236\177\148\237\148\188\236\150\184"] = "Champion",
+        ["\236\152\129\236\155\133"] = "Hero", ["\236\139\160\237\153\148"] = "Myth",
+        -- zhCN
+        ["\230\142\162\231\180\162\232\128\133"] = "Explorer", ["\229\134\146\233\153\169\232\128\133"] = "Adventurer",
+        ["\232\128\129\229\133\181"] = "Veteran", ["\229\139\135\229\163\171"] = "Champion",
+        ["\232\139\177\233\155\132"] = "Hero", ["\231\165\158\232\175\157"] = "Myth",
+        -- zhTW
+        ["\230\142\162\233\154\170\232\128\133"] = "Explorer", ["\229\134\146\233\154\170\232\128\133"] = "Adventurer",
+        ["\231\178\190\229\133\181"] = "Veteran", ["\231\165\158\232\169\177"] = "Myth",
+    }
+
+    EllesmereUI.UPGRADE_TRACK_KEYS = KEYS
+
+    -- Returns: trackKey (canonical English name) | nil, currentLevel, maxLevel.
+    -- trackKey is nil for items with no upgrade track (crafted gear, older
+    -- items) or for a trackString we have no translation for.
+    function EllesmereUI.GetUpgradeTrackKey(itemLink)
+        if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then return nil end
+        local info = C_Item.GetItemUpgradeInfo(itemLink)
+        if not info then return nil end
+        return KEYS[info.trackString or ""], info.currentLevel, info.maxLevel
+    end
+end
+
 -- Upgrade track color data (shared by BlizzardSkin character/inspect sheets + Bags)
 -- Only initialized when a consumer feature is actually enabled.
 do
@@ -1891,54 +1950,22 @@ do
         EllesmereUI._TRACK_WHITE = W
         EllesmereUI._TRACK_RANK = { [GR] = 1, [W] = 2, [VE] = 3, [CH] = 4, [HE] = 5, [MY] = 6 }
 
-        -- Locale-agnostic track color lookup (all known localized trackString values)
+        -- Canonical track key -> hue. The localized trackString translation
+        -- lives in EllesmereUI.UPGRADE_TRACK_KEYS above, so the list of
+        -- localized names exists in exactly one place.
         local map = {
-            -- Explorer / Delve (gray)
-            Explorer = GR, Expedicionario = GR, Forscher = GR,
-            Explorateur = GR, Esploratore = GR, Explorador = GR, Delve = GR,
-            -- Adventurer (white)
-            Adventurer = W, Aventurero = W, Abenteurer = W,
-            Aventurier = W, Avventuriero = W, Aventureiro = W,
-            -- Veteran (green)
-            Veteran = VE, Veterano = VE, ["V\195\169t\195\169ran"] = VE,
-            -- Champion (blue)
-            Champion = CH, ["Campe\195\179n"] = CH, Campione = CH,
-            ["Campe\195\163o"] = CH,
-            -- Hero (purple)
-            Hero = HE, ["H\195\169roe"] = HE, Held = HE,
-            ["H\195\169ros"] = HE, Eroe = HE, ["Hero\195\173"] = HE,
-            -- Myth (orange)
-            Myth = MY, Mito = MY, Mythos = MY, Mythe = MY,
-            -- ruRU
-            ["\208\152\209\129\209\129\208\187\208\181\208\180\208\190\208\178\208\176\209\130\208\181\208\187\209\140"] = GR,
-            ["\208\152\209\129\208\186\208\176\209\130\208\181\208\187\209\140 \208\191\209\128\208\184\208\186\208\187\209\142\209\135\208\181\208\189\208\184\208\185"] = W,
-            ["\208\146\208\181\209\130\208\181\209\128\208\176\208\189"] = VE,
-            ["\208\151\208\176\209\137\208\184\209\130\208\189\208\184\208\186"] = CH,
-            ["\208\147\208\181\209\128\208\190\208\185"] = HE,
-            ["\208\155\208\181\208\179\208\181\208\189\208\180\208\176"] = MY,
-            -- koKR
-            ["\237\131\144\237\151\152\234\176\128"] = GR, ["\235\170\168\237\151\152\234\176\128"] = W,
-            ["\235\133\184\235\160\168\234\176\128"] = VE, ["\236\177\148\237\148\188\236\150\184"] = CH,
-            ["\236\152\129\236\155\133"] = HE, ["\236\139\160\237\153\148"] = MY,
-            -- zhCN
-            ["\230\142\162\231\180\162\232\128\133"] = GR, ["\229\134\146\233\153\169\232\128\133"] = W,
-            ["\232\128\129\229\133\181"] = VE, ["\229\139\135\229\163\171"] = CH,
-            ["\232\139\177\233\155\132"] = HE, ["\231\165\158\232\175\157"] = MY,
-            -- zhTW
-            ["\230\142\162\233\154\170\232\128\133"] = GR, ["\229\134\146\233\154\170\232\128\133"] = W,
-            ["\231\178\190\229\133\181"] = VE, ["\231\165\158\232\169\177"] = MY,
+            Explorer   = GR,
+            Adventurer = W,
+            Veteran    = VE,
+            Champion   = CH,
+            Hero       = HE,
+            Myth       = MY,
         }
 
         function EllesmereUI.GetUpgradeTrack(itemLink)
-            if not itemLink or not (C_Item and C_Item.GetItemUpgradeInfo) then
-                return "", W
-            end
-            local info = C_Item.GetItemUpgradeInfo(itemLink)
-            if not info then return "", W end
-            local cur, maxL = info.currentLevel, info.maxLevel
+            local key, cur, maxL = EllesmereUI.GetUpgradeTrackKey(itemLink)
             local text = (cur and maxL and maxL > 0) and (cur .. "/" .. maxL) or ""
-            local color = map[info.trackString or ""] or W
-            return text, color
+            return text, map[key or ""] or W
         end
 
         -- Resolve the item-level text color using the exact same precedence as
