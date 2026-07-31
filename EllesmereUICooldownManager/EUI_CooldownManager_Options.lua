@@ -16121,7 +16121,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- the only visible reading is "specs of this character".
                     -- Kept to one line: the subtitle has room for two before it
                     -- runs into the Check All / Uncheck All row.
-                    subtitle    = "Choose which specs sync with " .. srcName .. ", including your alts' specs (the source is always included)",
+                    subtitle    = EllesmereUI.Lf("Choose which specs sync with %1$s, including your alts' specs (the source is always included)", srcName),
                     confirmText = "Sync",
                     specs       = specs,
                     lockedSpecs = { [sourceKey] = "This is the spec you're syncing from -- it's always included." },
@@ -16135,7 +16135,7 @@ initFrame:SetScript("OnEvent", function(self)
                             -- sync, and confirming with one spec ticked is the
                             -- natural first guess at "sync FROM this spec".
                             if ns.ClearRPTSync then ns.ClearRPTSync() end
-                            EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Sync cleared -- only one spec was selected. Tick at least two specs (including other characters' specs) to sync between them.")
+                            EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r " .. EllesmereUI.L("Sync cleared -- only one spec was selected. Tick at least two specs (including other characters' specs) to sync between them."))
                             EllesmereUI:RefreshPage(true)
                             return
                         end
@@ -16145,7 +16145,7 @@ initFrame:SetScript("OnEvent", function(self)
                         -- not, so every spec keeps its own ordering. Reported as
                         -- a bug ("some were right, some were wrong order"), so
                         -- it is stated where the subtitle has no room for it.
-                        EllesmereUI.Print(("|cff0cd29fEllesmereUI CDM:|r Syncing generic CDs/buffs across %d specs. Icon order is not synced -- each spec keeps its own arrangement."):format(cnt))
+                        EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r " .. EllesmereUI.Lf("Syncing generic CDs/buffs across %d specs. Icon order is not synced -- each spec keeps its own arrangement.", cnt))
                         EllesmereUI:RefreshPage(true)
                     end,
                 })
@@ -16183,7 +16183,7 @@ initFrame:SetScript("OnEvent", function(self)
                         -- Announced for the same reason as the setup path: the
                         -- sync is discarded here, not merely left unchanged.
                         if ns.ClearRPTSync then ns.ClearRPTSync() end
-                        EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r Sync cleared -- fewer than two specs remained selected.")
+                        EllesmereUI.Print("|cff0cd29fEllesmereUI CDM:|r " .. EllesmereUI.L("Sync cleared -- fewer than two specs remained selected."))
                         EllesmereUI:RefreshPage(true)
                         return
                     end
