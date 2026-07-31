@@ -8014,21 +8014,57 @@ function ns.SetupViewerHooks()
                                 -- the stop branch finally becoming reachable). The
                                 -- buff glow directly above already has this shape.
                                 local inPandemic = false
-                                if pandemicOn and fd then
-                                    -- Blizzard Default (-1): no custom glow and no
-                                    -- hooks -- Blizzard's native PandemicIcon does
-                                    -- the whole job, so the default config costs
-                                    -- zero. For custom styles the hooks install
-                                    -- lazily HERE on first need; this tick runs on
-                                    -- a CDM shell, so even install-time work bills
+                                if fd then
+                                    -- Blizzard Default (-1) is the ONLY config that
+                                    -- needs no hook: Blizzard's native PandemicIcon
+                                    -- does the whole job, so that config still costs
+                                    -- zero. EVERY other config needs the hook --
+                                    -- custom styles (>0) to REPLACE the icon, and
+                                    -- None (pandemicGlow off) to SUPPRESS it.
+                                    --
+                                    -- Installing was gated on `pandemicOn`, so None
+                                    -- got no hook at all and _PandemicShow -- which
+                                    -- is what hides Blizzard's icon -- never ran.
+                                    -- Blizzard's PandemicIcon then rendered
+                                    -- unopposed and the option could not be turned
+                                    -- off (reported for a tracked Fire Breath buff).
+                                    -- Same shape as the stop-branch bug: the code
+                                    -- that acts when the setting is OFF must not sit
+                                    -- behind the gate that requires it ON.
+                                    --
+                                    -- For custom styles the hooks still install
+                                    -- lazily HERE on first need; this tick runs on a
+                                    -- CDM shell, so even install-time work bills
                                     -- CooldownManager.
+                                    -- nil is NOT the same as false here. A bar that
+                                    -- was never configured has pandemicGlow == nil
+                                    -- and must keep behaving as Blizzard Default:
+                                    -- the three built-in bars simply never seed the
+                                    -- key, while every template that DOES seed it
+                                    -- ships true + style -1. Only an EXPLICIT false
+                                    -- (the user picking None) suppresses, so this
+                                    -- fix cannot silently strip Blizzard's pandemic
+                                    -- icon from everyone who never touched it.
                                     local pStyle = bd.pandemicGlowStyle or 1
-                                    if pStyle ~= -1 then
+                                    local custom = pandemicOn and pStyle ~= -1
+                                    local isNone = (bd.pandemicGlow == false)
+                                    if custom or isNone then
                                         if ns._pandemicHooked and not ns._pandemicHooked[frame]
                                            and ns.HookPandemicState then
                                             ns.HookPandemicState(frame)
                                         end
+                                    end
+                                    if custom then
                                         inPandemic = ns._pandemicState and ns._pandemicState[frame]
+                                    elseif isNone then
+                                        -- The hook only fires on the NEXT
+                                        -- ShowPandemicStateFrame, so an icon already
+                                        -- lit when the user picked None would stay up
+                                        -- until the aura lapsed. Take it down here
+                                        -- too; Hide is idempotent and this only runs
+                                        -- for bars actually set to None.
+                                        local pi = frame.PandemicIcon
+                                        if pi and pi:IsShown() then pi:Hide() end
                                     end
                                 end
                                 if inPandemic and fd then
