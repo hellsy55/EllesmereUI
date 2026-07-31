@@ -3122,7 +3122,28 @@ local function DecorateFrame(frame, barData)
                 -- Spells procced without a real CD (e.g. Demonic Meta via
                 -- Eye Beam) should stay saturated. Filter GCDs the same
                 -- way the suppressGCD check above does.
-                local cdInfo2 = sid2 and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(sid2)
+                -- Ask the EFFECTIVE spell, override first. A transform's real
+                -- cooldown ticks on the OVERRIDE id, and the base then reports no
+                -- cooldown whatever the icon is actually doing -- field dump under
+                -- Wings, both charges spent:
+                --   Judgment (20271) shows Hammer of Wrath (24275)
+                --   base CD isActive=false      <- what this used to read
+                --   ovr  CD isActive=true isOnGCD=false
+                -- so the verdict was "not on cooldown" and the icon never greyed.
+                -- The swipe path next to this one already resolves the id this way
+                -- for the same reason; only the saturation path still asked the base.
+                -- Fall back to the base ONLY when the override query returns nothing
+                -- (unknown), never when it returns a clean "not active": that answer
+                -- is the castable-proc case (Bestial Wrath -> Wailing Arrow) and it
+                -- must win.
+                local effID2 = sid2
+                if sid2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                    if ovr and ovr > 0 and ovr ~= sid2 then effID2 = ovr end
+                end
+                local cdInfo2 = effID2 and C_Spell.GetSpellCooldown
+                    and (C_Spell.GetSpellCooldown(effID2)
+                        or (effID2 ~= sid2 and C_Spell.GetSpellCooldown(sid2)) or nil)
                 local onRealCD = cdInfo2 and cdInfo2.isActive and not cdInfo2.isOnGCD
                 -- Charge spells report cooldown isActive while a recharge is in
                 -- progress even when a castable charge remains, which would wrongly
@@ -3130,12 +3151,23 @@ local function DecorateFrame(frame, barData)
                 -- in this tainted hook (can't be compared), so use Blizzard's clean
                 -- isOnActualCooldown flag instead -- false means at least one charge
                 -- is usable, so stay saturated until the spell is genuinely out.
-                -- Resolved as a TRI-STATE (true = genuinely out of charges, false =
-                -- a charge is still usable, nil = not a charge frame / unreadable)
-                -- because the transform guard below needs the same answer.
+                --
+                -- The charge-SPELL test is static charge data, NOT
+                -- frame:HasVisualDataSource_Charges(): that getter is documented
+                -- three times in this file as flipping FALSE while a GCD swipe is
+                -- layered on top, and a field dump shows it absent entirely (nil, not
+                -- false) on every CDM frame on a 12.0 client, so gating on it made
+                -- this whole branch dead code. maxCharges is stable, present, and
+                -- clean; the secret currentCharges is still never read. Same signal
+                -- the swipe guard, Max Stacks Glow and Hide CD Text already use.
+                local baseCI = sid2 and C_Spell and C_Spell.GetSpellCharges
+                    and C_Spell.GetSpellCharges(sid2)
+                local baseMax = baseCI and baseCI.maxCharges
+                local isChargeSpell = baseMax ~= nil
+                    and not (issecretvalue and issecretvalue(baseMax))
+                    and baseMax > 1
                 local outOfCharges
-                if onRealCD and type(frame.HasVisualDataSource_Charges) == "function"
-                   and frame:HasVisualDataSource_Charges() then
+                if onRealCD and isChargeSpell then
                     local actualCD = frame.isOnActualCooldown
                     if not issecretvalue or not issecretvalue(actualCD) then
                         if actualCD == false then
@@ -3148,35 +3180,14 @@ local function DecorateFrame(frame, barData)
                 if outOfCharges == false then
                     onRealCD = false
                 end
-                -- Hero-talent transform to a usable follow-up: while a live spell
-                -- override is showing (e.g. Bestial Wrath -> Wailing Arrow, Trueshot
-                -- -> Moonlight Chakram), the base cooldownID spell (sid2) is on its
-                -- real CD but the displayed proc is castable, so the base check above
-                -- desaturated it wrongly. Re-check the override's OWN cooldown and
-                -- stay saturated when the proc is free. Same shape as the charge guard
-                -- above: only ever CLEARS onRealCD, never sets it -- so every
-                -- non-transform icon, and every transform whose proc is itself on a
-                -- real CD (oc.isActive), is byte-identical. Clean bools only.
-                -- A CHARGE frame that is genuinely OUT of charges is never a
-                -- castable proc, whatever the override reports about itself, so it
-                -- skips this guard entirely. Judgment -> Hammer of Wrath under
-                -- Wings keeps its charges on the BASE spell, so the override
-                -- answers "no real cooldown of my own" and this cleared onRealCD on
-                -- an icon sitting at zero charges: the transformed button never
-                -- greyed while plain Judgment (no override, guard never reached)
-                -- greyed correctly. outOfCharges is Blizzard's clean
-                -- isOnActualCooldown, the same signal the charge guard above trusts.
-                if onRealCD and outOfCharges ~= true
-                   and sid2 and C_SpellBook and C_SpellBook.FindSpellOverrideByID
-                   and C_Spell and C_Spell.GetSpellCooldown then
-                    local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
-                    if ovrID and ovrID > 0 and ovrID ~= sid2 then
-                        local oc = C_Spell.GetSpellCooldown(ovrID)
-                        if oc and not (oc.isActive and not oc.isOnGCD) then
-                            onRealCD = false
-                        end
-                    end
-                end
+                -- The transform guard that used to sit here is gone. It existed only
+                -- because the verdict above asked the BASE: for a castable proc
+                -- (Bestial Wrath -> Wailing Arrow) the base is on its real CD, so the
+                -- guard re-asked the override and CLEARED the verdict. Asking the
+                -- override in the first place answers that case directly, and the
+                -- guard's clear-only shape is what broke Judgment twice: it could
+                -- turn greying off but never on, so an icon whose cooldown lived on
+                -- the override could not be greyed by anything.
                 fd.tex:SetDesaturated(onRealCD or false)
                 fd._isProcessingOverride = false
             end
