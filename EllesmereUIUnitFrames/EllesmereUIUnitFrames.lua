@@ -2954,6 +2954,78 @@ local function ApplyClassIconTexture(tex, classToken, style)
 end
 
 
+-- Shared portrait element Override (assigned to the 2D texture and 3D model
+-- objects; the class texture keeps its own). The vendored oUF Update only
+-- guid-gates the eventless OnUpdate poll -- EVERY other trigger (onShow
+-- full updates, target-changed sweeps, any unit event) repainted
+-- unconditionally, so heavy combat re-ran SetPortraitTexture + the re-anchor
+-- PostUpdate over and over for the SAME portrayed unit. This Override
+-- repaints only when the portrayed identity or availability actually
+-- changed, on real appearance events (same-guid model/portrait-file
+-- changes), or on an explicit ForceUpdate (mode swaps). Secret guids
+-- (instanced-PvP identities) cannot be compared, so they fail open to
+-- repainting -- exactly the old behavior. The unitIsUnit head-check is
+-- deliberately absent (secret booleans on eventless frames; the gate makes
+-- the resulting repaint-on-any-event dispatch cheap). PostUpdate is called
+-- only after a real repaint: the 2D PostUpdate exists to heal what
+-- SetPortraitTexture resets, and the 3D PostUpdate re-applies zoom after
+-- SetUnit -- neither ran, nothing to heal.
+local function PortraitOverride(self, event, evtUnit)
+    local element = self.Portrait
+    if not element then return end
+    local u = self.unit
+    if not u then return end
+    if element.PreUpdate then element:PreUpdate(u) end
+    local isAvailable = UnitIsConnected(u) and UnitIsVisible(u)
+    local guid = UnitGUID(u)
+    local changed
+    if issecretvalue(guid) or issecretvalue(element.guid) then
+        changed = true
+    else
+        changed = element.guid ~= guid
+    end
+    local hasStateChanged = changed
+        or element.state ~= isAvailable
+        or event == "UNIT_PORTRAIT_UPDATE"
+        or event == "UNIT_MODEL_CHANGED"
+        or event == "ForceUpdate"
+        -- World transitions can reset PlayerModel widget state while the guid
+        -- stays the same; repaint once per zone so 3D portraits never come
+        -- back blank.
+        or event == "PLAYER_ENTERING_WORLD"
+    if hasStateChanged then
+        if element:IsObjectType("PlayerModel") then
+            if not isAvailable then
+                element:SetCamDistanceScale(0.25)
+                element:SetPortraitZoom(0)
+                element:SetPosition(0, 0, 0.25)
+                element:ClearModel()
+                element:SetModel([[Interface\Buttons\TalkToMeQuestionMark.m2]])
+            else
+                local uKey3d = UnitToSettingsKey(u)
+                local uS3d = uKey3d and db.profile[uKey3d]
+                local camScale = ((uS3d and uS3d.portrait3dZoom) or 100) / 100
+                element:ClearModel()
+                element:SetUnit(u)
+                element:SetPortraitZoom(1)
+                element:SetPosition(0, 0, 0)
+                element:SetCamDistanceScale(camScale)
+            end
+        else
+            if isAvailable then
+                SetPortraitTexture(element, u)
+            else
+                element:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]])
+            end
+        end
+        element.guid = guid
+        element.state = isAvailable
+    end
+    if hasStateChanged and element.PostUpdate then
+        return element:PostUpdate(u, hasStateChanged)
+    end
+end
+
 -- Portrait mask and border paths for detached portrait shapes
 local PORTRAIT_MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\portraits\\"
 local PORTRAIT_MASKS = {
@@ -4276,6 +4348,12 @@ local function CreateAbsorbBar(frame, unit, settings)
         Override = function(self, event, updUnit)
             if self.unit ~= updUnit then return end
 
+            -- Incoming-heal prediction is not rendered anywhere on unit frames,
+            -- so its (frequent, healer-cast-driven) events change nothing we
+            -- paint. Absorb and health changes always arrive via their own
+            -- events, so skipping here can never strand a stale bar or gate.
+            if event == "UNIT_HEAL_PREDICTION" then return end
+
             -- Drive the "Absorb Short" health-text gate(s): feed the raw absorb so
             -- the clip reveals/collapses, AND refresh the text in LOCKSTEP so the
             -- revealed text never flashes the stale "0" (oUF tags update on a
@@ -5029,6 +5107,7 @@ local function CreatePortrait(frame, side, frameHeight, unit)
             local cs = ((us and us.portrait3dZoom) or 100) / 100
             self:SetCamDistanceScale(cs)
         end
+        model3D.Override = PortraitOverride
         model3D:Hide()
         backdrop._3d = model3D
         return model3D
@@ -5039,6 +5118,7 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     PP.Point(tex2D, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
     PP.Point(tex2D, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
     tex2D:SetTexCoord(0.15, 0.85, 0.15, 0.85)
+    tex2D.Override = PortraitOverride
     tex2D:Hide()
 
     -- Class theme icon (static texture, no oUF element needed)
@@ -5763,15 +5843,31 @@ local function CreateCastBar(frame, unit, settings)
         if self._showDuration == false then
             self.Time:SetText("")
             self.Time:Hide()
+            self._timeBucket = nil
             return
         end
         self.Time:Show()
         if durationObject then
+            -- oUF calls this per RENDER FRAME, but the displayed value has
+            -- %.1f precision -- format + SetText only when the displayed
+            -- tenth actually changes (~6x fewer at 60fps, more uncapped).
+            -- Secret durations (other units' casts in combat) cannot be
+            -- floored: fail open to formatting every call, exactly the old
+            -- path (SetFormattedText accepts secrets). The delay branch is
+            -- rare (pushback) and stays unmemoized.
             local duration = durationObject:GetRemainingDuration()
             if self.delay and self.delay ~= 0 then
+                self._timeBucket = nil
                 self.Time:SetFormattedText('%.1f|cffff0000%s%.2f|r', duration, self.channeling and '-' or '+', self.delay)
-            else
+            elseif issecretvalue and issecretvalue(duration) then
+                self._timeBucket = nil
                 self.Time:SetFormattedText('%.1f', duration)
+            else
+                local bucket = math.floor(duration * 10)
+                if bucket ~= self._timeBucket then
+                    self._timeBucket = bucket
+                    self.Time:SetFormattedText('%.1f', duration)
+                end
             end
         end
     end
@@ -6373,6 +6469,14 @@ end
 function ns.ApplyEUIAuraFilter(element, base, settings)
     element.filter = base
     element.FilterAura = ns.EUIAuraFilter
+    -- The aura-element driver reuses per-instance filter verdicts; a filter
+    -- or classification-flag change invalidates them all. needFullUpdate is
+    -- read before any branch touches these tables, so a nil el.all can
+    -- never meet an incremental pass (library and driver both guard).
+    element.all = nil
+    element.active = nil
+    element._allN = nil
+    element.needFullUpdate = true
     local f = element._euiAuraFlags
     if not f then f = {}; element._euiAuraFlags = f end
     f.player, f.raid, f.cc, f.bigDef, f.extDef = ns.ResolveAuraFlags(base, settings)
@@ -8264,42 +8368,13 @@ local function RegisterStylesOnce()
     oUF:RegisterStyle("EllesmerePet", function(frame, unit)
         StylePetFrame(frame, unit)
     end)
-    -- Skip unitIsUnit check in portrait Update for eventless frames to avoid
-    -- secret boolean errors. These frames poll on OnUpdate so redundant
-    -- portrait updates are harmless.
+    -- Eventless frames (TargetTarget/FocusTarget) use the same shared gated
+    -- Override as every other frame: it skips the secret-hazard unitIsUnit
+    -- head-check AND guid-gates the OnUpdate poll, so the poll repaints only
+    -- when the portrayed unit actually changed (see PortraitOverride).
     local function ApplyPortraitOverride(frame)
         if not frame.Portrait then return end
-        frame.Portrait.Override = function(self, event, evtUnit)
-            local element = self.Portrait
-            if not element then return end
-            local u = self.unit
-            if element.PreUpdate then element:PreUpdate(u) end
-            local isAvailable = UnitIsConnected(u) and UnitIsVisible(u)
-            if element:IsObjectType("PlayerModel") then
-                if not isAvailable then
-                    element:SetCamDistanceScale(0.25)
-                    element:SetPortraitZoom(0)
-                    element:SetPosition(0, 0, 0.25)
-                    element:ClearModel()
-                    element:SetModel([[Interface\Buttons\TalkToMeQuestionMark.m2]])
-                else
-                    local uKey3d = UnitToSettingsKey(u)
-                    local uS3d = uKey3d and db.profile[uKey3d]
-                    local camScale = ((uS3d and uS3d.portrait3dZoom) or 100) / 100
-                    element:SetUnit(u)
-                    element:SetPortraitZoom(1)
-                    element:SetPosition(0, 0, 0)
-                    element:SetCamDistanceScale(camScale)
-                end
-            else
-                if isAvailable then
-                    SetPortraitTexture(element, u)
-                else
-                    element:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]])
-                end
-            end
-            if element.PostUpdate then element:PostUpdate(u, isAvailable) end
-        end
+        frame.Portrait.Override = PortraitOverride
     end
     oUF:RegisterStyle("EllesmereTargetTarget", function(frame, unit)
         StyleSimpleFrame(frame, unit)
@@ -11413,6 +11488,21 @@ local function ReloadFrames()
             end
         end
     end
+
+    -- Portrait settings (3D zoom, class style) used to live-apply through the
+    -- ungated ambient portrait repaints; the gated Override skips same-unit
+    -- repaints, so settings changes now force one explicit portrait update
+    -- per frame instead.
+    for _, frame in pairs(frames) do
+        if type(frame) == "table" and frame.Portrait and frame.Portrait.ForceUpdate then
+            frame.Portrait:ForceUpdate()
+        end
+    end
+
+    -- Player Auras stopped polling settings per grid tick; every settings
+    -- path that lands here (fonts, profiles, options) forces their one
+    -- explicit refresh instead.
+    if ns.RefreshPlayerAuras then ns.RefreshPlayerAuras() end
 end
 
 -- Toggle a frame's oUF Castbar element without rewriting Blizzard's cast bar
@@ -14746,6 +14836,28 @@ end
 do
     local olTex
     local curve
+    local racialCurve
+
+    -- RAID_PLAYER_DISPELLABLE only knows class and spec dispels, so it answers
+    -- no for every bleed: nothing a class learns removes one, only the dwarf
+    -- racial does. Without this, "Only Dispellable by You" can never light up
+    -- for a bleed, for anyone. A racial cleans its own caster, so this is the
+    -- player frame's business alone and other units are right to ignore it.
+    -- Bleed only, deliberately: Stoneform also clears poison, disease and
+    -- curse, but a class that dispels those already passes the token, and
+    -- treating a two-minute racial as a dispel would put an overlay on most of
+    -- what a dwarf ever catches.
+    local RACIAL_DISPEL_TYPES = {
+        bleed = { Dwarf = true },  -- Stoneform
+    }
+    -- Shared with the 12.1 container slots (EUI_UnitFrames_AuraContainers.lua),
+    -- which apply the same rule by choosing which slot style stays visible.
+    function ns.UF_RacialClearsDispel(typeKey)
+        local races = RACIAL_DISPEL_TYPES[typeKey]
+        if not races then return false end
+        local _, raceToken = UnitRace("player")
+        return raceToken ~= nil and races[raceToken] == true
+    end
 
     local function RebuildCurve()
         if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return end
@@ -14763,6 +14875,24 @@ do
         add(4,  "dispelColorPoison",  0.0,   0.706, 0.286)
         add(9,  "dispelColorBleed",   0.75,  0.15,  0.15)
         add(11, "dispelColorBleed",   0.75,  0.15,  0.15)
+
+        -- Racial detection curve. The type a racial clears carries the user's
+        -- opacity; every other index resolves to alpha 0, so an aura of any
+        -- other type paints nothing. The ALPHA does the branching the addon is
+        -- not allowed to do: the type stays secret and unread, and the RGBA
+        -- goes straight into SetColorTexture/SetVertexColor, never into Lua
+        -- arithmetic. Opacity is baked in here for that reason -- scaling a
+        -- secret alpha afterwards is exactly the arithmetic that throws.
+        local a = (p and p.dispelOverlayOpacity or 100) / 100
+        racialCurve = C_CurveUtil.CreateColorCurve()
+        racialCurve:SetType(Enum.LuaCurveType.Step)
+        local bleedCol = p and p.dispelColorBleed
+        local br, bg, bb = bleedCol and bleedCol.r or 0.75, bleedCol and bleedCol.g or 0.15, bleedCol and bleedCol.b or 0.15
+        local bleedAlpha = ns.UF_RacialClearsDispel("bleed") and a or 0
+        for _, idx in ipairs({ 0, 1, 2, 3, 4, 9 }) do
+            racialCurve:AddPoint(idx, CreateColor(br, bg, bb, 0))
+        end
+        racialCurve:AddPoint(11, CreateColor(br, bg, bb, bleedAlpha))
     end
 
     local function Update()
@@ -14804,19 +14934,49 @@ do
                 break
             end
         end
-        if not found then olTex:Hide(); return end
+
+        -- Racial fallback: the token rejected everything, but a type this
+        -- player's RACE can clear would be rejected even when it is present
+        -- (see RACIAL_DISPEL_TYPES). Re-scan unfiltered and let racialCurve
+        -- decide by alpha -- a non-matching type resolves to 0 and paints
+        -- nothing, so no Lua code ever asks what type this aura is.
+        -- Known limit: this takes the FIRST typed aura, so a bleed sitting
+        -- behind another typed debuff paints nothing rather than wrongly. The
+        -- 12.1 container path has a real per-type slot and no such limit.
+        local racialFound
+        if not found and p.dispelOverlayByMe and ns.UF_RacialClearsDispel("bleed") then
+            for i = 1, 40 do
+                local ad = C_UnitAuras.GetAuraDataByIndex("player", i, "HARMFUL")
+                if not ad then break end
+                if ad.dispelName ~= nil then
+                    racialFound = ad
+                    break
+                end
+            end
+        end
+        if not found and not racialFound then olTex:Hide(); return end
 
         -- Resolve the color through the curve. The components may be secret;
         -- they pass straight into SetColorTexture/SetVertexColor natively.
         if not curve then RebuildCurve() end
         local r, g, b = 0.349, 0.475, 1.0
-        if curve and C_UnitAuras.GetAuraDispelTypeColor then
+        local alpha = (p.dispelOverlayOpacity or 100) / 100
+        if racialFound then
+            -- Alpha comes from the curve (opacity already baked in) and may be
+            -- secret: it is only ever handed to a texture setter below.
+            alpha = 0
+            if racialCurve and C_UnitAuras.GetAuraDispelTypeColor then
+                local col = C_UnitAuras.GetAuraDispelTypeColor("player", racialFound.auraInstanceID, racialCurve)
+                if col then
+                    r, g, b, alpha = col:GetRGBA()
+                end
+            end
+        elseif curve and C_UnitAuras.GetAuraDispelTypeColor then
             local col = C_UnitAuras.GetAuraDispelTypeColor("player", found.auraInstanceID, curve)
             if col then
                 r, g, b = col:GetRGB()
             end
         end
-        local alpha = (p.dispelOverlayOpacity or 100) / 100
 
         olTex:ClearAllPoints()
         olTex:SetVertexColor(1, 1, 1, 1)

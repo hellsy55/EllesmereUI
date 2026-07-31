@@ -3470,7 +3470,9 @@ local function SkinChatFrame(cf)
                 HideSidebarIconTooltip(self)
             end)
 
+            local fcPending
             local function UpdateFriendsCount()
+                fcPending = nil
                 local _, numOnline = BNGetNumFriends()
                 local wowOnline = C_FriendList.GetNumOnlineFriends()
                 friendsCount:SetText(numOnline + wowOnline)
@@ -3481,7 +3483,15 @@ local function SkinChatFrame(cf)
             fcEvents:RegisterEvent("BN_FRIEND_INFO_CHANGED")
             fcEvents:RegisterEvent("FRIENDLIST_UPDATE")
             fcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
-            fcEvents:SetScript("OnEvent", UpdateFriendsCount)
+            -- BN_FRIEND_INFO_CHANGED storms with big friend lists (presence
+            -- spam), and each recount walks both friend APIs. Coalesce the
+            -- storm into one trailing recount per second; the count still
+            -- converges within 1s of any real change.
+            fcEvents:SetScript("OnEvent", function()
+                if fcPending then return end
+                fcPending = true
+                C_Timer.After(1, UpdateFriendsCount)
+            end)
 
             CFD(cf).friendsCount = friendsCount
             anchor = friendsCount

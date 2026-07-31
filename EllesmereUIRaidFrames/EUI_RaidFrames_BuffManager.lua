@@ -404,6 +404,22 @@ local function MakeSignature(unit, instanceID)
         .. (ext and "1" or "0") .. ":" .. (disp and "1" or "0")
 end
 
+-- Cached four-filter signature per aura INSTANCE. A signature is a static
+-- property of the aura (the spec tables map FIXED per-spell signatures, so
+-- the probes cannot be state-dependent), yet every rescan re-derived it for
+-- every secret aura -- and a 25-man's cross-player buffs are almost all
+-- secret. false = fingerprinted, not a player healer buff: the common case
+-- and the important one to remember. Callers own invalidation: unit
+-- reassignment and full updates wipe, removed instance IDs prune.
+local function CachedSignature(sigCache, unit, instanceID)
+    local sig = sigCache and sigCache[instanceID]
+    if sig == nil then
+        sig = MakeSignature(unit, instanceID) or false
+        if sigCache then sigCache[instanceID] = sig end
+    end
+    return sig or nil
+end
+
 -- Per-spec signature -> spellID lookup (built lazily)
 local specSignatures = {}  -- [specKey] = { ["1:1:1:0"] = spellID }
 
@@ -463,9 +479,9 @@ end
 
 DetectActiveSpecKey()
 
-local function MatchSecretAura(unit, instanceID)
+local function MatchSecretAura(unit, instanceID, sigCache)
     if not activeSpecKey_BM then return nil end
-    local sig = MakeSignature(unit, instanceID)
+    local sig = CachedSignature(sigCache, unit, instanceID)
     if not sig then return nil end
     local sigs = GetSpecSignatures(activeSpecKey_BM)
     local sid = sigs[sig]
@@ -481,9 +497,9 @@ end
 
 -- Simple Setup variant: identical fingerprint match, but validated against the
 -- full-whitelist set instead of the indicator-tracked set.
-local function MatchSecretAuraSimple(unit, instanceID)
+local function MatchSecretAuraSimple(unit, instanceID, sigCache)
     if not activeSpecKey_BM then return nil end
-    local sig = MakeSignature(unit, instanceID)
+    local sig = CachedSignature(sigCache, unit, instanceID)
     if not sig then return nil end
     local sigs = GetSpecSignatures(activeSpecKey_BM)
     local sid = sigs[sig]
@@ -502,9 +518,9 @@ end
 -- construction (the four-filter signature uses PLAYER filters and the lookup is
 -- keyed to the active spec), so it never reports another player's aura and never
 -- collides across classes.
-function ns.BM_IdentifySecretAura(unit, instanceID)
+function ns.BM_IdentifySecretAura(unit, instanceID, sigCache)
     if not activeSpecKey_BM then return nil end
-    local sig = MakeSignature(unit, instanceID)
+    local sig = CachedSignature(sigCache, unit, instanceID)
     if not sig then return nil end
     return GetSpecSignatures(activeSpecKey_BM)[sig]
 end
@@ -2082,6 +2098,16 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
         return
     end
 
+    -- Secret-aura signature cache for this button's unit (see
+    -- CachedSignature): shared with the custom path -- signatures are
+    -- config-independent aura properties, so one cache serves both.
+    local sigCache = d.bmSigCache
+    if not sigCache then sigCache = {}; d.bmSigCache = sigCache end
+    if d.bmSigCacheUnit ~= unit or (updateInfo and updateInfo.isFullUpdate) then
+        wipe(sigCache)
+        d.bmSigCacheUnit = unit
+    end
+
     -- Incremental quick-skip: only rescan when a tracked buff actually changed.
     if updateInfo and not updateInfo.isFullUpdate and d.bmSimpleActiveIDs then
         local needScan = false
@@ -2091,13 +2117,23 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
                 if sid and not issecretvalue(sid) then
                     if simpleTrackedSpellIDs[PRIMARY_BY_ALT[sid] or sid] then needScan = true; break end
                 elseif sid then
-                    needScan = true; break
+                    -- Secret spellId: fingerprint THE ADDED AURA (cached
+                    -- signature) instead of declaring a full rescan.
+                    local iid2 = ad.auraInstanceID
+                    if not iid2 or MatchSecretAuraSimple(unit, iid2, sigCache) then
+                        needScan = true; break
+                    end
                 end
             end
         end
-        if not needScan and updateInfo.removedAuraInstanceIDs then
+        if updateInfo.removedAuraInstanceIDs then
             for _, iid in ipairs(updateInfo.removedAuraInstanceIDs) do
-                if d.bmSimpleActiveIDs[iid] then needScan = true; break end
+                -- Removed instances always prune the signature cache, even
+                -- when no rescan is needed.
+                sigCache[iid] = nil
+                if not needScan and d.bmSimpleActiveIDs[iid] then
+                    needScan = true
+                end
             end
         end
         if not needScan and updateInfo.updatedAuraInstanceIDs then
@@ -2154,7 +2190,7 @@ function ns.BM_UpdateSimpleGrid(button, unit, db, updateInfo)
                     end
                 end
             else
-                local matchedSid = MatchSecretAuraSimple(unit, iid)
+                local matchedSid = MatchSecretAuraSimple(unit, iid, sigCache)
                 if matchedSid and not seen[matchedSid] then
                     matched = true
                     seen[matchedSid] = true
@@ -2268,7 +2304,32 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
     local GetFFD = ns.GetFFD
     if not GetFFD then return end
     local d = GetFFD(button)
-    if not d.bmIconPool then return end
+    if not d.bmIconPool then
+        -- LIVE lazy pool: the legacy indicator pool (~160 frames/regions per
+        -- button) is no longer built at login -- it materializes on the first
+        -- render that can actually draw for this button. 12.1 containers own
+        -- rendering and never build it; specs with no configured indicators
+        -- (simple mode off) never build it either. Creation is synchronous at
+        -- first use, so visuals are pixel-identical to the old eager build.
+        if ns.RFC_OwnsBM then return end
+        local mode = db and db.profile and db.profile.bmDisplayMode
+        if #allActiveIndicators == 0 and mode ~= "simple" then return end
+        if not d.health or not UnitExists(unit) or not button:IsVisible() then return end
+        local t0 = ns.ProfBegin and ns.ProfBegin("BM:LazyPool")
+        ns.BM_CreateIndicators(button, d.health, d, EllesmereUI.PanelPP or EllesmereUI.PP)
+        if ns.BM_AnchorIndicators and ns.RF_AnchorHost then
+            -- Anchor with the same identity-sensitive proxy each button type's
+            -- reload pass uses (BM recognizes the party proxy by identity).
+            local as = (d._isParty and ns._scaledPartyProxy)
+                or (d._isExtra and ns._scaledExtraProxy)
+                or ns._scaledProfile
+            if as then
+                ns.BM_AnchorIndicators(d, ns.RF_AnchorHost(d.health, as), as)
+            end
+        end
+        if ns.ProfEnd and t0 then ns.ProfEnd("BM:LazyPool", t0) end
+        if not d.bmIconPool then return end
+    end
 
     -- 12.1: BOTH display modes render via aura containers now (custom mode
     -- as slots/chains, Simple Setup as a grid group). Hide any lingering
@@ -2346,6 +2407,16 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
     if not health then return end
     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
 
+    -- Secret-aura signature cache for this button's unit (see
+    -- CachedSignature). Unit reassignment and full updates re-baseline the
+    -- instance-ID space, so both wipe.
+    local sigCache = d.bmSigCache
+    if not sigCache then sigCache = {}; d.bmSigCache = sigCache end
+    if d.bmSigCacheUnit ~= unit or (updateInfo and updateInfo.isFullUpdate) then
+        wipe(sigCache)
+        d.bmSigCacheUnit = unit
+    end
+
     -- Quick skip: if incremental update has no HELPFUL changes that could
     -- affect our tracked spells, don't rescan (keep current visuals).
     if updateInfo and not updateInfo.isFullUpdate then
@@ -2358,14 +2429,26 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                 if sid and not issecretvalue(sid) then
                     if trackedSpellIDs[sid] then needScan = true; break end
                 elseif sid then
-                    -- Secret spellId: could be a tracked secret buff
-                    needScan = true; break
+                    -- Secret spellId: fingerprint THE ADDED AURA (cached
+                    -- signature) instead of declaring a full rescan -- in a
+                    -- raid, most additions are other players' secret buffs
+                    -- and almost none match the player's tracked set; only
+                    -- a real match can change this display.
+                    local iid2 = ad.auraInstanceID
+                    if not iid2 or MatchSecretAura(unit, iid2, sigCache) then
+                        needScan = true; break
+                    end
                 end
             end
         end
-        if not needScan and updateInfo.removedAuraInstanceIDs and d.bmActiveInstanceIDs then
+        if updateInfo.removedAuraInstanceIDs then
             for _, iid in ipairs(updateInfo.removedAuraInstanceIDs) do
-                if d.bmActiveInstanceIDs[iid] then needScan = true; break end
+                -- Removed instances always prune the signature cache, even
+                -- when no rescan is needed.
+                sigCache[iid] = nil
+                if not needScan and d.bmActiveInstanceIDs and d.bmActiveInstanceIDs[iid] then
+                    needScan = true
+                end
             end
         end
         if not needScan and updateInfo.updatedAuraInstanceIDs and d.bmActiveInstanceIDs then
@@ -2429,7 +2512,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
                 -- spells the player's class can cast).
                 local iid = auraData.auraInstanceID
                 if iid then
-                    local matchedSid = MatchSecretAura(unit, iid)
+                    local matchedSid = MatchSecretAura(unit, iid, sigCache)
                     if matchedSid and not activeSpells[matchedSid] then
                         local entry = {
                             spellId = matchedSid,

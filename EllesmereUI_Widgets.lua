@@ -1541,16 +1541,38 @@ local function BuildSliderCore(parent, trackW, trackH, thumbSz, inputW, inputH, 
         end
     end
 
+    -- Re-entrancy guard: ClearFocus() below fires OnEditFocusLost, which calls
+    -- straight back in here. Harmless while this only re-set the same value, but
+    -- it would double the refresh sweep added at the end.
+    local committingInput = false
+
     local function CommitInput()
+        if committingInput then return end
+        committingInput = true
         local raw = tonumber(valBox:GetText())
+        local changed = false
         if raw then
             raw = math.max(minVal, math.min(maxVal, raw))
             local snapped = math.max(minVal, math.min(maxVal, math.floor(raw / step + 0.5) * step))
+            changed = snapped ~= currentVal
             setValue(snapped); currentVal = snapped; rawDragVal = snapped; UpdateSliderVisual(snapped)
         else
             valBox:SetText(FormatVal(currentVal))
         end
         valBox:ClearFocus()
+        committingInput = false
+        -- Typing a value has to re-evaluate widget state exactly as finishing a
+        -- drag does, or anything driven by the refresh sweep silently misses the
+        -- change: the "Apply to: All" sync indicator, disabled overlays, and the
+        -- like. EndDrag does this; without it here, dragging a cog slider showed
+        -- "Apply to: All" while typing the same value into the box did not.
+        --
+        -- Only when the value actually changed, so tabbing or clicking away from
+        -- an untouched box stays free. Deferred while any slider is mid-drag, to
+        -- match EndDrag, which only refreshes once every drag has ended.
+        if changed and not EllesmereUI._sliderDragging and EllesmereUI.RefreshPage then
+            EllesmereUI:RefreshPage()
+        end
     end
 
     valBox:SetScript("OnEnterPressed", function() CommitInput() end)

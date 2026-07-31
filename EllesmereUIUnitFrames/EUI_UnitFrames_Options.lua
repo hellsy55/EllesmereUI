@@ -15720,7 +15720,33 @@ initFrame:SetScript("OnEvent", function(self)
                       },
                       order = { "blizzard", "compact", "colon", "seconds" },
                       get = function() return PAGet("durationFormat") or "blizzard" end,
-                      set = function(v) PASet("durationFormat", v) end },
+                      set = function(v)
+                          -- Custom formats re-enter the per-frame UpdateDuration
+                          -- hook path (per visible aura, every render frame), so
+                          -- leaving the free Blizzard default gets the suite's
+                          -- standard performance confirm, once per account.
+                          local cur = PAGet("durationFormat") or "blizzard"
+                          if v ~= "blizzard" and cur == "blizzard"
+                             and not (EllesmereUIDB and EllesmereUIDB.dismissedDurFmtWarning) then
+                              EllesmereUI:ShowConfirmPopup({
+                                  title       = "Custom Duration Format",
+                                  message     = "Custom duration formats may cause a slight loss in performance efficiency. Do you want to enable them?",
+                                  confirmText = "Enable",
+                                  cancelText  = "Cancel",
+                                  onConfirm   = function()
+                                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                                      EllesmereUIDB.dismissedDurFmtWarning = true
+                                      PASet("durationFormat", v)
+                                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage(true) end
+                                  end,
+                                  onCancel    = function()
+                                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                                  end,
+                              })
+                              return
+                          end
+                          PASet("durationFormat", v)
+                      end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
