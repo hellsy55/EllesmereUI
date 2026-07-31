@@ -9359,6 +9359,13 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         -- The spell set may have changed: let the post-rebuild reanchor
         -- re-run the automatic base-bar materialization for this spec.
         if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
+        -- Drop the spellbook name map NOW, not only in the debounced rebuild.
+        -- It answers "which form does the player have", which is exactly what
+        -- just changed, and anything repainting inside the debounce window
+        -- would otherwise resolve against the pre-swap book. The rebuild wipes
+        -- it again, which still matters: this early rebuild can read a book the
+        -- client has not finished updating, and that second wipe corrects it.
+        if ns.WipeCdmBookNameCache then ns.WipeCdmBookNameCache() end
         ScheduleTalentRebuild()
         return
     end
@@ -10010,9 +10017,15 @@ SlashCmdList.CDMBUFFID = function(msg)
                 nBridged = nBridged + 1
                 bridgeTag = "  " .. GOOD .. "BRIDGED" .. OFF
             end
-            P(string.format("  [%d] sid=%s cdID=%s info.sID=%s info.ovr=%s linked=%s icon=%s(%s) name=%s%s",
+            -- Print the TEXTURE id too, not just the spell name. A reporter
+            -- quotes the icon they can see, and two ids can share a name while
+            -- carrying different art (Wither's castable and its DoT aura), so a
+            -- name-only line cannot tell a right icon from a wrong one.
+            local _GT = C_Spell and C_Spell.GetSpellTexture
+            local texNow = _GT and _GT(iconSID)
+            P(string.format("  [%d] sid=%s cdID=%s info.sID=%s info.ovr=%s linked=%s icon=%s(%s) tex=%s name=%s%s",
                 i, SN(e.sid), SN(e.cdID), SN(infoSpell), SN(infoOvr),
-                linked or "none", SN(iconSID), NM(iconSID), NM(e.sid), bridgeTag))
+                linked or "none", SN(iconSID), NM(iconSID), SN(texNow), NM(e.sid), bridgeTag))
         end
         P(string.format("  placeholder icon bridge: %d of %d entries resolve to a replacing spell",
             nBridged, #entries))
