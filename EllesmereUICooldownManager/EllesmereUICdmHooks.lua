@@ -4292,6 +4292,70 @@ for _, preset in ipairs(ns.CDM_ITEM_PRESETS or {}) do
     end
 end
 
+-------------------------------------------------------------------------------
+--  Per-bar "Suppress GCD" for EUI's OWN preset frames.
+--
+--  The setting is implemented as a hooksecurefunc on the cooldown's
+--  SetSwipeColor (see DecorateFrame). That reaches BLIZZARD-owned CDM icons
+--  only: Blizzard repaints their swipe colour as the cooldown state changes,
+--  so the hook gets a chance to alpha-0 it. Preset frames (racials and
+--  user-added custom spells) are painted by US -- their swipe colour is
+--  written once at decorate time and only their GEOMETRY is driven afterwards
+--  -- so the hook never fires for them and the GCD swipe stayed at full alpha
+--  while the rest of the bar suppressed it. EVERY place that drives a preset
+--  frame's SPELL cooldown must call this right after pushing the geometry.
+--
+--  ITEM-backed preset frames (trinket slots, potion/item presets) deliberately
+--  do NOT route through here: they drop the GCD out of the GEOMETRY with a
+--  dur > 1.5 test before SetCooldown, so there is no GCD swipe to hide.
+--
+--  cdInfo and barKey are optional: callers that already hold them pass them in
+--  rather than paying for the lookup twice. barKey must be passed by callers
+--  that run BEFORE the frame's cache entry is stamped.
+-------------------------------------------------------------------------------
+local function ApplyPresetGCDSwipe(f, sid, cdInfo, barKey)
+    local cdF = f and f._cooldown
+    if not (sid and cdF and cdF.SetSwipeColor) then return end
+    if not barKey then
+        local fc = _ecmeFC[f]
+        barKey = fc and fc.barKey
+    end
+    local bd = barKey and barDataByKey[barKey]
+    local hide = false
+    if bd and bd.suppressGCD then
+        if cdInfo == nil and C_Spell and C_Spell.GetSpellCooldown then
+            cdInfo = C_Spell.GetSpellCooldown(sid)
+        end
+        if cdInfo and cdInfo.isOnGCD then
+            -- Same charge carve-out as the hook: a charge spell mid-recharge is
+            -- showing its RECHARGE, never a GCD, and alpha-0'ing that would
+            -- blank the recharge for a whole GCD every time another ability is
+            -- pressed. Read it from the stable charge data (maxCharges +
+            -- isActive), never the secret currentCharges.
+            local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
+            hide = not (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true)
+        end
+    end
+    -- Re-assert while suppressed rather than only on the rising edge: an
+    -- appearance refresh repaints the swipe from bar data and would otherwise
+    -- un-hide it until the next state change. The restore arm fires on the
+    -- falling edge alone, so a frame we never suppressed keeps its own paint
+    -- and nothing else is fought for ownership of the colour.
+    local fd = FD(f)
+    if hide then
+        f._gcdSwipeHidden = true
+        fd._isProcessingOverride = true
+        cdF:SetSwipeColor(0, 0, 0, 0)
+        fd._isProcessingOverride = false
+    elseif f._gcdSwipeHidden then
+        f._gcdSwipeHidden = nil
+        fd._isProcessingOverride = true
+        cdF:SetSwipeColor(0, 0, 0, (bd and bd.swipeAlpha) or 0.7)
+        fd._isProcessingOverride = false
+    end
+end
+ns.ApplyPresetGCDSwipe = ApplyPresetGCDSwipe
+
 -- Dirty flag: high-frequency events (SPELL_UPDATE_COOLDOWN, BAG_UPDATE_COOLDOWN)
 -- just set this flag. The BuffTicker (10Hz) processes it, coalescing dozens of
 -- per-GCD events into a single update pass.
@@ -4324,42 +4388,9 @@ local function ProcessPresetCooldowns()
                     else
                         ApplySpellDesaturation(f, durObj)
                     end
-                    -- Per-bar "Suppress GCD" for OUR OWN frames. Blizzard's CDM
-                    -- icons get this from the SetSwipeColor hook in DecorateFrame,
-                    -- but a preset frame's swipe COLOUR is written once at decorate
-                    -- time and never again (this pass drives only its GEOMETRY), so
-                    -- that hook never fires here and the GCD swipe stayed on while
-                    -- the rest of the bar suppressed it -- racials were the visible
-                    -- case, Arcane Torrent being the report. Same isOnGCD predicate
-                    -- and same charge carve-out as the hook: a charge spell
-                    -- mid-recharge is showing its recharge, never a GCD.
-                    local fcS = _ecmeFC[f]
-                    local bdS = fcS and fcS.barKey and barDataByKey[fcS.barKey]
-                    local hideGCD = false
-                    if bdS and bdS.suppressGCD and cdInfo and cdInfo.isOnGCD then
-                        local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
-                        hideGCD = not (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true)
-                    end
-                    local cdF = f._cooldown
-                    if cdF and cdF.SetSwipeColor then
-                        local fdS = FD(f)
-                        -- Re-assert while suppressed rather than only on the edge:
-                        -- an appearance refresh repaints the swipe from bar data and
-                        -- would otherwise un-hide it until the next state change.
-                        -- The restore arm fires on the falling edge alone, so a
-                        -- frame we never touched is left entirely to its own paint.
-                        if hideGCD then
-                            f._gcdSwipeHidden = true
-                            fdS._isProcessingOverride = true
-                            cdF:SetSwipeColor(0, 0, 0, 0)
-                            fdS._isProcessingOverride = false
-                        elseif f._gcdSwipeHidden then
-                            f._gcdSwipeHidden = nil
-                            fdS._isProcessingOverride = true
-                            cdF:SetSwipeColor(0, 0, 0, (bdS and bdS.swipeAlpha) or 0.7)
-                            fdS._isProcessingOverride = false
-                        end
-                    end
+                    -- Suppress GCD: this pass drives the geometry, so it also owns
+                    -- hiding the swipe when that geometry is only a GCD.
+                    ApplyPresetGCDSwipe(f, sid, cdInfo)
                     -- Resource check: dim vertex color when not enough resources
                     -- Only for custom spells (not racials -- racials don't cost resources)
                     if f._isCustomSpellFrame and f._tex then
@@ -5988,6 +6019,12 @@ local function CollectAndReanchor()
                                             f._cooldown:SetCooldownFromDurationObject(durObj, true)
                                         end
                                         ApplySpellDesaturation(f, durObj)
+                                        -- This push can land mid-GCD (a bar rebuild
+                                        -- while a GCD is running), so it owns the
+                                        -- swipe the same way the 10Hz pass does.
+                                        -- barKey is passed explicitly: the frame's
+                                        -- cache entry is only stamped further down.
+                                        ApplyPresetGCDSwipe(f, sid, nil, barKey)
                                         f._cdSet = true; f._racialCdDirty = false
                                     end
                                     frames[#frames + 1] = f
