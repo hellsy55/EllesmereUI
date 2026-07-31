@@ -904,6 +904,47 @@ end
 --  ActionBarController call chain.
 -------------------------------------------------------------------------------
 do
+    -- Make Blizzard's action bar pager unclickable.
+    --
+    -- MainActionBar is kept in Blizzard's parent chain (see the disposal block
+    -- below) and hidden with alpha rather than Hide(), so its children are still
+    -- live objects -- and ActionBarPageNumber sits at frameLevel 100, above our own
+    -- buttons, with UpButton / DownButton that page the main bar on click. Invisible
+    -- but fully clickable.
+    --
+    -- Reached by parentKey, not by a global: the modern frame has no global name.
+    -- (The legacy MainMenuBarPageNumber global handled elsewhere is from the old
+    -- bar and no longer exists on current clients.) Every step is guarded so a
+    -- future rename degrades to a no-op instead of an error.
+    --
+    -- Mouse state only, never Hide(): this frame's parent has a documented taint
+    -- history around its protected shown state, and these are ordinary UI buttons
+    -- (QuickKeybindButtonTemplate), so disabling their mouse is unprotected, safe in
+    -- combat, and enough. Nothing of ours depends on them -- EUI's own paging arrows
+    -- drive secure macrotext buttons of their own and never click these.
+    local function KillPagerMouse(bar)
+        local pager = bar and bar.ActionBarPageNumber
+        if not pager then return end
+        local function killOne(f)
+            if not f or type(f.IsMouseEnabled) ~= "function" then return end
+            -- Guard so the re-assert on every Show is a no-op after the first pass.
+            if not f:IsMouseEnabled() then return end
+            f:EnableMouse(false)
+            if f.EnableMouseClicks then f:EnableMouseClicks(false) end
+            if f.EnableMouseMotion then f:EnableMouseMotion(false) end
+        end
+        killOne(pager)
+        killOne(pager.UpButton)
+        killOne(pager.DownButton)
+        -- Anything else Blizzard parents in here later (the frame is a
+        -- ResizeLayoutFrame and has gained children before).
+        if type(pager.GetChildren) == "function" then
+            for i = 1, pager:GetNumChildren() do
+                killOne((select(i, pager:GetChildren())))
+            end
+        end
+    end
+
     local framesToHide = {
         "MainActionBar",
         "MultiBar5",
@@ -945,6 +986,10 @@ do
                 -- children, and works in combat, so the bar stays hidden taint-free.
                 hooksecurefunc(frame, "Show", function(self)
                     self:SetAlpha(0)
+                    -- Re-assert the pager kill: a layout apply can re-enable
+                    -- mouse on those buttons. Guarded so every later Show is a
+                    -- no-op rather than a repeated write.
+                    KillPagerMouse(self)
                 end)
                 -- Disable mouse on MainActionBar so it never eats clicks.
                 -- During combat, Blizzard can Show() this frame (mount/dismount
@@ -953,6 +998,18 @@ do
                 frame:EnableMouse(false)
                 if frame.EnableMouseClicks then frame:EnableMouseClicks(false) end
                 if frame.EnableMouseMotion then frame:EnableMouseMotion(false) end
+                -- ...but EnableMouse(false) on a parent does NOT disable its
+                -- children, and MainActionBar owns a real pager: an
+                -- ActionBarPageNumber frame (frameLevel 100, above our buttons)
+                -- holding UpButton / DownButton, which change the action bar
+                -- page when clicked. Alpha 0 hides them and nothing else here
+                -- touched them, so once Blizzard re-Showed the bar there were two
+                -- invisible, clickable arrows sitting over an apparently empty
+                -- stretch of screen. Reported as "clicking an empty area flips my
+                -- main bar to another page", confirmed with /fstack, and worked
+                -- around by turning the Action Bar Pager off in Edit Mode -- which
+                -- removes the frame that this now neutralises.
+                KillPagerMouse(frame)
                 -- Hide Edit Mode selection/mover frame
                 if frame.Selection then frame.Selection:Hide(); frame.Selection:SetAlpha(0) end
                 -- Hide artwork children (gryphons/endcaps/border)
@@ -1481,6 +1538,9 @@ local function HideBlizzardBars()
     end
     -- ActionBarController retains all events so Blizzard's vehicle/override
     -- transition system (ValidateActionBarTransition) works correctly.
+    -- Legacy global from the pre-Dragonflight bar, absent on current clients.
+    -- Left in place for older builds; the live pager is MainActionBar's
+    -- ActionBarPageNumber child, neutralised by KillPagerMouse at disposal.
     if MainMenuBarPageNumber then MainMenuBarPageNumber:Hide() end
 
     -- Replace ActionBar_PageUp / ActionBar_PageDown with versions that
@@ -2061,7 +2121,10 @@ local function SetupPagingFrame()
     pageText:SetText("1")
     f._pageText = pageText
 
-    -- Up arrow (clicks Blizzard's ActionBarUpButton securely)
+    -- Up arrow. Drives our own secure macrotext (WireSecurePagingButton),
+    -- NOT Blizzard's ActionBarUpButton -- an older comment here claimed it
+    -- did, which matters because Blizzard's pager buttons are deliberately
+    -- mouse-dead (see KillPagerMouse).
     local upBtn = CreateFrame("Button", "EABPagingUp", f, "SecureActionButtonTemplate")
     upBtn:SetSize(18, 18)
     upBtn:RegisterForClicks("AnyUp", "AnyDown")
@@ -2072,7 +2135,7 @@ local function SetupPagingFrame()
     f._upBtn = upBtn
     InitPagingQuickKeybindButton(upBtn, "UI-HUD-ActionBar-PageUpArrow-Mouseover")
 
-    -- Down arrow (clicks Blizzard's ActionBarDownButton securely)
+    -- Down arrow. Same: our own secure macrotext, not Blizzard's button.
     local downBtn = CreateFrame("Button", "EABPagingDown", f, "SecureActionButtonTemplate")
     downBtn:SetSize(18, 18)
     downBtn:RegisterForClicks("AnyUp", "AnyDown")
