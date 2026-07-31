@@ -14836,6 +14836,28 @@ end
 do
     local olTex
     local curve
+    local racialCurve
+
+    -- RAID_PLAYER_DISPELLABLE only knows class and spec dispels, so it answers
+    -- no for every bleed: nothing a class learns removes one, only the dwarf
+    -- racial does. Without this, "Only Dispellable by You" can never light up
+    -- for a bleed, for anyone. A racial cleans its own caster, so this is the
+    -- player frame's business alone and other units are right to ignore it.
+    -- Bleed only, deliberately: Stoneform also clears poison, disease and
+    -- curse, but a class that dispels those already passes the token, and
+    -- treating a two-minute racial as a dispel would put an overlay on most of
+    -- what a dwarf ever catches.
+    local RACIAL_DISPEL_TYPES = {
+        bleed = { Dwarf = true },  -- Stoneform
+    }
+    -- Shared with the 12.1 container slots (EUI_UnitFrames_AuraContainers.lua),
+    -- which apply the same rule by choosing which slot style stays visible.
+    function ns.UF_RacialClearsDispel(typeKey)
+        local races = RACIAL_DISPEL_TYPES[typeKey]
+        if not races then return false end
+        local _, raceToken = UnitRace("player")
+        return raceToken ~= nil and races[raceToken] == true
+    end
 
     local function RebuildCurve()
         if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return end
@@ -14853,6 +14875,24 @@ do
         add(4,  "dispelColorPoison",  0.0,   0.706, 0.286)
         add(9,  "dispelColorBleed",   0.75,  0.15,  0.15)
         add(11, "dispelColorBleed",   0.75,  0.15,  0.15)
+
+        -- Racial detection curve. The type a racial clears carries the user's
+        -- opacity; every other index resolves to alpha 0, so an aura of any
+        -- other type paints nothing. The ALPHA does the branching the addon is
+        -- not allowed to do: the type stays secret and unread, and the RGBA
+        -- goes straight into SetColorTexture/SetVertexColor, never into Lua
+        -- arithmetic. Opacity is baked in here for that reason -- scaling a
+        -- secret alpha afterwards is exactly the arithmetic that throws.
+        local a = (p and p.dispelOverlayOpacity or 100) / 100
+        racialCurve = C_CurveUtil.CreateColorCurve()
+        racialCurve:SetType(Enum.LuaCurveType.Step)
+        local bleedCol = p and p.dispelColorBleed
+        local br, bg, bb = bleedCol and bleedCol.r or 0.75, bleedCol and bleedCol.g or 0.15, bleedCol and bleedCol.b or 0.15
+        local bleedAlpha = ns.UF_RacialClearsDispel("bleed") and a or 0
+        for _, idx in ipairs({ 0, 1, 2, 3, 4, 9 }) do
+            racialCurve:AddPoint(idx, CreateColor(br, bg, bb, 0))
+        end
+        racialCurve:AddPoint(11, CreateColor(br, bg, bb, bleedAlpha))
     end
 
     local function Update()
@@ -14894,19 +14934,49 @@ do
                 break
             end
         end
-        if not found then olTex:Hide(); return end
+
+        -- Racial fallback: the token rejected everything, but a type this
+        -- player's RACE can clear would be rejected even when it is present
+        -- (see RACIAL_DISPEL_TYPES). Re-scan unfiltered and let racialCurve
+        -- decide by alpha -- a non-matching type resolves to 0 and paints
+        -- nothing, so no Lua code ever asks what type this aura is.
+        -- Known limit: this takes the FIRST typed aura, so a bleed sitting
+        -- behind another typed debuff paints nothing rather than wrongly. The
+        -- 12.1 container path has a real per-type slot and no such limit.
+        local racialFound
+        if not found and p.dispelOverlayByMe and ns.UF_RacialClearsDispel("bleed") then
+            for i = 1, 40 do
+                local ad = C_UnitAuras.GetAuraDataByIndex("player", i, "HARMFUL")
+                if not ad then break end
+                if ad.dispelName ~= nil then
+                    racialFound = ad
+                    break
+                end
+            end
+        end
+        if not found and not racialFound then olTex:Hide(); return end
 
         -- Resolve the color through the curve. The components may be secret;
         -- they pass straight into SetColorTexture/SetVertexColor natively.
         if not curve then RebuildCurve() end
         local r, g, b = 0.349, 0.475, 1.0
-        if curve and C_UnitAuras.GetAuraDispelTypeColor then
+        local alpha = (p.dispelOverlayOpacity or 100) / 100
+        if racialFound then
+            -- Alpha comes from the curve (opacity already baked in) and may be
+            -- secret: it is only ever handed to a texture setter below.
+            alpha = 0
+            if racialCurve and C_UnitAuras.GetAuraDispelTypeColor then
+                local col = C_UnitAuras.GetAuraDispelTypeColor("player", racialFound.auraInstanceID, racialCurve)
+                if col then
+                    r, g, b, alpha = col:GetRGBA()
+                end
+            end
+        elseif curve and C_UnitAuras.GetAuraDispelTypeColor then
             local col = C_UnitAuras.GetAuraDispelTypeColor("player", found.auraInstanceID, curve)
             if col then
                 r, g, b = col:GetRGB()
             end
         end
-        local alpha = (p.dispelOverlayOpacity or 100) / 100
 
         olTex:ClearAllPoints()
         olTex:SetVertexColor(1, 1, 1, 1)
