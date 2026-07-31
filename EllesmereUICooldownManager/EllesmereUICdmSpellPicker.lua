@@ -395,7 +395,11 @@ function ns.RemoveSpellFromBar(barKey, spellID)
        and not (ns.ListHasHostedMarker and ns.ListHasHostedMarker(sd.assignedSpells, removed)) then
         hostedSid = removed
     end
-    if hostedSid and sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[hostedSid] = nil end
+    if hostedSid and sd.hostedBuffSpellIDs then
+        sd.hostedBuffSpellIDs[hostedSid] = nil
+        -- Host flip changes resolution routing: retire memoized results.
+        ns._cdmResGen = (ns._cdmResGen or 0) + 1
+    end
     local frame = cdmBarFrames[barKey]
     if frame then frame._blizzCache = nil; frame._prevVisibleCount = nil end
     return removed
@@ -1151,6 +1155,8 @@ end
 function ns.MarkBuffFamHasCdKey()
     local store = ns.GetSpellSettingsStore and ns.GetSpellSettingsStore("buffs")
     _cdKeyGate = { store = store, has = true }
+    -- The cdID-key gate feeds resolution: retire memoized results.
+    ns._cdmResGen = (ns._cdmResGen or 0) + 1
 end
 
 --- Reorder present keys to match Blizzard viewer order while absent keys (talent
@@ -1731,6 +1737,8 @@ function ns.AddBuffToCDUtilBar(barKey, spellID)
     -- frame still resolves regardless of its talent/override form.
     if not sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs = {} end
     sd.hostedBuffSpellIDs[spellID] = true
+    -- Host flip changes resolution routing: retire memoized results.
+    ns._cdmResGen = (ns._cdmResGen or 0) + 1
     if ns.RebuildSpellRouteMap then ns.RebuildSpellRouteMap() end
     if ns.QueueReanchor then ns.QueueReanchor() end
     return true
@@ -1797,7 +1805,11 @@ function ns.RemoveTrackedSpell(barKey, idx)
         -- here (it returns to the buffs bar). Never ghost-route a hosted
         -- buff -- the ghost bar hides by spellID, so it would also hide the
         -- spell's COOLDOWN form everywhere.
-        if sd.hostedBuffSpellIDs then sd.hostedBuffSpellIDs[hostedSid] = nil end
+        if sd.hostedBuffSpellIDs then
+            sd.hostedBuffSpellIDs[hostedSid] = nil
+            -- Host flip changes resolution routing: retire memoized results.
+            ns._cdmResGen = (ns._cdmResGen or 0) + 1
+        end
     else
         -- Auxiliary metadata cleanup (kept here so the wrapper exposes the
         -- same side effects RemoveSpellFromBar does for symmetry with

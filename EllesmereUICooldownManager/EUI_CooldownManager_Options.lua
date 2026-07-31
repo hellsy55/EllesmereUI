@@ -2224,6 +2224,8 @@ initFrame:SetScript("OnEvent", function(self)
             return
         end
         ns._tbbPlaceholderMode = true
+        -- The TBB tick may be idle-asleep; placeholders render from the tick.
+        if ns.WakeTBBTick then ns.WakeTBBTick() end
         local tbb = ns.GetTrackedBuffBars()
         local bars = tbb and tbb.bars
         if not bars then return end
@@ -8800,6 +8802,9 @@ initFrame:SetScript("OnEvent", function(self)
                     local function EnsureSS()
                         if store and not store[spellID] then
                             store[spellID] = ss
+                            -- New per-spell entry: retire memoized resolution
+                            -- results so every icon re-resolves against it.
+                            ns._cdmResGen = (ns._cdmResGen or 0) + 1
                             -- Flip the runtime hot-path gate the moment a
                             -- cooldownID-scoped buff entry is first persisted.
                             if type(spellID) == "string" and string.byte(spellID, 1) == 99
@@ -9083,6 +9088,9 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                         local function sweepProf(prof)
                             if type(prof) ~= "table" then return end
+                            -- Sweeps can delete emptied member entries and the
+                            -- per-spec tier: retire memoized resolution results.
+                            ns._cdmResGen = (ns._cdmResGen or 0) + 1
                             local bsX = prof.barSpells and prof.barSpells[barKey]
                             if allSpecs and bsX and type(bsX.barSettings) == "table" then
                                 for _, k in ipairs(keys) do bsX.barSettings[k] = nil end
@@ -9102,7 +9110,11 @@ initFrame:SetScript("OnEvent", function(self)
                         if allSpecs then
                             if not bdSel then return end
                             local abs = bdSel.barSpellSettings
-                            if not abs then abs = {}; bdSel.barSpellSettings = abs end
+                            if not abs then
+                                abs = {}; bdSel.barSpellSettings = abs
+                                -- New tier table: chained results are stale.
+                                ns._cdmResGen = (ns._cdmResGen or 0) + 1
+                            end
                             applyWrite(abs, val)
                             AB.FlipSessionGates(abs)
                             local spAll = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
@@ -9120,7 +9132,11 @@ initFrame:SetScript("OnEvent", function(self)
                             -- No-op (and no refresh) when All Specs isn't active.
                             AB.RunBarUnapply(keys, true)
                             local bs = sd.barSettings
-                            if not bs then bs = {}; sd.barSettings = bs end
+                            if not bs then
+                                bs = {}; sd.barSettings = bs
+                                -- New tier table: chained results are stale.
+                                ns._cdmResGen = (ns._cdmResGen or 0) + 1
+                            end
                             ns.ChainSettings(bs, bdSel and bdSel.barSpellSettings)
                             applyWrite(bs, val)
                             AB.FlipSessionGates(bs)
@@ -9205,6 +9221,8 @@ initFrame:SetScript("OnEvent", function(self)
                             else
                                 sd.barSettings = nil
                             end
+                            -- Tier table dropped: chained results are stale.
+                            ns._cdmResGen = (ns._cdmResGen or 0) + 1
                         end
                         if touchesCas and ns.GetCustomActiveState and ns.ResolveCustomActiveKey then
                             -- Remove still-equal stamped values from one cas entry.

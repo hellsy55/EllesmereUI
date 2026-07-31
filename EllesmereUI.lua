@@ -3206,6 +3206,22 @@ do
             if not bdFrame then
                 bdFrame = CreateFrame("Frame", nil, borderFrame, "BackdropTemplate")
                 bdFrame:EnableMouse(false)
+                -- This frame is addon-born, so its scripts always execute
+                -- tainted -- and when the owner rides a Blizzard frame whose
+                -- size derives from secret content (map-pin tooltips, menus
+                -- with secret text), GetWidth() hands the template's resize
+                -- recompute a SECRET number and its texcoord arithmetic
+                -- throws (Backdrop.lua:226 storm, tester-reported on world
+                -- map hover). Secret size = skip the recompute: the edges
+                -- keep their last-good texcoords and stretch, which is the
+                -- best any tainted code can do there -- the throwing path
+                -- also left them stale, plus an error per resize. Non-secret
+                -- sizes recompute exactly as the template always did.
+                bdFrame:SetScript("OnSizeChanged", function(self)
+                    if issecretvalue and (issecretvalue(self:GetWidth())
+                        or issecretvalue(self:GetHeight())) then return end
+                    self:OnBackdropSizeChanged()
+                end)
                 _bdBorderData[borderFrame] = bdFrame
             end
             bdFrame:SetFrameLevel(borderFrame:GetFrameLevel())
@@ -3255,11 +3271,30 @@ do
             bdFrame:ClearAllPoints()
             bdFrame:SetPoint("TOPLEFT", borderFrame, "TOPLEFT", -offsetX + sx, offsetY + sy)
             bdFrame:SetPoint("BOTTOMRIGHT", borderFrame, "BOTTOMRIGHT", offsetX + sx, -offsetY + sy)
-            bdFrame:SetBackdrop({
-                edgeFile = texPath,
-                edgeSize = edgeSize,
-                insets = { left = 0, right = 0, top = 0, bottom = 0 },
-            })
+            -- SetBackdrop re-runs the template's nine-slice texcoord math,
+            -- which divides by this frame's CURRENT width/height -- and this
+            -- frame rides owners whose size can be secret (map-pin tooltips).
+            -- The owner-width guard upstream can pass while THIS anchored
+            -- rect still resolves secret in here, so the guard must sit on
+            -- this frame at this call. Re-applying an unchanged style is the
+            -- overwhelmingly common call (tooltips re-skin every Show): skip
+            -- the template entirely then. On a real style change under a
+            -- secret size, keep the last-good backdrop and retry on the next
+            -- apply. The color write below is vertex-only and always safe.
+            local bdKey = texPath .. "@" .. edgeSize
+            if bdFrame._euiBdKey ~= bdKey then
+                if issecretvalue and (issecretvalue(bdFrame:GetWidth())
+                    or issecretvalue(bdFrame:GetHeight())) then
+                    bdFrame._euiBdKey = nil
+                else
+                    bdFrame:SetBackdrop({
+                        edgeFile = texPath,
+                        edgeSize = edgeSize,
+                        insets = { left = 0, right = 0, top = 0, bottom = 0 },
+                    })
+                    bdFrame._euiBdKey = bdKey
+                end
+            end
             bdFrame:SetBackdropBorderColor(r, g, b, a)
             bdFrame:Show()
             borderFrame:Show()
@@ -11113,7 +11148,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.6.7"
+EllesmereUI.VERSION = "8.6.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

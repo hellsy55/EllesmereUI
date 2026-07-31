@@ -2592,14 +2592,29 @@ local function TravelPickHearthstone(randomize)
     return list[1]
 end
 
+-- Negative-result cache: when the pool scan finds NO usable hearthstone, the
+-- 1s cooling probe would otherwise re-scan all ~40 candidates every second
+-- forever. Ownership can only change through the edges the travel block
+-- already listens to (hearth bind, world entry, bag/spell changes), which
+-- clear this via ns.TravelInvalidateHearthCache.
+local travelNoHearth
+function ns.TravelInvalidateHearthCache()
+    travelNoHearth = nil
+    travelPrimaryHearthId = nil
+end
 local function TravelGetPrimaryCooldown()
-    if not (travelPrimaryHearthId and TravelIsUsable(travelPrimaryHearthId)) then
-        travelPrimaryHearthId = nil
-    end
+    -- The cached id is trusted between ownership edges: re-validating it per
+    -- 1s probe cost a GetItemCount bag walk every second, and losing the item
+    -- always fires BAG_UPDATE_DELAYED (spells SPELLS_CHANGED), which clears
+    -- the cache via ns.TravelInvalidateHearthCache and forces a re-pick here.
     if not travelPrimaryHearthId then
+        if travelNoHearth then return 0 end
         travelPrimaryHearthId = TravelPickHearthstone(false)
+        if not travelPrimaryHearthId then
+            travelNoHearth = true
+            return 0
+        end
     end
-    if not travelPrimaryHearthId then return 0 end
     return TravelGetRemainingCooldown(travelPrimaryHearthId, false)
 end
 
@@ -2626,7 +2641,10 @@ end
 ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
     local inst = { cfg = blockCfg, slot = slot, content = content, ctx = barCtx }
     inst.key = InstKey(barCtx, blockCfg)
-    inst.events = { "HEARTHSTONE_BOUND", "PLAYER_ENTERING_WORLD" }
+    -- BAG_UPDATE_DELAYED / SPELLS_CHANGED: ownership edges that must clear
+    -- the negative hearthstone cache (rare at idle, cheap refresh).
+    inst.events = { "HEARTHSTONE_BOUND", "PLAYER_ENTERING_WORLD",
+        "BAG_UPDATE_DELAYED", "SPELLS_CHANGED" }
 
     local HEARTH_TEX = MEDIA .. "hearthstone.png"
     local _trvFitBuf1 = { "" }
@@ -2976,17 +2994,29 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
         MaybeRelayout(inst)
     end
 
-    -- 1s heartbeat: drives the ready/cooldown tint flip, and rebuilds the open
-    -- tooltip on every tick while hovered. The cooldown columns read M:SS, so
-    -- anything slower than the heartbeat shows visibly stale seconds.
+    -- 1s heartbeat. Hovered: the open tooltip's M:SS cooldown columns need
+    -- per-second rebuilds, so the full refresh runs exactly as before.
+    -- Un-hovered, the block renders only icon + bind location + a
+    -- ready/cooling tint that flips twice per hearth use -- so the tick is a
+    -- two-call cooling probe (cached-id usable check + one cooldown read)
+    -- and the full Refresh runs only on the tint EDGE, at the same 1s
+    -- granularity the flip always had. Location changes arrive through the
+    -- HEARTHSTONE_BOUND event, not this tick.
     local function TravelTick()
-        inst:Refresh()
         if built and mouseOver and ns.Tip_IsOwned(hearthButton) then
+            inst:Refresh()
             RefreshTravelTooltip()
+            return
+        end
+        local cooling = TravelGetPrimaryCooldown() > 0
+        if cooling ~= inst._lastCooling then
+            inst._lastCooling = cooling
+            inst:Refresh()
         end
     end
 
     inst.eventFrame = MakeEventFrame(inst, function(self)
+        ns.TravelInvalidateHearthCache()
         self:Refresh()
     end)
 

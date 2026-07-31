@@ -3294,24 +3294,24 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castTimer:SetWordWrap(false)
     plate.castTimer:SetMaxLines(1)
     plate.castTimer:SetTextColor(1, 1, 1, 1)
-    -- OnUpdate: tick the cast timer while a cast is active, throttled to
-    -- 10 Hz -- the text renders %.1f precision, so the displayed tenth
-    -- digit cannot change faster than every 0.1s and per-frame updates
-    -- are pure waste (3 duration-object API calls + SetFormattedText per
-    -- frame per casting plate at uncapped FPS).
+    -- Cast timer on a 10 Hz ANIM TICKER (engine sleeps between fires), not
+    -- a per-frame OnUpdate: the text renders %.1f precision, so the
+    -- displayed tenth digit cannot change faster than every 0.1s -- yet the
+    -- old accumulator paid a per-render-frame ENTRY per casting plate at
+    -- uncapped FPS just to gate the 10 Hz job (measured 60.8ms/min in a
+    -- caster-heavy pull; the dispatch-floor disease). Armed by
+    -- NotifyCastStarted; the body self-stops when the cast ends.
     -- Uses UnitCastingDuration/UnitChannelDuration duration objects and their
     -- :GetRemainingDuration() method to avoid taint from UnitCastingInfo's
     -- secret endTime/startTime values, which cannot be used in arithmetic.
-    plate.cast:SetScript("OnUpdate", function(self, elapsed)
+    plate.cast._timerTick = function(force)
+        local self = plate.cast
         local owner = self._timerPlate
-        if not owner or not owner.unit or not owner.isCasting then return end
-        if not owner._showCastTimer then return end
-        local acc = (self._timerAcc or 0.1) + elapsed
-        if acc < 0.1 then
-            self._timerAcc = acc
-            return
-        end
-        self._timerAcc = 0
+        -- force = the synchronous arm-time paint from NotifyCastStarted,
+        -- which fires BEFORE the caller sets isCasting (Notify IS the
+        -- rising-edge detector, so isCasting is still false there).
+        if not owner or not owner.unit or (not owner.isCasting and not force) then return end
+        if not owner._showCastTimer then return true end
         if UnitCastingDuration then
             local durObj = UnitCastingDuration(owner.unit)
                 or (UnitEmpoweredChannelDuration and UnitEmpoweredChannelDuration(owner.unit, true))
@@ -3333,7 +3333,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
                 owner.castTimer:SetText("")
             end
         end
-    end)
+        return true
+    end
+    plate.cast._timerTicker = EllesmereUI.Tick.NewAnimTicker(plate.cast, plate.cast._timerTick, 0.1)
     plate.cast._timerPlate = plate
     -- Full-size cast icon: its side-slot reserve is only valid while the cast bar
     -- is shown, so re-anchor the reserving side elements on every cast show/hide.
@@ -3897,10 +3899,15 @@ local _castColorTicker
 local function NotifyCastStarted(plate)
     if plate then
         ns._castingPlates[plate] = true
-        -- Arm the throttled cast-timer OnUpdate to render on its first
-        -- tick (accumulator starts at threshold) so the timer text is
-        -- never blank for the first 0.1s of a cast.
-        if plate.cast then plate.cast._timerAcc = 0.1 end
+        -- Arm the 10 Hz cast-timer ticker (engine-slept between fires; the
+        -- body self-stops when the cast ends), and paint ONCE synchronously
+        -- -- the old accumulator armed at-threshold so the text appeared on
+        -- the cast's first frame; the ticker's first fire alone would leave
+        -- it blank for 0.1s.
+        if plate.cast and plate.cast._timerTicker then
+            if plate.cast._timerTick then plate.cast._timerTick(true) end
+            plate.cast._timerTicker.Start()
+        end
     end
     activeCastCount = activeCastCount + 1
     if activeCastCount == 1 then
@@ -5481,9 +5488,13 @@ local function KillAuraRowMouse(frame)
         mouseDeadAuraItems[frame] = true
         frame:EnableMouse(false)
     end
-    for i = 1, frame:GetNumChildren() do
-        KillAuraRowMouse((select(i, frame:GetChildren())))
-    end
+    -- One GetChildren call per frame: the old select(i, frame:GetChildren())
+    -- re-unpacked the whole child list per index -- O(n^2) per sweep, and
+    -- this sweeps on every plate add plus every Blizzard aura-row refresh.
+    -- Table-capture form, NOT a varargs helper: this file sits AT the Lua
+    -- 5.1 200-local cap and a second file-scope local does not fit.
+    local kids = { frame:GetChildren() }
+    for i = 1, #kids do KillAuraRowMouse(kids[i]) end
 end
 local function HideBlizzardFrame(nameplate, unit)
     if not nameplate then return end
@@ -6156,10 +6167,15 @@ end
 function NameplateFrame:ApplyHealthTextAppearance()
     self.hpText:Hide()
     self.hpNumber:Hide()
+    -- Slot assignments may change element kinds: drop the value memo so the
+    -- next UpdateHealthValues rewrites every slot's content.
+    self._hpTxtPct, self._hpTxtCur = nil, nil
     if not self._cachedHealthSlots then
         self._cachedHealthSlots = { _count = 0 }
     end
     local ca = self._cachedHealthSlots
+    -- Slot kinds may change: re-derive the lazily-computed number/combo flag.
+    ca._anyNum = nil
     local ci = 0
 
     for si = 1, #HP_BAR_SLOTS do
@@ -6491,6 +6507,9 @@ function NameplateFrame:ClearUnit()
     self._auraGroupMask = nil
     self._buffsBuiltAttackable = nil
     self._lastHCr, self._lastHCg, self._lastHCb = nil, nil, nil
+    -- Health-text value memo (UpdateHealthValues): a recycled plate must
+    -- always write its first values, never skip against the old unit's.
+    self._hpTxtPct, self._hpTxtCur = nil, nil
     self._ovFocShown, self._ovTgtShown = nil, nil
     self._focusLetterShown = nil
     self._kickIsChannel = nil
@@ -6601,10 +6620,9 @@ function NameplateFrame:UpdateHealthValues()
         curHealth = self.hpCalculator:GetCurrentHealth()
         maxHealth = self.hpCalculator:GetMaximumHealth()
         absorbAmt = self.hpCalculator:GetDamageAbsorbs()
-
-        self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.WithAbsorbs)
-        maxWithAbsorbs = self.hpCalculator:GetMaximumHealth()
-        self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.Default)
+        -- maxWithAbsorbs is fetched LAZILY in the secret-absorb branch below
+        -- (its only consumer): the dominant no-absorb fast path paid the two
+        -- mode swaps + getter on every health tick for nothing.
     else
         curHealth = UnitHealth(unit)
         maxHealth = UnitHealthMax(unit)
@@ -6623,6 +6641,11 @@ function NameplateFrame:UpdateHealthValues()
         self.health:SetValue(curHealth)
     elseif absorbIsSecret then
         self._absorbHidden = false
+        if maxWithAbsorbs == nil and self.hpCalculator and self.hpCalculator.GetMaximumHealth then
+            self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.WithAbsorbs)
+            maxWithAbsorbs = self.hpCalculator:GetMaximumHealth()
+            self.hpCalculator:SetMaximumHealthMode(Enum.UnitMaximumHealthMode.Default)
+        end
         self.absorb:ClearAllPoints()
         if self.absorbForward then self.absorbForward:ClearAllPoints() end
         self.health:SetMinMaxValues(0, maxWithAbsorbs or maxHealth)
@@ -6699,13 +6722,21 @@ function NameplateFrame:UpdateHealthValues()
     local hlEnabled = (p and p.hashLineEnabled)
     local hlPct = (p and p.hashLinePercent) or defaults.hashLinePercent
     if hlEnabled and hlPct and hlPct > 0 and self._isTarget then
+        -- Input-gated: the anchor/color pushes only depend on bar width and
+        -- settings, none of which change per health tick (bar width is our
+        -- frame -- never secret). Re-pushed only when an input moves.
         local barW = self.health:GetWidth()
-        local xPos = barW * (hlPct / 100)
-        self.hashLine:ClearAllPoints()
-        self.hashLine:SetPoint("TOP", self.health, "TOPLEFT", xPos, 0)
-        self.hashLine:SetPoint("BOTTOM", self.health, "BOTTOMLEFT", xPos, 0)
         local hlc = (p and p.hashLineColor) or defaults.hashLineColor
-        self.hashLine:SetColorTexture(hlc.r, hlc.g, hlc.b, 0.8)
+        if self._hlW ~= barW or self._hlPct ~= hlPct
+           or self._hlR ~= hlc.r or self._hlG ~= hlc.g or self._hlB ~= hlc.b then
+            self._hlW = barW; self._hlPct = hlPct
+            self._hlR, self._hlG, self._hlB = hlc.r, hlc.g, hlc.b
+            local xPos = barW * (hlPct / 100)
+            self.hashLine:ClearAllPoints()
+            self.hashLine:SetPoint("TOP", self.health, "TOPLEFT", xPos, 0)
+            self.hashLine:SetPoint("BOTTOM", self.health, "BOTTOMLEFT", xPos, 0)
+            self.hashLine:SetColorTexture(hlc.r, hlc.g, hlc.b, 0.8)
+        end
         self.hashLine:Show()
     else
         self.hashLine:Hide()
@@ -6716,16 +6747,61 @@ function NameplateFrame:UpdateHealthValues()
     -- on every UNIT_HEALTH tick so it must be as lean as possible.
     local ca = self._cachedHealthSlots
     if ca and ca._count > 0 then
+        -- Value memo: health ticks on big pools land on the same DISPLAYED
+        -- values constantly, and the string.format + SetText churn was the
+        -- hottest allocation source on plates. Keys are quantized to display
+        -- granularity -- the raw percent is a FLOAT that moves every tick,
+        -- so keying on it raw never repeated and the memo never hit
+        -- (allocation-verified in combat capture #4). Raw health gates the
+        -- skip ONLY when a slot actually renders it (number/combo slots): a
+        -- percent-only layout keeps its hits through per-tick raw churn,
+        -- while a raw-number layout rewrites per change by definition.
+        -- Secret values cannot be compared or floored: any secret input
+        -- fails open to writing (today's behavior) and clears its key.
+        local isSec = issecretvalue
+        local dead = UnitIsDeadOrGhost(unit)
+        local anyDec = ca._anyDecimal
+        local pctVal
+        if not dead and UnitHealthPercent then
+            pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
+        end
+        local pctKey
+        if dead then
+            pctKey = -1
+        elseif pctVal ~= nil and not (isSec and isSec(pctVal)) then
+            pctKey = anyDec and math.floor(pctVal * 10 + 0.5) or math.floor(pctVal)
+        end
+        local anyNum = ca._anyNum
+        if anyNum == nil then
+            anyNum = false
+            for si = 1, ca._count do
+                local el = ca[si].element
+                if el == "healthNumber" or IsComboHealthText(el) then anyNum = true break end
+            end
+            ca._anyNum = anyNum
+        end
+        local hpKey
+        if not anyNum then
+            hpKey = 0
+        elseif dead then
+            hpKey = -1
+        elseif curHealth ~= nil and not (isSec and isSec(curHealth)) then
+            hpKey = curHealth
+        end
+        local skipText = pctKey ~= nil and hpKey ~= nil
+            and self._hpTxtPct == pctKey and self._hpTxtCur == hpKey
+        if not skipText then
+        self._hpTxtPct = pctKey
+        self._hpTxtCur = hpKey
         local pctText, pctNoSignText, numText
         local pctTextDec, pctNoSignTextDec
         local anyDec = ca._anyDecimal
-        if UnitIsDeadOrGhost(unit) then
+        if dead then
             pctText = "0%"
             pctNoSignText = "0"
             numText = "0"
             if anyDec then pctTextDec = "0.0%"; pctNoSignTextDec = "0.0" end
-        elseif UnitHealthPercent then
-            local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
+        elseif pctVal ~= nil then
             pctText = string.format("%d%%", pctVal)
             pctNoSignText = string.format("%d", pctVal)
             numText = AbbreviateNumbers(curHealth)
@@ -6754,6 +6830,7 @@ function NameplateFrame:UpdateHealthValues()
                 SetCombinedHealthText(fs, el, entry.pctDecimal and pctTextDec or pctText, numText)
             end
         end
+        end -- skipText
     end
 
     -- Execute Pulse Glow gate: evaluate the player's execute-window curve
@@ -8345,11 +8422,14 @@ function NameplateFrame:ApplyCastColor(uninterruptible)
         local isImp = self._castImportant
         if type(isImp) == "nil" then isImp = false end
         local ev = C_CurveUtil.EvaluateColorValueFromBoolean
-        normalCastTint = {
-            r = ev(isImp, imp.r, normalCastTint.r),
-            g = ev(isImp, imp.g, normalCastTint.g),
-            b = ev(isImp, imp.b, normalCastTint.b),
-        }
+        -- Scratch table (same pattern as _dispelScratch): this runs per cast
+        -- event per plate, and a fresh color table per call was pure GC churn.
+        local sc = ns._castImpScratch
+        if not sc then sc = {}; ns._castImpScratch = sc end
+        sc.r = ev(isImp, imp.r, normalCastTint.r)
+        sc.g = ev(isImp, imp.g, normalCastTint.g)
+        sc.b = ev(isImp, imp.b, normalCastTint.b)
+        normalCastTint = sc
     end
     local cr, cg, cb = ComputeCastBarTint(kickReadyTint, normalCastTint)
     self.cast:GetStatusBarTexture():SetVertexColor(cr, cg, cb)

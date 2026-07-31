@@ -293,7 +293,7 @@ ns.ResolveFrameSpellID = ResolveFrameSpellID
 -- spell may be the base whose active override is one of the identity ids -- e.g.
 -- assigned Corruption 172, frame shows Wither 445468 = FindSpellOverrideByID(172)
 -- -- or an identity id may be the base whose override is the assigned spell).
-local function ResolveSpellSettings(frame, sid2, sd2, barKey)
+local function ResolveSpellSettingsUncached(frame, sid2, sd2, barKey)
     if not sid2 then return nil end
     -- Bar identity: explicit barKey wins (nil-frame callers like the preset
     -- gain-sound path), else the frame's decorated context.
@@ -389,29 +389,51 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
 
     local fc2 = fc0
 
-    -- Build the frame's identity-id set (deduped).
-    local ids = { sid2 }
-    local function addId(id)
-        if not id or id <= 0 then return end
-        for i = 1, #ids do if ids[i] == id then return end end
-        ids[#ids + 1] = id
-    end
-    local canon2 = frame and ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(frame)
-    if canon2 then addId(canon2) end
-    if fc2 then
-        addId(fc2.resolvedSid)
-        addId(fc2.baseSpellID)
-    end
-    -- Talent "proc into a second ability" forms (e.g. Demon Hunter Reap 1226019 /
-    -- 1225826) share a GetBaseSpell base (344862) with the spell the user actually
-    -- configured -- but that base is NOT the cooldownInfo base (which for these is
-    -- the override id itself), and FindSpellOverrideByID is unreliable because the
-    -- LIVE override may differ from the displayed form. GetBaseSpell of the frame's
-    -- ids is the stable bridge, so a setting stored under the base form resolves on
-    -- the proc'd/override frame.
-    if C_Spell and C_Spell.GetBaseSpell then
-        addId(C_Spell.GetBaseSpell(sid2))
-        if canon2 then addId(C_Spell.GetBaseSpell(canon2)) end
+    -- The frame's identity-id set (deduped): sid2 + canonical + cached
+    -- override/base ids + GetBaseSpell bridges. Combat-hot (every icon
+    -- WITHOUT its own settings entry ran this per repaint: one table
+    -- allocation + the canonical resolve + two GetBaseSpell calls) and pure
+    -- frame-content data, so it is CACHED on the frame-cache entry, keyed by
+    -- everything it derives from: sid2 plus the entry's resolvedSid /
+    -- baseSpellID. ResolveFrameSpellID re-derives those on every content or
+    -- override flip, so a flip mismatches the key and rebuilds the set --
+    -- zero new invalidation edges. The FindSpellOverrideByID translation in
+    -- step 3 below stays LIVE by design: live overrides flip mid-combat
+    -- with no content change, exactly what that step exists to catch.
+    local ids
+    if fc2 and fc2.ssIds and fc2.ssIdsFor == sid2
+       and fc2.ssIdsRS == fc2.resolvedSid and fc2.ssIdsBS == fc2.baseSpellID then
+        ids = fc2.ssIds
+    else
+        ids = { sid2 }
+        local function addId(id)
+            if not id or id <= 0 then return end
+            for i = 1, #ids do if ids[i] == id then return end end
+            ids[#ids + 1] = id
+        end
+        local canon2 = frame and ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(frame)
+        if canon2 then addId(canon2) end
+        if fc2 then
+            addId(fc2.resolvedSid)
+            addId(fc2.baseSpellID)
+        end
+        -- Talent "proc into a second ability" forms (e.g. Demon Hunter Reap 1226019 /
+        -- 1225826) share a GetBaseSpell base (344862) with the spell the user actually
+        -- configured -- but that base is NOT the cooldownInfo base (which for these is
+        -- the override id itself), and FindSpellOverrideByID is unreliable because the
+        -- LIVE override may differ from the displayed form. GetBaseSpell of the frame's
+        -- ids is the stable bridge, so a setting stored under the base form resolves on
+        -- the proc'd/override frame.
+        if C_Spell and C_Spell.GetBaseSpell then
+            addId(C_Spell.GetBaseSpell(sid2))
+            if canon2 then addId(C_Spell.GetBaseSpell(canon2)) end
+        end
+        if fc2 then
+            fc2.ssIds = ids
+            fc2.ssIdsFor = sid2
+            fc2.ssIdsRS = fc2.resolvedSid
+            fc2.ssIdsBS = fc2.baseSpellID
+        end
     end
 
     -- 1. Direct hit on any identity id.
@@ -451,6 +473,48 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
     -- No per-spell entry anywhere in the identity set: the bar tiers (if any)
     -- are the effective settings.
     return tier
+end
+
+-- Result memo over the resolver. Per-frame stamps keyed on the resolution
+-- generation (ns._cdmResGen -- bumped by EVERY input edge: per-spell entry
+-- create/delete, tier table create/delete, host flips, cdID-key gate flip,
+-- clean-sid flips, SPELL_OVERRIDE_UPDATED, SPELLS_CHANGED, rebuilds) plus
+-- the frame's content identity (sid2/resolvedSid/baseSpellID -- the same key
+-- the identity-set cache uses) and the bar. In-place MUTATION of an existing
+-- entry or tier needs no bump: the memo returns the same table writers edit.
+-- The hit path still re-asserts the tier chain: two bars can share one
+-- family entry and each resolve re-points its __index at THAT bar's tier, so
+-- skipping the re-assert would let one bar read through the other's tier
+-- (ChainSettings is one getmetatable + compare when nothing moved).
+-- nil-frame callers (preset gain-sound path) bypass the memo.
+local function ResolveSpellSettings(frame, sid2, sd2, barKey)
+    local fc0 = frame and _ecmeFC[frame]
+    if not fc0 or not sid2 then
+        return ResolveSpellSettingsUncached(frame, sid2, sd2, barKey)
+    end
+    local bk = barKey or fc0.barKey
+    if fc0.ssRGen == ns._cdmResGen and fc0.ssRSid == sid2 and fc0.ssRBk == bk
+       and fc0.ssRRS == fc0.resolvedSid and fc0.ssRBS == fc0.baseSpellID then
+        local v = fc0.ssRVal
+        if v == false then return nil end
+        ns.ChainSettings(v, fc0.ssRTier)
+        return v
+    end
+    local res = ResolveSpellSettingsUncached(frame, sid2, sd2, barKey)
+    fc0.ssRGen = ns._cdmResGen
+    fc0.ssRSid = sid2
+    fc0.ssRBk = bk
+    fc0.ssRRS = fc0.resolvedSid
+    fc0.ssRBS = fc0.baseSpellID
+    if res == nil then
+        fc0.ssRVal = false
+        fc0.ssRTier = nil
+    else
+        fc0.ssRVal = res
+        local mt = getmetatable(res)
+        fc0.ssRTier = mt and mt.__index or nil
+    end
+    return res
 end
 ns.ResolveSpellSettings = ResolveSpellSettings
 
@@ -3438,6 +3502,10 @@ end
 local function UpdateTrinketFrame(slotID)
     local f = _trinketFrames[slotID]
     if not f then return end
+    -- Decoration is the settings/content edge: drop the cooldown push memo
+    -- (UpdateTrinketCooldown) so the next event re-pushes and re-derives
+    -- the desaturation against fresh settings.
+    f._cdMemoStart, f._cdMemoDur = nil, nil
     local itemID = GetInventoryItemID("player", slotID)
     _trinketItemCache[slotID] = itemID
     if not itemID then
@@ -3547,12 +3615,25 @@ local function UpdateTrinketCooldown(slotID)
     if not f or not f._trinketIsOnUse then return false end
     local start, dur, enable = GetInventoryItemCooldown("player", slotID)
     if start and dur and dur > 1.5 and enable == 1 then
-        f._cooldown:SetCooldown(start, dur)
-        if f._tex then f._tex:SetDesaturated(not PresetKeepsColor(f)) end
+        -- Push-on-edge: SPELL_UPDATE_COOLDOWN fires 10-17/sec in combat and
+        -- re-pushed the SAME schedule every time. start/dur are plain for
+        -- player inventory (compared unguarded here since forever); a
+        -- modified cooldown changes them and re-pushes. The memo clears at
+        -- decoration (UpdateTrinketFrame), so settings changes re-derive.
+        if f._cdMemoStart ~= start or f._cdMemoDur ~= dur then
+            f._cdMemoStart, f._cdMemoDur = start, dur
+            f._cooldown:SetCooldown(start, dur)
+            if f._tex then f._tex:SetDesaturated(not PresetKeepsColor(f)) end
+        end
         return true
     else
-        f._cooldown:Clear()
-        if f._tex then f._tex:SetDesaturated(false) end
+        -- false = "cleared" marker, distinct from nil = "unknown" (fresh
+        -- decoration): unknown must always paint the clear once.
+        if f._cdMemoStart ~= false then
+            f._cdMemoStart, f._cdMemoDur = false, false
+            f._cooldown:Clear()
+            if f._tex then f._tex:SetDesaturated(false) end
+        end
         return false
     end
 end
@@ -3804,6 +3885,9 @@ end
 
 local function ApplySpellDesaturation(f, durObj)
     if not f._tex then return end
+    -- Out-of-band write: drop the drain's edge-gate memo so its next tick
+    -- re-derives instead of trusting a value this call may have changed.
+    f._lastDesatVal = nil
     if PresetKeepsColor(f) then f._tex:SetDesaturation(0); return end
     if durObj and _desatCurve and durObj.EvaluateRemainingDuration then
         local val = durObj:EvaluateRemainingDuration(_desatCurve, 0)
@@ -3818,6 +3902,39 @@ end
 -------------------------------------------------------------------------------
 local _presetFrames = {}
 ns._presetFrames = _presetFrames
+
+-- LIVE SET for the preset drain: only the frames ProcessPresetCooldowns and
+-- the hot listener loops actually work on (SHOWN racial / custom-spell /
+-- item preset frames -- custom-BUFF frames are excluded from the drain and
+-- never register here). _presetFrames above is the permanent identity/reuse
+-- map and MUST NEVER BE PRUNED: a pruned key would make the create-only
+-- sites build a NEW frame object on the next inject and leak the old one
+-- (WoW frames are unreclaimable). It grows with every distinct config
+-- touched in a session, which made every pairs() walk of it scale with
+-- session AGE rather than live content -- the drain now iterates this set
+-- instead, so the reuse map's growth costs nothing.
+-- OnShow/OnHide track the frame's OWN shown flag: exactly the IsShown()
+-- gate the drain applied per entry, so membership == the old gate by
+-- construction (alpha/parent-only hiding behaves identically to before).
+local _pcActive = {}
+local function _RegisterPresetLive(f, fkey)
+    f._pfKey = fkey
+    f:HookScript("OnShow", function(self)
+        _pcActive[self] = true
+        -- Show is a state edge (events may have fired while hidden):
+        -- re-read and re-push everything on the next pass.
+        self._cdPushArm = true
+        if self._isItemPresetFrame then
+            self._itemWalkArm = true
+            self._countArm = true
+        end
+        if ns._MarkPresetCdDirty then ns._MarkPresetCdDirty() end
+    end)
+    f:HookScript("OnHide", function(self)
+        _pcActive[self] = nil
+    end)
+    if f:IsShown() then _pcActive[f] = true end
+end
 
 -------------------------------------------------------------------------------
 --  Always Show Buffs placeholders
@@ -4158,6 +4275,7 @@ local function GetOrCreateItemPresetFrame(barKey, itemID)
     end)
     f:SetScript("OnLeave", GameTooltip_Hide)
     _presetFrames[fkey] = f
+    _RegisterPresetLive(f, fkey)
     return f
 end
 ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
@@ -4279,6 +4397,9 @@ _racialCdListener:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("SPELL_UPDATE_CHARGES")
 _racialCdListener:RegisterEvent("BAG_UPDATE_COOLDOWN")
 _racialCdListener:RegisterEvent("BAG_UPDATE_DELAYED")
+-- Usability edges for the custom-spell resource tint (UniqueEvent:
+-- client-coalesced to at most one fire per frame).
+_racialCdListener:RegisterEvent("SPELL_UPDATE_USABLE")
 _racialCdListener:RegisterEvent("ENCOUNTER_END")
 _racialCdListener:RegisterEvent("CHALLENGE_MODE_START")
 _racialCdListener:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
@@ -4296,33 +4417,84 @@ end
 -- just set this flag. The BuffTicker (10Hz) processes it, coalescing dozens of
 -- per-GCD events into a single update pass.
 local _presetCdDirty = false
+-- True when the last drain pass found every preset frame settled (no running
+-- cooldown, no desaturation, no resource dim, no shown charge text). While
+-- settled, high-frequency noise events (SPELL_UPDATE_COOLDOWN fires steadily
+-- even at idle) no longer arm the drain -- every settled->unsettled transition
+-- arrives through the fast lanes (player cast, bag update, combat edges).
+local _pcAllSettled = false
 
 -- The actual update work, called from BuffTicker at 10Hz max.
 local function ProcessPresetCooldowns()
     _presetCdDirty = false
+    local anyUnsettled = false
     local now = GetTime()
-    for fkey, f in pairs(_presetFrames) do
+    -- 5s full sweep: reads every spell-preset frame regardless of arms --
+    -- the self-heal net for any missed arm edge (worst staleness = 5s,
+    -- once). Between sweeps, ready un-armed frames are skipped entirely.
+    local fullSweep
+    if now >= (ns._pcFullNext or 0) then
+        fullSweep = true
+        ns._pcFullNext = now + 5
+    end
+    -- Iterate the LIVE set (shown drain-relevant frames only), not the
+    -- session-cumulative _presetFrames reuse map -- see _RegisterPresetLive.
+    -- The IsShown() belt is redundant by construction but costs one call
+    -- per LIVE frame.
+    for f in pairs(_pcActive) do
         if f:IsShown() then
             if (f._isRacialFrame or f._isCustomSpellFrame) and not f._isCustomBuffFrame then
                 -- Cache extracted spellID on the frame to avoid regex every tick
                 local sid = f._cachedPresetSID
                 if not sid then
-                    local m = fkey:match(":(%d+)$")
+                    local m = f._pfKey and f._pfKey:match(":(%d+)$")
                     sid = m and tonumber(m)
                     f._cachedPresetSID = sid
                 end
-                if sid then
-                    local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(sid)
-                    if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
-                        f._cooldown:SetCooldownFromDurationObject(durObj, true)
-                    end
-                    -- Skip desaturation when the spell is only on GCD
+                -- Read-skip: a READY frame with no pending arm cannot have
+                -- changed state -- every start edge arms it (cast/named/wave
+                -- lanes set _cdPushArm, usability edges set _cdEvalArm) and
+                -- the 5s sweep heals anything missed. Running frames
+                -- (_lastOnRealCD ~= false, incl. never-read nil), dimmed
+                -- frames and visible charge texts keep polling: the
+                -- running-frame poll IS the eventless ready-edge belt, and
+                -- text/tint recovery paths stay live exactly as today.
+                if sid and (fullSweep or f._cdPushArm or f._cdEvalArm
+                   or f._lastOnRealCD ~= false or f._lastVertexDim
+                   or (ns._cdmAnyCustomForceCount and f._isCustomSpellFrame
+                       and f._castCountText and f._castCountText:IsShown())) then
+                    f._cdEvalArm = nil
                     local cdInfo = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(sid)
-                    local onRealCD = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
-                    if cdInfo and cdInfo.isOnGCD and not onRealCD then
-                        if f._tex then f._tex:SetDesaturation(0) end
-                    else
-                        ApplySpellDesaturation(f, durObj)
+                    local onRealCD = (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) and true or false
+                    -- Push-on-edge: the swipe widget animates itself once armed,
+                    -- so the duration object is re-pushed only when an event
+                    -- lane armed it (cast, named/wave cooldown event, rebuild).
+                    -- Belt: a state flip the lanes missed re-arms on this tick
+                    -- (the old unconditional push had the same 10Hz latency).
+                    if f._lastOnRealCD ~= onRealCD then
+                        f._lastOnRealCD = onRealCD
+                        f._cdPushArm = true
+                    end
+                    if f._cdPushArm then
+                        f._cdPushArm = false
+                        local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(sid)
+                        if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
+                            f._cooldown:SetCooldownFromDurationObject(durObj, true)
+                        end
+                    end
+                    if onRealCD then anyUnsettled = true end
+                    -- Binary desat from the SAME readable bools this pass
+                    -- already holds: the desat curve is a STEP (0 -> 0,
+                    -- 0.001 -> 1), so the per-tick duration-object fetch +
+                    -- engine evaluation recomputed exactly (onRealCD and 1
+                    -- or 0). GCD-only stays saturated, keep-color presets
+                    -- stay at 0 (the old path's early-out), and the write is
+                    -- edge-gated; ApplySpellDesaturation nils the memo on
+                    -- out-of-band writes (frame create/dirty path).
+                    local desat = (onRealCD and not PresetKeepsColor(f)) and 1 or 0
+                    if f._tex and f._lastDesatVal ~= desat then
+                        f._lastDesatVal = desat
+                        f._tex:SetDesaturation(desat)
                     end
                     -- Resource check: dim vertex color when not enough resources
                     -- Only for custom spells (not racials -- racials don't cost resources)
@@ -4342,6 +4514,7 @@ local function ProcessPresetCooldowns()
                             f._lastVertexDim = nil
                         end
                     end
+                    if f._lastVertexDim then anyUnsettled = true end
                     -- "Show Charges" (opt-in, CD/utility custom spells only):
                     -- Blizzard reports no charge frame for a manually-added spell,
                     -- so on request show its count -- the display charge count when
@@ -4378,6 +4551,9 @@ local function ProcessPresetCooldowns()
                             if ok and str then
                                 f._castCountText:SetText(str)
                                 if not f._castCountText:IsShown() then f._castCountText:Show() end
+                                -- Charge counts regen eventlessly: keep polling
+                                -- while the text is on screen.
+                                anyUnsettled = true
                             elseif f._castCountText:IsShown() then
                                 f._castCountText:SetText("")
                                 f._castCountText:Hide()
@@ -4389,62 +4565,125 @@ local function ProcessPresetCooldowns()
                         end
                     end
                 end
-            elseif f._isItemPresetFrame and f._presetItemID and now >= _encounterResetUntil then
+            elseif f._isItemPresetFrame and f._presetItemID and now >= _encounterResetUntil
+               -- Item read-skip (probe-proven capture #12: the item branch was
+               -- the drain's entire remaining cost): a READY, un-armed,
+               -- un-desaturated item frame cannot change state -- loot/bag
+               -- edges arm it, lockout/desat keep it polling, an on-cd frame
+               -- polls for its own expiry edge, and the 5s sweep heals
+               -- anything missed.
+               and (fullSweep or f._itemWalkArm ~= false or f._countArm ~= false
+                    or f._inCombatLockout or f._lastDesat
+                    or (f._cdStart and f._cdDur and now < f._cdStart + f._cdDur)) then
                 -- Pot presets: re-resolve the display variant (generation-gated,
                 -- one compare when nothing changed) and drive count/cooldown off
                 -- the resolved chain. Every other item preset keeps the legacy
                 -- primary-then-alts walk byte-identically.
                 local dispID = PotSwap.Ensure(f)
-                local itemID = dispID or f._presetItemID
-                local potChain = dispID and PotSwap.Chain(f._presetData) or nil
-                local getContainerCD = C_Container and C_Container.GetItemCooldown
-                local start, dur
-                if potChain then
-                    -- Only the owned/used item id reports the shared potion
-                    -- cooldown, so walk the full active chain (partner family
-                    -- included while the swap toggle is on).
-                    for i = 1, #potChain do
-                        local cid = potChain[i]
-                        if getContainerCD then start, dur = getContainerCD(cid) end
-                        if not (start and dur and dur > 1.5) then start, dur = C_Item.GetItemCooldown(cid) end
-                        if start and dur and dur > 1.5 then break end
+                -- A variant flip moves the cooldown source: force a re-walk.
+                if dispID ~= f._lastDispID then
+                    f._lastDispID = dispID
+                    f._itemWalkArm = true
+                end
+                -- Walk-on-edge: item cooldowns only move on BAG_UPDATE_COOLDOWN
+                -- / cast / bag-content / encounter-reset edges, all of which arm
+                -- the walk. Between edges the cached start/dur drives itemOnCD
+                -- and the armed widget completes on its own (nil arm = first
+                -- pass for this frame, walk once).
+                if f._itemWalkArm ~= false then
+                    f._itemWalkArm = false
+                    local getContainerCD = C_Container and C_Container.GetItemCooldown
+                    local start, dur
+                    -- SINGLE-ID cooldown probe (user-directed model, the
+                    -- reference watcher's shape): ownership picks ONE active
+                    -- id, re-pointed ONLY on bag-CONTENT edges (PotSwap's
+                    -- resolver for pots, the count walk below for the rest);
+                    -- cooldown events probe exactly that id. The shared
+                    -- potion cd reports on every OWNED id, and after
+                    -- drinking the LAST of a rank it lives on the id just
+                    -- used -- so the last-OWNED id is remembered as the cd
+                    -- source while nothing is owned. Cast-driven item-GCD
+                    -- noise (BAG_UPDATE_COOLDOWN fires per ability press)
+                    -- now costs 1-2 calls instead of a dozen bag scans.
+                    local probeID
+                    if dispID then
+                        if (f._displayCount or 0) > 0 then
+                            f._lastOwnedDispID = dispID
+                            probeID = dispID
+                        else
+                            probeID = f._lastOwnedDispID or dispID
+                        end
+                    else
+                        probeID = f._itemCdSource or f._presetItemID
                     end
-                else
-                    if getContainerCD then
-                        start, dur = getContainerCD(itemID)
-                    end
-                    if not (start and dur and dur > 1.5) then
-                        start, dur = C_Item.GetItemCooldown(itemID)
-                    end
-                    if not (start and dur and dur > 1.5) and f._presetData and f._presetData.altItemIDs then
-                        for _, altID in ipairs(f._presetData.altItemIDs) do
-                            if getContainerCD then start, dur = getContainerCD(altID) end
-                            if not (start and dur and dur > 1.5) then start, dur = C_Item.GetItemCooldown(altID) end
-                            if start and dur and dur > 1.5 then break end
+                    if getContainerCD then start, dur = getContainerCD(probeID) end
+                    if not (start and dur and dur > 1.5) then start, dur = C_Item.GetItemCooldown(probeID) end
+                    -- One-time seed per frame object: post-/reload a residual
+                    -- cd can live on an id we have no memory of (used before
+                    -- the reload, nothing owned now) -- find and remember it.
+                    if not f._cdSeeded then
+                        f._cdSeeded = true
+                        if not (start and dur and dur > 1.5) then
+                            local list = dispID and PotSwap.Chain(f._presetData)
+                                or (f._presetData and f._presetData.altItemIDs)
+                            if list then
+                                for i = 1, #list do
+                                    local cid = list[i]
+                                    if cid ~= probeID then
+                                        if getContainerCD then start, dur = getContainerCD(cid) end
+                                        if not (start and dur and dur > 1.5) then start, dur = C_Item.GetItemCooldown(cid) end
+                                        if start and dur and dur > 1.5 then
+                                            if dispID then f._lastOwnedDispID = cid
+                                            else f._itemCdSource = cid end
+                                            break
+                                        end
+                                    end
+                                end
+                            end
                         end
                     end
-                end
-                if start and dur and dur > 1.5 then
-                    f._cooldown:SetCooldown(start, dur)
-                    f._cdStart = start; f._cdDur = dur
-                elseif not (f._cdStart and f._cdDur and (now < f._cdStart + f._cdDur)) then
-                    f._cooldown:Clear()
-                    f._cdStart = nil; f._cdDur = nil
+                    if start and dur and dur > 1.5 then
+                        f._cooldown:SetCooldown(start, dur)
+                        f._cdStart = start; f._cdDur = dur
+                    elseif not (f._cdStart and f._cdDur and (now < f._cdStart + f._cdDur)) then
+                        f._cooldown:Clear()
+                        f._cdStart = nil; f._cdDur = nil
+                    end
                 end
                 local itemOnCD = f._cdStart and f._cdDur and (now < f._cdStart + f._cdDur)
+                if itemOnCD or f._inCombatLockout then anyUnsettled = true end
                 local total
                 if dispID then
                     -- Exact count of the resolved variant only -- never a sum
                     -- across ranks/families (2 Fleeting shows 2, even with 50
                     -- regular rank 1s in the bags).
                     total = f._displayCount or 0
-                else
+                    -- Consume the arm here too: resolving pots count via
+                    -- PotSwap (_displayCount), so without this the read-skip
+                    -- gate saw pots as count-armed FOREVER and never skipped
+                    -- them (probe capture #12).
+                    f._countArm = false
+                elseif f._countArm ~= false then
+                    -- Count-on-edge: item counts only move with bag contents
+                    -- (BAG_UPDATE_DELAYED) or a use-cast, both of which arm.
+                    -- This content edge also re-points the single watched cd
+                    -- id (f._itemCdSource): first owned id wins; while
+                    -- nothing is owned the LAST owned id is kept (the shared
+                    -- cd lives on the id that was just used).
+                    f._countArm = false
                     total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
+                    local owned = total > 0 and f._presetItemID or nil
                     if total == 0 and f._presetData and f._presetData.altItemIDs then
                         for _, altID in ipairs(f._presetData.altItemIDs) do
-                            total = total + (C_Item.GetItemCount(altID, false, true) or 0)
+                            local c = C_Item.GetItemCount(altID, false, true) or 0
+                            total = total + c
+                            if not owned and c > 0 then owned = altID end
                         end
                     end
+                    if owned then f._itemCdSource = owned end
+                    f._cachedTotal = total
+                else
+                    total = f._cachedTotal or 0
                 end
                 if f._itemCountText then
                     local fc = _ecmeFC[f]
@@ -4481,6 +4720,7 @@ local function ProcessPresetCooldowns()
             end
         end
     end
+    _pcAllSettled = not anyUnsettled
     if QueueCustomBuffUpdate then QueueCustomBuffUpdate() end
 end
 ns._ProcessPresetCooldowns = ProcessPresetCooldowns
@@ -4489,7 +4729,11 @@ ns._isPresetCdDirty = function() return _presetCdDirty end
 -- full rebuild wipes and re-injects preset frames with no cached desat state; if
 -- no game event (bag/cooldown/combat) follows -- e.g. an in-panel sync/import --
 -- ProcessPresetCooldowns would never run and an unowned item would stay saturated.
-ns._MarkPresetCdDirty = function() _presetCdDirty = true end
+ns._MarkPresetCdDirty = function()
+    _presetCdDirty = true
+    _pcAllSettled = false
+    if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+end
 
 -- TEMP DEBUG: /cdmcc -- dumps why the "Show Charges" custom-spell count is / is
 -- not displaying. Remove once diagnosed.
@@ -4569,14 +4813,76 @@ local function CheckItemPresenceForHide()
     if changed and ns.QueueReanchor then ns.QueueReanchor() end
 end
 
-_racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
-    -- Infrequent events: handle immediately and return
-    if event == "BAG_UPDATE_DELAYED" then
-        -- Bag contents changed: pot-preset display variants must re-resolve
-        -- (before the presence check below, which reads the resolution).
+-- Readable plain number: payload ids can in principle be secret in combat;
+-- comparing a secret throws, so an unreadable id is treated as absent.
+local function _PlainNum(v)
+    return type(v) == "number" and (not canaccessvalue or canaccessvalue(v))
+end
+
+_racialCdListener:SetScript("OnEvent", function(_, event, a1, a2, a3, a4)
+    -- Trailing flush for the loot-storm cap: a bag fire swallowed inside the
+    -- window re-arms on the first event past it (combat noise makes that
+    -- near-immediate; quiet worlds land on the next bag event or the sweep).
+    if ns._pcBagPend and GetTime() >= (ns._pcBagNext or 0) then
+        ns._pcBagPend = nil
+        ns._pcBagNext = GetTime() + 0.5
         PotSwap.Bump()
         CheckItemPresenceForHide()
+        for f in pairs(_pcActive) do
+            if f._isItemPresetFrame then
+                f._itemWalkArm = true
+                f._countArm = true
+            end
+        end
         _presetCdDirty = true
+        _pcAllSettled = false
+        if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+    end
+    -- Infrequent events: handle immediately and return
+    if event == "BAG_UPDATE_DELAYED" then
+        -- Loot-storm cap (probe-proven capture #12: mob-farming loot fires
+        -- this in bursts, and each fire re-armed variant re-resolves + chain
+        -- walks + bag-count scans -- the drain's dominant real cost). At
+        -- most two re-arm cycles per second; a burst's trailing changes land
+        -- on the next capped fire, the head flush, or the 5s sweep.
+        local nowB = GetTime()
+        if nowB >= (ns._pcBagNext or 0) then
+            ns._pcBagNext = nowB + 0.5
+            -- Bag contents changed: pot-preset display variants must
+            -- re-resolve (before the presence check below, which reads the
+            -- resolution).
+            PotSwap.Bump()
+            CheckItemPresenceForHide()
+            -- Contents are the only thing that changes item counts, and a
+            -- new stack can move the displayed cooldown source too: re-walk
+            -- both. (Live set: hidden frames re-arm on their Show edge.)
+            for f in pairs(_pcActive) do
+                if f._isItemPresetFrame then
+                    f._itemWalkArm = true
+                    f._countArm = true
+                end
+            end
+            _presetCdDirty = true
+            _pcAllSettled = false
+            if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+        else
+            -- Swallowed by the cap: flush on the first event after the
+            -- window (see the head of this handler).
+            ns._pcBagPend = true
+        end
+        return
+    end
+    if event == "BAG_UPDATE_COOLDOWN" then
+        -- THE item-cooldown edge: fires when any item cooldown starts, ends
+        -- early or is modified. Re-walk the item chains on the next pass;
+        -- between these edges the cached start/dur drives the display.
+        -- (Live set: hidden frames re-arm on their Show edge.)
+        for f in pairs(_pcActive) do
+            if f._isItemPresetFrame then f._itemWalkArm = true end
+        end
+        _presetCdDirty = true
+        _pcAllSettled = false
+        if ns.ArmBuffTicker then ns.ArmBuffTicker() end
         return
     end
     if event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_START" then
@@ -4587,19 +4893,38 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
                     if f._cooldown then f._cooldown:Clear() end
                     if f._tex then f._tex:SetDesaturated(false) end
                     f._lastDesat = false
+                    f._itemWalkArm = true
                 end
             end
             _encounterResetUntil = GetTime() + 3
+            _pcAllSettled = false
         end
         return
     end
-    if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" then
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and a1 == "player" then
+        local spellID = a3
         -- Fast lane: a player cast is the moment a preset cooldown can START,
         -- so it arms the drain AND resets its rate cap -- the swipe appears
         -- on the next tick. Pure SPELL_UPDATE_COOLDOWN noise (the catch-all
         -- below) coasts on the 1 Hz slow lane instead.
+        -- Item presets re-walk (combat pots show instantly, ahead of
+        -- BAG_UPDATE_COOLDOWN). Spell presets are deliberately NOT armed
+        -- here: pushes exclude the GCD by construction (the duration fetch
+        -- passes ignoreGCD), so a cast pushes nothing visible on a ready
+        -- frame -- and the cast's OWN cooldown start arrives as a named
+        -- SPELL_UPDATE_COOLDOWN in the same cascade, which the catch-all's
+        -- payload discrimination arms precisely (capture #10: arming all
+        -- spell frames per cast was the drain's dominant remaining cost).
+        for f in pairs(_pcActive) do
+            if f._isItemPresetFrame then
+                f._itemWalkArm = true
+                f._countArm = true
+            end
+        end
         _presetCdDirty = true
+        _pcAllSettled = false
         ns._pcLast = 0
+        if ns.ArmBuffTicker then ns.ArmBuffTicker() end
         local targetItemID = spellID and _combatLockoutSpells[spellID]
         if targetItemID and InCombatLockdown() then
             for _, f in pairs(_presetFrames) do
@@ -4615,15 +4940,77 @@ _racialCdListener:SetScript("OnEvent", function(_, event, unit, _, spellID)
     end
     if event == "PLAYER_REGEN_ENABLED" then
         for _, f in pairs(_presetFrames) do
-            if f._isItemPresetFrame and f._inCombatLockout then
-                f._inCombatLockout = nil
+            if f._isItemPresetFrame then
+                if f._inCombatLockout then f._inCombatLockout = nil end
+                f._itemWalkArm = true
             end
         end
         _presetCdDirty = true  -- refresh desaturation on combat end
+        _pcAllSettled = false
+        if ns.ArmBuffTicker then ns.ArmBuffTicker() end
         return
     end
-    -- High-frequency events: just set dirty flag for BuffTicker to process
-    _presetCdDirty = true
+    if event == "SPELL_UPDATE_USABLE" then
+        -- Resource-tint edge: arm a READ of the custom-spell frames so the
+        -- usability tint reacts without keeping ready frames in the poll.
+        -- Same settled gate as the catch-all (today's contract: no drain
+        -- work while settled), plus a 0.2s arm cap so usability churn can
+        -- never re-arm passes beyond ~5/s.
+        if not _pcAllSettled then
+            local nowU = GetTime()
+            if nowU >= (ns._pcUsableNext or 0) then
+                ns._pcUsableNext = nowU + 0.2
+                for f in pairs(_pcActive) do
+                    if f._isCustomSpellFrame then f._cdEvalArm = true end
+                end
+                _presetCdDirty = true
+                if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+            end
+        end
+        return
+    end
+    -- High-frequency events: arm the drain ONLY while something is in flight.
+    -- When the last pass found every preset frame settled, this noise
+    -- (SPELL_UPDATE_COOLDOWN/CHARGES fire steadily even at idle) would only
+    -- schedule identical repaints -- every real settled->unsettled transition
+    -- comes through the fast lanes above.
+    if not _pcAllSettled then
+        if event == "SPELL_UPDATE_COOLDOWN" then
+            -- Payload discrimination (verified on both clients): a NAMED
+            -- event re-arms the duration-object push only for the matching
+            -- spell presets (id or base id -- CDR on a transform ticks the
+            -- override, whose base id matches the tracked spell). A nil or
+            -- unreadable id is a wave ("all cooldowns should be updated")
+            -- and re-arms every spell preset. Frames with no extracted id
+            -- yet arm conservatively.
+            local sid, base = a1, a2
+            local named = _PlainNum(sid)
+            local baseOk = named and _PlainNum(base)
+            for f in pairs(_pcActive) do
+                if not f._isItemPresetFrame then
+                    local fsid = f._cachedPresetSID
+                    if not named or not fsid or fsid == sid
+                       or (baseOk and fsid == base) then
+                        f._cdPushArm = true
+                    end
+                end
+            end
+        elseif event == "SPELL_UPDATE_CHARGES" then
+            -- Same discrimination for charge movement (charge customs).
+            local sid = a1
+            local named = _PlainNum(sid)
+            for f in pairs(_pcActive) do
+                if not f._isItemPresetFrame then
+                    local fsid = f._cachedPresetSID
+                    if not named or not fsid or fsid == sid then
+                        f._cdPushArm = true
+                    end
+                end
+            end
+        end
+        _presetCdDirty = true
+        if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+    end
 end)
 
 -- Custom aura bar cast detection
@@ -4948,7 +5335,12 @@ local function CollectAndReanchor()
                                         -- can resolve this spell to its live form even later while
                                         -- the aura is ACTIVE (GetSpellID secret then). Done for ALL
                                         -- inactive buff frames, not just opted-in bars.
-                                        ns._cdmCleanSidByCDID[dedupKey] = realSID
+                                        -- Value-gated resGen bump: a clean-sid FLIP (form/talent
+                                        -- change) alters buff resolution; steady re-primes do not.
+                                        if ns._cdmCleanSidByCDID[dedupKey] ~= realSID then
+                                            ns._cdmCleanSidByCDID[dedupKey] = realSID
+                                            ns._cdmResGen = ns._cdmResGen + 1
+                                        end
                                     end
                                     -- Always Show Buffs: draw OUR OWN placeholder icon for the
                                     -- inactive buff on the bar it routes to, when that bar has the
@@ -5943,6 +6335,7 @@ local function CollectAndReanchor()
                                         end)
                                         f:SetScript("OnLeave", GameTooltip_Hide)
                                         _presetFrames[fkey] = f
+                                        _RegisterPresetLive(f, fkey)
                                     end
                                     local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
                                     if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
@@ -6683,6 +7076,9 @@ local function CollectAndReanchor()
         local pv = EllesmereUI._contentHeaderPreview
         if pv and pv.Update then pv:Update() end
     end
+    -- Claims just settled: retire the proc-alert child map so the next alert
+    -- rebuilds it against the fresh claim set.
+    if ns._cdmClaimGen then ns._cdmClaimGen = ns._cdmClaimGen + 1 end
 end
 ns.CollectAndReanchor = CollectAndReanchor
 
@@ -7022,6 +7418,7 @@ function ns.SetupViewerHooks()
         -- Content churn: re-arm the buff ticker's dirty + pool gates.
         ns._acGen = (ns._acGen or 0) + 1
         ns._btDirty = true
+        if ns.ArmBuffTicker then ns.ArmBuffTicker() end
         if frame then
             local fc = _ecmeFC[frame]
             if fc then
@@ -7043,6 +7440,7 @@ function ns.SetupViewerHooks()
         hooksecurefunc(CooldownViewerBuffBarItemMixin, "OnCooldownIDSet", function(frame)
             ns._acGen = (ns._acGen or 0) + 1
             ns._btDirty = true
+            if ns.ArmBuffTicker then ns.ArmBuffTicker() end
             if ns.InvalidateTBBFrameCache then ns.InvalidateTBBFrameCache() end
             ResetFrameCache(frame)
             QueueReanchor()
@@ -7114,6 +7512,7 @@ function ns.SetupViewerHooks()
             hooksecurefunc(v.itemFramePool, "Acquire", function()
                 ns._acGen = (ns._acGen or 0) + 1
                 ns._btDirty = true
+                if ns.ArmBuffTicker then ns.ArmBuffTicker() end
                 if isBuff then InstallBuffFrameHooks(v) end
                 if isBarViewer and ns.InvalidateTBBFrameCache then
                     ns.InvalidateTBBFrameCache()
@@ -7276,21 +7675,17 @@ function ns.SetupViewerHooks()
         -- 10 Hz job -- the dispatch-floor disease the ERB rebuild removed.
         -- Body and cadence unchanged; fn returns true to keep looping.
         local _btBody = function()
-            -- Two-tier dirty gate (timed: the full body ran 0.26ms per fire
-            -- at 10 Hz = nearly all of CDM's combat CPU). The body runs only
-            -- when something CAN have changed -- player aura/totem flip,
-            -- viewer pool churn, pandemic edge, preset-cooldown dirt -- or on
-            -- a 0.5s staleness net (the poll's original no-event mandate,
-            -- e.g. secret procs; in practice those arrive as pool churn, so
-            -- the net is insurance). A clean fire costs three reads.
+            -- Dirty-gated (timed: the full body ran 0.26ms per fire at 10 Hz
+            -- = nearly all of CDM's combat CPU). The body runs ONLY when a
+            -- dirty edge fired -- player aura/totem flip, viewer pool churn,
+            -- pandemic edge, preset-cooldown dirt. There is no staleness
+            -- net: after ~1s of settled fires the ticker STOPS ITSELF and
+            -- every dirty writer re-arms it via ns.ArmBuffTicker. A stale
+            -- glow/desat is a missing edge to register, never to sweep for.
             local _btNow = GetTime()
-            -- Park integrity for Blizzard's tracked-bar viewer. Runs ahead of
-            -- the dirty gate: the movers that strand it on screen (Edit Mode
-            -- layout passes, third-party frame movers) do not dirty the
-            -- ticker, so a gated check would leave the duplicate bars up until
-            -- the next buff proc. Three reads on an intact park.
-            if ns.CheckSecondaryBuffViewerPark then ns.CheckSecondaryBuffViewerPark() end
-            if not ns._btDirty and _btNow - (ns._btLastFull or 0) < 0.5 then
+            -- Park integrity lives on event edges now (ns._parkEdges in the
+            -- main file + the QueueRepark hooksecurefuncs) -- no patrol here.
+            if not ns._btDirty then
                 -- Preset cooldowns drain independently on clean fires, capped
                 -- at 1 Hz: the dirty flag re-arms ~22x/sec from the racial/
                 -- trinket catch-alls, so an uncapped drain runs at full tick
@@ -7301,10 +7696,20 @@ function ns.SetupViewerHooks()
                     ns._pcLast = _btNow
                     ProcessPresetCooldowns()
                 end
+                if _presetCdDirty then
+                    ns._btCleanFires = 0
+                elseif (ns._btCleanFires or 0) < 10 then
+                    ns._btCleanFires = (ns._btCleanFires or 0) + 1
+                else
+                    -- Settled for ~1s (no dirty edge, presets drained): stop
+                    -- the ticker outright. Zero fires until the next edge.
+                    ns._btCleanFires = 0
+                    return false
+                end
                 return true
             end
+            ns._btCleanFires = 0
             ns._btDirty = nil
-            ns._btLastFull = _btNow
             MemSnap("BuffTicker")
             local p = ECME and ECME.db and ECME.db.profile
             if not p or not p.cdmBars or not p.cdmBars.bars then return true end
@@ -7714,9 +8119,18 @@ function ns.SetupViewerHooks()
             end
             if not _btTicker then
                 _btTicker = EllesmereUI.Tick.NewAnimTicker(cdmBuffTickFrame, _btBody, 0.1)
-                _btTicker.Start()
             end
+            _btTicker.Start()
         end)
+        -- Re-arm for every dirty writer. The body self-stops when settled;
+        -- Start() on a playing ticker is one IsPlaying check, so arming stays
+        -- indiscriminate. Creation is EXCLUSIVELY the OnEvent above's job
+        -- (guaranteed CDM execution context -- see the attribution note), so
+        -- a pre-first-event arm is a no-op; PLAYER_ENTERING_WORLD always
+        -- creates it at login.
+        ns.ArmBuffTicker = function()
+            if _btTicker then _btTicker.Start() end
+        end
     end
 
     ns.SyncViewerToContainer = function() end

@@ -4634,8 +4634,8 @@ local function UpdateSecondaryResource()
     -- UNIT_POWER_UPDATE, UNIT_POWER_FREQUENT, UNIT_AURA,
     -- UNIT_SPELLCAST_SUCCEEDED and the 10fps safety poll -- and most of those
     -- fire without the resource having changed at all. Measured 2026-07-26:
-    -- 300 hits / 9 misses over ~15s of casting, and this function's share of a
-    -- Perfy trace fell from 12.2% to 2.9%.
+    -- 300 hits / 9 misses over ~15s of casting, and this function's share of
+    -- the profiled trace fell from 12.2% to 2.9%.
     --
     -- Deliberately skipped when the bar tracks a buff for colouring: that state
     -- changes on aura events while the value stands still, so an early-out

@@ -1164,7 +1164,7 @@ end
 
 -- Lua-side showgrid manipulation (out of combat only)
 local function SetShowGridInsecure(btn, show, reason, force)
-    if InCombatLockdown() then return end
+    if InCombatLockdown() then ns._eabApplyDeferred = true return end
     if type(reason) ~= "number" then return end
 
     local value = btn:GetAttribute("showgrid") or 0
@@ -3134,6 +3134,74 @@ do
         EAB._RefreshCooldownVisuals = function(btn)
             if btn and btn.GetAttribute then RefreshCooldownVisuals(btn) end
         end
+
+        -- Per-button cooldown push: the swipe-only body (cd fetch, push-on-
+        -- edge via duration objects, Clear on the fall, opt-in desat/alpha).
+        -- Shared by the spell-keyed passes below and the residual slot walk;
+        -- semantics identical to the old inline walk body.
+        local function PushButtonCooldown(btn, visOn)
+            local action = btn:GetAttribute("action")
+            if not action or not HasAction(action) then
+                local rr = ns._cdRunningReal
+                if rr then rr[btn] = nil end
+                return
+            end
+            local fd = EFD(btn)
+            local cd = btn.cooldown
+            local durObj
+            local cdInfo = C_ActionBar.GetActionCooldown(action)
+            local active = (cdInfo and cdInfo.isActive) and true or false
+            local cdReal = active and not cdInfo.isOnGCD
+            local cdClassFlip = cdReal ~= (fd.cdWasReal or false)
+            local cdMoved = cdReal or (active and cdClassFlip)
+            if cd then
+                if active then
+                    if cdMoved or fd.pushGen ~= ns._gcdGen or not fd.cdWasActive then
+                        -- Spend the once-per-cast gen only on a SETTLED push.
+                        -- A pass running in the cast's OWN frame (events later
+                        -- in the same cascade -- guaranteed when the cast also
+                        -- reset a cooldown, e.g. a proc-reset instant breaking
+                        -- a channel) can read a not-yet-populated duration
+                        -- object, and in combat that object is SECRET so it
+                        -- cannot be inspected (only HasSecretValues is
+                        -- NeverSecret -- every other getter inherits the
+                        -- object's secrecy). So the rule is TIME-based, no
+                        -- reads needed: same frame as the cast = push what we
+                        -- see but leave the gen unspent; the cast kick's
+                        -- next-frame pass is the authoritative spend. Spending
+                        -- it same-frame left pure-GCD buttons blank for the
+                        -- whole GCD (tester recipe).
+                        if ns._gcdCastAt ~= GetTime() then
+                            fd.pushGen = ns._gcdGen
+                        end
+                        durObj = C_ActionBar.GetActionCooldownDuration(action)
+                        if durObj then cd:SetCooldownFromDurationObject(durObj) end
+                    end
+                elseif fd.cdWasActive then
+                    cd:Clear()
+                end
+            end
+            if visOn and ((active ~= (fd.cdWasActive or false)) or fd.chargeWasLive
+               or cdClassFlip or (active and fd.visGen ~= ns._gcdGen)) then
+                -- Same provisional rule for the visuals gen (the stale-desat
+                -- variant of the same transient).
+                if active and ns._gcdCastAt ~= GetTime() then
+                    fd.visGen = ns._gcdGen
+                end
+                if active and not durObj then
+                    durObj = C_ActionBar.GetActionCooldownDuration(action)
+                end
+                RefreshCooldownVisuals(btn, action, cdInfo or false, durObj, nil)
+            end
+            fd.cdWasActive = active
+            fd.cdWasReal = cdReal
+            -- Running-REAL-cooldown set: the bounded re-push target for
+            -- mid-flight CDR detection under combat secrecy (see the pass).
+            local rr = ns._cdRunningReal
+            if not rr then rr = {}; ns._cdRunningReal = rr end
+            if cdReal then rr[btn] = true else rr[btn] = nil end
+            if active then return true end
+        end
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
         -- Aliased to ACTIONBAR_UPDATE_COOLDOWN in the handler; see the note there.
         dispatcher:RegisterEvent("SPELL_UPDATE_COOLDOWN")
@@ -3141,7 +3209,15 @@ do
         -- the reliable herald of new cooldowns, so it re-arms the heartbeat
         -- walk below without ever running button work itself.
         dispatcher:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-        dispatcher:RegisterEvent("ACTIONBAR_UPDATE_STATE")
+        -- ACTIONBAR_UPDATE_STATE is deliberately NOT registered: every action
+        -- button's own Blizzard mixin receives it per button (see
+        -- BUTTON_EVENT_LISTS.action) and drives SetChecked natively -- the
+        -- old central checked walk was redundant belt (field-verified on
+        -- removal 2026-07-30: press-state stayed correct everywhere).
+        -- NOTE for future sessions: C_ActionBar.RegisterActionUIButton was
+        -- probed as a possible engine-side swipe driver and it paints
+        -- NOTHING for our buttons (the promising first probe was confounded
+        -- by our own then-active pushes). Do not re-chase it.
         dispatcher:RegisterEvent("ACTIONBAR_UPDATE_USABLE")
         dispatcher:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
         dispatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -3152,6 +3228,72 @@ do
         dispatcher:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
         dispatcher:RegisterEvent("PLAYER_TARGET_CHANGED")
         dispatcher:RegisterEvent("CVAR_UPDATE")  -- "Show numbers for cooldowns" toggled -> re-apply charge recharge numbers
+        -- The owning edge for item-count changes on buttons (loot, mail,
+        -- vendoring -- none of which cast). Dirty-trigger via the
+        -- infrequent-events branch; also forces the next walk's count pass.
+        dispatcher:RegisterEvent("BAG_UPDATE_DELAYED")
+        -- Viewer DATA events (talent/hotfix/override re-curation): pure data
+        -- signals, no dependency on CDM or the Blizzard viewer UI. They land
+        -- in the infrequent branch, which retires the classification via
+        -- ns._cdFilledDirty.
+        dispatcher:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
+        dispatcher:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
+        dispatcher:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
+        -- Per-button content refresh for a changed slot. Shared by the
+        -- dispatcher's SLOT_CHANGED full walk (arg1 == 0) and the
+        -- slot->buttons fast path; on ns because this chunk is at the
+        -- 200-local cap.
+        ns._eabSlotRefreshBtn = function(btn, action)
+            -- Assisted-combat slot: its "content changes" are
+            -- the manager re-stamping the suggestion (idle
+            -- spam, plus per rotation step in combat), and the
+            -- only visual that can differ is the ICON. The
+            -- full refresh below repainted count/cooldown/
+            -- tint identically several times per second
+            -- forever. Icon-only, secret-tolerant setters;
+            -- cooldown swipes ride the COOLDOWN branch.
+            local _, _, subType = GetActionInfo(action)
+            if subType == "assistedcombat" then
+                -- Same member resolution as ForceButtonRefresh:
+                -- the icon region's key differs by client.
+                local icon = btn.icon or btn.Icon
+                if icon then
+                    icon:SetTexture(GetActionTexture(action))
+                    icon:SetShown(HasAction(action))
+                end
+            else
+                -- Slot CONTENTS changed while the slot number
+                -- stayed (spec swap, drag-drop): needs the forced
+                -- refresh path (see ForceButtonRefresh).
+                EAB_VTABLE.ForceButtonRefresh(btn, action)
+                -- Content changed: drop this slot's memos so
+                -- every cached visual re-derives fresh.
+                local mfd = EFD(btn)
+                mfd.lastCountText = nil
+                mfd.usableState = nil
+                -- Slot emptied: the refresh leaves stale count
+                -- text behind (buttons no longer receive
+                -- ACTIONBAR_SLOT_CHANGED themselves).
+                local filled = HasAction(action)
+                if btn.Count and not filled then
+                    btn.Count:SetText("")
+                end
+                -- Blizzard icon background follows slot
+                -- contents; same reason as the count text --
+                -- the per-button OnEvent hook that used to
+                -- sync it never sees this event now, so a
+                -- vacated slot kept its background hidden.
+                -- Raw read (not EFD()): don't allocate
+                -- per-button state when the option never
+                -- built a clip.
+                local bfd = ns._eabFD[btn]
+                local clip = bfd and bfd.iconBgClip
+                if clip then
+                    local p2 = EAB.db and EAB.db.profile
+                    clip:SetShown((p2 and p2.showBlizzIconBg or false) and not filled)
+                end
+            end
+        end
         -- Direct API calls bypass the mixin's OnEvent dispatch, which
         -- triggers UpdateButtonArt (noop + hook), icon bg hook, and other
         -- per-button overhead. With 60 populated buttons, the mixin path
@@ -3175,46 +3317,71 @@ do
             end
             -- Idle sleep for the ~1/sec ACTIONBAR_UPDATE_COOLDOWN heartbeat
             -- (bisect-verified: walking 140 settled buttons per heartbeat was
-            -- ALL of ActionBars' idle CPU). The cooldown walk runs only while
-            -- something is live, within 2s of real activity, or on a 5s
-            -- safety resync that self-heals any exotic missed edge. Casts are
+            -- ALL of ActionBars' idle CPU). The cooldown walk runs ONLY while
+            -- something is live or within 2s of real activity -- there is no
+            -- periodic resync. Every way button state changes while settled
+            -- has an owning event edge (casts, the dirty-trigger events,
+            -- BAG_UPDATE_DELAYED for item counts); a stale display here is a
+            -- missing edge to FIX, never something to sweep for. Casts are
             -- pure dirty-triggers and return before any button work.
             if event == "UNIT_SPELLCAST_SUCCEEDED" then
                 ns._cdDirtyUntil = GetTime() + 2
-                -- A cast re-opens the walk rate gates so the events that
-                -- follow THIS cast always paint immediately -- the caps only
-                -- ever throttle between-cast chatter. The generation counter
-                -- lets active buttons push their (engine-live) duration
-                -- object once per cast instead of once per event.
+                -- A cast re-opens BOTH rate gates so the events that follow
+                -- THIS cast always paint immediately (incl. the slow tier's
+                -- GCD sweep) -- the caps only ever throttle between-cast
+                -- chatter. The generation counter lets the pushes repaint
+                -- once per cast instead of once per event.
                 ns._cdWalkNext = 0
-                ns._stWalkNext = 0
-                ns._gcdGen = (ns._gcdGen or 0) + 1
-                return
-            end
-            -- STATE rate cap (timed at ~0.3ms per walk, ~2.5/sec while
-            -- casting): 0.3s cap, cast-reset above, trailing flush below.
-            if event == "ACTIONBAR_UPDATE_STATE" then
-                local now = GetTime()
-                local nextAt = ns._stWalkNext or 0
-                if now < nextAt then
-                    if not ns._stFlushArmed then
-                        ns._stFlushArmed = true
-                        if not ns._stFlushFn then
-                            -- Built under this AB-born entry (timer callbacks
-                            -- bill their closure's creation context).
-                            ns._stFlushFn = function()
-                                ns._stFlushArmed = nil
-                                ns._stWalkNext = 0
-                                local d = ns._cdDispatcher
-                                local h = d and d:GetScript("OnEvent")
-                                if h then h(d, "ACTIONBAR_UPDATE_STATE") end
-                            end
-                        end
-                        C_Timer.After((nextAt - now) + 0.02, ns._stFlushFn)
+                ns._cdSlowNext = 0
+                -- The cast is the AUTHORITATIVE GCD signal: force the next
+                -- pass to push every tier unconditionally, memos ignored.
+                -- State-diffing alone can miss an entire GCD -- when the
+                -- bars are settled, a cast's cooldown events can arrive
+                -- BEFORE this event (order is not guaranteed), land in a
+                -- skipped pass, and by the next live pass the GCD has fully
+                -- round-tripped so the memo sees no change (tester-reported:
+                -- ~1-in-20 casts with no GCD swipe, plus a stale desat
+                -- healing only on the next wave). The old walk was immune
+                -- via exactly this semantics (gcdGen-driven cast pushes).
+                ns._cdCastWave = true
+                -- Deterministic delivery: don't wait for Blizzard's next
+                -- cooldown event to carry the wave (ordering races are the
+                -- bug this fixes) -- kick one pass next frame ourselves.
+                -- The event-driven passes that follow diff-no-change, so
+                -- the kick costs one wave that was owed anyway.
+                if not ns._cdCastKick then
+                    -- Built HERE, under this AB-born entry (timer callbacks
+                    -- bill their closure's creation context).
+                    ns._cdCastKick = function()
+                        ns._cdCastKickPending = nil
+                        -- Re-arm the wave: cooldown events later in the cast's
+                        -- OWN same-frame cascade (guaranteed when the cast also
+                        -- reset a cooldown, e.g. proc-reset instants fired mid
+                        -- channel) can consume the wave while the cooldown API
+                        -- is still inside its documented transient-disagreement
+                        -- window -- the stolen wave pushes pre-GCD state and the
+                        -- memo then sees no edge. The kick IS the guaranteed
+                        -- post-cascade frame, so it must run as a wave itself.
+                        -- Cost: only in that racy interleaving, one extra push
+                        -- of the wave that was owed to the cast anyway.
+                        ns._cdCastWave = true
+                        local d2 = ns._cdDispatcher
+                        local h2 = d2 and d2:GetScript("OnEvent")
+                        if h2 then h2(d2, "ACTIONBAR_UPDATE_COOLDOWN") end
                     end
-                    return
                 end
-                ns._stWalkNext = now + 0.3
+                if not ns._cdCastKickPending then
+                    ns._cdCastKickPending = true
+                    C_Timer.After(0, ns._cdCastKick)
+                end
+                ns._gcdGen = (ns._gcdGen or 0) + 1
+                -- The cast's frame timestamp: pushes running in THIS frame
+                -- are provisional (they may read a pre-settled duration
+                -- object) and must not spend the new gen -- see
+                -- PushButtonCooldown. GetTime is frame-constant, so equality
+                -- identifies the cast's own event cascade exactly.
+                ns._gcdCastAt = GetTime()
+                return
             end
             -- ICON rate cap. SPELL_UPDATE_ICON is a broadcast, and its walk
             -- is the heaviest in the dispatcher (full mixin UpdateAction per
@@ -3260,8 +3427,7 @@ do
             -- dupes return. GetTime() is frame-constant, so this is two
             -- compares. SLOT_CHANGED is exempt (slot-targeted, content-
             -- critical), as is the infrequent-events else-branch.
-            if event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "ACTIONBAR_UPDATE_USABLE"
-               or event == "ACTIONBAR_UPDATE_STATE" then
+            if event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "ACTIONBAR_UPDATE_USABLE" then
                 local stamps = ns._evStamps
                 if not stamps then stamps = {}; ns._evStamps = stamps end
                 local now = GetTime()
@@ -3269,16 +3435,11 @@ do
                 stamps[event] = now
             end
             local _cdSkip = false
-            local _cdCountPass = false
             if event == "ACTIONBAR_UPDATE_COOLDOWN" then
                 local now = GetTime()
                 if not ns._cdAnyLive and now >= (ns._cdDirtyUntil or 0) then
-                    if now < (ns._cdResyncAt or 0) then
-                        _cdSkip = true
-                    else
-                        ns._cdResyncAt = now + 5
-                        _cdCountPass = true
-                    end
+                    -- Fully settled: skip every heartbeat outright.
+                    _cdSkip = true
                 else
                     -- Storm cap while live/dirty (timed: ~1.0ms per walk at
                     -- 3.5/sec while chain-casting). Leading edge passes
@@ -3316,13 +3477,6 @@ do
                         _cdSkip = true
                     else
                         ns._cdWalkNext = now + 0.15
-                        -- Count-text sub-pass every ~2s: item stacks are not
-                        -- twitch-critical. Charge counts are exempt from it
-                        -- (see the count write in the walk).
-                        if now >= (ns._cdCountNext or 0) then
-                            _cdCountPass = true
-                            ns._cdCountNext = now + 2
-                        end
                     end
                 end
             elseif event ~= "PLAYER_TARGET_CHANGED" then
@@ -3340,6 +3494,50 @@ do
                 if not (event == "ACTIONBAR_SLOT_CHANGED" and arg1 and arg1 ~= 0
                         and select(3, GetActionInfo(arg1)) == "assistedcombat") then
                     ns._cdDirtyUntil = GetTime() + 2
+                    -- Content-bearing edge (slot/vehicle/override/form/PEW):
+                    -- retire the filled-slot fast lists. The assist slot's
+                    -- same-slot re-stamp spam is excluded above -- its
+                    -- filledness never changes, and marking dirty ~10/sec
+                    -- would make the rebuild cost what the lists save.
+                    ns._cdFilledDirty = true
+                    -- The slot->buttons map tracks which button HOSTS a
+                    -- slot, which only changes when paging re-maps action
+                    -- attributes (page/bonus/vehicle/override/form/PEW) --
+                    -- never on SLOT_CHANGED itself (contents, not mapping).
+                    -- Dirtying it per slot event would make every rebuild
+                    -- cost what the map saves on form-flip slot bursts.
+                    if event ~= "ACTIONBAR_SLOT_CHANGED" then
+                        ns._slotBtnMapDirty = true
+                    end
+                    -- Item stacks repaint on their owning edge (the 2s count
+                    -- sub-pass died with the engine-rendering move; charge
+                    -- counts ride SPELL_UPDATE_CHARGES, and slot edits clear
+                    -- their own text in the SLOT_CHANGED branch).
+                    if event == "BAG_UPDATE_DELAYED" and C_ActionBar.GetActionDisplayCount then
+                        for _, info2 in ipairs(BAR_CONFIG) do
+                            if not info2.isStance and not info2.isPetBar then
+                                local list2 = barButtons[info2.key]
+                                if list2 then
+                                    for _, b2 in ipairs(list2) do
+                                        local a2 = b2:GetAttribute("action")
+                                        if a2 and HasAction(a2) and b2.Count then
+                                            local d2 = C_ActionBar.GetActionDisplayCount(a2) or ""
+                                            local f2 = EFD(b2)
+                                            if issecretvalue and issecretvalue(d2) then
+                                                -- Secret string (combat): write through
+                                                -- and dirty the memo (never store one).
+                                                b2.Count:SetText(d2)
+                                                f2.lastCountText = nil
+                                            elseif f2.lastCountText ~= d2 then
+                                                f2.lastCountText = d2
+                                                b2.Count:SetText(d2)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
             end
             local _cdLiveSeen = false
@@ -3384,12 +3582,286 @@ do
             if event == "ACTIONBAR_SLOT_CHANGED" and ns.QueueAssistRescan then
                 ns.QueueAssistRescan()
             end
+            -- Filled-slot fast lists for the four repaint walks: iterating
+            -- every button paid GetAttribute+HasAction on EMPTY slots each
+            -- walk (about half the probe floor on typical layouts). Lists
+            -- rebuild lazily on content edges (SLOT_CHANGED / vehicle /
+            -- override / form / PEW via the infrequent branch above,
+            -- ACTIONBAR_PAGE_CHANGED in the range dispatcher, SPELLS_CHANGED
+            -- in the controller sweep). Failure modes are benign by
+            -- construction: a stale INCLUDED empty slot no-ops through the
+            -- per-button HasAction guards (kept below as the belt), and a
+            -- newly FILLED slot always fires ACTIONBAR_SLOT_CHANGED, which
+            -- repaints it directly AND marks the lists dirty.
+            local _filled
+            if event == "ACTIONBAR_UPDATE_COOLDOWN" or event == "ACTIONBAR_UPDATE_USABLE"
+               or event == "SPELL_UPDATE_CHARGES" then
+                _filled = ns._cdFilled
+                if ns._cdFilledDirty or not _filled then
+                    ns._cdFilledDirty = nil
+                    _filled = {}
+                    ns._cdFilled = _filled
+                    -- SPELL-KEYED CLASSIFICATION for the targeted cooldown
+                    -- passes. Slots dedup to unique spells (pages duplicate
+                    -- heavily), split into two cadence tiers:
+                    --   fast = the viewer-CURATED rotation kit (pure DATA
+                    --          api -- zero dependency on CDM or the Blizzard
+                    --          viewer being shown; talent-aware, refreshed
+                    --          by this rebuild's own edges + the viewer data
+                    --          events registered below). No curated data at
+                    --          all (client variance) = every spell is fast.
+                    --   slow = every other spell slot (utilities).
+                    --   residual = non-spell slots (items, macros -- whose
+                    --          resolved spell shifts with modifier keys --
+                    --          mounts): slot-polled at the slow cadence.
+                    local fast, slow, residual = {}, {}, {}
+                    ns._cdFastSpells, ns._cdSlowSpells, ns._cdResidual = fast, slow, residual
+                    -- curated[sid] = true (Essential rotation kit -> fast
+                    -- tier) or false (any other curated category -> slow).
+                    -- The fast tier must stay LEAN: its per-pass fetch floor
+                    -- runs at the capped storm rate, and under combat
+                    -- secrecy every cast cycles every fast spell's readable
+                    -- state twice (GCD on/off) -- utilities cost the same
+                    -- there while their rare castless changes tolerate 0.5s.
+                    local curated = {}
+                    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+                        and C_CooldownViewer.GetCooldownViewerCooldownInfo and Enum.CooldownViewerCategory then
+                        local essential = Enum.CooldownViewerCategory.Essential
+                        for _, cat in pairs(Enum.CooldownViewerCategory) do
+                            local isEss = (cat == essential)
+                            local okS, set = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat)
+                            if okS and type(set) == "table" then
+                                for _, cdID in ipairs(set) do
+                                    local okI, ci = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+                                    if okI and ci and ci.spellID then
+                                        local function mark(id)
+                                            if not id or id <= 0 then return end
+                                            if isEss or curated[id] == nil then curated[id] = isEss end
+                                        end
+                                        mark(ci.spellID)
+                                        mark(ci.overrideSpellID)
+                                        if type(ci.linkedSpellIDs) == "table" then
+                                            for _, lid in ipairs(ci.linkedSpellIDs) do mark(lid) end
+                                        end
+                                        if C_Spell and C_Spell.GetBaseSpell then
+                                            mark(C_Spell.GetBaseSpell(ci.spellID))
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    local haveCurated = next(curated) ~= nil
+                    for _, info in ipairs(BAR_CONFIG) do
+                        if not info.isStance and not info.isPetBar then
+                            local btns = barButtons[info.key]
+                            if btns then
+                                local list = {}
+                                for _, btn in ipairs(btns) do
+                                    local a = btn:GetAttribute("action")
+                                    if a and HasAction(a) then
+                                        list[#list + 1] = btn
+                                        local aType = GetActionInfo(a)
+                                        local sid = C_ActionBar.GetSpell and C_ActionBar.GetSpell(a)
+                                        if aType == "spell" and sid and sid > 0 then
+                                            local base = C_Spell and C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(sid)
+                                            -- Essential (true) -> fast; any other
+                                            -- curated (false) or uncurated (nil)
+                                            -- -> slow. No curated data at all ->
+                                            -- everything fast (degraded client).
+                                            local tier
+                                            if not haveCurated then
+                                                tier = fast
+                                            elseif curated[sid] or (base and base > 0 and curated[base]) then
+                                                tier = fast
+                                            else
+                                                tier = slow
+                                            end
+                                            local g = tier[sid]
+                                            if not g then g = {}; tier[sid] = g end
+                                            g[#g + 1] = btn
+                                        else
+                                            residual[#residual + 1] = btn
+                                        end
+                                    end
+                                end
+                                _filled[info.key] = list
+                            end
+                        end
+                    end
+                end
+            end
             -- /eabprof: time the walk loop for events that got this far
             -- (capped/deduped fires returned above and cost near-nothing).
+            -- Sits AFTER the list rebuild so a rebuild triggered by this
+            -- event does not inflate its walk row (it showed up as a phantom
+            -- +0.4ms/sec on the STATE row in combat measurement).
             local _profT0 = prof and debugprofilestop()
+            -- TARGETED COOLDOWN PASSES (spell-keyed; replaces the per-slot
+            -- walk). The broadcast cooldown events stay the trigger, but the
+            -- work is per UNIQUE SPELL with a state memo: fetch + compare
+            -- startTime/duration, and push buttons ONLY on change. During a
+            -- GCD every ready spell's state IS the GCD, so a cast naturally
+            -- changes every fast-tier memo at once = the full push wave;
+            -- between GCDs the memos are static and the pass is pure
+            -- compares. The slow tier + residual slots ride a 0.5s gate that
+            -- casts ZERO (see the cast branch), so their GCD sweeps stay
+            -- same-frame -- the relaxed cadence only delays castless changes
+            -- (item ICDs, utility procs). Falling edges are additionally
+            -- caught per button by the OnCooldownDone hooks. Secret state
+            -- fails open: push the group and clear its memo. A missing
+            -- C_Spell.GetSpellCooldown degrades to pushing every group per
+            -- capped event -- exactly the old walk's behavior.
+            if event == "ACTIONBAR_UPDATE_COOLDOWN" and not _cdSkip then
+                local p = EAB.db.profile
+                local visOn = p.desaturateOnCooldown
+                    or (p.alphaWhenOnCD or 100) ~= 100
+                local isSec = issecretvalue
+                local GetSpellCd = C_Spell and C_Spell.GetSpellCooldown
+                local function RunGroup(g)
+                    for i = 1, #g do
+                        if PushButtonCooldown(g[i], visOn) then _cdLiveSeen = true end
+                    end
+                end
+                local castWave = ns._cdCastWave
+                if castWave then ns._cdCastWave = nil end
+                local function RunTier(tier)
+                    if not tier then return end
+                    for sid, g in pairs(tier) do
+                        if castWave then
+                            -- Forced cast wave: push unconditionally and
+                            -- re-seed the memo from the fresh state so the
+                            -- following passes diff against reality.
+                            if GetSpellCd then
+                                local ci = GetSpellCd(sid)
+                                local s2 = ci and ci.startTime
+                                local d2 = ci and ci.duration
+                                if isSec and (isSec(s2) or isSec(d2)) then
+                                    g.mSecret = true
+                                    g.mA = (ci and ci.isActive) and true or false
+                                    g.mS, g.mD = nil, nil
+                                else
+                                    g.mSecret = nil
+                                    g.mS, g.mD = s2, d2
+                                end
+                            end
+                            RunGroup(g)
+                            _cdLiveSeen = true
+                        elseif GetSpellCd then
+                            local ci = GetSpellCd(sid)
+                            local s2 = ci and ci.startTime
+                            local d2 = ci and ci.duration
+                            if isSec and (isSec(s2) or isSec(d2)) then
+                                -- COMBAT SECRECY: timing values are secret,
+                                -- so the memo falls back to the READABLE
+                                -- isActive bool -- rising/falling edges
+                                -- still detect exactly. Mid-flight CDR on a
+                                -- RUNNING cooldown is invisible to this key;
+                                -- the bounded running-real re-push below
+                                -- owns that class.
+                                local a2 = (ci and ci.isActive) and true or false
+                                if not g.mSecret or g.mA ~= a2 then
+                                    g.mSecret = true
+                                    g.mA = a2
+                                    g.mS, g.mD = nil, nil
+                                    RunGroup(g)
+                                end
+                                if g.mA then _cdLiveSeen = true end
+                            else
+                                if g.mSecret or g.mS ~= s2 or g.mD ~= d2 then
+                                    g.mSecret = nil
+                                    g.mS, g.mD = s2, d2
+                                    RunGroup(g)
+                                end
+                                -- Any running schedule (incl. the GCD) keeps
+                                -- the heartbeat awake so the END transition
+                                -- (state returning to 0/0) is caught.
+                                if g.mD and g.mD ~= 0 then
+                                    _cdLiveSeen = true
+                                end
+                            end
+                        else
+                            RunGroup(g)
+                            _cdLiveSeen = true
+                        end
+                    end
+                end
+                RunTier(ns._cdFastSpells)
+                -- Mid-flight modification coverage (CDR procs, resets):
+                -- under combat secrecy the memos cannot see a RUNNING
+                -- cooldown's schedule change -- but modifications can ONLY
+                -- affect running REAL cooldowns, and PushButtonCooldown
+                -- maintains that exact set. Re-push it every capped pass:
+                -- the same guarantee the old walk gave all 140 slots, on
+                -- the 2-6 buttons it can actually apply to. (The push body
+                -- re-fetches per action and re-pushes real cooldowns, so a
+                -- changed schedule lands within one 0.15s cap window.)
+                local rr = ns._cdRunningReal
+                if rr and next(rr) then
+                    for btn in pairs(rr) do
+                        if PushButtonCooldown(btn, visOn) then _cdLiveSeen = true end
+                    end
+                end
+                local nowS = GetTime()
+                if nowS >= (ns._cdSlowNext or 0) then
+                    ns._cdSlowNext = nowS + 0.5
+                    RunTier(ns._cdSlowSpells)
+                    local res = ns._cdResidual
+                    if res then RunGroup(res) end
+                end
+            end
+            -- Slot-targeted fast path. Every SLOT_CHANGED used to scan all
+            -- ~140 buttons' action attributes to find the hosts; a form
+            -- flip fires the event for a dozen distinct slots, so form
+            -- dancing paid dozens of full scans per second. The lazily
+            -- rebuilt action->buttons map makes each event O(hosting
+            -- buttons); it rebuilds at most once per paging edge (see the
+            -- dirty site in the infrequent branch). Belt: each hit
+            -- re-checks the live attribute, so a stale map entry (a slot
+            -- event racing ahead of its paging event) can only skip --
+            -- never wrongly refresh -- and the paging event's own full
+            -- pass repaints anything a stale map missed.
+            local _slotFast, _infreqStampNew
+            if event == "ACTIONBAR_SLOT_CHANGED" and arg1 and arg1 ~= 0 then
+                local smap = ns._slotBtnMap
+                if not smap or ns._slotBtnMapDirty then
+                    ns._slotBtnMapDirty = nil
+                    smap = {}
+                    ns._slotBtnMap = smap
+                    for _, info2 in ipairs(BAR_CONFIG) do
+                        if not info2.isStance and not info2.isPetBar then
+                            local list2 = barButtons[info2.key]
+                            if list2 then
+                                for _, b2 in ipairs(list2) do
+                                    local a2 = b2:GetAttribute("action")
+                                    if a2 then
+                                        local bucket = smap[a2]
+                                        if not bucket then bucket = {}; smap[a2] = bucket end
+                                        bucket[#bucket + 1] = b2
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                _slotFast = smap[arg1] or false
+                if not ns._eabNoBtns then ns._eabNoBtns = {} end
+                if _slotFast then
+                    for _, b2 in ipairs(_slotFast) do
+                        local a2 = b2:GetAttribute("action")
+                        if a2 == arg1 then
+                            ns._eabSlotRefreshBtn(b2, a2)
+                        end
+                    end
+                end
+            end
             for _, info in ipairs(BAR_CONFIG) do
                 if not info.isStance and not info.isPetBar then
                     local btns = barButtons[info.key]
+                    -- Repaint branches iterate the filled list; content
+                    -- branches (SLOT_CHANGED, ICON, the infrequent else)
+                    -- keep the full set.
+                    local walkBtns = (_filled and _filled[info.key]) or btns
                     -- Repaint walks skip bars that are not currently visible:
                     -- swipes/desat/checked state on hidden buttons render
                     -- nothing, engine-live swipes complete themselves, and a
@@ -3400,234 +3872,24 @@ do
                     -- icons/bindings are correct the moment they show.
                     local _barHidden = (event == "ACTIONBAR_UPDATE_COOLDOWN"
                         or event == "ACTIONBAR_UPDATE_USABLE"
-                        or event == "ACTIONBAR_UPDATE_STATE"
                         or event == "SPELL_UPDATE_CHARGES")
                         and not (barFrames[info.key] and barFrames[info.key]:IsVisible())
                     if btns and not _barHidden then
                         if event == "ACTIONBAR_SLOT_CHANGED" then
-                            for _, btn in ipairs(btns) do
+                            -- Targeted events were resolved through the map
+                            -- fast path above; only arg1 == 0 ("all slots")
+                            -- still walks every button here.
+                            for _, btn in ipairs((_slotFast == nil) and btns or ns._eabNoBtns) do
                                 local action = btn:GetAttribute("action")
                                 if action and (arg1 == 0 or arg1 == action) then
-                                    -- Assisted-combat slot: its "content changes" are
-                                    -- the manager re-stamping the suggestion (idle
-                                    -- spam, plus per rotation step in combat), and the
-                                    -- only visual that can differ is the ICON. The
-                                    -- full refresh below repainted count/cooldown/
-                                    -- tint identically several times per second
-                                    -- forever. Icon-only, secret-tolerant setters;
-                                    -- cooldown swipes ride the COOLDOWN branch.
-                                    local _, _, subType = GetActionInfo(action)
-                                    if subType == "assistedcombat" then
-                                        -- Same member resolution as ForceButtonRefresh:
-                                        -- the icon region's key differs by client.
-                                        local icon = btn.icon or btn.Icon
-                                        if icon then
-                                            icon:SetTexture(GetActionTexture(action))
-                                            icon:SetShown(HasAction(action))
-                                        end
-                                    else
-                                    -- Slot CONTENTS changed while the slot number
-                                    -- stayed (spec swap, drag-drop): needs the forced
-                                    -- refresh path (see ForceButtonRefresh).
-                                    EAB_VTABLE.ForceButtonRefresh(btn, action)
-                                    -- Content changed: drop this slot's memos so
-                                    -- every cached visual re-derives fresh.
-                                    local mfd = EFD(btn)
-                                    mfd.lastCountText = nil
-                                    mfd.usableState = nil
-                                    -- Slot emptied: the refresh leaves stale count
-                                    -- text behind (buttons no longer receive
-                                    -- ACTIONBAR_SLOT_CHANGED themselves).
-                                    local filled = HasAction(action)
-                                    if btn.Count and not filled then
-                                        btn.Count:SetText("")
-                                    end
-                                    -- Blizzard icon background follows slot
-                                    -- contents; same reason as the count text --
-                                    -- the per-button OnEvent hook that used to
-                                    -- sync it never sees this event now, so a
-                                    -- vacated slot kept its background hidden.
-                                    -- Raw read (not EFD()): don't allocate
-                                    -- per-button state when the option never
-                                    -- built a clip.
-                                    local bfd = ns._eabFD[btn]
-                                    local clip = bfd and bfd.iconBgClip
-                                    if clip then
-                                        local p2 = EAB.db and EAB.db.profile
-                                        clip:SetShown((p2 and p2.showBlizzIconBg or false) and not filled)
-                                    end
-                                    end -- assistedcombat icon-only vs full refresh
+                                    ns._eabSlotRefreshBtn(btn, action)
                                 end
                             end
                         elseif event == "ACTIONBAR_UPDATE_COOLDOWN" then
-                            -- Use duration object API (12.0+) to avoid secret
-                            -- values. Opaque duration objects pass straight to
-                            -- the C-side SetCooldownFromDurationObject without
-                            -- any Lua comparisons on timing values.
-                            --
-                            -- EDGE-GATED (bisect-verified: Blizzard fires this
-                            -- event ~1/sec even at total idle, and the full
-                            -- per-button repaint chain here was ALL of
-                            -- ActionBars' idle CPU). A button now pays beyond
-                            -- the cheap isActive probe only while its cooldown
-                            -- or charge recharge is live, or on the exact
-                            -- rising/falling edge. A pushed swipe animates
-                            -- itself, so a cooldown running down on the
-                            -- schedule it was pushed with needs no re-push --
-                            -- but one that gets MODIFIED does (see below).
-                            for _, btn in ipairs(btns) do
-                                if _cdSkip then break end
-                                local action = btn:GetAttribute("action")
-                                if action and HasAction(action) then
-                                    local fd = EFD(btn)
-                                    local cd = btn.cooldown
-                                    local cdInfo, durObj
-                                    local active = false
-                                    -- A REAL (non-GCD) cooldown can be shortened, reset
-                                    -- or refunded by a proc at any time, with no cast of
-                                    -- ours to bump the generation -- so the once-per-cast
-                                    -- memo left the swipe animating on the schedule it
-                                    -- was pushed with until the player's next press ("the
-                                    -- cooldown takes 1-2s to catch up", "the number keeps
-                                    -- ticking on a spell that is already back up"; the
-                                    -- desat path re-derives when it runs, which is why the
-                                    -- swipe and the saturation disagreed). A GCD-only
-                                    -- cooldown cannot be modified, and it is the case the
-                                    -- memo exists for -- during a GCD all ~140 buttons
-                                    -- report active at once -- so it keeps the memo.
-                                    local cdReal, cdMoved, cdClassFlip = false, false, false
-                                    if cd then
-                                        cdInfo = C_ActionBar.GetActionCooldown(action)
-                                        active = (cdInfo and cdInfo.isActive) and true or false
-                                        -- Real <-> GCD-only is its own edge: a recharge
-                                        -- collapsing to ready mid-GCD leaves `active`
-                                        -- true, so nothing else fires one.
-                                        cdReal = active and not cdInfo.isOnGCD
-                                        cdClassFlip = cdReal ~= (fd.cdWasReal or false)
-                                        cdMoved = cdReal or (active and cdClassFlip)
-                                        if active then
-                                            if cdMoved or fd.pushGen ~= ns._gcdGen or not fd.cdWasActive then
-                                                fd.pushGen = ns._gcdGen
-                                                durObj = C_ActionBar.GetActionCooldownDuration(action)
-                                                if durObj then cd:SetCooldownFromDurationObject(durObj) end
-                                            end
-                                        elseif fd.cdWasActive then
-                                            cd:Clear()
-                                        end
-                                    end
-                                    -- Charges are fetched UNCONDITIONALLY, exactly as
-                                    -- before the optimization pass. Do NOT re-gate this.
-                                    -- Two gates lived here and both broke charge
-                                    -- tracking outright:
-                                    --   1. A sticky "this slot has no charges" cache.
-                                    --      One transient read reporting maxCharges as
-                                    --      nil or 1 (login before action data settles,
-                                    --      talent swap, slot still populating) latched
-                                    --      it permanently, and it only cleared on
-                                    --      ACTIONBAR_SLOT_CHANGED. From then on that
-                                    --      button never fetched charges again, so its
-                                    --      count, recharge swipe and recharge edge all
-                                    --      froze for the rest of the session.
-                                    --   2. An "only while something is in flight"
-                                    --      activity gate, which assumed every charge
-                                    --      spend lights the main cooldown first via the
-                                    --      GCD. Off-GCD spends do not, so the gate never
-                                    --      opened and the recharge was never drawn.
-                                    -- One fetch per button per walk is the price of
-                                    -- correct charge visuals.
-                                    local chargeInfo = C_ActionBar.GetActionCharges(action)
-                                    local chargeShown = (chargeInfo and chargeInfo.maxCharges
-                                        and chargeInfo.maxCharges > 1) and true or false
-                                    if chargeShown then
-                                        local chargeCd = btn.chargeCooldown
-                                        if not chargeCd and chargeInfo.isActive then
-                                            chargeCd = ns.EnsureChargeCooldown(btn)
-                                        end
-                                        if chargeCd then
-                                            -- Feature mirror + 0-charges occlusion rule; see
-                                            -- ns.UpdateChargeNumbersVisibility. cdInfo is fresh
-                                            -- this walk (fetched above, not generation-gated).
-                                            ns.UpdateChargeNumbersVisibility(btn, chargeCd, cdInfo)
-                                            if chargeInfo.isActive then
-                                                local chargeDur = C_ActionBar.GetActionChargeDuration(action)
-                                                if chargeDur then chargeCd:SetCooldownFromDurationObject(chargeDur) end
-                                            else
-                                                chargeCd:Clear()
-                                            end
-                                        end
-                                    elseif btn.chargeCooldown then
-                                        -- Unconditional clear, as before the
-                                        -- optimization pass. The falling-edge version
-                                        -- relied on chargeWasLive, which the gating
-                                        -- above could leave stale, stranding a
-                                        -- recharge swipe on screen.
-                                        btn.chargeCooldown:Clear()
-                                    end
-                                    -- Desat/dim visuals move only on edges or
-                                    -- while something is live; idle-steady
-                                    -- buttons skip the shared function entirely.
-                                    -- Visuals: edges, charge activity, or first
-                                    -- pass of a new cast-generation. A button
-                                    -- sitting mid-cooldown with no new cast
-                                    -- cannot change its desat/dim state.
-                                    -- cdClassFlip, not cdMoved: the desat/dim state of a
-                                    -- real cooldown is constant for its whole life (step
-                                    -- curve), so only the flip matters -- a cooldown
-                                    -- shortened to ready mid-GCD never flips `active`,
-                                    -- and the icon stayed desaturated on a spell that
-                                    -- was already back up.
-                                    if (active ~= (fd.cdWasActive or false)) or chargeShown or fd.chargeWasLive
-                                       or cdClassFlip or (active and fd.visGen ~= ns._gcdGen) then
-                                        if active then fd.visGen = ns._gcdGen end
-                                        -- durObj is only fetched on the once-per-cast
-                                        -- swipe push above, but charge buttons re-enter
-                                        -- here on EVERY walk (chargeShown). Passing the
-                                        -- stale nil made the shared function read the
-                                        -- live cooldown as inactive and snap a
-                                        -- recharging charge spell back to full color,
-                                        -- then the next cast generation re-desaturated
-                                        -- it: grey-color-grey flicker on every press.
-                                        if active and not durObj then
-                                            durObj = C_ActionBar.GetActionCooldownDuration(action)
-                                        end
-                                        RefreshCooldownVisuals(btn, action, cdInfo or false, durObj, chargeInfo or false)
-                                    end
-                                    -- Item stacks ride the ~2s sub-pass. Charge counts
-                                    -- do NOT: SPELL_UPDATE_CHARGES can land a frame or
-                                    -- more after the cooldown event that already
-                                    -- resaturated the icon here, so the count sat at 0
-                                    -- on a spell this walk had just drawn as ready.
-                                    -- Charge buttons are a handful, and lastCountText
-                                    -- keeps the SetText itself off the steady state.
-                                    -- fd.chargeWasShown covers the FALLING edge: a proc can
-                                    -- grant a temporary charge to a spell with none by
-                                    -- default, so maxCharges runs 1 -> 2 -> 1, and gating on
-                                    -- chargeShown alone switched this write off at exactly
-                                    -- the moment the count needed clearing.
-                                    if (_cdCountPass or chargeShown or fd.chargeWasShown)
-                                       and btn.Count and C_ActionBar.GetActionDisplayCount then
-                                        local display = C_ActionBar.GetActionDisplayCount(action) or ""
-                                        if issecretvalue and issecretvalue(display) then
-                                            -- Secret string (combat): write through --
-                                            -- SetText accepts secrets -- and dirty the
-                                            -- memo (never store a secret; it would
-                                            -- poison the next clean compare).
-                                            btn.Count:SetText(display)
-                                            fd.lastCountText = nil
-                                        elseif fd.lastCountText ~= display then
-                                            fd.lastCountText = display
-                                            btn.Count:SetText(display)
-                                        end
-                                    end
-                                    if active or (chargeInfo and chargeInfo.isActive) then
-                                        _cdLiveSeen = true
-                                    end
-                                    fd.cdWasActive = active
-                                    fd.cdWasReal = cdReal
-                                    fd.chargeWasShown = chargeShown
-                                    fd.chargeWasLive = (chargeInfo and chargeInfo.isActive) and true or false
-                                end
-                            end
+                            -- Handled entirely by the spell-keyed passes
+                            -- BEFORE this loop. This branch exists so the
+                            -- event can never fall through to the infrequent
+                            -- full-refresh else below.
                         elseif event == "CVAR_UPDATE" then
                             -- "Show numbers for cooldowns" toggled: re-apply the recharge-number
                             -- visibility to every charge cooldown immediately (the main cooldown
@@ -3644,7 +3906,7 @@ do
                                 end
                             end
                         elseif event == "ACTIONBAR_UPDATE_USABLE" then
-                            for _, btn in ipairs(btns) do
+                            for _, btn in ipairs(walkBtns) do
                                 -- Skip buttons with active range tint -- the
                                 -- range system owns vertex color for those.
                                 local ufd = EFD(btn)
@@ -3675,20 +3937,6 @@ do
                                 end
                                 end
                             end
-                        elseif event == "ACTIONBAR_UPDATE_STATE" then
-                            -- Fires ~4/sec while casting; the memo skips the
-                            -- C SetChecked push for unchanged buttons.
-                            for _, btn in ipairs(btns) do
-                                local action = btn:GetAttribute("action")
-                                if action and HasAction(action) then
-                                    local checked = (IsCurrentAction(action) or IsAutoRepeatAction(action)) and true or false
-                                    local sfd = EFD(btn)
-                                    if sfd.checkedWas ~= checked then
-                                        sfd.checkedWas = checked
-                                        btn:SetChecked(checked)
-                                    end
-                                end
-                            end
                         elseif event == "SPELL_UPDATE_CHARGES" then
                             -- Dedicated branch (cast-time buildup fix): this
                             -- fires per charge-regen tick, scaling with how
@@ -3698,13 +3946,14 @@ do
                             -- ~140 buttons per tick. A charge tick can only
                             -- move charge visuals: recharge swipe, count
                             -- text, and charge-aware desaturation.
-                            for _, btn in ipairs(btns) do
+                            for _, btn in ipairs(walkBtns) do
                                 local action = btn:GetAttribute("action")
                                 if action and HasAction(action) then
                                     local fd = EFD(btn)
-                                    -- Unconditional fetch, no sticky no-charges cache
-                                    -- (see the COOLDOWN branch for why that cache had
-                                    -- to go). This event only fires on charge ticks.
+                                    -- Unconditional fetch: this event only fires
+                                    -- on charge ticks, and it is the SOLE owner
+                                    -- of charge visuals since engine-driven
+                                    -- rendering retired the cooldown walk.
                                     local chargeInfo = C_ActionBar.GetActionCharges(action)
                                     local chargeShown = (chargeInfo and chargeInfo.maxCharges
                                         and chargeInfo.maxCharges > 1) and true or false
@@ -3748,6 +3997,12 @@ do
                                         -- function re-fetches main-cd state
                                         -- itself for these few charge buttons.
                                         RefreshCooldownVisuals(btn, action, nil, nil, chargeInfo)
+                                    elseif btn.chargeCooldown then
+                                        -- Falling edge (temp charge expired,
+                                        -- talent swap): clear a stale recharge
+                                        -- swipe. This was the cooldown walk's
+                                        -- job before engine-driven rendering.
+                                        btn.chargeCooldown:Clear()
                                     end
                                     -- Count write sits OUTSIDE the chargeShown gate. A proc
                                     -- can grant a TEMPORARY charge to a spell that has none
@@ -3793,17 +4048,61 @@ do
                             -- is nooped, so desaturation may not update. Explicit
                             -- usable refresh ensures correct visual state after
                             -- form/stance/talent changes.
+                            -- Same-frame dedupe: ONE stance/form flip fires
+                            -- several infrequent events (form, forms, bonus,
+                            -- page) and each ran this identical full
+                            -- ~140-button UpdateAction + cooldown-visual pass
+                            -- -- the dominant cost of form dancing. Duplicates
+                            -- skip, but arm ONE next-frame flush so state that
+                            -- mutates BETWEEN a frame's events (page attrs
+                            -- settle across the burst) always gets a final
+                            -- pass: correctness never rides on skipped dupes.
+                            -- Target changes keep their own cheap path and
+                            -- neither stamp nor skip.
+                            local nowI = GetTime()
+                            if not ns._eabNoBtns then ns._eabNoBtns = {} end
+                            local _infreqDup = event ~= "PLAYER_TARGET_CHANGED"
+                                and ns._infreqPassAt == nowI and not _infreqStampNew
+                            if _infreqDup then
+                                ns._infreqFlushEvent = event
+                                if not ns._infreqFlushArmed then
+                                    ns._infreqFlushArmed = true
+                                    if not ns._infreqFlushFn then
+                                        -- Built here, under this AB-born entry
+                                        -- (timer callbacks bill their closure's
+                                        -- creation context).
+                                        ns._infreqFlushFn = function()
+                                            ns._infreqFlushArmed = nil
+                                            ns._infreqPassAt = nil
+                                            local d = ns._cdDispatcher
+                                            local h = d and d:GetScript("OnEvent")
+                                            if h then h(d, ns._infreqFlushEvent) end
+                                        end
+                                    end
+                                    C_Timer.After(0, ns._infreqFlushFn)
+                                end
+                            elseif event ~= "PLAYER_TARGET_CHANGED" then
+                                ns._infreqPassAt = nowI
+                                _infreqStampNew = true
+                            end
                             local canSetAttr = not InCombatLockdown()
-                            for _, btn in ipairs(btns) do
-                                if btn.UpdateAction then btn:UpdateAction() end
+                            for _, btn in ipairs(_infreqDup and ns._eabNoBtns or btns) do
                                 -- Covers SPELL_UPDATE_CHARGES (previously never
                                 -- re-evaluated desat: a regained charge only
                                 -- resaturated at the next cooldown event) plus
                                 -- form/stance/world entries. Early-outs when
                                 -- both features are off. Target changes share
-                                -- this branch but cannot change cooldown
-                                -- state -- skip them (tab-target spam).
+                                -- this branch but change NO button content --
+                                -- the per-button mixin handles its own native
+                                -- target reactions -- so tab-target spam skips
+                                -- the full mixin UpdateAction AND the cooldown
+                                -- refresh (measured 0.7ms per tab through this
+                                -- sweep). Only the usable tri-state below can
+                                -- legitimately flip on a target swap (harmful
+                                -- spells need a valid target), and it is
+                                -- memo-gated.
                                 if event ~= "PLAYER_TARGET_CHANGED" then
+                                    if btn.UpdateAction then btn:UpdateAction() end
                                     RefreshCooldownVisuals(btn)
                                 end
                                 local ufd = EFD(btn)
@@ -3838,6 +4137,11 @@ do
             if _profT0 then
                 local k = "ms:" .. event
                 prof[k] = (prof[k] or 0) + (debugprofilestop() - _profT0)
+                -- Walk count alongside the time: event VOLUME swings 2x
+                -- between fights, so ms totals are only comparable divided
+                -- by walks actually run.
+                k = "walks:" .. event
+                prof[k] = (prof[k] or 0) + 1
             end
             -- Settled-detection: after a full (unskipped) heartbeat walk with
             -- nothing live, the walks stop until re-armed by activity.
@@ -3895,9 +4199,9 @@ do
             -- charges, vehicle/override) and SPELL_UPDATE_ICON run the mixin
             -- UpdateAction, and slot repaints can do the same from the C
             -- side. Re-assert any custom keybind color with one deferred
-            -- color-only pass per burst. The cooldown and check-state
-            -- branches never touch text color -- skip those.
-            if event ~= "ACTIONBAR_UPDATE_COOLDOWN" and event ~= "ACTIONBAR_UPDATE_STATE" then
+            -- color-only pass per burst. The cooldown branch never touches
+            -- text color -- skip it.
+            if event ~= "ACTIONBAR_UPDATE_COOLDOWN" then
                 EAB:QueueHotkeyColorReassert()
             end
         end)
@@ -4281,7 +4585,7 @@ end
 local _isApplyingAll = false
 
 local function LayoutBar(key)
-    if InCombatLockdown() then return end
+    if InCombatLockdown() then ns._eabApplyDeferred = true return end
     local info = BAR_LOOKUP[key]
     if not info then return end
     local frame = barFrames[key]
@@ -5606,7 +5910,7 @@ end
 
 
 function EAB:ApplyShapesForBar(barKey)
-    if InCombatLockdown() then return end
+    if InCombatLockdown() then ns._eabApplyDeferred = true return end
     if not self.db then return end
     if self.db.profile.useBlizzardStyle then return end
     local s = self.db.profile.bars[barKey]
@@ -6175,6 +6479,36 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     -- Stance bar always hides empty slots (count is dynamic per class)
     if info.isStance then showEmpty = false end
 
+    -- Respect icon cutoff (hoisted above the grid half so the signature
+    -- below sees every input)
+    local numIcons = s.overrideNumIcons or s.numIcons or info.count
+    if numIcons < 1 then numIcons = info.count end
+    if numIcons > info.count then numIcons = info.count end
+    if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
+    if numIcons < 1 then numIcons = 1 end
+
+    local quickKeybindVisible = ShouldQuickKeybindSurfaceBar(s)
+    local clickable = quickKeybindVisible or not s.clickThrough
+
+    -- Default-config fast path. With Always Show Buttons ON, per-button
+    -- visibility is CONSTANT (visible = true regardless of slot contents),
+    -- so a pass that already asserted this exact configuration has nothing
+    -- content-dependent left to do -- yet form/page flips queue this whole
+    -- pass per tick and paid ~140 secure-attribute reads plus idempotent
+    -- writes every time (the dominant cost of druid form dancing). The
+    -- signature covers every input; a settings change alters it, drag
+    -- restores wipe the stamp table, and combat passes never stamp (their
+    -- skipped writes must heal on the next unlocked pass). Hide-empty bars
+    -- (showEmpty false) always run: their visibility tracks slot contents.
+    local asbSig = (showEmpty and 1 or 0) + (quickKeybindVisible and 2 or 0)
+        + (clickable and 4 or 0) + numIcons * 8
+    local asbSt = ns._asbStamp
+    if not asbSt then asbSt = {}; ns._asbStamp = asbSt end
+    if showEmpty and asbSt[barKey] == asbSig and not _gridState.shown
+        and not InCombatLockdown() then
+        return
+    end
+
     -- Update the SHOWGRID.ALWAYS flag on managed action buttons
     if not InCombatLockdown() and not info.isStance and not info.isPetBar then
         for _, btn in ipairs(buttons) do
@@ -6188,16 +6522,6 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     -- alone. QuickKeybind still needs the normal visibility refresh so its
     -- dedicated KEYBOUND flag can show empty slots on EAB-owned bars.
     if _gridState.shown and not _quickKeybindState.open then return end
-
-    -- Respect icon cutoff
-    local numIcons = s.overrideNumIcons or s.numIcons or info.count
-    if numIcons < 1 then numIcons = info.count end
-    if numIcons > info.count then numIcons = info.count end
-    if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
-    if numIcons < 1 then numIcons = 1 end
-
-    local quickKeybindVisible = ShouldQuickKeybindSurfaceBar(s)
-    local clickable = quickKeybindVisible or not s.clickThrough
     local lastVisible = 0
     for i = 1, numIcons do
         local btn = buttons[i]
@@ -6268,6 +6592,14 @@ function EAB:ApplyAlwaysShowButtons(barKey)
         end
     end
 
+    -- Stamp only fully-applied passes: a combat pass skipped its secure
+    -- writes and must not suppress the healing re-run.
+    if not InCombatLockdown() then
+        asbSt[barKey] = asbSig
+    else
+        asbSt[barKey] = nil
+    end
+
     -- Note: frame size is left as-is from LayoutBar.  The mouseover
     -- OnEnter handler already checks cursor proximity to visible buttons,
     -- so shrinking the frame is unnecessary and can misposition bars
@@ -6285,7 +6617,8 @@ end
 --       buttons' normal OnAttributeChanged -> UpdateAction path in combat.
 -------------------------------------------------------------------------------
 function EAB_VTABLE.MainBarPageSync.SetButtonConfig(btn, withinCutoff, showEmpty)
-    if not btn or InCombatLockdown() then return end
+    if not btn then return end
+    if InCombatLockdown() then ns._eabApplyDeferred = true return end
     btn:SetAttributeNoHandler("eab-withincutoff", withinCutoff and 1 or 0)
     btn:SetAttributeNoHandler("eab-showempty", showEmpty and 1 or 0)
 end
@@ -6296,13 +6629,14 @@ function EAB_VTABLE.MainBarPageSync.Queue()
     state.pending = true
     C_Timer_After(0, function()
         state.pending = false
-        if InCombatLockdown() or not EAB or not EAB.db then return end
+        if InCombatLockdown() then ns._eabApplyDeferred = true return end
+        if not EAB or not EAB.db then return end
         EAB:ApplyAlwaysShowButtons("MainBar")
     end)
 end
 
 function EAB_VTABLE.MainBarPageSync.InstallAll()
-    if InCombatLockdown() then return end
+    if InCombatLockdown() then ns._eabApplyDeferred = true return end
     local buttons = barButtons["MainBar"]
     if not buttons then return end
     for _, btn in ipairs(buttons) do
@@ -6563,6 +6897,9 @@ function EAB:ApplyRangeColoring()
             elseif event == "ACTIONBAR_PAGE_CHANGED" then
                 -- No offset update needed: GetButtonActionSlot reads the bar
                 -- frame's actionpage attribute dynamically for MainBar.
+                -- A page flip remaps MainBar action ids with no per-slot
+                -- SLOT_CHANGED: the filled-slot fast lists must rebuild.
+                ns._cdFilledDirty = true
                 -- Page changed: clear all range state and re-enable for new slots
                 wipe(_range.outOfRange)
                 for _, info in ipairs(BAR_CONFIG) do
@@ -7139,14 +7476,18 @@ function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, supp
             ffd[shownKey] = frame:IsShown()
         end
         ffd[suppressKey] = true
-        if frame:IsShown() and not InCombatLockdown() then
-            frame:Hide()
+        if frame:IsShown() then
+            if not InCombatLockdown() then
+                frame:Hide()
+            else
+                ns._eabApplyDeferred = true
+            end
         end
         return
     end
 
     if ffd[suppressKey] then
-        if InCombatLockdown() then return end -- keep bookkeeping; re-apply after combat
+        if InCombatLockdown() then ns._eabApplyDeferred = true return end -- keep bookkeeping; re-apply after combat
         local wasShown = ffd[shownKey]
         ffd[suppressKey] = nil
         ffd[shownKey] = nil
@@ -7311,7 +7652,7 @@ end
 --  Combat Show/Hide, Runtime Visibility, Click-Through, Housing
 -------------------------------------------------------------------------------
 function EAB:ApplyCombatVisibility()
-    if InCombatLockdown() then return end
+    if InCombatLockdown() then ns._eabApplyDeferred = true return end
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
@@ -7371,6 +7712,10 @@ function EAB:_RefreshSoftTargetGate()
 end
 
 function EAB:RefreshRuntimeVisibility()
+    -- Secure driver/mouse writes below are per-site combat-gated; a run
+    -- during combat leaves those writes unapplied, and the REGEN_ENABLED
+    -- ApplyAll (gated on this flag) is the healer.
+    if InCombatLockdown() then ns._eabApplyDeferred = true end
     self:_RefreshSoftTargetGate()
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
@@ -9625,6 +9970,9 @@ end
 -------------------------------------------------------------------------------
 local function ApplyAll()
     _isApplyingAll = true
+    -- Full applies can create/enable bars and reassign slots without any
+    -- dispatcher content event: retire the filled-slot fast lists.
+    ns._cdFilledDirty = true
 
     -- Restore any strata raised during a drag that wasn't cleaned up
     if _dragState.visible then
@@ -9690,6 +10038,10 @@ local function ApplyAll()
     EAB:RefreshMouseover()
     EAB:RefreshProcGlows()
     EAB:ApplyRangeColoring()
+
+    -- A full apply that ran DURING combat skipped every `not inCombat` step
+    -- above; the REGEN_ENABLED re-run (gated on this flag) converges them.
+    if inCombat then ns._eabApplyDeferred = true end
 
     _isApplyingAll = false
 end
@@ -10405,6 +10757,66 @@ function EAB:OnInitialize()
     -- <GlowRescan>, <AssistRescan>, <SuggestChange>) for 10 seconds, then
     -- prints per-second rates. Zero cost while disarmed (one nil-check per
     -- counted site). Run it, fight for 10s, read the dump.
+    -- Coverage probe for the targeted-push cooldown architecture: how many
+    -- filled action slots resolve to a spell the Blizzard cooldown-viewer
+    -- stream tracks (payload-bearing per-cooldownID events CDM already
+    -- consumes). Covered slots could be event-driven; the uncovered list is
+    -- what a residual safety walk would still own. Zero cost unless run.
+    SLASH_EABCOV1 = "/eabcov"
+    SlashCmdList["EABCOV"] = function()
+        local ids = {}
+        if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+            and C_CooldownViewer.GetCooldownViewerCooldownInfo and Enum.CooldownViewerCategory then
+            for _, cat in pairs(Enum.CooldownViewerCategory) do
+                local ok, set = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat)
+                if ok and type(set) == "table" then
+                    for _, cdID in ipairs(set) do
+                        local ok2, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+                        if ok2 and info and info.spellID then
+                            local function addId(id)
+                                if not id or id <= 0 then return end
+                                ids[id] = true
+                                if C_Spell and C_Spell.GetBaseSpell then
+                                    local base = C_Spell.GetBaseSpell(id)
+                                    if base and base > 0 then ids[base] = true end
+                                end
+                                local ovr = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+                                    and C_SpellBook.FindSpellOverrideByID(id)
+                                if ovr and ovr > 0 then ids[ovr] = true end
+                            end
+                            addId(info.spellID)
+                            if type(info.linkedSpellIDs) == "table" then
+                                for _, lid in ipairs(info.linkedSpellIDs) do addId(lid) end
+                            end
+                            if info.overrideSpellID then addId(info.overrideSpellID) end
+                        end
+                    end
+                end
+            end
+        end
+        local covered, total, unc = 0, 0, {}
+        for slot = 1, 180 do
+            if HasAction(slot) then
+                total = total + 1
+                local sid = C_ActionBar.GetSpell and C_ActionBar.GetSpell(slot)
+                if not sid or sid == 0 then
+                    local t, x = GetActionInfo(slot)
+                    if t == "spell" then sid = x end
+                end
+                local base = sid and C_Spell and C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(sid)
+                if sid and (ids[sid] or (base and ids[base])) then
+                    covered = covered + 1
+                else
+                    local t, x = GetActionInfo(slot)
+                    local name = sid and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(sid)
+                    unc[#unc + 1] = slot .. ":" .. (t or "?") .. ":" .. (name or tostring(x))
+                end
+            end
+        end
+        print(("|cff00c0ffEAB|r viewer coverage: %d/%d filled slots"):format(covered, total))
+        print("uncovered: " .. (next(unc) and table.concat(unc, ", ") or "(none)"))
+    end
+
     SLASH_EABPROF1 = "/eabprof"
     SlashCmdList["EABPROF"] = function()
         if ns._evProf then
@@ -10916,6 +11328,9 @@ function EAB:FinishSetup()
                 end
             end
         elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" then
+            -- Spec/talent swaps refill slots: retire the filled-slot fast
+            -- lists (see the dispatcher's repaint walks).
+            ns._cdFilledDirty = true
             -- Force visibility update on all managed buttons
             if not InCombatLockdown() then
                 for btn in pairs(_controllerButtons) do
@@ -11180,6 +11595,9 @@ function EAB:FinishSetup()
             if _gridState.shown then
                 _gridState.shown = false
                 C_Timer_After(0, function()
+                    -- Drag force-showed grids: the stamps no longer reflect
+                    -- button state, so every bar must re-assert.
+                    if ns._asbStamp then wipe(ns._asbStamp) end
                     for _, info in ipairs(BAR_CONFIG) do
                         self:ApplyAlwaysShowButtons(info.key)
                     end
@@ -11189,8 +11607,18 @@ function EAB:FinishSetup()
     end)
 
     self:RegisterEvent("PLAYER_REGEN_ENABLED", function()
-        -- Re-apply anything that was deferred during combat
-        ApplyAll()
+        -- Re-apply anything that was deferred during combat -- but ONLY if
+        -- something actually deferred. ns._eabApplyDeferred is set by every
+        -- combat-gated apply site whose skipped work this ApplyAll heals
+        -- (LayoutBar, shapes, grid, page sync, suppress/unsuppress, the
+        -- visibility appliers, and ApplyAll itself when run mid-combat).
+        -- The unconditional version ran the full ~30ms bar reskin on EVERY
+        -- combat drop -- a visible hitch between every dungeon pack, paid
+        -- even when combat deferred nothing (verified with combat profiling).
+        if ns._eabApplyDeferred then
+            ns._eabApplyDeferred = nil
+            ApplyAll()
+        end
         -- Restore any strata changes that couldn't be done in combat
         ResetDragState()
         -- Quick Keybind buttons may need reassertion after combat transitions
