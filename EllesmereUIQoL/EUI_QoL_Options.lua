@@ -222,10 +222,11 @@ local function ShowTransformsPopup()
             EllesmereUIDB.hideTransformItems = EllesmereUIDB.hideTransformItems or {}
             local t = EllesmereUIDB.hideTransformItems
             for _, item in ipairs(data.items) do
-                if transformsStaged[item.key] then
-                    t[item.key] = nil       -- included is the default
+                local staged = transformsStaged[item.key] and true or false
+                if staged == (not item.defaultOff) then
+                    t[item.key] = nil       -- matches the per-key default
                 else
-                    t[item.key] = false     -- stored exclusions only
+                    t[item.key] = staged    -- stored deviations only
                 end
             end
             if EllesmereUI._applyHideTransforms then EllesmereUI._applyHideTransforms() end

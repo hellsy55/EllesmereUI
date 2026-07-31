@@ -240,6 +240,21 @@ local function UpdateSide(el, unit, updateInfo, isFullUpdate, forcedFull, defaul
     -- been wiped (occupant change / forced full / custom sort installed).
     local edgeDirty
     local canEdge = stableOrder and el._sortedValid and el.sorted
+    -- Occupant belt for the INCREMENTAL path: updateInfo deltas are only
+    -- meaningful against the creature el.all was built from, and the wipe
+    -- enforcing that lives in the full branch -- which only runs when a full
+    -- pass ARRIVES. If any swap path is ever missed, incrementals would
+    -- trickle the new unit's deltas onto the old unit's cache. A PLAIN guid
+    -- that differs from the cache's promotes the pass to a forced full.
+    -- Secret guids stay incremental: they cannot be compared, swaps are
+    -- covered by the explicit swap-event handlers (see Adopt), and promoting
+    -- every combat event would forfeit the content-split win.
+    if not isFullUpdate then
+        local g = UnitGUID(unit)
+        if g and not (issecretvalue and issecretvalue(g)) and g ~= el._allGuid then
+            isFullUpdate, forcedFull = true, true
+        end
+    end
     if isFullUpdate then
         -- Full pass with membership diff. The eventless poll (ToT / focus
         -- target) dispatches here every tick with no updateInfo, almost
@@ -611,6 +626,30 @@ function ns.EUIAuras_Adopt(frame)
 
     frame:RegisterEvent('UNIT_AURA', DriveAuras)
     hooksecurefunc(frame, 'UpdateAllElements', FullUpdate)
+
+    -- The hook alone does NOT cover unit swaps. oUF wires swap repaints
+    -- (units.lua) by registering the UpdateAllElements FUNCTION VALUE at
+    -- spawn time; hooksecurefunc rawsets a wrapper onto the frame AFTERWARDS,
+    -- so those registrations keep dispatching the captured ORIGINAL and the
+    -- wrapper never runs for them. Result: a target swap repainted every
+    -- element except auras, leaving the previous unit's icons on the new
+    -- unit. (Eventless units were never affected: their poll colon-calls
+    -- frame:UpdateAllElements, which resolves to the wrapper.) Register our
+    -- own handler beside oUF's for the same swap events it wires per unit --
+    -- its event system appends multiple function handlers per event.
+    local unit = frame.unit
+    if unit == 'target' then
+        frame:RegisterEvent('PLAYER_TARGET_CHANGED', FullUpdate, true)
+    elseif unit == 'focus' then
+        frame:RegisterEvent('PLAYER_FOCUS_CHANGED', FullUpdate, true)
+    elseif unit == 'mouseover' then
+        frame:RegisterEvent('UPDATE_MOUSEOVER_UNIT', FullUpdate, true)
+    elseif unit and unit:match('^boss%d') then
+        frame:RegisterEvent('INSTANCE_ENCOUNTER_ENGAGE_UNIT', FullUpdate, true)
+        frame:RegisterEvent('UNIT_TARGETABLE_CHANGED', FullUpdate)
+    elseif unit and unit:match('^arena%d') then
+        frame:RegisterEvent('ARENA_OPPONENT_UPDATE', FullUpdate, true)
+    end
 
     FullUpdate(frame)
 end
