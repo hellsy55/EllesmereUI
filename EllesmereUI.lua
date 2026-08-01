@@ -5994,6 +5994,46 @@ local function GetPopupScale()
 end
 EllesmereUI.GetPopupScale = GetPopupScale
 
+-- Dialog popups sit on a dimmer that GetPopupScale has ALREADY scaled, and
+-- used to call SetScale(ppScale) on themselves as well. Being children of that
+-- dimmer they rendered at ppScale SQUARED. Since baseScale is
+-- 768/(physH * uiScale), that works out to panelScale^2 * baseScale physical
+-- pixels per unit instead of panelScale, so popups were oversized on every
+-- display and, with uiScale in the denominator, LOWERING your UI scale made
+-- popups BIGGER. Dialogs now take their scale ONCE, from the dimmer, and set
+-- only their own relative bump (1, or 1.15 for the intro popups), which makes
+-- px/unit == panelScale, exactly matching the options panel.
+--
+-- Careful with the units, it is easy to get wrong: GetEffectiveScale() is NOT
+-- physical pixels per unit. WoW maps the UI through a 768-tall virtual space,
+-- so px/unit = GetEffectiveScale() * physH/768. Work that through and baseScale
+-- is exactly 1 at the pixel-perfect uiScale (768/physH) on every resolution,
+-- which is what makes the corrected formula collapse to panelScale.
+--
+-- NOT folded into GetPopupScale: the popups registered in _popupFrames, the two
+-- raid-frame manager popups and the nameplate filter panel hang off UNSCALED
+-- parents and were never doubled, so a change there would inflate them.
+EllesmereUI.POPUP_DENSITY = 1  -- kept as a named hook; dialogs pass 1 or 1.15
+
+-- Hard ceiling for modal setup popups. They sit on a full-screen dimmer that
+-- eats every click behind it, so one that overflows the display does not just
+-- look wrong: its buttons land off-screen and there is no way back to the game
+-- menu. A 4K tester was left unable to log out.
+--
+-- Measured, not derived: GetEffectiveScale reports what the frame will really
+-- render at, including however many parent scales are stacked above it, so this
+-- holds regardless of what the scale math upstream does. Only ever shrinks.
+function EllesmereUI.ClampPopupToScreen(popup, w, h)
+    if not popup or not w or not h or w <= 0 or h <= 0 then return end
+    local es = popup:GetEffectiveScale()
+    if type(es) ~= "number" or es <= 0 then return end
+    local pw, ph = GetPhysicalScreenSize()
+    if type(pw) ~= "number" or type(ph) ~= "number" or pw <= 0 or ph <= 0 then return end
+    local fit = math.min((pw * 0.92) / (w * es), (ph * 0.92) / (h * es))
+    if fit >= 1 then return end
+    popup:SetScale(popup:GetScale() * fit)
+end
+
 local function RefreshPopupScales()
     local s = GetPopupScale()
     for _, entry in ipairs(_popupFrames) do
