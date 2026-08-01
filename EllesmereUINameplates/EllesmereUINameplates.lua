@@ -9343,11 +9343,23 @@ function ns._UpdateMouseover()
     end
     ns._EnsureMouseoverTicker()
 end
+-- Baseline lift for friendly plates, applied to BOTH distance settings:
+-- Name Distance (name-only) and the Distance slider in the friendly plate
+-- cog (full plate). Name-only needs it because the friendly module collapses
+-- Blizzard's two-point name anchor onto the UnitFrame's centre (so long
+-- names stop truncating and the guild line has room), landing the name this
+-- far below where Blizzard's own anchor put it; the full plate carries the
+-- same lift so the two modes sit at the same height and switching between
+-- them does not jump. Both settings keep their stored values and their
+-- meaning of "relative to where the plate normally sits".
+-- On ns, not a new file local: this file is at the Lua 5.1 200-local cap.
+ns.FRIENDLY_Y_BASE = 26
+
 -- Refresh Y-offset on all visible friendly name-only plates
 function ns.RefreshFriendlyNameOnlyOffset()
     local db = p or defaults
     local nameOnly = (db.friendlyNameOnly ~= false)
-    local yOff = nameOnly and (db.friendlyNameOnlyYOffset or 0) or 0
+    local yOff = nameOnly and ((db.friendlyNameOnlyYOffset or 0) + ns.FRIENDLY_Y_BASE) or 0
     for unit, nameplate in pairs(pendingUnits) do
         if nameplate.UnitFrame then
             local uf = nameplate.UnitFrame
@@ -9403,8 +9415,9 @@ manager:SetScript("OnEvent", function(self, event, unit)
                         RestoreFromOffscreen(uf.RaidTargetFrame)
                     end
                 end
-                -- Apply Y-offset
-                local yOff = db.friendlyNameOnlyYOffset or 0
+                -- Apply Y-offset (+ the name-only baseline lift; see
+                -- ns.FRIENDLY_Y_BASE)
+                local yOff = (db.friendlyNameOnlyYOffset or 0) + ns.FRIENDLY_Y_BASE
                 if yOff ~= 0 and nameplate.UnitFrame then
                     nameplate.UnitFrame:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, yOff)
                     nameplate.UnitFrame:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, yOff)

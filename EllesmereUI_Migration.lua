@@ -4404,7 +4404,15 @@ EllesmereUI.RegisterMigration({
         if not db then return end
         local _, physH = GetPhysicalScreenSize()
         if type(physH) ~= "number" or physH <= 0 then return end
+        -- Snap BEFORE the reset test, not after. The dropdown only offers fixed
+        -- steps, so an off-menu seed (1600p lands on 1.111) leaves the control
+        -- reading "Normal (100%)" while the panel renders larger, and the user
+        -- is snapped the moment they open it. Testing the SNAPPED value also
+        -- keeps the reset honest: a display close enough to the reference that
+        -- it rounds back to 1.00 has nothing to correct, so it must not fire
+        -- the overwrite branch and clobber a genuine preference.
         local seeded = math.max(1, math.min(physH / 1440, 2))
+        if EllesmereUI.SnapPanelScale then seeded = EllesmereUI.SnapPanelScale(seeded) end
 
         if seeded > 1 then
             -- Above the reference: one-time reset (see above).

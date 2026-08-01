@@ -5994,6 +5994,43 @@ local function GetPopupScale()
 end
 EllesmereUI.GetPopupScale = GetPopupScale
 
+-- Reference density for dialog popups: 1440p at 0.64 UI scale, which is the
+-- look the suite is designed against. There the pre-fix popups rendered at
+-- 768/(1440*0.64) = 0.8333 physical pixels per unit, and that is the size to
+-- hold. Removing the squared scale alone would have normalized every display
+-- to 1.0 px/unit instead -- correct in the abstract, but 20% larger than the
+-- reference look, which is what it was reported as.
+--
+-- Applying it as a CONSTANT is the point: it pins the reference size on every
+-- display while still dropping both defects the squared scale carried --
+-- popup size no longer moves INVERSELY with UI scale, and no longer grows
+-- QUADRATICALLY with the panel-scale dropdown. px/unit is now
+-- 0.8333 * panelScale everywhere, full stop.
+--
+-- THE INVARIANT this serves: every popup occupies the same fraction of the
+-- screen that it does at 1440p / 0.64. Screen-height fraction works out to
+-- (units * POPUP_REF_DENSITY * panelScale) / physH, so the invariant holds
+-- exactly when panelScale == physH/1440 -- which is what the Startup seed and
+-- the panel_scale_highdpi_reset_v3 migration set it to. Do NOT "fix" this
+-- constant to 1.0: that normalizes every display to 1 px/unit, which is 20%
+-- larger than the reference and was reported as such.
+--
+-- Known and deliberate deviation: the seed is FLOORED at 1, so below 1440p
+-- the fraction runs larger than the reference (1080p by 33%). Enforcing the
+-- invariant there would seed 0.75 and shrink the options panel a quarter for
+-- the largest resolution segment. The floor is the accepted trade.
+-- On the namespace, NOT a file local: this file is at the Lua 5.1 200-local
+-- cap, and one more local here is a load-time error.
+EllesmereUI.POPUP_REF_DENSITY = 768 / (1440 * 0.64)
+
+-- Scale a dialog sets on ITSELF, on top of the dimmer that already carries
+-- GetPopupScale(). mult is the dialog's own relative bump (1, or 1.15 for the
+-- intro popups). Always route through this so the reference density lives in
+-- exactly one place and the dialogs can never drift apart again.
+function EllesmereUI.PopupBump(mult)
+    return (mult or 1) * EllesmereUI.POPUP_REF_DENSITY
+end
+
 -- Dialog popups sit on a dimmer that GetPopupScale has ALREADY scaled, and
 -- used to call SetScale(ppScale) on themselves as well. Being children of that
 -- dimmer they rendered at ppScale SQUARED. Since baseScale is
@@ -6010,10 +6047,12 @@ EllesmereUI.GetPopupScale = GetPopupScale
 -- is exactly 1 at the pixel-perfect uiScale (768/physH) on every resolution,
 -- which is what makes the corrected formula collapse to panelScale.
 --
--- NOT folded into GetPopupScale: the popups registered in _popupFrames, the two
--- raid-frame manager popups and the nameplate filter panel hang off UNSCALED
--- parents and were never doubled, so a change there would inflate them.
-EllesmereUI.POPUP_DENSITY = 1  -- kept as a named hook; dialogs pass 1 or 1.15
+-- _popupFrames entries come in TWO shapes, and which one a popup registers is
+-- exactly what decides where its scale belongs (see RefreshPopupScales):
+--   { popup = p }             -- unscaled parent, so the popup carries the scale
+--   { popup = p, dimmer = d } -- scaled dimmer, so the popup carries only its bump
+-- The raid-frame manager popups and the nameplate filter panel are the former
+-- and were never doubled, which is why GetPopupScale itself is unchanged.
 
 -- Hard ceiling for modal setup popups. They sit on a full-screen dimmer that
 -- eats every click behind it, so one that overflows the display does not just
@@ -6034,10 +6073,21 @@ function EllesmereUI.ClampPopupToScreen(popup, w, h)
     popup:SetScale(popup:GetScale() * fit)
 end
 
+-- Re-apply the scale to the frame that actually OWNS it. A popup registered
+-- with a dimmer takes its scale from that dimmer and carries only its own
+-- relative bump, so writing GetPopupScale() onto the popup here would restore
+-- the squared double-scale on the first slider change -- silently undoing the
+-- fix for exactly the popups that were built to avoid it. Scaling the dimmer
+-- also fixes the older half of the same bug: the dimmer used to keep its
+-- creation-time scale forever while the popup rescaled underneath it.
 local function RefreshPopupScales()
     local s = GetPopupScale()
     for _, entry in ipairs(_popupFrames) do
-        if entry.popup then entry.popup:SetScale(s) end
+        if entry.dimmer then
+            entry.dimmer:SetScale(s)
+        elseif entry.popup then
+            entry.popup:SetScale(s)
+        end
     end
 end
 
@@ -11219,7 +11269,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.7.1"
+EllesmereUI.VERSION = "8.7.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

@@ -219,7 +219,7 @@ do
 
             -- Popup frame
             local popup = CreateFrame("Frame", "EUISpecAssignPopup", dimmer)
-            popup:SetScale(1)
+            popup:SetScale(EllesmereUI.PopupBump(1))
             popup:SetFrameStrata("FULLSCREEN_DIALOG")
             popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
 

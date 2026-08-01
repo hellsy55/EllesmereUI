@@ -3044,7 +3044,43 @@ end
 --  which happens when SaveLayouts triggers a layout reapply from addon code.
 -------------------------------------------------------------------------------
 local _editModePolicyApplied = false
-local _suppressPolicyPopup = false
+
+-- Shown when our automatic save did NOT take (see the loop breaker below).
+-- Dismissable, and deliberately repeats every login until the layout is
+-- actually correct: the settings still need fixing, so going quiet would just
+-- leave CDM misbehaving with no explanation.
+--
+-- CDM has to be OFF while they do it. This addon hides Blizzard's cooldown
+-- viewers, and a hidden system cannot be selected in Edit Mode -- so the
+-- instructions would be impossible to follow with CDM still loaded. The
+-- confirm button does that step for them, using the same disable+reload idiom
+-- as the incompatible-addon warning at the top of this file. Step 6 has to
+-- live in the text because once CDM is disabled nothing of ours runs to
+-- remind them to turn it back on.
+local function ShowManualEditModeFixPopup()
+    C_Timer.After(0, function()
+        if not (EllesmereUI and EllesmereUI.ShowConfirmPopup) then return end
+        EllesmereUI:ShowConfirmPopup({
+            title = "Edit Mode Needs a Manual Fix",
+            message = "EllesmereUI could not save this change to your Edit Mode layout, so it has to be set by hand. The Cooldown Manager has to be off while you do it, because it hides Blizzard's cooldown viewers and a hidden viewer cannot be selected in Edit Mode.\n\n"
+                .. "1. Disable EllesmereUI Cooldown Manager (button below).\n"
+                .. "2. Open Edit Mode from the Game Menu.\n"
+                .. "3. Select each Cooldown Manager viewer and set Visibility to Always.\n"
+                .. "4. On Tracked Buffs and Tracked Bars, tick Hide When Inactive.\n"
+                .. "5. Save the layout and leave Edit Mode.\n"
+                .. "6. Re-enable EllesmereUI Cooldown Manager.",
+            disclaimer = "This will keep appearing each login until the layout is correct.",
+            confirmText = "Disable CDM & Reload",
+            cancelText = "Not Now",
+            onConfirm = function()
+                local disable = C_AddOns and C_AddOns.DisableAddOn or DisableAddOn
+                if disable then disable("EllesmereUICooldownManager") end
+                ReloadUI()
+            end,
+        })
+    end)
+end
+
 local function EnforceCooldownViewerEditModeSettings()
     if _editModePolicyApplied then return end
     if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts
@@ -3139,15 +3175,40 @@ local function EnforceCooldownViewerEditModeSettings()
     end
 
     _editModePolicyApplied = true
-    if not changed then return end
+    if not changed then
+        -- Settled: the layout already carries what we want, so whatever we
+        -- saved previously DID stick. Re-arm the loop breaker below so a
+        -- genuine future change (new layout, manual edit) still prompts.
+        if EllesmereUIDB then EllesmereUIDB.cdmEditModeSavePending = nil end
+        return
+    end
 
     -- Save the corrected layout. Blizzard won't visually apply this until
     -- the next login/reload, so we force a reload via popup.
     C_EditMode.SaveLayouts(layoutInfo)
 
-    -- Show a forced (non-dismissable) reload popup (suppressed when called
-    -- from ReapplyEditModePolicy -- caller shows its own dismissable prompt)
-    if _suppressPolicyPopup then return end
+    -- LOOP BREAKER. Forcing a reload only makes sense if the save actually
+    -- persisted. If we already saved this exact correction in a PREVIOUS
+    -- session and the delta is STILL here, the save did not stick, and
+    -- re-offering the same non-dismissable reload just rebuilds it every
+    -- login -- reported in the wild as being unable to get past the popup.
+    -- So the forced reload is offered at most once per unresolved
+    -- correction; after that we hand the user the manual instructions
+    -- instead, every login, until the layout actually comes back clean.
+    -- The flag clears itself in the not-changed branch above, so this costs
+    -- a working user nothing: they save, reload, come back clean, re-armed.
+    --
+    -- This is a backstop, NOT the cure -- it stops the loop without knowing
+    -- why the save failed. See the preset-merge note on the SaveLayouts
+    -- payload above if the underlying save is ever fixed.
+    local savedLastSession = EllesmereUIDB and EllesmereUIDB.cdmEditModeSavePending
+    if EllesmereUIDB then EllesmereUIDB.cdmEditModeSavePending = true end
+    if savedLastSession then
+        ShowManualEditModeFixPopup()
+        return
+    end
+
+    -- Show a forced (non-dismissable) reload popup.
     -- First install: the Welcome picker is pending/open and ALWAYS ends in
     -- its own forced ReloadUI, which applies the layout we just saved. A
     -- second forced popup here would stomp the picker and wreck the very
@@ -3184,16 +3245,6 @@ local function EnforceCooldownViewerEditModeSettings()
             end
         end
     end)
-end
-
---- Re-apply EditMode CDM settings (called when showInactiveBuffIcons changes).
---- Resets the one-shot guard so the enforce function re-evaluates the layout.
---- Suppresses the built-in reload popup (caller shows its own).
-function ns.ReapplyEditModePolicy()
-    _editModePolicyApplied = false
-    _suppressPolicyPopup = true
-    EnforceCooldownViewerEditModeSettings()
-    _suppressPolicyPopup = false
 end
 
 -- One-time per-profile migration: the old GLOBAL Always Show Buffs settings

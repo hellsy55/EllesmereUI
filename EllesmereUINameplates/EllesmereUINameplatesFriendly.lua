@@ -164,19 +164,17 @@ local function GetFriendlyNameSize()
 end
 
 -------------------------------------------------------------------------------
---  Below Name sub text (player title / guild name)
---  One shared setting drives both friendly modes: full plates render the
---  lines on the pooled plate (subText1/subText2, between the name and the
---  bar), name-only mode uses a pooled overlay hung under Blizzard's name
---  FontString. Implementations live after the NPC overlay section; this is
---  the shared state plus forward declarations.
+--  Subtitle Text (player title / guild name)
+--  One shared setting drives both friendly modes. The TITLE is inline with
+--  the name (one string via UnitPVPName): full plates set it on their own
+--  name FontString, name-only mode writes Blizzard's. The GUILD is a line
+--  below: full plates use subText1 (between name and bar), name-only mode a
+--  pooled overlay hung under Blizzard's name FontString. Implementations
+--  live after the NPC overlay section; this is the shared state plus
+--  forward declarations.
 -------------------------------------------------------------------------------
-local playerSubOverlays = {}   -- nameplate -> overlay frame (name-only mode)
-local playerSubPool = {}       -- recycled overlay frames
-local UpdatePlayerSubText      -- forward declarations, defined below
-local ShowPlayerSubText
-local HidePlayerSubText
-local HideAllPlayerSubTexts
+-- Name-only mode needs no widgets of its own: the title AND the guild line
+-- both ride Blizzard's name FontString (see the composition section below).
 
 -- "none" | "title" | "guild" | "both"
 local function GetBelowNameMode()
@@ -191,7 +189,7 @@ local function GetSubTextSize()
     return (fp and fp.friendlyBelowNameSize) or 12
 end
 
--- Shared font object for ALL subtitle texts (full-plate subText1/2 and the
+-- Shared font object for the guild sub texts (full-plate subText1 and the
 -- name-only overlay lines). Restyling this one object live-updates every
 -- attached FontString engine-side -- the exact mechanism the name-only name
 -- size uses via SystemFont_NamePlate -- so size / font / slug changes never
@@ -246,9 +244,78 @@ local function RestoreFriendlyFontOverride()
 end
 
 -- Name-only fonts are applied globally via the SystemFont_NamePlate override
--- above; hookedNameFonts tracks the per-FontString SetWidth hooks installed in
--- the OnNamePlateAdded hook below (long-name truncation fix).
-local hookedNameFonts = {}  -- nameText -> true (permanent hooks, applied once)
+-- above.
+--
+-- Friendly name-only names must NEVER truncate. Blizzard anchors that name
+-- FontString on BOTH its left and right edges, and a two-point anchor FIXES
+-- the width -- SetWidth is a no-op against it (probe: pts=2, w=128 while the
+-- string measured 274). So the fix collapses it to a single CENTER anchor
+-- and drops any width box, letting it auto-size to the text.
+--
+-- Perf shape: no polling. The state IS the live point count, so the delta
+-- probe (GetNumPoints, cheap and allowed inside the restricted 12.1 plate
+-- tree) runs first and every already-collapsed FontString early-outs -- the
+-- steady state costs one C call. Hooks are permanent but installed once per
+-- pooled FontString (bounded, ~plate count) and their handlers are
+-- file-scope, so no closure is allocated per plate. Blizzard re-anchoring is
+-- self-correcting: its first SetPoint leaves one point (skipped), the second
+-- trips the probe and we collapse again.
+-- SECRET-VALUE RULE for this block: inside the nameplate tree GetWidth (and
+-- GetPoint) return SECRET numbers, and ANY comparison on one throws. So the
+-- only geometry read here is GetNumPoints -- a plain count that stays
+-- readable -- and nothing else is measured, compared, or carried over. The
+-- writes (ClearAllPoints / SetPoint / SetWidth) are display sinks and are
+-- always safe.
+local hookedNameFonts = {}  -- nameFS -> true (permanent hooks, applied once)
+local _nameFixGuard = false
+local ReanchorAllPlayerNames   -- forward decl (defined with the sweep helpers)
+
+local function FixNameSizing(nameFS)
+    if _nameFixGuard then return end
+    _nameFixGuard = true
+    local okp, pts = pcall(nameFS.GetNumPoints, nameFS)
+    if okp and (pts or 0) >= 2 then
+        -- Collapse the pair onto the parent's centre. No offset is read from
+        -- the old points, so a plate whose name sat off-centre vertically is
+        -- re-centred. Only runs while actually two-point, so this is a
+        -- one-shot.
+        local parent = nameFS:GetParent()
+        if parent then
+            nameFS:ClearAllPoints()
+            nameFS:SetPoint("CENTER", parent, "CENTER", 0, 0)
+        end
+    end
+    -- 0 on BOTH axes = auto-size to the text. Height matters as much as
+    -- width here: Blizzard sizes this FontString for a single line, and a
+    -- fixed height leaves the guild's second line nowhere to draw -- the
+    -- composed string is present and correct on the widget but only its
+    -- first line renders.
+    nameFS:SetWidth(0)
+    nameFS:SetHeight(0)
+    _nameFixGuard = false
+end
+
+-- Width/size hook body: no reads and no comparisons at all (the incoming
+-- values can themselves be secret), just an idempotent re-clear on both
+-- axes. Deliberately does NOT touch anchors -- re-anchoring from inside
+-- Blizzard's own anchor pass re-enters UpdateAnchors.
+local function _OnNameWidthChanged(self)
+    if _nameFixGuard then return end
+    if not IsNameOnlyMode() then return end
+    _nameFixGuard = true
+    self:SetWidth(0)
+    self:SetHeight(0)
+    _nameFixGuard = false
+end
+
+local function EnsureNameUnconstrained(nameFS)
+    if not nameFS then return end
+    FixNameSizing(nameFS)
+    if hookedNameFonts[nameFS] then return end
+    hookedNameFonts[nameFS] = true
+    hooksecurefunc(nameFS, "SetWidth", _OnNameWidthChanged)
+    if nameFS.SetSize then hooksecurefunc(nameFS, "SetSize", _OnNameWidthChanged) end
+end
 
 local function ApplyFontToNameplate(nameplate)
     -- No-op: font is applied globally via the SystemFont_NamePlate override.
@@ -261,6 +328,9 @@ ns.ApplyFontToNameplate = ApplyFontToNameplate
 function ns.RefreshFriendlyNameSize()
     if IsNameOnlyMode() then
         ApplyFriendlyFontOverride()
+        -- The guild line hangs half a name-height below the plate centre, so
+        -- a new name size moves it (ns lookup: defined later in this file).
+        if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
     end
 end
 
@@ -278,7 +348,13 @@ local function ScheduleNameSizeReapply()
     _nameSizeReapplyPending = true
     C_Timer.After(0, function()
         _nameSizeReapplyPending = false
-        if IsNameOnlyMode() then ApplyFriendlyFontOverride() end
+        if not IsNameOnlyMode() then return end
+        ApplyFriendlyFontOverride()
+        -- Blizzard's own ApplyFrameOptions pass re-anchors the name (that is
+        -- what fires this), so re-collapse it here rather than from a
+        -- SetPoint hook, which would re-enter UpdateAnchors mid-pass. Rides
+        -- the existing debounce, so a burst costs one sweep.
+        if ReanchorAllPlayerNames then ReanchorAllPlayerNames() end
     end)
 end
 
@@ -466,166 +542,183 @@ local function GetSubTextColor(unit)
     return SUB_TEXT_R, SUB_TEXT_G, SUB_TEXT_B
 end
 
--- Extract just the title words from UnitPVPName ("Sergeant Bob" / "Bob the
--- Patient" -> "Sergeant" / "the Patient"). Secret strings cannot be compared
--- or gsub'd, so any secret input means no title line (guard comes first).
-local function GetPlayerTitle(unit)
+local function ModeHasTitle(mode) return mode == "title" or mode == "both" end
+local function ModeHasGuild(mode) return mode == "guild" or mode == "both" end
+
+
+-- The player's name WITH their title as one string ("Sergeant Bob" / "Bob
+-- the Patient") -- UnitPVPName returns exactly that, so the title renders
+-- inline with the name instead of on its own line. Returns nil when there
+-- is no titled form to use (no API, no name yet, or a secret value: secrets
+-- cannot be compared, and the plain-name fallback covers them).
+local function GetTitledName(unit)
     if not UnitPVPName then return nil end
-    local name = UnitName(unit)
     local titled = UnitPVPName(unit)
-    if not name or not titled then return nil end
-    if issecretvalue and (issecretvalue(name) or issecretvalue(titled)) then return nil end
-    if titled == name then return nil end
-    local title = titled:gsub(name, "", 1):gsub("^[%s,]+", ""):gsub("[%s,]+$", "")
-    if title == "" then return nil end
-    return title
+    if not titled then return nil end
+    if issecretvalue and issecretvalue(titled) then return nil end
+    return titled
 end
 
--- Fill the two sub-text lines for a unit per the Below Name mode and return
--- how many lines got content. The guild name can be a secret string: it is
--- only truth-tested and rendered through SetFormattedText (display sinks
--- accept secrets), never concatenated or compared.
-local function ApplySubTextLines(fs1, fs2, unit)
-    local mode = GetBelowNameMode()
-    local title, guild
-    if mode == "title" or mode == "both" then
-        title = GetPlayerTitle(unit)
-    end
-    if mode == "guild" or mode == "both" then
+-- Fill the sub text line (guild only -- the title rides the name itself)
+-- and return how many lines got content. The guild name can be a secret
+-- string: it is only truth-tested and rendered through SetFormattedText
+-- (display sinks accept secrets), never concatenated or compared.
+local function ApplySubText(fs, unit)
+    local guild
+    if ModeHasGuild(GetBelowNameMode()) then
         guild = GetGuildInfo and GetGuildInfo(unit)
     end
+    if not guild then
+        fs:SetText("")
+        return 0
+    end
     -- "<GuildName>" by default; the Subtitle Text cog can drop the brackets.
-    -- Either way the guild renders through a format string (secret-safe).
     local fp = FP()
-    local guildFmt = (not fp or fp.friendlyBelowNameGuildBrackets ~= false) and "<%s>" or "%s"
-    local lines = 0
-    if title then
-        lines = lines + 1
-        fs1:SetText(title)
-        if guild then
-            lines = lines + 1
-            fs2:SetFormattedText(guildFmt, guild)
-        else
-            fs2:SetText("")
-        end
-    elseif guild then
-        lines = lines + 1
-        fs1:SetFormattedText(guildFmt, guild)
-        fs2:SetText("")
-    else
-        fs1:SetText("")
-        fs2:SetText("")
+    fs:SetFormattedText((not fp or fp.friendlyBelowNameGuildBrackets ~= false) and "<%s>" or "%s", guild)
+    local r, g, b = GetSubTextColor(unit)
+    fs:SetTextColor(r, g, b)
+    return 1
+end
+
+-------------------------------------------------------------------------------
+--  Name-only mode: EVERYTHING rides Blizzard's own name FontString
+--
+--  Blizzard renders the name here, so the title is folded in inline (via
+--  UnitPVPName) and the guild is appended as a SECOND LINE of that same
+--  string. One region means the guild can never drift from the name: there
+--  is no second widget to position, so there is nothing to fall out of sync
+--  on a moving (mounted) plate. A separate overlay frame was tried first and
+--  jittered ~1px per frame against the name no matter how it was anchored or
+--  pixel-snapped; this removes the failure mode instead of compensating.
+--
+--  Cost of the approach: one FontString means ONE font size, so the guild
+--  line renders at the name's size here (its colour still applies, via an
+--  inline colour escape). The Guild Text Size setting governs full-plate
+--  mode, which draws its own separate FontString.
+--
+--  The unit token and last-written text for a Blizzard name FontString ride
+--  external weak-keyed tables -- never custom keys on the Blizzard widget.
+-------------------------------------------------------------------------------
+local nameFSUnits = setmetatable({}, { __mode = "k" })   -- nameFS -> unit token
+local nameFSText  = setmetatable({}, { __mode = "k" })   -- nameFS -> { name=, guild= }
+local hookedNameText = {}   -- nameFS -> true (permanent hooks, applied once)
+local _titledNameGuard = false
+
+-- Compose and write the full name-only string: name (+ inline title) plus an
+-- optional second line for the guild. Also the restore path -- with the
+-- Subtitle Text setting off this resolves to the plain single-line name.
+local function UpdateNameOnlyText(nameFS)
+    local unit = nameFSUnits[nameFS]
+    if not unit or not UnitExists(unit) then return end
+    -- Nameplate tokens are recycled: a plate reused for an enemy keeps our
+    -- hook and a stale friendly token, so never write on a hostile unit
+    -- (Blizzard's own name write is already correct there).
+    if UnitCanAttack("player", unit) then return end
+    local mode = GetBelowNameMode()
+    local isPlayer = UnitIsPlayer(unit)
+
+    local want
+    if ModeHasTitle(mode) and isPlayer then want = GetTitledName(unit) end
+    if not want then want = UnitName(unit) end
+    if not want or (issecretvalue and issecretvalue(want)) then return end
+
+    local guild
+    if ModeHasGuild(mode) and isPlayer then
+        guild = GetGuildInfo and GetGuildInfo(unit)
     end
-    if lines > 0 then
+
+    -- Dedupe key. A secret guild cannot be compared, so it collapses to a
+    -- plain "present" marker: a guild RENAME then rides the next respawn
+    -- rather than the next hook fire, which is a fair trade for never
+    -- touching a secret with ==.
+    local guildKey = guild
+    if guildKey ~= nil and issecretvalue and issecretvalue(guildKey) then guildKey = true end
+    local st = nameFSText[nameFS]
+    if st and st.name == want and st.guild == guildKey then return end
+    if not st then st = {}; nameFSText[nameFS] = st end
+    st.name, st.guild = want, guildKey
+
+    _titledNameGuard = true
+    if guild then
+        -- Second line via an explicit newline. The guild is only ever a
+        -- SetFormattedText argument (display sinks accept secrets); the
+        -- colour escape and brackets are literals built from our own values.
         local r, g, b = GetSubTextColor(unit)
-        fs1:SetTextColor(r, g, b)
-        fs2:SetTextColor(r, g, b)
+        local fp = FP()
+        local body = (not fp or fp.friendlyBelowNameGuildBrackets ~= false) and "<%s>" or "%s"
+        -- Word wrap MUST be on for the explicit newline to break a line --
+        -- Blizzard leaves this FontString non-wrapping, which silently drops
+        -- everything after the "\n". Nothing wraps by accident: the width is
+        -- 0 (auto-size), so there is no boundary to wrap against.
+        nameFS:SetWordWrap(true)
+        nameFS:SetMaxLines(2)
+        nameFS:SetFormattedText("%s\n" .. string.format("|cff%02x%02x%02x",
+            math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
+            .. body .. "|r", want, guild)
+    else
+        nameFS:SetMaxLines(1)
+        nameFS:SetText(want)
     end
-    return lines
+    _titledNameGuard = false
 end
 
--------------------------------------------------------------------------------
---  Name-only player sub text overlay
---  Blizzard renders the name itself in name-only mode; the extra line(s)
---  hang from its name FontString via a pooled overlay frame. Anchor-only
---  layout: the nameplate subtree cannot be measured on 12.1.
--------------------------------------------------------------------------------
-local function AcquirePlayerSubOverlay()
-    local overlay = table.remove(playerSubPool)
-    if overlay then return overlay end
-    overlay = CreateFrame("Frame", nil, UIParent)
-    overlay:SetSize(1, 1)
-    overlay.line1 = overlay:CreateFontString(nil, "OVERLAY")
-    overlay.line1:SetFontObject(subtitleFont)
-    overlay.line1:SetPoint("TOP", overlay, "TOP", 0, 0)
-    overlay.line1:SetTextColor(SUB_TEXT_R, SUB_TEXT_G, SUB_TEXT_B)
-    overlay.line1:SetWordWrap(false)
-    overlay.line1:SetMaxLines(1)
-    if overlay.line1.SetSnapToPixelGrid then overlay.line1:SetSnapToPixelGrid(false) end
-    if overlay.line1.SetTexelSnappingBias then overlay.line1:SetTexelSnappingBias(0) end
-    overlay.line2 = overlay:CreateFontString(nil, "OVERLAY")
-    overlay.line2:SetFontObject(subtitleFont)
-    overlay.line2:SetPoint("TOP", overlay.line1, "BOTTOM", 0, -1)
-    overlay.line2:SetTextColor(SUB_TEXT_R, SUB_TEXT_G, SUB_TEXT_B)
-    overlay.line2:SetWordWrap(false)
-    overlay.line2:SetMaxLines(1)
-    if overlay.line2.SetSnapToPixelGrid then overlay.line2:SetSnapToPixelGrid(false) end
-    if overlay.line2.SetTexelSnappingBias then overlay.line2:SetTexelSnappingBias(0) end
-    overlay:SetScript("OnEvent", function(self)
-        if self.unit then UpdatePlayerSubText(self) end
-    end)
-    return overlay
-end
-
-function UpdatePlayerSubText(overlay)
-    local unit = overlay.unit
-    if not unit then return end
-    -- Content + color only: the font (file / size / outline / slug) lives on
-    -- the shared subtitleFont object and propagates engine-side. The text is
-    -- re-applied every call on purpose -- it is the recovery path for
-    -- guild/title data that arrives after the plate first showed.
-    ApplySubTextLines(overlay.line1, overlay.line2, unit)
-end
-
-function ShowPlayerSubText(nameplate, unit)
-    local overlay = playerSubOverlays[nameplate]
-    if not overlay then
-        local uf = nameplate.UnitFrame
-        local nameFS = uf and uf.name
-        if not nameFS then return end
-        overlay = AcquirePlayerSubOverlay()
-        overlay:SetParent(nameplate)
-        overlay:ClearAllPoints()
-        overlay:SetPoint("TOP", nameFS, "BOTTOM", 0, -1)
-        overlay:SetFrameLevel(nameplate:GetFrameLevel() + 5)
-        overlay:Show()
-        playerSubOverlays[nameplate] = overlay
+-- Register a plate's name FontString and (once) hook its SetText so our
+-- composition survives Blizzard's own name updates. The hook body is a
+-- single field read while the feature is off.
+local function AttachNameOnlyText(nameFS, unit)
+    -- Pair the width clear with the (longer) text write: a titled name must
+    -- never hit a leftover constraint and ellipsize.
+    EnsureNameUnconstrained(nameFS)
+    nameFSUnits[nameFS] = unit
+    if not hookedNameText[nameFS] then
+        hookedNameText[nameFS] = true
+        hooksecurefunc(nameFS, "SetText", function(self)
+            if _titledNameGuard then return end
+            if GetBelowNameMode() == "none" then return end
+            -- Blizzard just overwrote the composed string with its own plain
+            -- name; drop the dedupe so the recompose actually runs.
+            nameFSText[self] = nil
+            UpdateNameOnlyText(self)
+        end)
     end
-    if overlay.unit ~= unit then
-        overlay.unit = unit
-        overlay:UnregisterAllEvents()
-        overlay:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
-    end
-    UpdatePlayerSubText(overlay)
+    UpdateNameOnlyText(nameFS)
 end
 
-function HidePlayerSubText(nameplate)
-    local overlay = playerSubOverlays[nameplate]
-    if not overlay then return end
-    overlay:UnregisterAllEvents()
-    overlay:Hide()
-    overlay.line1:SetText("")
-    overlay.line2:SetText("")
-    overlay:SetParent(UIParent)
-    overlay:ClearAllPoints()
-    overlay.unit = nil
-    playerSubOverlays[nameplate] = nil
-    playerSubPool[#playerSubPool + 1] = overlay
-end
-
-function HideAllPlayerSubTexts()
-    for nameplate in pairs(playerSubOverlays) do
-        HidePlayerSubText(nameplate)
-    end
-end
-
--- Sweep all visible friendly player plates and attach / update / detach the
--- sub text per the current settings. Iterates ns.pendingUnits -- the main
--- file's live unit -> nameplate registry for friendly plates, maintained by
--- its NAME_PLATE_UNIT_ADDED/REMOVED handlers (the name-only Y-offset
--- feature sweeps it the same way). C_NamePlate.GetNamePlates does not
--- return friendly player plates, so it cannot drive this sweep.
+-- Sweep all visible friendly player plates and recompose their name text per
+-- the current settings (mode off included -- the composition resolves back to
+-- the plain name, undoing anything we previously wrote). Iterates
+-- ns.pendingUnits -- the main file's live unit -> nameplate registry for
+-- friendly plates, maintained by its NAME_PLATE_UNIT_ADDED/REMOVED handlers
+-- (the name-only Y-offset feature sweeps it the same way).
+-- C_NamePlate.GetNamePlates does not return friendly player plates, so it
+-- cannot drive this sweep.
 local function SweepPlayerSubText()
     if not IsNameOnlyMode() then return end
-    if GetBelowNameMode() == "none" then
-        HideAllPlayerSubTexts()
-        return
-    end
     local pending = ns.pendingUnits
     if not pending then return end
     for unit, nameplate in pairs(pending) do
         if UnitIsPlayer(unit) and not UnitIsUnit(unit, "player") and not UnitCanAttack("player", unit) then
-            ShowPlayerSubText(nameplate, unit)
+            local uf = nameplate.UnitFrame
+            if uf and uf.name then
+                -- Settings changed under us, so drop the dedupe first.
+                nameFSText[uf.name] = nil
+                AttachNameOnlyText(uf.name, unit)
+            end
+        end
+    end
+end
+
+-- Re-collapse every visible friendly player name after Blizzard re-anchors
+-- them (UpdateNamePlateOptions / ApplyFrameOptions). Assigns the forward
+-- local declared with FixNameSizing. Each call is a GetNumPoints probe per
+-- plate and writes only where the two-point anchor came back.
+function ReanchorAllPlayerNames()
+    local pending = ns.pendingUnits
+    if not pending then return end
+    for unit, nameplate in pairs(pending) do
+        if UnitIsPlayer(unit) and not UnitCanAttack("player", unit) and not UnitIsUnit(unit, "player") then
+            local uf = nameplate.UnitFrame
+            if uf and uf.name then FixNameSizing(uf.name) end
         end
     end
 end
@@ -763,24 +856,11 @@ hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, unit)
     if IsNameOnlyMode() and UnitIsPlayer(unit) then
         local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
         if nameplate and nameplate.UnitFrame and nameplate.UnitFrame.name then
-            local nameFS = nameplate.UnitFrame.name
-            nameFS:SetWidth(0)
-            -- Hook SetWidth so Blizzard can't re-apply a constraint later
-            if not hookedNameFonts[nameFS] then
-                hookedNameFonts[nameFS] = true
-                local guard = false
-                hooksecurefunc(nameFS, "SetWidth", function(self, w)
-                    if guard then return end
-                    if w and w > 0 and IsNameOnlyMode() then
-                        guard = true
-                        self:SetWidth(0)
-                        guard = false
-                    end
-                end)
-            end
-            -- Below Name sub text (player title / guild)
+            EnsureNameUnconstrained(nameplate.UnitFrame.name)
+            -- Subtitle Text: inline title + guild line, both composed onto
+            -- this same FontString.
             if GetBelowNameMode() ~= "none" then
-                ShowPlayerSubText(nameplate, unit)
+                AttachNameOnlyText(nameplate.UnitFrame.name, unit)
             end
         end
     end
@@ -789,11 +869,12 @@ end)
 hooksecurefunc(NamePlateDriverFrame, "OnNamePlateRemoved", function(_, unit)
     -- Guard: Blizzard settings panel can fire this with "preview" which is not a valid unit
     if not unit or not unit:find("^nameplate") then return end
-    -- Clean up NPC overlay / player sub text if present
+    -- Clean up the NPC overlay if present. The player name-only text needs no
+    -- teardown -- it lives on Blizzard's own FontString, which Blizzard
+    -- rewrites when the plate is reused (our SetText hook recomposes then).
     local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
     if nameplate then
         HideNPCOverlay(nameplate)
-        HidePlayerSubText(nameplate)
         nameOnlyNPCSuppressed[nameplate] = nil
     end
     if modifiedUFs[unit] then
@@ -940,16 +1021,13 @@ local friendlyFrameCache = CreateFramePool("Frame", UIParent, nil, nil, false, f
     -- changes live-update without touching the plate.
     plate.subText1 = plate:CreateFontString(nil, "OVERLAY")
     plate.subText1:SetFontObject(subtitleFont)
-    plate.subText1:SetPoint("TOP", plate.name, "BOTTOM", 0, -1)
+    -- Anchored in UpdateSubText against the HEALTH BAR with the same computed
+    -- number that positions the name -- never against the name's own rect,
+    -- which re-derives from text metrics every render and jitters on a
+    -- moving plate.
     plate.subText1:SetTextColor(SUB_TEXT_R, SUB_TEXT_G, SUB_TEXT_B)
     plate.subText1:SetWordWrap(false)
     plate.subText1:SetMaxLines(1)
-    plate.subText2 = plate:CreateFontString(nil, "OVERLAY")
-    plate.subText2:SetFontObject(subtitleFont)
-    plate.subText2:SetPoint("TOP", plate.subText1, "BOTTOM", 0, -1)
-    plate.subText2:SetTextColor(SUB_TEXT_R, SUB_TEXT_G, SUB_TEXT_B)
-    plate.subText2:SetWordWrap(false)
-    plate.subText2:SetMaxLines(1)
 
     -- Fully-anchored rects, NOT single point + size: inside the 12.1
     -- restricted plate subtree, point+size regions render DISPLACED. The
@@ -1003,8 +1081,10 @@ function FriendlyFrame:SetUnit(unit, nameplate)
     self.nameplate = nameplate
     self:SetParent(nameplate)
     self:ClearAllPoints()
-    -- Single center anchor to prevent pixel shimmer when nameplate bounces
-    local yOff = (FP() and FP().friendlyPlateYOffset) or 0
+    -- Single center anchor to prevent pixel shimmer when nameplate bounces.
+    -- Distance rides the shared friendly baseline lift so full plates and
+    -- name-only names sit at the same height (see ns.FRIENDLY_Y_BASE).
+    local yOff = ((FP() and FP().friendlyPlateYOffset) or 0) + (ns.FRIENDLY_Y_BASE or 0)
     self:SetPoint("CENTER", nameplate, "CENTER", 0, yOff)
     self:SetSize(1, 1)
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
@@ -1061,7 +1141,6 @@ function FriendlyFrame:ClearUnit()
     -- never leak while the feature-off path stays zero-write.
     if self._subOff and self._subOff ~= 4 then
         self.subText1:SetText("")
-        self.subText2:SetText("")
     end
     -- Restore Blizzard UF before clearing our reference
     if self.unit then RestoreBlizzardUF(self.unit) end
@@ -1107,39 +1186,50 @@ end
 function FriendlyFrame:UpdateName()
     local unit = self.unit
     if not unit then return end
-    local unitName = UnitName(unit)
+    -- Title (when the Subtitle Text mode includes it) rides the name as ONE
+    -- string via UnitPVPName; everything else shows the plain name.
+    local unitName
+    if ModeHasTitle(GetBelowNameMode()) and UnitIsPlayer(unit) then
+        unitName = GetTitledName(unit)
+    end
+    if not unitName then unitName = UnitName(unit) end
     self.name:SetText(unitName or "")
     self:UpdateSubText()
 end
 
--- Below Name sub text (player title / guild). The name normally hangs 4px
--- above the bar (the pool initializer's base anchor); populated lines
--- reserve extra room under it so they fit between the name and the bar.
--- The name anchor is memoized on the COMPUTED offset (a pure function of
--- line count and sub text size, its only two inputs), so it self-invalidates
--- on size and mode changes and survives pool round-trips. _subOff == 4 means
--- base anchor + empty texts, which is the zero-write fast path while the
--- feature is off.
+-- Below Name sub text (guild only -- the title is inline on the name). The
+-- name normally hangs 4px above the bar (the pool initializer's base
+-- anchor); a populated guild line reserves extra room under it so it fits
+-- between the name and the bar. The name anchor is memoized on the COMPUTED
+-- offset (a pure function of line count and sub text size, its only two
+-- inputs), so it self-invalidates on size and mode changes and survives pool
+-- round-trips. _subOff == 4 means base anchor + empty text, which is the
+-- zero-write fast path while the feature is off.
 function FriendlyFrame:UpdateSubText()
     local unit = self.unit
     if not unit then return end
     local lines = 0
     local size = 0
-    if GetBelowNameMode() ~= "none" and UnitIsPlayer(unit) then
+    if ModeHasGuild(GetBelowNameMode()) and UnitIsPlayer(unit) then
         -- Font lives on the shared subtitleFont object; only the content and
         -- the name-lift offset are per-plate.
         size = GetSubTextSize()
-        lines = ApplySubTextLines(self.subText1, self.subText2, unit)
+        lines = ApplySubText(self.subText1, unit)
     elseif self._subOff == 4 then
-        return   -- feature off and nothing drawn: nothing to do
+        return   -- no guild line drawn: nothing to do
     else
         self.subText1:SetText("")
-        self.subText2:SetText("")
     end
     local off = 4 + lines * (size + 2)
     if off ~= self._subOff then
         self._subOff = off
+        -- Both texts hang off the HEALTH BAR (a frame) with computed numbers:
+        -- the name's bottom sits at off, so the guild line's top sits 1px
+        -- under it. Chaining the line off the name's rect instead is what
+        -- made it jitter on moving plates.
         self.name:SetPoint("BOTTOM", self.health, "TOP", 0, off)
+        self.subText1:ClearAllPoints()
+        self.subText1:SetPoint("TOP", self.health, "TOP", 0, off - 1)
     end
 end
 
@@ -1259,11 +1349,6 @@ end
 -- Used when promoting friendly -> enemy so the Blizzard UF stays suppressed
 -- until HideBlizzardFrame takes over in the enemy plate's SetUnit.
 function ns.RemoveFriendlyPlateNoRestore(unit)
-    -- Promotion runs in both friendly modes: in name-only mode there is no
-    -- full plate to tear down, but a Below Name overlay may hang on the
-    -- Blizzard plate and must not survive onto the enemy plate.
-    local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
-    if nameplate then HidePlayerSubText(nameplate) end
     local plate = friendlyPlates[unit]
     if not plate then return end
     if ns._ClearMouseoverPlate then ns._ClearMouseoverPlate(plate) end
@@ -1273,7 +1358,6 @@ function ns.RemoveFriendlyPlateNoRestore(unit)
     plate.name:SetText("")
     if plate._subOff and plate._subOff ~= 4 then
         plate.subText1:SetText("")
-        plate.subText2:SetText("")
     end
     -- Clear modifiedUFs entry so the friendly SetAlpha hook stops interfering
     modifiedUFs[unit] = nil
@@ -1331,7 +1415,8 @@ end)
 --  Live refresh of friendly plate Y offset
 -------------------------------------------------------------------------------
 function ns.RefreshFriendlyPlateYOffset()
-    local yOff = (FP() and FP().friendlyPlateYOffset) or 0
+    -- Same baseline lift as the spawn path (see ns.FRIENDLY_Y_BASE).
+    local yOff = ((FP() and FP().friendlyPlateYOffset) or 0) + (ns.FRIENDLY_Y_BASE or 0)
     for _, plate in pairs(friendlyPlates) do
         if plate.nameplate then
             plate:ClearAllPoints()
@@ -1394,16 +1479,14 @@ end
 function ns.RefreshFriendlyBelowName()
     -- Size / font / slug propagate through the shared font object.
     ApplySubtitleFont()
-    -- Full-plate mode: recompute sub text + name lift on live plates.
+    -- Full-plate mode: repaint the name (the title is part of it now) plus
+    -- the guild line and name lift on live plates.
     for _, plate in pairs(friendlyPlates) do
-        plate:UpdateSubText()
+        plate:UpdateName()
     end
-    -- Name-only mode: attach / update / detach overlays on visible player plates.
-    if IsNameOnlyMode() then
-        SweepPlayerSubText()
-    else
-        HideAllPlayerSubTexts()
-    end
+    -- Name-only mode: recompose the name text on visible player plates
+    -- (self-gated; a no-op outside name-only mode).
+    SweepPlayerSubText()
 end
 
 -------------------------------------------------------------------------------
@@ -1548,12 +1631,13 @@ function ns.UpdateFriendlyNameplateSystem()
     if shouldEnable and not friendlyEnabled then
         -- Switching TO health-bar mode
         RestoreFriendlyFontOverride()               -- undo any font override
-        -- Clean up any name-only NPC overlays / player sub texts
+        -- Clean up any name-only NPC overlays. The player name-only text
+        -- needs no teardown: full-plate mode suppresses the Blizzard UF
+        -- entirely, so its FontString is not rendered.
         for np in pairs(nameOnlyNPCSuppressed) do
             local u = np.namePlateUnitToken
             RestoreNPCNameplate(np, u)
         end
-        HideAllPlayerSubTexts()
         friendlyEnabled = true
         RegisterFriendlyManager()
         -- Pick up any nameplates already visible.
@@ -1635,7 +1719,6 @@ function ns.UpdateFriendlyNameplateSystem()
     elseif not shouldEnable then
         -- Not in health-bar mode — restore fonts (covers disabled + name-only-off)
         RestoreFriendlyFontOverride()
-        HideAllPlayerSubTexts()
     end
 
     -- Apply friendly click-through (independent of player/NPC plate mode).

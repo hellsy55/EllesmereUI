@@ -2757,6 +2757,26 @@ end
 -- vInset (optional): amount to shrink each tick vertically at the top and
 -- bottom, so hash lines sit inside the border instead of spanning over it. Default
 -- 0. Callers pass borderSize * PP.mult.
+-- Hide a tick cache from OUTSIDE ApplyResourceBarTicks -- the branch switches
+-- do this (pips / runes / Ironfur / Ignore Pain hide the BAR ticks, and the
+-- bar branch hides the PIP ticks).
+--
+-- Dropping the owner's memos is the load-bearing half. ApplyResourceBarTicks
+-- early-returns whenever none of its layout inputs changed, and
+-- UpdateSecondaryResource gates its re-apply on _hashApplied -- so hiding the
+-- textures behind both their backs left the next IDENTICAL call a no-op and
+-- the ticks never came back. That is the reported Balance Druid bug: shift to
+-- cat/bear (pip branch hides the bar ticks), shift back to Moonkin (same
+-- resource, same max, same width -> memo hit -> nothing redrawn), hash lines
+-- gone until /reload. Runs only on the branch-switch edge, never per update.
+local function HideResourceBarTicks(tickCache, owner)
+    for i = 1, #tickCache do tickCache[i]:Hide() end
+    if owner then
+        owner._tickState = nil     -- ApplyResourceBarTicks' layout memo
+        owner._hashApplied = nil   -- UpdateSecondaryResource's re-apply gate
+    end
+end
+
 local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, hashR, hashG, hashB, hashA, hashIsPercent, maxRenderVal, vInset)
     -- UNIT_POWER_FREQUENT drives this several times a second for as long as power
     -- regenerates, but the tick layout is a pure function of the arguments below
@@ -3383,7 +3403,7 @@ local function BuildBars()
             -- Hide all pips, runes, and pip tick marks
             for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
             for i = 1, #runeFrames do if runeFrames[i] then runeFrames[i]:Hide() end end
-            for i = 1, #secondaryPipTicks do secondaryPipTicks[i]:Hide() end
+            HideResourceBarTicks(secondaryPipTicks, secondaryFrame)
             ERB.ApplyGapFills(secondaryFrame, nil, 0, isVertical, isReversed, sp)  -- no pips -> hide any gap fills
 
             if not secondaryBar then
@@ -3465,13 +3485,13 @@ local function BuildBars()
             if cachedSecondary.power == "IRONFUR_BAR" then
                 -- Guardian Ironfur: no static threshold hash lines; the moving
                 -- per-cast hash lines are drawn live in UpdateIronfurBar.
-                for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
+                HideResourceBarTicks(secondaryBarTicks, secondaryBar)
                 EnsureIronfurOverlay(secondaryBar)
             elseif cachedSecondary.power == "IGNOREPAIN_BAR" then
                 -- Prot Ignore Pain: no static threshold hash lines (the absorb value
                 -- is secret, so value-positioned hashes are meaningless; the moving
                 -- duration hash line is drawn separately via IP.UpdateHash).
-                for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
+                HideResourceBarTicks(secondaryBarTicks, secondaryBar)
             else
                 -- Resolve hash lines from thresholdSpecs entry (falls back to legacy tickValues)
                 local _buildTsEntry = ResolveThresholdSpecEntry(sp)
@@ -3565,7 +3585,7 @@ local function BuildBars()
             end
             for i = 7, #pips do if pips[i] then pips[i]:Hide() end end
             if secondaryBar then secondaryBar:Hide() end
-            for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
+            HideResourceBarTicks(secondaryBarTicks, secondaryBar)
             -- Hash lines for rune-type resources (drawn on secondaryFrame)
             local _runeTsEntry = ResolveThresholdSpecEntry(sp)
             local _runeTickStr = (_runeTsEntry and _runeTsEntry.hashValues ~= "") and _runeTsEntry.hashValues or nil
@@ -3629,7 +3649,7 @@ local function BuildBars()
             ERB.ApplyGapFills(secondaryFrame, slots, maxPts, isVertical, isReversed, sp)
             for i = 1, #runeFrames do if runeFrames[i] then runeFrames[i]:Hide() end end
             if secondaryBar then secondaryBar:Hide() end
-            for i = 1, #secondaryBarTicks do secondaryBarTicks[i]:Hide() end
+            HideResourceBarTicks(secondaryBarTicks, secondaryBar)
             -- Hash lines for pip-type resources (drawn on secondaryFrame)
             local _pipTsEntry = ResolveThresholdSpecEntry(sp)
             local _pipTickStr = (_pipTsEntry and _pipTsEntry.hashValues ~= "") and _pipTsEntry.hashValues or nil
@@ -8668,21 +8688,19 @@ function ERB:OnInitialize()
         if not pp then return 0 end
         local mode = pp.shiftElementsIfNoPower
         if mode ~= "Up" and mode ~= "Down" then return 0 end
-        -- Fires whenever the power bar leaves an empty slot: globally disabled,
-        -- disabled for the CURRENT spec via the spec picker, disabled for the
-        -- CURRENT DRUID FORM via the per-form toggles, or the spec has no
-        -- primary power. The power frame is created unconditionally and kept at
-        -- full height / zero alpha when not shown, so anchored children and the
-        -- shift magnitude (target height) stay correct. Only an enabled,
-        -- spec-allowed, form-allowed bar that actually has power suppresses the
-        -- shift.
+        -- Fires whenever the power bar leaves an empty slot. IsPowerBarHidden()
+        -- is the single source of truth for that -- the same predicate the
+        -- visibility pass and the "Resource Text" gate consult -- so the shift
+        -- can never disagree with what is actually on screen. Hand-rolling the
+        -- clauses here is what stranded the empty slot under "Hide Power Bar if
+        -- Resource": that hide path lives only in the visibility pass, so the
+        -- shift kept treating the bar as present. Every future power-hiding
+        -- condition now reaches the shift for free by landing in that helper.
         --
-        -- No isClassResource argument here: the Moonkin exemption belongs to the
-        -- class resource bar, not the power bar -- again matching the visibility
-        -- pass verbatim. Non-druids short-circuit inside the helper.
-        if pp.enabled ~= false and not IsSpecDisabled(pp)
-           and not _G._ERB_BarHiddenByForm(pp)
-           and GetPrimaryPowerType() then return 0 end
+        -- The power frame is created unconditionally and kept at full height /
+        -- zero alpha when not shown, so anchored children and the shift
+        -- magnitude (target height) stay correct in every hidden case.
+        if not IsPowerBarHidden() then return 0 end
         return (mode == "Up") and 1 or -1
     end
     -- Consulted inside ApplyAnchorPosition. Returns 0 while unlock mode is

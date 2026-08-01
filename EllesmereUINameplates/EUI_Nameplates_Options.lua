@@ -2393,7 +2393,14 @@ initFrame:SetScript("OnEvent", function(self)
         local function friendlyPlayersOff() return DBVal("showFriendlyPlayers") == false end
         local function friendlyPlateOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") ~= false end
         local function nameOnlyOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") == false end
-        local function subtitleOff() return friendlyPlayersOff() or (DBVal("friendlyBelowName") or "none") == "none" end
+        -- The title renders INLINE with the name (one string), so it takes the
+        -- name's own font, size and color. Everything below the name -- the
+        -- guild line -- is what the size / color / bracket controls style, so
+        -- they gate on a mode that actually includes the guild.
+        local function subtitleGuildOff()
+            local m = DBVal("friendlyBelowName") or "none"
+            return friendlyPlayersOff() or (m ~= "guild" and m ~= "both")
+        end
 
         local friendlyRow
         _, h = W:DualRow(parent, y,
@@ -2593,14 +2600,62 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         ---------------------------------------------------------------
-        --  Subtitle Text (player title / guild below the name), with the
-        --  size slider and the Custom/Class inline swatch pair (mirrors
-        --  the Name Only White/Class swatches above).
+        --  Subtitle Text: the title renders inline with the name, the guild
+        --  on its own line below. The colour pair styles the guild line
+        --  only -- the inline title is part of the name string and so takes
+        --  the name's own colour.
         ---------------------------------------------------------------
+        -- Custom / Class pair, house multiSwatch convention: clicking the
+        -- INACTIVE custom swatch only selects custom mode; clicking it again
+        -- opens the picker. The inactive one dims, both grey out together.
+        local function MakeGuildColorSwatches()
+            return {
+                { tooltip = "Custom Color", hasAlpha = false,
+                  getValue = function()
+                      local c = DBVal("friendlyBelowNameColor") or defaults.friendlyBelowNameColor
+                      return c.r, c.g, c.b
+                  end,
+                  setValue = function(r, g, b)
+                      DB().friendlyBelowNameColor = { r = r, g = g, b = b }
+                      if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                  end,
+                  onClick = function(self)
+                      if DBVal("friendlyBelowNameClassColor") == true then
+                          DB().friendlyBelowNameClassColor = false
+                          if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      if subtitleGuildOff() then return 0.15 end
+                      return (DBVal("friendlyBelowNameClassColor") == true) and 0.3 or 1
+                  end },
+                { tooltip = "Class Color", hasAlpha = false,
+                  getValue = function()
+                      local _, ct = UnitClass("player")
+                      local cc = ct and C_ClassColor and C_ClassColor.GetClassColor(ct)
+                      if cc then return cc.r, cc.g, cc.b end
+                      return 1, 1, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      DB().friendlyBelowNameClassColor = true
+                      if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      if subtitleGuildOff() then return 0.15 end
+                      return (DBVal("friendlyBelowNameClassColor") == true) and 1 or 0.3
+                  end },
+            }
+        end
+
         local subtitleRow
         subtitleRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Subtitle Text",
-              tooltip="Show the player's title or guild in a smaller line below their name on friendly nameplates.",
+              tooltip="Show the player's title inline with their name, and/or their guild on a line below it, on friendly nameplates.",
               disabled=friendlyPlayersOff,
               disabledTooltip="Show EUI Friendly Player Nameplates",
               values={ none="None", title="Player Title", guild="Guild Name", both="Title & Guild" },
@@ -2611,81 +2666,14 @@ initFrame:SetScript("OnEvent", function(self)
                 if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
                 EllesmereUI:RefreshPage()
               end },
-            { type="slider", text="Subtitle Text Size", trackWidth=120,
-              min=6, max=30, step=1,
-              disabled=subtitleOff,
+            { type="multiSwatch", text="Guild Text Color",
+              disabled=subtitleGuildOff,
               disabledTooltip=function()
                   if friendlyPlayersOff() then return "Show EUI Friendly Player Nameplates" end
-                  return "Subtitle Text"
+                  return "This option requires Subtitle Text to include the Guild Name"
               end,
-              getValue=function() return DBVal("friendlyBelowNameSize") or defaults.friendlyBelowNameSize end,
-              setValue=function(v)
-                DB().friendlyBelowNameSize = v
-                if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
-              end });  y = y - h
-
-        do
-            local rightRgn = subtitleRow._rightRegion
-            local customSwatch, updateCustom, classSwatch, updateSubClass
-            local function refreshSubtitleSwatches()
-                if updateCustom then updateCustom() end
-                if updateSubClass then updateSubClass() end
-                local off = subtitleOff()
-                local useClass = DBVal("friendlyBelowNameClassColor") == true
-                customSwatch:SetAlpha(off and 0.15 or (useClass and 0.3 or 1))
-                classSwatch:SetAlpha(off and 0.15 or (useClass and 1 or 0.3))
-                customSwatch:SetMouseClickEnabled(not off)
-                classSwatch:SetMouseClickEnabled(not off)
-            end
-            -- Custom swatch: editable color. Clicking it while Class is
-            -- active only selects custom mode; clicking again opens the
-            -- picker (house multiSwatch convention).
-            customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
-                function()
-                    local c = DBVal("friendlyBelowNameColor") or defaults.friendlyBelowNameColor
-                    return c.r, c.g, c.b
-                end,
-                function(r, g, b)
-                    DB().friendlyBelowNameColor = { r = r, g = g, b = b }
-                    if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
-                end, nil, 20)
-            PP.Point(customSwatch, "RIGHT", rightRgn._control, "LEFT", -8, 0)
-            local origCustomClick = customSwatch:GetScript("OnClick")
-            customSwatch:SetScript("OnClick", function(self, ...)
-                if subtitleOff() then return end
-                if DBVal("friendlyBelowNameClassColor") == true then
-                    DB().friendlyBelowNameClassColor = false
-                    if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
-                    refreshSubtitleSwatches()
-                    return
-                end
-                if origCustomClick then origCustomClick(self, ...) end
-            end)
-            customSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color") end)
-            customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            -- Class color swatch: previews the player's class color; selects
-            -- class-colored mode (each unit's subtitle uses its own class).
-            classSwatch, updateSubClass = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
-                function()
-                    local _, ct = UnitClass("player")
-                    local cc = ct and C_ClassColor and C_ClassColor.GetClassColor(ct)
-                    if cc then return cc.r, cc.g, cc.b end
-                    return 1, 1, 1
-                end,
-                function() end, nil, 20)
-            PP.Point(classSwatch, "RIGHT", customSwatch, "LEFT", -8, 0)
-            rightRgn._lastInline = classSwatch
-            classSwatch:SetScript("OnClick", function()
-                if subtitleOff() then return end
-                DB().friendlyBelowNameClassColor = true
-                if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
-                refreshSubtitleSwatches()
-            end)
-            classSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(classSwatch, "Class Color") end)
-            classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            EllesmereUI.RegisterWidgetRefresh(refreshSubtitleSwatches)
-            refreshSubtitleSwatches()
-        end
+              rawTooltip=function() return not friendlyPlayersOff() end,
+              swatches = MakeGuildColorSwatches() });  y = y - h
 
         -- Subtitle Text inline cog (guild bracket toggle)
         do
@@ -2707,24 +2695,24 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetSize(26, 26)
             btn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
             btn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            btn:SetAlpha(subtitleOff() and 0.15 or 0.4)
+            btn:SetAlpha(subtitleGuildOff() and 0.15 or 0.4)
             local tex = btn:CreateTexture(nil, "OVERLAY")
             tex:SetAllPoints(); tex:SetTexture(COGS_ICON)
             btn:SetScript("OnEnter", function(self)
-                if subtitleOff() then
-                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Subtitle Text"))
+                if subtitleGuildOff() then
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("This option requires Subtitle Text to include the Guild Name"))
                 else self:SetAlpha(0.7) end
             end)
             btn:SetScript("OnLeave", function(self)
                 EllesmereUI.HideWidgetTooltip()
-                if subCogOwner ~= self then self:SetAlpha(subtitleOff() and 0.15 or 0.4) end
+                if subCogOwner ~= self then self:SetAlpha(subtitleGuildOff() and 0.15 or 0.4) end
             end)
             btn:SetScript("OnClick", function(self)
-                if subtitleOff() then return end
+                if subtitleGuildOff() then return end
                 ShowSubtitlePopup(self)
             end)
             EllesmereUI.RegisterWidgetRefresh(function()
-                if subCogOwner ~= btn then btn:SetAlpha(subtitleOff() and 0.15 or 0.4) end
+                if subCogOwner ~= btn then btn:SetAlpha(subtitleGuildOff() and 0.15 or 0.4) end
             end)
         end
 
