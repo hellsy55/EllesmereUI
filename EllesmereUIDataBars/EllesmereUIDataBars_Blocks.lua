@@ -2543,6 +2543,11 @@ end
 ns.TravelHearthstoneIDs = HEARTHSTONE_IDS
 ns.TravelIsUsable = TravelIsUsable
 
+-- Returns remaining, known. In restricted combat the cooldown numbers are
+-- SECRET: comparing or dead-reckoning them throws (type() still says
+-- "number"), so those report 0, false and callers degrade -- the tooltip
+-- shows "-" on gray non-clickable rows, the block tints as cooling, and the
+-- probe keeps ticking so state self-corrects once values come back clean.
 local function TravelGetRemainingCooldown(id, isSpell)
     local startTime, duration
     if isSpell then
@@ -2555,10 +2560,13 @@ local function TravelGetRemainingCooldown(id, isSpell)
             startTime, duration = C_Container.GetItemCooldown(id)
         end
     end
-    if type(startTime) == "number" and type(duration) == "number" and duration > 0 then
-        return max(0, startTime + duration - GetTime())
+    if issecretvalue(startTime) or issecretvalue(duration) then
+        return 0, false
     end
-    return 0
+    if type(startTime) == "number" and type(duration) == "number" and duration > 0 then
+        return max(0, startTime + duration - GetTime()), true
+    end
+    return 0, true
 end
 
 local _hearthList = {}
@@ -2608,11 +2616,11 @@ local function TravelGetPrimaryCooldown()
     -- always fires BAG_UPDATE_DELAYED (spells SPELLS_CHANGED), which clears
     -- the cache via ns.TravelInvalidateHearthCache and forces a re-pick here.
     if not travelPrimaryHearthId then
-        if travelNoHearth then return 0 end
+        if travelNoHearth then return 0, true end
         travelPrimaryHearthId = TravelPickHearthstone(false)
         if not travelPrimaryHearthId then
             travelNoHearth = true
-            return 0
+            return 0, true
         end
     end
     return TravelGetRemainingCooldown(travelPrimaryHearthId, false)
@@ -2655,7 +2663,7 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
     -- is the static integer teleport spell ID (the click-to-teleport overlay's
     -- secure attribute), kept separate from the displayed dungeon `name`.
     local _mythicLinesBuf = {}
-    for i = 1, #SEASON_TELEPORTS do _mythicLinesBuf[i] = { name = "", cd = 0, spellId = nil } end
+    for i = 1, #SEASON_TELEPORTS do _mythicLinesBuf[i] = { name = "", cd = 0, cdKnown = true, spellId = nil } end
     local _mythicLineCount = 0
 
     local function D() return blockCfg.settings or {} end
@@ -2674,10 +2682,15 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
         ns.Tip_MarkInteractive()
         ns.Tip_AddLine("|cFFFFFFFF[|r" .. L["TRAVEL_COOLDOWNS"] .. "|cFFFFFFFF]|r", ar, ag, ab)
         ns.Tip_AddLine(" ")
-        local cd2 = TravelGetPrimaryCooldown()
-        local cdStr = ns.FormatCooldown(cd2)
-        if not cdStr then cdStr = L["READY"] end
-        local ready = cd2 <= 0
+        local cd2, cdKnown = TravelGetPrimaryCooldown()
+        local cdStr
+        if cdKnown then
+            cdStr = ns.FormatCooldown(cd2)
+            if not cdStr then cdStr = L["READY"] end
+        else
+            cdStr = "-"
+        end
+        local ready = cdKnown and cd2 <= 0
         local rr, rg, rb = 0.5, 0.5, 0.5
         if ready then rr, rg, rb = 0, 1, 0 end
         -- The Hearthstone row itself is click-to-use when ready, firing the
@@ -2731,12 +2744,18 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                     end
                 end
                 if entryName then
-                    local tcd = TravelGetRemainingCooldown(entryId, isSpell)
-                    local tstr = ns.FormatCooldown(tcd)
-                    if not tstr then tstr = L["READY"] end
+                    local tcd, tKnown = TravelGetRemainingCooldown(entryId, isSpell)
+                    local tstr
+                    if tKnown then
+                        tstr = ns.FormatCooldown(tcd)
+                        if not tstr then tstr = L["READY"] end
+                    else
+                        tstr = "-"
+                    end
+                    local tready = tKnown and tcd <= 0
                     local tr, tg, tb = 0.5, 0.5, 0.5
-                    if tcd <= 0 then tr, tg, tb = 0, 1, 0 end
-                    if tcd <= 0 then
+                    if tready then tr, tg, tb = 0, 1, 0 end
+                    if tready then
                         -- Ready: click-to-use, same secure overlay contract
                         -- as the M+ teleport rows (degrades to text in
                         -- combat). White while ready; the row wash + accent
@@ -2771,8 +2790,10 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                     if not name2 then name2 = spName end
                     if not name2 then name2 = tostring(spellId) end
                     _mythicLineCount = _mythicLineCount + 1
+                    local mcd, mKnown = TravelGetRemainingCooldown(spellId, true)
                     _mythicLinesBuf[_mythicLineCount].name    = name2
-                    _mythicLinesBuf[_mythicLineCount].cd      = TravelGetRemainingCooldown(spellId, true)
+                    _mythicLinesBuf[_mythicLineCount].cd      = mcd
+                    _mythicLinesBuf[_mythicLineCount].cdKnown = mKnown
                     _mythicLinesBuf[_mythicLineCount].spellId = spellId
                 end
             end
@@ -2786,6 +2807,7 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                 while j > 1 and _mythicLinesBuf[j].name < _mythicLinesBuf[j - 1].name do
                     _mythicLinesBuf[j].name,    _mythicLinesBuf[j - 1].name    = _mythicLinesBuf[j - 1].name,    _mythicLinesBuf[j].name
                     _mythicLinesBuf[j].cd,      _mythicLinesBuf[j - 1].cd      = _mythicLinesBuf[j - 1].cd,      _mythicLinesBuf[j].cd
+                    _mythicLinesBuf[j].cdKnown, _mythicLinesBuf[j - 1].cdKnown = _mythicLinesBuf[j - 1].cdKnown, _mythicLinesBuf[j].cdKnown
                     _mythicLinesBuf[j].spellId, _mythicLinesBuf[j - 1].spellId = _mythicLinesBuf[j - 1].spellId, _mythicLinesBuf[j].spellId
                     j = j - 1
                 end
@@ -2796,10 +2818,14 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
             -- On-cooldown teleports share one cooldown group, so instead of
             -- a wall of identical timers they collapse into a single
             -- "On Cooldown" line showing the soonest remaining time.
-            local cdMin
+            local cdMin, cdUnknown
             for i = 1, _mythicLineCount do
                 local e = _mythicLinesBuf[i]
-                if e.cd <= 0 then
+                if not e.cdKnown then
+                    -- Secret cooldown (restricted combat): state unknowable,
+                    -- fold into the collapsed On Cooldown line below.
+                    cdUnknown = true
+                elseif e.cd <= 0 then
                     -- Ready teleport: left-click the row to cast it (secure
                     -- overlay button keyed to the static spell ID; the row
                     -- highlights on hover).
@@ -2812,6 +2838,8 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
                 local cs = ns.FormatCooldown(cdMin)
                 if not cs then cs = L["READY"] end
                 ns.Tip_AddDouble(L["ON_COOLDOWN"], cs, 0.65, 0.65, 0.65, 0.5, 0.5, 0.5)
+            elseif cdUnknown then
+                ns.Tip_AddDouble(L["ON_COOLDOWN"], "-", 0.65, 0.65, 0.65, 0.5, 0.5, 0.5)
             end
         end
         ns.Tip_AddLine(" ")
@@ -2931,12 +2959,13 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
 
         -- The block renders only icon + bind location; the remaining cooldown
         -- lives in the tooltip. On cooldown the block dims to disabled gray.
-        local cd = TravelGetPrimaryCooldown()
+        -- An unknown (secret) cooldown tints as cooling too.
+        local cd, cdKnown = TravelGetPrimaryCooldown()
 
         if mouseOver then
             local ar, ag, ab = ns.GetAccent()
             hearthText:SetTextColor(ar, ag, ab, 1); hearthIcon:SetVertexColor(ar, ag, ab, 1)
-        elseif cd > 0 then
+        elseif (not cdKnown) or cd > 0 then
             hearthText:SetTextColor(0.5, 0.5, 0.5, 1); hearthIcon:SetVertexColor(0.5, 0.5, 0.5, 1)
         else
             local br, bgr, bb = BlockColorOf(blockCfg)
@@ -3008,7 +3037,10 @@ ns.BlockFactories.travel = function(blockCfg, slot, content, barCtx)
             RefreshTravelTooltip()
             return
         end
-        local cooling = TravelGetPrimaryCooldown() > 0
+        -- Unknown (secret) cooldowns count as cooling: the probe keeps
+        -- ticking through combat and self-corrects on the first clean read.
+        local pcd, pKnown = TravelGetPrimaryCooldown()
+        local cooling = (not pKnown) or pcd > 0
         if cooling ~= inst._lastCooling then
             inst._lastCooling = cooling
             inst:Refresh()

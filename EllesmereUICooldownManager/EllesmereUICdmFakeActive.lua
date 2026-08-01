@@ -615,7 +615,6 @@ if EllesmereUI and EllesmereUI.IS_121 then
                 -- inside the engine).
                 local showCD = bd and bd.showCooldownText
                 if ss and ss.showCooldownText ~= nil then showCD = ss.showCooldownText end
-                if bd and bd.onlyShowNumbers then showCD = true end
                 if showCD then
                     -- ARMORED: an uncaught error inside initializeFrame
                     -- aborts the engine's whole CreateFrameBatch and kills

@@ -332,14 +332,6 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -366,12 +358,6 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
-            btbLeftShortNameLength = 0,
-            btbLeftShortNameEllipsis = true,
-            btbRightShortNameLength = 0,
-            btbRightShortNameEllipsis = true,
-            btbCenterShortNameLength = 0,
-            btbCenterShortNameEllipsis = true,
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -585,14 +571,6 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -619,12 +597,6 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
-            btbLeftShortNameLength = 0,
-            btbLeftShortNameEllipsis = true,
-            btbRightShortNameLength = 0,
-            btbRightShortNameEllipsis = true,
-            btbCenterShortNameLength = 0,
-            btbCenterShortNameEllipsis = true,
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -751,12 +723,6 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -792,12 +758,6 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -829,12 +789,6 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -915,14 +869,6 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -947,12 +893,6 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
-            btbLeftShortNameLength = 0,
-            btbLeftShortNameEllipsis = true,
-            btbRightShortNameLength = 0,
-            btbRightShortNameEllipsis = true,
-            btbCenterShortNameLength = 0,
-            btbCenterShortNameEllipsis = true,
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -1126,8 +1066,6 @@ local defaults = {
             extraTextColorR = 1, extraTextColorG = 1, extraTextColorB = 1,
             extraTextX = 0, extraTextY = 0,
             extraTextAlign = "left",
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             leftTextContent = "name",
             leftTextClassColor = false,
             leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
@@ -1140,12 +1078,6 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -2195,30 +2127,12 @@ end
 -- Nickname-aware replacement for the stock [name] tag (see ContentToTag). Returns
 -- the nickname when one applies, else the raw unit name -- identical to [name] for
 -- everyone without a nickname.
-oUF.Tags.Methods["eui-name"] = function(unit, realUnit, lenStr, ellipsisStr)
-    local name = ns.ResolveUnitNickname(unit)
-    local maxLen = tonumber(lenStr) or 0
-    if maxLen <= 0 then return name end
-    -- Secret names (enemy target/focus in protected content) cannot be
-    -- inspected: #, sub and concat all throw. Return the secret raw -- the
-    -- display sink accepts it -- so those names render untruncated.
-    if issecretvalue and issecretvalue(name) then return name end
-    -- Truncate by UTF-8 codepoints, never bytes: multibyte names (Cyrillic,
-    -- CJK, accents) must cut on a character boundary, and byte length would
-    -- overcount their character count.
-    local i, chars = 1, 0
-    local len = #name
-    while i <= len do
-        if chars == maxLen then
-            local cut = name:sub(1, i - 1)
-            if ellipsisStr ~= "0" then return cut .. "..." end
-            return cut
-        end
-        local b = name:byte(i)
-        i = i + ((b >= 240 and 4) or (b >= 224 and 3) or (b >= 192 and 2) or 1)
-        chars = chars + 1
-    end
-    return name
+oUF.Tags.Methods["eui-name"] = function(unit)
+    -- Truncation is width-based (the per-slot Width % clamp in the position
+    -- code), never character-based: FontString width boxes ellipsize in the
+    -- renderer, which also works on SECRET enemy names that Lua cannot
+    -- measure or substring.
+    return ns.ResolveUnitNickname(unit)
 end
 oUF.Tags.Events["eui-name"] = "UNIT_NAME_UPDATE"
 
@@ -2822,12 +2736,11 @@ local function GetBossHealthTag()
     end
 end
 
--- Build a truncated name tag for the given settings prefix (e.g. "leftText", "btbLeft").
-local function BuildShortNameTag(prefix, settings)
-    local len = settings[prefix .. "ShortNameLength"] or 0
-    if len <= 0 then return "[eui-name]" end
-    local ellipsis = settings[prefix .. "ShortNameEllipsis"] ~= false and "1" or "0"
-    return "[eui-name(" .. len .. "," .. ellipsis .. ")]"
+-- Per-slot Width % (of the slot's computed clamp width; default 100 = the
+-- normal truncation amount, above 100 grants extra room). Applied by the
+-- position code to the slot FontString's width box.
+local function SlotWidthMul(settings, prefix)
+    return (settings[prefix .. "WidthPct"] or 100) / 100
 end
 
 -- Build the per-slot "Name > Target" indicator tag. The separator string is
@@ -2858,14 +2771,14 @@ end
 -- Resolve a leftTextContent / rightTextContent value to an oUF tag string.
 -- content: "name", "both", "curhpshort", "perhp", "perhpnosign", "perhpnum", "none"
 local function ContentToTag(content, prefix, settings)
-    if content == "name" then return BuildShortNameTag(prefix, settings)
+    if content == "name" then return "[eui-name]"
     elseif content == "nametotarget" then
-        return BuildShortNameTag(prefix, settings)
+        return "[eui-name]"
             .. BuildTgtSepTag(prefix, settings) .. "[eui-tgtcol][eui-tgtname]"
     elseif content == "levelname" then
-        return "[eui-level] | " .. BuildShortNameTag(prefix, settings)
+        return "[eui-level] | [eui-name]"
     elseif content == "namelevel" then
-        return BuildShortNameTag(prefix, settings) .. " | [eui-level]"
+        return "[eui-name] | [eui-level]"
     elseif content == "level" then return "[eui-level]"
     elseif content == "both" then return "[curhpshort] | [eui-perhp]%"
     elseif content == "bothdash" then return "[curhpshort] - [eui-perhp]%"
@@ -3381,6 +3294,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if lc ~= "none" then
             leftFS:SetJustifyH("LEFT")
             PP.Point(leftFS, "LEFT", textOvr, "LEFT", 5 + (s.btbLeftX or 0), s.btbLeftY or 0)
+            PP.Width(leftFS, totalWidth * 0.9 * SlotWidthMul(s, "btbLeft"))
             leftFS:Show()
         else leftFS:Hide() end
 
@@ -3389,6 +3303,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if rc ~= "none" then
             rightFS:SetJustifyH("RIGHT")
             PP.Point(rightFS, "RIGHT", textOvr, "RIGHT", -5 + (s.btbRightX or 0), s.btbRightY or 0)
+            PP.Width(rightFS, totalWidth * 0.9 * SlotWidthMul(s, "btbRight"))
             rightFS:Show()
         else rightFS:Hide() end
 
@@ -3397,6 +3312,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if cc ~= "none" then
             centerFS:SetJustifyH("CENTER")
             PP.Point(centerFS, "CENTER", textOvr, "CENTER", s.btbCenterX or 0, s.btbCenterY or 0)
+            PP.Width(centerFS, totalWidth * 0.9 * SlotWidthMul(s, "btbCenter"))
             centerFS:Show()
         else centerFS:Hide() end
 
@@ -7162,7 +7078,7 @@ local function StyleFullFrame(frame, unit)
                 extraText:SetJustifyH("LEFT")
                 PP.Point(extraText, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
             end
-            PP.Width(extraText, barW * 0.95)
+            PP.Width(extraText, barW * 0.95 * SlotWidthMul(s, "extraText"))
             extraText:Show()
             ApplyClassColor(extraText, unit, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
         else extraText:Hide() end
@@ -7173,7 +7089,7 @@ local function StyleFullFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -7186,9 +7102,9 @@ local function StyleFullFrame(frame, unit)
             -- Constrain width when opposing right text exists
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -7202,9 +7118,9 @@ local function StyleFullFrame(frame, unit)
             -- Constrain width when opposing left text exists
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -7496,7 +7412,7 @@ local function StyleFocusFrame(frame, unit)
                 extraText:SetJustifyH("LEFT")
                 PP.Point(extraText, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
             end
-            PP.Width(extraText, barW * 0.95)
+            PP.Width(extraText, barW * 0.95 * SlotWidthMul(s, "extraText"))
             extraText:Show()
             ApplyClassColor(extraText, unit, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
         else extraText:Hide() end
@@ -7507,7 +7423,7 @@ local function StyleFocusFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -7519,9 +7435,9 @@ local function StyleFocusFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -7534,9 +7450,9 @@ local function StyleFocusFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -7767,7 +7683,7 @@ local function StyleSimpleFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -7779,9 +7695,9 @@ local function StyleSimpleFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -7793,9 +7709,9 @@ local function StyleSimpleFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -8012,7 +7928,7 @@ local function StylePetFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -8024,9 +7940,9 @@ local function StylePetFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -8038,9 +7954,9 @@ local function StylePetFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -8301,7 +8217,7 @@ local function StyleBossFrame(frame, unit)
                 extraText:SetJustifyH("LEFT")
                 PP.Point(extraText, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
             end
-            PP.Width(extraText, barW * 0.95)
+            PP.Width(extraText, barW * 0.95 * SlotWidthMul(s, "extraText"))
             extraText:Show()
             ApplyClassColor(extraText, unit, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
         else extraText:Hide() end
@@ -8311,7 +8227,7 @@ local function StyleBossFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -8323,9 +8239,9 @@ local function StyleBossFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -8337,9 +8253,9 @@ local function StyleBossFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -11570,9 +11486,13 @@ local function UnitFrame_OnEnter(self)
             -- 3D models don't inherit parent alpha: reveal the portrait too
             local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
             if bd3d then bd3d:SetAlpha(a) end
-            -- Mini-frame inheritance: the companion frame reveals with us
+            -- Mini-frame inheritance: the companion frame reveals with us.
+            -- Always Show Pet Frame opts the pet out (it is already visible
+            -- and must not pick up the player's fade alpha).
             local mini = ns.UF_MINI_OF and frames[ns.UF_MINI_OF[unitKey]]
-            if mini then mini:SetAlpha(a) end
+            if mini and not (unitKey == "player" and db.profile.pet and db.profile.pet.alwaysShow) then
+                mini:SetAlpha(a)
+            end
         end
     end
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
@@ -11628,9 +11548,13 @@ local function UnitFrame_OnLeave(self)
         -- 3D models don't inherit parent alpha: hide/dim the portrait too
         local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
         if bd3d then bd3d:SetAlpha(leaveAlpha) end
-        -- Mini-frame inheritance: the companion frame hides/dims with us
+        -- Mini-frame inheritance: the companion frame hides/dims with us.
+        -- Always Show Pet Frame opts the pet out (a leave alpha of 0 would
+        -- hide a pet frame that must stay visible).
         local mini = ns.UF_MINI_OF and frames[ns.UF_MINI_OF[unitKey]]
-        if mini then mini:SetAlpha(leaveAlpha) end
+        if mini and not (unitKey == "player" and db.profile.pet and db.profile.pet.alwaysShow) then
+            mini:SetAlpha(leaveAlpha)
+        end
     end
     if self._tooltipTicker then self._tooltipTicker:Cancel(); self._tooltipTicker = nil end
     if GameTooltip and GameTooltip:IsOwned(self) then
@@ -13031,13 +12955,18 @@ function InitializeFrames()
                 end
 
                 local mini = frames[ns.UF_MINI_OF[unitKey]]
+                -- Always Show Pet Frame: the pet opts out of every parent
+                -- visibility inheritance in this pass -- its own unit watch
+                -- alone owns Show/Hide (visible whenever a pet exists).
+                local miniAlways = (unitKey == "player") and db.profile.pet
+                    and db.profile.pet.alwaysShow
 
                 -- The companion mini frame gets its own condition driver
                 -- (parent conditions + its own unit existence), so a
                 -- condition-hidden mini absorbs no clicks either.
                 if mini then
                     local miniWant
-                    if drvSet and EllesmereUI.BuildVisibilityDriverString then
+                    if (not miniAlways) and drvSet and EllesmereUI.BuildVisibilityDriverString then
                         miniWant = EllesmereUI.BuildVisibilityDriverString(
                             "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; ", drvSet)
                     end
@@ -13064,7 +12993,7 @@ function InitializeFrames()
                 -- alpha never conflicts with it. Hover reveals mirror in
                 -- the OnEnter/OnLeave handlers.
                 if mini then
-                    mini:SetAlpha(frame:IsShown() and bodyAlpha or 0)
+                    mini:SetAlpha(miniAlways and 1 or (frame:IsShown() and bodyAlpha or 0))
                 end
             elseif frame then
                 -- Parent disabled ("Never" clears enabledFrames): a
@@ -13078,11 +13007,25 @@ function InitializeFrames()
                 end
                 local mini = frames[ns.UF_MINI_OF[unitKey]]
                 if mini then
-                    if not isLocked and mini._euiVisDriver and mini._euiVisDriver ~= "hide" then
-                        RegisterAttributeDriver(mini, "state-visibility", "hide")
-                        mini._euiVisDriver = "hide"
+                    local miniAlways = (unitKey == "player") and db.profile.pet
+                        and db.profile.pet.alwaysShow
+                    if miniAlways then
+                        -- Always Show Pet Frame survives a disabled player
+                        -- frame: unpin any driver so the pet's own unit
+                        -- watch shows it whenever a pet exists.
+                        if not isLocked and mini._euiVisDriver then
+                            UnregisterAttributeDriver(mini, "state-visibility")
+                            RegisterUnitWatch(mini)
+                            mini._euiVisDriver = nil
+                        end
+                        mini:SetAlpha(1)
+                    else
+                        if not isLocked and mini._euiVisDriver and mini._euiVisDriver ~= "hide" then
+                            RegisterAttributeDriver(mini, "state-visibility", "hide")
+                            mini._euiVisDriver = "hide"
+                        end
+                        mini:SetAlpha(0)
                     end
-                    mini:SetAlpha(0)
                 end
             end
         end

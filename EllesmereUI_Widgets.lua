@@ -2364,6 +2364,61 @@ local function AttachLabelHover(parent, label, hoverText)
     return hit
 end
 
+-- Deferred label clamp for the row-half regions (DualRow / TripleRow).
+-- Half-region labels get their RIGHT edge bounded against the leftmost
+-- inline item (region._lastInline -- cogs / swatches / eyeballs attach
+-- AFTER the row builder returns, which is why this runs one frame deferred)
+-- or the control itself. Overflowing labels -- long localized strings
+-- especially -- then ellipsize instead of running under the controls, and
+-- the full text surfaces on label hover: folded into the label tooltip when
+-- the row has one (the tooltip hitFrames read region._labelTruncated via
+-- LabelTooltipText), or via a plain reveal hover attached here when not.
+local _labelClampQueue, _labelClampQueued = {}, false
+local function _FlushLabelClamps()
+    _labelClampQueued = false
+    for i = 1, #_labelClampQueue do
+        local region = _labelClampQueue[i]
+        _labelClampQueue[i] = nil
+        local label = region._label
+        local bound = region._lastInline or region._control
+        if label and bound and label:IsShown() then
+            local truncated = false
+            local ll, bl, sw = label:GetLeft(), bound:GetLeft(), label:GetStringWidth()
+            if ll and bl and sw and not (issecretvalue and (issecretvalue(ll) or issecretvalue(bl) or issecretvalue(sw))) then
+                truncated = sw > (bl - 12 - ll) + 0.5
+            end
+            -- Bound only when overflowing (see the builder tails: a right
+            -- anchor stretches the rect and displaces label-edge-anchored
+            -- subtitles on short labels).
+            if truncated then
+                label:SetPoint("RIGHT", bound, "LEFT", -12, 0)
+            end
+            region._labelTruncated = truncated
+            if truncated and not region._labelHasHit and not region._labelRevealHit then
+                region._labelRevealHit = AttachLabelHover(region, label, label:GetText())
+            end
+        end
+    end
+end
+local function QueueLabelClamp(region)
+    if not region._label then return end
+    _labelClampQueue[#_labelClampQueue + 1] = region
+    if not _labelClampQueued then
+        _labelClampQueued = true
+        C_Timer.After(0, _FlushLabelClamps)
+    end
+end
+
+-- Compose a label's hover tooltip: prepend the full label text when the
+-- label is truncated (composite is not a catalog key; the L() inside
+-- ShowWidgetTooltip leaves it untouched).
+local function LabelTooltipText(region, label, tip)
+    if region._labelTruncated then
+        return (label:GetText() or "") .. "\n" .. EllesmereUI.L(tip)
+    end
+    return tip
+end
+
 -- Toggle switch  (pill-shaped, teal when ON, dark when OFF, animated)
 function WidgetFactory:Toggle(parent, text, yOffset, getValue, setValue, tooltip)
     local ROW_H = 50
@@ -3570,11 +3625,16 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
             region._control = nil
             return
         end
-        -- Label (all types have one)
+        -- Label (all types have one). Single-line so the right-edge clamp
+        -- (QueueLabelClamp) can ellipsize instead of wrapping.
         local label = MakeFont(region, 14, nil, TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B)
         PP.Point(label, "LEFT", region, "LEFT", SIDE_PAD, 0)
+        label:SetJustifyH("LEFT")
+        label:SetWordWrap(false)
+        label:SetMaxLines(1)
         label:SetText(EllesmereUI.L(cfg.text or ""))
         region._label = label
+        region._labelHasHit = (cfg.tooltip or cfg.disabledTooltip) and true or false
 
         -- Tooltip on the label text.  For dropdowns the hitFrame is created
         -- after the dropdown button so it can check whether the menu is open.
@@ -3589,7 +3649,11 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
                     local tt = ResolveDisabledTip(cfg)
                     if tt then ShowWidgetTooltip(label, tt) end
                 elseif cfg.tooltip then
-                    ShowWidgetTooltip(label, cfg.tooltip, ttOpts)
+                    ShowWidgetTooltip(label, LabelTooltipText(region, label, cfg.tooltip), ttOpts)
+                elseif region._labelTruncated then
+                    -- Truncated label on a row whose hit exists only for the
+                    -- disabled tooltip: reveal the full text while enabled.
+                    ShowWidgetTooltip(label, label:GetText())
                 end
             end)
             hitFrame:SetScript("OnLeave", function() HideWidgetTooltip() end)
@@ -3699,7 +3763,9 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
                         local tt = ResolveDisabledTip(cfg)
                         if tt then ShowWidgetTooltip(label, tt) end
                     elseif cfg.tooltip and not (ddBtn._ddMenu and ddBtn._ddMenu:IsShown()) then
-                        ShowWidgetTooltip(label, cfg.tooltip, ttOpts)
+                        ShowWidgetTooltip(label, LabelTooltipText(region, label, cfg.tooltip), ttOpts)
+                    elseif region._labelTruncated and not (ddBtn._ddMenu and ddBtn._ddMenu:IsShown()) then
+                        ShowWidgetTooltip(label, label:GetText())
                     end
                 end)
                 hitFrame:SetScript("OnLeave", function() HideWidgetTooltip() end)
@@ -3918,6 +3984,12 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
             ApplyDisabledState()
         end
         region._control = controlAnchor or controlFrame
+        -- Label truncation is deferred (QueueLabelClamp) and the right bound
+        -- is only applied when the label actually overflows: a bound
+        -- stretches the label's rect, and anything anchored to its RIGHT
+        -- edge (inline "(Applies to ...)" subtitles) would slide to the far
+        -- side of the slot on short labels.
+        QueueLabelClamp(region)
     end
 
     BuildHalf(leftRegion, leftCfg)
@@ -4004,7 +4076,12 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
         end
         local label = MakeFont(region, 14, nil, TEXT_WHITE_R, TEXT_WHITE_G, TEXT_WHITE_B)
         PP.Point(label, "LEFT", region, "LEFT", SIDE_PAD, 0)
+        label:SetJustifyH("LEFT")
+        label:SetWordWrap(false)
+        label:SetMaxLines(1)
         label:SetText(EllesmereUI.L(cfg.text or ""))
+        region._label = label
+        region._labelHasHit = (cfg.tooltip or cfg.disabledTooltip) and true or false
 
         if (cfg.tooltip or cfg.disabledTooltip) and t ~= "dropdown" then
             local ttOpts = cfg.tooltipOpts
@@ -4017,7 +4094,11 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
                     local tt = ResolveDisabledTip(cfg)
                     if tt then ShowWidgetTooltip(label, tt) end
                 elseif cfg.tooltip then
-                    ShowWidgetTooltip(label, cfg.tooltip, ttOpts)
+                    ShowWidgetTooltip(label, LabelTooltipText(region, label, cfg.tooltip), ttOpts)
+                elseif region._labelTruncated then
+                    -- Truncated label on a row whose hit exists only for the
+                    -- disabled tooltip: reveal the full text while enabled.
+                    ShowWidgetTooltip(label, label:GetText())
                 end
             end)
             hitFrame:SetScript("OnLeave", function() HideWidgetTooltip() end)
@@ -4033,7 +4114,7 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
             end
         end
 
-        local controlFrame
+        local controlFrame, controlAnchor
         local function ApplyDisabledState()
             if not cfg.disabled then return end
             local off = cfg.disabled()
@@ -4074,6 +4155,7 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
                 valBox:SetAlpha(off and 0.3 or 1)
                 if slThumb then slThumb._sliderDisabled = off end
             end
+            controlAnchor = trackFrame
 
         elseif t == "dropdown" then
             local DD_W = cfg.dropdownWidth or 170
@@ -4114,7 +4196,9 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
                         local tt = ResolveDisabledTip(cfg)
                         if tt then ShowWidgetTooltip(label, tt) end
                     elseif cfg.tooltip and not (ddBtn._ddMenu and ddBtn._ddMenu:IsShown()) then
-                        ShowWidgetTooltip(label, cfg.tooltip, ttOpts)
+                        ShowWidgetTooltip(label, LabelTooltipText(region, label, cfg.tooltip), ttOpts)
+                    elseif region._labelTruncated and not (ddBtn._ddMenu and ddBtn._ddMenu:IsShown()) then
+                        ShowWidgetTooltip(label, label:GetText())
                     end
                 end)
                 hitFrame:SetScript("OnLeave", function() HideWidgetTooltip() end)
@@ -4231,6 +4315,13 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
             RegisterWidgetRefresh(function() ApplyDisabledState() end)
             ApplyDisabledState()
         end
+        region._control = controlAnchor or controlFrame
+        -- Label truncation is deferred (QueueLabelClamp) and the right bound
+        -- is only applied when the label actually overflows: a bound
+        -- stretches the label's rect, and anything anchored to its RIGHT
+        -- edge (inline "(Applies to ...)" subtitles) would slide to the far
+        -- side of the slot on short labels.
+        QueueLabelClamp(region)
     end
 
     BuildThird(leftRegion, leftCfg)

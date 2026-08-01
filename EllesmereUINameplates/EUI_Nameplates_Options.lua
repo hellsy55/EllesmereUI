@@ -2393,6 +2393,7 @@ initFrame:SetScript("OnEvent", function(self)
         local function friendlyPlayersOff() return DBVal("showFriendlyPlayers") == false end
         local function friendlyPlateOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") ~= false end
         local function nameOnlyOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") == false end
+        local function subtitleOff() return friendlyPlayersOff() or (DBVal("friendlyBelowName") or "none") == "none" end
 
         local friendlyRow
         _, h = W:DualRow(parent, y,
@@ -2589,6 +2590,142 @@ initFrame:SetScript("OnEvent", function(self)
             classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(refreshNameSwatches)
             refreshNameSwatches()
+        end
+
+        ---------------------------------------------------------------
+        --  Subtitle Text (player title / guild below the name), with the
+        --  size slider and the Custom/Class inline swatch pair (mirrors
+        --  the Name Only White/Class swatches above).
+        ---------------------------------------------------------------
+        local subtitleRow
+        subtitleRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Subtitle Text",
+              tooltip="Show the player's title or guild in a smaller line below their name on friendly nameplates.",
+              disabled=friendlyPlayersOff,
+              disabledTooltip="Show EUI Friendly Player Nameplates",
+              values={ none="None", title="Player Title", guild="Guild Name", both="Title & Guild" },
+              order={ "none", "title", "guild", "both" },
+              getValue=function() return DBVal("friendlyBelowName") or "none" end,
+              setValue=function(v)
+                DB().friendlyBelowName = v
+                if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Subtitle Text Size", trackWidth=120,
+              min=6, max=30, step=1,
+              disabled=subtitleOff,
+              disabledTooltip=function()
+                  if friendlyPlayersOff() then return "Show EUI Friendly Player Nameplates" end
+                  return "Subtitle Text"
+              end,
+              getValue=function() return DBVal("friendlyBelowNameSize") or defaults.friendlyBelowNameSize end,
+              setValue=function(v)
+                DB().friendlyBelowNameSize = v
+                if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+              end });  y = y - h
+
+        do
+            local rightRgn = subtitleRow._rightRegion
+            local customSwatch, updateCustom, classSwatch, updateSubClass
+            local function refreshSubtitleSwatches()
+                if updateCustom then updateCustom() end
+                if updateSubClass then updateSubClass() end
+                local off = subtitleOff()
+                local useClass = DBVal("friendlyBelowNameClassColor") == true
+                customSwatch:SetAlpha(off and 0.15 or (useClass and 0.3 or 1))
+                classSwatch:SetAlpha(off and 0.15 or (useClass and 1 or 0.3))
+                customSwatch:SetMouseClickEnabled(not off)
+                classSwatch:SetMouseClickEnabled(not off)
+            end
+            -- Custom swatch: editable color. Clicking it while Class is
+            -- active only selects custom mode; clicking again opens the
+            -- picker (house multiSwatch convention).
+            customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                function()
+                    local c = DBVal("friendlyBelowNameColor") or defaults.friendlyBelowNameColor
+                    return c.r, c.g, c.b
+                end,
+                function(r, g, b)
+                    DB().friendlyBelowNameColor = { r = r, g = g, b = b }
+                    if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                end, nil, 20)
+            PP.Point(customSwatch, "RIGHT", rightRgn._control, "LEFT", -8, 0)
+            local origCustomClick = customSwatch:GetScript("OnClick")
+            customSwatch:SetScript("OnClick", function(self, ...)
+                if subtitleOff() then return end
+                if DBVal("friendlyBelowNameClassColor") == true then
+                    DB().friendlyBelowNameClassColor = false
+                    if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                    refreshSubtitleSwatches()
+                    return
+                end
+                if origCustomClick then origCustomClick(self, ...) end
+            end)
+            customSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color") end)
+            customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            -- Class color swatch: previews the player's class color; selects
+            -- class-colored mode (each unit's subtitle uses its own class).
+            classSwatch, updateSubClass = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
+                function()
+                    local _, ct = UnitClass("player")
+                    local cc = ct and C_ClassColor and C_ClassColor.GetClassColor(ct)
+                    if cc then return cc.r, cc.g, cc.b end
+                    return 1, 1, 1
+                end,
+                function() end, nil, 20)
+            PP.Point(classSwatch, "RIGHT", customSwatch, "LEFT", -8, 0)
+            rightRgn._lastInline = classSwatch
+            classSwatch:SetScript("OnClick", function()
+                if subtitleOff() then return end
+                DB().friendlyBelowNameClassColor = true
+                if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                refreshSubtitleSwatches()
+            end)
+            classSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(classSwatch, "Class Color") end)
+            classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            EllesmereUI.RegisterWidgetRefresh(refreshSubtitleSwatches)
+            refreshSubtitleSwatches()
+        end
+
+        -- Subtitle Text inline cog (guild bracket toggle)
+        do
+            local subCogOwner
+            local _, ShowSubtitlePopup = EllesmereUI.BuildCogPopup({
+                title = "Subtitle Text Settings",
+                rows = {
+                    { type = "toggle", label = "Show <> Around Guild",
+                      get = function() return DBVal("friendlyBelowNameGuildBrackets") ~= false end,
+                      set = function(v)
+                        DB().friendlyBelowNameGuildBrackets = v and true or false
+                        if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
+                      end },
+                },
+            })
+
+            local rgn = subtitleRow._leftRegion
+            local btn = CreateFrame("Button", nil, rgn)
+            btn:SetSize(26, 26)
+            btn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
+            btn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            btn:SetAlpha(subtitleOff() and 0.15 or 0.4)
+            local tex = btn:CreateTexture(nil, "OVERLAY")
+            tex:SetAllPoints(); tex:SetTexture(COGS_ICON)
+            btn:SetScript("OnEnter", function(self)
+                if subtitleOff() then
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Subtitle Text"))
+                else self:SetAlpha(0.7) end
+            end)
+            btn:SetScript("OnLeave", function(self)
+                EllesmereUI.HideWidgetTooltip()
+                if subCogOwner ~= self then self:SetAlpha(subtitleOff() and 0.15 or 0.4) end
+            end)
+            btn:SetScript("OnClick", function(self)
+                if subtitleOff() then return end
+                ShowSubtitlePopup(self)
+            end)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                if subCogOwner ~= btn then btn:SetAlpha(subtitleOff() and 0.15 or 0.4) end
+            end)
         end
 
         local npcRow

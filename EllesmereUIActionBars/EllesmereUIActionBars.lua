@@ -42,6 +42,75 @@ do
     end
 end
 
+-- "Hide Count at 0" (Icon Effects): hide a zero charge/stack count on
+-- action buttons via the count fontstring's ALPHA, not its text. The text
+-- channel is co-owned: every action button keeps SPELL_UPDATE_CHARGES
+-- registered to Blizzard's mixin (BUTTON_EVENT_LISTS.action), whose handler
+-- rewrites Count with the raw value and would stomp a filtered text on
+-- every charge event -- but nothing engine-side ever touches the
+-- fontstring's alpha, so that channel is ours alone (same reasoning as the
+-- CDM twin). Memoized so only real state changes write; fail-open on
+-- SECRET display values (combat) so the count always shows rather than
+-- risking a tainted comparison. Off = one profile read + a memoized
+-- identity, zero machinery. (On the ns table: this file's main chunk is at
+-- the 200-local cap.)
+ns._EABZeroCountAlpha = function(fd, fs, v, action)
+    local pdb = EAB.db and EAB.db.profile
+    if not (pdb and pdb.hideZeroCount) then
+        -- OFF fast path, first and unconditional: three table reads and a
+        -- memo compare, no writes -- except healing a leftover hidden stamp
+        -- (toggle or profile switch while a count was hidden), so no button
+        -- can ever stay stuck invisible regardless of which path disabled
+        -- the feature. The profile read IS the gate on purpose: a cached
+        -- flag would go stale across profile switches.
+        if fd._zeroCountAlpha == 0 then
+            fd._zeroCountAlpha = 1
+            fs:SetAlpha(1)
+        end
+        return
+    end
+    local a = 1
+    if action then
+        -- The DISPLAY-count API is not what paints the visible zero: the
+        -- mixin shows GetActionCount for consumables/stackables (including
+        -- 0) and the charge count for maxCharges > 1 spells. Mirror that
+        -- display logic; the display string is only the cheap first check.
+        if v ~= nil and not (issecretvalue and issecretvalue(v))
+           and (v == 0 or v == "0") then
+            a = 0
+        elseif (IsConsumableAction and IsConsumableAction(action))
+            or (IsStackableAction and IsStackableAction(action)) then
+            local c = GetActionCount and GetActionCount(action)
+            if c ~= nil and not (issecretvalue and issecretvalue(c)) and c == 0 then
+                a = 0
+            end
+        elseif C_ActionBar.GetActionCharges then
+            -- Charge spells: zero charges <=> on a real (non-GCD) cooldown,
+            -- the same clean-flag predicate as the CDM twin -- both flags
+            -- stay PLAIN in combat, so the display is identical in and out
+            -- of instanced content (the secret currentCharges is never
+            -- compared).
+            local ci = C_ActionBar.GetActionCharges(action)
+            local mc = ci and ci.maxCharges
+            if mc ~= nil and not (issecretvalue and issecretvalue(mc)) and mc > 1 then
+                local cd = C_ActionBar.GetActionCooldown
+                    and C_ActionBar.GetActionCooldown(action)
+                local act = cd and cd.isActive
+                local gcd = cd and cd.isOnGCD
+                if act ~= nil and not (issecretvalue and issecretvalue(act))
+                   and not (issecretvalue and issecretvalue(gcd))
+                   and act and not gcd then
+                    a = 0
+                end
+            end
+        end
+    end
+    if fd._zeroCountAlpha ~= a then
+        fd._zeroCountAlpha = a
+        fs:SetAlpha(a)
+    end
+end
+
 -- Cold-path helper table for module-level behavior that benefits from a
 -- shared dispatch surface without adding more direct top-level helpers.
 local EAB_VTABLE = {
@@ -715,6 +784,7 @@ local function FormatHotkeyText(text)
     text = text:gsub("CTRL%-", "C")
     text = text:gsub("ALT%-", "A")
     text = text:gsub("SHIFT%-", "S")
+    text = text:gsub("META%-", "M")  -- Mac Command key (CMD-E -> ME)
     text = text:gsub("Mouse Button ", "M")
     text = text:gsub("MOUSEWHEELUP", "MwU")
     text = text:gsub("MOUSEWHEELDOWN", "MwD")
@@ -3014,6 +3084,7 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
         local display = C_ActionBar.GetActionDisplayCount(action)
         btn.Count:SetText(display or "")
+        ns._EABZeroCountAlpha(EFD(btn), btn.Count, display, action)
     end
     -- Macro / action text. The mixin's Update() maintains this normally, but
     -- we suppress its per-button events, so a moved macro leaves its name
@@ -3595,6 +3666,7 @@ do
                                                 f2.lastCountText = d2
                                                 b2.Count:SetText(d2)
                                             end
+                                            ns._EABZeroCountAlpha(f2, b2.Count, d2, a2)
                                         end
                                     end
                                 end
@@ -4087,6 +4159,7 @@ do
                                             fd.lastCountText = display
                                             btn.Count:SetText(display)
                                         end
+                                        ns._EABZeroCountAlpha(fd, btn.Count, display, action)
                                     end
                                     fd.chargeWasLive = (chargeInfo and chargeInfo.isActive) and true or false
                                 end
@@ -6312,6 +6385,30 @@ end
 -- (immediate feedback + a clean restore to full alpha when set back to 100) and on
 -- the main apply. Reuses the exact same secret-safe curve detection as the live
 -- ACTIONBAR_UPDATE_COOLDOWN handler.
+-- Immediate re-apply of the Hide Count at 0 alpha on every button, so the
+-- options toggle applies on click instead of waiting for the next count
+-- event. Alpha only -- the count TEXT stays whatever its owners last wrote.
+-- Cold path: options clicks only.
+function EAB:RefreshAllCounts()
+    if not (C_ActionBar and C_ActionBar.GetActionDisplayCount) then return end
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local btns = barButtons[info.key]
+            if btns then
+                for _, btn in ipairs(btns) do
+                    if btn.Count then
+                        local action = btn:GetAttribute("action")
+                        if action and HasAction(action) then
+                            ns._EABZeroCountAlpha(EFD(btn), btn.Count,
+                                C_ActionBar.GetActionDisplayCount(action), action)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 function EAB:ApplyCDAlphaAll()
     local pdb = self.db and self.db.profile
     local cdAlpha = (pdb and pdb.alphaWhenOnCD) or 100

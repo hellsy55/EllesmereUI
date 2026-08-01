@@ -5450,8 +5450,6 @@ function ns.StyleOverlayCooldownText(oCd, barData, ssb, iconScale)
     local fontScale = 1 / iconScale
     local showCD = barData and barData.showCooldownText
     if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
-    -- Only Show Numbers (bar setting): the countdown IS the icon on these bars.
-    if barData and barData.onlyShowNumbers then showCD = true end
     oCd:SetHideCountdownNumbers(not showCD)
     if not showCD then return end
     local cdFont = GetCDMFont()
@@ -5699,6 +5697,14 @@ local function RefreshCDMIconAppearance(barKey)
         if ns._cdmAnyChargeHideCdText and not isBuffFamilyBar and ns.WatchChargeCdTextIfEnabled then
             ns.WatchChargeCdTextIfEnabled(icon)
         end
+        -- "Hide Text at 0 Stacks" (bar-level): enroll/refresh on the same
+        -- login + settings-change pass. Gated on the bar's own key, plus a
+        -- next() probe so turning the setting OFF still reaches the unwatch/
+        -- restore path; both empty = skipped entirely (zero cost unused).
+        if not isBuffFamilyBar and ns.WatchZeroChargeTextIfEnabled
+           and (barData.hideZeroChargeText or next(ns._zeroChargeTextWatch or {}) ~= nil) then
+            ns.WatchZeroChargeTextIfEnabled(icon)
+        end
         -- Immediately re-assert Hide Recharge Edge / Hide Swipe on charge icons so a
         -- toggle (per-icon or via Apply to Bar) updates a currently-recharging spell
         -- right away instead of waiting for its next recharge to fire the reactive
@@ -5787,11 +5793,10 @@ local function RefreshCDMIconAppearance(barKey)
             -- Above the border (icon+13); still below glow (icon+16) / text (icon+23).
             pcall(cd.SetFrameLevel, cd, icon:GetFrameLevel() + 14)
             -- Per-icon Duration Text override (ssb) falls back to the bar's values.
+            -- Only Show Numbers no longer forces this on: hiding the duration
+            -- (bar toggle or per-icon) under it leaves just the stack count.
             local showCD = barData.showCooldownText
             if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
-            -- Only Show Numbers (bar setting): the countdown IS the icon, so it
-            -- overrides both the bar's Cooldown Text toggle and per-icon offs.
-            if barData.onlyShowNumbers then showCD = true end
             cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
             -- Per-spell Reverse Swipe: flips this icon's swipe direction away from
             -- the bar default (buffs fill up, cooldowns deplete). Entire block is
@@ -7408,6 +7413,7 @@ local function FormatKeybindKey(key)
     key = key:gsub("SHIFT%-", "S")
     key = key:gsub("CTRL%-",  "C")
     key = key:gsub("ALT%-",   "A")
+    key = key:gsub("META%-",  "M")  -- Mac Command key (CMD-E -> ME)
     key = key:gsub("Mouse Button ", "M")
     key = key:gsub("MOUSEWHEELUP",   "MwU")
     key = key:gsub("MOUSEWHEELDOWN", "MwD")

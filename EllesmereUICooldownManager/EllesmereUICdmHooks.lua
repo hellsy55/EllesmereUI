@@ -1832,6 +1832,111 @@ function ns.WatchChargeCdTextIfEnabled(frame)
 end
 
 -------------------------------------------------------------------------------
+--  "Hide Text at 0 Stacks" (bar-level, cd/utility bars): hide the charge
+--  counter (frame.ChargeCount.Current) while a charge spell is genuinely OUT
+--  of charges, instead of showing a 0. Uses the same clean charges>0
+--  predicate as CdmShouldHideCountdown above -- GetSpellCooldown().isActive
+--  AND not isOnGCD, both plain flags; the secret currentCharges is never
+--  read, so the display is identical in and out of instanced combat. Driven
+--  by the same SPELL_UPDATE_CHARGES edge as the other charge features (fires
+--  on every spend AND refill, nothing else); the event shell is created
+--  lazily on first enrollment and the watch set self-drains, so a user who
+--  never enables the toggle pays nothing at all. Alpha, not Hide: the engine
+--  rewrites the counter's TEXT on charge changes but never its alpha, and
+--  our eval re-asserts on the same event either way.
+-------------------------------------------------------------------------------
+ns._zeroChargeTextWatch = ns._zeroChargeTextWatch or setmetatable({}, { __mode = "k" })
+
+-- Paint-the-delta memo: SetAlpha only on a real state change. fd is our own
+-- hook data table; the engine rewrites the counter's TEXT but never its
+-- alpha, so the stamp stays truthful between our writes.
+local function ZctSetAlpha(fd, fs, a)
+    if fd._zctAlpha ~= a then
+        fd._zctAlpha = a
+        fs:SetAlpha(a)
+    end
+end
+
+local function EvalZeroChargeTextFrame(frame, fd)
+    local fs = frame.ChargeCount and frame.ChargeCount.Current
+    local fcz = _ecmeFC[frame]
+    local sidz = fcz and fcz.spellID
+    local bkz = fcz and fcz.barKey
+    if not fs or not sidz or not bkz then
+        ns._zeroChargeTextWatch[frame] = nil
+        if fs then ZctSetAlpha(fd, fs, 1) end
+        return
+    end
+    local bd = barDataByKey and barDataByKey[bkz]
+    if not (bd and bd.hideZeroChargeText) then
+        ns._zeroChargeTextWatch[frame] = nil
+        ZctSetAlpha(fd, fs, 1)
+        return
+    end
+    local liveSid = sidz
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        liveSid = C_SpellBook.FindSpellOverrideByID(sidz) or sidz
+    end
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    if not (ci and (ci.maxCharges or 0) > 1) then
+        -- Not a charge spell (talent may have changed since enrollment):
+        -- restore and unwatch; the appearance pass re-enrolls if charge-ness
+        -- returns. Keeps the per-event set charge-spells-only.
+        ns._zeroChargeTextWatch[frame] = nil
+        ZctSetAlpha(fd, fs, 1)
+        return
+    end
+    -- 0 charges <=> on a real (non-GCD) cooldown; see CdmShouldHideCountdown
+    -- for why the isOnGCD term is required (a GCD right after a cast reports
+    -- isActive with a charge still in hand).
+    local cdInfo = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(liveSid)
+    local zero = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
+    ZctSetAlpha(fd, fs, zero and 0 or 1)
+end
+
+function ns.WatchZeroChargeTextIfEnabled(frame)
+    if not frame then return end
+    local fd = hookFrameData[frame]
+    if not fd then return end
+    local fcz = _ecmeFC[frame]
+    local sidz = fcz and fcz.spellID
+    local bkz = fcz and fcz.barKey
+    local bd = bkz and barDataByKey and barDataByKey[bkz]
+    if bd and bd.hideZeroChargeText and sidz then
+        -- Enroll CHARGE SPELLS ONLY (mirrors WatchChargeCdTextIfEnabled):
+        -- non-charge icons would just be identity work on every
+        -- SPELL_UPDATE_CHARGES. Talent swaps that change charge-ness re-run
+        -- this via the appearance pass, and the eval self-unwatches the
+        -- other direction.
+        local liveSid = sidz
+        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+            liveSid = C_SpellBook.FindSpellOverrideByID(sidz) or sidz
+        end
+        local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+        if not (ci and (ci.maxCharges or 0) > 1) then
+            if ns._zeroChargeTextWatch[frame] then EvalZeroChargeTextFrame(frame, fd) end
+            return
+        end
+        if not ns._zeroChargeTextEventFrame then
+            local ef = ns.TakeShell()
+            ef:RegisterEvent("SPELL_UPDATE_CHARGES")
+            ef:SetScript("OnEvent", function()
+                for f, d in pairs(ns._zeroChargeTextWatch) do
+                    EvalZeroChargeTextFrame(f, d)
+                end
+            end)
+            ns._zeroChargeTextEventFrame = ef
+        end
+        ns._zeroChargeTextWatch[frame] = fd
+        EvalZeroChargeTextFrame(frame, fd)
+    elseif ns._zeroChargeTextWatch[frame] then
+        -- Setting turned off: the eval's off-branch unwatches and restores
+        -- the counter's alpha in one place.
+        EvalZeroChargeTextFrame(frame, fd)
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Cooldown State Effect -- charge-aware readiness for Hidden (CD Ready)
 --
 --  For a CHARGE spell "CD Ready" must mean AT MAX CHARGES, not "a charge is in
@@ -2139,9 +2244,10 @@ ns.ApplyCustomIcon = ApplyCustomIcon
 --    cd/utility bars:  "Charges/Stacks Only (No Icon)" -> barData.chargesOnly
 --  Both hide the icon texture, background, square border, shape ring, Blizzard
 --  debuff border, the swipe and the recharge edge. They differ in the text they
---  leave behind: Only Show Numbers FORCES the Cooldown widget's engine
---  countdown on (the duration number IS the display), while Charges/Stacks Only
---  forces it OFF, so the charge / stack counter is all that remains.
+--  leave behind: Only Show Numbers leaves the countdown to the normal Duration
+--  Text settings (bar toggle + per-icon overrides -- turning those off leaves
+--  a stacks-only display), while Charges/Stacks Only forces the countdown OFF,
+--  so the charge / stack counter is all that remains.
 --  Swipe, edge and countdown all have writers that re-assert between our
 --  passes, so each is gated on the frame's flags at its own choke point:
 --  the SetDrawSwipe hook and ApplyCdmChargeStyle (which owns ApplyCdmEdge) read
@@ -2204,10 +2310,13 @@ local function ApplyOnlyNumbers(frame, fd, barData)
             if cd.SetDrawSwipe then cd:SetDrawSwipe(false) end
             -- No icon means no recharge edge either.
             if cd.SetDrawEdge then cd:SetDrawEdge(false) end
-            -- Only Show Numbers FORCES the duration on (the number is the whole
-            -- display); Charges/Stacks Only forces it OFF, leaving the charge /
-            -- stack counter alone on the bar.
-            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(not osn) end
+            -- Charges/Stacks Only forces the countdown OFF (the charge / stack
+            -- counter is all that remains). The buff variant does NOT touch it:
+            -- the duration follows the normal Duration Text settings (bar
+            -- toggle + per-icon overrides), which the appearance pass applied
+            -- before this re-hide tail -- so hiding the duration under Only
+            -- Show Numbers leaves just the stack count.
+            if (not osn) and cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
         end
     elseif fd and fd._osnOn then
         fd._osnOn = nil
@@ -6066,9 +6175,9 @@ local function CollectAndReanchor()
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local count = 0
 
-                -- Only Show Numbers forces the countdown text on for the whole
-                -- bar regardless of the Cooldown Text toggle.
-                local hideCD = not (barData.showCooldownText or barData.onlyShowNumbers)
+                -- Duration text follows the bar's Cooldown Text toggle even
+                -- under Only Show Numbers (hide duration = stacks only).
+                local hideCD = not barData.showCooldownText
                 -- FocusKick icon alpha is owned exclusively by
                 -- SetFocusKickAlpha; skip the per-icon alpha override here
                 -- so CollectAndReanchor doesn't clobber the nameplate-driven
