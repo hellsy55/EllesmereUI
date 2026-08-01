@@ -6331,9 +6331,16 @@ end
 -- untouched at any sane setting, and small buttons scale down on their own.
 function EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
     local host = cdFrame and (cdFrame:GetParent() or cdFrame)
-    local w = host and host.GetWidth and host:GetWidth() or 0
-    if not w or w <= 0 then return cdSize end   -- not laid out yet; re-applied later
-    local cap = math.floor(w * 0.40)
+    if not (host and host.GetWidth and host.GetHeight) then return cdSize end
+    local w, h = host:GetWidth(), host:GetHeight()
+    if not w or not h or w <= 0 or h <= 0 then
+        return cdSize   -- not laid out yet; re-applied on the next layout pass
+    end
+    -- Smaller dimension, not width: buttonWidth and buttonHeight are separate
+    -- settings, so a wide, short button gives a generous width while the text
+    -- still overflows vertically. The tighter axis is the one that constrains.
+    local dim = (w < h) and w or h
+    local cap = math.floor(dim * 0.40)
     if cap < 5 then cap = 5 end                 -- never shrink to illegibility
     return (cdSize > cap) and cap or cdSize
 end
