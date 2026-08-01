@@ -332,8 +332,8 @@ local function IsGearCategory(catIdx)
     return _gearCatSet[catIdx]
 end
 
--- Item-management panels (mail, trade, auction house, bank, void storage,
--- guild bank) take one real bag slot at a time, so a merged button only ever
+-- Item-management panels (mail, trade, auction house, bank, guild bank)
+-- take one real bag slot at a time, so a merged button only ever
 -- hands over the single slot behind it: a merged count of 3 mails as 1.
 -- Duplicates are left unmerged while any of them is open, so every slot is
 -- reachable. Players who keep duplicates deliberately apart can also turn
@@ -6691,14 +6691,22 @@ local function StartAddon()
         TRADE_CLOSED          = { "trade",     false },
         AUCTION_HOUSE_SHOW    = { "auction",   true  },
         AUCTION_HOUSE_CLOSED  = { "auction",   false },
-        VOID_STORAGE_OPEN     = { "void",      true  },
-        VOID_STORAGE_CLOSE    = { "void",      false },
         BANKFRAME_OPENED      = { "bank",      true  },
         BANKFRAME_CLOSED      = { "bank",      false },
         GUILDBANKFRAME_OPENED = { "guildbank", true  },
         GUILDBANKFRAME_CLOSED = { "guildbank", false },
     }
-    for evt in pairs(ITEM_PANEL_EVENTS) do EUI_Bags:RegisterEvent(evt) end
+    -- pcall belt: RegisterEvent on a name the client no longer knows is a HARD
+    -- error, and this loop runs BEFORE the OnEvent wiring below -- an invalid
+    -- name here killed the rest of StartAddon and shipped a bags window with
+    -- no event handler at all (field-caught: VOID_STORAGE_OPEN, removed with
+    -- Warbands, froze the whole refresh pipeline). A panel event lost to a
+    -- future patch rename must degrade to "that panel doesn't unmerge", never
+    -- to a dead bags addon.
+    for evt in pairs(ITEM_PANEL_EVENTS) do
+        local ok = pcall(EUI_Bags.RegisterEvent, EUI_Bags, evt)
+        if not ok then ITEM_PANEL_EVENTS[evt] = nil end
+    end
 
     -- Pre-warm the secure item-button pool while out of combat. Creating a
     -- ContainerFrameItemButtonTemplate button during combat lockdown taints it,

@@ -209,7 +209,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Merge Duplicate Items
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Merge Duplicate Items",
-                  tooltip="Show copies of the same item that sit in separate bag slots as one icon with their counts added together. Turn this off to keep every slot separate, for example when you deliberately split stacks. Merging is always paused while the mail, trade, auction house, bank, void storage or guild bank window is open, since those take one bag slot at a time.",
+                  tooltip="Show copies of the same item that sit in separate bag slots as one icon with their counts added together. Turn this off to keep every slot separate, for example when you deliberately split stacks. Merging is always paused while the mail, trade, auction house, bank or guild bank window is open, since those take one bag slot at a time.",
                   getValue=function() return db.profile.bagMergeDuplicates ~= false end,
                   setValue=function(v)
                       db.profile.bagMergeDuplicates = v
