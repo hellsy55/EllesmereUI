@@ -935,17 +935,32 @@ end
 --
 -- The propagate calls are PROTECTED in combat, and the lazily built pool can
 -- be born mid-combat (first BM update of a delve/raid pull -- even inside the
--- secure header's own update chain), where they are blocked and taint
+-- secure header's own update chain, which Blizzard does NOT combat-gate:
+-- SecureGroupHeader_Update runs on every GROUP_ROSTER_UPDATE/UNIT_NAME_UPDATE
+-- while the header is visible, and its SetAttribute("unit") fires our
+-- OnAttributeChanged hook synchronously), where they are blocked and taint
 -- (field-reported ADDON_ACTION_BLOCKED). They are also inert until
 -- BM_SetTipTarget ENABLES mouse (the opt-in tooltip setting): a
 -- mouse-disabled frame passes motion and clicks through natively. So apply
 -- them immediately only out of combat; in combat, queue the frame for one
--- shared REGEN pass. Until that pass, the worst case is a tooltip-opted-in
--- hover swallowing motion over one 12px icon for the rest of that combat.
+-- shared REGEN pass.
+--
+-- _propagateOK records whether that pass has landed. Mouse must stay OFF
+-- until it has: a frame that is mouse-ENABLED but not yet propagating
+-- swallows motion AND clicks, which kills click-casting over that 12px icon
+-- for the rest of the fight. Staying transparent instead costs only the
+-- aura tooltip until combat drops, which is the same thing the default
+-- (tooltips hidden) already does.
 local _wirePending, _wireFrame
+local BM_SetTipTarget  -- defined below; the REGEN pass re-evaluates through it
 local function BM_ApplyPropagate(f)
     if f.SetPropagateMouseMotion then f:SetPropagateMouseMotion(true) end
     if f.SetPropagateMouseClicks then f:SetPropagateMouseClicks(true) end
+    f._propagateOK = true
+    -- Re-arm the hover now that propagation is live, so a tooltip the user
+    -- opted into returns when combat drops instead of waiting for that unit's
+    -- next aura event. No-op for a frame wired out of combat (no tip target yet).
+    if f._tipUnit then BM_SetTipTarget(f, f._tipUnit, f._tipIID) end
 end
 local function BM_WireTooltip(f, button)
     f._ownerButton = button
@@ -979,7 +994,7 @@ end
 -- mouse-transparent until the user opts in -- which is what makes the tooltip
 -- handler's own gate the only one it needs. The `not prof` fallback only covers
 -- a profile-less early call. A missing/secret instance id disables the hover.
-local function BM_SetTipTarget(f, unit, iid)
+function BM_SetTipTarget(f, unit, iid)
     f._tipUnit = unit
     f._tipIID  = iid
     -- db is a per-call parameter elsewhere in this file, not a file upvalue;
@@ -987,6 +1002,8 @@ local function BM_SetTipTarget(f, unit, iid)
     local prof = ns.db and ns.db.profile
     local wantMouse = (not prof or prof.buffHideTooltips ~= true)
         and iid ~= nil and not issecretvalue(iid)
+        -- Never take the mouse before propagation is live (see BM_ApplyPropagate).
+        and f._propagateOK == true
     if f._tipMouse ~= wantMouse then
         f:EnableMouse(wantMouse)
         f._tipMouse = wantMouse
