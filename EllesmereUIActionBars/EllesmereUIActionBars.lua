@@ -6085,6 +6085,12 @@ end
 
 function EAB:ApplyButtonSizeForBar(barKey)
     LayoutBar(barKey)
+    -- The countdown size is capped against the button (CooldownFonts
+    -- .EffectiveSize), so resizing changes the cap. Nothing else re-applies it
+    -- on this path -- ApplyCooldownFonts runs from ApplyAll and UPDATE_BINDINGS
+    -- only -- so without this the text keeps the previous bar's size until some
+    -- unrelated event happens to refresh it.
+    self:ApplyCooldownFontsForBar(barKey)
 end
 
 function EAB:ApplyIconRowOverrides(barKey)
@@ -6311,14 +6317,37 @@ function EAB_VTABLE.CooldownFonts.GetSettings(s)
         s.cooldownTextColor or { r = 1, g = 1, b = 1 }
 end
 
+-- Cap the configured countdown size against the button it has to fit inside.
+-- The size is absolute and the countdown string is Blizzard's, formatted in the
+-- CLIENT locale -- so the same setting that fits "5m" on an English client
+-- overflows with "5 мин" on a Russian one, which is how this was reported. The
+-- text was always overflowing; a textured border merely HID it, because that
+-- border frame is anchored OUTSIDE the button (see ApplyBorderStyle) and its art
+-- covers the spill, while a solid border sits on the edge and covers nothing.
+-- Masking is not a fix, so cap the size instead: a normal 45px button is
+-- untouched at any sane setting, and small buttons scale down on their own.
+function EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
+    local host = cdFrame and (cdFrame:GetParent() or cdFrame)
+    local w = host and host.GetWidth and host:GetWidth() or 0
+    if not w or w <= 0 then return cdSize end   -- not laid out yet; re-applied later
+    local cap = math.floor(w * 0.40)
+    if cap < 5 then cap = 5 end                 -- never shrink to illegibility
+    return (cdSize > cap) and cap or cdSize
+end
+
 function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, cdOY, cdColor)
     if not cdFrame then return false end
+
+    -- Stamp on the EFFECTIVE size, not the requested one: keyed to the request,
+    -- resizing the bar would leave the setting unchanged, match the stamp, and
+    -- skip the re-apply -- freezing the old size on a button that just changed.
+    local eff = EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
 
     -- Skip if these exact settings were already applied to this frame
     local cdfd = EFD(cdFrame)
     local stamp = cdfd.cdFontStamp
     local cr, cg, cb = cdColor.r, cdColor.g, cdColor.b
-    if stamp and stamp[1] == fontPath and stamp[2] == cdSize
+    if stamp and stamp[1] == fontPath and stamp[2] == eff
        and stamp[3] == cdOX and stamp[4] == cdOY
        and stamp[5] == cr and stamp[6] == cg and stamp[7] == cb then
         return true
@@ -6327,11 +6356,11 @@ function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, 
     for ri = 1, cdFrame:GetNumRegions() do
         local region = select(ri, cdFrame:GetRegions())
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            EllesmereUI.ApplyIconTextFont(region, fontPath, cdSize, "actionBars")
+            EllesmereUI.ApplyIconTextFont(region, fontPath, eff, "actionBars")
             region:SetTextColor(cr, cg, cb)
             region:ClearAllPoints()
             region:SetPoint("CENTER", cdFrame, "CENTER", cdOX, cdOY)
-            cdfd.cdFontStamp = { fontPath, cdSize, cdOX, cdOY, cr, cg, cb }
+            cdfd.cdFontStamp = { fontPath, eff, cdOX, cdOY, cr, cg, cb }
             return true
         end
     end
