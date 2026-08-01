@@ -5187,6 +5187,15 @@ local function LayoutBar(key)
             end)
         end
     end
+
+    -- Countdown size is capped against button width (CooldownFonts
+    -- .EffectiveSize), so anything that re-lays a bar can change the cap. This
+    -- sits here rather than at the callers because there are fourteen of them
+    -- (icon size, padding, row/column overrides, width- and height-match links,
+    -- profile swaps, ...) and hooking one leaves the rest applying a stale size.
+    -- Cheap when nothing changed: the per-frame stamp makes the font work a
+    -- no-op unless the effective size actually differs.
+    EAB:ApplyCooldownFontsForBar(key)
 end
 
 -------------------------------------------------------------------------------
@@ -6085,12 +6094,6 @@ end
 
 function EAB:ApplyButtonSizeForBar(barKey)
     LayoutBar(barKey)
-    -- The countdown size is capped against the button (CooldownFonts
-    -- .EffectiveSize), so resizing changes the cap. Nothing else re-applies it
-    -- on this path -- ApplyCooldownFonts runs from ApplyAll and UPDATE_BINDINGS
-    -- only -- so without this the text keeps the previous bar's size until some
-    -- unrelated event happens to refresh it.
-    self:ApplyCooldownFontsForBar(barKey)
 end
 
 function EAB:ApplyIconRowOverrides(barKey)
