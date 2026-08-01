@@ -368,19 +368,55 @@ local function UpdateSide(el, unit, updateInfo, isFullUpdate, forcedFull, defaul
         if updateInfo.updatedAuraInstanceIDs then
             for _, auraInstanceID in next, updateInfo.updatedAuraInstanceIDs do
                 if el.all[auraInstanceID] then
-                    el.all[auraInstanceID] = processData(el, unit, C_UnitAuras.GetAuraDataByAuraInstanceID(unit, auraInstanceID), filter)
-
-                    if el.active[auraInstanceID] then
-                        el.active[auraInstanceID] = true
-                        if stableOrder then
-                            updated = true
-                            if not updatedIDs then
-                                updatedIDs = table.wipe(el._updatedIDs or {})
-                                el._updatedIDs = updatedIDs
+                    local data = C_UnitAuras.GetAuraDataByAuraInstanceID(unit, auraInstanceID)
+                    if not data then
+                        -- Update racing its own removal: a forcibly removed aura
+                        -- (dispel, trap break, absorb consumed) can appear in
+                        -- updatedAuraInstanceIDs of the SAME payload that removes
+                        -- it, and the fetch comes back nil. Storing that nil
+                        -- silently deleted the el.all entry while active/sorted
+                        -- still held the aura -- and the removal loop below is
+                        -- gated on el.all, so it then skipped it, orphaning the
+                        -- icon permanently (field-reported: dead icon with no
+                        -- tooltip, duplicated once the aura is reapplied; the
+                        -- prune can't recover it either, it iterates el.all).
+                        -- Treat the nil fetch as the removal it really is, with
+                        -- the exact bookkeeping of the removal branch; the
+                        -- removal loop stays consistent whether or not the id
+                        -- also arrives there.
+                        el.all[auraInstanceID] = nil
+                        el._allN = math.max(0, (el._allN or 1) - 1)
+                        if el.active[auraInstanceID] then
+                            el.active[auraInstanceID] = nil
+                            local s = canEdge and el.sorted
+                            local idx
+                            if s then
+                                for i = 1, #s do
+                                    if s[i].auraInstanceID == auraInstanceID then idx = i; break end
+                                end
                             end
-                            updatedIDs[auraInstanceID] = true
-                        else
-                            changed = true
+                            if idx then
+                                table.remove(s, idx)
+                                if not edgeDirty or idx < edgeDirty then edgeDirty = idx end
+                            else
+                                changed = true
+                            end
+                        end
+                    else
+                        el.all[auraInstanceID] = processData(el, unit, data, filter)
+
+                        if el.active[auraInstanceID] then
+                            el.active[auraInstanceID] = true
+                            if stableOrder then
+                                updated = true
+                                if not updatedIDs then
+                                    updatedIDs = table.wipe(el._updatedIDs or {})
+                                    el._updatedIDs = updatedIDs
+                                end
+                                updatedIDs[auraInstanceID] = true
+                            else
+                                changed = true
+                            end
                         end
                     end
                 end
