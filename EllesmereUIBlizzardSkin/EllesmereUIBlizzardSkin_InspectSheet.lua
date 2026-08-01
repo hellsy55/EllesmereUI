@@ -74,9 +74,29 @@ local INSPECT_ENCHANT_SLOTS = {
     [INVSLOT_MAINHAND] = true,
 }
 
+-- Drop every label a previous styling pass left on this slot.
+local function EUI_ClearSlotLabels(slot)
+    local d = GetFFD(slot)
+    if d.iLvlText then d.iLvlText:Hide(); d.iLvlText = nil end
+    if d.enchantText then d.enchantText:Hide(); d.enchantText = nil end
+    if d.enchantHoverFrame then d.enchantHoverFrame:Hide(); d.enchantHoverFrame = nil end
+    if d.upgradeText then d.upgradeText:Hide(); d.upgradeText = nil end
+end
+
 local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightColumn)
     local slot = _G[slotName]
     if not slot or not textOverlayFrame then return end
+
+    -- Blizzard reuses the SAME global slot frames (InspectHeadSlot etc) for
+    -- every target, so a label belongs to whoever was inspected last until
+    -- something clears it. The create-once guards below are no-ops while a
+    -- stale label exists, which left the previous target's numbers sitting
+    -- next to the new target's icons. Only RefreshSlotStyles used to clear,
+    -- so a sheet opened without a following INSPECT_READY (the client already
+    -- had that unit cached) kept the old values indefinitely -- the reported
+    -- "shows the first player's item levels". Clear here instead, so EVERY
+    -- styling pass rebuilds from the live item link no matter who calls.
+    EUI_ClearSlotLabels(slot)
 
     local skipLabels = (slotName == "InspectShirtSlot" or slotName == "InspectTabardSlot")
 
@@ -1321,25 +1341,8 @@ if EllesmereUI then
         for slotName, gridPos in pairs(slotGridMap) do
             local slot = _G[slotName]
             if slot then
-                -- Hide and clear old labels BEFORE creating new ones
-                if GetFFD(slot).iLvlText then
-                    GetFFD(slot).iLvlText:Hide()
-                    GetFFD(slot).iLvlText = nil
-                end
-                if GetFFD(slot).enchantText then
-                    GetFFD(slot).enchantText:Hide()
-                    GetFFD(slot).enchantText = nil
-                end
-                if GetFFD(slot).enchantHoverFrame then
-                    GetFFD(slot).enchantHoverFrame:Hide()
-                    GetFFD(slot).enchantHoverFrame = nil
-                end
-                if GetFFD(slot).upgradeText then
-                    GetFFD(slot).upgradeText:Hide()
-                    GetFFD(slot).upgradeText = nil
-                end
-
-                -- Clear old styling
+                -- Label clearing now lives in EUI_UpdateSlotStyle, so it covers
+                -- ApplyThemedInspectSheet's styling pass too, not just this one.
                 GetFFD(slot).border = false
                 -- Re-style (right column = col 1)
                 local isRightColumn = gridPos.col == 1
