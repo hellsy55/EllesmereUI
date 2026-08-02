@@ -3324,8 +3324,15 @@ ns._eabBarDormant = {}
 ns.ApplyBarDormancy = function(key, dormant)
     local info = BAR_LOOKUP[key]
     -- Stance/pet bars reuse Blizzard buttons with their own event wiring;
-    -- their gating is handled by their own handlers, not the mixin list.
-    if not info or info.isStance or info.isPetBar then return end
+    -- their handlers gate themselves on frame visibility. On the show edge
+    -- just rerun their painters so anything skipped while hidden reconciles.
+    if not info or info.isStance or info.isPetBar then
+        if info and not dormant then
+            if info.isStance and ns._eabStanceReconcile then ns._eabStanceReconcile() end
+            if info.isPetBar and ns._eabPetReconcile then ns._eabPetReconcile() end
+        end
+        return
+    end
     local btns = barButtons[key]
     if not btns then return end
     dormant = dormant and true or false
@@ -3333,6 +3340,13 @@ ns.ApplyBarDormancy = function(key, dormant)
     ns._eabBarDormant[key] = dormant
     -- Either edge changes which buttons the tier/filled lists may include.
     ns._cdFilledDirty = true
+    -- Range acquisition follows the same edges (defined later in the chunk,
+    -- hence the ns indirection): hidden bars stop generating range traffic.
+    if ns._eabRangeBarDormancy then ns._eabRangeBarDormancy(key, dormant) end
+    -- Reveal: restore any proc glow that fired while dormant (the GLOW_SHOW
+    -- scan skipped this bar). Runs after the map flip above, so the queued
+    -- rescan sees the bar as live.
+    if not dormant and ns._eabQueueGlowRescan then ns._eabQueueGlowRescan() end
     if dormant then
         -- Strip the mixin event list. A hidden bar's buttons otherwise keep
         -- running Blizzard's full mixin OnEvent per event (state/usable/
@@ -7237,7 +7251,8 @@ end
 --  for slots we care about.
 -------------------------------------------------------------------------------
 local _range = {
-    slots = {},           -- [actionSlot] = true  (slots with range checking enabled)
+    slots = {},           -- [actionSlot] = refcount (bars currently holding range checking on the slot)
+    barSlots = {},        -- [barKey] = { [actionSlot] = true } acquisition snapshot
     outOfRange = {},      -- [actionSlot] = true  (currently out of range)
     eventFrame = nil,     -- lazy-created event frame
     slotPending = false,  -- debounce for per-slot range re-enable
@@ -7286,18 +7301,62 @@ local function ApplyRangeTint(btn, outOfRange, barSettings)
     end
 end
 
+-- Slot acquisition is REFCOUNTED: pages duplicate slots across bars, so a
+-- plain boolean let one bar's release kill another bar's live tracking, and
+-- resolving slots at release time meant a page flip between acquire and
+-- release stranded the old page's slots enabled forever. Each bar releases
+-- exactly the snapshot it acquired; the engine call happens only on 0<->1
+-- edges. Hidden (dormant) bars release their slots entirely, so they stop
+-- GENERATING ACTION_RANGE_CHECK_UPDATE traffic -- previously every hidden
+-- bar's slots stayed range-enabled and each fire walked all bars.
+
+-- Release whatever the bar snapshot holds (no slot resolution: the snapshot
+-- IS what was acquired, immune to page drift). (On ns: this chunk is at the
+-- 200-local cap.)
+ns._eabReleaseRangeSlots = function(barKey)
+    local held = _range.barSlots[barKey]
+    if not held then return end
+    _range.barSlots[barKey] = nil
+    for slot in pairs(held) do
+        local n = _range.slots[slot]
+        if n and n > 1 then
+            _range.slots[slot] = n - 1
+        else
+            _range.slots[slot] = nil
+            _range.outOfRange[slot] = nil
+            if C_ActionBar and C_ActionBar.EnableActionRangeCheck then
+                pcall(C_ActionBar.EnableActionRangeCheck, slot, false)
+            end
+        end
+    end
+end
+
 -- Enable range checking for all active button slots on a bar
 local function EnableRangeCheckForBar(barKey)
     local buttons = barButtons[barKey]
     if not buttons then return end
     local s = EAB.db.profile.bars[barKey]
     if not s or not s.outOfRangeColoring then return end
+    -- Dormant bars acquire nothing; the show edge re-runs this.
+    if ns._eabBarDormant[barKey] then return end
+    -- Re-acquire from scratch: releasing the old snapshot first makes this
+    -- idempotent under page flips (the debounced SLOT_CHANGED re-enable and
+    -- the PAGE_CHANGED pass both land here).
+    ns._eabReleaseRangeSlots(barKey)
+    local held = {}
+    _range.barSlots[barKey] = held
     for _, btn in ipairs(buttons) do
         local slot = GetButtonActionSlot(btn)
-        if slot and not _range.slots[slot] then
-            _range.slots[slot] = true
-            if C_ActionBar and C_ActionBar.EnableActionRangeCheck then
-                pcall(C_ActionBar.EnableActionRangeCheck, slot, true)
+        if slot and not held[slot] then
+            held[slot] = true
+            local n = _range.slots[slot]
+            if n then
+                _range.slots[slot] = n + 1
+            else
+                _range.slots[slot] = 1
+                if C_ActionBar and C_ActionBar.EnableActionRangeCheck then
+                    pcall(C_ActionBar.EnableActionRangeCheck, slot, true)
+                end
             end
         end
     end
@@ -7305,18 +7364,10 @@ end
 
 -- Disable range checking for all slots on a bar and clear tints
 local function DisableRangeCheckForBar(barKey)
+    ns._eabReleaseRangeSlots(barKey)
     local buttons = barButtons[barKey]
     if not buttons then return end
-    local s = EAB.db.profile.bars[barKey]
     for _, btn in ipairs(buttons) do
-        local slot = GetButtonActionSlot(btn)
-        if slot and _range.slots[slot] then
-            _range.slots[slot] = nil
-            _range.outOfRange[slot] = nil
-            if C_ActionBar and C_ActionBar.EnableActionRangeCheck then
-                pcall(C_ActionBar.EnableActionRangeCheck, slot, false)
-            end
-        end
         local rfd = EFD(btn)
         if rfd.rangeTinted then
             rfd.rangeTinted = nil
@@ -7325,6 +7376,28 @@ local function DisableRangeCheckForBar(barKey)
             else
                 local ico = btn.icon or btn.Icon
                 if ico then ico:SetVertexColor(1, 1, 1) end
+            end
+        end
+    end
+end
+
+-- Dormancy edges for range (called via ns from ApplyBarDormancy, which is
+-- defined earlier in the chunk than these locals). Hide releases the bar's
+-- slots; show re-acquires and repaints from the stale-tolerant cache --
+-- live events correct any drift on the next flip.
+ns._eabRangeBarDormancy = function(barKey, dormant)
+    if dormant then
+        ns._eabReleaseRangeSlots(barKey)
+        return
+    end
+    EnableRangeCheckForBar(barKey)
+    local buttons = barButtons[barKey]
+    local s = EAB.db.profile.bars[barKey]
+    if buttons and s and s.outOfRangeColoring then
+        for _, btn in ipairs(buttons) do
+            local slot = GetButtonActionSlot(btn)
+            if slot then
+                ApplyRangeTint(btn, _range.outOfRange[slot] or false, s)
             end
         end
     end
@@ -7392,13 +7465,41 @@ function EAB:ApplyRangeColoring()
                 end
                 if not changed then return end
                 local bars = EAB.db.profile.bars
-                for _, info in ipairs(BAR_CONFIG) do
-                    local btns = barButtons[info.key]
-                    local s = bars[info.key]
-                    if btns and s and s.outOfRangeColoring then
-                        for _, btn in ipairs(btns) do
+                -- Slot->buttons map fast path (the dispatcher maintains it):
+                -- every flip used to scan all bars x all buttons with a
+                -- GetButtonActionSlot call each. Belt: re-verify the live
+                -- slot per hit so a stale entry can only skip, never
+                -- mis-tint; the paging edges that stale the map also wipe
+                -- and re-derive range state, healing anything skipped.
+                -- Dormant bars are skipped (their reveal repaints from the
+                -- outOfRange cache).
+                local smap = ns._slotBtnMap
+                if smap and not ns._slotBtnMapDirty then
+                    local hosts = smap[slot]
+                    if hosts then
+                        for i = 1, #hosts do
+                            local btn = hosts[i]
                             if GetButtonActionSlot(btn) == slot then
-                                ApplyRangeTint(btn, isOut, s)
+                                local bInfo = buttonToBar[btn]
+                                local s = bInfo and bars[bInfo.barKey]
+                                if s and s.outOfRangeColoring
+                                    and not ns._eabBarDormant[bInfo.barKey] then
+                                    ApplyRangeTint(btn, isOut, s)
+                                end
+                            end
+                        end
+                    end
+                else
+                    -- Map absent/dirty: original full scan.
+                    for _, info in ipairs(BAR_CONFIG) do
+                        local btns = barButtons[info.key]
+                        local s = bars[info.key]
+                        if btns and s and s.outOfRangeColoring
+                            and not ns._eabBarDormant[info.key] then
+                            for _, btn in ipairs(btns) do
+                                if GetButtonActionSlot(btn) == slot then
+                                    ApplyRangeTint(btn, isOut, s)
+                                end
                             end
                         end
                     end
@@ -7410,13 +7511,33 @@ function EAB:ApplyRangeColoring()
                     if _range.outOfRange[slot] then
                         _range.outOfRange[slot] = nil
                         local bars2 = EAB.db.profile.bars
-                        for _, info2 in ipairs(BAR_CONFIG) do
-                            local btns2 = barButtons[info2.key]
-                            local s2 = bars2[info2.key]
-                            if btns2 and s2 then
-                                for _, btn2 in ipairs(btns2) do
+                        -- Same map fast path + re-verify belt as the flip
+                        -- walk above (clearing is safe to over-skip: a bar
+                        -- the map misses gets cleared by its paging pass).
+                        local smap2 = ns._slotBtnMap
+                        if smap2 and not ns._slotBtnMapDirty then
+                            local hosts2 = smap2[slot]
+                            if hosts2 then
+                                for i = 1, #hosts2 do
+                                    local btn2 = hosts2[i]
                                     if GetButtonActionSlot(btn2) == slot then
-                                        ApplyRangeTint(btn2, false, s2)
+                                        local bInfo2 = buttonToBar[btn2]
+                                        local s2 = bInfo2 and bars2[bInfo2.barKey]
+                                        if s2 then
+                                            ApplyRangeTint(btn2, false, s2)
+                                        end
+                                    end
+                                end
+                            end
+                        else
+                            for _, info2 in ipairs(BAR_CONFIG) do
+                                local btns2 = barButtons[info2.key]
+                                local s2 = bars2[info2.key]
+                                if btns2 and s2 then
+                                    for _, btn2 in ipairs(btns2) do
+                                        if GetButtonActionSlot(btn2) == slot then
+                                            ApplyRangeTint(btn2, false, s2)
+                                        end
                                     end
                                 end
                             end
@@ -7473,7 +7594,8 @@ function EAB:ApplyRangeColoring()
                 for _, info in ipairs(BAR_CONFIG) do
                     local btns = barButtons[info.key]
                     local s = EAB.db.profile.bars[info.key]
-                    if btns and s and s.outOfRangeColoring then
+                    if btns and s and s.outOfRangeColoring
+                        and not ns._eabBarDormant[info.key] then
                         for _, btn in ipairs(btns) do
                             if EFD(btn).rangeTinted then
                                 ApplyRangeTint(btn, true, s)
@@ -7489,7 +7611,8 @@ function EAB:ApplyRangeColoring()
                     local bars = EAB.db.profile.bars
                     for _, info in ipairs(BAR_CONFIG) do
                         local s = bars[info.key]
-                        if s and s.outOfRangeColoring then
+                        if s and s.outOfRangeColoring
+                            and not ns._eabBarDormant[info.key] then
                             local btns = barButtons[info.key]
                             if btns then
                                 for _, btn in ipairs(btns) do
@@ -9517,7 +9640,10 @@ function EAB:HookProcGlow()
         end
         local blizz = IsBlizzStyle()
         for _, info in ipairs(BAR_CONFIG) do
-            local buttons = barButtons[info.key]
+            -- Dormant bars skip the IsSpellOverlayed walk; their show edge
+            -- queues a rescan (ApplyBarDormancy), which runs after the
+            -- dormancy map flipped, so a revealed bar is covered here.
+            local buttons = (not ns._eabBarDormant[info.key]) and barButtons[info.key] or nil
             if buttons then
                 for _, btn in ipairs(buttons) do
                     if btn and (EFD(btn).squared or blizz) and not _procState.active[btn] then
@@ -9528,6 +9654,16 @@ function EAB:HookProcGlow()
         end
         if _t0 then prof["ms:<GlowRescan>"] = (prof["ms:<GlowRescan>"] or 0) + (debugprofilestop() - _t0) end
         ns.ProfEnd("Glow:rescan", _gcT0)
+    end
+    -- Bar-reveal reconcile (ApplyBarDormancy show edge): a proc that fired
+    -- while the bar was dormant was skipped by the GLOW_SHOW scan; queue the
+    -- same coalesced rescan the slot/page edges use to restore it.
+    ns._eabQueueGlowRescan = function()
+        if not _glowRescanPending then
+            _glowRescanPending = true
+            local elapsed = GetTime() - _glowLastScan
+            C_Timer_After(elapsed >= 0.25 and 0 or (0.25 - elapsed), GlowRescan)
+        end
     end
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
         if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" or event == "SPELL_UPDATE_ICON" then
@@ -9563,11 +9699,13 @@ function EAB:HookProcGlow()
                 for i = 1, #toHide do HideGlow(toHide[i]) end
             end
         else
-            -- SHOW: scan all buttons for the matching spellID.
+            -- SHOW: scan all buttons for the matching spellID. Dormant bars
+            -- skip (nobody can see the glow); the show-edge rescan restores
+            -- any proc glow that is still live when the bar reveals.
             local _gsT0 = ns.ProfBegin()
             local blizz2 = IsBlizzStyle()
             for _, info in ipairs(BAR_CONFIG) do
-                local buttons = barButtons[info.key]
+                local buttons = (not ns._eabBarDormant[info.key]) and barButtons[info.key] or nil
                 if buttons then
                     for _, btn in ipairs(buttons) do
                         if btn and (EFD(btn).squared or blizz2) then
@@ -12698,20 +12836,22 @@ function EAB:FinishSetup()
     -- PET_BAR_UPDATE_USABLE fires when action usability changes (energy/focus
     -- state, etc.) so icon dimming stays current. UNIT_AURA "pet" fires when
     -- an aura on the pet changes, which can also affect ability usability.
-    local _petUpdateQueued = false
-    local function UpdatePetBar(_, event)
-        -- /eabprof: pet traffic never reaches the central dispatcher's counters.
-        local _pprof = ns._evProf
-        if _pprof then _pprof["pet:" .. (event or "?")] = (_pprof["pet:" .. (event or "?")] or 0) + 1 end
-        -- UNIT_AURA fires very frequently; throttle to one update per frame
-        if event == "UNIT_AURA" or event == "PET_BAR_UPDATE_USABLE" then
-            if _petUpdateQueued then return end
-            _petUpdateQueued = true
-        end
-        C_Timer_After(0, function()
-            _petUpdateQueued = false
-            local _pT0 = ns.ProfBegin()
-            if event == "PET_BAR_UPDATE_COOLDOWN" then
+    -- Coalesced: any event burst schedules ONE deferred pass per frame
+    -- through a cached closure (the old shape allocated a fresh closure and
+    -- timer per event, and only UNIT_AURA/USABLE were deduped -- cooldown
+    -- events were not). "full" absorbs "cd": every full path repaints
+    -- cooldowns too. A hidden pet bar skips all of it -- the secure [pet]
+    -- driver keeps its visibility correct engine-side -- and the show edge
+    -- reconciles with one full pass (ns._eabPetReconcile).
+    local _petPendingKind = nil  -- nil | "cd" | "full"
+    local PetBarDeferred
+    PetBarDeferred = function()
+        local kind = _petPendingKind
+        _petPendingKind = nil
+        if not kind then return end
+        local _pT0 = ns.ProfBegin()
+        do
+            if kind == "cd" then
                 -- Cooldown-only path: safe during combat, no taint risk.
                 -- Update each button's cooldown frame directly.
                 for i = 1, NUM_PET_ACTION_SLOTS do
@@ -12807,8 +12947,20 @@ function EAB:FinishSetup()
             if PetActionBar and PetActionBar.Update then
                 PetActionBar:Update()
             end
-            LayoutBar("PetBar")
-            self:ApplyAlwaysShowButtons("PetBar")
+            -- Layout only when the populated-slot SHAPE changed (summon,
+            -- dismiss, swap): re-laying the whole bar per aura/usable event
+            -- was the pet handler's dominant cost. Every shape-changing
+            -- input fires one of the registered pet events, so the memo
+            -- cannot strand; settings changes lay out via ApplyAll directly.
+            local sig = PetHasActionBar() and "p" or "n"
+            for i = 1, NUM_PET_ACTION_SLOTS do
+                sig = sig .. (GetPetActionInfo(i) and "1" or "0")
+            end
+            if sig ~= ns._eabPetLayoutSig then
+                ns._eabPetLayoutSig = sig
+                LayoutBar("PetBar")
+                self:ApplyAlwaysShowButtons("PetBar")
+            end
             -- Re-register the state driver so the [pet] condition is always
             -- current after a pet summon, swap, or dismissal.
             local petInfo = BAR_LOOKUP["PetBar"]
@@ -12818,7 +12970,28 @@ function EAB:FinishSetup()
                 RegisterAttributeDriver(petFrame, "state-visibility", BuildVisibilityString(petInfo, petS))
             end
             ns.ProfEnd("Pet:update", _pT0)
-        end)
+        end
+    end
+    local function UpdatePetBar(_, event)
+        -- /eabprof: pet traffic never reaches the central dispatcher's counters.
+        local _pprof = ns._evProf
+        if _pprof then _pprof["pet:" .. (event or "?")] = (_pprof["pet:" .. (event or "?")] or 0) + 1 end
+        -- Hidden pet bar: skip entirely. The [pet] visibility driver
+        -- evaluates engine-side regardless, and the show edge runs a full
+        -- reconcile pass, so nothing here can be missed.
+        local pf = barFrames["PetBar"]
+        if pf and not pf:IsVisible() then return end
+        local kind = (event == "PET_BAR_UPDATE_COOLDOWN") and "cd" or "full"
+        local prev = _petPendingKind
+        _petPendingKind = (kind == "full" or prev == "full") and "full" or "cd"
+        if not prev then C_Timer_After(0, PetBarDeferred) end
+    end
+    -- Bar-reveal reconcile (ApplyBarDormancy show edge): one full pass
+    -- covers everything the hidden-skip above dropped.
+    ns._eabPetReconcile = function()
+        local prev = _petPendingKind
+        _petPendingKind = "full"
+        if not prev then C_Timer_After(0, PetBarDeferred) end
     end
     local _petEventFrame = ns.TakeShell()
     _petEventFrame:RegisterEvent("PET_BAR_UPDATE")
@@ -12851,6 +13024,11 @@ function EAB:FinishSetup()
         -- form classes and never reaches the central dispatcher's counters.
         local _sprof = ns._evProf
         if _sprof then _sprof["<StanceCd>"] = (_sprof["<StanceCd>"] or 0) + 1 end
+        -- Hidden stance bar: skip. The show edge reruns this painter
+        -- (ns._eabStanceReconcile), and the event refires every GCD for
+        -- form classes, so nothing can stay stale while visible.
+        local sf = barFrames["StanceBar"]
+        if sf and not sf:IsVisible() then return end
         local _stT0 = ns.ProfBegin()
         local numForms = GetNumShapeshiftForms()
         for i = 1, numForms do
@@ -12862,6 +13040,7 @@ function EAB:FinishSetup()
         end
         ns.ProfEnd("Stance:cd", _stT0)
     end
+    ns._eabStanceReconcile = UpdateStanceCooldowns
     local _stanceEventFrame = ns.TakeShell()
     _stanceEventFrame:RegisterEvent("UPDATE_SHAPESHIFT_COOLDOWN")
     _stanceEventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
