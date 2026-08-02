@@ -225,15 +225,6 @@ qolFrame:SetScript("OnEvent", function(self)
         local _lastBagChurn = 0
         local CHURN_SETTLE_WINDOW = 0.35  -- "recent" churn cutoff, seconds
         local CHURN_SETTLE_DELAY = 0.4    -- extra wait when churn was recent
-        -- Coarse backstop regardless of the churn signal: pause longer after
-        -- every few opens in one cycle so a long mail-dump burst can't
-        -- steamroll through at full cadence. Starting guess, not a measured
-        -- threshold -- see AODbg below for tuning with real capture data if
-        -- the churn signal alone isn't enough. Live-tunable via
-        -- EllesmereUI._aoBurstCooldown (falls back to the default) so a tester
-        -- can try values in one session -- e.g. /run EllesmereUI._aoBurstCooldown = 2
-        local OPEN_BURST_SIZE = 4
-        local OPEN_BURST_COOLDOWN_DEFAULT = 4
         local function AODbg(...)
             if EllesmereUI._AODEBUG then print("|cff33ff99[AutoOpen]|r", ...) end
         end
@@ -253,6 +244,14 @@ qolFrame:SetScript("OnEvent", function(self)
         -- re-runs on MERCHANT_CLOSED.
         local function MerchantOpen()
             return (MerchantFrame and MerchantFrame:IsShown()) and true or false
+        end
+        -- Same reasoning as MerchantOpen: opening containers while the mailbox
+        -- is up is at best pointless (loot windows / bag churn stacking on top
+        -- of mail's own item delivery) and at worst compounds the exact
+        -- strand-a-slot race the pacing logic above exists to avoid. Pause
+        -- while the mailbox is shown and resume cleanly once it closes.
+        local function MailOpen()
+            return (MailFrame and MailFrame:IsShown()) and true or false
         end
         -- "Exclude Warbound Containers": true only when the option is on AND
         -- the slot is confirmed warband-bank-eligible. Guarded like the bags
@@ -348,6 +347,17 @@ qolFrame:SetScript("OnEvent", function(self)
                 -- suppressed), so without this the just-bought containers would
                 -- never open after leaving the vendor.
                 containerFrame:RegisterEvent("MERCHANT_CLOSED")
+                -- Pause while the mailbox is open, resume once it's closed.
+                -- MAIL_SHOW/MAIL_CLOSED are kept for older clients, but as of
+                -- patch 10.0.0 MAIL_CLOSED no longer fires at all -- Blizzard
+                -- folded it into the generic interaction-manager events, so
+                -- those are the ones that actually drive the resume on retail.
+                containerFrame:RegisterEvent("MAIL_SHOW")
+                containerFrame:RegisterEvent("MAIL_CLOSED")
+                if C_PlayerInteractionManager then
+                    containerFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+                    containerFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+                end
                 -- Track loot windows so payout containers (which open one and
                 -- linger in the bag) aren't opened over / re-opened while looting.
                 containerFrame:RegisterEvent("LOOT_OPENED")
@@ -361,6 +371,12 @@ qolFrame:SetScript("OnEvent", function(self)
                 containerFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
                 containerFrame:UnregisterEvent("BAG_UPDATE")
                 containerFrame:UnregisterEvent("MERCHANT_CLOSED")
+                containerFrame:UnregisterEvent("MAIL_SHOW")
+                containerFrame:UnregisterEvent("MAIL_CLOSED")
+                if C_PlayerInteractionManager then
+                    containerFrame:UnregisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+                    containerFrame:UnregisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+                end
                 containerFrame:UnregisterEvent("LOOT_OPENED")
                 containerFrame:UnregisterEvent("LOOT_CLOSED")
                 _lootOpen = false
@@ -394,11 +410,16 @@ qolFrame:SetScript("OnEvent", function(self)
         -- anything progressed -- that subsumes nested containers (a bag yielding
         -- more bags) and lingering payout containers without ever running a
         -- second concurrent chain. _openBusy guards the whole cycle.
-        ScanAndOpen = function(skipMerchantGate)
+        -- skipMailGate: MAIL_CLOSED / the interaction-manager hide are handled
+        -- with their own 0.5s settle delay (see the dispatcher below), by which
+        -- point MailOpen() is reliably false -- this flag is passed there purely
+        -- as belt-and-suspenders, not load-bearing the way skipMerchantGate is.
+        ScanAndOpen = function(skipMerchantGate, skipMailGate)
             if not _cacheBuilt then return end
             if not IsEnabled() then return end
             if InCombatLockdown() then return end
             if not skipMerchantGate and MerchantOpen() then return end
+            if not skipMailGate and MailOpen() then return end
             -- A loot window is up (payout container lingering): LOOT_CLOSED
             -- restarts a clean cycle once it has left the bag.
             if _lootOpen then return end
@@ -427,13 +448,6 @@ qolFrame:SetScript("OnEvent", function(self)
             _cycleGen = _cycleGen + 1
             local myGen = _cycleGen
             local madeProgress = false
-            local openStreak = 0  -- real opens completed so far in THIS cycle
-            -- Cycle-boundary marker: without this, a rescan's first open
-            -- (unpaced, via step(1)) reads identically in the log to a paced
-            -- continuation, especially right after a burst cooldown resets
-            -- openStreak to 0 -- both print "streak=0". Real capture already
-            -- hit this ambiguity (mail refilled a slot right as a burst pause
-            -- ended, and the two cycles read as one continuous run).
             AODbg(("cycle start: %d candidate(s)"):format(#toOpen))
 
             -- The single place _openBusy is cleared. Every step() exit routes
@@ -445,9 +459,9 @@ qolFrame:SetScript("OnEvent", function(self)
                 _openBusy = false
                 if (madeProgress or _missedScan) and IsEnabled()
                     and not InCombatLockdown()
-                    and not MerchantOpen() and not _lootOpen then
+                    and not MerchantOpen() and not MailOpen() and not _lootOpen then
                     _missedScan = false
-                    C_Timer.After(0.3, function() ScanAndOpen(false) end)
+                    C_Timer.After(0.3, function() ScanAndOpen(false, false) end)
                 end
             end
 
@@ -455,7 +469,7 @@ qolFrame:SetScript("OnEvent", function(self)
             local function step(idx)
                 if myGen ~= _cycleGen then return end
                 if idx > #toOpen then return finish() end
-                if not IsEnabled() or InCombatLockdown() or MerchantOpen() then return finish() end
+                if not IsEnabled() or InCombatLockdown() or MerchantOpen() or MailOpen() then return finish() end
                 -- Loot window opened mid-cycle: stop; LOOT_CLOSED restarts cleanly.
                 if _lootOpen then return finish() end
                 local item = toOpen[idx]
@@ -474,8 +488,8 @@ qolFrame:SetScript("OnEvent", function(self)
                         _openInProgress[key] = true
                         _pendingOpen = { bag = item.bag, slot = item.slot,
                             itemID = prevID, count = prevCount }
-                        AODbg(("open bag=%d slot=%d item=%d streak=%d"):format(
-                            item.bag, item.slot, prevID, openStreak))
+                        AODbg(("open bag=%d slot=%d item=%d"):format(
+                            item.bag, item.slot, prevID))
                         C_Container.UseContainerItem(item.bag, item.slot)
                         C_Timer.After(0.5, function()
                             -- Always release the slot flag (global bookkeeping),
@@ -518,27 +532,18 @@ qolFrame:SetScript("OnEvent", function(self)
                 C_Timer.After(0.1, function() step(idx + 1) end)
             end
 
-            -- Paces the step AFTER a real open resolves. Two independent
-            -- triggers for extra breathing room, either can apply:
-            --  * recent bag churn -- something else touched the bags just now
-            --    (Blizzard's own mail delivery is exactly this) -- wait for it
-            --    to settle before adding our own action into the mix.
-            --  * the burst backstop -- every OPEN_BURST_SIZE real opens in this
-            --    cycle, pause the burst cooldown regardless (default
-            --    OPEN_BURST_COOLDOWN_DEFAULT, live-tunable via
-            --    EllesmereUI._aoBurstCooldown), so a long "Open All Mail" dump
-            --    can't steamroll through at full pace.
+            -- Paces the step AFTER a real open resolves: if something else
+            -- touched the bags just now (Blizzard's own item delivery is
+            -- exactly this), wait for it to settle before adding our own action
+            -- into the mix. The mailbox case that used to also need a burst
+            -- cooldown backstop is now handled directly by pausing while the
+            -- mailbox is open and settling after it closes, so this is the only
+            -- pacing needed here.
             PaceNext = function(idx)
                 if myGen ~= _cycleGen then return end
-                openStreak = openStreak + 1
                 local extra, why = 0, nil
                 if GetTime() - _lastBagChurn < CHURN_SETTLE_WINDOW then
                     extra, why = CHURN_SETTLE_DELAY, "churn"
-                end
-                if openStreak >= OPEN_BURST_SIZE then
-                    openStreak = 0
-                    local cooldown = EllesmereUI._aoBurstCooldown or OPEN_BURST_COOLDOWN_DEFAULT
-                    if cooldown > extra then extra, why = cooldown, "burst" end
                 end
                 if extra > 0 then
                     AODbg(("pacing +%.1fs (%s)"):format(extra, why))
@@ -565,7 +570,7 @@ qolFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        containerFrame:SetScript("OnEvent", function(_, event)
+        containerFrame:SetScript("OnEvent", function(_, event, interactionType)
             if event == "BAG_UPDATE" then
                 _lastBagChurn = GetTime()
                 return
@@ -605,6 +610,31 @@ qolFrame:SetScript("OnEvent", function(self)
             end
             if event == "BAG_UPDATE_DELAYED" then
                 RequestScan()
+                return
+            end
+            if event == "MAIL_SHOW" then
+                -- Nothing to do beyond letting the gate take over: MailOpen()
+                -- now reads true and every entry point (this dispatcher,
+                -- step(), finish()) bails until the mailbox closes.
+                return
+            end
+            if event == "MAIL_CLOSED" then
+                -- Legacy path: no longer fires on retail (see the registration
+                -- comment), kept for older clients where it still does.
+                C_Timer.After(0.5, function() ScanAndOpen(false, true) end)
+                return
+            end
+            if event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
+                if interactionType == Enum.PlayerInteractionType.MailInfo then
+                    -- The event that actually fires on retail. Mail's own item
+                    -- delivery can still be landing and unlocking slots for a
+                    -- moment after the frame closes -- the exact race that
+                    -- strands a slot -- so settle first, same as LOOT_CLOSED.
+                    C_Timer.After(0.5, function() ScanAndOpen(false, true) end)
+                end
+                return
+            end
+            if event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
                 return
             end
             -- MERCHANT_CLOSED: the interaction is over but the frame may not
