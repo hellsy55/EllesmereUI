@@ -6,6 +6,12 @@
 --  placeable mid-combat) -- shown either as one combined window (default) or
 --  as two independently positioned windows.
 --
+--  Which Group & Pull buttons exist is a SETTING, not a build fact: Role
+--  Check, Convert and Disband each have a switch, and a pull slot set to 0
+--  seconds drops out. Buttons are still created once, at build; the layout
+--  pass (LayoutGroupContent) re-flows the survivors across the rows and is the
+--  only writer of the content height the shells are sized from.
+--
 --  SHOW MODE (p.mode) replaces the old shared-visibility system outright:
 --
 --    "never"  -- the default. NOTHING exists: no frames, no events, no
@@ -14,6 +20,12 @@
 --    "group"  -- auto-shows in any group ([group] state driver).
 --    "always" -- always shown (no driver; the visible attribute just stays
 --                true).
+--
+--  On top of the mode sits ONE unconditional gate: in a raid without leader or
+--  assist the whole feature is off the screen, because the server refuses
+--  every button on it there. It is raid-only (a party has no assistants) and
+--  Lua-side, since no macro conditional can express it -- see AssistSuppressed
+--  and RefreshAssistGate.
 --
 --  The Toggle Raid Tools keybind works in every active mode, and what it
 --  toggles follows Default to Collapsed When Shown: with it ON the key rocks
@@ -249,6 +261,7 @@ local applyPending             -- true when combat blocked an Apply()
 local groupsPending             -- true when combat blocked a raid-frame re-render
 local wasInGroup = false       -- edge-detects joining a group, for ResetGroupFilter
 local previewOn = false        -- Raid Tools settings page is in front (see ApplyVisibility)
+local lastSuppressed           -- assist gate verdict currently ON SCREEN (see AssistSuppressed)
 local toggleButton             -- keybind target; also the out-of-combat path
 local sections = {}            -- key -> shell frame
 local shellTitle = {}          -- key -> title fontstring
@@ -257,7 +270,9 @@ local iconBtn                  -- collapsed-state square
 local raidGroupsCogBtn          -- opens the Raid Groups composition window (Group shell only)
 local raidCheckBtn              -- re-runs and shows the Raid Check window on demand (Group shell only)
 local assistCheckRow, assistCheckTex   -- Make Everyone Assistant row (Group shell, raid-only)
-local GROUP_CONTENT_H, MARKERS_CONTENT_H   -- computed at build
+-- Markers are fixed at build; the Group & Pull height follows the settings and
+-- is re-computed by LayoutGroupContent on every Apply.
+local GROUP_CONTENT_H, MARKERS_CONTENT_H
 local Apply                    -- forward: the event handler closes over it
 local ApplyMouseoverFade       -- forward: ApplyVisibility and the mouseover ticker close over it
 
@@ -406,10 +421,14 @@ end
 
 local groupButtons = {}        -- plain buttons, enable-gated on assist
 local markerButtons = {}       -- secure buttons, dimmed on assist
-local pullButtons = {}         -- fixed set of 3; durations are re-labelled live
+local pullButtons = {}         -- fixed set of 3; only the ones above 0s show
 local raidGroupButtons = {}    -- plain buttons, gated on the raid frames only
 local raidGroupsRowLabel
-local convertButton
+-- Individually hideable content. Every one of these is created at build and
+-- kept for the lifetime of the session; the layout pass decides which of them
+-- reach the screen. Ready Check is the one action button with no switch -- a
+-- raid panel without it has no reason to exist.
+local readyButton, roleButton, convertButton, disbandButton, stopButton
 
 -- Both marker rows draw Blizzard's own raid target sheet -- the texture the
 -- rest of the suite already uses for markers, in nameplates and raid frames.
@@ -478,7 +497,17 @@ local DB_DEFAULTS = {
         -- a security constraint -- the pull buttons are plain, only the marker
         -- buttons are secure. Growing the count later means growing the panel,
         -- nothing more.
+        --
+        -- 0 means "no button": the slot drops out of the row and the survivors
+        -- share the width. All three at 0 takes the row away entirely, Stop
+        -- included (see LayoutGroupContent).
         pullTimes     = { PULL_DEFAULTS[1], PULL_DEFAULTS[2], PULL_DEFAULTS[3] },
+        -- Per-button switches for the three optional actions. Ready Check has
+        -- none on purpose. Same flow rule as the pull slots: a hidden button
+        -- leaves no hole, the rest close up.
+        showRoleCheck = true,
+        showConvert   = true,
+        showDisband   = true,
         -- Per-section: pos[key] = { point, relPoint, x, y }
         pos           = {},
     },
@@ -726,15 +755,41 @@ local function IsLeader()
     return UnitIsGroupLeader("player")
 end
 
--- Durations are the only pull-timer setting that can change at runtime: the
--- button count is fixed at build, so re-labelling is all it takes.
-local function RefreshPullTimes()
+-- In a RAID, every control on the panel needs leader or assist: ready check,
+-- role check, the countdown, convert, disband and the marker buttons are all
+-- refused by the server without it. So the feature steps off the screen there
+-- instead of sitting around fully dimmed.
+--
+-- Raid only, deliberately. A party has no assistants -- UnitIsGroupAssistant
+-- is false for everyone in one -- so the same test would hide the panel from
+-- every non-leader in a 5-man, where marking is open to all of them.
+--
+-- There is no macro conditional for leader/assist, so NO state driver can
+-- express this: the gate is Lua's, it lands on the enabled attribute, and a
+-- promotion mid-combat is picked up on PLAYER_REGEN_ENABLED like every other
+-- Lua-side change (see the combat model in the header).
+local function AssistSuppressed()
+    if previewOn then return false end   -- configuring the thing beats hiding it
+    return IsInRaid() and not HasAssist()
+end
+
+-- An optional button's switch, defaulting to shown for an unset profile.
+local function ButtonShown(key)
+    local p = P()
+    return not p or p[key] ~= false
+end
+
+-- The pull durations worth a button, in slot order. 0 (and anything below it)
+-- means the user turned that slot off.
+local function VisiblePullTimes()
     local times = (P() and P().pullTimes) or {}
-    for i, b in ipairs(pullButtons) do
-        local secs = times[i] or PULL_DEFAULTS[i]
-        b.secs = secs
-        b._lbl:SetText(tostring(secs))
+    local out = {}
+    for i = 1, PULL_SLOTS do
+        local secs = times[i]
+        if secs == nil then secs = PULL_DEFAULTS[i] end
+        if secs and secs > 0 then out[#out + 1] = secs end
     end
+    return out
 end
 
 -------------------------------------------------------------------------------
@@ -1149,21 +1204,95 @@ local function MakeShell(key)
     return f
 end
 
+-- Where the Group & Pull content actually lands. Re-run on every Apply, and
+-- the ONLY writer of GROUP_CONTENT_H -- which button is on screen is a
+-- setting, so positions, widths and the holder height all follow the profile
+-- rather than the build.
+--
+-- Everything it touches is a plain frame, and Apply is out-of-combat only, so
+-- this is an ordinary re-point with no lockdown story. It must run BEFORE
+-- ApplyLayout, which sizes the shells from GROUP_CONTENT_H.
+local function LayoutGroupContent()
+    if not groupHolder then return end
+    local f = groupHolder
+
+    -- Row plan first, geometry second: collect what is actually shown, two
+    -- action buttons per row in the fixed order below, so a hidden button
+    -- closes the gap instead of leaving a hole. A row that ends up with a
+    -- single button takes the full width.
+    local rows, pair = {}, {}
+    local function Add(b)
+        pair[#pair + 1] = b
+        if #pair == 2 then rows[#rows + 1] = pair; pair = {} end
+    end
+    Add(readyButton)
+    if ButtonShown("showRoleCheck") then Add(roleButton) end
+    if ButtonShown("showConvert")   then Add(convertButton) end
+    if ButtonShown("showDisband")   then Add(disbandButton) end
+    if #pair > 0 then rows[#rows + 1] = pair end
+
+    -- Pull row: the slots left above 0, sharing the row with Stop. The
+    -- duration lives on the button (the click closure reads it back), so the
+    -- surviving durations simply move onto the leading buttons.
+    --
+    -- All three at 0 drops the row entirely, Stop included: a Stop button
+    -- alone is a pull-timer row with no pull timer.
+    local times = VisiblePullTimes()
+    if #times > 0 then
+        local pull = {}
+        for i, secs in ipairs(times) do
+            local b = pullButtons[i]
+            b.secs = secs
+            b._lbl:SetText(tostring(secs))
+            pull[i] = b
+        end
+        pull[#pull + 1] = stopButton
+        rows[#rows + 1] = pull
+    end
+
+    -- Hide first, show what the plan placed: anything the switches dropped
+    -- stops at this line.
+    for _, b in ipairs(groupButtons) do b:Hide() end
+
+    -- Make Everyone Assistant sits above this flow, fixed at the top of the
+    -- holder (see BuildGroupContent) -- reserve its row before laying out
+    -- the buttons below it.
+    local y = -(ROW_H + ROW_GAP)
+    for _, row in ipairs(rows) do
+        local n = #row
+        local w = (PANEL_W - PAD * 2 - ROW_GAP * (n - 1)) / n
+        for i, b in ipairs(row) do
+            b:SetWidth(w)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
+            b:Show()
+        end
+        y = y - ROW_H - ROW_GAP
+    end
+    y = y + ROW_GAP   -- the last row's trailing gap is not content
+
+    GROUP_CONTENT_H = -y
+    f:SetHeight(GROUP_CONTENT_H)
+end
+
 -- Group & Pull content, in its own plain holder so one-window mode can treat
--- it uniformly with the markers holder.
+-- it uniformly with the markers holder. Creation only -- the buttons are born
+-- unplaced at full-row width, and LayoutGroupContent puts them where the
+-- settings say (MakeGroupButton runs labels through L itself).
 local function BuildGroupContent()
     groupHolder = CreateFrame("Frame", nil, sections.Group)
     groupHolder:SetWidth(PANEL_W)
     fontOwners[#fontOwners + 1] = groupHolder
     local f = groupHolder
-    local y = 0
+    local full = PANEL_W - PAD * 2
 
-    -- Make Everyone Assistant: first row, right under the title. Whole-row
-    -- button (not just the box) so the label is as clickable as the tick --
-    -- same reasoning as the pull/marker rows' generous hit targets.
+    -- Make Everyone Assistant: first row, right under the title, fixed in
+    -- place (not part of LayoutGroupContent's flow). Whole-row button (not
+    -- just the box) so the label is as clickable as the tick -- same
+    -- reasoning as the pull/marker rows' generous hit targets.
     assistCheckRow = CreateFrame("Button", nil, f)
     assistCheckRow:SetSize(PANEL_W - PAD * 2, ROW_H)
-    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, 0)
     local chkBox = CreateFrame("Frame", nil, assistCheckRow)
     chkBox:SetSize(ASSIST_CHK_SZ, ASSIST_CHK_SZ)
     chkBox:SetPoint("LEFT", assistCheckRow, "LEFT", 0, 0)
@@ -1190,44 +1319,33 @@ local function BuildGroupContent()
         SetEveryoneAssistant(not AllAssistants())
         RefreshAssistCheckbox()
     end)
-    y = y - ROW_H - ROW_GAP
+    -- MakeGroupButton runs labels through L itself. All four action buttons
+    -- are born unplaced at full-row width; LayoutGroupContent re-flows the
+    -- survivors (per the showRoleCheck/showConvert/showDisband switches)
+    -- starting below this fixed checkbox row.
+    readyButton = MakeGroupButton(f, "Ready Check", full, function() DoReadyCheck() end)
+    roleButton  = MakeGroupButton(f, "Role Check", full, function() InitiateRolePoll() end)
 
-    -- MakeGroupButton runs labels through L itself.
-    local half = (PANEL_W - PAD * 2 - ROW_GAP) / 2
-    local ready = MakeGroupButton(f, "Ready Check", half, function() DoReadyCheck() end)
-    ready:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-
-    local role = MakeGroupButton(f, "Role Check", half, function() InitiateRolePoll() end)
-    role:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + half + ROW_GAP, y)
-    y = y - ROW_H - ROW_GAP
-
-    convertButton = MakeGroupButton(f, "Convert to Raid", half, function()
+    convertButton = MakeGroupButton(f, "Convert to Raid", full, function()
         if IsInRaid() then C_PartyInfo.ConvertToParty() else C_PartyInfo.ConvertToRaid() end
     end, true)
-    convertButton:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
 
-    local disband = MakeGroupButton(f, "Disband", half, function()
+    disbandButton = MakeGroupButton(f, "Disband", full, function()
         ConfirmDisband()
-    end)
-    disband:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + half + ROW_GAP, y)
-    y = y - ROW_H - ROW_GAP
+    end, true)
 
-    -- Pull timer row: three durations + Stop, sharing the holder's width.
-    local w = (PANEL_W - PAD * 2 - PULL_SLOTS * ROW_GAP) / (PULL_SLOTS + 1)
     for i = 1, PULL_SLOTS do
         -- The pull duration lives on the button and changes at runtime, so
         -- the click reads it through the closure.
         local b
-        b = MakeGroupButton(f, "", w, function() StartPull(b.secs) end)
-        b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
+        b = MakeGroupButton(f, "", full, function() StartPull(b.secs) end)
         pullButtons[i] = b
     end
-    local cancel = MakeGroupButton(f, "Stop", w, StopPull)
-    cancel:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * PULL_SLOTS, y)
-    y = y - ROW_H
+    stopButton = MakeGroupButton(f, "Stop", full, StopPull)
 
-    GROUP_CONTENT_H = -y
-    f:SetHeight(GROUP_CONTENT_H)
+    -- A height right away: BuildAll has callers (the slash command, unlock
+    -- mode) that reach the shells without going through Apply.
+    LayoutGroupContent()
 end
 
 -- Row order matches how they are used: unit markers first, ground markers
@@ -1671,10 +1789,14 @@ local function ApplyVisibility()
     -- Which SHELLS may show, straight from Show as: the Group shell is the
     -- window everywhere except Markers-only; the Markers shell exists only in
     -- Two Windows and Markers-only.
+    --
+    -- The assist gate rides on top of that and takes ALL of them, icon
+    -- included -- a raid without assist is a raid where nothing here works.
     local showAs = ShowAs()
+    local suppressed = AssistSuppressed()
     local shellOn = {
-        Group   = showAs ~= "markers",
-        Markers = showAs == "two" or showAs == "markers",
+        Group   = showAs ~= "markers" and not suppressed,
+        Markers = (showAs == "two" or showAs == "markers") and not suppressed,
     }
     -- One seed for every show (see header): Default to Collapsed When Shown.
     -- With the toggle off the seed is "expanded" and the icon never shows.
@@ -1710,12 +1832,17 @@ local function ApplyVisibility()
     end
 
     -- The icon represents the whole feature; every Show as choice shows
-    -- something, so it is simply on while the mode is active.
-    iconBtn:SetAttribute("enabled", true)
+    -- something, so it is on while the mode is active and the assist gate is
+    -- open. With it shut the keybind and the slash command go quiet too --
+    -- both run the secure snippets, and those refuse a disabled frame.
+    iconBtn:SetAttribute("enabled", not suppressed)
     iconBtn:SetAttribute("visible", visNow)
     iconBtn:SetAttribute("override", "")
     iconBtn:SetAttribute("startexpanded", startExpanded)
     iconBtn:SetAttribute("expanded", expandedNow)
+
+    -- What is now ON SCREEN, for the roster handler to compare against.
+    lastSuppressed = suppressed
 
     -- Run the snippets rather than re-deciding in Lua: attributes are set
     -- first so "apply" sees them.
@@ -1836,7 +1963,10 @@ local function ApplyToggleKeybind()
     ClearOverrideBindings(toggleButton)
     local p = P()
     local k = p and p.toggleKey
-    if k and k ~= "" and Mode() ~= "never" then
+    -- The gate takes the binding with it rather than leaving a key that eats
+    -- its own keypress: the snippet would refuse a disabled frame, and an
+    -- override binding swallows whatever the key does otherwise.
+    if k and k ~= "" and Mode() ~= "never" and not AssistSuppressed() then
         SetOverrideBindingClick(toggleButton, false, k, "EllesmereUIRaidToolsToggle")
     end
 end
@@ -1847,6 +1977,19 @@ end
 --  Nothing exists until the mode first leaves "never": no frames, no events,
 --  no bindings, no unlock rows. Apply() is the single entry point.
 -------------------------------------------------------------------------------
+
+-- The assist gate is Lua's, so a promotion, a demotion or a raid you join
+-- without assist has to bring Apply back around -- no state driver will do it
+-- for us. Compared against what ApplyVisibility last put on screen, because
+-- GROUP_ROSTER_UPDATE bursts and Apply is not free.
+--
+-- In combat Apply parks itself behind applyPending, which leaves lastSuppressed
+-- untouched: the next roster event re-enters here and parks again, and
+-- PLAYER_REGEN_ENABLED finishes the job. That is the module's standard
+-- deferral, not an omission.
+local function RefreshAssistGate()
+    if AssistSuppressed() ~= lastSuppressed then Apply() end
+end
 
 -- Events live only while the feature is active (or while a combat-deferred
 -- Apply is pending, since PLAYER_REGEN_ENABLED is what completes it). The
@@ -1886,6 +2029,7 @@ local function EnsureEvents()
             if Mode() == "never" then return end
             RefreshPermissions()
             RefreshRaidGroups()
+            RefreshAssistGate()
         end)
     end
     ev:RegisterEvent("GROUP_ROSTER_UPDATE")
@@ -1918,6 +2062,9 @@ local function RegisterUnlock()
             noResize = true,
             getFrame = function()
                 if Mode() == "never" then return nil end
+                -- Nothing to move while the assist gate has the whole feature
+                -- off the screen -- same opt-out as the modes below.
+                if AssistSuppressed() then return nil end
                 -- Offer exactly the shells the Show as choice puts on screen:
                 -- One Window / Only Group & Pull = the Group element alone,
                 -- Two Windows = both, Only Markers = the Markers element alone.
@@ -2008,6 +2155,9 @@ function Apply()
     EnsureEvents()
     RegisterUnlock()
     BuildAll()
+    -- Before ApplyLayout: it sizes the shells from GROUP_CONTENT_H, which the
+    -- hidden buttons and the 0-second pull slots move.
+    LayoutGroupContent()
     ApplyLayout()
     -- One Window Scale for everything the feature draws.
     local scale = WindowScale()
@@ -2023,7 +2173,6 @@ function Apply()
     ApplyVisibility()
     ApplyToggleKeybind()
     ApplyFonts()
-    RefreshPullTimes()
     RefreshPermissions(true)
     RefreshRaidGroups(true)
 end
@@ -2064,6 +2213,12 @@ SlashCmdList["EUIRAIDTOOLS"] = function()
     end
     if InCombatLockdown() then
         EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Raid Tools cannot be toggled by slash command in combat -- use the keybind."))
+        return
+    end
+    -- The snippet would refuse anyway (enabled is false while the gate is
+    -- shut); saying so beats a slash command that looks broken.
+    if AssistSuppressed() then
+        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Raid Tools is hidden in a raid without leader or assist -- none of its buttons work there."))
         return
     end
     BuildAll()
