@@ -10201,12 +10201,13 @@ if IsHouseEditorActive then
                 _bindState.sigValid = false
             end
         else
-            -- House editor closed restore our override bindings
+            -- House editor closed restore our override bindings. Call
+            -- unconditionally: UpdateKeybinds defers itself in combat, where
+            -- the old guard dropped the restore with nothing to re-arm it and
+            -- every override binding stayed cleared until reload.
             if not _bindState.housingCleared then return end
             _bindState.housingCleared = false
-            if not InCombatLockdown() then
-                UpdateKeybinds()
-            end
+            UpdateKeybinds()
         end
     end)
 end
@@ -11977,16 +11978,24 @@ function EAB:FinishSetup()
         -- the bindings stay cleared forever.  This catches that.
         ResetDragState()
         C_Timer_After(0.2, function()
-            if InCombatLockdown() then return end
-            -- Reset stale flags -- if we're not actually in a vehicle/housing
-            -- the flags should be false
-            local inVehicle = (UnitInVehicle and UnitInVehicle("player"))
-                              or EAB_VTABLE.HasVehicleActionBar()
-
+            -- Reset stale flags -- if we're not actually in housing the flag
+            -- should be false. Plain Lua state, safe in combat.
             local inHousing = IsHouseEditorActive and IsHouseEditorActive()
             if not inHousing and _bindState.housingCleared then
                 _bindState.housingCleared = false
             end
+            -- This is the restore point for the transient-clear race described
+            -- above, so it must never be skipped: bindings can be cleared or
+            -- wrongly routed while the cached signature claims they are applied.
+            -- Force the rebuild past the signature short-circuit, and call
+            -- unconditionally -- UpdateKeybinds defers itself to
+            -- PLAYER_REGEN_ENABLED in combat. The old bare combat return here
+            -- reproduced the exact "stay cleared forever" this timer exists to
+            -- prevent: zoning INTO combat (die, release, run back in while the
+            -- raid still fights) missed the restore, and with no re-arm the
+            -- empower slots sat on native bindings (= Press-and-Tap behaviour)
+            -- until the next reload.
+            _bindState.sigValid = false
             UpdateKeybinds()
         end)
         -- Re-evaluate visibility options (visOnlyInstances, visHideHousing,
