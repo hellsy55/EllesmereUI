@@ -10031,11 +10031,35 @@ SlashCmdList.EABEMPOWER = function()
                        and C_Spell.IsPressHoldReleaseSpell(spellID) then
                         isPH = true
                     end
+                    -- Base-slot view: the fix routes by what the button CAN
+                    -- hold, so a paged-away empower button (mounted = skyriding
+                    -- page) must still be listed or the fix cannot be verified
+                    -- while mounted -- both earlier "mounted" dumps silently
+                    -- dropped the MainBar rows for exactly this reason.
+                    local basePH, baseName, base = false, nil, nil
+                    local off = BAR_SLOT_OFFSETS[info.key]
+                    if off then base = off + i end
+                    if base and base ~= slot and HasAction(base) then
+                        local bt, bid, bsub = GetActionInfo(base)
+                        local bSpell
+                        if bt == "spell" or (bt == "macro" and bsub == "spell") then bSpell = bid end
+                        if bt == "flyout" then
+                            basePH = true
+                        elseif bSpell and not (issecretvalue and issecretvalue(bSpell))
+                           and C_Spell and C_Spell.IsPressHoldReleaseSpell
+                           and C_Spell.IsPressHoldReleaseSpell(bSpell) then
+                            basePH = true
+                        end
+                        if basePH and bSpell and C_Spell and C_Spell.GetSpellInfo then
+                            local bi = C_Spell.GetSpellInfo(bSpell)
+                            baseName = (bi and bi.name) or "?"
+                        end
+                    end
                     -- Macros are listed even when they currently resolve to a
                     -- NON-empowered spell. A conditional macro is the case that
                     -- flips isPH mid-combat, and listing only isPH slots hid it
                     -- from the dump whenever it happened to resolve the other way.
-                    if isPH or actionType == "macro" then
+                    if isPH or basePH or actionType == "macro" then
                         found = found + 1
                         local nm = "?"
                         if spellID and C_Spell and C_Spell.GetSpellInfo then
@@ -10045,6 +10069,9 @@ SlashCmdList.EABEMPOWER = function()
                             nm = "flyout"
                         end
                         nm = ("%s [%s isPH=%s]"):format(nm, actionType, tostring(isPH))
+                        if basePH then
+                            nm = nm .. ("|cff9999ff base%d=%s|r"):format(base, baseName or "flyout")
+                        end
                         local k1, k2 = GetBindingKey(prefix .. i)
                         local function route(k)
                             if not k then return "-" end
