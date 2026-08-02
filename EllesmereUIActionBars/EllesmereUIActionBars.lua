@@ -3124,6 +3124,40 @@ end
 do
     local _dispatcherSetup = false
     local _empowerReroutePending = false
+
+    -- Empower keybind reroute, shared by the immediate and the deferred path.
+    -- UpdateKeybinds returns false when the routing signature is unchanged
+    -- (mouseover-conditional macro storms re-fire ACTIONBAR_SLOT_CHANGED on
+    -- every flip without changing any binding or empower state). Skip the
+    -- secure re-trigger in that case: rebuilding bindings and running the
+    -- ChildUpdate snippet on every bar every frame is what tanked FPS while
+    -- hovering across nameplates.
+    local function _EmpowerReroute()
+        if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
+            for _, info in ipairs(BAR_CONFIG) do
+                local frame = barFrames[info.key]
+                if frame then
+                    frame:SetAttribute("eab-empower-trigger", GetTime())
+                end
+            end
+        end
+    end
+
+    -- Deferral shell for that reroute. ACTIONBAR_SLOT_CHANGED fires freely IN
+    -- combat (a single page swap fires 12+), but the reroute cannot run there:
+    -- UpdateKeybinds needs SetOverrideBinding and the re-trigger needs
+    -- SetAttribute on a secure header, both combat-protected. This used to
+    -- `return` and drop the update on the floor with NOTHING to re-arm it --
+    -- ACTIONBAR_SLOT_CHANGED had already fired and would not fire again, and
+    -- the only other UpdateKeybinds callers are load-time, house-editor-close
+    -- and the vehicle/housing handler. So a slot change during a fight could
+    -- leave an empowered spell routed to its native binding, with no
+    -- pressAndHoldAction/typerelease, which presents as the Empowered Spell
+    -- Input setting having flipped from Hold and Release to Press and Tap, and
+    -- it persisted until something unrelated happened to rebuild.
+    -- Both sibling paths (the UPDATE_BINDINGS handler and ApplyKeyDownCVar)
+    -- already defer to PLAYER_REGEN_ENABLED; this now matches them.
+    local _empowerDeferFrame
     function EAB:SetupEventDispatcher()
         if _dispatcherSetup then return end
         _dispatcherSetup = true
@@ -4292,22 +4326,19 @@ do
                 _empowerReroutePending = true
                 C_Timer_After(0, function()
                     _empowerReroutePending = false
-                    if InCombatLockdown() then return end
-                    -- UpdateKeybinds returns false when the routing signature is
-                    -- unchanged (mouseover-conditional macro storms re-fire
-                    -- ACTIONBAR_SLOT_CHANGED every mouseover flip without changing
-                    -- any binding or empower state). Skip the secure empower
-                    -- re-trigger in that case: rebuilding bindings and running the
-                    -- ChildUpdate snippet on every bar every frame is what tanked
-                    -- FPS while hovering across nameplates.
-                    if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
-                        for _, info in ipairs(BAR_CONFIG) do
-                            local frame = barFrames[info.key]
-                            if frame then
-                                frame:SetAttribute("eab-empower-trigger", GetTime())
-                            end
+                    if InCombatLockdown() then
+                        -- Re-arm for leaving combat instead of dropping it.
+                        if not _empowerDeferFrame then
+                            _empowerDeferFrame = ns.TakeShell()
+                            _empowerDeferFrame:SetScript("OnEvent", function(self)
+                                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                                _EmpowerReroute()
+                            end)
                         end
+                        _empowerDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                        return
                     end
+                    _EmpowerReroute()
                 end)
             end
 
@@ -9821,7 +9852,33 @@ local _eabBindOwner = CreateFrame("Frame", "EAB_BindOwner", UIParent)
 -- to run when a routing decision, a bound key, or a button's empower state
 -- actually changes.
 local function UpdateKeybinds()
-    if InCombatLockdown() then return false end
+    -- Combat bail, self-re-arming. Everything below is protected
+    -- (ClearOverrideBindings / SetOverrideBindingClick), so it genuinely cannot
+    -- run here -- but returning false with nothing to retry dropped the whole
+    -- build on the floor. The load-time apply is the caller that matters: it has
+    -- no deferral of its own and assumes combat state is not yet restored, so
+    -- logging in or reloading during combat left EVERY override binding
+    -- unapplied. Empower slots then sat on their native binding, where
+    -- pressAndHoldAction never engages, and the spell behaved exactly like
+    -- Press-and-Tap with the CVar untouched -- for the rest of the session,
+    -- because nothing re-ran this. A reload was the only cure, which is the
+    -- reported symptom.
+    -- Re-arming here rather than at the call site covers every caller at once;
+    -- the sibling paths that already defer simply arm this a second time, which
+    -- is idempotent (RegisterEvent twice is one registration).
+    if InCombatLockdown() then
+        local df = _bindState.deferFrame
+        if not df then
+            df = ns.TakeShell()
+            df:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                UpdateKeybinds()
+            end)
+            _bindState.deferFrame = df
+        end
+        df:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return false
+    end
     -- While the house editor is active our override bindings are cleared so
     -- Blizzard's housing hotkeys work (see Housing Editor Keybind Clearing).
     -- The editor registers its OWN override bindings after ours are cleared,
@@ -9832,6 +9889,26 @@ local function UpdateKeybinds()
     -- editor close (housingCleared reset -> UpdateKeybinds; sigValid stays
     -- false while cleared, so that rebuild is never skipped).
     if _bindState.housingCleared then return false end
+    -- Empower/flyout detection for one action slot, shared by the current-page
+    -- and base-slot checks in pass 1.
+    local function SlotIsPH(slot)
+        if not (slot and HasAction(slot)) then return false end
+        local actionType, id, subType = GetActionInfo(slot)
+        if actionType == "flyout" then return true end
+        if C_Spell and C_Spell.IsPressHoldReleaseSpell then
+            local spellID
+            if actionType == "spell" then
+                spellID = id
+            elseif actionType == "macro" and subType == "spell" then
+                spellID = id
+            end
+            if spellID and not (issecretvalue and issecretvalue(spellID))
+               and C_Spell.IsPressHoldReleaseSpell(spellID) then
+                return true
+            end
+        end
+        return false
+    end
     -- Pass 1: compute per-button routing signature (k1, k2, useClick, isPH)
     -- and compare against the last applied build.
     local sig = _bindState.sig
@@ -9880,21 +9957,28 @@ local function UpdateKeybinds()
                     -- custom-paged bar useClick is always true, but the secure
                     -- empower snippet still needs a re-trigger when a slot's
                     -- press-and-hold state flips.
-                    local isPH = false
-                    if slot and HasAction(slot) then
-                        local actionType, id, subType = GetActionInfo(slot)
-                        if actionType == "flyout" then
-                            isPH = true
-                        elseif C_Spell and C_Spell.IsPressHoldReleaseSpell then
-                            local spellID
-                            if actionType == "spell" then
-                                spellID = id
-                            elseif actionType == "macro" and subType == "spell" then
-                                spellID = id
-                            end
-                            if spellID and not (issecretvalue and issecretvalue(spellID))
-                               and C_Spell.IsPressHoldReleaseSpell(spellID) then
-                                isPH = true
+                    local isPH = SlotIsPH(slot)
+                    -- Page-proof routing: also consult the button's BASE slot.
+                    -- A click binding tracks the BUTTON, whose action attr
+                    -- re-pages SECURELY in combat, so a click-routed key
+                    -- survives any page swap with no rebind. Deriving isPH only
+                    -- from the CURRENT page meant mounting (skyriding page)
+                    -- rebuilt the empower keys to native; dismounting INTO
+                    -- combat then blocked the rebuild back, leaving empowered
+                    -- spells on native routes -- Press-and-Tap behaviour -- for
+                    -- the rest of the fight, or (before the combat re-arm) the
+                    -- session. Keeping the key click-routed when EITHER slot is
+                    -- empower-capable removes the rebind entirely; the cost is
+                    -- press-and-hold repeat on that key only while paged away
+                    -- from the empower slot. Guarded on the offsets table so
+                    -- Pet/Stance buttons (action attr nil) never alias into
+                    -- MainBar slots.
+                    if not isPH then
+                        local off = BAR_SLOT_OFFSETS[info.key]
+                        if off then
+                            local base = off + i
+                            if base ~= slot then
+                                isPH = SlotIsPH(base)
                             end
                         end
                     end
@@ -9949,6 +10033,7 @@ local function UpdateKeybinds()
     return true
 end
 _G._EAB_UpdateKeybinds = UpdateKeybinds
+
 
 
 
@@ -10113,12 +10198,13 @@ if IsHouseEditorActive then
                 _bindState.sigValid = false
             end
         else
-            -- House editor closed restore our override bindings
+            -- House editor closed restore our override bindings. Call
+            -- unconditionally: UpdateKeybinds defers itself in combat, where
+            -- the old guard dropped the restore with nothing to re-arm it and
+            -- every override binding stayed cleared until reload.
             if not _bindState.housingCleared then return end
             _bindState.housingCleared = false
-            if not InCombatLockdown() then
-                UpdateKeybinds()
-            end
+            UpdateKeybinds()
         end
     end)
 end
@@ -11889,16 +11975,24 @@ function EAB:FinishSetup()
         -- the bindings stay cleared forever.  This catches that.
         ResetDragState()
         C_Timer_After(0.2, function()
-            if InCombatLockdown() then return end
-            -- Reset stale flags -- if we're not actually in a vehicle/housing
-            -- the flags should be false
-            local inVehicle = (UnitInVehicle and UnitInVehicle("player"))
-                              or EAB_VTABLE.HasVehicleActionBar()
-
+            -- Reset stale flags -- if we're not actually in housing the flag
+            -- should be false. Plain Lua state, safe in combat.
             local inHousing = IsHouseEditorActive and IsHouseEditorActive()
             if not inHousing and _bindState.housingCleared then
                 _bindState.housingCleared = false
             end
+            -- This is the restore point for the transient-clear race described
+            -- above, so it must never be skipped: bindings can be cleared or
+            -- wrongly routed while the cached signature claims they are applied.
+            -- Force the rebuild past the signature short-circuit, and call
+            -- unconditionally -- UpdateKeybinds defers itself to
+            -- PLAYER_REGEN_ENABLED in combat. The old bare combat return here
+            -- reproduced the exact "stay cleared forever" this timer exists to
+            -- prevent: zoning INTO combat (die, release, run back in while the
+            -- raid still fights) missed the restore, and with no re-arm the
+            -- empower slots sat on native bindings (= Press-and-Tap behaviour)
+            -- until the next reload.
+            _bindState.sigValid = false
             UpdateKeybinds()
         end)
         -- Re-evaluate visibility options (visOnlyInstances, visHideHousing,
