@@ -10026,8 +10026,23 @@ SlashCmdList.EABEMPOWER = function()
                             local tag = a:find("^CLICK") and "|cff40ff40click|r" or "|cffff4040NATIVE|r"
                             return ("%s -> %s [%s]"):format(k, a, tag)
                         end
-                        print(("   %s btn%d slot=%s %s | %s | %s"):format(
-                            info.key, i, tostring(slot), nm, route(k1), route(k2)))
+                        -- The binding is only HALF the empower path. A green
+                        -- CLICK route still behaves as Press-and-Tap if the
+                        -- button's own pressAndHoldAction/typerelease attrs are
+                        -- stale (the secure snippet maintains them; only page
+                        -- changes and the eab-empower-trigger re-run it).
+                        -- GetAttribute is readable from insecure code, so print
+                        -- both layers: for an empowered spell the healthy state
+                        -- is PH=true REL=actionrelease; PH=false/nil on an
+                        -- empower slot IS the bug, on the attribute layer.
+                        local aPH = btn:GetAttribute("pressAndHoldAction")
+                        local aRel = btn:GetAttribute("typerelease")
+                        local attrTag = ("attr PH=%s REL=%s"):format(tostring(aPH), tostring(aRel))
+                        if isPH and aPH ~= true then
+                            attrTag = "|cffff4040" .. attrTag .. " <STALE>|r"
+                        end
+                        print(("   %s btn%d slot=%s %s | %s | %s | %s"):format(
+                            info.key, i, tostring(slot), nm, route(k1), route(k2), attrTag))
                     end
                 end
             end
