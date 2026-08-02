@@ -1508,10 +1508,19 @@ do
     end
 end
 
--- Add a bar frame to the override controller's watch list
+-- Add a bar frame to the override controller's watch list. Deduped in the
+-- snippet: the secure list can never be pruned, so a re-registration (any
+-- future setup-path re-entry) would grow it and every controller sweep
+-- permanently.
 local function RegisterBarWithOverrideController(frame)
     OverrideController:SetFrameRef("add", frame)
-    OverrideController:Execute([[ table.insert(_eabBarFrames, self:GetFrameRef("add")) ]])
+    OverrideController:Execute([[
+        local f = self:GetFrameRef("add")
+        for i = 1, #_eabBarFrames do
+            if _eabBarFrames[i] == f then return end
+        end
+        table.insert(_eabBarFrames, f)
+    ]])
 
     -- Initialize state on the frame
     frame:SetAttribute("state-overrideui", tonumber(OverrideController:GetAttribute("overrideui")) == 1)
@@ -7438,16 +7447,11 @@ function EAB_VTABLE.Hover.GetState(barKey, frame)
     return state
 end
 
-ns._broadcastingMouseover = false
-
-function EAB_VTABLE.Hover.FadeIn(barKey, state)
-    -- /eabprof: hover edges are invisible to the dispatcher counters, so
-    -- count and time them here (one nil-check while disarmed). The count is
-    -- unconditional (nested broadcast calls show the amplification factor);
-    -- the timer is outer-call-only so broadcast recursion isn't double-billed.
-    local _hprof = ns._evProf
-    if _hprof then _hprof["<FadeIn>"] = (_hprof["<FadeIn>"] or 0) + 1 end
-    local _hT0 = not ns._broadcastingMouseover and ns.ProfBegin() or 0
+-- Fade ONE bar in, no broadcast. The fadeDir memo makes repeat calls while
+-- already fading/faded in O(1) table reads, so sweeping across a bar's 12
+-- buttons costs 12 memo hits and one real fade. (On the vtable, not a
+-- chunk local: this file's main chunk is at the 200-local cap.)
+function EAB_VTABLE.Hover.FadeInOne(barKey, state)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
         local targetAlpha = s._savedBarAlpha or 1
@@ -7455,15 +7459,27 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
         StopFade(state.frame)
         FadeTo(state.frame, targetAlpha, s.mouseoverSpeed or 0.15)
         if barKey == "MainBar" then SyncPagingAlpha(targetAlpha) end
-        -- Broadcast to all other mouseover-enabled bars
-        if not ns._broadcastingMouseover and EAB.db.profile.mouseoverShowAll then
-            ns._broadcastingMouseover = true
-            for otherKey, otherState in pairs(hoverStates) do
-                if otherKey ~= barKey then
-                    EAB_VTABLE.Hover.FadeIn(otherKey, otherState)
-                end
+    end
+end
+
+function EAB_VTABLE.Hover.FadeIn(barKey, state)
+    -- /eabprof: hover edges are invisible to the dispatcher counters, so
+    -- count and time them here (one nil-check while disarmed).
+    local _hprof = ns._evProf
+    if _hprof then _hprof["<FadeIn>"] = (_hprof["<FadeIn>"] or 0) + 1 end
+    local _hT0 = ns.ProfBegin()
+    EAB_VTABLE.Hover.FadeInOne(barKey, state)
+    -- "Show All on Mouseover": bring the other bars along. Iterative (the
+    -- old recursive form needed a module-global reentrancy latch that a
+    -- mid-broadcast error would have left stuck, silently killing the
+    -- feature); FadeInOne's own mouseoverEnabled + fadeDir guards make the
+    -- per-bar cost of an already-visible bar two table reads.
+    if EAB.db.profile.mouseoverShowAll then
+        local FadeInOne = EAB_VTABLE.Hover.FadeInOne
+        for otherKey, otherState in pairs(hoverStates) do
+            if otherKey ~= barKey then
+                FadeInOne(otherKey, otherState)
             end
-            ns._broadcastingMouseover = false
         end
     end
     if _hT0 > 0 then ns.ProfEnd("Hover:fadeIn", _hT0) end
@@ -7495,39 +7511,62 @@ end
 function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
     opts = opts or {}
 
-    -- /eabprof: <FadeOutSched> counts timers SCHEDULED (every OnLeave lands
-    -- here -- the bar frame and each of its buttons all hook OnLeave, so one
-    -- mouse sweep across a 12-button bar schedules 12+); <FadeOutTimer>
-    -- counts callbacks that actually FIRED 0.1s later.
+    -- /eabprof: <FadeOutSched> counts OnLeave arrivals (the bar frame and
+    -- each of its buttons all hook OnLeave, so one mouse sweep across a
+    -- 12-button bar lands here 12+ times); <FadeOutTimer> counts callbacks
+    -- that actually fired. Pre-coalescing these were equal.
     local _sprof = ns._evProf
     if _sprof then _sprof["<FadeOutSched>"] = (_sprof["<FadeOutSched>"] or 0) + 1 end
-    C_Timer_After(0.1, function()
-        local _fprof = ns._evProf
-        if _fprof then _fprof["<FadeOutTimer>"] = (_fprof["<FadeOutTimer>"] or 0) + 1 end
-        local _fT0 = ns.ProfBegin()
-        if opts.isStillHovered and opts.isStillHovered(state) then
-            if opts.markHoveredWhileActive then
-                state.isHovered = true
+    -- Coalesced: one pending timer per bar covers the whole sweep (same
+    -- pattern as _range.slotPending) instead of a fresh timer + closure per
+    -- OnLeave, each of which later ran the O(bars) hovered scan -- the
+    -- repeated-hover FPS decay users reported. The callback is built once
+    -- per state and reused; opts is stable per bar (one BuildHandlers call).
+    if state.foPending then return end
+    state.foPending = true
+    local cb = state.foCb
+    if not cb then
+        cb = function()
+            state.foPending = false
+            local _fprof = ns._evProf
+            if _fprof then _fprof["<FadeOutTimer>"] = (_fprof["<FadeOutTimer>"] or 0) + 1 end
+            local _fT0 = ns.ProfBegin()
+            if opts.isStillHovered and opts.isStillHovered(state) then
+                if opts.markHoveredWhileActive then
+                    state.isHovered = true
+                end
+                ns.ProfEnd("Hover:fadeOutTimer", _fT0)
+                return
             end
-            ns.ProfEnd("Hover:fadeOutTimer", _fT0)
-            return
-        end
-        if state.isHovered then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
-        if _quickKeybindState.open then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
-        if opts.blockFadeOut and opts.blockFadeOut(state) then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
-        -- When showing all bars together, keep visible while any bar is hovered
-        if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
-        EAB_VTABLE.Hover.FadeOut(barKey, state)
-        -- Broadcast fade-out to all other mouseover bars
-        if EAB.db.profile.mouseoverShowAll then
-            for otherKey, otherState in pairs(hoverStates) do
-                if otherKey ~= barKey and not otherState.isHovered then
-                    EAB_VTABLE.Hover.FadeOut(otherKey, otherState)
+            if state.isHovered then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
+            -- Ground truth: Enter/Leave interleaves between a bar frame and
+            -- its own children can leave isHovered false while the cursor
+            -- never left the bar, which used to fade every bar out and
+            -- straight back in per mouse twitch. One C call settles it and
+            -- re-syncs the flag.
+            if state.frame and state.frame:IsMouseOver() then
+                state.isHovered = true
+                ns.ProfEnd("Hover:fadeOutTimer", _fT0)
+                return
+            end
+            if _quickKeybindState.open then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
+            if opts.blockFadeOut and opts.blockFadeOut(state) then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
+            -- When showing all bars together, keep visible while any bar is hovered
+            if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
+            EAB_VTABLE.Hover.FadeOut(barKey, state)
+            -- Broadcast fade-out to all other mouseover bars
+            if EAB.db.profile.mouseoverShowAll then
+                for otherKey, otherState in pairs(hoverStates) do
+                    if otherKey ~= barKey and not otherState.isHovered then
+                        EAB_VTABLE.Hover.FadeOut(otherKey, otherState)
+                    end
                 end
             end
+            ns.ProfEnd("Hover:fadeOutTimer", _fT0)
         end
-        ns.ProfEnd("Hover:fadeOutTimer", _fT0)
-    end)
+        state.foCb = cb
+    end
+    C_Timer_After(0.1, cb)
 end
 
 function EAB_VTABLE.Hover.BuildHandlers(barKey, state, opts)
@@ -7561,6 +7600,11 @@ local function AttachDataBarHoverHooks(barKey)
 end
 
 local function AttachHoverHooks(barKey)
+    -- Idempotency (same guard as both sibling attach functions): HookScript
+    -- stacks and can never be unhooked, so a second pass would permanently
+    -- double every hover handler on the bar and its 12 buttons.
+    if hoverStates[barKey] then return end
+
     local frame = barFrames[barKey]
     local buttons = barButtons[barKey]
     if not frame or not buttons then return end
@@ -11584,6 +11628,13 @@ end
 
 -- The actual bar creation, positioning, and event registration.
 function EAB:FinishSetup()
+    -- Run-once: reachable from OnEnable AND OnFirstLogin, and a module
+    -- disable/re-enable dispatches OnEnable again. Everything in here that
+    -- uses HookScript (hover hooks on ~140 buttons, flyout OnHide, stock-bar
+    -- OnShow) stacks a second permanent handler on re-entry -- HookScript
+    -- cannot be unhooked -- and the pet/stance event frames would duplicate.
+    if ns._eabFinishSetupDone then return end
+    ns._eabFinishSetupDone = true
     local function DoSetupSecure()
         -- Non-protected setup: create bar frames, compute layout, register events.
         -- Protected operations (SetParent, SetPoint on Blizzard buttons) are
@@ -12909,6 +12960,12 @@ local function CreateDataBarFrame(barKey, updateFunc)
     holder._text = text
     holder._updateFunc = updateFunc
 
+    -- EUI-owned frame: mark it so FadeTo uses the cached-AnimationGroup path
+    -- instead of the manual per-frame OnUpdate queue reserved for
+    -- Blizzard-owned frames (animating a foreign frame spreads taint; these
+    -- holders are ours).
+    _ownedFrames[holder] = true
+
     dataBarFrames[barKey] = holder
     return holder
 end
@@ -14046,12 +14103,23 @@ AttachExtraBarHoverHooks = function(info)
     end
 
     local function IsHoverRootActive()
-        local foci = GetMouseFoci and GetMouseFoci() or { GetMouseFocus and GetMouseFocus() }
-        if foci then
-            for _, focus in ipairs(foci) do
-                if focus and IsChildOfHoverRoot(focus) then
-                    return true
+        -- Called from every hover edge and every scheduled fade-out check:
+        -- avoid the table-per-call fallback on clients that have GetMouseFoci
+        -- (all current ones); the legacy single-focus branch keeps the old
+        -- shape for anything older.
+        if GetMouseFoci then
+            local foci = GetMouseFoci()
+            if foci then
+                for _, focus in ipairs(foci) do
+                    if focus and IsChildOfHoverRoot(focus) then
+                        return true
+                    end
                 end
+            end
+        elseif GetMouseFocus then
+            local focus = GetMouseFocus()
+            if focus and IsChildOfHoverRoot(focus) then
+                return true
             end
         end
 
