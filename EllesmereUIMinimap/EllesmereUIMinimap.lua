@@ -1190,6 +1190,14 @@ local function SaveZoomLevel()
     p.savedZoom = Minimap:GetZoom()
 end
 
+-- Global names of third-party buttons that REPLACE the expansion landing page
+-- button. Such an addon hides Blizzard's button (typically unregistering its
+-- events first) and parents its own to the minimap in the same corner.
+-- Plumber's "Landing Button" is the reference case.
+local FOLIO_REPLACEMENT_BUTTONS = {
+    "PlumberLandingPageMinimapButton",
+}
+
 -- Blizzard structural frames that should NOT go into the flyout
 local flyoutBlacklist = {
     MinimapZoomIn    = true,
@@ -1200,6 +1208,18 @@ local flyoutBlacklist = {
     -- minimap surface instead of sweeping it into the addon-button flyout.
     ExpansionLandingPageMinimapButton = true,
 }
+
+-- A replacement landing button is a feature button, not a generic addon
+-- button: it belongs on the minimap surface for exactly the reason Blizzard's
+-- does. Sweeping one into the flyout also RE-CREATES the duplicate-button bug
+-- it is meant to prevent -- HideMinimapChild hides the replacement, our folio
+-- code then sees no replacement on screen and resurrects Blizzard's button via
+-- RefreshButton, and the replacing addon never hides it again because it still
+-- believes it did. Result: Blizzard's button back in the corner, the
+-- replacement buried in the flyout.
+for _, name in ipairs(FOLIO_REPLACEMENT_BUTTONS) do
+    flyoutBlacklist[name] = true
+end
 
 -- Persistently hide a minimap button via Show hook
 local addonButtonHooks = {}
@@ -3798,14 +3818,8 @@ end
 -- It is a plain (non-secure) Blizzard button, so SetParent/SetPoint are safe.
 local _omniumFolioHooked = false
 
--- Global names of third-party buttons that REPLACE the landing page button.
--- Such an addon hides Blizzard's button (typically unregistering its events
--- first) and draws its own in the same corner.
-local FOLIO_REPLACEMENT_BUTTONS = {
-    "PlumberLandingPageMinimapButton",
-}
-
--- True while a replacement button is on screen. Our RefreshButton nudge below
+-- True while a replacement button (FOLIO_REPLACEMENT_BUTTONS, declared with
+-- the flyout blacklist above) is on screen. Our RefreshButton nudge below
 -- would otherwise undo the replacement addon's hide -- RefreshButton re-Shows
 -- Blizzard's button, and the other addon never hides it again because it still
 -- believes it did -- so BOTH buttons end up visible until the user toggles the
