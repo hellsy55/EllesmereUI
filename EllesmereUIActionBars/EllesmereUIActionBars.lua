@@ -4332,10 +4332,12 @@ do
                             _empowerDeferFrame = ns.TakeShell()
                             _empowerDeferFrame:SetScript("OnEvent", function(self)
                                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                                print("|cff0cd29f[empower]|r left combat, running deferred reroute")  -- PROBE
                                 _EmpowerReroute()
                             end)
                         end
                         _empowerDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                        print("|cff0cd29f[empower]|r slot change IN COMBAT, deferred (was dropped before the fix)")  -- PROBE
                         return
                     end
                     _EmpowerReroute()
@@ -9941,6 +9943,67 @@ local function UpdateKeybinds()
     return true
 end
 _G._EAB_UpdateKeybinds = UpdateKeybinds
+
+-------------------------------------------------------------------------------
+-- TEMPORARY EMPOWER ROUTING PROBE (/eabempower) -- REMOVE before merge.
+--
+-- The reported symptom is "Empowered Spell Input flipped to Press and Tap", but
+-- an empower slot left on its NATIVE binding behaves identically with the CVar
+-- untouched. This prints the routing per empower slot so the two are told apart
+-- without guessing: CLICK... is hold-and-release, ACTIONBUTTON... is the bug.
+--
+-- No new file-scope locals: this chunk sits near the 200-local cap.
+-------------------------------------------------------------------------------
+SLASH_EABEMPOWER1 = "/eabempower"
+SlashCmdList.EABEMPOWER = function()
+    local found = 0
+    print(("|cff0cd29f[empower]|r combat=%s"):format(tostring(InCombatLockdown())))
+    for _, info in ipairs(BAR_CONFIG) do
+        local prefix = BINDING_MAP[info.key]
+        local btns = barButtons[info.key]
+        if prefix and btns then
+            for i, btn in ipairs(btns) do
+                local slot = btn and btn:GetAttribute("action")
+                if slot and HasAction(slot) then
+                    local actionType, id, subType = GetActionInfo(slot)
+                    local isPH = (actionType == "flyout")
+                    local spellID
+                    if actionType == "spell" or (actionType == "macro" and subType == "spell") then
+                        spellID = id
+                    end
+                    if not isPH and spellID and not (issecretvalue and issecretvalue(spellID))
+                       and C_Spell and C_Spell.IsPressHoldReleaseSpell
+                       and C_Spell.IsPressHoldReleaseSpell(spellID) then
+                        isPH = true
+                    end
+                    if isPH then
+                        found = found + 1
+                        local nm = "?"
+                        if spellID and C_Spell and C_Spell.GetSpellInfo then
+                            local si = C_Spell.GetSpellInfo(spellID)
+                            nm = (si and si.name) or "?"
+                        elseif actionType == "flyout" then
+                            nm = "flyout"
+                        end
+                        local k1, k2 = GetBindingKey(prefix .. i)
+                        local function route(k)
+                            if not k then return "-" end
+                            local a = GetBindingAction(k, true)
+                            if not a or a == "" then return k .. " -> (none)" end
+                            local tag = a:find("^CLICK") and "|cff40ff40click|r" or "|cffff4040NATIVE|r"
+                            return ("%s -> %s [%s]"):format(k, a, tag)
+                        end
+                        print(("   %s btn%d slot=%s %s | %s | %s"):format(
+                            info.key, i, tostring(slot), nm, route(k1), route(k2)))
+                    end
+                end
+            end
+        end
+    end
+    if found == 0 then
+        print("|cff0cd29f[empower]|r no press-hold-release action found on any bar")
+    end
+end
 
 
 
