@@ -9854,6 +9854,26 @@ local function UpdateKeybinds()
     -- editor close (housingCleared reset -> UpdateKeybinds; sigValid stays
     -- false while cleared, so that rebuild is never skipped).
     if _bindState.housingCleared then return false end
+    -- Empower/flyout detection for one action slot, shared by the current-page
+    -- and base-slot checks in pass 1.
+    local function SlotIsPH(slot)
+        if not (slot and HasAction(slot)) then return false end
+        local actionType, id, subType = GetActionInfo(slot)
+        if actionType == "flyout" then return true end
+        if C_Spell and C_Spell.IsPressHoldReleaseSpell then
+            local spellID
+            if actionType == "spell" then
+                spellID = id
+            elseif actionType == "macro" and subType == "spell" then
+                spellID = id
+            end
+            if spellID and not (issecretvalue and issecretvalue(spellID))
+               and C_Spell.IsPressHoldReleaseSpell(spellID) then
+                return true
+            end
+        end
+        return false
+    end
     -- Pass 1: compute per-button routing signature (k1, k2, useClick, isPH)
     -- and compare against the last applied build.
     local sig = _bindState.sig
@@ -9902,21 +9922,28 @@ local function UpdateKeybinds()
                     -- custom-paged bar useClick is always true, but the secure
                     -- empower snippet still needs a re-trigger when a slot's
                     -- press-and-hold state flips.
-                    local isPH = false
-                    if slot and HasAction(slot) then
-                        local actionType, id, subType = GetActionInfo(slot)
-                        if actionType == "flyout" then
-                            isPH = true
-                        elseif C_Spell and C_Spell.IsPressHoldReleaseSpell then
-                            local spellID
-                            if actionType == "spell" then
-                                spellID = id
-                            elseif actionType == "macro" and subType == "spell" then
-                                spellID = id
-                            end
-                            if spellID and not (issecretvalue and issecretvalue(spellID))
-                               and C_Spell.IsPressHoldReleaseSpell(spellID) then
-                                isPH = true
+                    local isPH = SlotIsPH(slot)
+                    -- Page-proof routing: also consult the button's BASE slot.
+                    -- A click binding tracks the BUTTON, whose action attr
+                    -- re-pages SECURELY in combat, so a click-routed key
+                    -- survives any page swap with no rebind. Deriving isPH only
+                    -- from the CURRENT page meant mounting (skyriding page)
+                    -- rebuilt the empower keys to native; dismounting INTO
+                    -- combat then blocked the rebuild back, leaving empowered
+                    -- spells on native routes -- Press-and-Tap behaviour -- for
+                    -- the rest of the fight, or (before the combat re-arm) the
+                    -- session. Keeping the key click-routed when EITHER slot is
+                    -- empower-capable removes the rebind entirely; the cost is
+                    -- press-and-hold repeat on that key only while paged away
+                    -- from the empower slot. Guarded on the offsets table so
+                    -- Pet/Stance buttons (action attr nil) never alias into
+                    -- MainBar slots.
+                    if not isPH then
+                        local off = BAR_SLOT_OFFSETS[info.key]
+                        if off then
+                            local base = off + i
+                            if base ~= slot then
+                                isPH = SlotIsPH(base)
                             end
                         end
                     end
