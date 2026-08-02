@@ -2363,7 +2363,7 @@ function ns.BM_UpdateIndicators(button, unit, db, updateInfo)
         local mode = db and db.profile and db.profile.bmDisplayMode
         if #allActiveIndicators == 0 and mode ~= "simple" then return end
         if not d.health or not UnitExists(unit) or not button:IsVisible() then return end
-        local t0 = ns.ProfBegin and ns.ProfBegin("BM:LazyPool")
+        local t0 = nil -- PROF: ns.ProfBegin and ns.ProfBegin("BM:LazyPool")
         ns.BM_CreateIndicators(button, d.health, d, EllesmereUI.PanelPP or EllesmereUI.PP)
         if ns.BM_AnchorIndicators and ns.RF_AnchorHost then
             -- Anchor with the same identity-sensitive proxy each button type's

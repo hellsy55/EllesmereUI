@@ -2709,9 +2709,9 @@ local function Refresh()
     local _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7
     if _memProbe then collectgarbage("stop"); _m0 = collectgarbage("count") end
 
-    local _pt = EABR.ProfBegin("AuraCache")
+    local _pt = 0 -- PROF: EABR.ProfBegin("AuraCache")
     BuildPlayerAuraCache()
-    EABR.ProfEnd("AuraCache", _pt)
+    if _pt > 0 then EABR.ProfEnd("AuraCache", _pt) end
     if _memProbe then _m1 = collectgarbage("count") end
 
     local playerClass = GetPlayerClass()
@@ -2729,9 +2729,9 @@ local function Refresh()
     ---------------------------------------------------------------------------
     if remindersOn then
         local inInstance = InRealInstancedContent()
-        _pt = EABR.ProfBegin("RaidBuffs")
+        _pt = 0 -- PROF: EABR.ProfBegin("RaidBuffs")
         CollectRaidBuffs(missing, playerClass, inInstance, inCombat)
-        EABR.ProfEnd("RaidBuffs", _pt)
+        if _pt > 0 then EABR.ProfEnd("RaidBuffs", _pt) end
     end
     if _memProbe then _m2 = collectgarbage("count") end
 
@@ -2751,9 +2751,9 @@ local function Refresh()
     --  2) Auras (suppressed in M+ keystones and combat)
     ---------------------------------------------------------------------------
     if remindersOn and not inCombat and not inKeystone then
-        _pt = EABR.ProfBegin("Auras")
+        _pt = 0 -- PROF: EABR.ProfBegin("Auras")
         CollectAuras(missing, playerClass, specID, inInstance, inCombat)
-        EABR.ProfEnd("Auras", _pt)
+        if _pt > 0 then EABR.ProfEnd("Auras", _pt) end
     end
     if _memProbe then _m3 = collectgarbage("count") end
 
@@ -2761,9 +2761,9 @@ local function Refresh()
     --  3) Consumables (suppressed in M+ keystones, combat, and PvP)
     ---------------------------------------------------------------------------
     if remindersOn and not inCombat and not inKeystone and not inPvP then
-        _pt = EABR.ProfBegin("Consumables")
+        _pt = 0 -- PROF: EABR.ProfBegin("Consumables")
         CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
-        EABR.ProfEnd("Consumables", _pt)
+        if _pt > 0 then EABR.ProfEnd("Consumables", _pt) end
     end
     if _memProbe then _m4 = collectgarbage("count") end
 
@@ -2855,7 +2855,7 @@ local function Refresh()
     --  Apply results
     ---------------------------------------------------------------------------
     if inCombat then
-        _pt = EABR.ProfBegin("Display")
+        _pt = 0 -- PROF: EABR.ProfBegin("Display")
         -- Combat path: use non-secure visual-only icons.
         -- Fade out stale secure buttons (SetAlpha is safe during combat).
         FadeOutSecureIcons()
@@ -2909,12 +2909,12 @@ local function Refresh()
             if combatIdx > 0 then EllesmereUI.SetElementVisibility(combatAnchor, true); LayoutCombatIcons() end
             if cursorIdx > 0 then cursorAnchor:Show(); EllesmereUI.SetElementVisibility(cursorAnchor, true); LayoutCursorIcons() end
         end
-        EABR.ProfEnd("Display", _pt)
+        if _pt > 0 then EABR.ProfEnd("Display", _pt) end
         return
     end
 
     -- OOC path: full secure button display
-    _pt = EABR.ProfBegin("Display")
+    _pt = 0 -- PROF: EABR.ProfBegin("Display")
     HideCombatIcons()
     HideCursorIcons()
     HideAllIcons()
@@ -2965,7 +2965,7 @@ local function Refresh()
         EllesmereUI.SetElementVisibility(iconAnchor, false)
     end
 
-    EABR.ProfEnd("Display", _pt)
+    if _pt > 0 then EABR.ProfEnd("Display", _pt) end
 
     -- MEMORY PROBE REPORT (temporary)
     if _memProbe then

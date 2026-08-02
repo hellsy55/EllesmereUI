@@ -1834,10 +1834,19 @@ end
 -------------------------------------------------------------------------------
 --  "Hide Text at 0 Stacks" (bar-level, cd/utility bars): hide the charge
 --  counter (frame.ChargeCount.Current) while a charge spell is genuinely OUT
---  of charges, instead of showing a 0. Uses the same clean charges>0
---  predicate as CdmShouldHideCountdown above -- GetSpellCooldown().isActive
---  AND not isOnGCD, both plain flags; the secret currentCharges is never
---  read, so the display is identical in and out of instanced combat. Driven
+--  of charges, instead of showing a 0. The count itself is the alpha:
+--  SetAlpha clamps to [0,1] engine-side, so alpha := currentCharges renders
+--  hidden at exactly 0 and fully visible at 1+, with no comparison at all.
+--  SetAlpha accepts secret numbers (SecretArguments AllowedWhenTainted), so
+--  the SAME write runs in and out of instanced combat -- a secret count
+--  writes through with the memo dirtied, never stored or compared. (The
+--  earlier clean-flag inference "real non-GCD cooldown = zero charges" is
+--  NOT universal: Roll-class wiring -- native, or talent-granted charges on
+--  cooldown spells like Feint / Survival of the Fittest -- keeps the main
+--  cooldown record active while charges are banked, which hid a real count.
+--  Field report 8.7.1. CdmShouldHideCountdown still uses that inference and
+--  shares the blind spot in the harmless direction: it shows the duration
+--  where it could hide it.) Driven
 --  by the same SPELL_UPDATE_CHARGES edge as the other charge features (fires
 --  on every spend AND refill, nothing else); the event shell is created
 --  lazily on first enrollment and the watch set self-drains, so a user who
@@ -1886,12 +1895,19 @@ local function EvalZeroChargeTextFrame(frame, fd)
         ZctSetAlpha(fd, fs, 1)
         return
     end
-    -- 0 charges <=> on a real (non-GCD) cooldown; see CdmShouldHideCountdown
-    -- for why the isOnGCD term is required (a GCD right after a cast reports
-    -- isActive with a charge still in hand).
-    local cdInfo = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(liveSid)
-    local zero = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
-    ZctSetAlpha(fd, fs, zero and 0 or 1)
+    -- Alpha := currentCharges. The engine clamps SetAlpha to [0,1], so the
+    -- count renders itself: hidden at exactly 0, fully visible at 1+ -- one
+    -- write, no comparison, correct for every charge wiring (see the block
+    -- header). Secret count (instanced combat): same write, memo dirtied.
+    local cc = ci.currentCharges
+    if cc == nil then
+        ZctSetAlpha(fd, fs, 1)
+    elseif issecretvalue and issecretvalue(cc) then
+        fd._zctAlpha = nil
+        fs:SetAlpha(cc)
+    else
+        ZctSetAlpha(fd, fs, cc > 1 and 1 or cc)
+    end
 end
 
 function ns.WatchZeroChargeTextIfEnabled(frame)

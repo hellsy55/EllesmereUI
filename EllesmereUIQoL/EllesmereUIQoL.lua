@@ -347,15 +347,15 @@ qolFrame:SetScript("OnEvent", function(self)
                 -- suppressed), so without this the just-bought containers would
                 -- never open after leaving the vendor.
                 containerFrame:RegisterEvent("MERCHANT_CLOSED")
-                -- Pause while the mailbox is open, resume once it's closed.
-                -- MAIL_SHOW/MAIL_CLOSED are kept for older clients, but as of
-                -- patch 10.0.0 MAIL_CLOSED no longer fires at all -- Blizzard
-                -- folded it into the generic interaction-manager events, so
-                -- those are the ones that actually drive the resume on retail.
-                containerFrame:RegisterEvent("MAIL_SHOW")
+                -- Resume once the mailbox closes. The pause needs no event of
+                -- its own: MailOpen() reads the frame directly at every entry
+                -- point, so only the close edge is registered. MAIL_CLOSED is
+                -- kept for older clients, but as of patch 10.0.0 it no longer
+                -- fires at all -- Blizzard folded it into the generic
+                -- interaction-manager events, so the HIDE event is the one
+                -- that actually drives the resume on retail.
                 containerFrame:RegisterEvent("MAIL_CLOSED")
                 if C_PlayerInteractionManager then
-                    containerFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
                     containerFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
                 end
                 -- Track loot windows so payout containers (which open one and
@@ -376,10 +376,8 @@ qolFrame:SetScript("OnEvent", function(self)
                 containerFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
                 containerFrame:UnregisterEvent("BAG_UPDATE")
                 containerFrame:UnregisterEvent("MERCHANT_CLOSED")
-                containerFrame:UnregisterEvent("MAIL_SHOW")
                 containerFrame:UnregisterEvent("MAIL_CLOSED")
                 if C_PlayerInteractionManager then
-                    containerFrame:UnregisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
                     containerFrame:UnregisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
                 end
                 containerFrame:UnregisterEvent("LOOT_OPENED")
@@ -647,12 +645,6 @@ qolFrame:SetScript("OnEvent", function(self)
                 end
                 return
             end
-            if event == "MAIL_SHOW" then
-                -- Nothing to do beyond letting the gate take over: MailOpen()
-                -- now reads true and every entry point (this dispatcher,
-                -- step(), finish()) bails until the mailbox closes.
-                return
-            end
             if event == "MAIL_CLOSED" then
                 -- Legacy path: no longer fires on retail (see the registration
                 -- comment), kept for older clients where it still does.
@@ -667,9 +659,6 @@ qolFrame:SetScript("OnEvent", function(self)
                     -- strands a slot -- so settle first, same as LOOT_CLOSED.
                     C_Timer.After(0.5, function() ScanAndOpen(false, true) end)
                 end
-                return
-            end
-            if event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" then
                 return
             end
             -- MERCHANT_CLOSED: the interaction is over but the frame may not

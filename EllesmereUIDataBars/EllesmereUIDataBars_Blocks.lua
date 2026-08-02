@@ -5275,7 +5275,10 @@ ns.BlockFactories.currency = function(blockCfg, slot, content, barCtx)
             qr, qg, qb = qc.r, qc.g, qc.b
         end
         ns.Tip_AddLine(info.name or "?", qr, qg, qb)
-        if info.description and info.description ~= "" then
+        -- Some currencies carry several paragraphs of flavor text, which is
+        -- what makes the tooltip tower over the bar. Opt-out keeps the name,
+        -- the total and the click hint -- only the wall of text goes.
+        if s.showDescription ~= false and info.description and info.description ~= "" then
             ns.Tip_AddLine(" ")
             ns.Tip_AddWrappedLine(info.description, 280, 0.8, 0.8, 0.8)
         end
