@@ -409,6 +409,10 @@ local function SetHeaderButtonsShown(W, shown)
             btn:EnableMouse(shown)
         end
     end
+    -- The title reserves room for the icons, so it has to re-fit whenever they
+    -- come and go (hide-until-hover) or the gap they left stays empty.
+    W._hdrIconsShown = shown and true or false
+    if W.FitTitle then W.FitTitle() end
 end
 
 local function EnsureHeaderButtonsHoverHooks(W)
@@ -2899,6 +2903,9 @@ local function CreateDMWindow(winIdx)
         local c = DB()
         local iconSz = c.hdrIconSize or 22
         local n = #GetHeaderLayoutButtons(W, c)
+        -- Icons hidden until hover occupy no space, so the title gets the whole
+        -- header instead of being truncated against a gap that isn't there.
+        if W._hdrIconsShown == false then n = 0 end
         local headerW = frame:GetWidth() or (wdb.width or 300)
         local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2
         local avail = btnLeft - (6 + (c.hdrTextOffX or 0)) - 6
@@ -2906,7 +2913,15 @@ local function CreateDMWindow(winIdx)
         if fs:GetStringWidth() <= avail then return end
         local s = full
         while #s > 1 do
-            s = string.sub(s, 1, #s - 1)
+            -- Drop one character, not one byte: localised titles are UTF-8 and
+            -- a mid-codepoint cut renders as garbage.
+            local i = #s
+            while i > 1 do
+                local b = string.byte(s, i)
+                if b < 0x80 or b >= 0xC0 then break end
+                i = i - 1
+            end
+            s = string.sub(s, 1, i - 1)
             fs:SetText(s .. "...")
             if fs:GetStringWidth() <= avail then break end
         end
@@ -4630,7 +4645,7 @@ ns.ApplyHeader = function()
     else local c = cfg.hdrTextColor; tR = c and c.r or 1; tG = c and c.g or 1; tB = c and c.b or 1 end
     local hdrFS = cfg.hdrFontSize or 11
     local hdrH = GetHeaderH()
-    local iconSz = cfg.hdrIconSize or 14
+    local iconSz = cfg.hdrIconSize or 22
     for _, w in ipairs(_windows) do
         if w.header then
             w.header:SetHeight(hdrH)
