@@ -2547,10 +2547,24 @@ ns.LayoutPagingFrame = LayoutPagingFrame
 
 -- Secure snippet appended to each button's _childupdate-eab-page handler (and
 -- reused as the _childupdate-eab-empower handler): after the action attr changes
--- on a page swap, re-evaluate pressAndHoldAction/typerelease for empowered /
--- hold-release spells. IsPressHoldReleaseSpell and GetActionInfo are available
--- in the restricted environment even though they are gone from _G.
+-- on a page swap, re-evaluate pressAndHoldAction for empowered / hold-release
+-- spells. IsPressHoldReleaseSpell and GetActionInfo are available in the
+-- restricted environment even though they are gone from _G (GetActionInfo as a
+-- scrubbing wrapper, RestrictedEnvironment.lua).
 -- Stored on ns (not a file local) to stay clear of Lua's 200-local chunk cap.
+--
+-- Writes pressAndHoldAction ONLY, exactly like Blizzard's own
+-- UpdatePressAndHoldAction. It must NOT touch typerelease: Blizzard sets that
+-- to "actionrelease" once in the button mixin's OnLoad and never clears it,
+-- and SecureTemplates reads it on EVERY key release when the
+-- ActionButtonUseKeyHeldSpell CVar is on, not just for empowered spells
+-- (releasePressAndHoldAction = (not down) and (pressAndHoldAction or CVar)).
+-- Clearing it on non-empower buttons would leave those users' key-up path with
+-- no action type at all. The old version did clear it, which was harmless only
+-- because this snippet never actually ran outside a page change -- the
+-- re-check trigger was wired to an _onattributechanged handler that
+-- SecureHandlerStateTemplate does not implement. Fixing the trigger made this
+-- snippet live addon-wide, so the clear had to go with it.
 ns._eabEmpowerSnippet = [[
     local slot = self:GetAttribute('action')
     if slot and IsPressHoldReleaseSpell then
@@ -2563,12 +2577,8 @@ ns._eabEmpowerSnippet = [[
         end
         if spellID and IsPressHoldReleaseSpell(spellID) then
             self:SetAttribute('pressAndHoldAction', true)
-            self:SetAttribute('typerelease', 'actionrelease')
         else
             self:SetAttribute('pressAndHoldAction', false)
-            if self:GetAttribute('typerelease') then
-                self:SetAttribute('typerelease', nil)
-            end
         end
     end
 ]]
@@ -10635,10 +10645,10 @@ local function UpdateKeybinds()
             end
         end
     end
-    -- Pass 3: re-evaluate pressAndHoldAction/typerelease on every button.
+    -- Pass 3: re-evaluate pressAndHoldAction on every button.
     -- Routing the key is only HALF of hold-and-release -- a CLICK-routed key
-    -- still behaves as Press-and-Tap unless the button also carries those
-    -- attrs. The only writers are this re-check and _childupdate-eab-page, and
+    -- still behaves as Press-and-Tap unless the button also carries that
+    -- attr. The only writers are this re-check and _childupdate-eab-page, and
     -- that page handler is installed on MainBar and custom-paged bars alone.
     --
     -- Meanwhile Blizzard writes the attribute too, and gets the last word on
