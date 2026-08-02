@@ -42,6 +42,151 @@ do
     end
 end
 
+-------------------------------------------------------------------------------
+--  CPU label profiler (/eabprof cpu): zero cost when off. Same shape as the
+--  RaidFrames profiler: per-label totals plus per-frame label buckets, keeping
+--  the PEAK frame's breakdown, then scaling those labels by the addon's real
+--  peak ms from C_AddOnProfiler so the report reads in addon-ms.
+--
+--  BOTH addon buckets are sampled (module + core EllesmereUI): the engine
+--  bills a handler's call tree to the addon whose execution context created
+--  the frame the engine entered through, and this module's buttons and bar
+--  frames are built during OnEnable dispatch -- so their event/script work
+--  (per-button mixin OnEvent, hover OnEnter/OnLeave) is billed to the CORE
+--  addon row, and C_Timer callbacks to neither. Field-verified: label totals
+--  from debugprofilestop exceed the module's own C_AddOnProfiler average.
+--  The dps() labels are the truthful cost; the two addon rows show where the
+--  profilers (and Numy) actually bill it.
+--  (Exports on ns: this file's main chunk is at the 200-local cap.)
+-------------------------------------------------------------------------------
+do
+    local _profData, _profActive = {}, false
+    local dps = debugprofilestop
+    local _addonName = "EllesmereUIActionBars"
+    local _coreName = "EllesmereUI"
+    local _frameCount = 0
+    local _totalAddonMs = 0
+    local _peakAddonMs = 0
+    local _totalCoreMs = 0
+    local _peakCoreMs = 0
+    local _startTime = 0
+    local _curFrameLabels = {}
+    local _curFrameTotal = 0
+    local _curFrameTime = 0
+    local _peakFrameLabels = {}
+    local _peakFrameTotal = 0
+
+    ns.ProfBegin = function()
+        if not _profActive then return 0 end
+        return dps()
+    end
+    ns.ProfEnd = function(label, t0)
+        if not _profActive then return end
+        local elapsed = dps() - t0
+        local now = GetTime()
+        if now ~= _curFrameTime then
+            if _curFrameTotal > _peakFrameTotal then
+                _peakFrameTotal = _curFrameTotal
+                wipe(_peakFrameLabels)
+                for k, v in pairs(_curFrameLabels) do _peakFrameLabels[k] = v end
+            end
+            wipe(_curFrameLabels)
+            _curFrameTotal = 0
+            _curFrameTime = now
+        end
+        local d = _profData[label]
+        if not d then d = { n = 0, total = 0 }; _profData[label] = d end
+        d.n = d.n + 1
+        d.total = d.total + elapsed
+        _curFrameLabels[label] = (_curFrameLabels[label] or 0) + elapsed
+        _curFrameTotal = _curFrameTotal + elapsed
+    end
+
+    local profFrame = CreateFrame("Frame")
+    profFrame:Hide()
+    profFrame:SetScript("OnUpdate", function()
+        if not _profActive then profFrame:Hide(); return end
+        if not C_AddOnProfiler or not C_AddOnProfiler.GetAddOnMetric then return end
+        local addonMs = C_AddOnProfiler.GetAddOnMetric(
+            _addonName, Enum.AddOnProfilerMetric.LastTime) or 0
+        local coreMs = C_AddOnProfiler.GetAddOnMetric(
+            _coreName, Enum.AddOnProfilerMetric.LastTime) or 0
+        _frameCount = _frameCount + 1
+        _totalAddonMs = _totalAddonMs + addonMs
+        if addonMs > _peakAddonMs then _peakAddonMs = addonMs end
+        _totalCoreMs = _totalCoreMs + coreMs
+        if coreMs > _peakCoreMs then _peakCoreMs = coreMs end
+    end)
+
+    local function ResetProf()
+        wipe(_profData); wipe(_curFrameLabels); wipe(_peakFrameLabels)
+        _frameCount = 0; _totalAddonMs = 0; _peakAddonMs = 0
+        _totalCoreMs = 0; _peakCoreMs = 0
+        _peakFrameTotal = 0; _curFrameTotal = 0; _curFrameTime = 0; _startTime = 0
+    end
+
+    -- Dispatched from the /eabprof slash handler ("cpu" / "cpureset" args).
+    ns._eabCpuProf = function(msg)
+        if msg == "cpureset" then
+            ResetProf()
+            print("|cff00c0ffEAB|r cpu profile data cleared")
+            return
+        end
+        _profActive = not _profActive
+        if _profActive then
+            ResetProf()
+            _startTime = GetTime()
+            profFrame:Show()
+            print("|cff00c0ffEAB|r cpu profile ON -- /eabprof cpu again to stop")
+        else
+            profFrame:Hide()
+            if _curFrameTotal > _peakFrameTotal then
+                _peakFrameTotal = _curFrameTotal
+                wipe(_peakFrameLabels)
+                for k, v in pairs(_curFrameLabels) do _peakFrameLabels[k] = v end
+            end
+            local dur = GetTime() - _startTime
+            local avgAddon = _frameCount > 0
+                and (_totalAddonMs / _frameCount) or 0
+            local avgCore = _frameCount > 0
+                and (_totalCoreMs / _frameCount) or 0
+            print("|cff00c0ffEAB cpu report:|r  "
+                .. _frameCount .. " frames, " .. format("%.1f", dur) .. "s")
+            print(format("  |cff00c0ffModule Peak:|r %.3f ms   |cff00c0ffAvg:|r %.3f ms", _peakAddonMs, avgAddon))
+            print(format("  |cff00c0ffCore Peak:|r   %.3f ms   |cff00c0ffAvg:|r %.3f ms  (buttons/bars bill here)", _peakCoreMs, avgCore))
+            -- Worst single frame by labeled work, with its breakdown: the
+            -- spike view (a mean hides one 12ms broadcast frame completely).
+            print(format("  |cff00c0ffPeak labeled frame:|r %.3f ms", _peakFrameTotal))
+            for k, v in pairs(_peakFrameLabels) do
+                if v >= 0.1 then print(format("    %-24s %9.3f", k, v)) end
+            end
+            local sorted = {}
+            local labeledAvg = 0
+            for label, d in pairs(_profData) do
+                local avg = _frameCount > 0 and (d.total / _frameCount) or 0
+                labeledAvg = labeledAvg + avg
+                sorted[#sorted + 1] = { label = label, avg = avg, n = d.n, total = d.total }
+            end
+            table.sort(sorted, function(a, b) return a.total > b.total end)
+            -- ms/call is the artifact detector: a per-call cost that exceeds
+            -- what the code could plausibly do flags a probe bug, and a real
+            -- one names the expensive callee (harness lesson: report a mean
+            -- AND a per-call figure, never just the mean).
+            print(format("  %-26s %9s %10s %10s %8s", "Label", "avg ms", "total ms", "ms/call", "calls"))
+            for _, e in ipairs(sorted) do
+                print(format("  %-26s %9.3f %10.1f %10.3f %8d",
+                    e.label, e.avg, e.total, e.n > 0 and (e.total / e.n) or 0, e.n))
+            end
+            -- Labeled totals come from debugprofilestop and include work the
+            -- engine bills to the core addon (frames built under OnEnable
+            -- dispatch) or to no addon at all (C_Timer callbacks), so the
+            -- labeled sum can legitimately EXCEED the module average above.
+            print(format("  %-26s %9.3f  (vs module avg %.3f; overshoot = core/C_Timer-billed work)",
+                "labeled sum", labeledAvg, avgAddon))
+        end
+    end
+end
+
 -- "Hide Count at 0" (Icon Effects): hide a zero charge/stack count on
 -- action buttons via the count fontstring's ALPHA, not its text. The text
 -- channel is co-owned: every action button keeps SPELL_UPDATE_CHARGES
@@ -3767,6 +3912,7 @@ do
                or event == "SPELL_UPDATE_CHARGES" then
                 _filled = ns._cdFilled
                 if ns._cdFilledDirty or not _filled then
+                    local _rbT0 = ns.ProfBegin()
                     ns._cdFilledDirty = nil
                     _filled = {}
                     ns._cdFilled = _filled
@@ -3858,6 +4004,7 @@ do
                             end
                         end
                     end
+                    ns.ProfEnd("Disp:rebuild", _rbT0)
                 end
             end
             -- /eabprof: time the walk loop for events that got this far
@@ -3866,6 +4013,7 @@ do
             -- event does not inflate its walk row (it showed up as a phantom
             -- +0.4ms/sec on the STATE row in combat measurement).
             local _profT0 = prof and debugprofilestop()
+            local _cpuT0 = ns.ProfBegin()
             -- TARGETED COOLDOWN PASSES (spell-keyed; replaces the per-slot
             -- walk). The broadcast cooldown events stay the trigger, but the
             -- work is per UNIQUE SPELL with a state memo: fetch + compare
@@ -4313,6 +4461,9 @@ do
                 k = "walks:" .. event
                 prof[k] = (prof[k] or 0) + 1
             end
+            -- _cpuT0 == 0 when the label profiler is off; the guard keeps the
+            -- label concat from allocating on every event while disarmed.
+            if _cpuT0 > 0 then ns.ProfEnd("Disp:" .. event, _cpuT0) end
             -- Settled-detection: after a full (unskipped) heartbeat walk with
             -- nothing live, the walks stop until re-armed by activity.
             if event == "ACTIONBAR_UPDATE_COOLDOWN" and not _cdSkip then
@@ -4758,6 +4909,7 @@ local function LayoutBar(key)
     local frame = barFrames[key]
     local buttons = barButtons[key]
     if not frame or not buttons then return end
+    local _lbT0 = ns.ProfBegin()
 
     local s = EAB.db.profile.bars[key]
     local numIcons = s.overrideNumIcons or s.numIcons or info.count
@@ -5227,6 +5379,7 @@ local function LayoutBar(key)
     -- Cheap when nothing changed: the per-frame stamp makes the font work a
     -- no-op unless the effective size actually differs.
     EAB:ApplyCooldownFontsForBar(key)
+    ns.ProfEnd("LayoutBar", _lbT0)
 end
 
 -------------------------------------------------------------------------------
@@ -7062,6 +7215,12 @@ function EAB:ApplyRangeColoring()
         _range.eventFrame:RegisterEvent("ACTION_USABLE_CHANGED")
         _range.eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
         _range.eventFrame:SetScript("OnEvent", function(_, event, slot, inRange, checksRange)
+            -- /eabprof: range traffic never reaches the central dispatcher's
+            -- counters. The early-return paths (untracked slot, no flip) are
+            -- two table reads and are deliberately left untimed.
+            local _rprof = ns._evProf
+            if _rprof then _rprof["rg:" .. event] = (_rprof["rg:" .. event] or 0) + 1 end
+            local _rT0 = ns.ProfBegin()
             if event == "ACTION_RANGE_CHECK_UPDATE" then
                 if not _range.slots[slot] then return end
                 local wasOut = _range.outOfRange[slot]
@@ -7193,6 +7352,7 @@ function EAB:ApplyRangeColoring()
                     end
                 end)
             end
+            ns.ProfEnd("Range:ev", _rT0)
         end)
     end
 
@@ -7281,6 +7441,13 @@ end
 ns._broadcastingMouseover = false
 
 function EAB_VTABLE.Hover.FadeIn(barKey, state)
+    -- /eabprof: hover edges are invisible to the dispatcher counters, so
+    -- count and time them here (one nil-check while disarmed). The count is
+    -- unconditional (nested broadcast calls show the amplification factor);
+    -- the timer is outer-call-only so broadcast recursion isn't double-billed.
+    local _hprof = ns._evProf
+    if _hprof then _hprof["<FadeIn>"] = (_hprof["<FadeIn>"] or 0) + 1 end
+    local _hT0 = not ns._broadcastingMouseover and ns.ProfBegin() or 0
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
         local targetAlpha = s._savedBarAlpha or 1
@@ -7299,6 +7466,7 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
             ns._broadcastingMouseover = false
         end
     end
+    if _hT0 > 0 then ns.ProfEnd("Hover:fadeIn", _hT0) end
 end
 
 function EAB_VTABLE.Hover.FadeOut(barKey, state)
@@ -7327,18 +7495,28 @@ end
 function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
     opts = opts or {}
 
+    -- /eabprof: <FadeOutSched> counts timers SCHEDULED (every OnLeave lands
+    -- here -- the bar frame and each of its buttons all hook OnLeave, so one
+    -- mouse sweep across a 12-button bar schedules 12+); <FadeOutTimer>
+    -- counts callbacks that actually FIRED 0.1s later.
+    local _sprof = ns._evProf
+    if _sprof then _sprof["<FadeOutSched>"] = (_sprof["<FadeOutSched>"] or 0) + 1 end
     C_Timer_After(0.1, function()
+        local _fprof = ns._evProf
+        if _fprof then _fprof["<FadeOutTimer>"] = (_fprof["<FadeOutTimer>"] or 0) + 1 end
+        local _fT0 = ns.ProfBegin()
         if opts.isStillHovered and opts.isStillHovered(state) then
             if opts.markHoveredWhileActive then
                 state.isHovered = true
             end
+            ns.ProfEnd("Hover:fadeOutTimer", _fT0)
             return
         end
-        if state.isHovered then return end
-        if _quickKeybindState.open then return end
-        if opts.blockFadeOut and opts.blockFadeOut(state) then return end
+        if state.isHovered then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
+        if _quickKeybindState.open then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
+        if opts.blockFadeOut and opts.blockFadeOut(state) then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
         -- When showing all bars together, keep visible while any bar is hovered
-        if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then return end
+        if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
         EAB_VTABLE.Hover.FadeOut(barKey, state)
         -- Broadcast fade-out to all other mouseover bars
         if EAB.db.profile.mouseoverShowAll then
@@ -7348,6 +7526,7 @@ function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
                 end
             end
         end
+        ns.ProfEnd("Hover:fadeOutTimer", _fT0)
     end)
 end
 
@@ -9122,6 +9301,7 @@ function EAB:HookProcGlow()
         local prof = ns._evProf
         if prof then prof["<GlowRescan>"] = (prof["<GlowRescan>"] or 0) + 1 end
         local _t0 = prof and debugprofilestop()
+        local _gcT0 = ns.ProfBegin()
         -- Clear glows that no longer match, add new ones
         for btn in pairs(_procState.active) do
             local id = GetButtonSpellID(btn)
@@ -9141,6 +9321,7 @@ function EAB:HookProcGlow()
             end
         end
         if _t0 then prof["ms:<GlowRescan>"] = (prof["ms:<GlowRescan>"] or 0) + (debugprofilestop() - _t0) end
+        ns.ProfEnd("Glow:rescan", _gcT0)
     end
     glowFrame:SetScript("OnEvent", function(_, event, arg1)
         if event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "UPDATE_BONUS_ACTIONBAR" or event == "SPELL_UPDATE_ICON" then
@@ -9177,6 +9358,7 @@ function EAB:HookProcGlow()
             end
         else
             -- SHOW: scan all buttons for the matching spellID.
+            local _gsT0 = ns.ProfBegin()
             local blizz2 = IsBlizzStyle()
             for _, info in ipairs(BAR_CONFIG) do
                 local buttons = barButtons[info.key]
@@ -9191,6 +9373,7 @@ function EAB:HookProcGlow()
                     end
                 end
             end
+            ns.ProfEnd("Glow:show", _gsT0)
         end
     end)
 
@@ -11156,7 +11339,14 @@ function EAB:OnInitialize()
     end
 
     SLASH_EABPROF1 = "/eabprof"
-    SlashCmdList["EABPROF"] = function()
+    SlashCmdList["EABPROF"] = function(msg)
+        -- "/eabprof cpu" toggles the label profiler (top of file);
+        -- "/eabprof cpureset" clears its data. Bare "/eabprof" keeps the
+        -- original 10s event-rate capture.
+        if msg == "cpu" or msg == "cpureset" then
+            ns._eabCpuProf(msg)
+            return
+        end
         if ns._evProf then
             print("|cff00c0ffEAB|r event capture already running")
             return
@@ -12284,6 +12474,9 @@ function EAB:FinishSetup()
     -- an aura on the pet changes, which can also affect ability usability.
     local _petUpdateQueued = false
     local function UpdatePetBar(_, event)
+        -- /eabprof: pet traffic never reaches the central dispatcher's counters.
+        local _pprof = ns._evProf
+        if _pprof then _pprof["pet:" .. (event or "?")] = (_pprof["pet:" .. (event or "?")] or 0) + 1 end
         -- UNIT_AURA fires very frequently; throttle to one update per frame
         if event == "UNIT_AURA" or event == "PET_BAR_UPDATE_USABLE" then
             if _petUpdateQueued then return end
@@ -12291,6 +12484,7 @@ function EAB:FinishSetup()
         end
         C_Timer_After(0, function()
             _petUpdateQueued = false
+            local _pT0 = ns.ProfBegin()
             if event == "PET_BAR_UPDATE_COOLDOWN" then
                 -- Cooldown-only path: safe during combat, no taint risk.
                 -- Update each button's cooldown frame directly.
@@ -12301,6 +12495,7 @@ function EAB:FinishSetup()
                         CooldownFrame_Set(btn.cooldown, start, duration, enable)
                     end
                 end
+                ns.ProfEnd("Pet:update", _pT0)
                 return
             end
             if InCombatLockdown() then
@@ -12359,6 +12554,7 @@ function EAB:FinishSetup()
                         end
                     end
                 end
+                ns.ProfEnd("Pet:update", _pT0)
                 return
             end
             -- Full update path: only safe out of combat.
@@ -12379,6 +12575,7 @@ function EAB:FinishSetup()
                         end
                     end
                 end
+                ns.ProfEnd("Pet:update", _pT0)
                 return
             end
             if PetActionBar and PetActionBar.Update then
@@ -12394,6 +12591,7 @@ function EAB:FinishSetup()
             if petInfo and petFrame and petS and not petS.alwaysHidden then
                 RegisterAttributeDriver(petFrame, "state-visibility", BuildVisibilityString(petInfo, petS))
             end
+            ns.ProfEnd("Pet:update", _pT0)
         end)
     end
     local _petEventFrame = ns.TakeShell()
@@ -12423,6 +12621,11 @@ function EAB:FinishSetup()
     -- Visual-only (CooldownFrame_Set touches no protected state), so it is safe
     -- during combat, same as the pet PET_BAR_UPDATE_COOLDOWN path above.
     local function UpdateStanceCooldowns()
+        -- /eabprof: UPDATE_SHAPESHIFT_COOLDOWN fires roughly every GCD for
+        -- form classes and never reaches the central dispatcher's counters.
+        local _sprof = ns._evProf
+        if _sprof then _sprof["<StanceCd>"] = (_sprof["<StanceCd>"] or 0) + 1 end
+        local _stT0 = ns.ProfBegin()
         local numForms = GetNumShapeshiftForms()
         for i = 1, numForms do
             local btn = _G["StanceButton" .. i]
@@ -12431,6 +12634,7 @@ function EAB:FinishSetup()
                 CooldownFrame_Set(btn.cooldown, start, duration, enable)
             end
         end
+        ns.ProfEnd("Stance:cd", _stT0)
     end
     local _stanceEventFrame = ns.TakeShell()
     _stanceEventFrame:RegisterEvent("UPDATE_SHAPESHIFT_COOLDOWN")
