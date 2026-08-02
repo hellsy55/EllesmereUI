@@ -803,6 +803,9 @@ local _extraFadeQueue = {}
 local _extraFadeFrame = CreateFrame("Frame")
 
 local function _ExtraFadeOnUpdate(_, elapsed)
+    -- /eabprof: per-frame cost of the manual fader (all lockstep hover
+    -- fades ride this since the show-all hitch fix).
+    local _ftT0 = ns.ProfBegin()
     local anyActive = false
     for frame, info in pairs(_extraFadeQueue) do
         info.elapsed = info.elapsed + elapsed
@@ -820,6 +823,7 @@ local function _ExtraFadeOnUpdate(_, elapsed)
     if not anyActive then
         _extraFadeFrame:SetScript("OnUpdate", nil)
     end
+    if _ftT0 > 0 then ns.ProfEnd("Fade:tick", _ftT0) end
 end
 
 -- Drag visibility state (file-scope so ApplyAll can reset strata on spec change)
@@ -845,16 +849,20 @@ local function ShouldQuickKeybindSurfaceBar(s)
     return not s.alwaysHidden and vis ~= "never"
 end
 
-local function FadeTo(frame, toAlpha, duration)
+local function FadeTo(frame, toAlpha, duration, manual)
     duration = duration or 0.1
     if abs(frame:GetAlpha() - toAlpha) < 0.01 then
         frame:SetAlpha(toAlpha)
         return
     end
 
-    -- Use OnUpdate path for Blizzard-owned frames to avoid taint from
-    -- CreateAnimationGroup on frames we don't own.
-    if not _ownedFrames[frame] then
+    -- OnUpdate path for Blizzard-owned frames (CreateAnimationGroup on
+    -- frames we don't own spreads taint) AND for callers passing `manual`:
+    -- per-bar probes measured AnimationGroup start/stop machinery at
+    -- 0.7-4ms per bar on secure bar frames, while this path's per-frame
+    -- SetAlpha writes are microseconds -- so the hover fades ride it to
+    -- start every bar in the same frame without the hitch.
+    if manual or not _ownedFrames[frame] then
         local existing = _extraFadeQueue[frame]
         if existing and existing.toAlpha == toAlpha then return end
         _extraFadeQueue[frame] = {
@@ -7454,11 +7462,19 @@ end
 function EAB_VTABLE.Hover.FadeInOne(barKey, state)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "in" then
+        -- Per-bar probe: a show-all edge measures ~13ms in ONE frame across
+        -- the broadcast (field capture); this names which bars carry it.
+        -- Only real fade starts are timed -- memo-hit calls skip the branch.
+        local _fbT0 = ns.ProfBegin()
         local targetAlpha = s._savedBarAlpha or 1
         state.fadeDir = "in"
         StopFade(state.frame)
-        FadeTo(state.frame, targetAlpha, s.mouseoverSpeed or 0.15)
+        -- `manual`: hover fades ride the shared per-frame fader so a
+        -- show-all edge starts every bar in the same frame (lockstep, no
+        -- ripple) without the 0.7-4ms-per-bar AnimationGroup start cost.
+        FadeTo(state.frame, targetAlpha, s.mouseoverSpeed or 0.15, true)
         if barKey == "MainBar" then SyncPagingAlpha(targetAlpha) end
+        if _fbT0 > 0 then ns.ProfEnd("Fade:" .. barKey, _fbT0) end
     end
 end
 
@@ -7469,11 +7485,13 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
     if _hprof then _hprof["<FadeIn>"] = (_hprof["<FadeIn>"] or 0) + 1 end
     local _hT0 = ns.ProfBegin()
     EAB_VTABLE.Hover.FadeInOne(barKey, state)
-    -- "Show All on Mouseover": bring the other bars along. Iterative (the
-    -- old recursive form needed a module-global reentrancy latch that a
-    -- mid-broadcast error would have left stuck, silently killing the
-    -- feature); FadeInOne's own mouseoverEnabled + fadeDir guards make the
-    -- per-bar cost of an already-visible bar two table reads.
+    -- "Show All on Mouseover": bring the other bars along, all starting THIS
+    -- frame in lockstep. Cheap because FadeInOne routes hover fades through
+    -- the shared manual fader -- starting one bar's AnimationGroup cost
+    -- 0.7-4ms (measured), which made this loop a ~13ms hitch per edge; a
+    -- manual-fader start is a table write. (The old recursive broadcast also
+    -- needed a module-global reentrancy latch that a mid-broadcast error
+    -- would have left stuck; iterative needs none.)
     if EAB.db.profile.mouseoverShowAll then
         local FadeInOne = EAB_VTABLE.Hover.FadeInOne
         for otherKey, otherState in pairs(hoverStates) do
@@ -7489,11 +7507,14 @@ function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
-
+        -- Per-bar probe, same rationale as FadeInOne's.
+        local _fbT0 = ns.ProfBegin()
         state.fadeDir = "out"
         StopFade(state.frame)
-        FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15)
+        -- `manual`: same lockstep rationale as FadeInOne.
+        FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15, true)
         if barKey == "MainBar" then SyncPagingAlpha(0) end
+        if _fbT0 > 0 then ns.ProfEnd("FadeO:" .. barKey, _fbT0) end
     end
 end
 
@@ -7554,7 +7575,8 @@ function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
             -- When showing all bars together, keep visible while any bar is hovered
             if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then ns.ProfEnd("Hover:fadeOutTimer", _fT0) return end
             EAB_VTABLE.Hover.FadeOut(barKey, state)
-            -- Broadcast fade-out to all other mouseover bars
+            -- Broadcast fade-out to all other mouseover bars, lockstep
+            -- (cheap via the manual fader, same as the fade-in broadcast).
             if EAB.db.profile.mouseoverShowAll then
                 for otherKey, otherState in pairs(hoverStates) do
                     if otherKey ~= barKey and not otherState.isHovered then
