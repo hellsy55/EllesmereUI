@@ -9815,7 +9815,35 @@ local _eabBindOwner = CreateFrame("Frame", "EAB_BindOwner", UIParent)
 -- to run when a routing decision, a bound key, or a button's empower state
 -- actually changes.
 local function UpdateKeybinds()
-    if InCombatLockdown() then return false end
+    -- Combat bail, self-re-arming. Everything below is protected
+    -- (ClearOverrideBindings / SetOverrideBindingClick), so it genuinely cannot
+    -- run here -- but returning false with nothing to retry dropped the whole
+    -- build on the floor. The load-time apply is the caller that matters: it has
+    -- no deferral of its own and assumes combat state is not yet restored, so
+    -- logging in or reloading during combat left EVERY override binding
+    -- unapplied. Empower slots then sat on their native binding, where
+    -- pressAndHoldAction never engages, and the spell behaved exactly like
+    -- Press-and-Tap with the CVar untouched -- for the rest of the session,
+    -- because nothing re-ran this. A reload was the only cure, which is the
+    -- reported symptom.
+    -- Re-arming here rather than at the call site covers every caller at once;
+    -- the sibling paths that already defer simply arm this a second time, which
+    -- is idempotent (RegisterEvent twice is one registration).
+    if InCombatLockdown() then
+        local df = _bindState.deferFrame
+        if not df then
+            df = ns.TakeShell()
+            df:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                print("|cff0cd29f[empower]|r left combat, applying deferred keybind build")  -- PROBE
+                UpdateKeybinds()
+            end)
+            _bindState.deferFrame = df
+        end
+        df:RegisterEvent("PLAYER_REGEN_ENABLED")
+        print("|cff0cd29f[empower]|r UpdateKeybinds blocked by combat, re-armed (was dropped)")  -- PROBE
+        return false
+    end
     -- While the house editor is active our override bindings are cleared so
     -- Blizzard's housing hotkeys work (see Housing Editor Keybind Clearing).
     -- The editor registers its OWN override bindings after ours are cleared,
