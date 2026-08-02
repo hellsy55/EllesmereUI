@@ -912,6 +912,11 @@ local defaults = {
             castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
             castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
             castbarClassColored = false,
+            castbarRaidMarkerEnabled = false,
+            castbarRaidMarkerSide = "right",
+            castbarRaidMarkerSize = 16,
+            castbarRaidMarkerX = 0,
+            castbarRaidMarkerY = 0,
             healthDisplay = "perhp",
             leftTextContent = "name",
             rightTextContent = "perhp",
@@ -7846,6 +7851,52 @@ local function StyleFocusFrame(frame, unit)
         end
     end
 
+    -- Secondary raid target marker icon, anchored to the Focus cast bar
+    -- itself (left or right of it) instead of the frame. oUF only supports
+    -- one RaidTargetIndicator element per frame (the one above), so this
+    -- second icon is driven manually off RAID_TARGET_UPDATE / focus-change
+    -- events rather than reusing the oUF element.
+    if frame.Castbar then
+        local cb = frame.Castbar
+        local cbParent = cb:GetParent()
+        local cbmHolder = CreateFrame("Frame", nil, cbParent)
+        cbmHolder:SetFrameLevel(cbParent:GetFrameLevel() + 20)
+        local cbmIcon = cbmHolder:CreateTexture(nil, "OVERLAY", nil, 7)
+        cbmIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+        local function UpdateCastbarRaidMarker()
+            local s = GetSettingsForUnit("focus")
+            local size = s.castbarRaidMarkerSize or 16
+            local side = s.castbarRaidMarkerSide or "right"
+            local xo    = s.castbarRaidMarkerX or 0
+            local yo    = s.castbarRaidMarkerY or 0
+            cbmIcon:SetSize(size, size)
+            cbmIcon:ClearAllPoints()
+            if side == "left" then
+                cbmIcon:SetPoint("RIGHT", cbParent, "LEFT", -4 + xo, yo)
+            else
+                cbmIcon:SetPoint("LEFT", cbParent, "RIGHT", 4 + xo, yo)
+            end
+            if not s.castbarRaidMarkerEnabled then
+                cbmIcon:Hide()
+                return
+            end
+            local index = GetRaidTargetIndex("focus")
+            if index then
+                SetRaidTargetIconTexture(cbmIcon, index)
+                cbmIcon:Show()
+            else
+                cbmIcon:Hide()
+            end
+        end
+        cbmHolder:RegisterEvent("RAID_TARGET_UPDATE")
+        cbmHolder:RegisterEvent("PLAYER_FOCUS_CHANGED")
+        cbmHolder:SetScript("OnEvent", UpdateCastbarRaidMarker)
+        frame._castbarRaidMarkerIcon = cbmIcon
+        frame._castbarRaidMarkerHolder = cbmHolder
+        frame._castbarRaidMarkerUpdate = UpdateCastbarRaidMarker
+        UpdateCastbarRaidMarker()
+    end
+
     -- Text overlay frame -- sits above the StatusBar and unified border.
     -- Parented to frame (not Health) so text is not clipped by the health bar.
     local textOverlay = CreateFrame("Frame", nil, frame)
@@ -12187,6 +12238,11 @@ local function ReloadFrames()
                 icon:Hide()
             end
         end
+    end
+
+    -- Live-update the Focus cast bar's secondary raid marker
+    if frames.focus and frames.focus._castbarRaidMarkerUpdate then
+        frames.focus._castbarRaidMarkerUpdate()
     end
 
     -- Portrait settings (3D zoom, class style) used to live-apply through the

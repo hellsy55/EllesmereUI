@@ -8248,6 +8248,43 @@ initFrame:SetScript("OnEvent", function(self)
                     get = function() return math.floor(((SVal("castbarOorAlpha", 1)) * 100) + 0.5) end,
                     set = function(v) UNIT_DB_MAP[selectedUnit]().castbarOorAlpha = v / 100 end }
             end
+            -- Focus only: a second raid target marker icon anchored to the
+            -- cast bar itself (left or right of it), independent of the
+            -- frame-level Raid Marker option in Extras.
+            if selectedUnit == "focus" then
+                cogRows[#cogRows + 1] = { type = "toggle", label = "Show Cast Bar Raid Marker",
+                    tooltip = "Shows the focus target's raid marker icon next to the cast bar itself, instead of (or in addition to) the frame-level marker in Extras.",
+                    get = function() return SValSupported("castbarRaidMarkerEnabled", false) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerEnabled", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "dropdown", label = "Side",
+                    values = { ["left"] = "Left", ["right"] = "Right" }, order = { "left", "right" },
+                    get = function() return SValSupported("castbarRaidMarkerSide", "right") end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerSide", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "slider", label = "Marker Size", min = 8, max = 40, step = 1,
+                    get = function() return SValSupported("castbarRaidMarkerSize", 16) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerSize", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
+                    get = function() return SValSupported("castbarRaidMarkerX", 0) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerX", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "slider", label = "Y Offset", min = -50, max = 50, step = 1,
+                    get = function() return SValSupported("castbarRaidMarkerY", 0) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerY", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+            end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Cast Bar",
                 rows = cogRows,
