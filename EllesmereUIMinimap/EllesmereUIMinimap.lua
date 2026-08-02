@@ -3798,6 +3798,29 @@ end
 -- It is a plain (non-secure) Blizzard button, so SetParent/SetPoint are safe.
 local _omniumFolioHooked = false
 
+-- Global names of third-party buttons that REPLACE the landing page button.
+-- Such an addon hides Blizzard's button (typically unregistering its events
+-- first) and draws its own in the same corner.
+local FOLIO_REPLACEMENT_BUTTONS = {
+    "PlumberLandingPageMinimapButton",
+}
+
+-- True while a replacement button is on screen. Our RefreshButton nudge below
+-- would otherwise undo the replacement addon's hide -- RefreshButton re-Shows
+-- Blizzard's button, and the other addon never hides it again because it still
+-- believes it did -- so BOTH buttons end up visible until the user toggles the
+-- other addon's setting. When a replacement is visibly in charge, we keep our
+-- hands off Blizzard's button entirely; the replacement addon Shows it back
+-- itself (before hiding its own) if the user turns the replacement off, and
+-- our Show hook then re-applies our position/scale as usual.
+local function IsFolioReplacedByAddOn()
+    for _, name in ipairs(FOLIO_REPLACEMENT_BUTTONS) do
+        local b = _G[name]
+        if b and b:IsShown() then return true end
+    end
+    return false
+end
+
 -- Folio visibility mode with legacy fallback: pre-dropdown data carries the
 -- showOmniumFolio toggle (default ON; only false is ever stored).
 local function GetOmniumFolioMode(mp)
@@ -3934,7 +3957,7 @@ function EBS._HVRevealMapHover()
     if not mp.hideZoomButtons then
         raiseZoom()
     end
-    if GetOmniumFolioMode(mp) == "hover" then
+    if GetOmniumFolioMode(mp) == "hover" and not IsFolioReplacedByAddOn() then
         local b = _G.ExpansionLandingPageMinimapButton
         if b then
             PositionOmniumFolio(b)
@@ -3987,6 +4010,7 @@ local function ApplyOmniumFolio()
             -- Hide()/Show()s the button, and a raw IsMouseOver here could
             -- veto that Show at the exact edge for the same rounding reason.
             if mode == "never"
+               or IsFolioReplacedByAddOn()
                or (mode == "hover" and not (Minimap and EBS._HoverStillOver(Minimap))) then
                 self:Hide()
             else
@@ -4008,6 +4032,9 @@ local function ApplyOmniumFolio()
         btn:Hide()
         return
     end
+    -- A replacement landing button is on screen: leave Blizzard's alone rather
+    -- than resurrecting it next to the replacement (see IsFolioReplacedByAddOn).
+    if IsFolioReplacedByAddOn() then return end
     if mode == "hover" and not Minimap:IsMouseOver() then
         btn:Hide()
         return
