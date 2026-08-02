@@ -2658,7 +2658,11 @@ local function DecorateFrame(frame, barData)
                 --      never a GCD -- alpha-0'ing it blanks the recharge for the entire
                 --      GCD whenever another ability is pressed. Charge recharges are
                 --      shown as their own swipe, so the GCD on top is irrelevant.
-                if bd2 and bd2.suppressGCD and sid2 and not fd._hideActiveOverriding
+                -- The Hide-Active exclusion applies to the whole-swipe suppression
+                -- below, NOT to the charge tail: _hideActiveOverriding follows the
+                -- active read, which flaps for charge spells, and a fix that switches
+                -- itself off whenever the icon happens to read active is no fix.
+                if bd2 and bd2.suppressGCD and sid2
                    and C_Spell and C_Spell.GetSpellCooldown then
                     -- Charge-recharge guard. A charge spell that is mid-recharge --
                     -- INCLUDING at 0 charges -- is showing its recharge, never a GCD,
@@ -2689,8 +2693,10 @@ local function DecorateFrame(frame, barData)
                     local cdInfo = C_Spell.GetSpellCooldown(effID2) or C_Spell.GetSpellCooldown(sid2)
                     if cdInfo and cdInfo.isOnGCD then
                         if not chargeRecharging then
-                            cd:SetSwipeColor(0, 0, 0, 0)
-                            _gcdSuppressed = true
+                            if not fd._hideActiveOverriding then
+                                cd:SetSwipeColor(0, 0, 0, 0)
+                                _gcdSuppressed = true
+                            end
                         elseif C_Spell.GetSpellChargeDuration then
                             -- Recharge in flight, but the LAST GCD-length slice of it
                             -- is drawn by the GCD, not the recharge. Hand the recharge
