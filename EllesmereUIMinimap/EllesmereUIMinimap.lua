@@ -3829,8 +3829,11 @@ local _omniumFolioHooked = false
 -- our Show hook then re-applies our position/scale as usual.
 local function IsFolioReplacedByAddOn()
     for _, name in ipairs(FOLIO_REPLACEMENT_BUTTONS) do
+        -- IsShown presence check: if anything else ever squats one of these
+        -- global names with a non-frame value, treat it as no replacement
+        -- rather than erroring on the method call.
         local b = _G[name]
-        if b and b:IsShown() then return true end
+        if b and b.IsShown and b:IsShown() then return true end
     end
     return false
 end

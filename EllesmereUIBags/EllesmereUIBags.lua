@@ -4908,7 +4908,7 @@ function EUI_Bags:RefreshInventory()
     C_NewItems.ClearAll()
 
     -- 1. Gather items from all bags (0-4 + reagent bag 5)
-    local _t0Scan = ProfBegin("BagScan")
+    local _t0Scan = 0 -- PROF: ProfBegin("BagScan")
     ReleaseAllSlotTables()
     local tempItems = {}
     local emptySlots = {}
@@ -4986,7 +4986,7 @@ function EUI_Bags:RefreshInventory()
             end
         end
     end
-    ProfEnd("BagScan", _t0Scan)
+    if _t0Scan > 0 then ProfEnd("BagScan", _t0Scan) end
 
     -- 1b. Detect manual item swaps and update saved visual order
     local isAllItems = selectedCategoryIndex == 0 and not selectedGroupName
@@ -5004,9 +5004,9 @@ function EUI_Bags:RefreshInventory()
     end
 
     -- 2. Classify all items and get counts
-    local _t0Classify = ProfBegin("ClassifyAll")
+    local _t0Classify = 0 -- PROF: ProfBegin("ClassifyAll")
     local categoryCounts, totalCount = EUI_CategoryManager:ClassifyAll(tempItems)
-    ProfEnd("ClassifyAll", _t0Classify)
+    if _t0Classify > 0 then ProfEnd("ClassifyAll", _t0Classify) end
 
     -- 2a. Snapshot slot->category mapping for partial refresh
     wipe(_slotCategories)
@@ -5048,16 +5048,16 @@ function EUI_Bags:RefreshInventory()
     end
 
     -- 3. Update sidebar
-    local _t0Sidebar = ProfBegin("BuildSidebarButtons")
+    local _t0Sidebar = 0 -- PROF: ProfBegin("BuildSidebarButtons")
     BuildSidebarButtons(categoryCounts, totalCount)
-    ProfEnd("BuildSidebarButtons", _t0Sidebar)
+    if _t0Sidebar > 0 then ProfEnd("BuildSidebarButtons", _t0Sidebar) end
 
     -- Cache counts for partial refresh
     _lastCatCounts = categoryCounts
     _lastTotalCount = totalCount
 
     -- 4. Filter items by selected category/group + search
-    local _t0Filter = ProfBegin("FilterAndSort")
+    local _t0Filter = 0 -- PROF: ProfBegin("FilterAndSort")
     local isRecentView = recentCatIdx and selectedCategoryIndex == recentCatIdx
     local isPinnedView = pinnedCatIdx and selectedCategoryIndex == pinnedCatIdx
     local filterSet = nil  -- nil = show all
@@ -5117,10 +5117,10 @@ function EUI_Bags:RefreshInventory()
         wipe(_pendingResortGroups)
     end
 
-    ProfEnd("FilterAndSort", _t0Filter)
+    if _t0Filter > 0 then ProfEnd("FilterAndSort", _t0Filter) end
 
     -- 5. Render grid into scroll child
-    local _t0GridSetup = ProfBegin("GridSetup")
+    local _t0GridSetup = 0 -- PROF: ProfBegin("GridSetup")
     for _, btn in pairs(itemSlots) do
         if btn.ProfessionQualityOverlay then btn.ProfessionQualityOverlay:SetAlpha(0) end
         if btn.IconOverlay then btn.IconOverlay:SetAlpha(0); btn.IconOverlay:Hide() end
@@ -5260,7 +5260,7 @@ function EUI_Bags:RefreshInventory()
         end
     end
 
-    ProfEnd("GridSetup", _t0GridSetup)
+    if _t0GridSetup > 0 then ProfEnd("GridSetup", _t0GridSetup) end
 
     if selectedCategoryIndex == -1 or selectedCategoryIndex == -2 then
         -- "OneBag"/"MultiBag" view: Pinned Items (display-only) + bag section(s)
@@ -5476,7 +5476,7 @@ function EUI_Bags:RefreshInventory()
             hdr:Show()
             curY = curY - 22
             for i, data in ipairs(slotList) do
-                local _t0RB = ProfBegin("RenderButton")
+                local _t0RB = 0 -- PROF: ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
                 if btn then  -- nil during combat (avoids minting tainted secure buttons)
@@ -5485,7 +5485,7 @@ function EUI_Bags:RefreshInventory()
                     local row = math.floor((i - 1) / columns)
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, true)
                 end
-                ProfEnd("RenderButton", _t0RB)
+                if _t0RB > 0 then ProfEnd("RenderButton", _t0RB) end
             end
             local rows = math.ceil(#slotList / columns)
             curY = curY - (rows * (SLOT_SIZE + SPACING)) - 6
@@ -5554,7 +5554,7 @@ function EUI_Bags:RefreshInventory()
             curY = curY - 22
 
             for i, data in ipairs(reagentSlotList) do
-                local _t0RB = ProfBegin("RenderButton")
+                local _t0RB = 0 -- PROF: ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
                 if btn then  -- nil during combat (avoids minting tainted secure buttons)
@@ -5563,7 +5563,7 @@ function EUI_Bags:RefreshInventory()
                     local row = math.floor((i - 1) / columns)
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, true)
                 end
-                ProfEnd("RenderButton", _t0RB)
+                if _t0RB > 0 then ProfEnd("RenderButton", _t0RB) end
             end
             local reagRows = math.ceil(#reagentSlotList / columns)
             curY = curY - (reagRows * (SLOT_SIZE + SPACING))
@@ -5598,7 +5598,7 @@ function EUI_Bags:RefreshInventory()
         local function RenderItemBlock(blockItems)
             local n = #blockItems
             for j, data in ipairs(blockItems) do
-                local _t0RB = ProfBegin("RenderButton")
+                local _t0RB = 0 -- PROF: ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
                 if btn then  -- nil during combat (avoids minting tainted secure buttons)
@@ -5607,7 +5607,7 @@ function EUI_Bags:RefreshInventory()
                     local row = math.floor((j - 1) / columns)
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
                 end
-                ProfEnd("RenderButton", _t0RB)
+                if _t0RB > 0 then ProfEnd("RenderButton", _t0RB) end
             end
             local remainder = n % columns
             local padCount
@@ -5755,7 +5755,7 @@ function EUI_Bags:RefreshInventory()
             end
 
             for j, data in ipairs(sectionItems) do
-                local _t0RB = ProfBegin("RenderButton")
+                local _t0RB = 0 -- PROF: ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
                 if btn then
@@ -5764,7 +5764,7 @@ function EUI_Bags:RefreshInventory()
                     local row = math.floor((j - 1) / columns)
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
                 end
-                ProfEnd("RenderButton", _t0RB)
+                if _t0RB > 0 then ProfEnd("RenderButton", _t0RB) end
             end
 
             -- Pin "+" button: a regular empty slot with a "+" overlay on top
@@ -5932,7 +5932,7 @@ function EUI_Bags:RefreshInventory()
                 curY = curY - 22
 
                 for j, data in ipairs(memberItems) do
-                    local _t0RB = ProfBegin("RenderButton")
+                    local _t0RB = 0 -- PROF: ProfBegin("RenderButton")
                     slotIdx = slotIdx + 1
                     local btn = GetOrCreateSlot(slotIdx)
                     if btn then
@@ -5941,7 +5941,7 @@ function EUI_Bags:RefreshInventory()
                         local row = math.floor((j - 1) / columns)
                         RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
                     end
-                    ProfEnd("RenderButton", _t0RB)
+                    if _t0RB > 0 then ProfEnd("RenderButton", _t0RB) end
                 end
 
                 -- Assign "+" per member sub-section in group view
@@ -6112,7 +6112,7 @@ function EUI_Bags:RefreshInventory()
 
             local itemCount = #displayItems
             for i, data in ipairs(displayItems) do
-                local _t0RB = ProfBegin("RenderButton")
+                local _t0RB = 0 -- PROF: ProfBegin("RenderButton")
                 slotIdx = slotIdx + 1
                 local btn = GetOrCreateSlot(slotIdx)
                 if btn then
@@ -6121,7 +6121,7 @@ function EUI_Bags:RefreshInventory()
                     local row = math.floor((i - 1) / columns)
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
                 end
-                ProfEnd("RenderButton", _t0RB)
+                if _t0RB > 0 then ProfEnd("RenderButton", _t0RB) end
             end
 
             local remainder = itemCount % columns

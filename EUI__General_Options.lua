@@ -520,6 +520,56 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.7.4",
+        heroes = {
+            {
+                -- Pure performance work: nothing to open, renders static.
+                module = "Action Bars",
+                title  = "Performance Upgrade",
+                desc   = "Hovering with Show All on Mouseover has been significantly optimized, and bars hidden by visibility conditions now cost zero CPU while hidden. Combat event handling across range, glows, stance, and pet bars was rebuilt to do the minimum work possible.",
+            },
+        },
+        features = {
+            {
+                -- The toggle lives in the Cooldown Text cog on this row.
+                module = "Action Bars",
+                title  = "Fit Cooldown Text to Button",
+                desc   = "Optional per-bar cap so countdown text stays inside small buttons",
+                nav    = { module = "EllesmereUIActionBars", page = "Bar Display", section = "TEXT", highlight = "Cooldown Text Size" },
+            },
+            {
+                -- The toggle lives in the currency block's own settings
+                -- popup, so the nav is page-only.
+                module = "Data Bars",
+                title  = "Currency Description Toggle",
+                desc   = "Hide the long description text in the currency block's tooltip",
+                nav    = { module = "EllesmereUIDataBars", page = "DataBars" },
+            },
+            {
+                -- The toggle lives in the Background row's cog; the row
+                -- label is dynamic ("Background (Class Resource)" while
+                -- split), so the highlight matches the default state only.
+                module = "Resource Bars",
+                title  = "Unique Backgrounds Per Bar",
+                desc   = "Give Health and Power bars separate background colors and opacity",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "BAR DISPLAY", highlight = "Background" },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Cancelling a cast now clears the cooldown swipe immediately instead of letting the full sweep play out." },
+            { module = "Action Bars", text = "Out-of-range coloring now tracks correctly across page flips and slots shared between bars." },
+            { module = "Action Bars", text = "Cooldown text renders at exactly your configured size again; the 8.7.3 small-button cap is now the opt-in Fit Size to Button toggle." },
+            { module = "Action Bars & Cooldown Manager", text = "Hide Count at 0 no longer hides the charge number for spells that keep a cooldown while holding charges, such as Roll, Feint, and Survival of the Fittest." },
+            { module = "Damage Meters", text = "Window titles no longer truncate against hidden header icons when Hide Icons Until Hover is on." },
+            { module = "Data Bars", text = "Databar tooltips now layer above other tooltips, and description text uses the tooltip's full width." },
+            { module = "Localization", text = "Updated Korean (koKR) translations for the latest options." },
+            { module = "Minimap", text = "The expansion landing button no longer reappears next to a replacement button from another addon." },
+            { module = "PTR Auras", text = "Buff duration text no longer flashes 0 for a moment when crossing under one minute." },
+            { module = "Quality of Life", text = "Auto Open Containers no longer cancels your casts, and waits for the mailbox to close before opening deliveries." },
+            { module = "Quality of Life", text = "Guild repair messages now report the true payer when Auto Sell Junk runs during the same visit." },
+        },
+    },
+    {
         version = "8.7.3",
         heroes = {
             {
@@ -1038,46 +1088,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "General", text = "Added the missing French translations for the latency block's bandwidth labels, plus a large pass of new German translations." },
             { module = "Resource Bars", text = "Destruction Warlock soul shard fragments display and drain again. Partial shards were invisible in combat and did not deplete out of combat." },
             { module = "Unit Frames", text = "The External Defensives frame no longer breaks when Duration Format is set to anything other than Blizzard Default. Those custom formats now display correctly." },
-        },
-    },
-    {
-        version = "8.6.2",
-        heroes = {
-            {
-                -- Static on purpose: a suite-wide CPU pass has no single
-                -- setting to open, so this card renders non-clickable.
-                module = "General",
-                title  = "Performance Upgrades",
-                desc   = "A major optimization pass across many of the core addons of the suite: Resource Bars, Action Bars, Cooldown Manager, and Unit Frames.",
-            },
-        },
-        features = {
-            {
-                module = "General",
-                title  = "Expressway Font Option",
-                desc   = "Now selectable in non-Latin locales",
-                nav    = { module = "_EUIGlobal", page = "Fonts & Colors", section = "GLOBAL FONT", highlight = "Global Font" },
-            },
-            {
-                -- Page-only nav: BuildFullExportPage is hand-built chrome with
-                -- no W:SectionHeader to anchor, and the scroll resets to the
-                -- top on tab switch, which is where its content sits.
-                module = "Profiles",
-                title  = "Full Account Export & Import",
-                desc   = "Share every account-wide setting as one string",
-                nav    = { module = "_EUIProfiles", page = "Full Export" },
-            },
-        },
-        fixes = {
-            { module = "Action Bars", text = "The pet bar's visibility conditions work again; in combat, out of combat, and the dragonriding modes were being ignored, or applied under the opposite state." },
-            { module = "Conditional Overrides", text = "Deleting an active group no longer leaves its captured values stuck on your profile; your normal settings come back the moment it is removed, and any settings page you have open updates immediately." },
-            { module = "Cooldown Manager", text = "Blizzard's own tracked buff bars no longer reappear over Tracked Buff Bars during combat or on zone-in, and no longer stay invisible while still blocking clicks after Tracked Buff Bars is disabled." },
-            { module = "General", text = "Added the missing Traditional Chinese translations." },
-            { module = "Nameplates", text = "Execute Pulse Glow is now spec-aware: it lights only for specs that actually have an execute, at that spec's own health threshold, and rises automatically with talents that widen the window. Most specs now trigger at 20% instead of a flat 30%, and specs with no execute no longer glow at all." },
-            { module = "Profiles", text = "The Spec Overrides and Conditional Overrides tabs are now a single Overrides tab, with a toggle at the top to switch between the two lists." },
-            { module = "Quality of Life", text = "Buff-based Movement Alerts such as Burning Rush no longer throw an error and stop detecting the buff once you are in combat." },
-            { module = "Unit Frames", text = "An attached power bar no longer draws a stray border line where it meets the health bar." },
-            { module = "Unit Frames", text = "Turning off EllesmereUI's own cast bar no longer leaves Blizzard's player and pet cast bars dead or invisible, including when you log in with it already off or hide the player frame entirely." },
         },
     },
 }

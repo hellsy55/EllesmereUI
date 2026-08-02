@@ -4819,11 +4819,13 @@ initFrame:SetScript("OnEvent", function(self)
                         local sz = s.cooldownFontSize or 12
                         local ox = s.cooldownTextXOffset or 0
                         local oy = s.cooldownTextYOffset or 0
+                        local ft = s.cooldownFontFit or false
                         for _, key in ipairs(GROUP_BAR_ORDER) do
                             if c then EAB.db.profile.bars[key].cooldownTextColor = { r=c.r, g=c.g, b=c.b } end
                             EAB.db.profile.bars[key].cooldownFontSize = sz
                             EAB.db.profile.bars[key].cooldownTextXOffset = ox
                             EAB.db.profile.bars[key].cooldownTextYOffset = oy
+                            EAB.db.profile.bars[key].cooldownFontFit = ft
                             EAB:ApplyCooldownFontsForBar(key)
                         end
                         EllesmereUI:RefreshPage()
@@ -4834,11 +4836,13 @@ initFrame:SetScript("OnEvent", function(self)
                         local c = s.cooldownTextColor
                         local ox = s.cooldownTextXOffset or 0
                         local oy = s.cooldownTextYOffset or 0
+                        local ft = s.cooldownFontFit or false
                         for _, key in ipairs(GROUP_BAR_ORDER) do
                             local b = EAB.db.profile.bars[key]
                             if (b.cooldownFontSize or 12) ~= sz then return false end
                             if (b.cooldownTextXOffset or 0) ~= ox then return false end
                             if (b.cooldownTextYOffset or 0) ~= oy then return false end
+                            if (b.cooldownFontFit or false) ~= ft then return false end
                             if c then
                                 local bc = b.cooldownTextColor
                                 if not bc or bc.r ~= c.r or bc.g ~= c.g or bc.b ~= c.b then return false end
@@ -4857,11 +4861,13 @@ initFrame:SetScript("OnEvent", function(self)
                             local sz = s.cooldownFontSize or 12
                             local ox = s.cooldownTextXOffset or 0
                             local oy = s.cooldownTextYOffset or 0
+                            local ft = s.cooldownFontFit or false
                             for _, key in ipairs(checkedKeys) do
                                 if c then EAB.db.profile.bars[key].cooldownTextColor = { r=c.r, g=c.g, b=c.b } end
                                 EAB.db.profile.bars[key].cooldownFontSize = sz
                                 EAB.db.profile.bars[key].cooldownTextXOffset = ox
                                 EAB.db.profile.bars[key].cooldownTextYOffset = oy
+                                EAB.db.profile.bars[key].cooldownFontFit = ft
                                 EAB:ApplyCooldownFontsForBar(key)
                             end
                             EllesmereUI:RefreshPage()
@@ -4891,7 +4897,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(function() cdUpdateSwatch() end)
 
                 local _, cdCogShowRaw = EllesmereUI.BuildCogPopup({
-                    title = "Cooldown Text Offsets",
+                    title = "Cooldown Text",
                     rows = {
                         { type="slider", label="X Offset", min=-150, max=150, step=1,
                           get=function() return SVal("cooldownTextXOffset", 0) end,
@@ -4904,6 +4910,12 @@ initFrame:SetScript("OnEvent", function(self)
                           set=function(v)
                               SSet("cooldownTextYOffset", v, function(k) EAB:ApplyCooldownFontsForBar(k) end)
                               SUpdatePreview()
+                          end },
+                        { type="toggle", label="Fit Size to Button",
+                          tooltip="Caps the countdown size so it cannot spill outside small buttons.",
+                          get=function() return SVal("cooldownFontFit", false) end,
+                          set=function(v)
+                              SSet("cooldownFontFit", v and true or false, function(k) EAB:ApplyCooldownFontsForBar(k) end)
                           end },
                     },
                 })
