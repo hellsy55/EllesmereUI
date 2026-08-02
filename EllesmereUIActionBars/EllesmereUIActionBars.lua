@@ -9976,7 +9976,11 @@ SlashCmdList.EABEMPOWER = function()
                        and C_Spell.IsPressHoldReleaseSpell(spellID) then
                         isPH = true
                     end
-                    if isPH then
+                    -- Macros are listed even when they currently resolve to a
+                    -- NON-empowered spell. A conditional macro is the case that
+                    -- flips isPH mid-combat, and listing only isPH slots hid it
+                    -- from the dump whenever it happened to resolve the other way.
+                    if isPH or actionType == "macro" then
                         found = found + 1
                         local nm = "?"
                         if spellID and C_Spell and C_Spell.GetSpellInfo then
@@ -9985,6 +9989,7 @@ SlashCmdList.EABEMPOWER = function()
                         elseif actionType == "flyout" then
                             nm = "flyout"
                         end
+                        nm = ("%s [%s isPH=%s]"):format(nm, actionType, tostring(isPH))
                         local k1, k2 = GetBindingKey(prefix .. i)
                         local function route(k)
                             if not k then return "-" end
