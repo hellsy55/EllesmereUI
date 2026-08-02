@@ -48,6 +48,16 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
+    -- Auto-Compact is intentionally limited to the standard action bars. Keep
+    -- this list driven by the runtime capability check so the options page,
+    -- Apply All, and Apply to Multiple can never drift from runtime support.
+    local AUTO_COMPACT_BAR_ORDER = {}
+    for _, key in ipairs(GROUP_BAR_ORDER) do
+        if EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(key) then
+            AUTO_COMPACT_BAR_ORDER[#AUTO_COMPACT_BAR_ORDER + 1] = key
+        end
+    end
+
     -- Check if a bar is enabled (we control all bars now, always enabled)
     local function IsBarEnabled(barKey)
         if not EAB or not EAB.db then return true end
@@ -605,14 +615,45 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
 
-            -- Multi-row layout: show all rows matching the real bar
+            -- Auto-Compact packs occupied logical slots into contiguous preview
+            -- positions. Keep the source-slot mapping separate so icons, text,
+            -- and keybinds still come from their real action buttons.
+            local autoCompact = settings.autoCompactSlots == true
+                and EAB.BarSupportsAutoCompact
+                and EAB:BarSupportsAutoCompact(info.key)
+            local sourceIndices
+            local previewCount = numVisible
+            local eabBtns = ns.barButtons and ns.barButtons[info.key]
+            if autoCompact then
+                sourceIndices = {}
+                for sourceIndex = 1, numVisible do
+                    local realBtn = (eabBtns and eabBtns[sourceIndex])
+                        or (info.buttonPrefix and _G[info.buttonPrefix .. sourceIndex])
+                    if realBtn and ns.ButtonHasAction(realBtn, info.buttonPrefix) then
+                        sourceIndices[#sourceIndices + 1] = sourceIndex
+                    end
+                end
+                previewCount = #sourceIndices
+            end
+
+            -- Multi-row layout: use the packed count while Auto-Compact is on.
+            -- A completely empty compact bar has a 1x1 footprint, so retain a
+            -- safe stride without fabricating a visible preview button.
             local numRows = settings.numRows or 1
             local ovRows = settings.overrideNumRows
             if ovRows and ovRows > 0 then numRows = ovRows end
-            local stride = math.ceil(numVisible / numRows)
-            numRows = math.ceil(numVisible / stride)
-            local previewCount = numVisible
-            -- Preview always shows all slots regardless of alwaysShowButtons setting
+            if numRows < 1 then numRows = 1 end
+            local stride
+            if previewCount > 0 then
+                stride = math.ceil(previewCount / numRows)
+                numRows = math.ceil(previewCount / stride)
+            else
+                stride = 1
+                numRows = 1
+            end
+
+            -- Non-compact previews continue to show all configured slots,
+            -- regardless of the Always Show Buttons preference.
             local showEmpty = true
 
             local leftmost = 1
@@ -679,18 +720,25 @@ initFrame:SetScript("OnEvent", function(self)
             local scaledCTSize = math.max(6, floor(ctSize * totalScale + 0.5))
             local scaledMCSize = math.max(6, floor(mcSize * totalScale + 0.5))
 
-            -- Multi-row grid layout (vertical swaps cols/rows)
-            -- For vertical: calculate actual columns used (not all numRows may be filled)
+            -- Multi-row grid layout (vertical swaps cols/rows). For vertical,
+            -- calculate actual columns used; an empty compact bar deliberately
+            -- retains only the runtime's 1x1 minimum frame footprint.
             local gridCols, gridRows
-            if isVertical then
-                gridCols = math.ceil(numVisible / stride)
+            if previewCount == 0 then
+                gridCols, gridRows = 0, 0
+            elseif isVertical then
+                gridCols = math.ceil(previewCount / stride)
                 gridRows = stride
             else
                 gridCols = stride
                 gridRows = numRows
             end
-            local gridW = gridCols * scaledBtnW + (gridCols - 1) * scaledPad
-            local gridH = gridRows * scaledBtnH + (gridRows - 1) * scaledPad
+            local gridW = gridCols > 0
+                and (gridCols * scaledBtnW + (gridCols - 1) * scaledPad)
+                or SnapS(1)
+            local gridH = gridRows > 0
+                and (gridRows * scaledBtnH + (gridRows - 1) * scaledPad)
+                or SnapS(1)
             local gridStartX = Snap(math.max(0, (self:GetWidth() - gridW) / 2))
 
             -- Reserve room for a background that grows above/below the icon
@@ -805,9 +853,11 @@ initFrame:SetScript("OnEvent", function(self)
                     bf:SetPoint("TOPLEFT", self, "TOPLEFT", xOff, yOff)
                     bf:Show()
 
-                    -- Icon texture from our EABButton (not the hidden Blizzard button)
-                    local eabBtns = ns.barButtons and ns.barButtons[info.key]
-                    local realBtn = (eabBtns and eabBtns[i]) or (info.buttonPrefix and _G[info.buttonPrefix .. i])
+                    -- Icon texture from the real logical slot. In compact mode
+                    -- display index i maps back to its occupied source slot.
+                    local sourceIndex = sourceIndices and sourceIndices[i] or i
+                    local realBtn = (eabBtns and eabBtns[sourceIndex])
+                        or (info.buttonPrefix and _G[info.buttonPrefix .. sourceIndex])
                     local hasAction = realBtn and ns.ButtonHasAction(realBtn, info.buttonPrefix)
                     local iconTex = hasAction and realBtn.icon and realBtn.icon:GetTexture()
 
@@ -1830,13 +1880,28 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return SB().dragShow == true end,
                       set=function(v) SB().dragShow = v end }
                 end
+                -- Independent of the Visibility mode above (including
+                -- Never/multi-select): keeps the bar fully visible the
+                -- whole time the player is airborne on a skyriding mount
+                -- or in Druid Flight Form.
+                local function SkyridingRow()
+                    return { type="toggle", label="Always Show While Skyriding",
+                      tooltip="Keeps this bar fully visible while flying on a skyriding mount (or Druid Flight Form), regardless of the Visibility mode above.",
+                      get=function() return SB().visShowSkyriding == true end,
+                      set=function(v)
+                          SB().visShowSkyriding = v
+                          EAB:RefreshRuntimeVisibility()
+                          EAB:RefreshMouseover()
+                          EAB:ApplyCombatVisibility()
+                      end }
+                end
                 local _, visCogShow = EllesmereUI.BuildCogPopup({
                     title = "Visibility",
-                    rows = { MORow() },
+                    rows = { MORow(), SkyridingRow() },
                 })
                 local _, visCogShowNever = EllesmereUI.BuildCogPopup({
                     title = "Visibility",
-                    rows = { MORow(), DragRow() },
+                    rows = { MORow(), DragRow(), SkyridingRow() },
                 })
                 local visCtrl = rgn._control
                 local visCogBtn = MakeCogBtn(rgn, function(anchor)
@@ -1866,7 +1931,14 @@ initFrame:SetScript("OnEvent", function(self)
                   end)
                   SUpdatePreview()
               end,
-              tooltip="Show button backgrounds even if a spell is not assigned to that slot." },
+              tooltip="Show button backgrounds even if a spell is not assigned to that slot.",
+              disabled=function()
+                  return SVal("autoCompactSlots", false)
+                      and EAB.BarSupportsAutoCompact
+                      and EAB:BarSupportsAutoCompact(SelectedKey())
+              end,
+              disabledTooltip="Auto-Compact Bar temporarily overrides this setting.",
+              rawTooltip=true },
             { type="slider", text="Bar Opacity", min=0, max=100, step=5,
               getValue=function()
                   local bs = SB()
@@ -2098,6 +2170,97 @@ initFrame:SetScript("OnEvent", function(self)
                             for _, key in ipairs(checkedKeys) do
                                 EAB.db.profile.bars[key].clickThrough = v
                                 EAB:ApplyClickThroughForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
+        end
+
+        -- Auto-Compact Bar (own row: this profile has no Icon Order UI yet to
+        -- pair it with, unlike the reference layout). Automatically hides
+        -- unused action slots and resizes the bar to fit its assigned actions.
+        if not visOnly then
+            local autoCompactRow
+            autoCompactRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Auto-Compact Bar",
+                  tooltip="Automatically hides unused action slots and resizes the bar to fit its assigned actions. Empty slots return while dragging an action so you can place it anywhere.",
+                  disabled=function()
+                      return not (EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(SelectedKey()))
+                  end,
+                  disabledTooltip="Auto-Compact Bar is only available for Action Bars 1-10.",
+                  rawTooltip=true,
+                  labelOnlyTooltip=true,
+                  getValue=function() return SVal("autoCompactSlots", false) end,
+                  setValue=function(v)
+                      if not (EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(SelectedKey())) then return end
+                      SSet("autoCompactSlots", v, function(k) EAB:ApplyIconRowOverrides(k) end)
+                      SUpdatePreviewAndResize()
+                  end },
+                { type="label", text="" });  y = y - h
+
+            -- Gear popup: "Only While Skyriding" limits compacting to while
+            -- the player is actually airborne on a skyriding mount (or Flight
+            -- Form); the bar behaves like a normal (non-compact) bar the rest
+            -- of the time, still respecting Always Show Buttons while grounded.
+            do
+                local function SkyOnlyRow()
+                    return { type="toggle", label="Only While Skyriding",
+                      tooltip="Only auto-compacts this bar while flying on a skyriding mount (or Druid Flight Form). Shows the normal full bar otherwise.",
+                      get=function() return SB().autoCompactSkyOnly == true end,
+                      set=function(v)
+                          SB().autoCompactSkyOnly = v
+                          EAB:ApplyIconRowOverrides(SelectedKey())
+                          SUpdatePreviewAndResize()
+                      end }
+                end
+                local _, autoCompactCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Auto-Compact Bar",
+                    rows = { SkyOnlyRow() },
+                })
+                local acCtrl = autoCompactRow._leftRegion._control
+                MakeCogBtn(autoCompactRow._leftRegion, function(anchor)
+                    autoCompactCogShow(anchor)
+                end, acCtrl, EllesmereUI.COGS_ICON)
+            end
+
+            -- Standard per-bar synchronization for Auto-Compact. Apply All and
+            -- Apply to Multiple only offer bars supported by the runtime.
+            do
+                local rgn = autoCompactRow._leftRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Auto-Compact Bar to all Bars",
+                    onClick = function()
+                        local v = SVal("autoCompactSlots", false)
+                        for _, key in ipairs(AUTO_COMPACT_BAR_ORDER) do
+                            EAB.db.profile.bars[key].autoCompactSlots = v
+                            EAB:ApplyIconRowOverrides(key)
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = SVal("autoCompactSlots", false)
+                        for _, key in ipairs(AUTO_COMPACT_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].autoCompactSlots or false) ~= v then
+                                return false
+                            end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = AUTO_COMPACT_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local v = SVal("autoCompactSlots", false)
+                            for _, key in ipairs(checkedKeys) do
+                                if EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(key) then
+                                    EAB.db.profile.bars[key].autoCompactSlots = v
+                                    EAB:ApplyIconRowOverrides(key)
+                                end
                             end
                             EllesmereUI:RefreshPage()
                         end,

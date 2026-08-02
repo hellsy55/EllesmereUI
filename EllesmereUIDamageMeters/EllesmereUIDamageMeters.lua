@@ -138,6 +138,16 @@ local DM_TYPE_NAMES = {
     [Enum.DamageMeterType.Deaths]               = "Deaths",
 }
 
+-- Optional abbreviated header titles (hdrShortTitle), so long type names
+-- like "Damage Done"/"Healing Done" don't get truncated with "..." in
+-- narrower windows. Kept on ns (already an upvalue inside CreateDMWindow)
+-- rather than as its own top-level local, for the same upvalue-budget
+-- reason as ns.PositionHeaderTitleTimer above.
+ns.DM_TYPE_NAMES_SHORT = {
+    [Enum.DamageMeterType.DamageDone]  = "Damage",
+    [Enum.DamageMeterType.HealingDone] = "Healing",
+}
+
 local DM_TYPES = {
     Enum.DamageMeterType.DamageDone,
     Enum.DamageMeterType.HealingDone,
@@ -244,7 +254,11 @@ local DM_DEFAULTS = {
             hdrFontSize     = 11,
             hdrTextOffX     = 0,
             hdrTextOffY     = 0,
+            hdrTimerPosition = "right",
+            hdrShortTitle   = false,
             hdrIconSize     = 22,
+            hdrIconOffsetX  = 0,
+            hdrIconOffsetY  = 0,
             hdrMouseoverIcons = false,
             hdrTextUseAccent = true,
             hdrTextColor    = { r = 1, g = 1, b = 1 },
@@ -387,11 +401,13 @@ end
 local function LayoutHeaderButtons(W, cfg, iconSz)
     if not W or not W.header or not W.hdrBtns then return end
     local btnPad = -2
+    local offX = (cfg and cfg.hdrIconOffsetX) or 0
+    local offY = (cfg and cfg.hdrIconOffsetY) or 0
     local layoutBtns = GetHeaderLayoutButtons(W, cfg)
     for bi, btn in ipairs(layoutBtns) do
         if iconSz then btn:SetSize(iconSz, iconSz) end
         btn:ClearAllPoints()
-        btn:SetPoint("RIGHT", W.header, "RIGHT", -(iconSz * (bi - 1) + btnPad * bi + 2), 0)
+        btn:SetPoint("RIGHT", W.header, "RIGHT", -(iconSz * (bi - 1) + btnPad * bi + 2) + offX, offY)
     end
 end
 
@@ -466,6 +482,56 @@ local function WinDB(idx)
         }
     end
     return cfg.windows[idx]
+end
+
+-- Gives the header combat timer a fixed box width (sized for the longest
+-- realistic duration at the current font) instead of letting it auto-size
+-- to the current text. Without this, "0:59" -> "1:00" -> ... -> "10:00"
+-- each render at a different pixel width, which shoves whatever sits next
+-- to the timer (the title, in "left" mode) sideways on every tick.
+-- Justification depends on which side the title is on: in "left" mode the
+-- timer sits before the title, so the text is right-justified to hug the
+-- title (growing digits extend away from it, not toward it); in the
+-- default "right" mode the text is left-justified to hug the title on its
+-- own left side.
+ns.SizeHeaderTimer = function(w)
+    if not w or not w.timerText then return end
+    local prevText = w.timerText:GetText()
+    w.timerText:SetText("(199:59)")
+    local maxW = w.timerText:GetStringWidth() or 40
+    w.timerText:SetWidth(math.ceil(maxW))
+    w.timerText:SetJustifyH(DB().hdrTimerPosition == "left" and "RIGHT" or "LEFT")
+    if w.timerText.SetWordWrap then w.timerText:SetWordWrap(false) end
+    w.timerText:SetText(prevText or "")
+end
+
+-- Positions the header title and combat timer relative to each other,
+-- honoring hdrTimerPosition ("right" = default, timer after the title;
+-- "left" = timer first, title follows it). In "left" mode, the title only
+-- makes room for the timer while it's actually showing a duration (in
+-- combat / viewing a segment with time); out of combat, when the timer
+-- text is blank, the title sits at its normal spot instead of leaving a gap.
+-- Stored on ns (already an upvalue everywhere it's used) instead of as its
+-- own top-level local, so it doesn't push CreateDMWindow past Lua's 60
+-- upvalue-per-function limit.
+ns.PositionHeaderTitleTimer = function(w, cfg)
+    if not w or not w.titleText or not w.header then return end
+    local txOX, txOY = cfg.hdrTextOffX or 0, cfg.hdrTextOffY or 0
+    local wdb = w.idx and WinDB(w.idx)
+    local timerVisible = w.timerText and w.timerText:IsShown() and not (wdb and wdb.hideTimer)
+    local timerHasText = timerVisible and (w.timerText:GetText() or "") ~= ""
+    local timerOnLeft = (cfg.hdrTimerPosition == "left") and timerHasText
+    w.titleText:ClearAllPoints()
+    if w.timerText then w.timerText:ClearAllPoints() end
+    if timerOnLeft then
+        w.timerText:SetPoint("LEFT", w.header, "LEFT", 6 + txOX, txOY)
+        w.titleText:SetPoint("LEFT", w.timerText, "RIGHT", 4, 0)
+    else
+        w.titleText:SetPoint("LEFT", w.header, "LEFT", 6 + txOX, txOY)
+        if w.timerText then
+            w.timerText:SetPoint("LEFT", w.titleText, "RIGHT", 4, 0)
+        end
+    end
 end
 
 -- Applies a window's saved position to its frame. Two stored formats:
@@ -2571,19 +2637,23 @@ local function CreateDMWindow(winIdx)
     local hdrFS = cfg.hdrFontSize or 11
     local txOX, txOY = cfg.hdrTextOffX or 0, cfg.hdrTextOffY or 0
     W.titleText = header:CreateFontString(nil, "OVERLAY"); SetDMFont(W.titleText, hdrFS)
-    W.titleText:SetPoint("LEFT", header, "LEFT", 6 + txOX, txOY)
     do
         local tR, tG, tB
         if cfg.hdrTextUseAccent ~= false then tR, tG, tB = GetAccentRGB()
         else local tc = cfg.hdrTextColor; tR = tc and tc.r or 1; tG = tc and tc.g or 1; tB = tc and tc.b or 1 end
         W.titleText:SetTextColor(tR, tG, tB, 1)
     end
-    W._fullTitle = L("Damage Done")
-    W.titleText:SetText(L("Damage Done"))
+    do
+        local initTitle = (cfg.hdrShortTitle and ns.DM_TYPE_NAMES_SHORT[Enum.DamageMeterType.DamageDone]) or "Damage Done"
+        W._fullTitle = L(initTitle)
+        W.titleText:SetText(L(initTitle))
+    end
 
     W.timerText = header:CreateFontString(nil, "OVERLAY"); SetDMFont(W.timerText, hdrFS)
-    W.timerText:SetTextColor(1, 1, 1, 0.7); W.timerText:SetPoint("LEFT", W.titleText, "RIGHT", 4, 0); W.timerText:SetText("(0:00)")
+    W.timerText:SetTextColor(1, 1, 1, 0.7); W.timerText:SetText("")
     if wdb.hideTimer then W.timerText:Hide() end
+    ns.SizeHeaderTimer(W)
+    ns.PositionHeaderTitleTimer(W, cfg)
 
     if EUI.RegAccent then
         EUI.RegAccent({ type = "callback", fn = function(r, g, b)
@@ -2697,6 +2767,8 @@ local function CreateDMWindow(winIdx)
             { text = L("Hide Timer"), isActive = wdb.hideTimer, onClick = function()
                 wdb.hideTimer = not wdb.hideTimer
                 W.timerText:SetShown(not wdb.hideTimer)
+                ns.PositionHeaderTitleTimer(W, DB())
+                if W.FitTitle then W.FitTitle() end
             end },
             { text = L("Auto Swap Current/Overall"),
               tooltip = L("Auto switch your window to overall at the end of an M+ run, and current at the start"),
@@ -2901,7 +2973,12 @@ local function CreateDMWindow(winIdx)
         local n = #GetHeaderLayoutButtons(W, c)
         local headerW = frame:GetWidth() or (wdb.width or 300)
         local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2
-        local avail = btnLeft - (6 + (c.hdrTextOffX or 0)) - 6
+        local leftEdge = 6 + (c.hdrTextOffX or 0)
+        if c.hdrTimerPosition == "left" and W.timerText and W.timerText:IsShown() and not wdb.hideTimer
+           and (W.timerText:GetText() or "") ~= "" then
+            leftEdge = leftEdge + (W.timerText:GetWidth() or 0) + 4
+        end
+        local avail = btnLeft - leftEdge - 6
         if avail < 1 then avail = 1 end
         if fs:GetStringWidth() <= avail then return end
         local s = full
@@ -3774,7 +3851,11 @@ local function CreateDMWindow(winIdx)
         W.UpdateTimerText()
         local isOverall = (not W.curSessionID and W.curSession == Enum.DamageMeterSessionType.Overall)
         local titlePrefix = isOverall and "Overall " or ""
-        W._fullTitle = L(titlePrefix .. (DM_TYPE_NAMES[W.curDMType] or "Damage Done"))
+        local typeName = DM_TYPE_NAMES[W.curDMType] or "Damage Done"
+        if DB().hdrShortTitle then
+            typeName = ns.DM_TYPE_NAMES_SHORT[W.curDMType] or typeName
+        end
+        W._fullTitle = L(titlePrefix .. typeName)
         W.FitTitle()
         if winIdx == 1 then UpdateSATimerText() end
 
@@ -3815,11 +3896,22 @@ local function CreateDMWindow(winIdx)
             sec = math.floor(dur)
         end
         if W._timerSec == sec then return end
+        local hadText = (W._timerSec or -1) >= 0
         W._timerSec = sec
         if sec >= 0 then
             W.timerText:SetText("(" .. FormatTimer(dur) .. ")")
         else
             W.timerText:SetText("")
+        end
+        -- Only "left" mode cares whether the timer currently has content: out
+        -- of combat the title shouldn't leave a gap for a blank timer.
+        local hasText = (sec >= 0)
+        if hasText ~= hadText then
+            local c = DB()
+            if c.hdrTimerPosition == "left" then
+                ns.PositionHeaderTitleTimer(W, c)
+                if W.FitTitle then W.FitTitle() end
+            end
         end
     end
 
@@ -4651,13 +4743,12 @@ ns.ApplyHeader = function()
         if w.titleText then
             SetDMFont(w.titleText, hdrFS)
             w.titleText:SetTextColor(tR, tG, tB, 1)
-            local txOX, txOY = cfg.hdrTextOffX or 0, cfg.hdrTextOffY or 0
-            w.titleText:ClearAllPoints()
-            w.titleText:SetPoint("LEFT", w.header, "LEFT", 6 + txOX, txOY)
         end
         if w.timerText then
             SetDMFont(w.timerText, hdrFS)
+            ns.SizeHeaderTimer(w)
         end
+        ns.PositionHeaderTitleTimer(w, cfg)
         -- Resize and reposition header buttons
         LayoutHeaderButtons(w, cfg, iconSz)
         -- Close icon is 2px larger than other icons

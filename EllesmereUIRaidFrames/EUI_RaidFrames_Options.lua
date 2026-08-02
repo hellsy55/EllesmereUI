@@ -4550,8 +4550,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Dynamic rows for each defined custom raid size
         do
-            local CUSTOM_TIERS = { 10, 15, 25, 30 }
-            local TIER_LABELS = { [10] = "10 Man", [15] = "15 Man", [25] = "25 Man", [30] = "30 Man" }
+            local CUSTOM_TIERS = { 10, 15, 25, 30, 40 }
+            local TIER_LABELS = { [10] = "10 Man", [15] = "15 Man", [25] = "25 Man", [30] = "30 Man", [40] = "40 Man" }
             local overrides = db.profile.raidSizeOverrides
             local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
             local EYE_INVISIBLE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-invisible.png"

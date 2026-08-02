@@ -1,7 +1,3 @@
-# Libraries are pulled by the packager via .pkgmeta externals
-Libs/
-EllesmereUIUnitFrames/Libs/
-
 # Kiro workspace files
 .kiro/
 .DS_Store

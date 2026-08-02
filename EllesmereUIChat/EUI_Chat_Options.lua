@@ -455,6 +455,18 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshBorderSwatches()
             end
 
+            -- Row: Abbreviate Channel Names (e.g. [Party] -> [P])
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Abbreviate Channel Names",
+                    tooltip="Shortens channel prefixes in chat, e.g. [Party] -> [P].",
+                    getValue=function() return Cfg("abbreviateChannels") == true end,
+                    setValue=function(v)
+                        Set("abbreviateChannels", v)
+                        if ECHAT.ApplyChannelAbbreviations then ECHAT.ApplyChannelAbbreviations() end
+                    end },
+                { type="spacer", text="" })
+            y = y - h
+
         -- -- IDLE FADE ---------------------------------------------------------
         _, h = W:SectionHeader(parent, "IDLE FADE", y); y = y - h
 
@@ -796,6 +808,23 @@ initFrame:SetScript("OnEvent", function(self)
 
         if isTabs then
             _, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
+
+            local tabVisValues = {
+                always    = { text = "Always" },
+                mouseover = { text = "Mouseover" },
+            }
+            local tabVisOrder = { "always", "mouseover" }
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Tab Visibility",
+                  tooltip="Mouseover fades the tab strip's decoration/host layer when idle, the same safe dock-level fade the panel already uses -- it never touches the native Blizzard tab objects.",
+                  values=tabVisValues, order=tabVisOrder,
+                  getValue=function() return Cfg("tabVisibility") or "always" end,
+                  setValue=function(v)
+                      Set("tabVisibility", v)
+                      if ECHAT.ApplyTabVisibility then ECHAT.ApplyTabVisibility() end
+                  end },
+                { type="label", text="" })
+            y = y - h
 
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Tabs Inside Chat Panel",

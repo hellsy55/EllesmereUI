@@ -1243,7 +1243,8 @@ end
 -- travels with the spell wherever it is placed -- no re-adding. The settings key
 -- matches assignedSpells: positive = racial / custom spell; negative = item /
 -- trinket-slot preset. Entry shape: { duration, activeSwipeMode,
--- activeSwipeClassColor, activeSwipeR/G/B/A, activeGlow, glowColor, glowColorR/G/B }.
+-- activeSwipeClassColor, activeSwipeR/G/B/A, activeSwipeReverse, activeGlow,
+-- glowColor, glowColorR/G/B }.
 function ns.GetCustomActiveStates()
     local p = ECME and ECME.db and ECME.db.profile
     if not p then return nil end
@@ -1488,17 +1489,19 @@ end
 -- so the cooldown keeps its default swipe direction at 0 cost. Monotonic,
 -- scanned-once contract identical to the flags above (the options toggle flips
 -- the flag live on enable).
--- Also gates hideCDSwipe (Hide CD Swipe): both are monotonic per-spell swipe
--- flags, scanned together in one pass so neither costs anything until used.
+-- Also gates hideCDSwipe (Hide CD Swipe) and activeSwipeReverse (Reverse
+-- Active Swipe): all are monotonic per-spell swipe flags, scanned together
+-- in one pass so none costs anything until used.
 function ns.RescanReverseSwipeFlag()
     if ns._reverseSwipeFlagScanned then return end
-    if ns._cdmAnyReverseSwipe and ns._cdmAnyHideCDSwipe then return end
+    if ns._cdmAnyReverseSwipe and ns._cdmAnyHideCDSwipe and ns._cdmAnyActiveSwipeReverse then return end
     if not EllesmereUIDB then return end
     ns._reverseSwipeFlagScanned = true
     -- Regular per-spell settings (family stores + bar tiers, every spec).
     ns.ForEachSavedSettingsBlock(function(ss)
         if ss.reverseSwipe then ns._cdmAnyReverseSwipe = true end
         if ss.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+        if ss.activeSwipeReverse then ns._cdmAnyActiveSwipeReverse = true end
     end)
     -- Preset / custom cd-utility spells (profile-level customActiveStates).
     local cas = ns.GetCustomActiveStates and ns.GetCustomActiveStates()
@@ -1507,6 +1510,7 @@ function ns.RescanReverseSwipeFlag()
             if e then
                 if e.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                 if e.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                if e.activeSwipeReverse then ns._cdmAnyActiveSwipeReverse = true end
             end
         end
     end

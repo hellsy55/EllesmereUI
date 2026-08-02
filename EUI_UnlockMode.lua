@@ -4521,6 +4521,21 @@ do
             -- have time to finish rebuilding with final icon counts.
             C_Timer.After(2, function()
                 EllesmereUI._zoneTransitionActive = false
+                -- Catch-up sweep: any resize that happened WHILE the guard
+                -- was up (e.g. a non-CDM element -- resource bars, action
+                -- bars, etc. -- changing size during the loading screen)
+                -- had its NotifyElementResized propagation silently
+                -- suppressed above, and nothing re-fires for it on its own.
+                -- CDM re-applies matches itself at the end of its own
+                -- rebuild, but that only covers CDM-driven resizes; any
+                -- other source is left stale until this runs. This
+                -- unconditional pass re-derives every width/height match
+                -- from CURRENT sizes now that all rebuilds should have
+                -- settled, so no match is left pointing at a stale target
+                -- size just because its resize landed inside the window.
+                if EllesmereUI.ApplyAllWidthHeightMatches then
+                    EllesmereUI.ApplyAllWidthHeightMatches()
+                end
             end)
         end
     end)

@@ -9442,8 +9442,8 @@ ns._RFTierTopLeft = function(tw, th, unitGrowth, groupGrowth, ox, oy)
 end
 
 -- Resolve the active size tier bucket and its override table, cascading
--- toward 20 (10 falls back to 15, 30 falls back to 25). The single copy of
--- the cascade -- _GetRaidSizeFrameDimensions, ReloadFrames and
+-- toward 20 (10 falls back to 15; 30 falls back to 25; 40 falls back to 30,
+-- then 25). The single copy of the cascade -- _GetRaidSizeFrameDimensions, ReloadFrames and
 -- _ApplyTierOffset all route through here. Returns tier, override; the
 -- override is nil for the base 20 tier or when none is defined.
 ns._RFResolveTierOverride = function(numMembers)
@@ -9454,14 +9454,18 @@ ns._RFResolveTierOverride = function(numMembers)
     elseif numMembers <= 15 then tier = 15
     elseif numMembers <= 20 then tier = 20
     elseif numMembers <= 25 then tier = 25
-    else                         tier = 30
+    elseif numMembers <= 30 then tier = 30
+    else                         tier = 40
     end
     if tier == 20 then return 20, nil end
     local ov
     if tier < 20 then
         ov = overrides[tier] or (tier == 10 and overrides[15]) or nil
     else
-        ov = overrides[tier] or (tier == 30 and overrides[25]) or nil
+        -- Cascade upward toward 20: 40 falls back to 30, which falls back to 25.
+        ov = overrides[tier]
+        if not ov and tier == 40 then ov = overrides[30] end
+        if not ov and (tier == 40 or tier == 30) then ov = overrides[25] end
     end
     return tier, ov or nil
 end

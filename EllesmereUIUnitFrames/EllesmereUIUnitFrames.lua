@@ -332,6 +332,11 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -478,6 +483,8 @@ local defaults = {
             combatIndicatorX = 0,
             combatIndicatorY = 0,
             healthHeight = 46,
+            oorAlpha = 0.4,
+            castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
             powerHeight = 6,
             powerPosition = "below",
             powerWidth = 0,
@@ -572,6 +579,11 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -726,6 +738,10 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            powerTextStrata = "inherit",
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -762,6 +778,10 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            powerTextStrata = "inherit",
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -794,6 +814,10 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            powerTextStrata = "inherit",
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -806,6 +830,8 @@ local defaults = {
         focus = {
             frameWidth = 160,
             healthHeight = 34,
+            oorAlpha = 0.4,
+            castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
             powerHeight = 6,
             powerPosition = "below",
             powerWidth = 0,
@@ -875,6 +901,11 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -975,6 +1006,7 @@ local defaults = {
             frameWidth = 160,
             healthHeight = 34,
             oorAlpha = 0.4,
+            castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
             powerHeight = 6,
             powerPosition = "below",
             powerWidth = 0,
@@ -1073,6 +1105,11 @@ local defaults = {
             extraTextColorR = 1, extraTextColorG = 1, extraTextColorB = 1,
             extraTextX = 0, extraTextY = 0,
             extraTextAlign = "left",
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
             leftTextContent = "name",
             leftTextClassColor = false,
             leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
@@ -4947,6 +4984,14 @@ local function CreatePowerBar(frame, unit, settings)
             ppTextOvr._euiHeight0 = nil
         end
 
+        -- Power Text strata (defaults to "inherit", i.e. follow the frame's strata
+        -- like it always has). Re-applied every call (creation + every settings
+        -- refresh via power._applyPowerPercentText) since a frame-strata reset
+        -- elsewhere cascades to child frames, same as the raid marker holder.
+        if s.powerTextStrata and s.powerTextStrata ~= "inherit" then
+            ppTextOvr:SetFrameStrata(s.powerTextStrata)
+        end
+
         SetFSFont(ppFS, sz)
         ppFS:ClearAllPoints()
 
@@ -5668,6 +5713,34 @@ local function CreateCastBar(frame, unit, settings)
     -- Castbar is a standalone element parented to the oUF frame for
     -- compatibility, but sized and positioned independently.
     local castbarBg = CreateFrame("Frame", nil, frame)
+
+    -- Target/Focus/Boss only: alpha inherits multiplicatively down the
+    -- parent chain, so as long as castbarBg is a child of "frame" the
+    -- whole-frame Out of Range Alpha / Out of Combat fade (applied to
+    -- "frame" itself -- see UpdateFrameVisibility for Target/Focus, TickBoss
+    -- for Boss) always caps how opaque the Castbar can ever render, no
+    -- matter what the independent Cast Bar-only Out of Range Alpha sets on
+    -- the Castbar's own alpha. A child can't be made to render MORE opaque
+    -- than its parent by raising its own alpha (SetAlpha is clamped to 1),
+    -- so that fade has to be kept off the Castbar's ancestor chain entirely
+    -- rather than compensated after the fact.
+    --
+    -- Reparent to whatever "frame" is itself parented to (unaffected by any
+    -- of the fades above) and mirror real Show/Hide so the Castbar still
+    -- disappears whenever the unit frame does (e.g. losing target/focus).
+    -- UpdateFrameVisibility separately gates this parent's alpha to a plain
+    -- 0/1 (see the "cbg" block there) for the alpha-only hide states
+    -- (mouseover, in/out of combat, hide-if overrides) so those still hide
+    -- the Castbar too -- just without carrying the fade's actual magnitude.
+    if unit == "target" or unit == "focus" or (unit and unit:match("^boss%d$")) then
+        local cbParent = frame:GetParent() or UIParent
+        castbarBg:SetParent(cbParent)
+        castbarBg:SetFrameStrata(frame:GetFrameStrata())
+        castbarBg:SetFrameLevel(frame:GetFrameLevel() + 1)
+        if not frame:IsShown() then castbarBg:Hide() end
+        frame:HookScript("OnShow", function() castbarBg:Show() end)
+        frame:HookScript("OnHide", function() castbarBg:Hide() end)
+    end
 
     -- Determine width and height from settings (no auto-derive, always stored)
     local cbWidth, cbHeight
@@ -7109,19 +7182,33 @@ local function StyleFullFrame(frame, unit)
     local cts = settings.centerTextSize or settings.textSize or 12
     local ets = settings.extraTextSize or settings.textSize or 12
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, lts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, rts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, cts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -7129,7 +7216,10 @@ local function StyleFullFrame(frame, unit)
 
     -- Extra Text: a 4th text zone, identical to the others (same tags + absorb gate);
     -- it only anchors per extraTextAlign and is capped at 95% of the bar width (ellipsis truncation).
-    local extraText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local extraTextHolder = CreateFrame("Frame", nil, frame)
+    extraTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._extraTextHolder = extraTextHolder
+    local extraText = extraTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(extraText, ets)
     extraText:SetWordWrap(false)
     extraText:SetTextColor(1, 1, 1)
@@ -7154,19 +7244,28 @@ local function StyleFullFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -7187,7 +7286,7 @@ local function StyleFullFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -7301,6 +7400,24 @@ local function StyleFullFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -7443,19 +7560,33 @@ local function StyleFocusFrame(frame, unit)
     local cts = settings.centerTextSize or settings.textSize or 12
     local ets = settings.extraTextSize or settings.textSize or 12
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, lts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, rts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, cts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -7463,7 +7594,10 @@ local function StyleFocusFrame(frame, unit)
 
     -- Extra Text: a 4th text zone, identical to the others (same tags + absorb gate);
     -- it only anchors per extraTextAlign and is capped at 95% of the bar width (ellipsis truncation).
-    local extraText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local extraTextHolder = CreateFrame("Frame", nil, frame)
+    extraTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._extraTextHolder = extraTextHolder
+    local extraText = extraTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(extraText, ets)
     extraText:SetWordWrap(false)
     extraText:SetTextColor(1, 1, 1)
@@ -7488,19 +7622,28 @@ local function StyleFocusFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -7521,7 +7664,7 @@ local function StyleFocusFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -7633,6 +7776,24 @@ local function StyleFocusFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -7742,19 +7903,33 @@ local function StyleSimpleFrame(frame, unit)
     local rightContent = settings.rightTextContent or "none"
     local centerContent = settings.centerTextContent or "none"
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -7783,19 +7958,28 @@ local function StyleSimpleFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -7817,7 +8001,7 @@ local function StyleSimpleFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -7893,6 +8077,24 @@ local function StyleSimpleFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -7989,19 +8191,33 @@ local function StylePetFrame(frame, unit)
     local rightContent = settings.rightTextContent or "none"
     local centerContent = settings.centerTextContent or "none"
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -8029,19 +8245,28 @@ local function StylePetFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -8063,7 +8288,7 @@ local function StylePetFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -8139,6 +8364,24 @@ local function StylePetFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -8248,19 +8491,33 @@ local function StyleBossFrame(frame, unit)
     local centerContent = settings.centerTextContent or "none"
     local extraContent = settings.extraTextContent or "none"
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -8269,7 +8526,10 @@ local function StyleBossFrame(frame, unit)
     -- Extra Text: a 4th text zone, identical to the others (same tags + absorb
     -- gate); it only anchors per extraTextAlign and is capped at 95% of the bar
     -- width (ellipsis truncation). Mirrors the Main Frames implementation.
-    local extraText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local extraTextHolder = CreateFrame("Frame", nil, frame)
+    extraTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._extraTextHolder = extraTextHolder
+    local extraText = extraTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(extraText, settings.extraTextSize or settings.textSize or 12)
     extraText:SetWordWrap(false)
     extraText:SetTextColor(1, 1, 1)
@@ -8297,19 +8557,28 @@ local function StyleBossFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -8331,7 +8600,7 @@ local function StyleBossFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -8438,6 +8707,24 @@ local function StyleBossFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -11640,11 +11927,23 @@ end
 -- Combat state is passed in by the caller (the visibility loop uses its own
 -- event-tracked _ufInCombat, which leads InCombatLockdown() on regen events).
 -- On ns (not a new file-scope local) to respect the Lua 200-locals cap.
-function ns.ResolveFrameAlpha(s, inCombat)
+--
+-- unitKey (optional) additionally composes the "Out of Range Alpha" fade
+-- (Target/Focus only -- see the Unit Frame Range Dimming block) so the two
+-- fades multiply instead of fighting over the last SetAlpha call. The range
+-- ticker never calls SetAlpha directly for these units; it only updates
+-- ns._oorFactor and re-runs UpdateFrameVisibility, which routes back through
+-- here.
+function ns.ResolveFrameAlpha(s, inCombat, unitKey)
+    local a = 1
     if s and s.oocFadeEnabled and not inCombat then
-        return s.oocAlpha or 0.5
+        a = s.oocAlpha or 0.5
     end
-    return 1
+    if unitKey and ns._oorFactor then
+        local f = ns._oorFactor[unitKey]
+        if f then a = a * f end
+    end
+    return a
 end
 
 local function UnitFrame_OnEnter(self)
@@ -11660,7 +11959,7 @@ local function UnitFrame_OnEnter(self)
             eligible = EllesmereUI.VisWantsMouseover(s, "barVisibility", nil, EllesmereUI.VIS_CAPS_DEFAULT)
         end
         if eligible then
-            local a = ns.ResolveFrameAlpha(s, InCombatLockdown())
+            local a = ns.ResolveFrameAlpha(s, InCombatLockdown(), unitKey)
             ;(self._visWrap or self):SetAlpha(a)
             -- 3D models don't inherit parent alpha: reveal the portrait too
             local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
@@ -11721,7 +12020,7 @@ local function UnitFrame_OnLeave(self)
                                or s.visHideHousing
                                or s.visOnlyInstances
             local keepShown = (not hiddenByOpts) and hasAnyHideOpt
-            leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0
+            leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown(), unitKey) or 0
         end
         ;(self._visWrap or self):SetAlpha(leaveAlpha)
         -- 3D models don't inherit parent alpha: hide/dim the portrait too
@@ -12979,7 +13278,9 @@ function InitializeFrames()
                 -- we are out of combat, in which case the chosen oocAlpha. Uses the
                 -- event-tracked _ufInCombat (authoritative on regen transitions,
                 -- which lead InCombatLockdown()) so the fade flips instantly.
-                local shownAlpha = ns.ResolveFrameAlpha(s, _ufInCombat)
+                -- Also composes the Out of Range fade (Target/Focus) via
+                -- ns._oorFactor -- see the Unit Frame Range Dimming block.
+                local shownAlpha = ns.ResolveFrameAlpha(s, _ufInCombat, unitKey)
 
                 -- Combat-sensitive and mouseover modes use SetAlpha to show/hide
                 -- (SetAlpha is not a restricted API). The frame stays technically
@@ -13047,6 +13348,23 @@ function InitializeFrames()
                     bodyAlpha = 0
                 end
                 alphaTarget:SetAlpha(bodyAlpha)
+
+                -- Target/Focus Castbar: reparented off "frame" above (see
+                -- CreateCastBar) specifically so it stops inheriting the
+                -- fade this SetAlpha just applied -- otherwise the whole-
+                -- frame Out of Range Alpha / OOC fade would always cap the
+                -- independent Cast Bar-only Out of Range Alpha. It still
+                -- needs to vanish alongside every alpha-only hide state
+                -- (mouseover-hidden, in/out-of-combat mismatch, hide-if
+                -- overrides), so gate its parent to a plain on/off here --
+                -- 1 when the frame is meant to be visible at all, 0 when
+                -- bodyAlpha says it shouldn't be -- and let the range
+                -- ticker's own cb:SetAlpha calls (TickPipelineUnit) supply
+                -- the actual displayed magnitude from here on.
+                if frame.Castbar and (unitKey == "target" or unitKey == "focus") then
+                    local cbg = frame.Castbar:GetParent()
+                    if cbg then cbg:SetAlpha(bodyAlpha > 0 and 1 or 0) end
+                end
 
                 -- 3D PlayerModel frames don't inherit parent alpha, so the
                 -- model must mirror the EXACT body alpha computed above --
@@ -14811,13 +15129,34 @@ do
 end
 
 -------------------------------------------------------------------------------
---  Boss Frame Range Dimming
---  Boss units sit outside UnitInRange's group-member domain, so range is
---  measured against a known spell instead: a harm spell for attackable
---  bosses (all specs, first known spell in the class chain wins), or the
---  class baseline heal for friendly bosses (healer specs only). Whole-frame
---  alpha follows db.profile.boss.oorAlpha; 100% means no fade and the check
---  short-circuits. The ticker exists only while a boss frame is shown.
+--  Unit Frame Range Dimming (Boss, Target, Focus)
+--  Boss units -- and Target/Focus, which aren't reliably covered by
+--  UnitInRange either -- sit outside that API's group-member domain, so
+--  range is measured against a known spell instead: a harm spell for
+--  attackable units (all specs, first known spell in the class chain
+--  wins), or the class baseline heal for friendly units (healer specs
+--  only).
+--
+--  Two independent fades share this one range check:
+--   * Whole-frame Out of Range Alpha (db.profile[key].oorAlpha; Boss/
+--     Target/Focus, "Extras"/"Indicators" section). 100% means no fade and
+--     that half of the check short-circuits.
+--   * Cast Bar-only Out of Range Alpha (db.profile[key].castbarOorAlpha;
+--     Target/Focus, inside the Cast Bar cog). Dims just the Castbar element
+--     instead of the whole frame; defaults to 100% (off) so it never
+--     changes anyone's cast bar unless they opt in.
+--
+--  Two application styles for the whole-frame fade, because Target/Focus
+--  already have their own alpha pipeline (Fade Out of Combat + mouseover/
+--  driver visibility) and Boss doesn't:
+--   * Target/Focus: the tick only updates ns._oorFactor[unitKey], then
+--     re-runs UpdateFrameVisibility() so ns.ResolveFrameAlpha composes the
+--     range fade with everything else through the single existing alpha
+--     site instead of a second SetAlpha call fighting the first.
+--   * Boss: no such pipeline exists, so the tick sets alpha directly.
+--  The Cast Bar fade always sets alpha directly (Target/Focus only; the
+--  Castbar element has no fade pipeline of its own to route through).
+--  The ticker exists only while at least one tracked frame is shown.
 --  (do-block: zero persistent main-chunk locals.)
 -------------------------------------------------------------------------------
 do
@@ -14841,8 +15180,15 @@ do
         DRUID = 8936, MONK = 116670, EVOKER = 361469,
     }
 
+    -- Full frames with their own fade/visibility pipeline: whole-frame fade
+    -- dimmed indirectly via ns._oorFactor + ns.ResolveFrameAlpha (see
+    -- UpdateFrameVisibility); Cast Bar fade dimmed directly either way.
+    local PIPELINE_UNITS = { "target", "focus" }
+
     local harmSpell, helpSpell
     local visCount, ticker = 0, nil
+
+    ns._oorFactor = ns._oorFactor or {}
 
     local function Known(sid)
         if C_SpellBook and C_SpellBook.IsSpellInSpellBook and Enum.SpellBookSpellBank then
@@ -14862,41 +15208,134 @@ do
         if role == "HEALER" then helpSpell = HELP_HEAL[pClass] end
     end
 
-    local function TickOne(f, unit)
-        if not db then return end
-        local oor = (db.profile.boss and db.profile.boss.oorAlpha) or 0.4
-        if oor >= 1 or not UnitExists(unit) then
-            f:SetAlpha(1)
-            return
-        end
+    -- Returns true/false (in range or not), or nil when the unit/spell
+    -- can't be range-checked right now (unit gone, no known spell, or a
+    -- momentarily unevaluable result that isn't secret either).
+    local function ComputeInRange(unit)
+        if not UnitExists(unit) then return nil end
         local spell
         if UnitCanAttack("player", unit) then
             spell = harmSpell
         else
             spell = helpSpell
         end
-        if spell then
-            -- Secret-safe: the result may be secret in instances, which
-            -- SetAlphaFromBoolean accepts natively -- but it can also be NIL
-            -- (unit not range-checkable right now / spell momentarily not
-            -- evaluable), which it rejects. issecretvalue runs first so the
-            -- nil check never touches a secret.
-            local inRange = C_Spell.IsSpellInRange(spell, unit)
-            if issecretvalue(inRange) or inRange ~= nil then
-                f:SetAlphaFromBoolean(inRange, 1, oor)
-            else
-                f:SetAlpha(1)
-            end
+        if not spell then return nil end
+        -- Secret-safe: the result may be secret in instances, which
+        -- SetAlphaFromBoolean accepts natively -- but it can also be NIL
+        -- (unit not range-checkable right now / spell momentarily not
+        -- evaluable), which it rejects. issecretvalue runs first so the
+        -- nil check never touches a secret.
+        local inRange = C_Spell.IsSpellInRange(spell, unit)
+        if issecretvalue(inRange) or inRange ~= nil then return inRange end
+        return nil
+    end
+
+    local function TickBoss(f, unit)
+        if not db then return end
+        local s = db.profile.boss
+        local oor = (s and s.oorAlpha) or 0.4
+        local castOor = (s and s.castbarOorAlpha) or 1
+        local cbg = f.Castbar and f.Castbar:GetParent()
+
+        if not UnitExists(unit) then
+            f:SetAlpha(1)
+            -- Castbar is reparented off "f" (see CreateCastBar) so it no
+            -- longer hides/dims with it automatically via alpha; when there
+            -- is nothing to range-check, reset both to full same as the
+            -- whole frame.
+            if cbg then cbg:SetAlpha(1) end
+            if f.Castbar then f.Castbar:SetAlpha(1) end
+            return
+        end
+
+        local inRange
+        if oor < 1 or castOor < 1 then
+            inRange = ComputeInRange(unit)
+        end
+
+        -- Whole-frame Out of Range Alpha (unchanged behavior).
+        if oor >= 1 then
+            f:SetAlpha(1)
+        elseif inRange ~= nil then
+            f:SetAlphaFromBoolean(inRange, 1, oor)
         else
             f:SetAlpha(1)
+        end
+
+        -- Castbar's parent is reparented off "f" specifically so the fade
+        -- just applied above doesn't cascade into it (see CreateCastBar);
+        -- boss frames have no alpha-only hide state to mirror here (they are
+        -- either UnitExists or not, handled above), so the gate stays open.
+        if cbg then cbg:SetAlpha(1) end
+
+        -- Cast Bar-only Out of Range Alpha: independent of the whole-frame
+        -- fade above (shares the same range check when both are active).
+        if f.Castbar then
+            if castOor >= 1 then
+                f.Castbar:SetAlpha(1)
+            elseif inRange ~= nil then
+                f.Castbar:SetAlphaFromBoolean(inRange, 1, castOor)
+            else
+                f.Castbar:SetAlpha(1)
+            end
+        end
+    end
+
+    local function ResetCastbarAlpha(unitKey)
+        local cb = frames[unitKey] and frames[unitKey].Castbar
+        if cb then cb:SetAlpha(1) end
+    end
+
+    local function TickPipelineUnit(unitKey)
+        local s = db and db.profile and db.profile[unitKey]
+        local oor = (s and s.oorAlpha) or 0.4
+        local castOor = (s and s.castbarOorAlpha) or 1
+        local inRange
+
+        local factor = 1
+        if oor < 1 then
+            inRange = ComputeInRange(unitKey)
+            if inRange ~= nil then
+                factor = inRange and 1 or oor
+            end
+        end
+        ns._oorFactor[unitKey] = factor
+
+        -- Cast Bar-only Out of Range Alpha: independent of the whole-frame
+        -- fade above (shares the same range check when both are active), so
+        -- it can dim just the Castbar element on its own.
+        local cb = frames[unitKey] and frames[unitKey].Castbar
+        if cb then
+            if castOor >= 1 then
+                cb:SetAlpha(1)
+            else
+                if inRange == nil then inRange = ComputeInRange(unitKey) end
+                if inRange ~= nil then
+                    cb:SetAlphaFromBoolean(inRange, 1, castOor)
+                else
+                    cb:SetAlpha(1)
+                end
+            end
         end
     end
 
     local function Tick()
         for i = 1, 5 do
             local f = frames["boss" .. i]
-            if f and f:IsVisible() then TickOne(f, "boss" .. i) end
+            if f and f:IsVisible() then TickBoss(f, "boss" .. i) end
         end
+        local anyPipeline = false
+        for _, unitKey in ipairs(PIPELINE_UNITS) do
+            local f = frames[unitKey]
+            if f and f:IsVisible() then
+                TickPipelineUnit(unitKey)
+                anyPipeline = true
+            else
+                ns._oorFactor[unitKey] = 1
+                ResetCastbarAlpha(unitKey)
+            end
+        end
+        if anyPipeline and ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
     end
 
     local function UpdateTicker()
@@ -14909,26 +15348,33 @@ do
         end
     end
 
-    local hooked = false
+    -- Per-frame hooked flag (rather than one module-level bool) so units
+    -- that spawn after the first InstallHooks pass (e.g. boss frames that
+    -- weren't up yet) still get hooked on a later PLAYER_ENTERING_WORLD.
+    local function HookFrame(f, onHide)
+        if not f or f._oorHooked then return end
+        f._oorHooked = true
+        if f:IsVisible() then visCount = visCount + 1 end
+        f:HookScript("OnShow", function()
+            visCount = visCount + 1
+            UpdateTicker()
+        end)
+        f:HookScript("OnHide", function(self)
+            visCount = math.max(0, visCount - 1)
+            if onHide then onHide(self) end
+            UpdateTicker()
+        end)
+    end
+
     local function InstallHooks()
-        if hooked or not frames["boss1"] then return end
-        hooked = true
         for i = 1, 5 do
-            local f = frames["boss" .. i]
-            if f then
-                local unit = "boss" .. i
-                if f:IsVisible() then visCount = visCount + 1 end
-                f:HookScript("OnShow", function(self)
-                    visCount = visCount + 1
-                    TickOne(self, unit)
-                    UpdateTicker()
-                end)
-                f:HookScript("OnHide", function(self)
-                    visCount = math.max(0, visCount - 1)
-                    self:SetAlpha(1)
-                    UpdateTicker()
-                end)
-            end
+            HookFrame(frames["boss" .. i], function(self) self:SetAlpha(1) end)
+        end
+        for _, unitKey in ipairs(PIPELINE_UNITS) do
+            HookFrame(frames[unitKey], function()
+                ns._oorFactor[unitKey] = 1
+                ResetCastbarAlpha(unitKey)
+            end)
         end
         UpdateTicker()
     end

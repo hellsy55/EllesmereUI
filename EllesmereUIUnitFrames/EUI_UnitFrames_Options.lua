@@ -4470,6 +4470,7 @@ initFrame:SetScript("OnEvent", function(self)
             },
         })
 
+
         -- When this unit isn't on the EllesmereUI frame there is nothing below
         -- to configure (its EUI frame isn't spawned): keep the Visibility row
         -- (it hosts the Frame Source cog; in the hidden state its "Never Show"
@@ -6366,6 +6367,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return SVal("leftTextContent","name") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return SVal("leftTextStrata", "inherit") end,
+                      set=function(v) SSet("leftTextStrata", v) end },
                                     },
             })
             local leftCogShow = leftCogShowRaw
@@ -6553,6 +6559,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return SVal("rightTextContent","both") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return SVal("rightTextStrata", "inherit") end,
+                      set=function(v) SSet("rightTextStrata", v) end },
                                     },
             })
             local rightCogShow = rightCogShowRaw
@@ -6742,6 +6753,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return SVal("centerTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return SVal("centerTextStrata", "inherit") end,
+                      set=function(v) SSet("centerTextStrata", v) end },
                                     },
             })
             local centerCogShow = centerCogShowRaw
@@ -6923,6 +6939,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return SVal("extraTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return SVal("extraTextStrata", "inherit") end,
+                      set=function(v) SSet("extraTextStrata", v) end },
                                     },
             })
             local extraCogShow = extraCogShowRaw
@@ -7507,6 +7528,11 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-50, max=50, step=1,
                       get=function() return SVal("powerPercentY", 0) end,
                       set=function(v) SSet("powerPercentY", v); UpdatePreview() end },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return SVal("powerTextStrata", "inherit") end,
+                      set=function(v) SSet("powerTextStrata", v) end },
                 },
             })
             local ppCogShow = ppCogShowRaw
@@ -8086,6 +8112,14 @@ initFrame:SetScript("OnEvent", function(self)
                         -- greys/ungreys immediately; the cog popup stays open.
                         EllesmereUI:RefreshPage()
                     end }
+                -- Dims just the cast bar (not the whole frame) when the unit
+                -- is out of range of your spells. Independent of the
+                -- whole-frame "Out of Range Alpha" slider in Extras -- read
+                -- live by the range ticker, so no reload is needed here.
+                cogRows[#cogRows + 1] = { type = "slider", label = "Out of Range Alpha", min = 10, max = 100, step = 1,
+                    tooltip = "Fades just the cast bar when the unit is out of range of your spells. Set to 100% to disable the fade.",
+                    get = function() return math.floor(((SVal("castbarOorAlpha", 1)) * 100) + 0.5) end,
+                    set = function(v) UNIT_DB_MAP[selectedUnit]().castbarOorAlpha = v / 100 end }
             end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Cast Bar",
@@ -11842,6 +11876,24 @@ initFrame:SetScript("OnEvent", function(self)
                 "Apply Leader Icon Size to all Frames")
         end
 
+        -- Row 6: Out of Range Alpha. Target/Focus only -- mirrors the Boss
+        -- Frames "Indicators" section slider of the same name. Read live by
+        -- the range ticker (Unit Frame Range Dimming block), so no reload is
+        -- needed here; it composes with Fade Out of Combat through
+        -- ns.ResolveFrameAlpha instead of a second SetAlpha call.
+        local sharedAddRow6
+        local function oorSupported()
+            return selectedUnit == "target" or selectedUnit == "focus"
+        end
+        if oorSupported() then
+            sharedAddRow6, h = W:DualRow(parent, y,
+                { type="slider", text="Out of Range Alpha", min=10, max=100, step=1,
+                  tooltip="Fades the frame when the unit is out of range of your spells. Set to 100% to disable the fade.",
+                  getValue=function() return math.floor(((SVal("oorAlpha", 0.4)) * 100) + 0.5) end,
+                  setValue=function(v) UNIT_DB_MAP[selectedUnit]().oorAlpha = v / 100 end },
+                { type="label", text="" });  y = y - h
+        end
+
         -------------------------------------------------------------------
         --  Return click mapping targets + total height
         -------------------------------------------------------------------
@@ -11866,6 +11918,7 @@ initFrame:SetScript("OnEvent", function(self)
             debuffIcon   = { section = sharedBuffDebuffHeader, target = sharedAddRow3, slotSide = "left" },
             raidMarker   = { section = sharedAddHeader,      target = sharedAddRow4, slotSide = "left" },
             leaderIndicator = { section = sharedAddHeader,   target = sharedAddRow5, slotSide = "left" },
+            outOfRangeAlpha = { section = sharedAddHeader,   target = sharedAddRow6, slotSide = "left" },
             castBar      = { section = sharedCastHeader,     target = sharedCastRow1 },
             castIcon     = { section = sharedCastHeader,     target = castRow2,      slotSide = "left" },
             castName     = { section = sharedCastHeader,     target = castTextRow,   slotSide = "left" },
@@ -12836,6 +12889,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return MVal("leftTextContent","name") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return MVal("leftTextStrata", "inherit") end,
+                      set=function(v) MSet("leftTextStrata", v) end },
                                     },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
@@ -12950,6 +13008,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return MVal("rightTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return MVal("rightTextStrata", "inherit") end,
+                      set=function(v) MSet("rightTextStrata", v) end },
                                     },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
@@ -13083,6 +13146,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return MVal("centerTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return MVal("centerTextStrata", "inherit") end,
+                      set=function(v) MSet("centerTextStrata", v) end },
                                     },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
@@ -13204,6 +13272,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       disabled=function() return MVal("extraTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
+                    { type="dropdown", label="Strata",
+                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      get=function() return MVal("extraTextStrata", "inherit") end,
+                      set=function(v) MSet("extraTextStrata", v) end },
                                     },
             })
             local cogBtn = MCogBtn(rgn, cogShowFn)
@@ -13500,6 +13573,11 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Y Offset", min=-50, max=50, step=1,
                           get=function() return MVal("powerPercentY", 0) end,
                           set=function(v) MSet("powerPercentY", v) end },
+                        { type="dropdown", label="Strata",
+                          values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
+                          order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                          get=function() return MVal("powerTextStrata", "inherit") end,
+                          set=function(v) MSet("powerTextStrata", v) end },
                     },
                 })
                 local cogBtn = MCogBtn(rgn, szCog, EllesmereUI.RESIZE_ICON)
@@ -14976,6 +15054,15 @@ initFrame:SetScript("OnEvent", function(self)
                           tooltip="Colors the cast segment during which your interrupt will be available.",
                           get=function() return B.castbarInterruptMidCastEnabled == true end,
                           set=function(v) B.castbarInterruptMidCastEnabled = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
+                        -- Dims just the cast bar (not the whole frame) when the
+                        -- boss is out of range of your spells. Independent of
+                        -- the whole-frame "Out of Range Alpha" slider in
+                        -- Indicators -- read live by the range ticker, so no
+                        -- reload is needed here.
+                        { type="slider", label="Cast Bar Out of Range Alpha", min=10, max=100, step=1,
+                          tooltip="Fades just the cast bar when the boss is out of range of your spells. Set to 100% to disable the fade.",
+                          get=function() return math.floor(((B.castbarOorAlpha or 1) * 100) + 0.5) end,
+                          set=function(v) B.castbarOorAlpha = v / 100 end },
                         { type="slider", label="Offset X", min=-500, max=500, step=1,
                           get=function() return B.castbarOffsetX or 0 end,
                           set=function(v) B.castbarOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
