@@ -269,6 +269,56 @@ local POWER_COLORS = setmetatable({}, { __index = function(_, powerKey)
     return nil
 end })
 
+-- Blizzard player-frame power-bar atlas per power token, validated at
+-- runtime via GetAtlasInfo: unknown tokens (special bars like Stagger or
+-- Ironfur) and atlases missing on this client fall back to the regular bar
+-- texture, so an atlas rename can never render broken art. Lives on ns:
+-- this chunk sits at Lua 5.1's 200-local cap.
+ns._crAtlasSuffix = {
+    MANA = "Mana", RAGE = "Rage", FOCUS = "Focus", ENERGY = "Energy",
+    RUNIC_POWER = "RunicPower", LUNAR_POWER = "AstralPower",
+    MAELSTROM = "Maelstrom", INSANITY = "Insanity", FURY = "Fury",
+    PAIN = "Pain",
+}
+-- Tint sink for atlas-mode fills: stands in for the fill texture at the
+-- live recolor sites so threshold/band/base tints go nowhere while the
+-- surrounding logic (text recoloring, curve evaluation) keeps running.
+ns._atlasNoTint = { SetVertexColor = function() end }
+ns._crAtlasClass = {
+    DEATHKNIGHT = "DeathKnight", DEMONHUNTER = "DemonHunter",
+    DRUID = "Druid", EVOKER = "Evoker", HUNTER = "Hunter", MAGE = "Mage",
+    MONK = "Monk", PALADIN = "Paladin", PRIEST = "Priest", ROGUE = "Rogue",
+    SHAMAN = "Shaman", WARLOCK = "Warlock", WARRIOR = "Warrior",
+}
+function ns.GetBlizzardPowerAtlas(powerKey)
+    local resolved = ResolvePowerKey(powerKey) or powerKey
+    local suffix = ns._crAtlasSuffix[resolved]
+    local dbg = { power = powerKey, resolved = resolved, suffix = suffix }
+    _G._ERB_AtlasDebug = dbg
+    if not suffix or not (C_Texture and C_Texture.GetAtlasInfo) then return nil end
+    -- Midnight family first ("Unit_Druid_AstralPower_Fill", read off the
+    -- default player frame), then classless and legacy HUD spellings; every
+    -- candidate is validated so a miss falls back to the regular texture.
+    local _, classFile = UnitClass("player")
+    local classToken = classFile and ns._crAtlasClass[classFile]
+    local candidates = {}
+    if classToken then
+        candidates[#candidates + 1] = "Unit_" .. classToken .. "_" .. suffix .. "_Fill"
+    end
+    candidates[#candidates + 1] = "Unit_" .. suffix .. "_Fill"
+    candidates[#candidates + 1] = "UI-HUD-UnitFrame-Player-PortraitOff-Bar-" .. suffix
+    candidates[#candidates + 1] = "UI-HUD-UnitFrame-Player-PortraitOn-Bar-" .. suffix
+    dbg.tried = candidates
+    for i = 1, #candidates do
+        local name = candidates[i]
+        if C_Texture.GetAtlasInfo(name) then
+            dbg.hit = name
+            return name
+        end
+    end
+    return nil
+end
+
 -- Dark theme fill/background COLOUR comes from the global per-profile Dark Mode
 -- palette (EllesmereUI.GetDarkModeFill / GetDarkModeBg), fetched live at each use.
 -- Resource Bars keep their OWN alpha below -- the Dark Mode opacity sliders apply
@@ -1147,6 +1197,7 @@ local DEFAULTS = {
             borderR     = 0, borderG = 0, borderB = 0, borderA = 1,
             borderTexture = "solid",
             darkTheme   = false,
+            useBlizzardAtlas = false,  -- bar-style class resources use Blizzard's player-frame power atlas as the fill
             classColored = true,
             resourceColored = false,  -- "Class Resource Color" fill mode (per-spec resource/power color); takes precedence over classColored when on
             fillR       = 0.95, fillG = 0.90, fillB = 0.60, fillA = 1,
@@ -3480,6 +3531,24 @@ local function BuildBars()
                 secondaryBar:GetStatusBarTexture():SetVertexColor(sp.fillR, sp.fillG, sp.fillB, 1)
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             end
+            -- Blizzard atlas fill: swapped in AFTER the tint chain because the
+            -- atlas art is pre-colored (every color mode above is overridden
+            -- to white), and SetStatusBarTexture resets orientation and vertex
+            -- color. No atlas for this power = the ApplyBarTexture fill and
+            -- its tints above stay untouched.
+            secondaryBar._atlasFill = nil
+            if sp.useBlizzardAtlas then
+                local atlas = ns.GetBlizzardPowerAtlas(cachedSecondary.power)
+                if atlas then
+                    secondaryBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+                    secondaryBar:GetStatusBarTexture():SetAtlas(atlas, true)
+                    ApplyBarOrientation(secondaryBar, pipOri)
+                    secondaryBar:GetStatusBarTexture():SetVertexColor(1, 1, 1, 1)
+                    -- An active atlas fill is never tinted: every live
+                    -- recolor path must check this stamp.
+                    secondaryBar._atlasFill = true
+                end
+            end
             ns.ApplyFillOpacity(secondaryBar, pipOri, sp.fillOpacity)
             secondaryBar:ApplyBorder(0, 0, 0, 0, 0)
             if cachedSecondary.power == "IRONFUR_BAR" then
@@ -5071,7 +5140,7 @@ local function UpdateSecondaryResource()
                     end
                     if _spTextInstead then
                         local lastR, lastG, lastB = secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB
-                        if lastR ~= r or lastG ~= g or lastB ~= b then
+                        if not secondaryBar._atlasFill and (lastR ~= r or lastG ~= g or lastB ~= b) then
                             secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB = r, g, b
                             secondaryBar:GetStatusBarTexture():SetVertexColor(r, g, b, a)
                         end
@@ -5081,7 +5150,7 @@ local function UpdateSecondaryResource()
                         local fr, fg, fb = r, g, b
                         if trig then fr, fg, fb = tcr, tcg, tcb end
                         local lastR, lastG, lastB = secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB
-                        if lastR ~= fr or lastG ~= fg or lastB ~= fb then
+                        if not secondaryBar._atlasFill and (lastR ~= fr or lastG ~= fg or lastB ~= fb) then
                             secondaryBar._lastStaggerR, secondaryBar._lastStaggerG, secondaryBar._lastStaggerB = fr, fg, fb
                             secondaryBar:GetStatusBarTexture():SetVertexColor(fr, fg, fb, 1)
                         end
@@ -5139,6 +5208,11 @@ local function UpdateSecondaryResource()
             -- at or above thresholdCount treated as a percent value.
             if powerType ~= "BREWMASTER_STAGGER" or sp.darkTheme then
                 local ft = secondaryBar:GetStatusBarTexture()
+                -- An active atlas fill is never tinted: route every fill
+                -- SetVertexColor below into the no-op sink. Text recoloring
+                -- still runs, and the special-power branches (Ignore Pain,
+                -- Devourer, Stagger) can never be atlased.
+                if ft and secondaryBar._atlasFill then ft = ns._atlasNoTint end
                 if ft then
                     -- Hide the Ignore Pain band/threshold overlays by default; the
                     -- IP branch below re-shows exactly the layers it needs. Any other

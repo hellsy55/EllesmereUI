@@ -1064,9 +1064,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Cropped icons (mirror the runtime): rectangular height (80% of
             -- width) + matching texcoord trim. Off by default.
-            local debuffCrop = DBVal("debuffCropIcons") or defaults.debuffCropIcons
-            local buffCrop   = DBVal("buffCropIcons")   or defaults.buffCropIcons
-            local ccCrop     = DBVal("ccCropIcons")     or defaults.ccCropIcons
+            -- ns.GetAuraCrop returns the height FACTOR (truthy number) when
+            -- cropped, so the preview follows the Adjust Crop slider exactly.
+            local debuffCrop = ns.GetAuraCrop("debuffs")
+            local buffCrop   = ns.GetAuraCrop("buffs")
+            local ccCrop     = ns.GetAuraCrop("ccs")
             local debuffH = ns.GetAuraCropHeight(debuffCrop, debuffSz)
             local buffH   = ns.GetAuraCropHeight(buffCrop, buffSz)
             local ccH     = ns.GetAuraCropHeight(ccCrop, ccSz)
@@ -5292,12 +5294,72 @@ initFrame:SetScript("OnEvent", function(self)
                 pf._cropLabel = cropLabel
                 local cropToggle, _, cropToggleSnap = EllesmereUI.BuildToggleControl(pf, pf:GetFrameLevel() + 5,
                     function() return pf._cropGet and pf._cropGet() or false end,
-                    function(v) if pf._cropSet then pf._cropSet(v) end end,
+                    function(v)
+                        if pf._cropSet then pf._cropSet(v) end
+                        -- The Adjust Crop slider (below) rides this toggle's state.
+                        if pf._cropPctSyncDisabled then pf._cropPctSyncDisabled() end
+                    end,
                     { sizeRatio = 0.8, noAnim = true })
                 cropToggle:SetPoint("RIGHT", pf, "TOPRIGHT", -SIDE_PAD, G_ROW_Y - GROWTH_ROW_H / 2)
                 cropToggle:Hide()
                 pf._cropToggle = cropToggle
                 pf._cropToggleSnap = cropToggleSnap
+
+                -- Optional "Adjust Crop" slider row (own row, directly below
+                -- Cropped Icons; wired via pf._cropPctGet / pf._cropPctSet).
+                -- Per-side trim percentage; 10 is the classic fixed crop.
+                -- Blocked + dimmed while Cropped Icons is off, following the
+                -- standard disabled-inline-control pattern.
+                local cpLabel = MakeFont(pf, 12, nil, 1, 1, 1)
+                cpLabel:SetAlpha(0.6); cpLabel:SetText(EllesmereUI.L("Adjust Crop"))
+                cpLabel:Hide()
+                pf._cropPctLabel = cpLabel
+                local cpHover = CreateFrame("Frame", nil, pf)
+                cpHover:SetFrameLevel(pf:GetFrameLevel() + 10)
+                cpHover:SetAllPoints(cpLabel)
+                cpHover:EnableMouse(true)
+                cpHover:Hide()
+                cpHover:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("How much is trimmed from the icon's top and bottom, as a percentage per side. 10% is the classic cropped look."), { width = 230 })
+                end)
+                cpHover:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                pf._cropPctHover = cpHover
+                -- Narrower track than the standard rows: the "Adjust Crop"
+                -- label is wider than Size/Spacing and would run under a
+                -- full-width track. The right edge stays aligned (the track
+                -- start shifts right by the same amount in the reposition).
+                local cpTrack, cpValBox = BuildSliderCore(pf, SLIDER_W - 26, 4, 12, INPUT_W, SLIDER_H, 11, SL_INPUT_A,
+                    5, 25, 1,
+                    function() return pf._cropPctGet and pf._cropPctGet() or 10 end,
+                    function(v) if pf._cropPctSet then pf._cropPctSet(v) end end, true)
+                cpTrack:Hide(); cpValBox:Hide()
+                pf._cropPctTrack = cpTrack; pf._cropPctValBox = cpValBox
+                -- Blocking overlay for the disabled state (covers track + input).
+                local cpBlock = CreateFrame("Frame", nil, pf)
+                cpBlock:SetFrameLevel(pf:GetFrameLevel() + 20)
+                cpBlock:EnableMouse(true)
+                cpBlock:Hide()
+                cpBlock:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Cropped Icons"))
+                end)
+                cpBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                pf._cropPctBlock = cpBlock
+                -- Dim/undim + block per the crop toggle's current value; called
+                -- on every popup show and whenever the crop toggle flips.
+                pf._cropPctSyncDisabled = function()
+                    if not cpTrack:IsShown() then
+                        cpBlock:Hide()
+                        return
+                    end
+                    local on = pf._cropGet and pf._cropGet() and true or false
+                    local a = on and 1 or 0.3
+                    cpTrack:SetAlpha(a); cpValBox:SetAlpha(a)
+                    cpLabel:SetAlpha(on and 0.6 or 0.25)
+                    cpBlock:ClearAllPoints()
+                    cpBlock:SetPoint("TOPLEFT", cpTrack, "TOPLEFT", 0, 4)
+                    cpBlock:SetPoint("BOTTOMRIGHT", cpValBox, "BOTTOMRIGHT", 0, -4)
+                    cpBlock:SetShown(not on)
+                end
 
                 -- Optional "Wrap" toggle row (own row, like Cropped Icons). Used by
                 -- the truncating text elements (enemy name, cast name/target, health
@@ -5388,6 +5450,7 @@ initFrame:SetScript("OnEvent", function(self)
             local hasCrop = opts.cropGet ~= nil
             local hasWrap = opts.wrapGet ~= nil
             local hasRaiseStrata = opts.raiseStrataGet ~= nil
+            local hasCropPct = opts.cropPctGet ~= nil
             if hasSize then
                 -- Rebuild size slider if range changed
                 local sStep = opts.sizeStep or 1
@@ -5504,6 +5567,24 @@ initFrame:SetScript("OnEvent", function(self)
                 cogPopup._cropToggle:Hide()
             end
 
+            -- Show/hide Adjust Crop row (slider, directly below Cropped Icons)
+            if hasCropPct then
+                cogPopup._cropPctGet = opts.cropPctGet
+                cogPopup._cropPctSet = opts.cropPctSet
+                cogPopup._cropPctLabel:Show()
+                cogPopup._cropPctTrack:Show()
+                cogPopup._cropPctValBox:Show()
+                cogPopup._cropPctHover:Show()
+            else
+                cogPopup._cropPctGet = nil
+                cogPopup._cropPctSet = nil
+                cogPopup._cropPctLabel:Hide()
+                cogPopup._cropPctTrack:Hide()
+                cogPopup._cropPctValBox:Hide()
+                cogPopup._cropPctHover:Hide()
+                cogPopup._cropPctBlock:Hide()
+            end
+
             -- Show/hide Wrap row (its own row, like Cropped Icons)
             if hasWrap then
                 cogPopup._wrapGet = opts.wrapGet
@@ -5599,6 +5680,23 @@ initFrame:SetScript("OnEvent", function(self)
                 p._cropLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, cropY - GRH / 2)
                 p._cropToggle:ClearAllPoints()
                 p._cropToggle:SetPoint("RIGHT", p, "TOPRIGHT", -SPAD, cropY - GRH / 2)
+                -- Adjust Crop sits in the row directly below Cropped Icons; the
+                -- slider anchorRow handles label + track + input box, then the
+                -- disabled sync dims/blocks it per the toggle's current state.
+                if hasCropPct then
+                    -- Manual anchoring instead of anchorRow: the track starts
+                    -- 26px further right (it was built 26px narrower) so the
+                    -- wider "Adjust Crop" label never runs underneath it while
+                    -- the track's right edge stays aligned with the other rows.
+                    local cpy = rowY(#seq + 2 + extraRows)
+                    p._cropPctLabel:ClearAllPoints()
+                    p._cropPctLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, cpy - SH / 2)
+                    p._cropPctTrack:ClearAllPoints()
+                    p._cropPctTrack:SetPoint("TOPLEFT", p, "TOPLEFT", SLEFT + 26, cpy - 2)
+                    p._cropPctValBox:ClearAllPoints()
+                    p._cropPctValBox:SetPoint("TOPRIGHT", p, "TOPRIGHT", -SPAD, cpy)
+                    if p._cropPctSyncDisabled then p._cropPctSyncDisabled() end
+                end
                 -- Wrap sits in its own row, like Cropped Icons: below the
                 -- Grow/toggle band when present, else after the data rows.
                 -- (No cog uses both Wrap and Cropped Icons, so they never collide.)
@@ -5613,6 +5711,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasRaiseStrata then
                     local rsRowIndex = #seq + 1 + extraRows
                     if hasCrop or hasWrap then rsRowIndex = rsRowIndex + 1 end
+                    if hasCropPct then rsRowIndex = rsRowIndex + 1 end
                     local rsY = rowY(rsRowIndex)
                     p._rsLabel:ClearAllPoints()
                     p._rsLabel:SetPoint("LEFT", p, "TOPLEFT", SPAD, rsY - GRH / 2)
@@ -5625,6 +5724,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasWidth then
                     local widthRowIndex = #seq + 1 + extraRows
                     if hasCrop or hasWrap then widthRowIndex = widthRowIndex + 1 end
+                    if hasCropPct then widthRowIndex = widthRowIndex + 1 end
                     anchorRow(p._wLabel, p._wTrack, p._wValBox, rowY(widthRowIndex))
                 end
             end
@@ -5654,6 +5754,8 @@ initFrame:SetScript("OnEvent", function(self)
                 if hasToggle then h = h + gap + p._GROWTH_ROW_H end
                 -- Cropped Icons always occupies its own extra row.
                 if hasCrop then h = h + gap + p._GROWTH_ROW_H end
+                -- Adjust Crop (slider) occupies its own extra row below it.
+                if hasCropPct then h = h + gap + rowH end
                 -- Wrap occupies its own extra row.
                 if hasWrap then h = h + gap + p._GROWTH_ROW_H end
                 -- Raise Strata occupies its own extra row.
@@ -6111,6 +6213,12 @@ initFrame:SetScript("OnEvent", function(self)
                 if cropKey then
                     opts.cropGet = function() return DBVal(cropKey) or defaults[cropKey] end
                     opts.cropSet = function(v) DB()[cropKey] = v; RefreshAllSlots(); UpdatePreview() end
+                    -- Adjust Crop: per-side trim percentage for the cropped mode.
+                    local cropPctKey = (element == "debuffs" and "debuffCropPercent")
+                        or (element == "buffs" and "buffCropPercent")
+                        or "ccCropPercent"
+                    opts.cropPctGet = function() return DBVal(cropPctKey) or 10 end
+                    opts.cropPctSet = function(v) DB()[cropPctKey] = v; RefreshAllSlots(); UpdatePreview() end
                 end
                 -- Rare/Quest Indicator: "Show In Instances" lifts the
                 -- open-world-only gates (UpdateClassification render gate +

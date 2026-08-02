@@ -1007,8 +1007,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end  -- close do (health eyeball)
 
-        -- Row 1: Health Bar Texture | Fill Opacity
-        _, h = W:DualRow(parent, y,
+        -- Row 1: Health Bar Texture (+ cog: Vertical Fill) | Fill Opacity
+        local texRow
+        texRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Health Bar Texture", values=hbtValues, order=hbtOrder,
               getValue=function() return SVal("healthBarTexture", "atrocity") end,
               setValue=function(v) SSet("healthBarTexture", v) end },
@@ -1016,7 +1017,36 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=function() return SVal("healthColorMode", "class") == "dark" end,
               disabledTooltip="Not available in Dark Mode", rawTooltip=true,
               getValue=function() return SVal("healthBarOpacity", 100) end,
-              setValue=function(v) SSet("healthBarOpacity", v) end });  y = y - h
+              setValue=function(v) SSet("healthBarOpacity", v) end });
+        -- Cog on Health Bar Texture: Vertical Fill. Part of the Health Bar
+        -- party-sync section, so an unsynced party tab keeps its own value.
+        do
+            local lrgn = texRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Health Bar Fill",
+                rows = {
+                    { type="toggle", label="Vertical Fill",
+                      tooltip="Fill the health bar bottom-to-top instead of left-to-right. Absorbs, heal prediction and the bar background follow the same axis.",
+                      get=function() return SVal("healthVerticalFill", false) end,
+                      -- RefreshPage re-labels the Absorbs Placement dropdowns for
+                      -- the new axis (cog popups bake the labels in on first build).
+                      set=function(v) SSet("healthVerticalFill", v); EllesmereUI:RefreshPage() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, lrgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", lrgn._lastInline or lrgn._control, "LEFT", -8, 0)
+            lrgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(lrgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
+        y = y - h
 
         -- Row 2: Fill Color | Background
         row, h = W:DualRow(parent, y,
@@ -1239,17 +1269,6 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSet("threatBorderSize", v) end });  y = y - h
         ns._editTargets.threat = smoothThreatRow
         ns._editTargets.animateBars = smoothThreatRow
-
-        -- Row 5: Vertical Fill. Part of the Health Bar party-sync section, so an
-        -- unsynced party tab keeps its own value.
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Vertical Fill",
-              tooltip="Fill the health bar bottom-to-top instead of left-to-right. Absorbs, heal prediction and the bar background follow the same axis.",
-              getValue=function() return SVal("healthVerticalFill", false) end,
-              -- RefreshPage re-labels the Absorbs Placement dropdowns for the new
-              -- axis (their cog popups bake the labels in on first build).
-              setValue=function(v) SSet("healthVerticalFill", v); EllesmereUI:RefreshPage() end },
-            { type="spacer" });  y = y - h
 
         -------------------------------------------------------------------
         --  ABSORBS

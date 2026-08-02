@@ -542,6 +542,8 @@ local function FormatEnemyForcesText(enemyObj, formatId, compact)
         return format("%d/%d%s", RoundToInt(rawCurrent), RoundToInt(rawTotal), suffix)
     elseif formatId == "COUNT_PERCENT" then
         return format("%d/%d - %.2f%%%s", RoundToInt(rawCurrent), RoundToInt(rawTotal), percent, suffix)
+    elseif formatId == "COUNT_REMAINING" then
+        return format("%d/%d (%d left)%s", RoundToInt(rawCurrent), RoundToInt(rawTotal), RoundToInt(remaining), suffix)
     elseif formatId == "REMAINING" then
         if compact then
             return format("%d left", RoundToInt(remaining))

@@ -520,6 +520,107 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.7.3",
+        heroes = {
+            {
+                -- Vertical Fill lives in the Health Bar Texture row's cog
+                -- (cog-only controls have no _labelText), so the highlight
+                -- targets the owning row.
+                module = "Raid & Unit Frames",
+                title  = "Vertical Health Bars",
+                desc   = "Health bars can now fill bottom-to-top on raid, party, and every unit frame. Absorbs, heal prediction, and the bar background follow the same axis, and Reverse Fill flips the direction to top-to-bottom.",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "HEALTH BAR", highlight = "Health Bar Texture" },
+            },
+            {
+                module = "Chat",
+                title  = "True Hide & Click-Through",
+                desc   = "Chat at Fade Strength 100 or hidden by visibility rules is now completely gone: clicks, camera drags, and targeting pass straight through to the world, and mouseover still wakes the faded chat.",
+                nav    = { module = "EllesmereUIChat", page = "Chat", section = "IDLE FADE", highlight = "Fade Strength" },
+            },
+        },
+        features = {
+            {
+                module = "Chat",
+                title  = "Scroll Button on Chat Panel",
+                desc   = "Anchor the scroll-to-bottom arrow to the chat's corner like default UI",
+                nav    = { module = "EllesmereUIChat", page = "Sidebar", section = "ICONS", highlight = "Scroll Button on Chat Panel" },
+            },
+            {
+                -- Tab Offset X is a cog-popup row (no _labelText); the
+                -- highlight targets the Inner Padding X row that owns the cog.
+                module = "Chat",
+                title  = "Tab Offset X",
+                desc   = "Shift the tab strip so corner-flush chat never clips a tab",
+                nav    = { module = "EllesmereUIChat", page = "Tabs", section = "LAYOUT", highlight = "Inner Padding X" },
+            },
+            {
+                -- Anchor choices live in the Breakdown cog; the highlight
+                -- targets the owning row.
+                module = "Damage Meters",
+                title  = "Breakdown Anchor Positions",
+                desc   = "Show the hover breakdown beside the window or centered",
+                nav    = { module = "EllesmereUIDamageMeters", page = "Damage Meters", section = "BARS", highlight = "Show Breakdown on Hover" },
+            },
+            {
+                -- No setting to open: pure interaction change, renders static.
+                module = "Damage Meters",
+                title  = "Header Right-Click",
+                desc   = "Right-click the window header to switch meter type",
+            },
+            {
+                -- Show Decimal lives in the Standalone Combat Timer cog.
+                module = "Damage Meters",
+                title  = "Standalone Timer Decimal",
+                desc   = "Optional tenths display on the standalone combat timer",
+                nav    = { module = "EllesmereUIDamageMeters", page = "Damage Meters", section = "STANDALONE COMBAT TIMER", highlight = "Standalone Combat Timer" },
+            },
+            {
+                module = "Mythic+ Timer",
+                title  = "Count / Total + Remaining",
+                desc   = "New enemy forces text format, e.g. 188/240 (52 left)",
+                nav    = { module = "EllesmereUIMythicTimer", page = "Mythic+ Timer", section = "FORCES", highlight = "Enemy Text Format" },
+            },
+            {
+                -- The slider lives in each aura slot's cog on the Core
+                -- Positions grid (custom chrome, no highlightable rows), so
+                -- the nav is section-only.
+                module = "Nameplates",
+                title  = "Adjust Crop",
+                desc   = "Set how much cropped aura icons trim, per element",
+                nav    = { module = "EllesmereUINameplates", page = "Display", section = "CORE POSITIONS" },
+            },
+            {
+                -- The toggle lives in the Texture row's cog.
+                module = "Resource Bars",
+                title  = "Blizzard Bar Artwork",
+                desc   = "Class Resource bar can use Blizzard's default bar art",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "BAR DISPLAY", highlight = "Texture" },
+            },
+            {
+                -- Both toggles live in the Spell ID cog on this row.
+                module = "Tooltips",
+                title  = "Icon ID & Item ID Toggles",
+                desc   = "Turn each tooltip ID line off individually",
+                nav    = { module = "EllesmereUIBlizzardSkin", page = "Tooltips, Menus & Popups", section = "BLIZZARD TOOLTIP", highlight = "Show Spell ID on Tooltip" },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Cooldown countdown text now scales down on small buttons instead of overflowing them." },
+            { module = "Action Bars", text = "Empowered spells no longer flip to Press and Tap behavior after mounting between pulls." },
+            { module = "Chat", text = "Clicks and camera drags pass through the visible chat like the default UI." },
+            { module = "Chat", text = "Hidden sidebar icons are no longer clickable and no longer show tooltips." },
+            { module = "Chat", text = "Panel border no longer draws above the EllesmereUI settings window." },
+            { module = "Cooldown Manager", text = "Suppress GCD now covers the final moments of a charge recharge." },
+            { module = "Damage Meters", text = "Combat timer ticks smoothly every second regardless of the refresh rate." },
+            { module = "Localization", text = "Updated Korean (koKR) translations for the latest options." },
+            { module = "Minimap", text = "The middle-click menu is now translated on every language and uses your minimap font." },
+            { module = "Quality of Life", text = "Movement Alert countdown no longer snaps to 0.0 when combat starts in instances." },
+            { module = "Unit Frames", text = "Kick tracking now follows the summoned demon's interrupt for Demonology Warlocks." },
+            { module = "PTR Tooltips", text = "Buff tooltips no longer show the spell ID twice when no modifier is set." },
+            { module = "PTR Unit Frames", text = "No more gap under the frame when the cast bar is moved away in unlock mode." },
+        },
+    },
+    {
         version = "8.7.2",
         mini = true,
         fixes = {
@@ -977,34 +1078,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Quality of Life", text = "Buff-based Movement Alerts such as Burning Rush no longer throw an error and stop detecting the buff once you are in combat." },
             { module = "Unit Frames", text = "An attached power bar no longer draws a stray border line where it meets the health bar." },
             { module = "Unit Frames", text = "Turning off EllesmereUI's own cast bar no longer leaves Blizzard's player and pet cast bars dead or invisible, including when you log in with it already off or hide the player frame entirely." },
-        },
-    },
-    {
-        version = "8.5.9",
-        mini = true,
-        features = {
-            {
-                module = "Data Bars",
-                title  = "Home, World or Both Latency",
-                desc   = "One block can now show both, with optional icons",
-                nav    = { module = "EllesmereUIDataBars", page = "DataBars" },
-            },
-            {
-                module = "Unit Frames",
-                title  = "Boss Frame Absorb Text",
-                desc   = "Show shield and heal-absorb amounts as text",
-                -- No highlight: "Left Text" also matches the Left Text Settings
-                -- rows above it and the matcher stops at the first hit.
-                nav    = { module = "EllesmereUIUnitFrames", page = "Boss Frames", section = "HEALTH BAR" },
-            },
-        },
-        fixes = {
-            { module = "General", text = "Added and corrected German, Korean, and Traditional Chinese translations." },
-            { module = "Nameplates", text = "Nameplates no longer eat clicks and camera drags meant for the world, or show aura tooltips over empty space." },
-            { module = "Nameplates", text = "Cast targets and interrupter names now keep their class color in Mythic+ and raids." },
-            { module = "PTR Nameplates & Frames", text = "Aura icons no longer start eating clicks again after a settings change." },
-            { module = "PTR Resource Bars", text = "The Ebon Might bar no longer blocks clicks on nameplates behind it." },
-            { module = "Unit Frames", text = "Blizzard's cast bar no longer appears when you use a standalone cast bar addon." },
         },
     },
 }

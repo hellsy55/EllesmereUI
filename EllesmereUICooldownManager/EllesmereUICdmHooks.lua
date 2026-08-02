@@ -4169,8 +4169,11 @@ end
 -- applied engine-side by a Step curve: below the GCD it yields alpha 0, at or
 -- above it yields the alpha the bar would have used. The result may itself be
 -- SECRET; never compare it. SetSwipeColor is AllowedWhenTainted so it goes
--- straight in. GCD length comes from UnitSpellHaste, which is a plain number
--- (the cooldown getters for spell 61304 are not).
+-- straight in. GCD length comes from UnitSpellHaste -- which, field-confirmed
+-- 2026-08-02, is ALSO a secret in instanced combat, so it gets the
+-- issecretvalue-first treatment: a secret haste falls back to 0 (unhasted
+-- 1.5s GCD). That errs toward suppressing the tail slightly early on hasted
+-- players, and the moment haste reads clean again the exact window returns.
 local _gcdTailCurves = {}
 function ns.GCDTailAlpha(durObj, normalAlpha)
     normalAlpha = normalAlpha or 0
@@ -4180,6 +4183,9 @@ function ns.GCDTailAlpha(durObj, normalAlpha)
         return normalAlpha
     end
     local haste = (UnitSpellHaste and UnitSpellHaste("player")) or 0
+    if (issecretvalue and issecretvalue(haste)) or type(haste) ~= "number" then
+        haste = 0
+    end
     local len = 1.5 / (1 + haste / 100)
     if len < 0.75 then len = 0.75 end          -- engine floor
     len = math.floor(len * 100 + 0.5) / 100    -- bound the curve cache

@@ -1095,7 +1095,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
         else
             -- Icon mode with no icon falls back to text, so it needs the same
             -- sentinel guard as the text branch below.
-            if cdRemaining == true then
+            if type(cdRemaining) == "boolean" then
                 slot.text:SetText("No " .. spellName)
             else
                 slot.text:SetFormattedText(fmtStr, cdRemaining)
@@ -1105,7 +1105,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     elseif displayMode == "bar" then
         local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
         slot.bar:SetStatusBarColor(r, g, b)
-        if cdRemaining == true then
+        if type(cdRemaining) == "boolean" then
             -- Unreadable remaining (see the text branch): show a full bar so the
             -- alert still reads as "unavailable" instead of an empty one, which
             -- would look like the cooldown had just finished.
@@ -1123,7 +1123,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
         if ma.barShowIcon ~= false and spellIcon then slot.bar.icon:SetTexture(spellIcon); slot.bar.icon:Show() else slot.bar.icon:Hide() end
         slot.bar:Show()
     else -- any text mode (text_nd / text_dn / legacy "text")
-        if cdRemaining == true then
+        if type(cdRemaining) == "boolean" then
             -- The cdInfo fallback stores a BOOLEAN sentinel when the cooldown is
             -- secret, because Lua cannot compute a remaining from secret
             -- start/duration. Feeding that to a "%.1f" renders 0.0, which reads
@@ -1135,6 +1135,10 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             -- Only the sentinel is special-cased. A genuine secret NUMBER is
             -- passed straight through, because SetFormattedText is
             -- AllowedWhenTainted and the engine renders the real value from it.
+            -- Sentinel test is type-based, NOT `== true`: the Duration-object
+            -- path above stores a raw SECRET number in cdRemaining, and
+            -- equality against a secret is not a comparison we ever risk;
+            -- type() is secret-safe and the sentinel is a plain boolean.
             slot.text:SetText("No " .. spellName)
         else
             slot.text:SetFormattedText(fmtStr, cdRemaining)

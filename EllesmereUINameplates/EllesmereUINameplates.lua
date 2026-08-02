@@ -150,6 +150,7 @@ function ns._appendDisplayPresetKeys(t)
         "debuffTimerPosition", "buffTimerPosition", "ccTimerPosition",
         "auraDurationTextSize", "auraDurationTextColor",
         "debuffCropIcons", "buffCropIcons", "ccCropIcons",
+        "debuffCropPercent", "buffCropPercent", "ccCropPercent",
         "showCastLockoutAsCrowdControl",
         "castIconOffsetX", "castIconOffsetY",
         "targetGlowEllesmereUI", "targetGlowBorderColor", "targetGlowHighlight", "targetBorderColor",
@@ -334,6 +335,12 @@ local defaults = {
     debuffCropIcons = false,
     buffCropIcons = false,
     ccCropIcons = false,
+    -- Per-side trim percentage for the cropped mode (5-25). 10 reproduces the
+    -- classic fixed crop (height = 80% of width) exactly, so existing cropped
+    -- setups render identically until the slider is moved.
+    debuffCropPercent = 10,
+    buffCropPercent = 10,
+    ccCropPercent = 10,
     debuffIconSize = 26,
     buffIconSize = 24,
     buffTextSize = 12,
@@ -1343,19 +1350,35 @@ ns.GetCCIconSize = GetCCIconSize
 do
     local AURA_CROP_HEIGHT = 0.80
     local AURA_ZOOM = 0.08
+    -- Returns FALSE when uncropped, or the height FACTOR (a truthy number)
+    -- when cropped: factor = 1 - 2 * (cropPercent / 100), so the default 10%
+    -- yields the classic 0.80. Callers that only truth-test the result stay
+    -- byte-identical; the height math below reads the number when present.
     function ns.GetAuraCrop(element)
+        local on, pct
         if element == "debuffs" then
-            return (p and p.debuffCropIcons) or defaults.debuffCropIcons
+            on = (p and p.debuffCropIcons) or defaults.debuffCropIcons
+            pct = p and p.debuffCropPercent
         elseif element == "buffs" then
-            return (p and p.buffCropIcons) or defaults.buffCropIcons
+            on = (p and p.buffCropIcons) or defaults.buffCropIcons
+            pct = p and p.buffCropPercent
         elseif element == "ccs" then
-            return (p and p.ccCropIcons) or defaults.ccCropIcons
+            on = (p and p.ccCropIcons) or defaults.ccCropIcons
+            pct = p and p.ccCropPercent
         end
-        return false
+        if not on then return false end
+        pct = tonumber(pct) or 10
+        if pct < 5 then pct = 5 elseif pct > 25 then pct = 25 end
+        return 1 - 2 * (pct / 100)
     end
-    -- Frame height for a given icon width: shorter when cropped, square when not.
+    -- Frame height for a given icon width: shorter when cropped, square when
+    -- not. `cropped` is GetAuraCrop's result -- a factor number when adjustable,
+    -- plain true from any legacy caller (falls back to the classic constant).
     function ns.GetAuraCropHeight(cropped, w)
-        if cropped then return math.floor(w * AURA_CROP_HEIGHT + 0.5) end
+        if cropped then
+            local factor = (type(cropped) == "number") and cropped or AURA_CROP_HEIGHT
+            return math.floor(w * factor + 0.5)
+        end
         return w
     end
     -- Texcoord trim. Cropped scales the vertical span to the rectangle's aspect

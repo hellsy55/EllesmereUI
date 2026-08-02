@@ -642,7 +642,10 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
     MakeBorder(menu, mBrR, mBrG, mBrB, mBrA, PP)
 
     if _moSearchable then
-        local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("options") or "Fonts\\FRIZQT__.TTF"
+        -- Options panel is Expressway-locked by design (EllesmereUI.EXPRESSWAY is
+        -- the locale-aware value: CJK/Cyrillic clients get the system glyph font).
+        -- The user's global font intentionally does not restyle the settings UI.
+        local fontPath = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
         searchEdit = CreateFrame("EditBox", nil, menu)
         searchEdit:SetSize(menuW - 16, SEARCH_H)
         searchEdit:SetPoint("TOP", menu, "TOP", 0, -4)
@@ -6434,7 +6437,10 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
     end
     local checked = _multiApplyCheckedState[cacheKey]
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("options") or "Fonts\\FRIZQT__.TTF"
+    -- Options panel is Expressway-locked by design (EllesmereUI.EXPRESSWAY is
+    -- the locale-aware value: CJK/Cyrillic clients get the system glyph font).
+    -- The user's global font intentionally does not restyle the settings UI.
+    local fontPath = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
 
     -- "Apply" button at top -- styled like the footer Reset/Reload buttons (white, muted, fade hover)
     local applyRow = CreateFrame("Button", nil, menu)
@@ -7492,7 +7498,10 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
     ddBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
     local ddBrd = EllesmereUI.MakeBorder(ddBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
     local ddLbl = ddBtn:CreateFontString(nil, "OVERLAY")
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("options") or "Fonts\\FRIZQT__.TTF"
+    -- Options panel is Expressway-locked by design (EllesmereUI.EXPRESSWAY is
+    -- the locale-aware value: CJK/Cyrillic clients get the system glyph font).
+    -- The user's global font intentionally does not restyle the settings UI.
+    local fontPath = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
     ddLbl:SetFont(fontPath, 13, "")
     ddLbl:SetTextColor(1, 1, 1, EllesmereUI.DD_TXT_A)
     ddLbl:SetJustifyH("LEFT")
@@ -8392,7 +8401,10 @@ function EllesmereUI.BuildReorderCBDropdown(parentFrame, ddW, fLevel, items, get
     opts = opts or {}
     local PP = EllesmereUI.PP or EllesmereUI.PanelPP
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("options") or "Fonts\\FRIZQT__.TTF"
+    -- Options panel is Expressway-locked by design (EllesmereUI.EXPRESSWAY is
+    -- the locale-aware value: CJK/Cyrillic clients get the system glyph font).
+    -- The user's global font intentionally does not restyle the settings UI.
+    local fontPath = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
 
     -- Split movable / fixed, preserving the given order
     local movable, fixedItems = {}, {}

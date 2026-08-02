@@ -11269,7 +11269,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.7.2"
+EllesmereUI.VERSION = "8.7.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12374,15 +12374,25 @@ initFrame:SetScript("OnEvent", function(self, event)
             if not IsSpellIDModifierHeld() then return end
             if not data or not data.id then return end
             if _isSecret and _isSecret(data.id) then return end
+            -- 12.1 no-modifier configs render aura IDs engine-side via the
+            -- tooltipShowAuraSpellIDs CVar (see SyncAuraSpellIDCVar); adding
+            -- the Lua line too would show the ID twice on aura tooltips.
+            if EllesmereUI.IS_121 and Enum.TooltipDataType
+                and data.type == Enum.TooltipDataType.UnitAura
+                and (EllesmereUIDB.spellIDModifier or "none") == "none" then
+                return
+            end
             if not tooltip or not tooltip.GetName then return end
             local ok, name = pcall(tooltip.GetName, tooltip)
             if not ok or not name then return end
             if hasDupLine(tooltip, name, "SpellID") then return end
             tooltip:AddDoubleLine("SpellID", tostring(data.id), 1, 1, 1, 1, 1, 1)
-            local iconID = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(data.id)
-                or (GetSpellTexture and GetSpellTexture(data.id))
-            if iconID then
-                tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+            if EllesmereUIDB.showIconID ~= false then
+                local iconID = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(data.id)
+                    or (GetSpellTexture and GetSpellTexture(data.id))
+                if iconID then
+                    tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+                end
             end
             tooltip:Show()
         end
@@ -12399,11 +12409,18 @@ initFrame:SetScript("OnEvent", function(self, event)
             -- ID lines do not belong inside that window.
             if name == "ItemSocketingDescription" then return end
             if hasDupLine(tooltip, name, "ItemID") then return end
-            tooltip:AddDoubleLine("ItemID", tostring(data.id), 1, 1, 1, 1, 1, 1)
-            local iconID = C_Item.GetItemIconByID and C_Item.GetItemIconByID(data.id)
-                or (GetItemIcon and GetItemIcon(data.id))
-            if iconID then
-                tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+            local showItem = EllesmereUIDB.showItemID ~= false
+            local showIcon = EllesmereUIDB.showIconID ~= false
+            if not showItem and not showIcon then return end
+            if showItem then
+                tooltip:AddDoubleLine("ItemID", tostring(data.id), 1, 1, 1, 1, 1, 1)
+            end
+            if showIcon then
+                local iconID = C_Item.GetItemIconByID and C_Item.GetItemIconByID(data.id)
+                    or (GetItemIcon and GetItemIcon(data.id))
+                if iconID then
+                    tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+                end
             end
             tooltip:Show()
         end
@@ -12446,10 +12463,12 @@ initFrame:SetScript("OnEvent", function(self, event)
             if not okN or not name then return end
             if hasDupLine(tooltip, name, "SpellID") then return end
             tooltip:AddDoubleLine("SpellID", tostring(spellID), 1, 1, 1, 1, 1, 1)
-            local iconID = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID)
-                or (GetSpellTexture and GetSpellTexture(spellID))
-            if iconID then
-                tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+            if EllesmereUIDB.showIconID ~= false then
+                local iconID = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID)
+                    or (GetSpellTexture and GetSpellTexture(spellID))
+                if iconID then
+                    tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
+                end
             end
             tooltip:Show()
         end

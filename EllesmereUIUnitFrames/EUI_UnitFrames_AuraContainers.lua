@@ -440,6 +440,21 @@ local function BuildStyle(unit, base, s, unitFrame)
     }
 end
 
+-- A cast bar that was free-moved off the frame in unlock mode no longer sits
+-- between the frame and a bottom-anchored aura stack, so the stack must not
+-- reserve its height. Detached = the unlock anchor record is gone AND a saved
+-- free position exists; with neither (fresh install, anchor seed not yet run)
+-- the reserve is kept.
+local CB_UNLOCK_KEYS = { player = "playerCastbar", target = "targetCastbar", focus = "focusCastbar" }
+local function CastbarDetached(unit)
+    local key = CB_UNLOCK_KEYS[unit]
+    if not key then return false end
+    if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(key) then return false end
+    local db = ns.db
+    local pos = db and db.profile and db.profile.positions
+    return (pos and pos[key]) ~= nil
+end
+
 -- Container anchoring: mirrors the legacy element's SetPoint(ia, frame, fp,
 -- ox + userX, oy + castbarPush + userY) with gap = 1.
 -- buffContainer (HARMFUL calls only): the unit's buff container, needed by
@@ -497,7 +512,8 @@ local function AnchorContainer(container, frame, unit, base, s, buffContainer)
     else
         showCb, cbH = s.showCastbar, s.castbarHeight
     end
-    if showCb and (anchor == "bottomleft" or anchor == "bottomright" or anchor == "left" or anchor == "right") then
+    if showCb and (anchor == "bottomleft" or anchor == "bottomright" or anchor == "left" or anchor == "right")
+        and not CastbarDetached(unit) then
         if not cbH or cbH <= 0 then cbH = 14 end
         cbOff = -cbH
     end
@@ -680,7 +696,8 @@ local function CfgFP(unit, base, s)
         Pick(isBuff, s.buffMaxPerRow, s.debuffMaxPerRow), s.showBuffs, s.showLustDebuff,
         mAB, mAB and s.debuffAnchor or nil, mAB and s.debuffGrowth or nil,
         mAB and s.debuffOffsetX or nil, mAB and s.debuffOffsetY or nil,
-        mAB and s.debuffSpacingY or nil)
+        mAB and s.debuffSpacingY or nil,
+        CastbarDetached(unit))
 end
 
 ------------------------------------------------------------------------------
