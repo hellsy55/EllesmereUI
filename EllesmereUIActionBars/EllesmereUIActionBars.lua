@@ -5187,6 +5187,15 @@ local function LayoutBar(key)
             end)
         end
     end
+
+    -- Countdown size is capped against button width (CooldownFonts
+    -- .EffectiveSize), so anything that re-lays a bar can change the cap. This
+    -- sits here rather than at the callers because there are fourteen of them
+    -- (icon size, padding, row/column overrides, width- and height-match links,
+    -- profile swaps, ...) and hooking one leaves the rest applying a stale size.
+    -- Cheap when nothing changed: the per-frame stamp makes the font work a
+    -- no-op unless the effective size actually differs.
+    EAB:ApplyCooldownFontsForBar(key)
 end
 
 -------------------------------------------------------------------------------
@@ -6311,14 +6320,44 @@ function EAB_VTABLE.CooldownFonts.GetSettings(s)
         s.cooldownTextColor or { r = 1, g = 1, b = 1 }
 end
 
+-- Cap the configured countdown size against the button it has to fit inside.
+-- The size is absolute and the countdown string is Blizzard's, formatted in the
+-- CLIENT locale -- so the same setting that fits "5m" on an English client
+-- overflows with "5 мин" on a Russian one, which is how this was reported. The
+-- text was always overflowing; a textured border merely HID it, because that
+-- border frame is anchored OUTSIDE the button (see ApplyBorderStyle) and its art
+-- covers the spill, while a solid border sits on the edge and covers nothing.
+-- Masking is not a fix, so cap the size instead: a normal 45px button is
+-- untouched at any sane setting, and small buttons scale down on their own.
+function EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
+    local host = cdFrame and (cdFrame:GetParent() or cdFrame)
+    if not (host and host.GetWidth and host.GetHeight) then return cdSize end
+    local w, h = host:GetWidth(), host:GetHeight()
+    if not w or not h or w <= 0 or h <= 0 then
+        return cdSize   -- not laid out yet; re-applied on the next layout pass
+    end
+    -- Smaller dimension, not width: buttonWidth and buttonHeight are separate
+    -- settings, so a wide, short button gives a generous width while the text
+    -- still overflows vertically. The tighter axis is the one that constrains.
+    local dim = (w < h) and w or h
+    local cap = math.floor(dim * 0.40)
+    if cap < 5 then cap = 5 end                 -- never shrink to illegibility
+    return (cdSize > cap) and cap or cdSize
+end
+
 function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, cdOY, cdColor)
     if not cdFrame then return false end
+
+    -- Stamp on the EFFECTIVE size, not the requested one: keyed to the request,
+    -- resizing the bar would leave the setting unchanged, match the stamp, and
+    -- skip the re-apply -- freezing the old size on a button that just changed.
+    local eff = EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
 
     -- Skip if these exact settings were already applied to this frame
     local cdfd = EFD(cdFrame)
     local stamp = cdfd.cdFontStamp
     local cr, cg, cb = cdColor.r, cdColor.g, cdColor.b
-    if stamp and stamp[1] == fontPath and stamp[2] == cdSize
+    if stamp and stamp[1] == fontPath and stamp[2] == eff
        and stamp[3] == cdOX and stamp[4] == cdOY
        and stamp[5] == cr and stamp[6] == cg and stamp[7] == cb then
         return true
@@ -6327,11 +6366,11 @@ function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, 
     for ri = 1, cdFrame:GetNumRegions() do
         local region = select(ri, cdFrame:GetRegions())
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            EllesmereUI.ApplyIconTextFont(region, fontPath, cdSize, "actionBars")
+            EllesmereUI.ApplyIconTextFont(region, fontPath, eff, "actionBars")
             region:SetTextColor(cr, cg, cb)
             region:ClearAllPoints()
             region:SetPoint("CENTER", cdFrame, "CENTER", cdOX, cdOY)
-            cdfd.cdFontStamp = { fontPath, cdSize, cdOX, cdOY, cr, cg, cb }
+            cdfd.cdFontStamp = { fontPath, eff, cdOX, cdOY, cr, cg, cb }
             return true
         end
     end
