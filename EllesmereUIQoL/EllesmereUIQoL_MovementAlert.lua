@@ -1093,22 +1093,52 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             end
             slot.icon:Show()
         else
-            slot.text:SetFormattedText(fmtStr, cdRemaining)
+            -- Icon mode with no icon falls back to text, so it needs the same
+            -- sentinel guard as the text branch below.
+            if cdRemaining == true then
+                slot.text:SetText("No " .. spellName)
+            else
+                slot.text:SetFormattedText(fmtStr, cdRemaining)
+            end
             slot.text:Show()
         end
     elseif displayMode == "bar" then
-        slot.bar:SetMinMaxValues(0, cdDuration)
-        slot.bar:SetValue(cdRemaining)
         local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
         slot.bar:SetStatusBarColor(r, g, b)
-        slot.bar.text:SetShown(ma.barShowDuration ~= false)
-        if ma.barShowDuration ~= false then
-            slot.bar.text:SetFormattedText("%." .. precision .. "f", cdRemaining)
+        if cdRemaining == true then
+            -- Unreadable remaining (see the text branch): show a full bar so the
+            -- alert still reads as "unavailable" instead of an empty one, which
+            -- would look like the cooldown had just finished.
+            slot.bar:SetMinMaxValues(0, 1)
+            slot.bar:SetValue(1)
+            slot.bar.text:SetShown(false)
+        else
+            slot.bar:SetMinMaxValues(0, cdDuration)
+            slot.bar:SetValue(cdRemaining)
+            slot.bar.text:SetShown(ma.barShowDuration ~= false)
+            if ma.barShowDuration ~= false then
+                slot.bar.text:SetFormattedText("%." .. precision .. "f", cdRemaining)
+            end
         end
         if ma.barShowIcon ~= false and spellIcon then slot.bar.icon:SetTexture(spellIcon); slot.bar.icon:Show() else slot.bar.icon:Hide() end
         slot.bar:Show()
     else -- any text mode (text_nd / text_dn / legacy "text")
-        slot.text:SetFormattedText(fmtStr, cdRemaining)
+        if cdRemaining == true then
+            -- The cdInfo fallback stores a BOOLEAN sentinel when the cooldown is
+            -- secret, because Lua cannot compute a remaining from secret
+            -- start/duration. Feeding that to a "%.1f" renders 0.0, which reads
+            -- as "ready" -- the exact opposite of what the alert means, and what
+            -- made the countdown appear to reset the instant combat started in
+            -- instanced content. Drop the number instead: the alert still says
+            -- the ability is unavailable, which is the part that matters.
+            --
+            -- Only the sentinel is special-cased. A genuine secret NUMBER is
+            -- passed straight through, because SetFormattedText is
+            -- AllowedWhenTainted and the engine renders the real value from it.
+            slot.text:SetText("No " .. spellName)
+        else
+            slot.text:SetFormattedText(fmtStr, cdRemaining)
+        end
         slot.text:Show()
     end
 
