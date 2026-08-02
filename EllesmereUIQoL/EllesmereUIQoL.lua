@@ -1005,13 +1005,14 @@ qolFrame:SetScript("OnEvent", function(self)
     --     session, so the figure cannot be trusted on its own -- it serves as a
     --     ceiling on the deduced share, never as the source of it.
     --   * Hence the guild share is deduced from the player's ledger, and only
-    --     outgoing amounts are summed. The junk sweep above keeps firing passes
-    --     across this window, so a net before/after figure would cancel its
-    --     credits against the repair debit and invent a guild share. Credits
-    --     arrive in their own PLAYER_MONEY and are ignored; only a sale landing
-    --     in the same event as the debit could still net off.
+    --     outgoing amounts are summed, so a credit arriving in its own
+    --     PLAYER_MONEY cannot cancel the repair debit and invent a guild share.
+    --     A credit sharing one event with the debit still nets off, which is why
+    --     the caller holds the junk sweep back until the debit has landed: a
+    --     sale that was never sent has nothing to net against.
     local repairWatcher, repairWatchLast, repairWatchOut
     local repairWatchGen = 0
+    local repairWatchSweep  -- junk sweep on hold; see ReleaseJunkSweep
 
     -- Mirrors the arithmetic behind Blizzard's own guild-repair tooltip: today's
     -- remaining allowance, bounded by the balance; -1 means an unlimited rank.
@@ -1037,10 +1038,84 @@ qolFrame:SetScript("OnEvent", function(self)
         EllesmereUI.Print("|cff0CD29DEllesmereUI:|r |cffff6060" .. EllesmereUI.L("Not enough gold to repair.") .. "|r")
     end
 
+    -- Lets the held-back junk sweep go. Idempotent: whichever of the debit or the
+    -- settle timer gets here first is the one that starts it.
+    local function ReleaseJunkSweep()
+        local sweep = repairWatchSweep
+        repairWatchSweep = nil
+        if sweep then sweep() end
+    end
+
+    -- Settling a remainder can outlive the watch, so it gets its own waiter
+    -- rather than a verdict at the half-second mark: the junk sweep the watch
+    -- held back is often exactly what pays for the rest, and at settle time its
+    -- first sale has barely landed. Ends on the first of -- enough gold, the
+    -- merchant closing, or the deadline -- and only then is the player broke.
+    local TOPUP_WINDOW = 8  -- outlasts a full junk sweep (12 passes backing off to 1.6s)
+    local repairTopUp, repairTopUpGen = nil, 0
+
+    local function CancelRepairTopUp()
+        repairTopUpGen = repairTopUpGen + 1
+        if repairTopUp then
+            repairTopUp:UnregisterAllEvents()
+            repairTopUp:SetScript("OnEvent", nil)
+        end
+    end
+
+    local function StartRepairTopUp(remainCost)
+        CancelRepairTopUp()
+        if not repairTopUp then
+            repairTopUp = CreateFrame("Frame", "EUI_RepairTopUp", UIParent)
+        end
+        local gen = repairTopUpGen
+        local settled = false
+
+        local function Finish(afford)
+            settled = true
+            CancelRepairTopUp()
+            -- Giving up is not the same as being broke: the merchant walking away
+            -- with the gold still in the player's pocket is nobody's fault.
+            if not afford then
+                if GetMoney() < remainCost then ReportRepairBroke() end
+                return
+            end
+            -- Re-read rather than trust the figure this waiter was armed with:
+            -- seconds have passed, and the player may have repaired by hand.
+            local nowCost, stillNeed = GetRepairAllCost()
+            if not (stillNeed and nowCost > 0) then return end
+            RepairAllItems(false)
+            ReportRepairOutcome(0, nowCost)
+        end
+
+        local function Poll(_, event)
+            if settled or gen ~= repairTopUpGen then return end
+            -- MERCHANT_CLOSED rather than merchantOpen: two frames listening for
+            -- the same event have no defined order, so the flag may not be down yet.
+            if event == "MERCHANT_CLOSED" or not CanMerchantRepair() then return Finish(false) end
+            if GetMoney() >= remainCost then return Finish(true) end
+        end
+
+        Poll()
+        if settled then return end
+        repairTopUp:SetScript("OnEvent", Poll)
+        repairTopUp:RegisterEvent("PLAYER_MONEY")
+        repairTopUp:RegisterEvent("MERCHANT_CLOSED")
+        C_Timer.After(TOPUP_WINDOW, function()
+            if settled or gen ~= repairTopUpGen then return end
+            Finish(false)
+        end)
+    end
+
     local function OnRepairWatchEvent()  -- PLAYER_MONEY: accumulate only, never decide
         local now = GetMoney()
         local spent = repairWatchLast - now
-        if spent > 0 then repairWatchOut = repairWatchOut + spent end
+        if spent > 0 then
+            repairWatchOut = repairWatchOut + spent
+            -- The debit has landed and is booked, so nothing arriving later can
+            -- net against it. Holding the sweep past this point buys nothing and
+            -- costs the whole sale on a vendor visit that ends within the window.
+            ReleaseJunkSweep()
+        end
         repairWatchLast = now
     end
 
@@ -1048,7 +1123,10 @@ qolFrame:SetScript("OnEvent", function(self)
     -- would misread an unrelated purchase in the same window as the player
     -- having paid the whole bill, and MERCHANT_CLOSED would settle before a
     -- deduction still in flight had landed.
-    local function StartRepairWatch(cost, moneyBefore, guildFunds)
+    -- sweep is the junk sweep this watch is holding back; it is released on the
+    -- repair debit, or here at the latest. A watch superseded by a new merchant
+    -- never gets that far, which is correct: that merchant holds its own.
+    local function StartRepairWatch(cost, moneyBefore, guildFunds, sweep)
         if not repairWatcher then
             repairWatcher = CreateFrame("Frame", "EUI_RepairWatcher", UIParent)
             repairWatcher:SetScript("OnEvent", OnRepairWatchEvent)
@@ -1059,6 +1137,8 @@ qolFrame:SetScript("OnEvent", function(self)
         repairWatchGen = repairWatchGen + 1
         repairWatchLast = moneyBefore
         repairWatchOut = 0
+        repairWatchSweep = sweep
+        CancelRepairTopUp()  -- a remainder from the last merchant is no longer payable
         repairWatcher:RegisterEvent("PLAYER_MONEY")
 
         local gen = repairWatchGen
@@ -1069,30 +1149,25 @@ qolFrame:SetScript("OnEvent", function(self)
             if not (stillNeed and remainCost > 0) then remainCost = 0 end
 
             local own = repairWatchOut
-
-            -- The funds can run dry mid-bill; settle the rest, but only if the
-            -- merchant is still open to take it.
-            if remainCost > 0 and CanMerchantRepair() and GetMoney() >= remainCost then
-                RepairAllItems(false)
-                own = own + remainCost
-                remainCost = 0
-            end
-
             local paid = cost - remainCost
             if own > paid then own = paid end
             local guildPart = paid - own
 
-            -- A junk sale sharing one PLAYER_MONEY with the repair nets against
-            -- it and inflates the deduced guild share; the pre-repair funds cap
-            -- it back. A stale read is either too high to bind or zero and
-            -- skipped, so it can only ever tighten a wrong answer.
+            -- Backstop for a credit that did share an event with the debit: the
+            -- pre-repair funds cap the deduced share back. Weak on its own -- an
+            -- empty or unread bank is 0 and skips the cap, which is exactly the
+            -- guild-is-broke case -- so it only ever tightens, never decides.
             if guildFunds > 0 and guildPart > guildFunds then
                 guildPart = guildFunds
                 own = paid - guildPart
             end
 
             if paid > 0 then ReportRepairOutcome(guildPart, own) end
-            if remainCost > 0 and GetMoney() < remainCost then ReportRepairBroke() end
+
+            -- Release before handing the remainder over: the funds can run dry
+            -- mid-bill, and the sweep's income is what the top-up waits for.
+            ReleaseJunkSweep()
+            if remainCost > 0 then StartRepairTopUp(remainCost) end
         end)
     end
 
@@ -1107,46 +1182,45 @@ qolFrame:SetScript("OnEvent", function(self)
         merchantOpen = true
         if not EllesmereUIDB then return end
 
-        -- Auto sell junk
-        if EllesmereUIDB.autoSellJunk ~= false then
-            SellJunk()
-        end
+        local sweep = (EllesmereUIDB.autoSellJunk ~= false) and SellJunk or nil
 
-        -- Auto repair
-        if EllesmereUIDB.autoRepair ~= false then
-            if CanMerchantRepair() then
-                local cost, canRepair = GetRepairAllCost()
-                if canRepair and cost > 0 then
-                    -- No affordability test on purpose: Blizzard's own guild
-                    -- repair button just calls RepairAllItems(true) and lets the
-                    -- server split the bill. Gating on "the guild covers it all"
-                    -- threw that split away and billed the player the lot.
-                    local useGuild = (EllesmereUIDB.autoRepairGuild ~= false)
-                        and IsInGuild()
-                        and CanGuildBankRepair()
+        -- Auto repair goes first, and on the guild path the junk sweep is handed
+        -- to the watcher instead of started here: the sweep sells from
+        -- MERCHANT_SHOW onwards, and sale income landing in the same
+        -- PLAYER_MONEY as the repair debit nets against it, leaving the watcher
+        -- to credit the whole bill to the guild bank. The hold lasts only until
+        -- that debit lands (half a second at the outside), which is all it takes
+        -- to buy an unambiguous ledger.
+        if EllesmereUIDB.autoRepair ~= false and CanMerchantRepair() then
+            local cost, canRepair = GetRepairAllCost()
+            if canRepair and cost > 0 then
+                -- No affordability test on purpose: Blizzard's own guild repair
+                -- button just calls RepairAllItems(true) and lets the server
+                -- split the bill. Gating on "the guild covers it all" threw that
+                -- split away and billed the player the lot.
+                local useGuild = (EllesmereUIDB.autoRepairGuild ~= false)
+                    and IsInGuild()
+                    and CanGuildBankRepair()
 
-                    -- Check if we can actually afford the repair
-                    if not useGuild and GetMoney() < cost then
-                        ReportRepairBroke()
-                        return
-                    end
-
+                if not useGuild and GetMoney() < cost then
+                    ReportRepairBroke()  -- nothing was spent, so nothing to watch
+                elseif useGuild then
                     -- Both readings must predate the repair, and neither is of
                     -- any use unless the guild bank is in play.
-                    local moneyBefore, guildFunds
-                    if useGuild then
-                        moneyBefore, guildFunds = GetMoney(), GuildRepairFunds()
-                    end
-                    RepairAllItems(useGuild)
-
-                    if useGuild then
-                        StartRepairWatch(cost, moneyBefore, guildFunds)  -- reports once the real payer is known
-                    else
-                        ReportRepairOutcome(0, cost)  -- own gold: no ambiguity, report now
-                    end
+                    local moneyBefore, guildFunds = GetMoney(), GuildRepairFunds()
+                    RepairAllItems(true)
+                    -- Reports once the real payer is known; the sweep rides along
+                    -- and is let go the moment the ledger is safe.
+                    StartRepairWatch(cost, moneyBefore, guildFunds, sweep)
+                    return
+                else
+                    RepairAllItems(false)
+                    ReportRepairOutcome(0, cost)  -- own gold: no ambiguity, report now
                 end
             end
         end
+
+        if sweep then sweep() end
     end)
 
     ---------------------------------------------------------------------------
