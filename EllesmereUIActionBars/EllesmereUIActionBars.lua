@@ -1982,6 +1982,9 @@ local function ReRegisterButtonEvents(btn, listKey)
     end
 end
 
+-- Bar dormancy strips this same list per button (see ns.ApplyBarDormancy;
+-- the loop is inlined there -- this chunk is at the 200-local cap).
+
 -- Get or create an action button for a given slot.
 -- Action bars (1-8) always create our own buttons (ActionBarButtonTemplate
 -- already includes SecureActionButtonTemplate). This eliminates the taint
@@ -2679,6 +2682,19 @@ local function CreateBarFrame(info)
     -- Register with secure handler so it can reparent buttons to this frame
     SecureSetupHandler_RegisterBarFrame(key, frame)
     _ownedFrames[frame] = true
+
+    -- Bar dormancy edges. OnShow/OnHide fire on EFFECTIVE visibility -- a
+    -- secure driver flipping the frame mid-combat included -- and everything
+    -- the dormancy handler does is unprotected API, so both edges are
+    -- combat-legal. Buttons don't exist yet at creation time; the handler
+    -- no-ops until they do, and FinishSetup's initial sync covers bars that
+    -- START hidden (their OnHide never fires).
+    frame:HookScript("OnShow", function(f)
+        if ns.ApplyBarDormancy then ns.ApplyBarDormancy(f._barKey, false) end
+    end)
+    frame:HookScript("OnHide", function(f)
+        if ns.ApplyBarDormancy then ns.ApplyBarDormancy(f._barKey, true) end
+    end)
     return frame
 end
 
@@ -3283,6 +3299,94 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Bar dormancy: a driver-hidden bar does no event work.
+--
+--  Source of truth is the bar frame's effective visibility, observed as
+--  OnShow/OnHide edges (CreateBarFrame). Hide edge: strip the per-button
+--  mixin event list. Show edge: re-register and reconcile everything that
+--  can have gone stale, then re-seed the central walk's memos through the
+--  existing cast-wave path -- one wave that is paid on every GCD anyway.
+--
+--  What stays live for dormant bars, on purpose: the dispatcher's
+--  content-class branches (targeted SLOT_CHANGED repaint, the infrequent
+--  full walk) still cover ALL bars, so page flips, drag-and-drop onto a
+--  hidden bar, and spec swaps are correct-on-reveal by construction.
+--  Accepted staleness while hidden: loss-of-control swipes (rare; corrected
+--  by the next LOC event after reveal).
+--
+--  Alpha-0 mouseover bars are SHOWN frames and deliberately count as
+--  visible: gating on alpha would move reconcile work onto the hover-in
+--  edge -- the exact path the mouseover fix just took spikes out of.
+--  (On ns: this file's main chunk is at the 200-local cap.)
+-------------------------------------------------------------------------------
+ns._eabBarDormant = {}
+ns.ApplyBarDormancy = function(key, dormant)
+    local info = BAR_LOOKUP[key]
+    -- Stance/pet bars reuse Blizzard buttons with their own event wiring;
+    -- their gating is handled by their own handlers, not the mixin list.
+    if not info or info.isStance or info.isPetBar then return end
+    local btns = barButtons[key]
+    if not btns then return end
+    dormant = dormant and true or false
+    if ns._eabBarDormant[key] == dormant then return end
+    ns._eabBarDormant[key] = dormant
+    -- Either edge changes which buttons the tier/filled lists may include.
+    ns._cdFilledDirty = true
+    if dormant then
+        -- Strip the mixin event list. A hidden bar's buttons otherwise keep
+        -- running Blizzard's full mixin OnEvent per event (state/usable/
+        -- target/charges x 12 buttons x every hidden bar), billed to the
+        -- CORE addon row where no profile of this module ever looked.
+        -- UnregisterEvent on template-self-registered events is proven idiom
+        -- here (the SLOT_CHANGED/UPDATE_COOLDOWN strips in
+        -- GetOrCreateButton); NEVER wrap btn.OnEvent instead -- the engine
+        -- resolves the method at fire time and a replacement of ours would
+        -- taint every per-button dispatch (see the broadcaster note there).
+        local list = BUTTON_EVENT_LISTS.action
+        for _, btn in ipairs(btns) do
+            local fd = EFD(btn)
+            if not fd.evGated then
+                fd.evGated = true
+                for _, ev in ipairs(list) do
+                    btn:UnregisterEvent(ev)
+                end
+            end
+        end
+        return
+    end
+    for _, btn in ipairs(btns) do
+        local fd = EFD(btn)
+        if fd.evGated then
+            fd.evGated = nil
+            ReRegisterButtonEvents(btn, "action")
+        end
+        local a = btn:GetAttribute("action")
+        if a and HasAction(a) then
+            -- Icon/count/name/cooldown/desat/usable in one existing helper.
+            EAB_VTABLE.ForceButtonRefresh(btn, a)
+            -- The two channels ForceButtonRefresh doesn't own, whose events
+            -- were gated: checked state and the equipped-item border.
+            btn:SetChecked((IsCurrentAction(a) or IsAutoRepeatAction(a)) and true or false)
+            if btn.Border then
+                btn.Border:SetShown(IsEquippedAction(a) and true or false)
+            end
+        end
+    end
+    -- Re-seed the cooldown walk for this bar's buttons: arm the existing
+    -- cast-wave (memos ignored for one pass) exactly as a cast does. The
+    -- dirty flag above rebuilds the tier lists to include this bar first;
+    -- the kick delivers the wave next frame.
+    ns._cdDirtyUntil = GetTime() + 2
+    ns._cdWalkNext = 0
+    ns._cdSlowNext = 0
+    ns._cdCastWave = true
+    if ns._cdCastKick and not ns._cdCastKickPending then
+        ns._cdCastKickPending = true
+        C_Timer.After(0, ns._cdCastKick)
+    end
+end
+
 do
     local _dispatcherSetup = false
     local _empowerReroutePending = false
@@ -3564,8 +3668,10 @@ do
         dispatcher:RegisterEvent("BAG_UPDATE_DELAYED")
         -- Viewer DATA events (talent/hotfix/override re-curation): pure data
         -- signals, no dependency on CDM or the Blizzard viewer UI. They land
-        -- in the infrequent branch, which retires the classification via
-        -- ns._cdFilledDirty.
+        -- in the infrequent branch, which retires the button lists via
+        -- ns._cdFilledDirty; the curated-set memo retires separately below
+        -- (ns._cdCuratedDirty) -- these three events plus SPELLS_CHANGED and
+        -- PEW are the ONLY edges that can change what the viewer curates.
         dispatcher:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
         dispatcher:RegisterEvent("COOLDOWN_VIEWER_TABLE_HOTFIXED")
         dispatcher:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
@@ -3830,6 +3936,18 @@ do
                     -- filledness never changes, and marking dirty ~10/sec
                     -- would make the rebuild cost what the lists save.
                     ns._cdFilledDirty = true
+                    -- The curated-set memo only retires on edges that can
+                    -- actually re-curate (viewer data events, PEW; plus
+                    -- SPELLS_CHANGED in the controller sweep and ApplyAll).
+                    -- Every OTHER content edge reuses the memo -- measured:
+                    -- the viewer walk ran ~90x/fight for data that changed
+                    -- at most twice.
+                    if event == "COOLDOWN_VIEWER_DATA_LOADED"
+                        or event == "COOLDOWN_VIEWER_TABLE_HOTFIXED"
+                        or event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED"
+                        or event == "PLAYER_ENTERING_WORLD" then
+                        ns._cdCuratedDirty = true
+                    end
                     -- The slot->buttons map tracks which button HOSTS a
                     -- slot, which only changes when paging re-maps action
                     -- attributes (page/bonus/vehicle/override/form/PEW) --
@@ -3955,28 +4073,41 @@ do
                     -- secrecy every cast cycles every fast spell's readable
                     -- state twice (GCD on/off) -- utilities cost the same
                     -- there while their rare castless changes tolerate 0.5s.
-                    local curated = {}
-                    if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
-                        and C_CooldownViewer.GetCooldownViewerCooldownInfo and Enum.CooldownViewerCategory then
-                        local essential = Enum.CooldownViewerCategory.Essential
-                        for _, cat in pairs(Enum.CooldownViewerCategory) do
-                            local isEss = (cat == essential)
-                            local okS, set = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat)
-                            if okS and type(set) == "table" then
-                                for _, cdID in ipairs(set) do
-                                    local okI, ci = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
-                                    if okI and ci and ci.spellID then
-                                        local function mark(id)
-                                            if not id or id <= 0 then return end
-                                            if isEss or curated[id] == nil then curated[id] = isEss end
-                                        end
-                                        mark(ci.spellID)
-                                        mark(ci.overrideSpellID)
-                                        if type(ci.linkedSpellIDs) == "table" then
-                                            for _, lid in ipairs(ci.linkedSpellIDs) do mark(lid) end
-                                        end
-                                        if C_Spell and C_Spell.GetBaseSpell then
-                                            mark(C_Spell.GetBaseSpell(ci.spellID))
+                    --
+                    -- Memoized separately from the list rebuild: curated
+                    -- data only changes on COOLDOWN_VIEWER_* / SPELLS_CHANGED
+                    -- / spec edges, but the LISTS retire on every content
+                    -- edge -- measured at ~1 rebuild/sec across a fight, so
+                    -- the pcall-per-category viewer walk was the dominant
+                    -- rebuild cost and ran ~90x per fight for data that
+                    -- changed maybe twice.
+                    local curated = ns._cdCuratedMemo
+                    if not curated or ns._cdCuratedDirty then
+                        ns._cdCuratedDirty = nil
+                        curated = {}
+                        ns._cdCuratedMemo = curated
+                        if C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
+                            and C_CooldownViewer.GetCooldownViewerCooldownInfo and Enum.CooldownViewerCategory then
+                            local essential = Enum.CooldownViewerCategory.Essential
+                            for _, cat in pairs(Enum.CooldownViewerCategory) do
+                                local isEss = (cat == essential)
+                                local okS, set = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat)
+                                if okS and type(set) == "table" then
+                                    for _, cdID in ipairs(set) do
+                                        local okI, ci = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+                                        if okI and ci and ci.spellID then
+                                            local function mark(id)
+                                                if not id or id <= 0 then return end
+                                                if isEss or curated[id] == nil then curated[id] = isEss end
+                                            end
+                                            mark(ci.spellID)
+                                            mark(ci.overrideSpellID)
+                                            if type(ci.linkedSpellIDs) == "table" then
+                                                for _, lid in ipairs(ci.linkedSpellIDs) do mark(lid) end
+                                            end
+                                            if C_Spell and C_Spell.GetBaseSpell then
+                                                mark(C_Spell.GetBaseSpell(ci.spellID))
+                                            end
                                         end
                                     end
                                 end
@@ -3986,7 +4117,16 @@ do
                     local haveCurated = next(curated) ~= nil
                     for _, info in ipairs(BAR_CONFIG) do
                         if not info.isStance and not info.isPetBar then
-                            local btns = barButtons[info.key]
+                            -- Dormant (driver-hidden) bars are excluded from
+                            -- the lists and tier groups entirely: the walks
+                            -- stop paying for buttons nobody can see. Reads
+                            -- the dormancy map, not live IsVisible(): the map
+                            -- is edge-driven and every edge also sets
+                            -- _cdFilledDirty, so lists and gating can never
+                            -- disagree mid-transition. A bar flipping visible
+                            -- rejoins on the next rebuild; its show-edge
+                            -- reconcile repaints it directly in the meantime.
+                            local btns = (not ns._eabBarDormant[info.key]) and barButtons[info.key] or nil
                             if btns then
                                 local list = {}
                                 for _, btn in ipairs(btns) do
@@ -10558,8 +10698,10 @@ end
 local function ApplyAll()
     _isApplyingAll = true
     -- Full applies can create/enable bars and reassign slots without any
-    -- dispatcher content event: retire the filled-slot fast lists.
+    -- dispatcher content event: retire the filled-slot fast lists, and the
+    -- curated memo with them (profile swaps can land mid-session).
     ns._cdFilledDirty = true
+    ns._cdCuratedDirty = true
 
     -- Restore any strata raised during a drag that wasn't cleaned up
     if _dragState.visible then
@@ -10629,6 +10771,15 @@ local function ApplyAll()
     -- A full apply that ran DURING combat skipped every `not inCombat` step
     -- above; the REGEN_ENABLED re-run (gated on this flag) converges them.
     if inCombat then ns._eabApplyDeferred = true end
+
+    -- Dormancy re-sync: a profile swap or options change can re-register
+    -- visibility drivers without firing per-bar OnShow/OnHide edges the
+    -- dormancy map saw. Per-key memoized, so unchanged bars cost a table
+    -- read each.
+    for _, info in ipairs(BAR_CONFIG) do
+        local f = barFrames[info.key]
+        if f then ns.ApplyBarDormancy(info.key, not f:IsVisible()) end
+    end
 
     _isApplyingAll = false
 end
@@ -11930,8 +12081,10 @@ function EAB:FinishSetup()
             end
         elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" then
             -- Spec/talent swaps refill slots: retire the filled-slot fast
-            -- lists (see the dispatcher's repaint walks).
+            -- lists (see the dispatcher's repaint walks) AND the curated-set
+            -- memo (talents change what the viewer curates).
             ns._cdFilledDirty = true
+            ns._cdCuratedDirty = true
             -- Force visibility update on all managed buttons
             if not InCombatLockdown() then
                 for btn in pairs(_controllerButtons) do
@@ -12772,6 +12925,16 @@ function EAB:FinishSetup()
     -- ApplyAll pass is a no-op for these. Extra bars (built on a later
     -- timer) are nil-skipped here, exactly as on a normal login.
     self:ApplyCombatVisibility()
+
+    -- Dormancy initial sync: bars that START hidden never fire an OnHide
+    -- edge, and the creation-time OnHide fired before buttons existed. Runs
+    -- after the visibility drivers above have settled each frame's state.
+    -- The per-key memo inside makes this a no-op for anything the edges
+    -- already handled.
+    for _, info in ipairs(BAR_CONFIG) do
+        local f = barFrames[info.key]
+        if f then ns.ApplyBarDormancy(info.key, not f:IsVisible()) end
+    end
 end
 
 -------------------------------------------------------------------------------
