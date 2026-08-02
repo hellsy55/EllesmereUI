@@ -4332,12 +4332,10 @@ do
                             _empowerDeferFrame = ns.TakeShell()
                             _empowerDeferFrame:SetScript("OnEvent", function(self)
                                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                                print("|cff0cd29f[empower]|r left combat, running deferred reroute")  -- PROBE
                                 _EmpowerReroute()
                             end)
                         end
                         _empowerDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-                        print("|cff0cd29f[empower]|r slot change IN COMBAT, deferred (was dropped before the fix)")  -- PROBE
                         return
                     end
                     _EmpowerReroute()
@@ -9835,13 +9833,11 @@ local function UpdateKeybinds()
             df = ns.TakeShell()
             df:SetScript("OnEvent", function(self)
                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                print("|cff0cd29f[empower]|r left combat, applying deferred keybind build")  -- PROBE
                 UpdateKeybinds()
             end)
             _bindState.deferFrame = df
         end
         df:RegisterEvent("PLAYER_REGEN_ENABLED")
-        print("|cff0cd29f[empower]|r UpdateKeybinds blocked by combat, re-armed (was dropped)")  -- PROBE
         return false
     end
     -- While the house editor is active our override bindings are cleared so
@@ -9999,113 +9995,6 @@ local function UpdateKeybinds()
 end
 _G._EAB_UpdateKeybinds = UpdateKeybinds
 
--------------------------------------------------------------------------------
--- TEMPORARY EMPOWER ROUTING PROBE (/eabempower) -- REMOVE before merge.
---
--- The reported symptom is "Empowered Spell Input flipped to Press and Tap", but
--- an empower slot left on its NATIVE binding behaves identically with the CVar
--- untouched. This prints the routing per empower slot so the two are told apart
--- without guessing: CLICK... is hold-and-release, ACTIONBUTTON... is the bug.
---
--- No new file-scope locals: this chunk sits near the 200-local cap.
--------------------------------------------------------------------------------
-SLASH_EABEMPOWER1 = "/eabempower"
-SlashCmdList.EABEMPOWER = function()
-    local found = 0
-    print(("|cff0cd29f[empower]|r combat=%s"):format(tostring(InCombatLockdown())))
-    for _, info in ipairs(BAR_CONFIG) do
-        local prefix = BINDING_MAP[info.key]
-        local btns = barButtons[info.key]
-        if prefix and btns then
-            for i, btn in ipairs(btns) do
-                local slot = btn and btn:GetAttribute("action")
-                if slot and HasAction(slot) then
-                    local actionType, id, subType = GetActionInfo(slot)
-                    local isPH = (actionType == "flyout")
-                    local spellID
-                    if actionType == "spell" or (actionType == "macro" and subType == "spell") then
-                        spellID = id
-                    end
-                    if not isPH and spellID and not (issecretvalue and issecretvalue(spellID))
-                       and C_Spell and C_Spell.IsPressHoldReleaseSpell
-                       and C_Spell.IsPressHoldReleaseSpell(spellID) then
-                        isPH = true
-                    end
-                    -- Base-slot view: the fix routes by what the button CAN
-                    -- hold, so a paged-away empower button (mounted = skyriding
-                    -- page) must still be listed or the fix cannot be verified
-                    -- while mounted -- both earlier "mounted" dumps silently
-                    -- dropped the MainBar rows for exactly this reason.
-                    local basePH, baseName, base = false, nil, nil
-                    local off = BAR_SLOT_OFFSETS[info.key]
-                    if off then base = off + i end
-                    if base and base ~= slot and HasAction(base) then
-                        local bt, bid, bsub = GetActionInfo(base)
-                        local bSpell
-                        if bt == "spell" or (bt == "macro" and bsub == "spell") then bSpell = bid end
-                        if bt == "flyout" then
-                            basePH = true
-                        elseif bSpell and not (issecretvalue and issecretvalue(bSpell))
-                           and C_Spell and C_Spell.IsPressHoldReleaseSpell
-                           and C_Spell.IsPressHoldReleaseSpell(bSpell) then
-                            basePH = true
-                        end
-                        if basePH and bSpell and C_Spell and C_Spell.GetSpellInfo then
-                            local bi = C_Spell.GetSpellInfo(bSpell)
-                            baseName = (bi and bi.name) or "?"
-                        end
-                    end
-                    -- Macros are listed even when they currently resolve to a
-                    -- NON-empowered spell. A conditional macro is the case that
-                    -- flips isPH mid-combat, and listing only isPH slots hid it
-                    -- from the dump whenever it happened to resolve the other way.
-                    if isPH or basePH or actionType == "macro" then
-                        found = found + 1
-                        local nm = "?"
-                        if spellID and C_Spell and C_Spell.GetSpellInfo then
-                            local si = C_Spell.GetSpellInfo(spellID)
-                            nm = (si and si.name) or "?"
-                        elseif actionType == "flyout" then
-                            nm = "flyout"
-                        end
-                        nm = ("%s [%s isPH=%s]"):format(nm, actionType, tostring(isPH))
-                        if basePH then
-                            nm = nm .. ("|cff9999ff base%d=%s|r"):format(base, baseName or "flyout")
-                        end
-                        local k1, k2 = GetBindingKey(prefix .. i)
-                        local function route(k)
-                            if not k then return "-" end
-                            local a = GetBindingAction(k, true)
-                            if not a or a == "" then return k .. " -> (none)" end
-                            local tag = a:find("^CLICK") and "|cff40ff40click|r" or "|cffff4040NATIVE|r"
-                            return ("%s -> %s [%s]"):format(k, a, tag)
-                        end
-                        -- The binding is only HALF the empower path. A green
-                        -- CLICK route still behaves as Press-and-Tap if the
-                        -- button's own pressAndHoldAction/typerelease attrs are
-                        -- stale (the secure snippet maintains them; only page
-                        -- changes and the eab-empower-trigger re-run it).
-                        -- GetAttribute is readable from insecure code, so print
-                        -- both layers: for an empowered spell the healthy state
-                        -- is PH=true REL=actionrelease; PH=false/nil on an
-                        -- empower slot IS the bug, on the attribute layer.
-                        local aPH = btn:GetAttribute("pressAndHoldAction")
-                        local aRel = btn:GetAttribute("typerelease")
-                        local attrTag = ("attr PH=%s REL=%s"):format(tostring(aPH), tostring(aRel))
-                        if isPH and aPH ~= true then
-                            attrTag = "|cffff4040" .. attrTag .. " <STALE>|r"
-                        end
-                        print(("   %s btn%d slot=%s %s | %s | %s | %s"):format(
-                            info.key, i, tostring(slot), nm, route(k1), route(k2), attrTag))
-                    end
-                end
-            end
-        end
-    end
-    if found == 0 then
-        print("|cff0cd29f[empower]|r no press-hold-release action found on any bar")
-    end
-end
 
 
 
