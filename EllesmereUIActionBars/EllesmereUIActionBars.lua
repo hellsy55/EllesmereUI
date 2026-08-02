@@ -2682,12 +2682,22 @@ local function CreateBarFrame(info)
 
     barFrames[key] = frame
 
-    -- Empower re-check: when addon code sets "eab-empower-trigger", dispatch
+    -- Empower re-check: when addon code sets "state-eabempower", dispatch
     -- ChildUpdate to re-evaluate pressAndHoldAction on all child buttons.
-    frame:SetAttributeNoHandler("_onattributechanged", [[
-        if name == "eab-empower-trigger" then
-            self:ChildUpdate("eab-empower", "")
-        end
+    --
+    -- This MUST be an _onstate- handler on a state- attribute. These bar
+    -- frames are SecureHandlerStateTemplate, whose
+    -- SecureHandler_StateOnAttributeChanged only matches "^state%-(.+)" and
+    -- dispatches to "_onstate-<id>". It has no _onattributechanged path at
+    -- all -- that belongs to SecureHandlerAttributeTemplate (which is what
+    -- OverrideController above correctly uses). The original trigger was an
+    -- _onattributechanged snippet keyed on a plain "eab-empower-trigger"
+    -- attribute, so setting it fired NOTHING: the re-check has never once run
+    -- through this path since it was written. Every empower repair outside a
+    -- page change silently did nothing, which is why an empowered spell that
+    -- lost pressAndHoldAction stayed lost.
+    frame:SetAttributeNoHandler("_onstate-eabempower", [[
+        self:ChildUpdate("eab-empower", "")
     ]])
 
     -- Install a secure visibility handler so we can show/hide the frame
@@ -2916,8 +2926,8 @@ local function SetupBar(info, skipProtected)
                     btn:SetAttributeNoHandler("_childupdate-eab-page", ns._eabBuildPageChildSnippet(i))
                 end
                 -- Empower re-check on slot change (spec swap, drag, etc.)
-                -- The bar header's _onattributechanged dispatches ChildUpdate
-                -- when addon code sets "eab-empower-trigger" on slot change.
+                -- The bar header's _onstate-eabempower dispatches ChildUpdate
+                -- when addon code sets "state-eabempower".
                 if not btn:GetAttribute("_childupdate-eab-empower") then
                     btn:SetAttributeNoHandler("_childupdate-eab-empower", ns._eabEmpowerSnippet)
                 end
@@ -3440,21 +3450,14 @@ do
     local _empowerReroutePending = false
 
     -- Empower keybind reroute, shared by the immediate and the deferred path.
-    -- UpdateKeybinds returns false when the routing signature is unchanged
-    -- (mouseover-conditional macro storms re-fire ACTIONBAR_SLOT_CHANGED on
-    -- every flip without changing any binding or empower state). Skip the
-    -- secure re-trigger in that case: rebuilding bindings and running the
-    -- ChildUpdate snippet on every bar every frame is what tanked FPS while
-    -- hovering across nameplates.
+    -- The secure re-trigger that re-evaluates pressAndHoldAction now lives in
+    -- UpdateKeybinds itself (pass 3), so it can never be omitted by a caller;
+    -- it is still skipped when the routing signature is unchanged, which is
+    -- what keeps mouseover-conditional macro storms (ACTIONBAR_SLOT_CHANGED on
+    -- every flip) from rebuilding bindings and running the ChildUpdate snippet
+    -- on every bar every frame.
     local function _EmpowerReroute()
-        if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
-            for _, info in ipairs(BAR_CONFIG) do
-                local frame = barFrames[info.key]
-                if frame then
-                    frame:SetAttribute("eab-empower-trigger", GetTime())
-                end
-            end
-        end
+        if _G._EAB_UpdateKeybinds then _G._EAB_UpdateKeybinds() end
     end
 
     -- Deferral shell for that reroute. ACTIONBAR_SLOT_CHANGED fires freely IN
@@ -10630,6 +10633,35 @@ local function UpdateKeybinds()
                     end
                 end
             end
+        end
+    end
+    -- Pass 3: re-evaluate pressAndHoldAction/typerelease on every button.
+    -- Routing the key is only HALF of hold-and-release -- a CLICK-routed key
+    -- still behaves as Press-and-Tap unless the button also carries those
+    -- attrs. The only writers are this re-check and _childupdate-eab-page, and
+    -- that page handler is installed on MainBar and custom-paged bars alone.
+    --
+    -- Meanwhile Blizzard writes the attribute too, and gets the last word on
+    -- every loading screen: BUTTON_EVENT_LISTS.action registers
+    -- PLAYER_ENTERING_WORLD per button, the template wires OnEvent to the
+    -- mixin, and its PEW branch calls Update() -> UpdatePressAndHoldAction().
+    -- Zoning into an instance is where that lands wrong, and because the page
+    -- state does not change across the loading screen (page 1 -> page 1)
+    -- nothing re-ran our snippet afterwards, so an empowered spell sat on
+    -- pressAndHoldAction=false -- Press-and-Tap behaviour -- for the rest of
+    -- the session.
+    --
+    -- The re-check also used to be fired from the ACTIONBAR_SLOT_CHANGED
+    -- reroute only, so every other caller (load time, UPDATE_BINDINGS, the
+    -- combat re-arm above, the housing restore, and the post-loading-screen
+    -- restore) rebuilt the routing and left the attrs stale. Firing it here
+    -- covers all of them. SetAttribute on a secure header is protected, but
+    -- the combat bail at the top of this function guarantees we only reach
+    -- here out of combat.
+    for _, info in ipairs(BAR_CONFIG) do
+        local frame = barFrames[info.key]
+        if frame then
+            frame:SetAttribute("state-eabempower", GetTime())
         end
     end
     return true
