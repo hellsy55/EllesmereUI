@@ -2668,6 +2668,14 @@ local function CreateDMWindow(winIdx)
                 wdb.hideInRaid = not wdb.hideInRaid
                 for _, w in ipairs(_windows) do w.UpdateVisibility() end
             end },
+            { text = L("Hide in Delves"), isActive = wdb.hideInDelve, onClick = function()
+                wdb.hideInDelve = not wdb.hideInDelve
+                for _, w in ipairs(_windows) do w.UpdateVisibility() end
+            end },
+            { text = L("Hide in PvP"), isActive = wdb.hideInPvP, onClick = function()
+                wdb.hideInPvP = not wdb.hideInPvP
+                for _, w in ipairs(_windows) do w.UpdateVisibility() end
+            end },
             { text = L("Hide out of Instances"), isActive = wdb.hideOutOfInstance, onClick = function()
                 wdb.hideOutOfInstance = not wdb.hideOutOfInstance
                 for _, w in ipairs(_windows) do w.UpdateVisibility() end
@@ -4459,6 +4467,8 @@ local function CreateDMWindow(winIdx)
         local _, iType = IsInInstance()
         if wdb.hideInDungeon and iType == "party" then frame:Hide(); return end
         if wdb.hideInRaid and iType == "raid" then frame:Hide(); return end
+        if wdb.hideInDelve and C_PartyInfo and C_PartyInfo.IsDelveInProgress and C_PartyInfo.IsDelveInProgress() then frame:Hide(); return end
+        if wdb.hideInPvP and (iType == "pvp" or iType == "arena") then frame:Hide(); return end
         if wdb.hideOutOfInstance and (iType == "none" or iType == nil) then frame:Hide(); return end
         if vis == "mouseover" then frame:Hide()
         else frame:SetAlpha(1); frame:EnableMouse(true); frame:Show() end
