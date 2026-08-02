@@ -2646,6 +2646,9 @@ local function DecorateFrame(frame, barData)
                 -- duration timers work correctly during GCD.
                 local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
                 local _gcdSuppressed = false
+                -- Recharge duration of a charge spell whose recharge is running out
+                -- underneath a GCD; see ns.GCDTailAlpha at the swipe writes below.
+                local _gcdChargeTail
                 -- Per-bar "Suppress GCD": alpha-0 the swipe while the displayed
                 -- cooldown is just a GCD. Two cases must NEVER be suppressed:
                 --   1. The Hide-Active override window is forcing the real recharge
@@ -2655,7 +2658,11 @@ local function DecorateFrame(frame, barData)
                 --      never a GCD -- alpha-0'ing it blanks the recharge for the entire
                 --      GCD whenever another ability is pressed. Charge recharges are
                 --      shown as their own swipe, so the GCD on top is irrelevant.
-                if bd2 and bd2.suppressGCD and sid2 and not fd._hideActiveOverriding
+                -- The Hide-Active exclusion applies to the whole-swipe suppression
+                -- below, NOT to the charge tail: _hideActiveOverriding follows the
+                -- active read, which flaps for charge spells, and a fix that switches
+                -- itself off whenever the icon happens to read active is no fix.
+                if bd2 and bd2.suppressGCD and sid2
                    and C_Spell and C_Spell.GetSpellCooldown then
                     -- Charge-recharge guard. A charge spell that is mid-recharge --
                     -- INCLUDING at 0 charges -- is showing its recharge, never a GCD,
@@ -2678,16 +2685,26 @@ local function DecorateFrame(frame, barData)
                         local ci = C_Spell.GetSpellCharges(effID2) or C_Spell.GetSpellCharges(sid2)
                         chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
                     end
-                    if not chargeRecharging then
-                        -- The GCD read must use the override too: a transform's real
-                        -- CD ticks on the override ID (e.g. Rushing Wind Kick over
-                        -- Rising Sun Kick), and the base-ID query reads isOnGCD=true
-                        -- through that whole CD, leaving the swipe suppressed for
-                        -- its full duration.
-                        local cdInfo = C_Spell.GetSpellCooldown(effID2) or C_Spell.GetSpellCooldown(sid2)
-                        if cdInfo and cdInfo.isOnGCD then
-                            cd:SetSwipeColor(0, 0, 0, 0)
-                            _gcdSuppressed = true
+                    -- The GCD read must use the override too: a transform's real
+                    -- CD ticks on the override ID (e.g. Rushing Wind Kick over
+                    -- Rising Sun Kick), and the base-ID query reads isOnGCD=true
+                    -- through that whole CD, leaving the swipe suppressed for
+                    -- its full duration.
+                    local cdInfo = C_Spell.GetSpellCooldown(effID2) or C_Spell.GetSpellCooldown(sid2)
+                    if cdInfo and cdInfo.isOnGCD then
+                        if not chargeRecharging then
+                            if not fd._hideActiveOverriding then
+                                cd:SetSwipeColor(0, 0, 0, 0)
+                                _gcdSuppressed = true
+                            end
+                        elseif C_Spell.GetSpellChargeDuration then
+                            -- Recharge in flight, but the LAST GCD-length slice of it
+                            -- is drawn by the GCD, not the recharge. Hand the recharge
+                            -- duration to the swipe writes below, which fade the alpha
+                            -- to 0 for that slice only. Anything earlier keeps the
+                            -- recharge swipe, which is what case 2 above protects.
+                            _gcdChargeTail = C_Spell.GetSpellChargeDuration(effID2)
+                                or C_Spell.GetSpellChargeDuration(sid2)
                         end
                     end
                 end
@@ -2757,7 +2774,7 @@ local function DecorateFrame(frame, barData)
                         end
                     end
                     if not _gcdSuppressed then
-                        cd:SetSwipeColor(0, 0, 0, hideActiveAlpha)
+                        cd:SetSwipeColor(0, 0, 0, ns.GCDTailAlpha(_gcdChargeTail, hideActiveAlpha))
                     end
                     if isActive then
                         fd._hideActiveOverriding = true
@@ -2788,7 +2805,7 @@ local function DecorateFrame(frame, barData)
                 else
                     -- Not active: black swipe.
                     if not _gcdSuppressed then
-                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                        cd:SetSwipeColor(0, 0, 0, ns.GCDTailAlpha(_gcdChargeTail, barData.swipeAlpha or 0.7))
                     end
                     -- Desaturate When Not Active (per-spell). Symmetric: desaturate
                     -- while the setting is on, and RE-saturate when it's turned off --
@@ -4145,6 +4162,39 @@ end
 --  EvaluateRemainingDuration on a DurationObject handles secret values
 --  internally so we never compare secret numbers ourselves.
 -------------------------------------------------------------------------------
+-- Tail of a charge recharge, for "Suppress GCD". A recharge with less time left
+-- than the running GCD is no longer what the swipe draws -- the GCD outlasts it
+-- and takes the frame over -- so it has to be suppressed like any other GCD. The
+-- remaining time is a secret and cannot be compared in Lua, so the threshold is
+-- applied engine-side by a Step curve: below the GCD it yields alpha 0, at or
+-- above it yields the alpha the bar would have used. The result may itself be
+-- SECRET; never compare it. SetSwipeColor is AllowedWhenTainted so it goes
+-- straight in. GCD length comes from UnitSpellHaste, which is a plain number
+-- (the cooldown getters for spell 61304 are not).
+local _gcdTailCurves = {}
+function ns.GCDTailAlpha(durObj, normalAlpha)
+    normalAlpha = normalAlpha or 0
+    if not (durObj and durObj.EvaluateRemainingDuration
+            and C_CurveUtil and C_CurveUtil.CreateCurve
+            and Enum and Enum.LuaCurveType) then
+        return normalAlpha
+    end
+    local haste = (UnitSpellHaste and UnitSpellHaste("player")) or 0
+    local len = 1.5 / (1 + haste / 100)
+    if len < 0.75 then len = 0.75 end          -- engine floor
+    len = math.floor(len * 100 + 0.5) / 100    -- bound the curve cache
+    local key = len .. ":" .. normalAlpha
+    local curve = _gcdTailCurves[key]
+    if not curve then
+        curve = C_CurveUtil.CreateCurve()
+        curve:SetType(Enum.LuaCurveType.Step)
+        curve:AddPoint(0, 0)                -- recharge ends first: the swipe is the GCD
+        curve:AddPoint(len, normalAlpha)    -- recharge outlasts it: leave it visible
+        _gcdTailCurves[key] = curve
+    end
+    return durObj:EvaluateRemainingDuration(curve, normalAlpha)
+end
+
 local _desatCurve
 if C_CurveUtil and C_CurveUtil.CreateCurve then
     _desatCurve = C_CurveUtil.CreateCurve()
