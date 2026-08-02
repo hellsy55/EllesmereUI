@@ -19041,7 +19041,13 @@ initFrame:SetScript("OnEvent", function(self)
                       BD().chargesOnly = v and true or nil
                       ns.BuildAllCDMBars(); Refresh()
                   end },
-                { type="label", text="" });  y = y - h
+                { type="toggle", text="Hide Charge Count at 0",
+                  tooltip="Hide the charge number while a spell has no charges left, instead of showing a 0. The number returns as soon as a charge comes back.",
+                  getValue=function() return BD().hideZeroChargeText == true end,
+                  setValue=function(v)
+                      BD().hideZeroChargeText = v and true or nil
+                      ns.BuildAllCDMBars(); Refresh()
+                  end });  y = y - h
         end
 
         _, h = W:Spacer(parent, y, 8);  y = y - h

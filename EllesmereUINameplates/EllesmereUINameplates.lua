@@ -150,6 +150,7 @@ function ns._appendDisplayPresetKeys(t)
         "debuffTimerPosition", "buffTimerPosition", "ccTimerPosition",
         "auraDurationTextSize", "auraDurationTextColor",
         "debuffCropIcons", "buffCropIcons", "ccCropIcons",
+        "debuffCropPercent", "buffCropPercent", "ccCropPercent",
         "showCastLockoutAsCrowdControl",
         "castIconOffsetX", "castIconOffsetY",
         "targetGlowEllesmereUI", "targetGlowBorderColor", "targetGlowHighlight", "targetBorderColor",
@@ -264,6 +265,11 @@ local defaults = {
     friendlyNPCColor = { r = 0, g = 1, b = 0 },
     friendlyNPCNameSize = 13,
     friendlyNameTextSize = 12,
+    friendlyBelowName = "none",
+    friendlyBelowNameSize = 12,
+    friendlyBelowNameColor = { r = 0.8, g = 0.8, b = 0.8 },
+    friendlyBelowNameClassColor = false,
+    friendlyBelowNameGuildBrackets = true,
     showEnemyPets = false,
     font = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF",
     textSlotTop = "enemyName",
@@ -329,6 +335,12 @@ local defaults = {
     debuffCropIcons = false,
     buffCropIcons = false,
     ccCropIcons = false,
+    -- Per-side trim percentage for the cropped mode (5-25). 10 reproduces the
+    -- classic fixed crop (height = 80% of width) exactly, so existing cropped
+    -- setups render identically until the slider is moved.
+    debuffCropPercent = 10,
+    buffCropPercent = 10,
+    ccCropPercent = 10,
     debuffIconSize = 26,
     buffIconSize = 24,
     buffTextSize = 12,
@@ -1338,19 +1350,35 @@ ns.GetCCIconSize = GetCCIconSize
 do
     local AURA_CROP_HEIGHT = 0.80
     local AURA_ZOOM = 0.08
+    -- Returns FALSE when uncropped, or the height FACTOR (a truthy number)
+    -- when cropped: factor = 1 - 2 * (cropPercent / 100), so the default 10%
+    -- yields the classic 0.80. Callers that only truth-test the result stay
+    -- byte-identical; the height math below reads the number when present.
     function ns.GetAuraCrop(element)
+        local on, pct
         if element == "debuffs" then
-            return (p and p.debuffCropIcons) or defaults.debuffCropIcons
+            on = (p and p.debuffCropIcons) or defaults.debuffCropIcons
+            pct = p and p.debuffCropPercent
         elseif element == "buffs" then
-            return (p and p.buffCropIcons) or defaults.buffCropIcons
+            on = (p and p.buffCropIcons) or defaults.buffCropIcons
+            pct = p and p.buffCropPercent
         elseif element == "ccs" then
-            return (p and p.ccCropIcons) or defaults.ccCropIcons
+            on = (p and p.ccCropIcons) or defaults.ccCropIcons
+            pct = p and p.ccCropPercent
         end
-        return false
+        if not on then return false end
+        pct = tonumber(pct) or 10
+        if pct < 5 then pct = 5 elseif pct > 25 then pct = 25 end
+        return 1 - 2 * (pct / 100)
     end
-    -- Frame height for a given icon width: shorter when cropped, square when not.
+    -- Frame height for a given icon width: shorter when cropped, square when
+    -- not. `cropped` is GetAuraCrop's result -- a factor number when adjustable,
+    -- plain true from any legacy caller (falls back to the classic constant).
     function ns.GetAuraCropHeight(cropped, w)
-        if cropped then return math.floor(w * AURA_CROP_HEIGHT + 0.5) end
+        if cropped then
+            local factor = (type(cropped) == "number") and cropped or AURA_CROP_HEIGHT
+            return math.floor(w * factor + 0.5)
+        end
         return w
     end
     -- Texcoord trim. Cropped scales the vertical span to the rectangle's aspect
@@ -9338,11 +9366,23 @@ function ns._UpdateMouseover()
     end
     ns._EnsureMouseoverTicker()
 end
+-- Baseline lift for friendly plates, applied to BOTH distance settings:
+-- Name Distance (name-only) and the Distance slider in the friendly plate
+-- cog (full plate). Name-only needs it because the friendly module collapses
+-- Blizzard's two-point name anchor onto the UnitFrame's centre (so long
+-- names stop truncating and the guild line has room), landing the name this
+-- far below where Blizzard's own anchor put it; the full plate carries the
+-- same lift so the two modes sit at the same height and switching between
+-- them does not jump. Both settings keep their stored values and their
+-- meaning of "relative to where the plate normally sits".
+-- On ns, not a new file local: this file is at the Lua 5.1 200-local cap.
+ns.FRIENDLY_Y_BASE = 26
+
 -- Refresh Y-offset on all visible friendly name-only plates
 function ns.RefreshFriendlyNameOnlyOffset()
     local db = p or defaults
     local nameOnly = (db.friendlyNameOnly ~= false)
-    local yOff = nameOnly and (db.friendlyNameOnlyYOffset or 0) or 0
+    local yOff = nameOnly and ((db.friendlyNameOnlyYOffset or 0) + ns.FRIENDLY_Y_BASE) or 0
     for unit, nameplate in pairs(pendingUnits) do
         if nameplate.UnitFrame then
             local uf = nameplate.UnitFrame
@@ -9398,8 +9438,9 @@ manager:SetScript("OnEvent", function(self, event, unit)
                         RestoreFromOffscreen(uf.RaidTargetFrame)
                     end
                 end
-                -- Apply Y-offset
-                local yOff = db.friendlyNameOnlyYOffset or 0
+                -- Apply Y-offset (+ the name-only baseline lift; see
+                -- ns.FRIENDLY_Y_BASE)
+                local yOff = (db.friendlyNameOnlyYOffset or 0) + ns.FRIENDLY_Y_BASE
                 if yOff ~= 0 and nameplate.UnitFrame then
                     nameplate.UnitFrame:SetPoint("TOPLEFT", nameplate, "TOPLEFT", 0, yOff)
                     nameplate.UnitFrame:SetPoint("BOTTOMRIGHT", nameplate, "BOTTOMRIGHT", 0, yOff)

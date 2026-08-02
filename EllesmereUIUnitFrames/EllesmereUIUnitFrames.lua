@@ -332,14 +332,6 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -366,12 +358,6 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
-            btbLeftShortNameLength = 0,
-            btbLeftShortNameEllipsis = true,
-            btbRightShortNameLength = 0,
-            btbRightShortNameEllipsis = true,
-            btbCenterShortNameLength = 0,
-            btbCenterShortNameEllipsis = true,
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -475,6 +461,7 @@ local defaults = {
             leaderIndicatorX = 0,
             leaderIndicatorY = 0,
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
         },
@@ -585,14 +572,6 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -619,12 +598,6 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
-            btbLeftShortNameLength = 0,
-            btbLeftShortNameEllipsis = true,
-            btbRightShortNameLength = 0,
-            btbRightShortNameEllipsis = true,
-            btbCenterShortNameLength = 0,
-            btbCenterShortNameEllipsis = true,
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -673,6 +646,7 @@ local defaults = {
             leaderIndicatorX = 0,
             leaderIndicatorY = 0,
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
         },
@@ -725,6 +699,7 @@ local defaults = {
             playerCastbarWidth = 181,
             playerCastbarHeight = 14,
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
         },
@@ -751,18 +726,13 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
         },
         -- Focus Target: independent clone of Target of Target defaults.
@@ -792,18 +762,13 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
         },
         pet = {
@@ -829,18 +794,13 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
             highlightColor = { r = 1, g = 1, b = 1 },
             powerPosition = "none",
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
         },
         focus = {
@@ -915,14 +875,6 @@ local defaults = {
             extraTextY = 0,
             extraTextClassColor = false,
             extraTextAlign = "left",
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             bottomTextBar = false,
             bottomTextBarHeight = 16,
             btbPosition = "bottom",
@@ -947,12 +899,6 @@ local defaults = {
             btbCenterY = 0,
             btbCenterClassColor = false,
             btbCenterPowerColor = false,
-            btbLeftShortNameLength = 0,
-            btbLeftShortNameEllipsis = true,
-            btbRightShortNameLength = 0,
-            btbRightShortNameEllipsis = true,
-            btbCenterShortNameLength = 0,
-            btbCenterShortNameEllipsis = true,
             btbClassIcon = "none",
             btbClassIconSize = 14,
             btbClassIconLocation = "left",
@@ -1021,6 +967,7 @@ local defaults = {
             raidMarkerX = 0,
             raidMarkerY = 0,
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
         },
@@ -1126,8 +1073,6 @@ local defaults = {
             extraTextColorR = 1, extraTextColorG = 1, extraTextColorB = 1,
             extraTextX = 0, extraTextY = 0,
             extraTextAlign = "left",
-            extraTextShortNameLength = 0,
-            extraTextShortNameEllipsis = true,
             leftTextContent = "name",
             leftTextClassColor = false,
             leftTextColorR = 1, leftTextColorG = 1, leftTextColorB = 1,
@@ -1140,12 +1085,6 @@ local defaults = {
             centerTextClassColor = false,
             centerTextColorR = 1, centerTextColorG = 1, centerTextColorB = 1,
             centerTextX = 0, centerTextY = 0,
-            leftTextShortNameLength = 0,
-            leftTextShortNameEllipsis = true,
-            rightTextShortNameLength = 0,
-            rightTextShortNameEllipsis = true,
-            centerTextShortNameLength = 0,
-            centerTextShortNameEllipsis = true,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -1166,6 +1105,7 @@ local defaults = {
             raidMarkerY = 0,
             bossStackDirection = "down",
             healthReverseFill = false,
+            healthVerticalFill = false,
             smoothBars = false,
         },
         enabledFrames = {
@@ -1397,6 +1337,8 @@ local function ApplyHealthBarTexture(health, unitKey, texKeyOverride)
     health:SetStatusBarTexture(path)
     local hFill = health:GetStatusBarTexture()
     if hFill then UnsnapTex(hFill) end
+    -- The swap replaced the fill object; re-derive rotation for the bar's axis.
+    ns.ApplyFillRotation(health)
 
     -- Power bar: same texture. Walk up from health to find the oUF frame
     -- (health may be parented to a clip container, not the oUF frame directly).
@@ -1582,7 +1524,19 @@ local function AnchorHealthBg(health)
     local tex = health and health.GetStatusBarTexture and health:GetStatusBarTexture()
     if not bg or not tex then return end
     bg:ClearAllPoints()
-    if health.GetReverseFill and health:GetReverseFill() then
+    local reversed = health.GetReverseFill and health:GetReverseFill()
+    -- Vertical fill empties on the TOP (or the BOTTOM when reversed); read the
+    -- axis off the bar itself so this needs no settings lookup.
+    local vert = health.GetOrientation and health:GetOrientation() == "VERTICAL"
+    if vert then
+        if reversed then
+            bg:SetPoint("TOPLEFT", tex, "BOTTOMLEFT", 0, 0)
+            bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+        else
+            bg:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+            bg:SetPoint("BOTTOMRIGHT", tex, "TOPRIGHT", 0, 0)
+        end
+    elseif reversed then
         bg:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
         bg:SetPoint("BOTTOMRIGHT", tex, "BOTTOMLEFT", 0, 0)
     else
@@ -2195,30 +2149,12 @@ end
 -- Nickname-aware replacement for the stock [name] tag (see ContentToTag). Returns
 -- the nickname when one applies, else the raw unit name -- identical to [name] for
 -- everyone without a nickname.
-oUF.Tags.Methods["eui-name"] = function(unit, realUnit, lenStr, ellipsisStr)
-    local name = ns.ResolveUnitNickname(unit)
-    local maxLen = tonumber(lenStr) or 0
-    if maxLen <= 0 then return name end
-    -- Secret names (enemy target/focus in protected content) cannot be
-    -- inspected: #, sub and concat all throw. Return the secret raw -- the
-    -- display sink accepts it -- so those names render untruncated.
-    if issecretvalue and issecretvalue(name) then return name end
-    -- Truncate by UTF-8 codepoints, never bytes: multibyte names (Cyrillic,
-    -- CJK, accents) must cut on a character boundary, and byte length would
-    -- overcount their character count.
-    local i, chars = 1, 0
-    local len = #name
-    while i <= len do
-        if chars == maxLen then
-            local cut = name:sub(1, i - 1)
-            if ellipsisStr ~= "0" then return cut .. "..." end
-            return cut
-        end
-        local b = name:byte(i)
-        i = i + ((b >= 240 and 4) or (b >= 224 and 3) or (b >= 192 and 2) or 1)
-        chars = chars + 1
-    end
-    return name
+oUF.Tags.Methods["eui-name"] = function(unit)
+    -- Truncation is width-based (the per-slot Width % clamp in the position
+    -- code), never character-based: FontString width boxes ellipsize in the
+    -- renderer, which also works on SECRET enemy names that Lua cannot
+    -- measure or substring.
+    return ns.ResolveUnitNickname(unit)
 end
 oUF.Tags.Events["eui-name"] = "UNIT_NAME_UPDATE"
 
@@ -2822,12 +2758,11 @@ local function GetBossHealthTag()
     end
 end
 
--- Build a truncated name tag for the given settings prefix (e.g. "leftText", "btbLeft").
-local function BuildShortNameTag(prefix, settings)
-    local len = settings[prefix .. "ShortNameLength"] or 0
-    if len <= 0 then return "[eui-name]" end
-    local ellipsis = settings[prefix .. "ShortNameEllipsis"] ~= false and "1" or "0"
-    return "[eui-name(" .. len .. "," .. ellipsis .. ")]"
+-- Per-slot Width % (of the slot's computed clamp width; default 100 = the
+-- normal truncation amount, above 100 grants extra room). Applied by the
+-- position code to the slot FontString's width box.
+local function SlotWidthMul(settings, prefix)
+    return (settings[prefix .. "WidthPct"] or 100) / 100
 end
 
 -- Build the per-slot "Name > Target" indicator tag. The separator string is
@@ -2858,14 +2793,14 @@ end
 -- Resolve a leftTextContent / rightTextContent value to an oUF tag string.
 -- content: "name", "both", "curhpshort", "perhp", "perhpnosign", "perhpnum", "none"
 local function ContentToTag(content, prefix, settings)
-    if content == "name" then return BuildShortNameTag(prefix, settings)
+    if content == "name" then return "[eui-name]"
     elseif content == "nametotarget" then
-        return BuildShortNameTag(prefix, settings)
+        return "[eui-name]"
             .. BuildTgtSepTag(prefix, settings) .. "[eui-tgtcol][eui-tgtname]"
     elseif content == "levelname" then
-        return "[eui-level] | " .. BuildShortNameTag(prefix, settings)
+        return "[eui-level] | [eui-name]"
     elseif content == "namelevel" then
-        return BuildShortNameTag(prefix, settings) .. " | [eui-level]"
+        return "[eui-name] | [eui-level]"
     elseif content == "level" then return "[eui-level]"
     elseif content == "both" then return "[curhpshort] | [eui-perhp]%"
     elseif content == "bothdash" then return "[curhpshort] - [eui-perhp]%"
@@ -3381,6 +3316,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if lc ~= "none" then
             leftFS:SetJustifyH("LEFT")
             PP.Point(leftFS, "LEFT", textOvr, "LEFT", 5 + (s.btbLeftX or 0), s.btbLeftY or 0)
+            PP.Width(leftFS, totalWidth * 0.9 * SlotWidthMul(s, "btbLeft"))
             leftFS:Show()
         else leftFS:Hide() end
 
@@ -3389,6 +3325,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if rc ~= "none" then
             rightFS:SetJustifyH("RIGHT")
             PP.Point(rightFS, "RIGHT", textOvr, "RIGHT", -5 + (s.btbRightX or 0), s.btbRightY or 0)
+            PP.Width(rightFS, totalWidth * 0.9 * SlotWidthMul(s, "btbRight"))
             rightFS:Show()
         else rightFS:Hide() end
 
@@ -3397,6 +3334,7 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
         if cc ~= "none" then
             centerFS:SetJustifyH("CENTER")
             PP.Point(centerFS, "CENTER", textOvr, "CENTER", s.btbCenterX or 0, s.btbCenterY or 0)
+            PP.Width(centerFS, totalWidth * 0.9 * SlotWidthMul(s, "btbCenter"))
             centerFS:Show()
         else centerFS:Hide() end
 
@@ -3801,6 +3739,41 @@ end
 
 -- ShowFakeFrames / HideFakeFrames removed -- Unlock Mode handles all positioning
 
+-- Fill-texture rotation, DERIVED -- never set on its own, so it can never go
+-- stale against the bar's axis or a texture swap. Two texture families live on
+-- these bars and they want opposite treatment on a vertical bar:
+--
+--   stretch (shield.tga, striped3, blizzard, WHITE8X8, every health texture):
+--     one image scaled to the fill rect. Designed wide-and-short, so on a tall
+--     bar it must be ROTATED or it smears into a stretched mess.
+--   tiled (stripedReversed, the large* stripe sets, striped-maxhp, the modern
+--     absorb): repeats at native pixel size on BOTH axes, so it already reads
+--     correctly at any bar shape. Rotating it fights the tiling and is exactly
+--     what produced the stretched look -- leave these alone.
+--
+-- Tiling is read back off the live fill texture rather than passed in, so this
+-- stays correct no matter which style function last touched the bar.
+function ns.ApplyFillRotation(bar)
+    if not (bar and bar.SetRotatesTexture) then return end
+    local vert = bar.GetOrientation and bar:GetOrientation() == "VERTICAL"
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    local tiled = fill and ((fill.GetHorizTile and fill:GetHorizTile())
+                         or (fill.GetVertTile and fill:GetVertTile()))
+    bar:SetRotatesTexture((vert and not tiled) and true or false)
+end
+
+-- Vertical health fill. SetOrientation drives the bar's fill AXIS; the existing
+-- healthReverseFill still flips the direction WITHIN that axis (horizontal:
+-- left-to-right / right-to-left, vertical: bottom-to-top / top-to-bottom).
+-- Exposed on ns so the options preview paints the same way.
+function ns.ApplyHealthOrientation(bar, settings)
+    if not bar then return end
+    local vert = (settings and settings.healthVerticalFill) and true or false
+    bar:SetOrientation(vert and "VERTICAL" or "HORIZONTAL")
+    ns.ApplyFillRotation(bar)
+    return vert
+end
+
 local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInset)
     height = height or settings.healthHeight
     xOffset = xOffset or 0
@@ -3839,6 +3812,7 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
     ApplyHealthBarTexture(health, UnitToSettingsKey(unit))
     ApplyHealthBarAlpha(health, UnitToSettingsKey(unit))
     health:SetReverseFill(settings.healthReverseFill and true or false)
+    ns.ApplyHealthOrientation(health, settings)
     ApplyDarkTheme(health)
 
     -- Smooth bar interpolation (opt-in; defaults off)
@@ -3917,6 +3891,9 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
         fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
     end
+    -- New fill object + new tiling state: re-derive rotation (stretch styles
+    -- rotate on a vertical bar, tiled ones must not).
+    ns.ApplyFillRotation(absorbBar)
     local fw = absorbBar._forward
     if fw then
         fw:SetStatusBarTexture(tex)
@@ -3928,6 +3905,7 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
             fwFill:SetVertTile(tiled)
             if mask then fwFill:AddMaskTexture(mask) end
         end
+        ns.ApplyFillRotation(fw)
     end
 end
 
@@ -3951,6 +3929,7 @@ local function ApplyHealAbsorbStyle(haBar, style, settings)
         fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
     end
+    ns.ApplyFillRotation(haBar)
 end
 
 -- Two-segment absorb rendering using dynamic clip-frame trickery, so it
@@ -3983,9 +3962,11 @@ end
 -- HealthPrediction.Override so oUF still owns event registration
 -- (UNIT_HEALTH, UNIT_ABSORB_AMOUNT_CHANGED, etc.) and enable/disable.
 
--- Re-anchor existing absorb bars for the current reverse fill state.
--- Called from the live-update path when the user toggles reverse fill.
-local function UpdateAbsorbBarReverseFill(frame, isReversed)
+-- Re-anchor existing absorb bars for the current fill state (reverse + axis).
+-- Called from the live-update path when the user toggles reverse or vertical
+-- fill. `settingsOverride` lets the creation path pass the settings table it
+-- already holds, for frames whose .unit is not resolvable yet.
+local function UpdateAbsorbBarReverseFill(frame, isReversed, settingsOverride)
     if not frame or not frame.HealthPrediction then return end
     local ab = frame.HealthPrediction.damageAbsorb
     if not ab then return end
@@ -4003,14 +3984,116 @@ local function UpdateAbsorbBarReverseFill(frame, isReversed)
     --   overlay = backfill into the filled health from the HP edge (default)
     --   right   = full bar, fill from the frame's right edge
     --   left    = full bar, fill from the frame's left edge
-    local s = GetSettingsForUnit(frame.unit)
+    local s = settingsOverride or GetSettingsForUnit(frame.unit)
     local absorbMode = (s and s.absorbEdgeMode) or "overlay"
     local healMode = (s and s.healAbsorbEdgeMode) or "overlay"
+
+    -- Vertical fill: the whole HP cluster rotates with the health bar. Every
+    -- anchor below is the horizontal layout with its axis swapped -- the health
+    -- fill's RIGHT edge (the "HP edge" the shields and heal absorb hang off)
+    -- becomes its TOP edge, and reverse fill flips it to the BOTTOM edge. The
+    -- edge modes keep their key names: "right" is the far edge of the fill axis
+    -- (top when vertical), "left" the near one (bottom when vertical).
+    local isVert = (s and s.healthVerticalFill) and true or false
+    ab._isVert = isVert
+    local ha = ab._healAbsorb
+    local healClip = ab._healClip
+    -- Indexed, not ipairs: ha can be nil and ipairs would stop at the hole.
+    local axisBars = { ab, fw, ha }
+    for i = 1, 3 do
+        local bar = axisBars[i]
+        if bar then
+            bar:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+            ns.ApplyFillRotation(bar)  -- derived: rotate stretch styles only
+        end
+    end
 
     curClip:ClearAllPoints()
     missClip:ClearAllPoints()
     ab:ClearAllPoints()
     fw:ClearAllPoints()
+
+    if isVert then
+        -- missClip + forward bar always use the overlay layout; in the edge
+        -- modes the full-bar backfill shows the whole absorb and the Override
+        -- hides fw.
+        if isReversed then
+            missClip:SetPoint("TOPLEFT",     hpTex, "BOTTOMLEFT",  0, 1)
+            missClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+            fw:SetReverseFill(true)
+            fw:SetPoint("TOPLEFT",  hpTex, "BOTTOMLEFT",  0, 0)
+            fw:SetPoint("TOPRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
+        else
+            missClip:SetPoint("BOTTOMLEFT", hpTex, "TOPLEFT",  0, -1)
+            missClip:SetPoint("TOPRIGHT",   hpBar, "TOPRIGHT", 0, 0)
+            fw:SetReverseFill(false)
+            fw:SetPoint("BOTTOMLEFT",  hpTex, "TOPLEFT",  0, 0)
+            fw:SetPoint("BOTTOMRIGHT", hpTex, "TOPRIGHT", 0, 0)
+        end
+
+        -- Shield absorb placement.
+        if absorbMode == "right" or absorbMode == "left" then
+            curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",     0, 0)
+            curClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+            if absorbMode == "left" then
+                ab:SetReverseFill(false)
+                ab:SetPoint("BOTTOMLEFT",  hpBar, "BOTTOMLEFT",  0, 0)
+                ab:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+            else
+                ab:SetReverseFill(true)
+                ab:SetPoint("TOPLEFT",  hpBar, "TOPLEFT",  0, 0)
+                ab:SetPoint("TOPRIGHT", hpBar, "TOPRIGHT", 0, 0)
+            end
+        elseif isReversed then
+            curClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",       0, 0)
+            curClip:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT",   0, 0)
+            ab:SetReverseFill(false)
+            ab:SetPoint("BOTTOMLEFT",  hpBar, "BOTTOMLEFT",  0, 0)
+            ab:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+        else
+            curClip:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+            curClip:SetPoint("TOPRIGHT",   hpTex, "TOPRIGHT",   0, 0)
+            ab:SetReverseFill(true)
+            ab:SetPoint("TOPLEFT",  hpBar, "TOPLEFT",  0, 0)
+            ab:SetPoint("TOPRIGHT", hpBar, "TOPRIGHT", 0, 0)
+        end
+
+        -- Heal absorb placement (own clip frame, same rules).
+        if healClip then
+            healClip:ClearAllPoints()
+            if healMode == "right" or healMode == "left" then
+                healClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",     0, 0)
+                healClip:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+            elseif isReversed then
+                healClip:SetPoint("TOPLEFT",     hpBar, "TOPLEFT",     0, 0)
+                healClip:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
+            else
+                healClip:SetPoint("BOTTOMLEFT", hpBar, "BOTTOMLEFT", 0, 0)
+                healClip:SetPoint("TOPRIGHT",   hpTex, "TOPRIGHT",   0, 0)
+            end
+        end
+        if ha then
+            ha:ClearAllPoints()
+            if healMode == "right" then
+                ha:SetReverseFill(true)
+                ha:SetPoint("TOPLEFT",  hpBar, "TOPLEFT",  0, 0)
+                ha:SetPoint("TOPRIGHT", hpBar, "TOPRIGHT", 0, 0)
+            elseif healMode == "left" then
+                ha:SetReverseFill(false)
+                ha:SetPoint("BOTTOMLEFT",  hpBar, "BOTTOMLEFT",  0, 0)
+                ha:SetPoint("BOTTOMRIGHT", hpBar, "BOTTOMRIGHT", 0, 0)
+            elseif isReversed then
+                ha:SetReverseFill(false)
+                ha:SetPoint("BOTTOMLEFT",  hpTex, "BOTTOMLEFT",  0, 0)
+                ha:SetPoint("BOTTOMRIGHT", hpTex, "BOTTOMRIGHT", 0, 0)
+            else
+                ha:SetReverseFill(true)
+                ha:SetPoint("TOPLEFT",  hpTex, "TOPLEFT",  0, 0)
+                ha:SetPoint("TOPRIGHT", hpTex, "TOPRIGHT", 0, 0)
+            end
+        end
+        return
+    end
 
     -- missClip + forward bar always use the overlay layout; in the edge modes
     -- the full-bar backfill shows the whole absorb and the Override hides fw.
@@ -4060,8 +4143,6 @@ local function UpdateAbsorbBarReverseFill(frame, isReversed)
     -- Heal absorb placement (independent of shield absorb). The heal absorb
     -- has its OWN clip frame (ab._healClip) so right/left span the full bar
     -- (filled + missing health) while overlay stays clipped to filled health.
-    local ha = ab._healAbsorb
-    local healClip = ab._healClip
     if healClip then
         healClip:ClearAllPoints()
         if healMode == "right" or healMode == "left" then
@@ -4501,8 +4582,13 @@ local function CreateAbsorbBar(frame, unit, settings)
 
             -- Re-anchor when the placement settings change. The key starts
             -- nil, so this also applies the saved placement on first update.
+            -- The fill AXIS is part of the placement now, so it belongs in the
+            -- key: the settings-apply path already re-anchors on a Vertical Fill
+            -- toggle, but including it here keeps this gate self-healing if the
+            -- axis ever changes by some route that path does not cover.
             local absorbMode = (s and s.absorbEdgeMode) or "overlay"
             local edgeKey = absorbMode .. ":" .. ((s and s.healAbsorbEdgeMode) or "overlay")
+                .. ":" .. tostring((s and s.healthVerticalFill) and true or false)
             if ab._lastEdgeKey ~= edgeKey then
                 ab._lastEdgeKey = edgeKey
                 UpdateAbsorbBarReverseFill(self, ab._isReversed)
@@ -4586,6 +4672,12 @@ local function CreateAbsorbBar(frame, unit, settings)
             end
         end,
     }
+
+    -- The anchors set above are the horizontal layout. Hand the whole cluster to
+    -- the shared re-anchor pass so a vertical-fill frame starts out correct
+    -- without waiting for the first settings apply. `settings` is passed through
+    -- because frame.unit is not resolvable this early on every frame.
+    UpdateAbsorbBarReverseFill(frame, isReversed, settings)
 
     return backfillBar
 end
@@ -7162,7 +7254,7 @@ local function StyleFullFrame(frame, unit)
                 extraText:SetJustifyH("LEFT")
                 PP.Point(extraText, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
             end
-            PP.Width(extraText, barW * 0.95)
+            PP.Width(extraText, barW * 0.95 * SlotWidthMul(s, "extraText"))
             extraText:Show()
             ApplyClassColor(extraText, unit, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
         else extraText:Hide() end
@@ -7173,7 +7265,7 @@ local function StyleFullFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -7186,9 +7278,9 @@ local function StyleFullFrame(frame, unit)
             -- Constrain width when opposing right text exists
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -7202,9 +7294,9 @@ local function StyleFullFrame(frame, unit)
             -- Constrain width when opposing left text exists
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -7496,7 +7588,7 @@ local function StyleFocusFrame(frame, unit)
                 extraText:SetJustifyH("LEFT")
                 PP.Point(extraText, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
             end
-            PP.Width(extraText, barW * 0.95)
+            PP.Width(extraText, barW * 0.95 * SlotWidthMul(s, "extraText"))
             extraText:Show()
             ApplyClassColor(extraText, unit, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
         else extraText:Hide() end
@@ -7507,7 +7599,7 @@ local function StyleFocusFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -7519,9 +7611,9 @@ local function StyleFocusFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -7534,9 +7626,9 @@ local function StyleFocusFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -7607,6 +7699,7 @@ local function StyleSimpleFrame(frame, unit)
     ApplyHealthBarTexture(health, unitKey, ns.ResolveHealthBarTextureKey(settings, donor))
     ApplyHealthBarAlpha(health, unitKey)
     health:SetReverseFill(settings.healthReverseFill and true or false)
+    ns.ApplyHealthOrientation(health, settings)
     ApplyDarkTheme(health)
 
     frame.Health = health
@@ -7767,7 +7860,7 @@ local function StyleSimpleFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -7779,9 +7872,9 @@ local function StyleSimpleFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -7793,9 +7886,9 @@ local function StyleSimpleFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -7852,6 +7945,7 @@ local function StylePetFrame(frame, unit)
     ApplyHealthBarTexture(health, unitKey, ns.ResolveHealthBarTextureKey(settings, donor))
     ApplyHealthBarAlpha(health, unitKey)
     health:SetReverseFill(settings.healthReverseFill and true or false)
+    ns.ApplyHealthOrientation(health, settings)
     ApplyDarkTheme(health)
 
     frame.Health = health
@@ -8012,7 +8106,7 @@ local function StylePetFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -8024,9 +8118,9 @@ local function StylePetFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -8038,9 +8132,9 @@ local function StylePetFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -8301,7 +8395,7 @@ local function StyleBossFrame(frame, unit)
                 extraText:SetJustifyH("LEFT")
                 PP.Point(extraText, "LEFT", textOverlay, "LEFT", 5 + exo, eyo)
             end
-            PP.Width(extraText, barW * 0.95)
+            PP.Width(extraText, barW * 0.95 * SlotWidthMul(s, "extraText"))
             extraText:Show()
             ApplyClassColor(extraText, unit, s.extraTextClassColor, s.extraTextColorR, s.extraTextColorG, s.extraTextColorB)
         else extraText:Hide() end
@@ -8311,7 +8405,7 @@ local function StyleBossFrame(frame, unit)
         if cc ~= "none" then
             centerText:SetJustifyH("CENTER")
             PP.Point(centerText, "CENTER", textOverlay, "CENTER", cxo, cyo)
-            PP.Width(centerText, barW * 0.9)
+            PP.Width(centerText, barW * 0.9 * SlotWidthMul(s, "centerText"))
             centerText:Show()
             ApplyClassColor(centerText, unit, s.centerTextClassColor, s.centerTextColorR, s.centerTextColorG, s.centerTextColorB)
         else centerText:Hide() end
@@ -8323,9 +8417,9 @@ local function StyleBossFrame(frame, unit)
             PP.Point(leftText, "LEFT", textOverlay, "LEFT", 5 + lxo, lyo)
             if rc ~= "none" then
                 local rightUsed = EstimateUFTextWidth(rc)
-                PP.Width(leftText, math.max(barW - rightUsed - 10, 20))
+                PP.Width(leftText, math.max(barW - rightUsed - 10, 20) * SlotWidthMul(s, "leftText"))
             else
-                PP.Width(leftText, barW * 0.9)
+                PP.Width(leftText, barW * 0.9 * SlotWidthMul(s, "leftText"))
             end
             leftText:Show()
             ApplyClassColor(leftText, unit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -8337,9 +8431,9 @@ local function StyleBossFrame(frame, unit)
             PP.Point(rightText, "RIGHT", textOverlay, "RIGHT", -5 + rxo, ryo)
             if lc ~= "none" then
                 local leftUsed = EstimateUFTextWidth(lc)
-                PP.Width(rightText, math.max(barW - leftUsed - 10, 20))
+                PP.Width(rightText, math.max(barW - leftUsed - 10, 20) * SlotWidthMul(s, "rightText"))
             else
-                PP.Width(rightText, barW * 0.9)
+                PP.Width(rightText, barW * 0.9 * SlotWidthMul(s, "rightText"))
             end
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
@@ -11240,8 +11334,9 @@ local function ReloadFrames()
                 ns.ApplyBossBorderState(frame)
             end
             frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
-            ApplyDarkTheme(frame.Health)
-            UpdateAbsorbBarReverseFill(frame, settings.healthReverseFill and true or false)
+            ns.ApplyHealthOrientation(frame.Health, settings)
+            ApplyDarkTheme(frame.Health)  -- re-anchors health.bg for the new axis
+            UpdateAbsorbBarReverseFill(frame, settings.healthReverseFill and true or false, settings)
             -- Smooth bar interpolation (live toggle without /reload)
             if settings.smoothBars then
                 frame.Health.smoothing = Enum and Enum.StatusBarInterpolation
@@ -11570,9 +11665,13 @@ local function UnitFrame_OnEnter(self)
             -- 3D models don't inherit parent alpha: reveal the portrait too
             local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
             if bd3d then bd3d:SetAlpha(a) end
-            -- Mini-frame inheritance: the companion frame reveals with us
+            -- Mini-frame inheritance: the companion frame reveals with us.
+            -- Always Show Pet Frame opts the pet out (it is already visible
+            -- and must not pick up the player's fade alpha).
             local mini = ns.UF_MINI_OF and frames[ns.UF_MINI_OF[unitKey]]
-            if mini then mini:SetAlpha(a) end
+            if mini and not (unitKey == "player" and db.profile.pet and db.profile.pet.alwaysShow) then
+                mini:SetAlpha(a)
+            end
         end
     end
     if unit and GameTooltip and GameTooltip_SetDefaultAnchor then
@@ -11628,9 +11727,13 @@ local function UnitFrame_OnLeave(self)
         -- 3D models don't inherit parent alpha: hide/dim the portrait too
         local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
         if bd3d then bd3d:SetAlpha(leaveAlpha) end
-        -- Mini-frame inheritance: the companion frame hides/dims with us
+        -- Mini-frame inheritance: the companion frame hides/dims with us.
+        -- Always Show Pet Frame opts the pet out (a leave alpha of 0 would
+        -- hide a pet frame that must stay visible).
         local mini = ns.UF_MINI_OF and frames[ns.UF_MINI_OF[unitKey]]
-        if mini then mini:SetAlpha(leaveAlpha) end
+        if mini and not (unitKey == "player" and db.profile.pet and db.profile.pet.alwaysShow) then
+            mini:SetAlpha(leaveAlpha)
+        end
     end
     if self._tooltipTicker then self._tooltipTicker:Cancel(); self._tooltipTicker = nil end
     if GameTooltip and GameTooltip:IsOwned(self) then
@@ -13031,13 +13134,18 @@ function InitializeFrames()
                 end
 
                 local mini = frames[ns.UF_MINI_OF[unitKey]]
+                -- Always Show Pet Frame: the pet opts out of every parent
+                -- visibility inheritance in this pass -- its own unit watch
+                -- alone owns Show/Hide (visible whenever a pet exists).
+                local miniAlways = (unitKey == "player") and db.profile.pet
+                    and db.profile.pet.alwaysShow
 
                 -- The companion mini frame gets its own condition driver
                 -- (parent conditions + its own unit existence), so a
                 -- condition-hidden mini absorbs no clicks either.
                 if mini then
                     local miniWant
-                    if drvSet and EllesmereUI.BuildVisibilityDriverString then
+                    if (not miniAlways) and drvSet and EllesmereUI.BuildVisibilityDriverString then
                         miniWant = EllesmereUI.BuildVisibilityDriverString(
                             "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; ", drvSet)
                     end
@@ -13064,7 +13172,7 @@ function InitializeFrames()
                 -- alpha never conflicts with it. Hover reveals mirror in
                 -- the OnEnter/OnLeave handlers.
                 if mini then
-                    mini:SetAlpha(frame:IsShown() and bodyAlpha or 0)
+                    mini:SetAlpha(miniAlways and 1 or (frame:IsShown() and bodyAlpha or 0))
                 end
             elseif frame then
                 -- Parent disabled ("Never" clears enabledFrames): a
@@ -13078,11 +13186,25 @@ function InitializeFrames()
                 end
                 local mini = frames[ns.UF_MINI_OF[unitKey]]
                 if mini then
-                    if not isLocked and mini._euiVisDriver and mini._euiVisDriver ~= "hide" then
-                        RegisterAttributeDriver(mini, "state-visibility", "hide")
-                        mini._euiVisDriver = "hide"
+                    local miniAlways = (unitKey == "player") and db.profile.pet
+                        and db.profile.pet.alwaysShow
+                    if miniAlways then
+                        -- Always Show Pet Frame survives a disabled player
+                        -- frame: unpin any driver so the pet's own unit
+                        -- watch shows it whenever a pet exists.
+                        if not isLocked and mini._euiVisDriver then
+                            UnregisterAttributeDriver(mini, "state-visibility")
+                            RegisterUnitWatch(mini)
+                            mini._euiVisDriver = nil
+                        end
+                        mini:SetAlpha(1)
+                    else
+                        if not isLocked and mini._euiVisDriver and mini._euiVisDriver ~= "hide" then
+                            RegisterAttributeDriver(mini, "state-visibility", "hide")
+                            mini._euiVisDriver = "hide"
+                        end
+                        mini:SetAlpha(0)
                     end
-                    mini:SetAlpha(0)
                 end
             end
         end

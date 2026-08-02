@@ -42,6 +42,75 @@ do
     end
 end
 
+-- "Hide Count at 0" (Icon Effects): hide a zero charge/stack count on
+-- action buttons via the count fontstring's ALPHA, not its text. The text
+-- channel is co-owned: every action button keeps SPELL_UPDATE_CHARGES
+-- registered to Blizzard's mixin (BUTTON_EVENT_LISTS.action), whose handler
+-- rewrites Count with the raw value and would stomp a filtered text on
+-- every charge event -- but nothing engine-side ever touches the
+-- fontstring's alpha, so that channel is ours alone (same reasoning as the
+-- CDM twin). Memoized so only real state changes write; fail-open on
+-- SECRET display values (combat) so the count always shows rather than
+-- risking a tainted comparison. Off = one profile read + a memoized
+-- identity, zero machinery. (On the ns table: this file's main chunk is at
+-- the 200-local cap.)
+ns._EABZeroCountAlpha = function(fd, fs, v, action)
+    local pdb = EAB.db and EAB.db.profile
+    if not (pdb and pdb.hideZeroCount) then
+        -- OFF fast path, first and unconditional: three table reads and a
+        -- memo compare, no writes -- except healing a leftover hidden stamp
+        -- (toggle or profile switch while a count was hidden), so no button
+        -- can ever stay stuck invisible regardless of which path disabled
+        -- the feature. The profile read IS the gate on purpose: a cached
+        -- flag would go stale across profile switches.
+        if fd._zeroCountAlpha == 0 then
+            fd._zeroCountAlpha = 1
+            fs:SetAlpha(1)
+        end
+        return
+    end
+    local a = 1
+    if action then
+        -- The DISPLAY-count API is not what paints the visible zero: the
+        -- mixin shows GetActionCount for consumables/stackables (including
+        -- 0) and the charge count for maxCharges > 1 spells. Mirror that
+        -- display logic; the display string is only the cheap first check.
+        if v ~= nil and not (issecretvalue and issecretvalue(v))
+           and (v == 0 or v == "0") then
+            a = 0
+        elseif (IsConsumableAction and IsConsumableAction(action))
+            or (IsStackableAction and IsStackableAction(action)) then
+            local c = GetActionCount and GetActionCount(action)
+            if c ~= nil and not (issecretvalue and issecretvalue(c)) and c == 0 then
+                a = 0
+            end
+        elseif C_ActionBar.GetActionCharges then
+            -- Charge spells: zero charges <=> on a real (non-GCD) cooldown,
+            -- the same clean-flag predicate as the CDM twin -- both flags
+            -- stay PLAIN in combat, so the display is identical in and out
+            -- of instanced content (the secret currentCharges is never
+            -- compared).
+            local ci = C_ActionBar.GetActionCharges(action)
+            local mc = ci and ci.maxCharges
+            if mc ~= nil and not (issecretvalue and issecretvalue(mc)) and mc > 1 then
+                local cd = C_ActionBar.GetActionCooldown
+                    and C_ActionBar.GetActionCooldown(action)
+                local act = cd and cd.isActive
+                local gcd = cd and cd.isOnGCD
+                if act ~= nil and not (issecretvalue and issecretvalue(act))
+                   and not (issecretvalue and issecretvalue(gcd))
+                   and act and not gcd then
+                    a = 0
+                end
+            end
+        end
+    end
+    if fd._zeroCountAlpha ~= a then
+        fd._zeroCountAlpha = a
+        fs:SetAlpha(a)
+    end
+end
+
 -- Cold-path helper table for module-level behavior that benefits from a
 -- shared dispatch surface without adding more direct top-level helpers.
 local EAB_VTABLE = {
@@ -715,6 +784,7 @@ local function FormatHotkeyText(text)
     text = text:gsub("CTRL%-", "C")
     text = text:gsub("ALT%-", "A")
     text = text:gsub("SHIFT%-", "S")
+    text = text:gsub("META%-", "M")  -- Mac Command key (CMD-E -> ME)
     text = text:gsub("Mouse Button ", "M")
     text = text:gsub("MOUSEWHEELUP", "MwU")
     text = text:gsub("MOUSEWHEELDOWN", "MwD")
@@ -3014,6 +3084,7 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
         local display = C_ActionBar.GetActionDisplayCount(action)
         btn.Count:SetText(display or "")
+        ns._EABZeroCountAlpha(EFD(btn), btn.Count, display, action)
     end
     -- Macro / action text. The mixin's Update() maintains this normally, but
     -- we suppress its per-button events, so a moved macro leaves its name
@@ -3053,6 +3124,40 @@ end
 do
     local _dispatcherSetup = false
     local _empowerReroutePending = false
+
+    -- Empower keybind reroute, shared by the immediate and the deferred path.
+    -- UpdateKeybinds returns false when the routing signature is unchanged
+    -- (mouseover-conditional macro storms re-fire ACTIONBAR_SLOT_CHANGED on
+    -- every flip without changing any binding or empower state). Skip the
+    -- secure re-trigger in that case: rebuilding bindings and running the
+    -- ChildUpdate snippet on every bar every frame is what tanked FPS while
+    -- hovering across nameplates.
+    local function _EmpowerReroute()
+        if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
+            for _, info in ipairs(BAR_CONFIG) do
+                local frame = barFrames[info.key]
+                if frame then
+                    frame:SetAttribute("eab-empower-trigger", GetTime())
+                end
+            end
+        end
+    end
+
+    -- Deferral shell for that reroute. ACTIONBAR_SLOT_CHANGED fires freely IN
+    -- combat (a single page swap fires 12+), but the reroute cannot run there:
+    -- UpdateKeybinds needs SetOverrideBinding and the re-trigger needs
+    -- SetAttribute on a secure header, both combat-protected. This used to
+    -- `return` and drop the update on the floor with NOTHING to re-arm it --
+    -- ACTIONBAR_SLOT_CHANGED had already fired and would not fire again, and
+    -- the only other UpdateKeybinds callers are load-time, house-editor-close
+    -- and the vehicle/housing handler. So a slot change during a fight could
+    -- leave an empowered spell routed to its native binding, with no
+    -- pressAndHoldAction/typerelease, which presents as the Empowered Spell
+    -- Input setting having flipped from Hold and Release to Press and Tap, and
+    -- it persisted until something unrelated happened to rebuild.
+    -- Both sibling paths (the UPDATE_BINDINGS handler and ApplyKeyDownCVar)
+    -- already defer to PLAYER_REGEN_ENABLED; this now matches them.
+    local _empowerDeferFrame
     function EAB:SetupEventDispatcher()
         if _dispatcherSetup then return end
         _dispatcherSetup = true
@@ -3595,6 +3700,7 @@ do
                                                 f2.lastCountText = d2
                                                 b2.Count:SetText(d2)
                                             end
+                                            ns._EABZeroCountAlpha(f2, b2.Count, d2, a2)
                                         end
                                     end
                                 end
@@ -4087,6 +4193,7 @@ do
                                             fd.lastCountText = display
                                             btn.Count:SetText(display)
                                         end
+                                        ns._EABZeroCountAlpha(fd, btn.Count, display, action)
                                     end
                                     fd.chargeWasLive = (chargeInfo and chargeInfo.isActive) and true or false
                                 end
@@ -4219,22 +4326,19 @@ do
                 _empowerReroutePending = true
                 C_Timer_After(0, function()
                     _empowerReroutePending = false
-                    if InCombatLockdown() then return end
-                    -- UpdateKeybinds returns false when the routing signature is
-                    -- unchanged (mouseover-conditional macro storms re-fire
-                    -- ACTIONBAR_SLOT_CHANGED every mouseover flip without changing
-                    -- any binding or empower state). Skip the secure empower
-                    -- re-trigger in that case: rebuilding bindings and running the
-                    -- ChildUpdate snippet on every bar every frame is what tanked
-                    -- FPS while hovering across nameplates.
-                    if _G._EAB_UpdateKeybinds and _G._EAB_UpdateKeybinds() then
-                        for _, info in ipairs(BAR_CONFIG) do
-                            local frame = barFrames[info.key]
-                            if frame then
-                                frame:SetAttribute("eab-empower-trigger", GetTime())
-                            end
+                    if InCombatLockdown() then
+                        -- Re-arm for leaving combat instead of dropping it.
+                        if not _empowerDeferFrame then
+                            _empowerDeferFrame = ns.TakeShell()
+                            _empowerDeferFrame:SetScript("OnEvent", function(self)
+                                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                                _EmpowerReroute()
+                            end)
                         end
+                        _empowerDeferFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                        return
                     end
+                    _EmpowerReroute()
                 end)
             end
 
@@ -5114,6 +5218,15 @@ local function LayoutBar(key)
             end)
         end
     end
+
+    -- Countdown size is capped against button width (CooldownFonts
+    -- .EffectiveSize), so anything that re-lays a bar can change the cap. This
+    -- sits here rather than at the callers because there are fourteen of them
+    -- (icon size, padding, row/column overrides, width- and height-match links,
+    -- profile swaps, ...) and hooking one leaves the rest applying a stale size.
+    -- Cheap when nothing changed: the per-frame stamp makes the font work a
+    -- no-op unless the effective size actually differs.
+    EAB:ApplyCooldownFontsForBar(key)
 end
 
 -------------------------------------------------------------------------------
@@ -6238,14 +6351,44 @@ function EAB_VTABLE.CooldownFonts.GetSettings(s)
         s.cooldownTextColor or { r = 1, g = 1, b = 1 }
 end
 
+-- Cap the configured countdown size against the button it has to fit inside.
+-- The size is absolute and the countdown string is Blizzard's, formatted in the
+-- CLIENT locale -- so the same setting that fits "5m" on an English client
+-- overflows with "5 мин" on a Russian one, which is how this was reported. The
+-- text was always overflowing; a textured border merely HID it, because that
+-- border frame is anchored OUTSIDE the button (see ApplyBorderStyle) and its art
+-- covers the spill, while a solid border sits on the edge and covers nothing.
+-- Masking is not a fix, so cap the size instead: a normal 45px button is
+-- untouched at any sane setting, and small buttons scale down on their own.
+function EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
+    local host = cdFrame and (cdFrame:GetParent() or cdFrame)
+    if not (host and host.GetWidth and host.GetHeight) then return cdSize end
+    local w, h = host:GetWidth(), host:GetHeight()
+    if not w or not h or w <= 0 or h <= 0 then
+        return cdSize   -- not laid out yet; re-applied on the next layout pass
+    end
+    -- Smaller dimension, not width: buttonWidth and buttonHeight are separate
+    -- settings, so a wide, short button gives a generous width while the text
+    -- still overflows vertically. The tighter axis is the one that constrains.
+    local dim = (w < h) and w or h
+    local cap = math.floor(dim * 0.40)
+    if cap < 5 then cap = 5 end                 -- never shrink to illegibility
+    return (cdSize > cap) and cap or cdSize
+end
+
 function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, cdOY, cdColor)
     if not cdFrame then return false end
+
+    -- Stamp on the EFFECTIVE size, not the requested one: keyed to the request,
+    -- resizing the bar would leave the setting unchanged, match the stamp, and
+    -- skip the re-apply -- freezing the old size on a button that just changed.
+    local eff = EAB_VTABLE.CooldownFonts.EffectiveSize(cdFrame, cdSize)
 
     -- Skip if these exact settings were already applied to this frame
     local cdfd = EFD(cdFrame)
     local stamp = cdfd.cdFontStamp
     local cr, cg, cb = cdColor.r, cdColor.g, cdColor.b
-    if stamp and stamp[1] == fontPath and stamp[2] == cdSize
+    if stamp and stamp[1] == fontPath and stamp[2] == eff
        and stamp[3] == cdOX and stamp[4] == cdOY
        and stamp[5] == cr and stamp[6] == cg and stamp[7] == cb then
         return true
@@ -6254,11 +6397,11 @@ function EAB_VTABLE.CooldownFonts.ApplyToFrame(cdFrame, fontPath, cdSize, cdOX, 
     for ri = 1, cdFrame:GetNumRegions() do
         local region = select(ri, cdFrame:GetRegions())
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            EllesmereUI.ApplyIconTextFont(region, fontPath, cdSize, "actionBars")
+            EllesmereUI.ApplyIconTextFont(region, fontPath, eff, "actionBars")
             region:SetTextColor(cr, cg, cb)
             region:ClearAllPoints()
             region:SetPoint("CENTER", cdFrame, "CENTER", cdOX, cdOY)
-            cdfd.cdFontStamp = { fontPath, cdSize, cdOX, cdOY, cr, cg, cb }
+            cdfd.cdFontStamp = { fontPath, eff, cdOX, cdOY, cr, cg, cb }
             return true
         end
     end
@@ -6312,6 +6455,30 @@ end
 -- (immediate feedback + a clean restore to full alpha when set back to 100) and on
 -- the main apply. Reuses the exact same secret-safe curve detection as the live
 -- ACTIONBAR_UPDATE_COOLDOWN handler.
+-- Immediate re-apply of the Hide Count at 0 alpha on every button, so the
+-- options toggle applies on click instead of waiting for the next count
+-- event. Alpha only -- the count TEXT stays whatever its owners last wrote.
+-- Cold path: options clicks only.
+function EAB:RefreshAllCounts()
+    if not (C_ActionBar and C_ActionBar.GetActionDisplayCount) then return end
+    for _, info in ipairs(BAR_CONFIG) do
+        if not info.isStance and not info.isPetBar then
+            local btns = barButtons[info.key]
+            if btns then
+                for _, btn in ipairs(btns) do
+                    if btn.Count then
+                        local action = btn:GetAttribute("action")
+                        if action and HasAction(action) then
+                            ns._EABZeroCountAlpha(EFD(btn), btn.Count,
+                                C_ActionBar.GetActionDisplayCount(action), action)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 function EAB:ApplyCDAlphaAll()
     local pdb = self.db and self.db.profile
     local cdAlpha = (pdb and pdb.alphaWhenOnCD) or 100
@@ -9685,7 +9852,33 @@ local _eabBindOwner = CreateFrame("Frame", "EAB_BindOwner", UIParent)
 -- to run when a routing decision, a bound key, or a button's empower state
 -- actually changes.
 local function UpdateKeybinds()
-    if InCombatLockdown() then return false end
+    -- Combat bail, self-re-arming. Everything below is protected
+    -- (ClearOverrideBindings / SetOverrideBindingClick), so it genuinely cannot
+    -- run here -- but returning false with nothing to retry dropped the whole
+    -- build on the floor. The load-time apply is the caller that matters: it has
+    -- no deferral of its own and assumes combat state is not yet restored, so
+    -- logging in or reloading during combat left EVERY override binding
+    -- unapplied. Empower slots then sat on their native binding, where
+    -- pressAndHoldAction never engages, and the spell behaved exactly like
+    -- Press-and-Tap with the CVar untouched -- for the rest of the session,
+    -- because nothing re-ran this. A reload was the only cure, which is the
+    -- reported symptom.
+    -- Re-arming here rather than at the call site covers every caller at once;
+    -- the sibling paths that already defer simply arm this a second time, which
+    -- is idempotent (RegisterEvent twice is one registration).
+    if InCombatLockdown() then
+        local df = _bindState.deferFrame
+        if not df then
+            df = ns.TakeShell()
+            df:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                UpdateKeybinds()
+            end)
+            _bindState.deferFrame = df
+        end
+        df:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return false
+    end
     -- While the house editor is active our override bindings are cleared so
     -- Blizzard's housing hotkeys work (see Housing Editor Keybind Clearing).
     -- The editor registers its OWN override bindings after ours are cleared,
@@ -9696,6 +9889,26 @@ local function UpdateKeybinds()
     -- editor close (housingCleared reset -> UpdateKeybinds; sigValid stays
     -- false while cleared, so that rebuild is never skipped).
     if _bindState.housingCleared then return false end
+    -- Empower/flyout detection for one action slot, shared by the current-page
+    -- and base-slot checks in pass 1.
+    local function SlotIsPH(slot)
+        if not (slot and HasAction(slot)) then return false end
+        local actionType, id, subType = GetActionInfo(slot)
+        if actionType == "flyout" then return true end
+        if C_Spell and C_Spell.IsPressHoldReleaseSpell then
+            local spellID
+            if actionType == "spell" then
+                spellID = id
+            elseif actionType == "macro" and subType == "spell" then
+                spellID = id
+            end
+            if spellID and not (issecretvalue and issecretvalue(spellID))
+               and C_Spell.IsPressHoldReleaseSpell(spellID) then
+                return true
+            end
+        end
+        return false
+    end
     -- Pass 1: compute per-button routing signature (k1, k2, useClick, isPH)
     -- and compare against the last applied build.
     local sig = _bindState.sig
@@ -9744,21 +9957,28 @@ local function UpdateKeybinds()
                     -- custom-paged bar useClick is always true, but the secure
                     -- empower snippet still needs a re-trigger when a slot's
                     -- press-and-hold state flips.
-                    local isPH = false
-                    if slot and HasAction(slot) then
-                        local actionType, id, subType = GetActionInfo(slot)
-                        if actionType == "flyout" then
-                            isPH = true
-                        elseif C_Spell and C_Spell.IsPressHoldReleaseSpell then
-                            local spellID
-                            if actionType == "spell" then
-                                spellID = id
-                            elseif actionType == "macro" and subType == "spell" then
-                                spellID = id
-                            end
-                            if spellID and not (issecretvalue and issecretvalue(spellID))
-                               and C_Spell.IsPressHoldReleaseSpell(spellID) then
-                                isPH = true
+                    local isPH = SlotIsPH(slot)
+                    -- Page-proof routing: also consult the button's BASE slot.
+                    -- A click binding tracks the BUTTON, whose action attr
+                    -- re-pages SECURELY in combat, so a click-routed key
+                    -- survives any page swap with no rebind. Deriving isPH only
+                    -- from the CURRENT page meant mounting (skyriding page)
+                    -- rebuilt the empower keys to native; dismounting INTO
+                    -- combat then blocked the rebuild back, leaving empowered
+                    -- spells on native routes -- Press-and-Tap behaviour -- for
+                    -- the rest of the fight, or (before the combat re-arm) the
+                    -- session. Keeping the key click-routed when EITHER slot is
+                    -- empower-capable removes the rebind entirely; the cost is
+                    -- press-and-hold repeat on that key only while paged away
+                    -- from the empower slot. Guarded on the offsets table so
+                    -- Pet/Stance buttons (action attr nil) never alias into
+                    -- MainBar slots.
+                    if not isPH then
+                        local off = BAR_SLOT_OFFSETS[info.key]
+                        if off then
+                            local base = off + i
+                            if base ~= slot then
+                                isPH = SlotIsPH(base)
                             end
                         end
                     end
@@ -9813,6 +10033,7 @@ local function UpdateKeybinds()
     return true
 end
 _G._EAB_UpdateKeybinds = UpdateKeybinds
+
 
 
 
@@ -9977,12 +10198,13 @@ if IsHouseEditorActive then
                 _bindState.sigValid = false
             end
         else
-            -- House editor closed restore our override bindings
+            -- House editor closed restore our override bindings. Call
+            -- unconditionally: UpdateKeybinds defers itself in combat, where
+            -- the old guard dropped the restore with nothing to re-arm it and
+            -- every override binding stayed cleared until reload.
             if not _bindState.housingCleared then return end
             _bindState.housingCleared = false
-            if not InCombatLockdown() then
-                UpdateKeybinds()
-            end
+            UpdateKeybinds()
         end
     end)
 end
@@ -11753,16 +11975,24 @@ function EAB:FinishSetup()
         -- the bindings stay cleared forever.  This catches that.
         ResetDragState()
         C_Timer_After(0.2, function()
-            if InCombatLockdown() then return end
-            -- Reset stale flags -- if we're not actually in a vehicle/housing
-            -- the flags should be false
-            local inVehicle = (UnitInVehicle and UnitInVehicle("player"))
-                              or EAB_VTABLE.HasVehicleActionBar()
-
+            -- Reset stale flags -- if we're not actually in housing the flag
+            -- should be false. Plain Lua state, safe in combat.
             local inHousing = IsHouseEditorActive and IsHouseEditorActive()
             if not inHousing and _bindState.housingCleared then
                 _bindState.housingCleared = false
             end
+            -- This is the restore point for the transient-clear race described
+            -- above, so it must never be skipped: bindings can be cleared or
+            -- wrongly routed while the cached signature claims they are applied.
+            -- Force the rebuild past the signature short-circuit, and call
+            -- unconditionally -- UpdateKeybinds defers itself to
+            -- PLAYER_REGEN_ENABLED in combat. The old bare combat return here
+            -- reproduced the exact "stay cleared forever" this timer exists to
+            -- prevent: zoning INTO combat (die, release, run back in while the
+            -- raid still fights) missed the restore, and with no re-arm the
+            -- empower slots sat on native bindings (= Press-and-Tap behaviour)
+            -- until the next reload.
+            _bindState.sigValid = false
             UpdateKeybinds()
         end)
         -- Re-evaluate visibility options (visOnlyInstances, visHideHousing,

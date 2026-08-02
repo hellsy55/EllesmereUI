@@ -74,13 +74,16 @@ local INSPECT_ENCHANT_SLOTS = {
     [INVSLOT_MAINHAND] = true,
 }
 
--- Drop every label a previous styling pass left on this slot.
+-- Drop every label a previous styling pass left on this slot. The widgets
+-- are parked in per-slot cache fields and reused by the next pass: the
+-- client never frees frames or font strings, so recreating them on every
+-- pass would grow the widget count for the rest of the session.
 local function EUI_ClearSlotLabels(slot)
     local d = GetFFD(slot)
-    if d.iLvlText then d.iLvlText:Hide(); d.iLvlText = nil end
-    if d.enchantText then d.enchantText:Hide(); d.enchantText = nil end
-    if d.enchantHoverFrame then d.enchantHoverFrame:Hide(); d.enchantHoverFrame = nil end
-    if d.upgradeText then d.upgradeText:Hide(); d.upgradeText = nil end
+    if d.iLvlText then d.iLvlText:Hide(); d.cachedILvlText = d.iLvlText; d.iLvlText = nil end
+    if d.enchantText then d.enchantText:Hide(); d.cachedEnchantText = d.enchantText; d.enchantText = nil end
+    if d.enchantHoverFrame then d.enchantHoverFrame:Hide(); d.cachedEnchantHover = d.enchantHoverFrame; d.enchantHoverFrame = nil end
+    if d.upgradeText then d.upgradeText:Hide(); d.cachedUpgradeText = d.upgradeText; d.upgradeText = nil end
 end
 
 local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightColumn)
@@ -125,10 +128,11 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         local ilvl = select(4, GetItemInfo(itemLink))
         if ilvl and ilvl > 0 then
             local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
-            local ilvlText = textOverlayFrame:CreateFontString(nil, "OVERLAY")
+            local ilvlText = GetFFD(slot).cachedILvlText or textOverlayFrame:CreateFontString(nil, "OVERLAY")
             ilvlText:SetFont(fontPath, itemLevelSize, "")
             ilvlText:SetTextColor(1, 1, 1, 0.8)
             ilvlText:SetJustifyH("CENTER")
+            ilvlText:ClearAllPoints()
 
             if slotName == "InspectMainHandSlot" then
                 ilvlText:SetPoint("CENTER", slot, "LEFT", -15, 10)
@@ -157,6 +161,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             end
             displayColor = displayColor or { r = 1, g = 1, b = 1 }
             ilvlText:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
+            ilvlText:Show()
 
             GetFFD(slot).iLvlText = ilvlText
         end
@@ -189,9 +194,10 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowEnchants ~= false)
 
         if showEnchants and iconOnly and iconOnly ~= "" then
-            local enchantLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
+            local enchantLabel = GetFFD(slot).cachedEnchantText or textOverlayFrame:CreateFontString(nil, "OVERLAY")
             enchantLabel:SetFont(fontPath, enchantSize, "")
             enchantLabel:SetTextColor(1, 1, 1, 0.8)
+            enchantLabel:ClearAllPoints()
 
             if slotName == "InspectMainHandSlot" then
                 enchantLabel:SetPoint("RIGHT", slot, "LEFT", -5, -5)
@@ -204,11 +210,13 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             end
 
             enchantLabel:SetText(iconOnly)
+            enchantLabel:Show()
             GetFFD(slot).enchantText = enchantLabel
 
-            local hoverFrame = CreateFrame("Frame", nil, textOverlayFrame)
+            local hoverFrame = GetFFD(slot).cachedEnchantHover or CreateFrame("Frame", nil, textOverlayFrame)
             hoverFrame:SetSize(20, 20)
             hoverFrame:SetFrameLevel(textOverlayFrame:GetFrameLevel() + 20)
+            hoverFrame:ClearAllPoints()
             if slotName == "InspectMainHandSlot" then
                 hoverFrame:SetPoint("RIGHT", slot, "LEFT", -5, -5)
             elseif slotName == "InspectSecondaryHandSlot" then
@@ -228,6 +236,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             hoverFrame:SetScript("OnLeave", function()
                 if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             end)
+            hoverFrame:Show()
 
             GetFFD(slot).enchantHoverFrame = hoverFrame
         end
@@ -238,10 +247,11 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         local upgradeTrackSize = EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackSize or 11
         local upgradeText, upgradeColor = EllesmereUI.GetUpgradeTrack(itemLink)
         if upgradeText and upgradeText ~= "" then
-            local upgradeLabel = textOverlayFrame:CreateFontString(nil, "OVERLAY")
+            local upgradeLabel = GetFFD(slot).cachedUpgradeText or textOverlayFrame:CreateFontString(nil, "OVERLAY")
             upgradeLabel:SetFont(fontPath, upgradeTrackSize, "")
             upgradeLabel:SetTextColor(upgradeColor.r, upgradeColor.g, upgradeColor.b, 0.8)
             upgradeLabel:SetJustifyH("CENTER")
+            upgradeLabel:ClearAllPoints()
 
             if slotName == "InspectMainHandSlot" then
                 upgradeLabel:SetPoint("RIGHT", GetFFD(slot).iLvlText, "LEFT", -3, 0)
@@ -254,6 +264,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             end
 
             upgradeLabel:SetText("(" .. upgradeText .. ")")
+            upgradeLabel:Show()
             GetFFD(slot).upgradeText = upgradeLabel
         end
     end

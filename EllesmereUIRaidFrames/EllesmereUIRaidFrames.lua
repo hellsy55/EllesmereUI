@@ -500,6 +500,10 @@ local defaults = {
         customBgColor    = { r = 17/255, g = 17/255, b = 17/255 },
         bgClassColored   = false,
         bgDarkness       = 50,
+        -- Fill axis. Off = the classic left-to-right bar; on = the bar fills
+        -- bottom-to-top instead. Party frames can hold their own value (the
+        -- key is in the healthBar party-override section).
+        healthVerticalFill = false,
 
         -- Power bar (on when any powerShowFor* role is true)
         showPowerBar     = true,
@@ -1241,6 +1245,45 @@ ns.healthBarTextures     = healthBarTextures
 ns.healthBarTextureNames = healthBarTextureNames
 ns.healthBarTextureOrder = healthBarTextureOrder
 
+-- Vertical health fill. SetOrientation drives the bar's fill AXIS. Raid and
+-- party resolve their own value through the settings table the caller passes
+-- (party gets its own when the Health Bar section is unsynced). On ns, not
+-- file-scope locals -- this file is at the Lua 5.1 200-local cap.
+ns.RF_IsVerticalFill = function(s)
+    return ((s or db.profile).healthVerticalFill) and true or false
+end
+
+-- Fill-texture rotation, DERIVED -- never set on its own, so it can never go
+-- stale against the bar's axis or a texture swap. Two texture families live on
+-- these bars and they want opposite treatment on a vertical bar:
+--
+--   stretch (shield.tga, striped3, blizzard, WHITE8X8, every health texture):
+--     one image scaled to the fill rect. Designed wide-and-short, so on a tall
+--     bar it must be ROTATED or it smears into a stretched mess.
+--   tiled (stripedReversed, the large* stripe sets, striped-maxhp, the modern
+--     absorb): repeats at native pixel size on BOTH axes, so it already reads
+--     correctly at any bar shape. Rotating it fights the tiling and is exactly
+--     what produced the stretched look -- leave these alone.
+--
+-- Tiling is read back off the live fill texture rather than passed in, so this
+-- stays correct no matter which style function last touched the bar.
+ns.RF_ApplyFillRotation = function(bar)
+    if not (bar and bar.SetRotatesTexture) then return end
+    local vert = bar.GetOrientation and bar:GetOrientation() == "VERTICAL"
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    local tiled = fill and ((fill.GetHorizTile and fill:GetHorizTile())
+                         or (fill.GetVertTile and fill:GetVertTile()))
+    bar:SetRotatesTexture((vert and not tiled) and true or false)
+end
+
+ns.RF_ApplyHealthOrientation = function(bar, s)
+    if not bar then return false end
+    local vert = ns.RF_IsVerticalFill(s)
+    bar:SetOrientation(vert and "VERTICAL" or "HORIZONTAL")
+    ns.RF_ApplyFillRotation(bar)
+    return vert
+end
+
 -- Resolve an absorb/heal/max-health style key to a texture path. Built-in
 -- styles come from ABSORB_STYLE_TEX; "sm:" SharedMedia keys (shared with the
 -- Bar Texture dropdown, appended into healthBarTextures) fall through to the
@@ -1482,8 +1525,16 @@ function ns._ApplyHealthBg(d, health, s, unit)
     end
     if not bg then return end
     bg:ClearAllPoints()
-    bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-    bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+    -- The bg covers only the MISSING health, so it hangs off the far side of the
+    -- fill: the fill's right edge normally, its top edge on a vertical bar. Read
+    -- the axis off the bar itself so this needs no settings lookup.
+    if health.GetOrientation and health:GetOrientation() == "VERTICAL" then
+        bg:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+        bg:SetPoint("BOTTOMRIGHT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+    else
+        bg:SetPoint("TOPLEFT", health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+        bg:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+    end
     if s.healthColorMode == "dark" then
         bg:SetColorTexture(EllesmereUI.GetDarkModeBg())
     else
@@ -1967,6 +2018,7 @@ ns.ApplyModernAbsorbBar = function(bar, mask)
         local base = bar._modernBase
         if base then base:SetAllPoints(fill); base:Show() end
     end
+    ns.RF_ApplyFillRotation(bar)  -- tiled: stays unrotated on a vertical bar
 end
 
 -- Hide the modern solid base whenever a non-modern style is applied so that
@@ -2014,6 +2066,9 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
         fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
     end
+    -- New fill object + new tiling state: re-derive rotation (stretch styles
+    -- rotate on a vertical bar, tiled ones must not).
+    ns.RF_ApplyFillRotation(absorbBar)
     if fw then
         fw:SetStatusBarTexture(tex)
         fw:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
@@ -2024,6 +2079,7 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
             fwFill:SetVertTile(tiled)
             if mask then fwFill:AddMaskTexture(mask) end
         end
+        ns.RF_ApplyFillRotation(fw)
     end
 end
 
@@ -2046,6 +2102,7 @@ ns.ApplyHealAbsorbStyle = function(haBar, style, settings)
         fill:SetVertTile(tiled)
         if mask then fill:AddMaskTexture(mask) end
     end
+    ns.RF_ApplyFillRotation(haBar)
 end
 
 -- Reduced max-health overlay style. A 1:1 set of the heal-absorb textures plus
@@ -2075,6 +2132,7 @@ ns.ApplyMaxHealthStyle = function(bar, style, settings)
         fill:SetHorizTile(tiled)
         fill:SetVertTile(tiled)
     end
+    ns.RF_ApplyFillRotation(bar)
 end
 
 -------------------------------------------------------------------------------
@@ -2216,12 +2274,104 @@ local function CreateAbsorbBar(button, healthBar)
     -- nil guards inside ReanchorAbsorbToFill simply skip them. Without this,
     -- they resolved to globals (nil) inside the closure, so the heal absorb
     -- never re-anchored to the right edge in "Show Absorbs from Right Edge".
-    local healAbsorbBar, healPredBar, healClip
+    -- reducedBar joins them: ReanchorAbsorbToFill flips its orientation too, and
+    -- an undeclared name inside the closure would resolve to a nil global.
+    local healAbsorbBar, healPredBar, healClip, reducedBar
 
     -- Re-anchor clip frames and forward bar to the current health fill texture.
     -- Must be called whenever SetStatusBarTexture replaces the fill object.
     local function ReanchorAbsorbToFill()
         local fill = healthBar:GetStatusBarTexture()
+
+        -- Vertical fill: the whole HP cluster rotates with the health bar. Every
+        -- anchor below is the horizontal layout with its axis swapped -- the
+        -- fill's RIGHT edge (the "HP edge" the shields, heal absorb and heal
+        -- prediction hang off) becomes its TOP edge, and the frame's right/left
+        -- edges become its top/bottom. Resolved live off the button's own
+        -- settings source so party frames honour their own Health Bar section.
+        local vs = d._isParty and ns._scaledPartyProxy
+            or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
+        local isVert = ns.RF_ApplyHealthOrientation(healthBar, vs)
+        backfillBar._axisVert = isVert  -- read by the blizzardModern spark block
+        -- Indexed, not ipairs: the creation-time call runs before the heal/max
+        -- bars exist, and ipairs would stop at the first nil.
+        local axisBars = { backfillBar, forwardBar, healAbsorbBar, healPredBar, reducedBar }
+        for i = 1, 5 do
+            local b = axisBars[i]
+            if b then
+                b:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+                ns.RF_ApplyFillRotation(b)  -- derived: rotate stretch styles only
+            end
+        end
+
+        if isVert then
+            curClip:ClearAllPoints()
+            curClip:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
+            curClip:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+            missClip:ClearAllPoints()
+            missClip:SetPoint("BOTTOMLEFT", fill, "TOPLEFT", 0, -1)
+            missClip:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+            forwardBar:ClearAllPoints()
+            forwardBar:SetPoint("BOTTOMLEFT", fill, "TOPLEFT", 0, 0)
+            forwardBar:SetPoint("BOTTOMRIGHT", fill, "TOPRIGHT", 0, 0)
+            if healPredBar then
+                healPredBar:ClearAllPoints()
+                healPredBar:SetPoint("BOTTOMLEFT", fill, "TOPLEFT", 0, 0)
+                healPredBar:SetPoint("BOTTOMRIGHT", fill, "TOPRIGHT", 0, 0)
+            end
+            -- Edge modes keep their key names: "right" is the far edge of the
+            -- fill axis (the top when vertical), "left" the near one (bottom).
+            local vAbsorbMode = db.profile.absorbEdgeMode or "overlay"
+            backfillBar:ClearAllPoints()
+            if vAbsorbMode == "right" or vAbsorbMode == "left" then
+                curClip:ClearAllPoints()
+                curClip:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                curClip:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+                if vAbsorbMode == "left" then
+                    backfillBar:SetReverseFill(false)
+                    backfillBar:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
+                    backfillBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+                else
+                    backfillBar:SetReverseFill(true)
+                    backfillBar:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                    backfillBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+                end
+            else
+                backfillBar:SetReverseFill(true)
+                backfillBar:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                backfillBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+            end
+
+            if healAbsorbBar then
+                local vHealMode = db.profile.healAbsorbEdgeMode or "overlay"
+                if healClip then
+                    healClip:ClearAllPoints()
+                    if vHealMode == "right" or vHealMode == "left" then
+                        healClip:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                        healClip:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+                    else
+                        healClip:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
+                        healClip:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+                    end
+                end
+                healAbsorbBar:ClearAllPoints()
+                if vHealMode == "right" then
+                    healAbsorbBar:SetReverseFill(true)
+                    healAbsorbBar:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                    healAbsorbBar:SetPoint("TOPRIGHT", healthBar, "TOPRIGHT", 0, 0)
+                elseif vHealMode == "left" then
+                    healAbsorbBar:SetReverseFill(false)
+                    healAbsorbBar:SetPoint("BOTTOMLEFT", healthBar, "BOTTOMLEFT", 0, 0)
+                    healAbsorbBar:SetPoint("BOTTOMRIGHT", healthBar, "BOTTOMRIGHT", 0, 0)
+                else
+                    healAbsorbBar:SetReverseFill(true)
+                    healAbsorbBar:SetPoint("TOPLEFT", fill, "TOPLEFT", 0, 0)
+                    healAbsorbBar:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+                end
+            end
+            return
+        end
+
         curClip:ClearAllPoints()
         curClip:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
         curClip:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
@@ -2361,7 +2511,8 @@ local function CreateAbsorbBar(button, healthBar)
     healPredBar:Hide()
 
     -- Reduced max health bar: black bg + red striped overlay on right side
-    local reducedBar = CreateFrame("StatusBar", nil, healthBar)
+    -- (forward-declared above so ReanchorAbsorbToFill can reach it).
+    reducedBar = CreateFrame("StatusBar", nil, healthBar)
     reducedBar:SetStatusBarTexture("Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\striped-maxhp.png")
     local rmhFill = reducedBar:GetStatusBarTexture()
     if rmhFill then
@@ -2747,7 +2898,14 @@ local function UpdateAbsorb(button, unit)
     -- while overshielding. isClamped (the Missing-Health-clamp overshield boolean) flips
     -- between them secret-safely, so exactly one is ever visible.
     if absStyle == "blizzardModern" then
-        if fw then
+        -- Vertical fill: the shield itself rotates, but these two edge glows are
+        -- 16px-wide strips pinned to the shield's LEFT edge and re-sized to the
+        -- bar height on every update, so they cannot follow a vertical seam.
+        -- Hide them rather than render a sideways glow; the shield is unaffected.
+        if ab._axisVert and fw then
+            if fw._edgeSpark then fw._edgeSpark:Hide() end
+            if fw._bfSpark then fw._bfSpark:Hide() end
+        elseif fw then
             -- Fill-rect anchors are permanent (statusbar textures persist
             -- across SetValue); sizes are size-gated; the overshield spark's
             -- anchor moves only when the Show Overshield toggle flips.
@@ -3082,6 +3240,10 @@ local function StyleButton(button)
     health:SetStatusBarTexture(texPath)
     health:GetStatusBarTexture():SetHorizTile(false)
     if PP then PP.DisablePixelSnap(health) end
+    -- Fill axis. StyleButton runs before d._isParty is set, so this uses the raid
+    -- value; ReanchorAbsorbToFill re-resolves it against the button's real
+    -- settings source (raid / party / extra) on every update.
+    ns.RF_ApplyHealthOrientation(health, s)
     health:SetMinMaxValues(0, 100)
     health:SetValue(100)
     d.health = health
@@ -7037,6 +7199,10 @@ FB.ApplyStyle = function(owner)
         b._health:SetStatusBarTexture(texPath)
         local ft = b._health:GetStatusBarTexture()
         if ft then ft:SetHorizTile(false) end
+        -- Fill axis follows the raid Health Bar setting, like every other
+        -- element these buttons borrow. The bg is a full-button texture here
+        -- (not fill-tracking), so nothing else needs re-anchoring.
+        ns.RF_ApplyHealthOrientation(b._health, s)
         -- No power bar / top name bar here: health fills the button.
         b._health:SetHeight(h)
 
@@ -10557,6 +10723,7 @@ do
             "customFillColor", "dynamicColor100", "dynamicColor50", "dynamicColor0",
             "customBgColor", "bgClassColored", "bgDarkness", "smoothBars",
             "healPrediction", "healPredOpacity", "healPredColor",
+            "healthVerticalFill",
         },
         absorbs = {
             "absorbStyle", "absorbOpacity", "absorbColor", "absorbEdgeMode", "showOvershield",
@@ -13601,6 +13768,7 @@ local function ApplyPreviewData(f, index)
     if f._health then
         f._health:SetStatusBarTexture(ResolveHealthTexture())
         f._health:GetStatusBarTexture():SetHorizTile(false)
+        ns.RF_ApplyHealthOrientation(f._health, s)
         f._health:SetMinMaxValues(0, 100)
         f._health:SetValue(healthPct)
         f._healthPct = healthPct
@@ -13648,18 +13816,27 @@ local function ApplyPreviewData(f, index)
 
     -- Background
     if f._bg then
-        if s.healthColorMode == "dark" then
+        -- BG covers the missing-health portion only (never behind the fill), so
+        -- it hangs off the far side of the fill -- its right edge normally, its
+        -- top edge on a vertical bar. Mirrors the live UpdateHealthBg.
+        local pvVert = ns.RF_IsVerticalFill(s)
+        local function AnchorPreviewBg()
             f._bg:ClearAllPoints()
-            f._bg:SetPoint("TOPLEFT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-            f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+            if pvVert then
+                f._bg:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                f._bg:SetPoint("BOTTOMRIGHT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+            else
+                f._bg:SetPoint("TOPLEFT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+                f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+            end
+        end
+        if s.healthColorMode == "dark" then
+            AnchorPreviewBg()
             f._bg:SetColorTexture(EllesmereUI.GetDarkModeBg())
         else
-            -- BG covers the missing-health portion only (never behind the fill),
-            -- matching the real-frame themed branch + Dark mode. Keeps the preview
+            -- Matches the real-frame themed branch + Dark mode. Keeps the preview
             -- a 1:1 replica for reduced-fill-opacity setups.
-            f._bg:ClearAllPoints()
-            f._bg:SetPoint("TOPLEFT", f._health:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
-            f._bg:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+            AnchorPreviewBg()
             local bgA = (s.bgDarkness or 50) / 100
             local cc = s.bgClassColored and classToken and EllesmereUI.GetClassColor(classToken)
             if cc then
@@ -13800,7 +13977,11 @@ local function ApplyPreviewData(f, index)
             -- "Default Blizz Frames": seam spark + overshield spark (preview values are
             -- plain numbers, so overshield is a normal compare instead of isClamped).
             if modern then
-                if fw then
+                -- Vertical fill hides the two edge glows (see the live path).
+                if ns.RF_IsVerticalFill(s) and fw then
+                    if fw._edgeSpark then fw._edgeSpark:Hide() end
+                    if fw._bfSpark then fw._bfSpark:Hide() end
+                elseif fw then
                     local fmb = fw._modernBase
                     if fmb then fmb:SetAllPoints(fw:GetStatusBarTexture()) end
                     local previewOver = absorbAmt > (100 - (healthPct or 100))
@@ -13843,7 +14024,52 @@ local function ApplyPreviewData(f, index)
         local mc = f._absorbBar._missClip
         if cc and mc and f._health then
             local absorbMode = s.absorbEdgeMode or "overlay"
-            if absorbMode == "right" or absorbMode == "left" then
+            -- Vertical fill: same layout with the axis swapped (the fill's right
+            -- edge becomes its top edge). Mirrors the live vertical branch.
+            local pvAbVert = ns.RF_IsVerticalFill(s)
+            local pvAxisBars = { f._absorbBar, fw }
+            for i = 1, 2 do
+                local b = pvAxisBars[i]
+                if b then
+                    b:SetOrientation(pvAbVert and "VERTICAL" or "HORIZONTAL")
+                    ns.RF_ApplyFillRotation(b)
+                end
+            end
+            if pvAbVert then
+                local vfill = f._health:GetStatusBarTexture()
+                if absorbMode == "right" or absorbMode == "left" then
+                    cc:ClearAllPoints()
+                    cc:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                    cc:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                    f._absorbBar:ClearAllPoints()
+                    if absorbMode == "left" then
+                        f._absorbBar:SetReverseFill(false)
+                        f._absorbBar:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                        f._absorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                    else
+                        f._absorbBar:SetReverseFill(true)
+                        f._absorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                        f._absorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                    end
+                    if fw then fw:Hide() end
+                else
+                    cc:ClearAllPoints()
+                    cc:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                    cc:SetPoint("TOPRIGHT", vfill, "TOPRIGHT", 0, 0)
+                    mc:ClearAllPoints()
+                    mc:SetPoint("BOTTOMLEFT", vfill, "TOPLEFT", 0, -1)
+                    mc:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                    f._absorbBar:SetReverseFill(true)
+                    f._absorbBar:ClearAllPoints()
+                    f._absorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                    f._absorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                end
+                if fw then
+                    fw:ClearAllPoints()
+                    fw:SetPoint("BOTTOMLEFT", vfill, "TOPLEFT", 0, 0)
+                    fw:SetPoint("BOTTOMRIGHT", vfill, "TOPRIGHT", 0, 0)
+                end
+            elseif absorbMode == "right" or absorbMode == "left" then
                 cc:ClearAllPoints()
                 cc:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
                 cc:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
@@ -13871,6 +14097,14 @@ local function ApplyPreviewData(f, index)
                 f._absorbBar:ClearAllPoints()
                 f._absorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
                 f._absorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+            end
+            -- Restore the forward bar's horizontal anchors (the vertical branch
+            -- above re-points it, and these are otherwise only set at creation).
+            if not pvAbVert and fw then
+                local hfill = f._health:GetStatusBarTexture()
+                fw:ClearAllPoints()
+                fw:SetPoint("TOPLEFT", hfill, "TOPRIGHT", 0, 0)
+                fw:SetPoint("BOTTOMLEFT", hfill, "BOTTOMRIGHT", 0, 0)
             end
         end
     end
@@ -13920,30 +14154,62 @@ local function ApplyPreviewData(f, index)
         -- Heal absorb placement (independent of shield absorb; mirrors live).
         if f._health then
             local healMode = s.healAbsorbEdgeMode or "overlay"
-            if f._healClip then
-                f._healClip:ClearAllPoints()
-                if healMode == "right" or healMode == "left" then
-                    f._healClip:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
-                    f._healClip:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
-                else
-                    f._healClip:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
-                    f._healClip:SetPoint("BOTTOMRIGHT", f._health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+            -- Vertical fill: same layout, axis swapped (mirrors the live branch).
+            local pvHaVert = ns.RF_IsVerticalFill(s)
+            f._healAbsorbBar:SetOrientation(pvHaVert and "VERTICAL" or "HORIZONTAL")
+            ns.RF_ApplyFillRotation(f._healAbsorbBar)
+            if pvHaVert then
+                local vfill = f._health:GetStatusBarTexture()
+                if f._healClip then
+                    f._healClip:ClearAllPoints()
+                    if healMode == "right" or healMode == "left" then
+                        f._healClip:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                        f._healClip:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                    else
+                        f._healClip:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                        f._healClip:SetPoint("TOPRIGHT", vfill, "TOPRIGHT", 0, 0)
+                    end
                 end
-            end
-            f._healAbsorbBar:ClearAllPoints()
-            if healMode == "right" then
-                f._healAbsorbBar:SetReverseFill(true)
-                f._healAbsorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
-                f._healAbsorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
-            elseif healMode == "left" then
-                f._healAbsorbBar:SetReverseFill(false)
-                f._healAbsorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
-                f._healAbsorbBar:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                f._healAbsorbBar:ClearAllPoints()
+                if healMode == "right" then
+                    f._healAbsorbBar:SetReverseFill(true)
+                    f._healAbsorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                    f._healAbsorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                elseif healMode == "left" then
+                    f._healAbsorbBar:SetReverseFill(false)
+                    f._healAbsorbBar:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                    f._healAbsorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                else
+                    f._healAbsorbBar:SetReverseFill(true)
+                    f._healAbsorbBar:SetPoint("TOPLEFT", vfill, "TOPLEFT", 0, 0)
+                    f._healAbsorbBar:SetPoint("TOPRIGHT", vfill, "TOPRIGHT", 0, 0)
+                end
             else
-                local fill = f._health:GetStatusBarTexture()
-                f._healAbsorbBar:SetReverseFill(true)
-                f._healAbsorbBar:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
-                f._healAbsorbBar:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
+                if f._healClip then
+                    f._healClip:ClearAllPoints()
+                    if healMode == "right" or healMode == "left" then
+                        f._healClip:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                        f._healClip:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                    else
+                        f._healClip:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                        f._healClip:SetPoint("BOTTOMRIGHT", f._health:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+                    end
+                end
+                f._healAbsorbBar:ClearAllPoints()
+                if healMode == "right" then
+                    f._healAbsorbBar:SetReverseFill(true)
+                    f._healAbsorbBar:SetPoint("TOPRIGHT", f._health, "TOPRIGHT", 0, 0)
+                    f._healAbsorbBar:SetPoint("BOTTOMRIGHT", f._health, "BOTTOMRIGHT", 0, 0)
+                elseif healMode == "left" then
+                    f._healAbsorbBar:SetReverseFill(false)
+                    f._healAbsorbBar:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
+                    f._healAbsorbBar:SetPoint("BOTTOMLEFT", f._health, "BOTTOMLEFT", 0, 0)
+                else
+                    local fill = f._health:GetStatusBarTexture()
+                    f._healAbsorbBar:SetReverseFill(true)
+                    f._healAbsorbBar:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+                    f._healAbsorbBar:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
+                end
             end
         end
     end
@@ -13960,6 +14226,25 @@ local function ApplyPreviewData(f, index)
             f._healPredBar:SetStatusBarColor(pc.r, pc.g, pc.b, pAlpha)
             f._healPredBar:SetWidth(w)
             f._healPredBar:SetHeight(healthH)
+            -- Grows from the HP edge into the missing health: the fill's right
+            -- edge normally, its top edge on a vertical bar. Only set at creation
+            -- otherwise, so both axes are re-applied here.
+            do
+                local pvPredVert = ns.RF_IsVerticalFill(s)
+                local pFill = f._health and f._health:GetStatusBarTexture()
+                f._healPredBar:SetOrientation(pvPredVert and "VERTICAL" or "HORIZONTAL")
+                ns.RF_ApplyFillRotation(f._healPredBar)
+                if pFill then
+                    f._healPredBar:ClearAllPoints()
+                    if pvPredVert then
+                        f._healPredBar:SetPoint("BOTTOMLEFT", pFill, "TOPLEFT", 0, 0)
+                        f._healPredBar:SetPoint("BOTTOMRIGHT", pFill, "TOPRIGHT", 0, 0)
+                    else
+                        f._healPredBar:SetPoint("TOPLEFT", pFill, "TOPRIGHT", 0, 0)
+                        f._healPredBar:SetPoint("BOTTOMLEFT", pFill, "BOTTOMRIGHT", 0, 0)
+                    end
+                end
+            end
             f._healPredBar:SetMinMaxValues(0, 100)
             f._healPredBar:SetValue(predAmt)
             f._healPredBar:Show()
@@ -13978,6 +14263,11 @@ local function ApplyPreviewData(f, index)
             or (not ns._testMode and not ns._indicatorsVisible and ns._absorbsPreviewVisible)
         if rmhShow and rmhAmt > 0 and rmhStyle ~= "none" then
             ns.ApplyMaxHealthStyle(f._reducedMaxHealthBar, rmhStyle, s)
+            do  -- eats the far end of the bar: the right edge, or the top when vertical
+                local pvRmhVert = ns.RF_IsVerticalFill(s)
+                f._reducedMaxHealthBar:SetOrientation(pvRmhVert and "VERTICAL" or "HORIZONTAL")
+                ns.RF_ApplyFillRotation(f._reducedMaxHealthBar)
+            end
             f._reducedMaxHealthBar:SetValue(rmhAmt)
             local rmhBg = f._reducedMaxHealthBg
             if rmhBg then

@@ -544,6 +544,18 @@ initFrame:SetScript("OnEvent", function(self)
                           -- aura-ID CVar (12.1; no-op on retail).
                           if EllesmereUI.SyncAuraSpellIDCVar then EllesmereUI.SyncAuraSpellIDCVar() end
                       end },
+                    { type="toggle", label="Show Icon ID",
+                      get=function() return not EllesmereUIDB or EllesmereUIDB.showIconID ~= false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.showIconID = v
+                      end },
+                    { type="toggle", label="Show Item ID",
+                      get=function() return not EllesmereUIDB or EllesmereUIDB.showItemID ~= false end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.showItemID = v
+                      end },
                 },
             })
             local sidModBtn = CreateFrame("Button", nil, rightRgn)

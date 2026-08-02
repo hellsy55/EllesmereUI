@@ -1832,6 +1832,111 @@ function ns.WatchChargeCdTextIfEnabled(frame)
 end
 
 -------------------------------------------------------------------------------
+--  "Hide Text at 0 Stacks" (bar-level, cd/utility bars): hide the charge
+--  counter (frame.ChargeCount.Current) while a charge spell is genuinely OUT
+--  of charges, instead of showing a 0. Uses the same clean charges>0
+--  predicate as CdmShouldHideCountdown above -- GetSpellCooldown().isActive
+--  AND not isOnGCD, both plain flags; the secret currentCharges is never
+--  read, so the display is identical in and out of instanced combat. Driven
+--  by the same SPELL_UPDATE_CHARGES edge as the other charge features (fires
+--  on every spend AND refill, nothing else); the event shell is created
+--  lazily on first enrollment and the watch set self-drains, so a user who
+--  never enables the toggle pays nothing at all. Alpha, not Hide: the engine
+--  rewrites the counter's TEXT on charge changes but never its alpha, and
+--  our eval re-asserts on the same event either way.
+-------------------------------------------------------------------------------
+ns._zeroChargeTextWatch = ns._zeroChargeTextWatch or setmetatable({}, { __mode = "k" })
+
+-- Paint-the-delta memo: SetAlpha only on a real state change. fd is our own
+-- hook data table; the engine rewrites the counter's TEXT but never its
+-- alpha, so the stamp stays truthful between our writes.
+local function ZctSetAlpha(fd, fs, a)
+    if fd._zctAlpha ~= a then
+        fd._zctAlpha = a
+        fs:SetAlpha(a)
+    end
+end
+
+local function EvalZeroChargeTextFrame(frame, fd)
+    local fs = frame.ChargeCount and frame.ChargeCount.Current
+    local fcz = _ecmeFC[frame]
+    local sidz = fcz and fcz.spellID
+    local bkz = fcz and fcz.barKey
+    if not fs or not sidz or not bkz then
+        ns._zeroChargeTextWatch[frame] = nil
+        if fs then ZctSetAlpha(fd, fs, 1) end
+        return
+    end
+    local bd = barDataByKey and barDataByKey[bkz]
+    if not (bd and bd.hideZeroChargeText) then
+        ns._zeroChargeTextWatch[frame] = nil
+        ZctSetAlpha(fd, fs, 1)
+        return
+    end
+    local liveSid = sidz
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        liveSid = C_SpellBook.FindSpellOverrideByID(sidz) or sidz
+    end
+    local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+    if not (ci and (ci.maxCharges or 0) > 1) then
+        -- Not a charge spell (talent may have changed since enrollment):
+        -- restore and unwatch; the appearance pass re-enrolls if charge-ness
+        -- returns. Keeps the per-event set charge-spells-only.
+        ns._zeroChargeTextWatch[frame] = nil
+        ZctSetAlpha(fd, fs, 1)
+        return
+    end
+    -- 0 charges <=> on a real (non-GCD) cooldown; see CdmShouldHideCountdown
+    -- for why the isOnGCD term is required (a GCD right after a cast reports
+    -- isActive with a charge still in hand).
+    local cdInfo = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(liveSid)
+    local zero = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
+    ZctSetAlpha(fd, fs, zero and 0 or 1)
+end
+
+function ns.WatchZeroChargeTextIfEnabled(frame)
+    if not frame then return end
+    local fd = hookFrameData[frame]
+    if not fd then return end
+    local fcz = _ecmeFC[frame]
+    local sidz = fcz and fcz.spellID
+    local bkz = fcz and fcz.barKey
+    local bd = bkz and barDataByKey and barDataByKey[bkz]
+    if bd and bd.hideZeroChargeText and sidz then
+        -- Enroll CHARGE SPELLS ONLY (mirrors WatchChargeCdTextIfEnabled):
+        -- non-charge icons would just be identity work on every
+        -- SPELL_UPDATE_CHARGES. Talent swaps that change charge-ness re-run
+        -- this via the appearance pass, and the eval self-unwatches the
+        -- other direction.
+        local liveSid = sidz
+        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+            liveSid = C_SpellBook.FindSpellOverrideByID(sidz) or sidz
+        end
+        local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(liveSid)
+        if not (ci and (ci.maxCharges or 0) > 1) then
+            if ns._zeroChargeTextWatch[frame] then EvalZeroChargeTextFrame(frame, fd) end
+            return
+        end
+        if not ns._zeroChargeTextEventFrame then
+            local ef = ns.TakeShell()
+            ef:RegisterEvent("SPELL_UPDATE_CHARGES")
+            ef:SetScript("OnEvent", function()
+                for f, d in pairs(ns._zeroChargeTextWatch) do
+                    EvalZeroChargeTextFrame(f, d)
+                end
+            end)
+            ns._zeroChargeTextEventFrame = ef
+        end
+        ns._zeroChargeTextWatch[frame] = fd
+        EvalZeroChargeTextFrame(frame, fd)
+    elseif ns._zeroChargeTextWatch[frame] then
+        -- Setting turned off: the eval's off-branch unwatches and restores
+        -- the counter's alpha in one place.
+        EvalZeroChargeTextFrame(frame, fd)
+    end
+end
+
+-------------------------------------------------------------------------------
 --  Cooldown State Effect -- charge-aware readiness for Hidden (CD Ready)
 --
 --  For a CHARGE spell "CD Ready" must mean AT MAX CHARGES, not "a charge is in
@@ -2139,9 +2244,10 @@ ns.ApplyCustomIcon = ApplyCustomIcon
 --    cd/utility bars:  "Charges/Stacks Only (No Icon)" -> barData.chargesOnly
 --  Both hide the icon texture, background, square border, shape ring, Blizzard
 --  debuff border, the swipe and the recharge edge. They differ in the text they
---  leave behind: Only Show Numbers FORCES the Cooldown widget's engine
---  countdown on (the duration number IS the display), while Charges/Stacks Only
---  forces it OFF, so the charge / stack counter is all that remains.
+--  leave behind: Only Show Numbers leaves the countdown to the normal Duration
+--  Text settings (bar toggle + per-icon overrides -- turning those off leaves
+--  a stacks-only display), while Charges/Stacks Only forces the countdown OFF,
+--  so the charge / stack counter is all that remains.
 --  Swipe, edge and countdown all have writers that re-assert between our
 --  passes, so each is gated on the frame's flags at its own choke point:
 --  the SetDrawSwipe hook and ApplyCdmChargeStyle (which owns ApplyCdmEdge) read
@@ -2204,10 +2310,13 @@ local function ApplyOnlyNumbers(frame, fd, barData)
             if cd.SetDrawSwipe then cd:SetDrawSwipe(false) end
             -- No icon means no recharge edge either.
             if cd.SetDrawEdge then cd:SetDrawEdge(false) end
-            -- Only Show Numbers FORCES the duration on (the number is the whole
-            -- display); Charges/Stacks Only forces it OFF, leaving the charge /
-            -- stack counter alone on the bar.
-            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(not osn) end
+            -- Charges/Stacks Only forces the countdown OFF (the charge / stack
+            -- counter is all that remains). The buff variant does NOT touch it:
+            -- the duration follows the normal Duration Text settings (bar
+            -- toggle + per-icon overrides), which the appearance pass applied
+            -- before this re-hide tail -- so hiding the duration under Only
+            -- Show Numbers leaves just the stack count.
+            if (not osn) and cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
         end
     elseif fd and fd._osnOn then
         fd._osnOn = nil
@@ -2537,6 +2646,9 @@ local function DecorateFrame(frame, barData)
                 -- duration timers work correctly during GCD.
                 local bd2 = bk2 and barDataByKey and barDataByKey[bk2]
                 local _gcdSuppressed = false
+                -- Recharge duration of a charge spell whose recharge is running out
+                -- underneath a GCD; see ns.GCDTailAlpha at the swipe writes below.
+                local _gcdChargeTail
                 -- Per-bar "Suppress GCD": alpha-0 the swipe while the displayed
                 -- cooldown is just a GCD. Two cases must NEVER be suppressed:
                 --   1. The Hide-Active override window is forcing the real recharge
@@ -2546,7 +2658,11 @@ local function DecorateFrame(frame, barData)
                 --      never a GCD -- alpha-0'ing it blanks the recharge for the entire
                 --      GCD whenever another ability is pressed. Charge recharges are
                 --      shown as their own swipe, so the GCD on top is irrelevant.
-                if bd2 and bd2.suppressGCD and sid2 and not fd._hideActiveOverriding
+                -- The Hide-Active exclusion applies to the whole-swipe suppression
+                -- below, NOT to the charge tail: _hideActiveOverriding follows the
+                -- active read, which flaps for charge spells, and a fix that switches
+                -- itself off whenever the icon happens to read active is no fix.
+                if bd2 and bd2.suppressGCD and sid2
                    and C_Spell and C_Spell.GetSpellCooldown then
                     -- Charge-recharge guard. A charge spell that is mid-recharge --
                     -- INCLUDING at 0 charges -- is showing its recharge, never a GCD,
@@ -2569,16 +2685,26 @@ local function DecorateFrame(frame, barData)
                         local ci = C_Spell.GetSpellCharges(effID2) or C_Spell.GetSpellCharges(sid2)
                         chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
                     end
-                    if not chargeRecharging then
-                        -- The GCD read must use the override too: a transform's real
-                        -- CD ticks on the override ID (e.g. Rushing Wind Kick over
-                        -- Rising Sun Kick), and the base-ID query reads isOnGCD=true
-                        -- through that whole CD, leaving the swipe suppressed for
-                        -- its full duration.
-                        local cdInfo = C_Spell.GetSpellCooldown(effID2) or C_Spell.GetSpellCooldown(sid2)
-                        if cdInfo and cdInfo.isOnGCD then
-                            cd:SetSwipeColor(0, 0, 0, 0)
-                            _gcdSuppressed = true
+                    -- The GCD read must use the override too: a transform's real
+                    -- CD ticks on the override ID (e.g. Rushing Wind Kick over
+                    -- Rising Sun Kick), and the base-ID query reads isOnGCD=true
+                    -- through that whole CD, leaving the swipe suppressed for
+                    -- its full duration.
+                    local cdInfo = C_Spell.GetSpellCooldown(effID2) or C_Spell.GetSpellCooldown(sid2)
+                    if cdInfo and cdInfo.isOnGCD then
+                        if not chargeRecharging then
+                            if not fd._hideActiveOverriding then
+                                cd:SetSwipeColor(0, 0, 0, 0)
+                                _gcdSuppressed = true
+                            end
+                        elseif C_Spell.GetSpellChargeDuration then
+                            -- Recharge in flight, but the LAST GCD-length slice of it
+                            -- is drawn by the GCD, not the recharge. Hand the recharge
+                            -- duration to the swipe writes below, which fade the alpha
+                            -- to 0 for that slice only. Anything earlier keeps the
+                            -- recharge swipe, which is what case 2 above protects.
+                            _gcdChargeTail = C_Spell.GetSpellChargeDuration(effID2)
+                                or C_Spell.GetSpellChargeDuration(sid2)
                         end
                     end
                 end
@@ -2648,7 +2774,7 @@ local function DecorateFrame(frame, barData)
                         end
                     end
                     if not _gcdSuppressed then
-                        cd:SetSwipeColor(0, 0, 0, hideActiveAlpha)
+                        cd:SetSwipeColor(0, 0, 0, ns.GCDTailAlpha(_gcdChargeTail, hideActiveAlpha))
                     end
                     if isActive then
                         fd._hideActiveOverriding = true
@@ -2679,7 +2805,7 @@ local function DecorateFrame(frame, barData)
                 else
                     -- Not active: black swipe.
                     if not _gcdSuppressed then
-                        cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
+                        cd:SetSwipeColor(0, 0, 0, ns.GCDTailAlpha(_gcdChargeTail, barData.swipeAlpha or 0.7))
                     end
                     -- Desaturate When Not Active (per-spell). Symmetric: desaturate
                     -- while the setting is on, and RE-saturate when it's turned off --
@@ -4036,6 +4162,45 @@ end
 --  EvaluateRemainingDuration on a DurationObject handles secret values
 --  internally so we never compare secret numbers ourselves.
 -------------------------------------------------------------------------------
+-- Tail of a charge recharge, for "Suppress GCD". A recharge with less time left
+-- than the running GCD is no longer what the swipe draws -- the GCD outlasts it
+-- and takes the frame over -- so it has to be suppressed like any other GCD. The
+-- remaining time is a secret and cannot be compared in Lua, so the threshold is
+-- applied engine-side by a Step curve: below the GCD it yields alpha 0, at or
+-- above it yields the alpha the bar would have used. The result may itself be
+-- SECRET; never compare it. SetSwipeColor is AllowedWhenTainted so it goes
+-- straight in. GCD length comes from UnitSpellHaste -- which, field-confirmed
+-- 2026-08-02, is ALSO a secret in instanced combat, so it gets the
+-- issecretvalue-first treatment: a secret haste falls back to 0 (unhasted
+-- 1.5s GCD). That errs toward suppressing the tail slightly early on hasted
+-- players, and the moment haste reads clean again the exact window returns.
+local _gcdTailCurves = {}
+function ns.GCDTailAlpha(durObj, normalAlpha)
+    normalAlpha = normalAlpha or 0
+    if not (durObj and durObj.EvaluateRemainingDuration
+            and C_CurveUtil and C_CurveUtil.CreateCurve
+            and Enum and Enum.LuaCurveType) then
+        return normalAlpha
+    end
+    local haste = (UnitSpellHaste and UnitSpellHaste("player")) or 0
+    if (issecretvalue and issecretvalue(haste)) or type(haste) ~= "number" then
+        haste = 0
+    end
+    local len = 1.5 / (1 + haste / 100)
+    if len < 0.75 then len = 0.75 end          -- engine floor
+    len = math.floor(len * 100 + 0.5) / 100    -- bound the curve cache
+    local key = len .. ":" .. normalAlpha
+    local curve = _gcdTailCurves[key]
+    if not curve then
+        curve = C_CurveUtil.CreateCurve()
+        curve:SetType(Enum.LuaCurveType.Step)
+        curve:AddPoint(0, 0)                -- recharge ends first: the swipe is the GCD
+        curve:AddPoint(len, normalAlpha)    -- recharge outlasts it: leave it visible
+        _gcdTailCurves[key] = curve
+    end
+    return durObj:EvaluateRemainingDuration(curve, normalAlpha)
+end
+
 local _desatCurve
 if C_CurveUtil and C_CurveUtil.CreateCurve then
     _desatCurve = C_CurveUtil.CreateCurve()
@@ -6066,9 +6231,9 @@ local function CollectAndReanchor()
                 if not icons then icons = {}; cdmBarIcons[barKey] = icons end
                 local count = 0
 
-                -- Only Show Numbers forces the countdown text on for the whole
-                -- bar regardless of the Cooldown Text toggle.
-                local hideCD = not (barData.showCooldownText or barData.onlyShowNumbers)
+                -- Duration text follows the bar's Cooldown Text toggle even
+                -- under Only Show Numbers (hide duration = stacks only).
+                local hideCD = not barData.showCooldownText
                 -- FocusKick icon alpha is owned exclusively by
                 -- SetFocusKickAlpha; skip the per-icon alpha override here
                 -- so CollectAndReanchor doesn't clobber the nameplate-driven

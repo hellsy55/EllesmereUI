@@ -1786,7 +1786,7 @@ do
         "tooltipAnchorCursor", "tooltipCursorPosition",
         "tooltipCursorOffsetX", "tooltipCursorOffsetY",
         "tooltipBgColor", "tooltipBgOpacity", "tooltipBorderSize",
-        "showSpellID", "spellIDModifier",
+        "showSpellID", "spellIDModifier", "showIconID", "showItemID",
         "showItemMaxStacks", "itemStackModifier",
         "reskinPopupsMenus", "reskinGameMenu", "reskinQueuePopup",
         "showQueueTimer", "resurrectAcceptGlow",
