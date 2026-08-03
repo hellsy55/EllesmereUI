@@ -6615,7 +6615,20 @@ ns.FOCUSKICK_SOUND_ORDER = FOCUSKICK_SOUND_ORDER
 -- token follows focus changes automatically.
 local _focusCastProxy
 local function RefreshFocusCastProxyUnit()
-    if not _focusCastProxy then return end
+    if not _focusCastProxy then
+        -- The proxy does not exist yet, so there is no unit to re-point. That
+        -- happens whenever the bar had no assigned spell the last time the
+        -- arming ran: RefreshFocusKickProxies only builds the proxy on its
+        -- hasContent branch, and its ONLY two callers are setup and the tail of
+        -- BuildAllCDMBars. Adding a spell in the options writes assignedSpells
+        -- without re-arming anything, so the sound stayed dead with the bar
+        -- fully populated -- field-confirmed by the probe reporting
+        -- spells=1(1 pos) alongside sound=NOT CREATED at the same instant.
+        -- Returning here was what made the state unrecoverable without a
+        -- rebuild; run the full refresh so this path can create it.
+        if ns.RefreshFocusKickProxies then ns.RefreshFocusKickProxies() end
+        return
+    end
     local unit = GetFocusKickUnit()
     _focusCastProxy:UnregisterAllEvents()
     _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_START", unit)
