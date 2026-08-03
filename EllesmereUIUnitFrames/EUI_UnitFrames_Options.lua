@@ -8661,7 +8661,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         if selectedUnit == "player" or selectedUnit == "target" or selectedUnit == "focus" then
-            local function BuildCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback)
+            local function BuildCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback, showSourceCog)
                 local row
                 row, h = W:DualRow(parent, y,
                     { type="toggle", text=label,
@@ -8697,9 +8697,30 @@ initFrame:SetScript("OnEvent", function(self)
                     swatch:SetAlpha(off and 0.3 or 1); blocker:SetShown(off); updateSwatch()
                 end
                 RegisterWidgetRefresh(UpdateState); UpdateState()
+
+                -- Cog to the LEFT of the color swatch: lets the person show who
+                -- (or what) interrupted the cast, e.g. "Interrupted (Shaashak)".
+                -- Only offered where it's meaningful (target/focus, not player).
+                if showSourceCog then
+                    local sourceKey = colorPrefix.."ShowSource"
+                    local _, cogShow = EllesmereUI.BuildCogPopup({
+                        title = "Interrupted By",
+                        rows = {
+                            { type="toggle", label="Show Who Interrupted",
+                              get=function() return UNIT_DB_MAP[selectedUnit]()[sourceKey] ~= false end,
+                              set=function(v)
+                                  UNIT_DB_MAP[selectedUnit]()[sourceKey] = v and true or false
+                                  ReloadAndUpdate()
+                              end },
+                        },
+                    })
+                    MakeCogBtn(rgn, cogShow, swatch, nil, function()
+                        return UNIT_DB_MAP[selectedUnit]()[enabledKey] ~= true
+                    end)
+                end
             end
             BuildCastOutcomeRow("Show Cancelled Cast", "cancelledCastEnabled", "cancelledCastDuration", "cancelledCast", {0.95,0.55,0.10})
-            BuildCastOutcomeRow("Show Interrupted Cast", "interruptedCastEnabled", "interruptedCastDuration", "interruptedCast", {0.85,0.15,0.15})
+            BuildCastOutcomeRow("Show Interrupted Cast", "interruptedCastEnabled", "interruptedCastDuration", "interruptedCast", {0.85,0.15,0.15}, selectedUnit == "target" or selectedUnit == "focus")
         end
 
         -- Row 3: Spell Name (position dropdown + swatch + cog) | Duration (position dropdown + swatch + cog)

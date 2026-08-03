@@ -533,6 +533,7 @@ local defaults = {
             interruptedCastEnabled = false,
             interruptedCastDuration = 1.5,
             interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
+            interruptedCastShowSource = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
             castDurationSize = 10,
@@ -891,6 +892,7 @@ local defaults = {
             interruptedCastEnabled = false,
             interruptedCastDuration = 1.5,
             interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
+            interruptedCastShowSource = true,
             castSpellNameSize = 11,
             castSpellNameColor = { r = 1, g = 1, b = 1 },
             castDurationSize = 10,
@@ -6411,8 +6413,15 @@ local function SetupShowOnCastBar(frame, unit)
             -- real external interrupt from that cancellation (same rule used
             -- by the main Player castbar).
             local interrupted = false
+            -- Kept (possibly secret) for the Target/Focus "Interrupted (Name)"
+            -- text below. We never inspect or stringify it ourselves -- it's
+            -- handed only to UnitNameFromGUID/UnitClassFromGUID, which are on
+            -- Blizzard's allow-list for consuming secret arguments and return
+            -- an ordinary, readable name/class in exchange.
+            local interruptGUID
             if event == "UNIT_SPELLCAST_INTERRUPTED" then
                 local interruptedBy = select(3, ...)
+                interruptGUID = interruptedBy
                 if issecretvalue and issecretvalue(interruptedBy) then
                     -- A protected non-nil source still represents an external
                     -- interrupt; do not inspect or stringify its value.
@@ -6479,7 +6488,42 @@ local function SetupShowOnCastBar(frame, unit)
                 SetFSFont(castbar._outcomeText, s.castSpellNameSize or 11)
                 local tc = s.castSpellNameColor or { r=1, g=1, b=1 }
                 castbar._outcomeText:SetTextColor(tc.r, tc.g, tc.b)
-                castbar._outcomeText:SetText(EllesmereUI.L(interrupted and "Interrupted" or "Spell Cancelled"))
+                local outcomeText = EllesmereUI.L(interrupted and "Interrupted" or "Spell Cancelled")
+                -- Append "(Name)" for who/what landed the interrupt, only on
+                -- Target/Focus and only when the cog option is enabled.
+                -- Players are class-colored; anything without a class (pets,
+                -- NPCs) shows up in white.
+                --
+                -- UnitNameFromGUID/UnitClassFromGUID can hand back a SECRET
+                -- string even though they're allowed to consume a secret
+                -- GUID: the identity is still protected, it's just protected
+                -- one level further downstream now. That string can never be
+                -- compared (~= ""), concatenated (..), or run through Lua's
+                -- string.format -- all of that "reads" it and throws. It can
+                -- only be handed onward to other Blizzard widget/API methods
+                -- that are themselves allowed to accept secret arguments
+                -- (WrapTextInColorCode, FontString:SetFormattedText), which
+                -- is what Blizzard's own AdvancedFocusCastBarMixin does for
+                -- this exact feature.
+                local sourceText
+                if interrupted and interruptGUID and (unit == "target" or unit == "focus")
+                   and s.interruptedCastShowSource ~= false then
+                    local interruptName = UnitNameFromGUID(interruptGUID)
+                    if interruptName ~= nil then
+                        local _, classToken = UnitClassFromGUID(interruptGUID)
+                        local color
+                        if classToken ~= nil and C_ClassColor and C_ClassColor.GetClassColor then
+                            color = C_ClassColor.GetClassColor(classToken)
+                        end
+                        if not color then color = CreateColor(1, 1, 1) end
+                        sourceText = color:WrapTextInColorCode(interruptName)
+                    end
+                end
+                if sourceText then
+                    castbar._outcomeText:SetFormattedText("%s (%s)", outcomeText, sourceText)
+                else
+                    castbar._outcomeText:SetText(outcomeText)
+                end
                 castbar:SetStatusBarColor(r, g, b, a * (castbar._fillOp or 1))
                 castbarBg:Show()
                 if castbar._outcomeIcon then castbar._outcomeIcon:SetTexture(castbar._eufLastCastIcon) end
