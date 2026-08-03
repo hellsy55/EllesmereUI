@@ -7076,6 +7076,15 @@ function ns.RefreshFocusKickProxies()
             end
         end
     end
+    local soundWanted = false
+    if bd and bd.enabled ~= false then
+        local sk = bd.focusCastSoundKey
+        if sk and sk ~= "none" then
+            local sid = bd.focusKickInterruptSpellID
+            soundWanted = (type(sid) == "number" and sid > 0) or hasContent
+        end
+    end
+
     if not hasContent and not storeReady then
         -- Spell store unresolved: hold the current state rather than tearing
         -- down something that may still be correct, and COME BACK. Arming is
@@ -7085,6 +7094,10 @@ function ns.RefreshFocusKickProxies()
         -- fully populated bar. Field-confirmed: spells=1(1 pos) alongside
         -- sound=NOT CREATED, cured only by a spec change (which reruns
         -- BuildAllCDMBars). One pending retry at a time, self-cancelling.
+        -- An explicit interrupt spell id lives on the bar data, not in the
+        -- spell store, so the sound can arm right now even though the store is
+        -- still unresolved. Only the bar-content dependent parts have to wait.
+        if soundWanted then EnsureFocusCastProxy() end
         if not ns._fkRearmPending then
             ns._fkRearmPending = true
             C_Timer.After(2, function()
@@ -7094,12 +7107,20 @@ function ns.RefreshFocusKickProxies()
         end
         return
     end
+    -- The cast SOUND has a weaker requirement than the rest of the FocusKick
+    -- family. Its handler needs exactly two things: a configured sound, and an
+    -- interrupt spell id to run the "is my kick ready" check against. The bar's
+    -- assigned spells are only the FALLBACK source for that id -- an explicit
+    -- focusKickInterruptSpellID satisfies it on its own. Gating the sound on
+    -- hasContent therefore made a legitimate setup impossible: wanting the
+    -- focus-cast sound WITHOUT the kick icon sitting on the focus bar. The
+    -- icon-bearing parts of the family (anchor proxy, reminders) keep the
+    -- original bar-content gate.
     if hasContent then
         EnsureFocusKickProxy()
         ApplyFocusKickAnchor()
         EnsureFocusReminderProxy()
         RefreshFocusReminders()
-        EnsureFocusCastProxy()
     else
         if _focusKickProxy then
             _focusKickProxy:UnregisterAllEvents()
@@ -7110,9 +7131,12 @@ function ns.RefreshFocusKickProxies()
             _focusReminderProxy:UnregisterAllEvents()
             HideAllFocusReminders()
         end
-        if _focusCastProxy then
-            _focusCastProxy:UnregisterAllEvents()
-        end
+    end
+
+    if soundWanted then
+        EnsureFocusCastProxy()
+    elseif _focusCastProxy then
+        _focusCastProxy:UnregisterAllEvents()
     end
 end
 
