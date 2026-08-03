@@ -305,7 +305,16 @@ function ns.BlockIconDefault(bType)
         -- Shared with the Raid Tools consumable check, which shows the same
         -- reading for everyone in the group: one ramp, so "low" looks the same
         -- wherever the suite says it.
-        return EllesmereUI.GetDurabilityColor(_lastDurabilityPct)
+        -- Fallback keeps the original white-to-red ramp working standalone
+        -- if an older EllesmereUI core (without this helper) is ever loaded.
+        if EllesmereUI.GetDurabilityColor then
+            return EllesmereUI.GetDurabilityColor(_lastDurabilityPct)
+        end
+        local pct = _lastDurabilityPct or 100
+        local t = (pct - 20) * (100 / 80)
+        if t < 0 then t = 0 elseif t > 100 then t = 100 end
+        local gb = 0.35 + 0.65 * (t / 100)
+        return 1, gb, gb
     end
     local d = ICON_DEFAULTS[bType]
     if d then return d[1], d[2], d[3] end

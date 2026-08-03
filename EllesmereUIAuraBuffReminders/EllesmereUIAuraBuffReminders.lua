@@ -881,13 +881,20 @@ end
 --
 -- Still a field on EABR rather than a file local: the call sites below are
 -- unchanged that way, and this file runs at the 200-local cap.
-EABR.WeaponEnchants = EllesmereUI.WeaponEnchants
+-- Wrapped instead of assigned directly: EllesmereUI.WeaponEnchants is looked
+-- up at call time, not when this file loads, so load order between this
+-- addon and the EllesmereUI core no longer matters.
+EABR.WeaponEnchants = function(...)
+    return EllesmereUI.WeaponEnchants(...)
+end
 
 -- Moved to EllesmereUI_RaidBuffs.lua in the parent: the Raid Tools consumable
 -- check needs the same answers, and a second copy would mean two lists to
 -- update with one of them silently wrong. Every child has the parent, so
 -- neither module now depends on the other being enabled.
-local RAID_BUFFS = EllesmereUI.RaidBuffs
+-- No local capture here on purpose: RAID_BUFFS usages below read
+-- EllesmereUI.RaidBuffs live at call time so a load-order slip can't leave
+-- this file holding a stale nil.
 
 -------------------------------------------------------------------------------
 --  SPELL DATA Auras (some non-secret, some still OOC-only)
@@ -2113,7 +2120,7 @@ local rb = db.profile.raidBuffs
 if inInstance or rb.showNonInstanced then
     local _, iType = IsInInstance()
     local inPvP = (iType == "pvp" or iType == "arena")
-    for _, buff in ipairs(RAID_BUFFS) do
+    for _, buff in ipairs(EllesmereUI.RaidBuffs) do
         if rb.enabled[buff.key] and (buff.class == playerClass) and Known(buff.castSpell)
            and not (buff.noPvP and inPvP) then
             -- In combat, skip buffs whose IDs are not all whitelisted
@@ -3494,7 +3501,7 @@ function EABR:OnEnable()
     _G._EABR_EnsureGlowModeMigrated = EnsureGlowModeMigrated
     _G._EABR_RegisterUnlock = RegisterUnlockElements
     _G._EABR_ApplyUnlockPos = ApplyUnlockPos
-    _G._EABR_RAID_BUFFS = RAID_BUFFS
+    _G._EABR_RAID_BUFFS = EllesmereUI.RaidBuffs
     _G._EABR_AURAS = AURAS
     _G._EABR_ROGUE_POISONS = ROGUE_POISONS
     _G._EABR_PALADIN_RITES = PALADIN_RITES
@@ -3621,7 +3628,7 @@ function EABR:OnEnable()
         local playerClass = GetPlayerClass()
         _needGroupAura = false
         _isEvokerOwnOnRaid = false
-        for _, buff in ipairs(RAID_BUFFS) do
+        for _, buff in ipairs(EllesmereUI.RaidBuffs) do
             if buff.class == playerClass then _needGroupAura = true; break end
         end
         for _, aura in ipairs(AURAS) do

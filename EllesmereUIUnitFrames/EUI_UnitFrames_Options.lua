@@ -11,6 +11,15 @@ local PAGE_MINI      = "Mini Frames"
 local PAGE_AURAS     = "Blizzard Aura Frames"
 local PAGE_UNLOCK    = "Unlock Mode"
 
+-- Shared "Strata" dropdown (values + order) for the per-zone text cogs
+-- (Left/Right/Center/Extra Text, Power Text) across both the single-unit and
+-- multi/shared config paths. Not the same table as the unrelated global
+-- "Frame Strata" dropdown further down (that one has no "inherit" option and
+-- is scoped to a single function), so it gets its own on ns rather than a
+-- new file-scope local, per the existing local-count convention.
+ns.textStrataValues = { inherit = "Inherit", BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" }
+ns.textStrataOrder = { "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" }
+
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
@@ -6368,8 +6377,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return SVal("leftTextContent","name") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return SVal("leftTextStrata", "inherit") end,
                       set=function(v) SSet("leftTextStrata", v) end },
                                     },
@@ -6560,8 +6569,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return SVal("rightTextContent","both") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return SVal("rightTextStrata", "inherit") end,
                       set=function(v) SSet("rightTextStrata", v) end },
                                     },
@@ -6754,8 +6763,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return SVal("centerTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return SVal("centerTextStrata", "inherit") end,
                       set=function(v) SSet("centerTextStrata", v) end },
                                     },
@@ -6940,8 +6949,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return SVal("extraTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return SVal("extraTextStrata", "inherit") end,
                       set=function(v) SSet("extraTextStrata", v) end },
                                     },
@@ -7529,8 +7538,8 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return SVal("powerPercentY", 0) end,
                       set=function(v) SSet("powerPercentY", v); UpdatePreview() end },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return SVal("powerTextStrata", "inherit") end,
                       set=function(v) SSet("powerTextStrata", v) end },
                 },
@@ -8120,6 +8129,43 @@ initFrame:SetScript("OnEvent", function(self)
                     tooltip = "Fades just the cast bar when the unit is out of range of your spells. Set to 100% to disable the fade.",
                     get = function() return math.floor(((SVal("castbarOorAlpha", 1)) * 100) + 0.5) end,
                     set = function(v) UNIT_DB_MAP[selectedUnit]().castbarOorAlpha = v / 100 end }
+            end
+			-- Focus only: a second raid target marker icon anchored to the
+            -- cast bar itself (left or right of it), independent of the
+            -- frame-level Raid Marker option in Extras.
+            if selectedUnit == "focus" then
+                cogRows[#cogRows + 1] = { type = "toggle", label = "Show Cast Bar Raid Marker",
+                    tooltip = "Shows the focus target's raid marker icon next to the cast bar itself, instead of (or in addition to) the frame-level marker in Extras.",
+                    get = function() return SValSupported("castbarRaidMarkerEnabled", false) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerEnabled", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "dropdown", label = "Side",
+                    values = { ["left"] = "Left", ["right"] = "Right" }, order = { "left", "right" },
+                    get = function() return SValSupported("castbarRaidMarkerSide", "right") end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerSide", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "slider", label = "Marker Size", min = 8, max = 40, step = 1,
+                    get = function() return SValSupported("castbarRaidMarkerSize", 16) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerSize", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
+                    get = function() return SValSupported("castbarRaidMarkerX", 0) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerX", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
+                cogRows[#cogRows + 1] = { type = "slider", label = "Y Offset", min = -50, max = 50, step = 1,
+                    get = function() return SValSupported("castbarRaidMarkerY", 0) end,
+                    set = function(v)
+                        SSetSupported("castbarRaidMarkerY", v)
+                        ReloadAndUpdate(); UpdatePreview()
+                    end }
             end
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Cast Bar",
@@ -12890,8 +12936,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return MVal("leftTextContent","name") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return MVal("leftTextStrata", "inherit") end,
                       set=function(v) MSet("leftTextStrata", v) end },
                                     },
@@ -13009,8 +13055,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return MVal("rightTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return MVal("rightTextStrata", "inherit") end,
                       set=function(v) MSet("rightTextStrata", v) end },
                                     },
@@ -13147,8 +13193,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return MVal("centerTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return MVal("centerTextStrata", "inherit") end,
                       set=function(v) MSet("centerTextStrata", v) end },
                                     },
@@ -13273,8 +13319,8 @@ initFrame:SetScript("OnEvent", function(self)
                       disabled=function() return MVal("extraTextContent","none") ~= "nametotarget" end,
                       disabledTooltip="Only applies when Name > Target is selected." },
                     { type="dropdown", label="Strata",
-                      values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                      order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                      values=ns.textStrataValues,
+                      order=ns.textStrataOrder,
                       get=function() return MVal("extraTextStrata", "inherit") end,
                       set=function(v) MSet("extraTextStrata", v) end },
                                     },
@@ -13574,8 +13620,8 @@ initFrame:SetScript("OnEvent", function(self)
                           get=function() return MVal("powerPercentY", 0) end,
                           set=function(v) MSet("powerPercentY", v) end },
                         { type="dropdown", label="Strata",
-                          values={ inherit="Inherit", BACKGROUND="Background", LOW="Low", MEDIUM="Medium", HIGH="High", DIALOG="Dialog" },
-                          order={ "inherit", "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+                          values=ns.textStrataValues,
+                          order=ns.textStrataOrder,
                           get=function() return MVal("powerTextStrata", "inherit") end,
                           set=function(v) MSet("powerTextStrata", v) end },
                     },
