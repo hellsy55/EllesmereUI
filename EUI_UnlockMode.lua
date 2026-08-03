@@ -4541,6 +4541,39 @@ do
     end)
 end
 
+-- Spec-swap catch-up sweep: unlike _zoneTransitionActive (which is owned
+-- and cleared entirely within this file, see above), _specProfileSwitching
+-- is set/cleared by the SpecOverrides addon. NotifyElementResized still
+-- honors it as a suppression source (see suppressMatchProp, ~line 1668),
+-- but nothing here ever re-ran the match pass after it clears. If CDM's own
+-- end-of-rebuild ApplyAllWidthHeightMatches call lands even slightly before
+-- the icon population truly settles (e.g. a trinket/proc icon arriving on
+-- the 3s/6s retry rung), that later resize is still inside the suppression
+-- window and gets silently dropped -- with nothing left to correct it. This
+-- poll detects the true->false edge on the flag and, mirroring the zone-
+-- transition catch-up, waits a short settle window then forces one
+-- unconditional width/height match pass so a stale Class Resource Bar (or
+-- any other width-matched child) snaps to the CDM bar's final, settled size.
+do
+    local specWatchFrame = CreateFrame("Frame")
+    local wasSwitching = false
+    local pendingCatchup = false
+    specWatchFrame:SetScript("OnUpdate", function()
+        local switching = EllesmereUI._specProfileSwitching and true or false
+        if wasSwitching and not switching and not pendingCatchup then
+            pendingCatchup = true
+            C_Timer.After(2, function()
+                pendingCatchup = false
+                if EllesmereUI._specProfileSwitching then return end -- swapped again mid-wait
+                if EllesmereUI.ApplyAllWidthHeightMatches then
+                    EllesmereUI.ApplyAllWidthHeightMatches()
+                end
+            end)
+        end
+        wasSwitching = switching
+    end)
+end
+
 -- PLAYER_ENTERING_WORLD listener: applies saved positions + initial
 -- anchor pass once child addons have had time to register their unlock
 -- elements. Subsequent corrections are event-driven via NotifyElementResized

@@ -2266,6 +2266,42 @@ function EllesmereUI.SpecOverrides_FlushUnlock()
     end
 end
 
+--- Called by EllesmereUICooldownManager.lua's ProcessSpecChange right after
+--- FullCDMRebuild("talent_reconcile") finishes synchronously. This is the
+--- single authoritative "spec swap is done, geometry is final" signal --
+--- previously this function was CALLED but never DEFINED anywhere in the
+--- codebase (the call was silently a no-op behind the `if ... then` guard),
+--- which is why Width/Height Match to a CDM bar would only pick up the new
+--- spec's size when some UNRELATED event happened to fire NotifyElementResized
+--- again afterward -- intermittent by nature, and often invisible if the user
+--- immediately alt-tabs to check and a later event happens to fix it.
+---
+--- Two things must happen here, not one:
+---   1. SpecOverrides_FlushUnlock() -- applies any PER-SPEC unlock LAYER
+---      override (anchors/widthMatch/heightMatch saved for this spec group).
+---      This is a no-op for users who never set up per-spec unlock layouts.
+---   2. An UNCONDITIONAL EllesmereUI.ApplyAllWidthHeightMatches() -- covers
+---      the plain case (no per-spec layer at all, just a live Width Match
+---      set in Unlock Mode). FlushUnlock only forces this pass when it wrote
+---      layer data (_unlockSettleWanted), so relying on it alone leaves the
+---      common case uncovered.
+--- _specProfileSwitching is cleared defensively even though nothing in this
+--- codebase currently sets it true; if that ever changes, this keeps the
+--- suppression/catch-up contract in EUI_UnlockMode.lua honest.
+function EllesmereUI.OnSpecSwitchComplete()
+    EllesmereUI._specProfileSwitching = false
+    if EllesmereUI.SpecOverrides_FlushUnlock then
+        pcall(EllesmereUI.SpecOverrides_FlushUnlock)
+    end
+    if EllesmereUI._unlockModeActive then return end -- unlock session owns its own settle
+    if EllesmereUI.ApplyAllWidthHeightMatches then
+        pcall(EllesmereUI.ApplyAllWidthHeightMatches)
+    end
+    if EllesmereUI._applySavedPositions then
+        pcall(EllesmereUI._applySavedPositions)
+    end
+end
+
 ScheduleUnlockFlush = function()
     if _unlockFlushScheduled then return end
     _unlockFlushScheduled = true

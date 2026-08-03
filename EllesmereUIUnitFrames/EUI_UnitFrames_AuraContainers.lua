@@ -79,12 +79,72 @@ local CANDIDATE_CLASSES = {
     { key = "steal",    cand = "isStealable",    skey = "Stealable",    buffOnly = true },
 }
 
+-------------------------------------------------------------------------------
+-- Boss Debuff Filter -> Edit Filters (2026-08-02). Replaces the old flat
+-- per-category booleans (s.debuffBossAura, s.debuffRoleAura, ...) with one
+-- config table -- same shape as the nameplate module's npAuraFilters --
+-- stored at s.bossDebuffFilters = { all = bool, f = { <TOKEN/CANDIDATE
+-- class key> = true }, exclude = { [spellID] = true/false } }. This is
+-- BOSS-ONLY: Player/Target/Focus keep the legacy flat-boolean dropdown
+-- untouched, and Own Only stays on the legacy s.onlyPlayerDebuffs key since
+-- it is already applied independently via EffectiveOwnOnly (own-variant
+-- groups), not through the class chain. Seeded ONCE from whatever the old
+-- checkboxes had set, so existing boss profiles carry over with zero drift.
+-- The blacklist (exclude) is independent from every other unit's list --
+-- boss debuffs are a different pool than Player/Target/Focus debuffs.
+-------------------------------------------------------------------------------
+local function SeedBossDebuffFilters(s)
+    local f = {}
+    for i = 1, #TOKEN_CLASSES do
+        local c = TOKEN_CLASSES[i]
+        if not c.buffOnly and not c.playerUnitOnly then
+            f[c.key] = s["debuff" .. c.skey] == true
+        end
+    end
+    for i = 1, #CANDIDATE_CLASSES do
+        local c = CANDIDATE_CLASSES[i]
+        if not c.buffOnly then f[c.key] = s["debuff" .. c.skey] == true end
+    end
+    return { all = false, f = f, exclude = {} }
+end
+
+function ns.UF_BossDebuffFilterConfig(s)
+    if not s then return nil end
+    local cfg = s.bossDebuffFilters
+    if not cfg then
+        cfg = SeedBossDebuffFilters(s)
+        s.bossDebuffFilters = cfg
+    end
+    return cfg
+end
+
+-- Fingerprint of the boss exclude list only (the class-chain part of the
+-- config already participates in ChainSignature via BuildChain below; the
+-- blacklist does not touch the chain, so it needs its own signal into
+-- CfgFP or blacklist-only edits would never re-drive the candidate filters).
+local function BossExcludeFP(s)
+    local cfg = s.bossDebuffFilters
+    local ex = cfg and cfg.exclude
+    if not ex or next(ex) == nil then return "" end
+    local o = {}
+    for id, v in pairs(ex) do o[#o + 1] = (v and "" or "-") .. id end
+    table.sort(o)
+    return table.concat(o, ",")
+end
+
 local function ClassEnabled(class, isBuff, s, unit)
     if class.buffOnly and not isBuff then return false end
     if class.debuffOnly and isBuff then return false end
     -- Player-frame-only classes: offered nowhere else in the UI, and a
     -- stale key on another unit's settings must have no effect.
     if class.playerUnitOnly and unit ~= "player" then return false end
+    -- Boss debuffs: Edit Filters config owns the class set (Show All means
+    -- every class reads disabled, same as the nameplate module's cfg.all).
+    if unit:match("^boss") and not isBuff then
+        local cfg = ns.UF_BossDebuffFilterConfig(s)
+        if not cfg or cfg.all then return false end
+        return (cfg.f or {})[class.key] == true
+    end
     local prefix = "debuff"
     if isBuff then prefix = "buff" end
     return s[prefix .. class.skey] == true
@@ -610,6 +670,15 @@ local function ApplyGroupConfig(container, unit, base, s, chain, own, declared)
         if not s.showLustDebuff then
             for id in pairs(SATED_DEBUFFS) do ex[id] = true end
         end
+        if unit:match("^boss") then
+            -- Boss Edit Filters blacklist: tri-state (true = active,
+            -- false = kept but disabled via the popup checkbox, nil =
+            -- deleted) -- only ACTIVE entries may reach the engine map.
+            local cfg = ns.UF_BossDebuffFilterConfig(s)
+            for id, v in pairs((cfg and cfg.exclude) or {}) do
+                if v then ex[id] = true end
+            end
+        end
         cand = cand or {}
         cand.excludeSpellIDs = ex
     end
@@ -697,7 +766,8 @@ local function CfgFP(unit, base, s)
         mAB, mAB and s.debuffAnchor or nil, mAB and s.debuffGrowth or nil,
         mAB and s.debuffOffsetX or nil, mAB and s.debuffOffsetY or nil,
         mAB and s.debuffSpacingY or nil,
-        CastbarDetached(unit))
+        CastbarDetached(unit),
+        (not isBuff and unit:match("^boss")) and BossExcludeFP(s) or nil)
 end
 
 ------------------------------------------------------------------------------
