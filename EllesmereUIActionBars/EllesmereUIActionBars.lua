@@ -7406,6 +7406,36 @@ ns._eabReleaseRangeSlots = function(barKey)
     end
 end
 
+-- Re-evaluate a bar's range state from the live API and repaint it.
+--
+-- Acquiring a slot yields NO initial state: EnableActionRangeCheck is silent
+-- until the next transition, so a slot whose refcount just went 0->1 has
+-- nothing to paint from and the cache entry the release wiped stays wiped.
+-- The flip handler's "no change, return" gate then swallows the next report,
+-- stranding whatever tint was last painted (a button already red when the
+-- release landed stays red for as long as the player remains in range).
+-- Before slots were released on re-acquire this could not bite: acquisition
+-- only ever added slots, so cache and tint always survived. (On ns: this
+-- chunk is at the 200-local cap.)
+ns._eabRangeSweepBar = function(barKey)
+    local buttons = barButtons[barKey]
+    local s = EAB.db.profile.bars[barKey]
+    if not buttons or not s or not s.outOfRangeColoring then return end
+    if ns._eabBarDormant[barKey] then return end
+    for _, btn in ipairs(buttons) do
+        local slot = GetButtonActionSlot(btn)
+        if slot and HasAction(slot) then
+            local isOut = (IsActionInRange(slot) == false)
+            _range.outOfRange[slot] = isOut or nil
+            ApplyRangeTint(btn, isOut, s)
+        elseif slot then
+            -- Slot lost its action (talent swap, drag): clear stale tint.
+            _range.outOfRange[slot] = nil
+            ApplyRangeTint(btn, false, s)
+        end
+    end
+end
+
 -- Enable range checking for all active button slots on a bar
 local function EnableRangeCheckForBar(barKey)
     local buttons = barButtons[barKey]
@@ -7435,6 +7465,11 @@ local function EnableRangeCheckForBar(barKey)
             end
         end
     end
+    -- Every acquire path lands here, so the post-acquire re-evaluation lives
+    -- here too rather than in each caller. Unconditional: a bar sharing slots
+    -- another bar already holds takes no 0->1 edge but still needs its own
+    -- buttons painted.
+    ns._eabRangeSweepBar(barKey)
 end
 
 -- Disable range checking for all slots on a bar and clear tints
@@ -7458,24 +7493,15 @@ end
 
 -- Dormancy edges for range (called via ns from ApplyBarDormancy, which is
 -- defined earlier in the chunk than these locals). Hide releases the bar's
--- slots; show re-acquires and repaints from the stale-tolerant cache --
--- live events correct any drift on the next flip.
+-- slots; show re-acquires, and the acquire sweep repaints from the live API.
+-- Repainting from the cache instead would paint every button in-range, since
+-- the release that ran on hide wiped the bar's entries.
 ns._eabRangeBarDormancy = function(barKey, dormant)
     if dormant then
         ns._eabReleaseRangeSlots(barKey)
         return
     end
     EnableRangeCheckForBar(barKey)
-    local buttons = barButtons[barKey]
-    local s = EAB.db.profile.bars[barKey]
-    if buttons and s and s.outOfRangeColoring then
-        for _, btn in ipairs(buttons) do
-            local slot = GetButtonActionSlot(btn)
-            if slot then
-                ApplyRangeTint(btn, _range.outOfRange[slot] or false, s)
-            end
-        end
-    end
 end
 
 -- Recompute a bar's flyout direction from its current screen position.
@@ -7715,29 +7741,9 @@ function EAB:ApplyRangeColoring()
         local key = info.key
         local s = self.db.profile.bars[key]
         if s and s.outOfRangeColoring then
+            -- The acquire path sweeps: EnableActionRangeCheck fires no initial
+            -- event, so slots already out of range need the live poll.
             EnableRangeCheckForBar(key)
-            -- Immediate sweep: apply tint for slots already out of range
-            -- since EnableActionRangeCheck does not fire an initial event.
-            local btns = barButtons[key]
-            if btns then
-                for _, btn in ipairs(btns) do
-                    local slot = GetButtonActionSlot(btn)
-                    if slot and HasAction(slot) then
-                        local inRange = IsActionInRange(slot)
-                        if inRange == false then
-                            _range.outOfRange[slot] = true
-                            ApplyRangeTint(btn, true, s)
-                        else
-                            _range.outOfRange[slot] = nil
-                            ApplyRangeTint(btn, false, s)
-                        end
-                    elseif slot and _range.outOfRange[slot] then
-                        -- Slot lost its action (e.g., talent swap). Clear stale tint.
-                        _range.outOfRange[slot] = nil
-                        ApplyRangeTint(btn, false, s)
-                    end
-                end
-            end
         else
             DisableRangeCheckForBar(key)
         end
