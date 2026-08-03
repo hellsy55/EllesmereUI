@@ -1411,8 +1411,32 @@ local function RegisterButtonWithController(btn)
     ActionButtonController:WrapScript(btn, "OnReceiveDrag", BTN_ON_RECEIVE_DRAG_BEFORE, BTN_ON_RECEIVE_DRAG_AFTER)
     ActionButtonController:WrapScript(btn, "OnShow", BTN_ON_SHOW_HIDE)
     ActionButtonController:WrapScript(btn, "OnHide", BTN_ON_SHOW_HIDE)
+    -- Combat drag belt: dragging FROM one of our buttons reveals empty drop
+    -- targets through the controller's secure broadcast, independent of the
+    -- ActionButton1 showgrid monitor (which depends on Blizzard's retained
+    -- MainActionBar event chain staying secure end to end). The pre-wrap
+    -- returns nothing, so the native drag proceeds untouched; the matching
+    -- grid-off arrives via the monitor or, failing that, the regen apply.
+    ActionButtonController:WrapScript(btn, "OnDragStart", [[
+        control:RunAttribute("SetShowGrid", true, 2)
+    ]])
 
-    -- Per-button showgrid: toggle the flag bit and update visibility
+    -- Per-button showgrid: toggle the flag bit and update visibility.
+    --
+    -- TRANSIENT grid reasons (GAME_EVENT drag / SPELLBOOK / KEYBOUND -- every
+    -- bit below ALWAYS) override statehidden for within-cutoff buttons: with
+    -- "Always Show Buttons" off, empty slots are parked statehidden + Hidden
+    -- + alpha 0 + mouse off, and every insecure reversal path is gated on
+    -- being out of combat -- so a combat spell drag had NO drop targets
+    -- (reported: cannot move a keybound ability to an empty slot in combat).
+    -- The reveal must therefore be complete IN the restricted environment:
+    -- Show, alpha, and mouse are all restored here (HANDLE:SetAlpha and
+    -- HANDLE:EnableMouse exist in the restricted API), gated on the
+    -- hidden->shown edge so a live on-CD alpha on an already-visible button
+    -- is never stomped. eab-withincutoff keeps icon-cutoff buttons out of
+    -- the override (revealing those would paint slots the user configured
+    -- away); eab-click carries the bar's click-through setting so a reveal
+    -- never turns a click-through bar clickable.
     btn:SetAttributeNoHandler("SetShowGrid", [[
         local show, reason, force = ...
         local cur = self:GetAttribute("showgrid") or 0
@@ -1426,19 +1450,49 @@ local function RegisterButtonWithController(btn)
 
         if (prev ~= cur) or force then
             self:SetAttribute("showgrid", cur)
-            local vis = (cur > 0 or HasAction(self:GetAttribute("action") or 0))
-                and not self:GetAttribute("statehidden")
-            if vis then self:Show(true) else self:Hide(true) end
+            local vis
+            if (cur % 32) > 0 and (self:GetAttribute("eab-withincutoff") or 1) ~= 0 then
+                vis = true
+            else
+                vis = (cur > 0 or HasAction(self:GetAttribute("action") or 0))
+                    and not self:GetAttribute("statehidden")
+            end
+            if vis then
+                if not self:IsShown() then
+                    self:SetAlpha(1)
+                    if (self:GetAttribute("eab-click") or 1) ~= 0 then
+                        self:EnableMouse(true)
+                    end
+                end
+                self:Show(true)
+            else
+                self:Hide(true)
+            end
         end
     ]])
 
     -- Visibility evaluation: show if grid is active or action exists,
-    -- unless the button is explicitly state-hidden.
+    -- unless the button is explicitly state-hidden. Same transient-grid
+    -- override and same edge-gated alpha/mouse restore as SetShowGrid, so
+    -- a mid-drag flush (action attribute change -> pending-vis batch)
+    -- cannot re-hide a revealed drop target.
     btn:SetAttributeNoHandler("UpdateShown", [[
-        local grid = (self:GetAttribute("showgrid") or 0) > 0
+        local cur = self:GetAttribute("showgrid") or 0
         local hasAct = HasAction(self:GetAttribute("action") or 0)
         local hidden = self:GetAttribute("statehidden")
-        if (grid or hasAct) and not hidden then
+        local vis
+        if (cur % 32) > 0 and (self:GetAttribute("eab-withincutoff") or 1) ~= 0 then
+            vis = true
+        else
+            vis = (cur > 0 or hasAct) and not hidden
+        end
+        if vis then
+            if not self:IsShown() then
+                self:SetAlpha(1)
+                if (self:GetAttribute("eab-click") or 1) ~= 0 then
+                    self:EnableMouse(true)
+                end
+            end
             self:Show(true)
         else
             self:Hide(true)
@@ -7143,6 +7197,17 @@ function EAB:ApplyAlwaysShowButtons(barKey)
         for _, btn in ipairs(buttons) do
             if btn then
                 SetShowGridInsecure(btn, showEmpty, SHOWGRID.ALWAYS)
+                -- Heal transient drag/spellbook bits. A COMBAT drag reveals
+                -- empty slots through the secure path (which honors these
+                -- bits), but its HIDEGRID may land while the insecure
+                -- handler is combat-gated -- without this, a bit stuck from
+                -- a mid-combat drag would keep empty slots visible after
+                -- combat. This runs from the post-drag re-assert and the
+                -- regen-deferred ApplyAll, both outside any live drag.
+                if not _gridState.shown then
+                    SetShowGridInsecure(btn, false, SHOWGRID.GAME_EVENT)
+                    SetShowGridInsecure(btn, false, SHOWGRID.SPELLBOOK)
+                end
             end
         end
     end
@@ -7172,6 +7237,13 @@ function EAB:ApplyAlwaysShowButtons(barKey)
                 bfd.shapeBorder:SetShown(visible and EFD(bfd.shapeBorder).wantsShow == true)
             end
 
+            -- Stamp the secure-side facts the restricted reveal needs
+            -- (see the SetShowGrid snippet): this button is within the icon
+            -- cutoff, and whether a reveal may enable mouse clicks.
+            if not InCombatLockdown() then
+                btn:SetAttributeNoHandler("eab-withincutoff", 1)
+                btn:SetAttributeNoHandler("eab-click", clickable and 1 or 0)
+            end
             if not visible then
                 btn:SetAlpha(0)
                 -- Invisible empty slots should not catch mouse events.
@@ -7215,6 +7287,9 @@ function EAB:ApplyAlwaysShowButtons(barKey)
             btn:SetAlpha(0)
             SafeEnableMouse(btn, false)
             if not InCombatLockdown() then
+                -- Cutoff buttons are excluded from the secure drag reveal:
+                -- revealing them would paint slots the user configured away.
+                btn:SetAttributeNoHandler("eab-withincutoff", 0)
                 btn:SetAttributeNoHandler("statehidden", true)
                 btn:Hide()
             end
