@@ -7054,8 +7054,18 @@ ns.EnsureFocusReminderProxy = EnsureFocusReminderProxy
 function ns.RefreshFocusKickProxies()
     local bd = barDataByKey and barDataByKey[FOCUSKICK_BAR_KEY]
     local hasContent = false
+    -- "No spell data available" is NOT the same as "the bar is empty".
+    -- GetBarSpellData returns nil while the active spec key is unresolved
+    -- (not specKey or specKey == "0"), which is exactly the state during a
+    -- loading screen. Treating that as empty ran the teardown below and
+    -- UNREGISTERED a perfectly good proxy, which is the field report of the
+    -- sound dying after a port or a zone change and only coming back when
+    -- something else rebuilt the bars. When the store is not ready we now
+    -- leave the proxy exactly as it is; the next rebuild arms it properly.
+    local storeReady = true
     if bd and bd.enabled ~= false then
         local sd = ns.GetBarSpellData and ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
+        if not sd then storeReady = false end
         local spells = sd and sd.assignedSpells
         if spells then
             for _, sid in ipairs(spells) do
@@ -7065,6 +7075,11 @@ function ns.RefreshFocusKickProxies()
                 end
             end
         end
+    end
+    if not hasContent and not storeReady then
+        -- Spell store unresolved: hold the current state rather than tearing
+        -- down something that may still be correct.
+        return
     end
     if hasContent then
         EnsureFocusKickProxy()
