@@ -3872,6 +3872,22 @@ do
             -- Cost: only in that racy interleaving, one extra push
             -- of the wave that was owed to the cast anyway.
             ns._cdCastWave = true
+            -- ...and re-open the two rate gates for the same reason. The cast
+            -- branch zeroes both, but a cooldown event in the cast's OWN frame
+            -- consumes that opening and re-arms them (storm cap to +0.15s, slow
+            -- tier to +0.5s) off state read inside the transient window. The
+            -- kick would then be capped out of the walk entirely, and the slow
+            -- tier -- every utility spell, item and macro, i.e. most of the bar
+            -- -- would keep whatever that transient push painted until its gate
+            -- expired, or until the ~1/sec heartbeat if no event landed at the
+            -- gate. Measured before this: swipe start a mean 231-304ms late
+            -- over two captures, a fifth to a third of them past 500ms, tail
+            -- reaching 616ms; after, 85ms mean with nothing past 208ms and the
+            -- 500ms+ band empty. Reopening is
+            -- self-limiting: the kick is once per cast (pending guard), and
+            -- when the wave was NOT stolen these are already 0.
+            ns._cdWalkNext = 0
+            ns._cdSlowNext = 0
             local d2 = ns._cdDispatcher
             local h2 = d2 and d2:GetScript("OnEvent")
             if h2 then h2(d2, "ACTIONBAR_UPDATE_COOLDOWN") end
