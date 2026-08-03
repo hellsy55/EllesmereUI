@@ -2979,7 +2979,12 @@ local function CreateDMWindow(winIdx)
         -- header instead of being truncated against a gap that isn't there.
         if W._hdrIconsShown == false then n = 0 end
         local headerW = frame:GetWidth() or (wdb.width or 300)
-        local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2
+        -- + offX mirrors the same term LayoutHeaderButtons adds to each
+        -- button's SetPoint, so a negative hdrIconOffsetX (icons dragged
+        -- toward the title) correctly shrinks the room left for the title
+        -- instead of letting truncation math run as if the icons were still
+        -- in their default spot.
+        local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2 + (c.hdrIconOffsetX or 0)
         local leftEdge = 6 + (c.hdrTextOffX or 0)
         if c.hdrTimerPosition == "left" and W.timerText and W.timerText:IsShown() and not wdb.hideTimer
            and (W.timerText:GetText() or "") ~= "" then

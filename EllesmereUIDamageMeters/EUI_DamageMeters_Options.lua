@@ -660,6 +660,21 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Row 4: Timer Position | (spacer)
+        local hdrTimerPosValues = {
+            right = "Right of Title (Default)",
+            left  = "Left of Title",
+        }
+        local hdrTimerPosOrder = { "right", "left" }
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Timer Position",
+              tooltip = "Where the combat timer shows relative to the header title.",
+              values = hdrTimerPosValues, order = hdrTimerPosOrder,
+              getValue = function() return Cfg("hdrTimerPosition") or "right" end,
+              setValue = function(v) Set("hdrTimerPosition", v); ApplyHdr() end },
+            { type="spacer" })
+        y = y - h
+
         -- ── BAR DESIGN ──────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "BARS", y); y = y - h
 

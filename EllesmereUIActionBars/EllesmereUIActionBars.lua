@@ -5327,6 +5327,22 @@ function EAB_VTABLE.Compact.GetOccupancy(key, info, s, buttons, numIcons)
     return mask, count
 end
 
+-- Shared by unlock-mode resize handles (setWidth/setHeight) and anywhere else
+-- that needs the packed slot count instead of the configured one while the
+-- bar is actively compacting. Falls back to numIcons unchanged when
+-- Auto-Compact is off, expanded, or the bar's buttons aren't available yet.
+function EAB_VTABLE.Compact.GetEffectiveNumIcons(key, info, s, buttons, numIcons)
+    if EAB_VTABLE.Compact.IsEnabled(key, info, s)
+        and not EAB_VTABLE.Compact.IsExpanded(key, info, s) then
+        local btns = buttons or barButtons[key]
+        if btns then
+            local _, occupied = EAB_VTABLE.Compact.GetOccupancy(key, info, s, btns, numIcons)
+            return max(occupied, 1)
+        end
+    end
+    return numIcons
+end
+
 function EAB_VTABLE.Compact.GetEffectiveShowEmpty(key, info, s)
     if EAB_VTABLE.Compact.IsEnabled(key, info, s) then
         local skyInactive = s.autoCompactSkyOnly
@@ -11829,15 +11845,8 @@ local function RegisterWithUnlockMode()
                 local numIcons = s.overrideNumIcons or s.numIcons or info.count
                 local numRows  = s.overrideNumRows  or s.numRows  or 1
                 if numRows < 1 then numRows = 1 end
-                if EAB_VTABLE.Compact.IsEnabled(info.key, info, s)
-                    and not EAB_VTABLE.Compact.IsExpanded(info.key, info, s) then
-                    local btns = barButtons[info.key]
-                    if btns then
-                        local _, occupied = EAB_VTABLE.Compact.GetOccupancy(
-                            info.key, info, s, btns, numIcons)
-                        numIcons = max(occupied, 1)
-                    end
-                end
+                numIcons = EAB_VTABLE.Compact.GetEffectiveNumIcons(
+                    info.key, info, s, barButtons[info.key], numIcons)
                 local stride   = math.ceil(numIcons / numRows)
                 if stride < 1 then stride = 1 end
                 local isVert   = (s.orientation == "vertical")
@@ -11879,15 +11888,8 @@ local function RegisterWithUnlockMode()
                 local numIcons = s.overrideNumIcons or s.numIcons or info.count
                 local numRows  = s.overrideNumRows  or s.numRows  or 1
                 if numRows < 1 then numRows = 1 end
-                if EAB_VTABLE.Compact.IsEnabled(info.key, info, s)
-                    and not EAB_VTABLE.Compact.IsExpanded(info.key, info, s) then
-                    local btns = barButtons[info.key]
-                    if btns then
-                        local _, occupied = EAB_VTABLE.Compact.GetOccupancy(
-                            info.key, info, s, btns, numIcons)
-                        numIcons = max(occupied, 1)
-                    end
-                end
+                numIcons = EAB_VTABLE.Compact.GetEffectiveNumIcons(
+                    info.key, info, s, barButtons[info.key], numIcons)
                 local stride   = math.ceil(numIcons / numRows)
                 if stride < 1 then stride = 1 end
                 local isVert   = (s.orientation == "vertical")

@@ -464,7 +464,7 @@ initFrame:SetScript("OnEvent", function(self)
                         Set("abbreviateChannels", v)
                         if ECHAT.ApplyChannelAbbreviations then ECHAT.ApplyChannelAbbreviations() end
                     end },
-                { type="spacer", text="" })
+                { type="label", text="" })
             y = y - h
 
         -- -- IDLE FADE ---------------------------------------------------------

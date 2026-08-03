@@ -4466,6 +4466,12 @@ initFrame:SetScript("OnEvent", function(self)
     self:UnregisterAllEvents()
     EnsureDB()
 
+    -- Forward-declared: assigned in section 7b below. Referenced by the
+    -- FCF_OpenNewWindow hook further down so new permanent chat windows
+    -- pick up the channel-abbreviation hook without a second
+    -- hooksecurefunc registration on the same Blizzard global.
+    local InstallChannelAbbrevHooksOnAllFrames
+
     ---------------------------------------------------------------------------
     --  1. Load saved background color/opacity before skinning any frames
     ---------------------------------------------------------------------------
@@ -4692,10 +4698,18 @@ initFrame:SetScript("OnEvent", function(self)
     -- User-created permanent chat windows use a separate creation path from
     -- temporary whisper windows. Skin after Blizzard has assigned the frame,
     -- tab, ID, and dock state.
+    --
+    -- InstallChannelAbbrevHooksOnAllFrames is forward-declared (assigned in
+    -- section 7b below, later in this same PLAYER_LOGIN pass) so new
+    -- permanent windows pick up the channel-abbreviation hook through this
+    -- single existing FCF_OpenNewWindow hook instead of a second one.
     if FCF_OpenNewWindow then
         hooksecurefunc("FCF_OpenNewWindow", function()
             C_Timer.After(0, SkinPass)
             C_Timer.After(0.10, SkinPass)
+            if InstallChannelAbbrevHooksOnAllFrames then
+                InstallChannelAbbrevHooksOnAllFrames()
+            end
         end)
     end
 
@@ -5152,8 +5166,10 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     local function InstallChannelAbbrevHook(frame)
-        if not frame or frame.EUI_ChanAbbrevHooked then return end
-        frame.EUI_ChanAbbrevHooked = true
+        if not frame then return end
+        local d = CFD(frame)
+        if d.chanAbbrevHooked then return end
+        d.chanAbbrevHooked = true
         local origAddMessage = frame.AddMessage
         frame.AddMessage = function(self, text, ...)
             local cfg = ECHAT.DB()
@@ -5172,7 +5188,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
-    local function InstallChannelAbbrevHooksOnAllFrames()
+    InstallChannelAbbrevHooksOnAllFrames = function()
         if not _G.CHAT_FRAMES then return end
         for _, name in ipairs(_G.CHAT_FRAMES) do
             InstallChannelAbbrevHook(_G[name])
@@ -5180,10 +5196,10 @@ initFrame:SetScript("OnEvent", function(self)
     end
     InstallChannelAbbrevHooksOnAllFrames()
 
-    -- Catch chat windows created later (e.g. via the "New Window" button).
-    if _G.FCF_OpenNewWindow then
-        hooksecurefunc("FCF_OpenNewWindow", InstallChannelAbbrevHooksOnAllFrames)
-    end
+    -- Chat windows created later (e.g. via the "New Window" button) are
+    -- caught by the existing FCF_OpenNewWindow hook above (see the
+    -- forward declaration near the top of this handler), not a second
+    -- hook here.
 
     ECHAT.ApplyChannelAbbreviations = InstallChannelAbbrevHooksOnAllFrames
 
