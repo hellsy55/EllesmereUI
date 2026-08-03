@@ -7062,7 +7062,7 @@ function ns.RefreshFocusKickProxies()
     -- sound dying after a port or a zone change and only coming back when
     -- something else rebuilt the bars. When the store is not ready we now
     -- leave the proxy exactly as it is; the next rebuild arms it properly.
-    local storeReady = true
+    local storeReady, soundWanted = true, false
     if bd and bd.enabled ~= false then
         local sd = ns.GetBarSpellData and ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
         if not sd then storeReady = false end
@@ -7075,13 +7075,17 @@ function ns.RefreshFocusKickProxies()
                 end
             end
         end
-    end
-    local soundWanted = false
-    if bd and bd.enabled ~= false then
+        -- The cast SOUND has a weaker requirement than the rest of the family.
+        -- Its handler needs a configured sound and an interrupt spell id to run
+        -- the "is my kick ready" check against; the bar's assigned spells are
+        -- only the FALLBACK source for that id, so an explicit
+        -- focusKickInterruptSpellID satisfies it alone. Gating the sound on
+        -- hasContent made a legitimate setup impossible: the focus-cast sound
+        -- WITHOUT the kick icon on the focus bar.
         local sk = bd.focusCastSoundKey
         if sk and sk ~= "none" then
-            local sid = bd.focusKickInterruptSpellID
-            soundWanted = (type(sid) == "number" and sid > 0) or hasContent
+            local pick = bd.focusKickInterruptSpellID
+            soundWanted = (type(pick) == "number" and pick > 0) or hasContent
         end
     end
 
@@ -7093,11 +7097,13 @@ function ns.RefreshFocusKickProxies()
         -- resolved yet leaves the proxy unbuilt for the whole session, with a
         -- fully populated bar. Field-confirmed: spells=1(1 pos) alongside
         -- sound=NOT CREATED, cured only by a spec change (which reruns
-        -- BuildAllCDMBars). One pending retry at a time, self-cancelling.
+        -- BuildAllCDMBars).
+        --
         -- An explicit interrupt spell id lives on the bar data, not in the
         -- spell store, so the sound can arm right now even though the store is
         -- still unresolved. Only the bar-content dependent parts have to wait.
         if soundWanted then EnsureFocusCastProxy() end
+        -- One pending retry at a time, self-cancelling.
         if not ns._fkRearmPending then
             ns._fkRearmPending = true
             C_Timer.After(2, function()
@@ -7107,15 +7113,7 @@ function ns.RefreshFocusKickProxies()
         end
         return
     end
-    -- The cast SOUND has a weaker requirement than the rest of the FocusKick
-    -- family. Its handler needs exactly two things: a configured sound, and an
-    -- interrupt spell id to run the "is my kick ready" check against. The bar's
-    -- assigned spells are only the FALLBACK source for that id -- an explicit
-    -- focusKickInterruptSpellID satisfies it on its own. Gating the sound on
-    -- hasContent therefore made a legitimate setup impossible: wanting the
-    -- focus-cast sound WITHOUT the kick icon sitting on the focus bar. The
-    -- icon-bearing parts of the family (anchor proxy, reminders) keep the
-    -- original bar-content gate.
+    -- Icon-bearing parts of the family keep the original bar-content gate.
     if hasContent then
         EnsureFocusKickProxy()
         ApplyFocusKickAnchor()
