@@ -1282,6 +1282,7 @@ local function BuildGroupContent()
     fontOwners[#fontOwners + 1] = groupHolder
     local f = groupHolder
     local full = PANEL_W - PAD * 2
+    local y = 0
 
     -- Make Everyone Assistant: first row, right under the title. Whole-row
     -- button (not just the box) so the label is as clickable as the tick --
