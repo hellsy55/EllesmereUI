@@ -10697,16 +10697,36 @@ do
         vehVis:RegisterEvent("PLAYER_ENTERING_WORLD")
         vehVis:RegisterEvent("PLAYER_REGEN_ENABLED")
         vehVis:SetScript("OnEvent", function(self, event, unit)
-            if event == "PLAYER_REGEN_ENABLED" then
-                local show = CanExitVehicle and CanExitVehicle()
-                btn:SetShown(show or false)
+            -- Only the UNIT_ events carry a unit; PLAYER_ENTERING_WORLD's first
+            -- arg is isInitialLogin, so testing it as a unit skipped the whole
+            -- pass on a fresh login.
+            if (event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE")
+                and unit ~= "player" then
                 return
             end
-            if unit and unit ~= "player" then return end
-            -- Protected instances (M+/raid) block SetShown during combat
-            if InCombatLockdown() and EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then return end
-            local show = CanExitVehicle and CanExitVehicle()
-            btn:SetShown(show or false)
+            if event ~= "PLAYER_REGEN_ENABLED" then
+                -- MainMenuBarVehicleLeaveButton is EditMode-managed, so SetShown
+                -- routes through the protected HideBase/ShowBase and is blocked
+                -- in ANY combat, not only inside a live keystone. This gate used
+                -- to AND InCombatLockdown with InProtectedInstance, which is
+                -- false in every normal dungeon AND goes false the instant a key
+                -- COMPLETES (it requires IsChallengeModeActive), so combat
+                -- vehicle events called straight through and tripped
+                -- ADDON_ACTION_BLOCKED -- field-reported from the end of a M+
+                -- run. Same rule the micro menu / bag bar site states above: the
+                -- restriction being worked around is "protected frame op blocked
+                -- in combat", so InCombatLockdown is the whole gate. Nothing is
+                -- lost by deferring: the protected call could not have succeeded
+                -- during combat either way, and the PLAYER_REGEN_ENABLED arm
+                -- re-applies the correct state the moment lockdown clears.
+                if InCombatLockdown() then return end
+            end
+            local show = (CanExitVehicle and CanExitVehicle()) or false
+            -- A redundant SetShown on a frame already in that state still trips
+            -- the block, so only issue the protected op on a real transition.
+            if btn:IsShown() ~= show then
+                btn:SetShown(show)
+            end
         end)
     end
 end
