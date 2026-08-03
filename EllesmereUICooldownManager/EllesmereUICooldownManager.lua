@@ -7078,7 +7078,20 @@ function ns.RefreshFocusKickProxies()
     end
     if not hasContent and not storeReady then
         -- Spell store unresolved: hold the current state rather than tearing
-        -- down something that may still be correct.
+        -- down something that may still be correct, and COME BACK. Arming is
+        -- otherwise a one-shot -- its only callers are setup and the tail of
+        -- BuildAllCDMBars -- so a login or zone where the spec key has not
+        -- resolved yet leaves the proxy unbuilt for the whole session, with a
+        -- fully populated bar. Field-confirmed: spells=1(1 pos) alongside
+        -- sound=NOT CREATED, cured only by a spec change (which reruns
+        -- BuildAllCDMBars). One pending retry at a time, self-cancelling.
+        if not ns._fkRearmPending then
+            ns._fkRearmPending = true
+            C_Timer.After(2, function()
+                ns._fkRearmPending = nil
+                if ns.RefreshFocusKickProxies then ns.RefreshFocusKickProxies() end
+            end)
+        end
         return
     end
     if hasContent then
@@ -9006,6 +9019,22 @@ function ECME:CDMFinishSetup()
     -- FocusKick family (anchor proxy + plate watcher, reminder text, cast
     -- sound): demand-gated -- an EMPTY kick bar installs nothing at all.
     ns.RefreshFocusKickProxies()
+    -- ...and again after every loading screen. Demand-gating makes arming a
+    -- one-shot, so any pass that runs before the spell store resolves leaves
+    -- the cast-sound proxy unbuilt until something unrelated rebuilds the bars
+    -- (a spec change, or opening the options). That is the reported "sound
+    -- stops working after I port" and it never recovers on its own. The
+    -- refresh is cheap and idempotent: it early-returns when the bar is empty
+    -- and re-registers the same events when it is not.
+    do
+        local fkRearm = CreateFrame("Frame")
+        fkRearm:RegisterEvent("PLAYER_ENTERING_WORLD")
+        fkRearm:SetScript("OnEvent", function()
+            C_Timer.After(2, function()
+                if ns.RefreshFocusKickProxies then ns.RefreshFocusKickProxies() end
+            end)
+        end)
+    end
     -- SharedMedia sounds feed the options dropdowns; append regardless.
     if EllesmereUI.AppendSharedMediaSounds then
         EllesmereUI.AppendSharedMediaSounds(
