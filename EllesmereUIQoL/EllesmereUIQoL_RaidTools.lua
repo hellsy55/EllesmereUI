@@ -272,7 +272,7 @@ local raidCheckBtn              -- re-runs and shows the Raid Check window on de
 local assistCheckRow, assistCheckTex   -- Make Everyone Assistant row (Group shell, raid-only)
 -- Markers are fixed at build; the Group & Pull height follows the settings and
 -- is re-computed by LayoutGroupContent on every Apply.
-local GROUP_CONTENT_H, MARKERS_CONTENT_H   -- computed at build
+local GROUP_CONTENT_H, MARKERS_CONTENT_H
 local Apply                    -- forward: the event handler closes over it
 local ApplyMouseoverFade       -- forward: ApplyVisibility and the mouseover ticker close over it
 
@@ -1254,7 +1254,10 @@ local function LayoutGroupContent()
     -- stops at this line.
     for _, b in ipairs(groupButtons) do b:Hide() end
 
-    local y = 0
+    -- Make Everyone Assistant sits above this flow, fixed at the top of the
+    -- holder (see BuildGroupContent) -- reserve its row before laying out
+    -- the buttons below it.
+    local y = -(ROW_H + ROW_GAP)
     for _, row in ipairs(rows) do
         local n = #row
         local w = (PANEL_W - PAD * 2 - ROW_GAP * (n - 1)) / n
@@ -1282,14 +1285,14 @@ local function BuildGroupContent()
     fontOwners[#fontOwners + 1] = groupHolder
     local f = groupHolder
     local full = PANEL_W - PAD * 2
-    local y = 0
 
-    -- Make Everyone Assistant: first row, right under the title. Whole-row
-    -- button (not just the box) so the label is as clickable as the tick --
-    -- same reasoning as the pull/marker rows' generous hit targets.
+    -- Make Everyone Assistant: first row, right under the title, fixed in
+    -- place (not part of LayoutGroupContent's flow). Whole-row button (not
+    -- just the box) so the label is as clickable as the tick -- same
+    -- reasoning as the pull/marker rows' generous hit targets.
     assistCheckRow = CreateFrame("Button", nil, f)
     assistCheckRow:SetSize(PANEL_W - PAD * 2, ROW_H)
-    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, 0)
     local chkBox = CreateFrame("Frame", nil, assistCheckRow)
     chkBox:SetSize(ASSIST_CHK_SZ, ASSIST_CHK_SZ)
     chkBox:SetPoint("LEFT", assistCheckRow, "LEFT", 0, 0)
@@ -1316,11 +1319,10 @@ local function BuildGroupContent()
         SetEveryoneAssistant(not AllAssistants())
         RefreshAssistCheckbox()
     end)
-    y = y - ROW_H - ROW_GAP
-
-    -- Built at full row width and left unpositioned here: which of these
-    -- reach the screen (and where) is a setting, not a build fact --
-    -- LayoutGroupContent lays every one of them out on every Apply.
+    -- MakeGroupButton runs labels through L itself. All four action buttons
+    -- are born unplaced at full-row width; LayoutGroupContent re-flows the
+    -- survivors (per the showRoleCheck/showConvert/showDisband switches)
+    -- starting below this fixed checkbox row.
     readyButton = MakeGroupButton(f, "Ready Check", full, function() DoReadyCheck() end)
     roleButton  = MakeGroupButton(f, "Role Check", full, function() InitiateRolePoll() end)
 
