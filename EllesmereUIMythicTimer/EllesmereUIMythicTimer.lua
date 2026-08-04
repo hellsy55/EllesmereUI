@@ -899,17 +899,18 @@ local PREVIEW_RUN = {
 
 -- The preview is a hardcoded dummy run, so its dungeon and affix names would
 -- stay English on every client. Both carry an ID and the live-run path already
--- resolves names from those same IDs, so do the same here. The English values
--- stay in the table as the fallback.
+-- resolves names from those same IDs, so do the same here. When an ID is not in
+-- the current season the API returns nil, so the hardcoded English falls back
+-- through L() instead.
 local function LocalizePreview()
     local run = PREVIEW_RUN
     if C_ChallengeMode and C_ChallengeMode.GetMapUIInfo then
-        run.mapName = C_ChallengeMode.GetMapUIInfo(run.mapID) or run.mapName
+        run.mapName = C_ChallengeMode.GetMapUIInfo(run.mapID) or EllesmereUI.L(run.mapName)
     end
     if run._previewAffixIDs and C_ChallengeMode and C_ChallengeMode.GetAffixInfo then
         for i, id in ipairs(run._previewAffixIDs) do
             local name = C_ChallengeMode.GetAffixInfo(id)
-            if name then run._previewAffixNames[i] = name end
+            run._previewAffixNames[i] = name or EllesmereUI.L(run._previewAffixNames[i])
         end
     end
 end
