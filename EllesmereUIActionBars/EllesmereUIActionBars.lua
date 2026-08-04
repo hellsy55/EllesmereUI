@@ -268,12 +268,16 @@ ns.BAR_LOOKUP          = BAR_LOOKUP
 ns.ALL_BARS            = ALL_BARS
 ns.EXTRA_BARS          = EXTRA_BARS
 
--- Auto-Compact is intentionally limited to Action Bar 1 (MainBar), and only
--- ever engages while the player is skyriding/flying (see EAB_VTABLE.Compact
--- .IsExpanded). Kept as a function (not a hardcoded string compare at every
--- call site) so it stays a single, easy-to-audit choke point.
+-- Auto-Compact is available on every standard action bar (MainBar, Bar2-10).
+-- Stance/Pet bars reuse Blizzard buttons and have their own dynamic-count
+-- rules, and visibility-only bars have no button grid at all. Kept as a
+-- function (not a hardcoded check at every call site) so it stays a single,
+-- easy-to-audit choke point.
 function EAB:BarSupportsAutoCompact(barKey)
-    return barKey == "MainBar"
+    local info = BAR_LOOKUP[barKey]
+    return info ~= nil and info.count ~= nil
+        and not info.isStance and not info.isPetBar
+        and not info.visibilityOnly
 end
 
 function EAB.VisibilityCompat.ApplyMode(settings, mode)
@@ -708,7 +712,7 @@ local function _ExtraFadeOnUpdate(_, elapsed)
 end
 
 -- Drag visibility state (file-scope so ApplyAll can reset strata on spec change)
-local _dragState = { visible = false, strataCache = {}, compactActive = false }
+local _dragState = { visible = false, strataCache = {} }
 -- Cursor types that should raise bar strata / force full visibility during a
 -- drag (spell/item-style drags a player might drop onto a bar). Shared
 -- between ApplyAll's drag-preservation check and the CURSOR_CHANGED handler.
@@ -1176,7 +1180,6 @@ local _controllerButtons = {}
 ActionButtonController:Execute([[
     _eabBtnMap = table.new()
     _eabPendingVis = table.new()
-    _eabCompactBars = table.new()
 ]])
 
 -- Secure method: SetShowGrid (bitwise flag toggle)
@@ -1197,13 +1200,6 @@ ActionButtonController:SetAttributeNoHandler("SetShowGrid", [[
         self:SetAttribute("showgrid", cur)
         for btn in pairs(_eabBtnMap) do
             btn:RunAttribute("SetShowGrid", show, reason)
-        end
-        -- Protected buttons cannot be repositioned from insecure Lua during
-        -- combat. Each compact bar's restricted method expands for active grid
-        -- flags and dynamically repacks when the last flag clears.
-        for bar in pairs(_eabCompactBars) do
-            bar:SetAttribute("eab-compact-grid", cur > 0 and 1 or 0)
-            bar:RunAttribute("RefreshAutoCompact", cur > 0)
         end
     end
 ]])
@@ -1655,13 +1651,6 @@ end
 -- Register our bar frames as refs. Called after CreateBarFrame.
 local function SecureSetupHandler_RegisterBarFrame(key, frame)
     _secureHandler:SetFrameRef("bar-" .. key, frame)
-    if EAB:BarSupportsAutoCompact(key) then
-        ActionButtonController:SetFrameRef("compact-add", frame)
-        ActionButtonController:Execute([[
-            local bar = self:GetFrameRef("compact-add")
-            if bar then _eabCompactBars[bar] = true end
-        ]])
-    end
 end
 
 -- Encode layout data for all buttons as attributes, then trigger the snippet.
@@ -2609,183 +2598,6 @@ local function CreateBarFrame(info)
     frame._barKey = key
     frame._barInfo = info
 
-    if EAB:BarSupportsAutoCompact(key) then
-        -- Combat-safe dynamic packing. Insecure LayoutBar encodes only scalar
-        -- geometry. Restricted Lua recounts the current secure action attrs
-        -- after a page change and reproduces the same grid math without tables,
-        -- allocation, or insecure calls. Only grid/explicit editor modes expand.
-        frame:SetAttributeNoHandler("RefreshAutoCompact", [[
-            if self:GetAttribute("eab-auto-compact") ~= 1 then return end
-
-            local count = self:GetAttribute("eab-full-count") or 0
-            local configuredCount = self:GetAttribute("eab-layout-count") or count
-            local configuredRows = self:GetAttribute("eab-layout-rows") or 1
-            if configuredRows < 1 then configuredRows = 1 end
-            local btnW = self:GetAttribute("eab-layout-btn-w") or 45
-            local btnH = self:GetAttribute("eab-layout-btn-h") or 45
-            local padding = self:GetAttribute("eab-layout-padding") or 2
-            local onePx = self:GetAttribute("eab-layout-one-px") or 1
-            local vertical = self:GetAttribute("eab-layout-vertical") == 1
-            local rowsUpward = self:GetAttribute("eab-layout-rows-upward") == 1
-            local colFlip = self:GetAttribute("eab-layout-col-flip") == 1
-            local rowFlip = self:GetAttribute("eab-layout-row-flip") == 1
-            local cornerFill = self:GetAttribute("eab-layout-corner-fill") == 1
-            local rawExtraW = self:GetAttribute("eab-layout-extra-w") or 0
-            local rawExtraH = self:GetAttribute("eab-layout-extra-h") or 0
-            local blizzStyle = self:GetAttribute("eab-layout-blizz-style") == 1
-            local nativeW = self:GetAttribute("eab-layout-native-w") or 45
-            local nativeH = self:GetAttribute("eab-layout-native-h") or 45
-            local expanded = self:GetAttribute("eab-compact-grid") == 1
-                or self:GetAttribute("eab-compact-force-full") == 1
-
-            local occupied = 0
-            if not expanded then
-                for i = 1, configuredCount do
-                    local btn = self:GetFrameRef("eab-compact-btn-" .. i)
-                    if btn then
-                        local slot = btn:GetAttribute("action") or 0
-                        if HasAction(slot) then occupied = occupied + 1 end
-                    end
-                end
-            end
-
-            local layoutCount = expanded and configuredCount or occupied
-            local gridCount = layoutCount
-            if gridCount < 1 then gridCount = 1 end
-            local stride = ceil(gridCount / configuredRows)
-            if stride < 1 then stride = 1 end
-            local rows = ceil(gridCount / stride)
-            local cols = vertical and rows or stride
-            local totalRows = vertical and stride or rows
-            local extraW = min(rawExtraW, cols)
-            local extraH = min(rawExtraH, totalRows)
-            local stepW = btnW + padding
-            local stepH = btnH + padding
-
-            local packed = 0
-            for i = 1, count do
-                local btn = self:GetFrameRef("eab-compact-btn-" .. i)
-                if btn then
-                    local within = i <= configuredCount
-                    if within then
-                        local slot = btn:GetAttribute("action") or 0
-                        local visible = expanded or HasAction(slot)
-                        if visible then
-                            local layoutIndex = i
-                            if not expanded then
-                                packed = packed + 1
-                                layoutIndex = packed
-                            end
-
-                            local col, row
-                            if vertical then
-                                if cornerFill then
-                                    col = (layoutIndex - 1) % rows
-                                    row = floor((layoutIndex - 1) / rows)
-                                else
-                                    col = floor((layoutIndex - 1) / stride)
-                                    row = (layoutIndex - 1) % stride
-                                end
-                            else
-                                col = (layoutIndex - 1) % stride
-                                row = floor((layoutIndex - 1) / stride)
-                            end
-                            if colFlip then col = (vertical and rows or stride) - 1 - col end
-                            if rowFlip then row = (vertical and stride or rows) - 1 - row end
-
-                            local thisW = (extraW > 0 and col < extraW) and (btnW + onePx) or btnW
-                            local thisH = (extraH > 0 and row < extraH) and (btnH + onePx) or btnH
-                            local x = col * stepW + min(col, extraW) * onePx
-                            local y = rowsUpward
-                                and (row * stepH + min(row, extraH) * onePx)
-                                or -(row * stepH + min(row, extraH) * onePx)
-                            local point = rowsUpward and "BOTTOMLEFT" or "TOPLEFT"
-                            local scale, w, h = 1, thisW, thisH
-                            if blizzStyle then
-                                scale = thisW / nativeW
-                                w, h = nativeW, nativeH
-                                x, y = x / scale, y / scale
-                            end
-                            btn:SetScale(scale)
-                            btn:ClearAllPoints()
-                            btn:SetPoint(point, self, point, x, y)
-                            btn:SetWidth(w)
-                            btn:SetHeight(h)
-                            btn:SetAttribute("statehidden", nil)
-                            btn:SetAlpha(1)
-                            btn:Show(true)
-                            local mouseMode = expanded and 2
-                                or (self:GetAttribute("eab-layout-mouse-mode") or 0)
-                            if btn.SetMouseClickEnabled then
-                                btn:SetMouseMotionEnabled(mouseMode > 0)
-                                btn:SetMouseClickEnabled(mouseMode > 1)
-                            else
-                                -- RestrictedFrames on clients without split
-                                -- mouse APIs cannot preserve motion-only hover.
-                                -- The bar frame owns hover motion, so never make
-                                -- a click-through action button clickable here.
-                                btn:EnableMouse(mouseMode > 1)
-                            end
-                        else
-                            btn:SetAttribute("statehidden", true)
-                            btn:SetAlpha(0)
-                            if btn.SetMouseClickEnabled then
-                                btn:SetMouseClickEnabled(false)
-                                btn:SetMouseMotionEnabled(false)
-                            else
-                                btn:EnableMouse(false)
-                            end
-                            btn:Hide(true)
-                        end
-                    else
-                        btn:SetAttribute("statehidden", true)
-                        btn:SetAlpha(0)
-                        btn:Hide(true)
-                    end
-                end
-            end
-
-            local frameW, frameH = 1, 1
-            if layoutCount > 0 then
-                frameW = cols * btnW + (cols - 1) * padding + extraW * onePx
-                frameH = totalRows * btnH + (totalRows - 1) * padding + extraH * onePx
-            end
-            frameW = max(frameW, 1)
-            frameH = max(frameH, 1)
-            if self:GetAttribute("eab-compact-current-w") ~= frameW
-                or self:GetAttribute("eab-compact-current-h") ~= frameH then
-                self:SetAttribute("eab-compact-secure-reflow", 1)
-                self:SetAttribute("eab-compact-current-w", frameW)
-                self:SetAttribute("eab-compact-current-h", frameH)
-            end
-            self:SetWidth(frameW)
-            self:SetHeight(frameH)
-            self:SetAttribute("eab-compact-secure-expanded", expanded and 1 or 0)
-        ]])
-        frame:SetAttributeNoHandler("_onstate-eabcompactcombat", [[
-            if newstate == "1" and self:GetAttribute("eab-auto-compact") == 1 then
-                self:RunAttribute("RefreshAutoCompact", false)
-            end
-        ]])
-        RegisterStateDriver(frame, "eabcompactcombat", "[combat] 1; 0")
-
-        -- Skyriding is not an optional sub-toggle here: this scoped-down
-        -- Auto-Compact only ever exists for Action Bar 1, and only while the
-        -- player is actually airborne on a skyriding mount (or Druid Flight
-        -- Form). eab-auto-compact-base is the Lua-maintained on/off flag
-        -- (LayoutBar); this recombines it with the live flying edge natively
-        -- so a mount/dismount mid-combat still (un)packs the bar correctly.
-        frame:SetAttributeNoHandler("_onstate-eabcompactsky", [[
-            local base = self:GetAttribute("eab-auto-compact-base") or 0
-            local enable = (newstate == "1") and base or 0
-            if self:GetAttribute("eab-auto-compact") ~= enable then
-                self:SetAttribute("eab-auto-compact", enable)
-                self:RunAttribute("RefreshAutoCompact", false)
-            end
-        ]])
-        RegisterStateDriver(frame, "eabcompactsky", "[advflyable,flying] 1; 0")
-    end
-
     if key == "MainBar" then
         -- MainBar paging: the state driver evaluates conditions (forms,
         -- vehicle, override, possess, bonus bars, modifiers). The
@@ -2826,9 +2638,6 @@ local function CreateBarFrame(info)
             local page = tonumber(newstate) or 1
             self:SetAttribute("actionpage", page)
             self:ChildUpdate("eab-page", page)
-            if self:GetAttribute("eab-auto-compact") == 1 then
-                self:RunAttribute("RefreshAutoCompact", false)
-            end
         ]])
 
         RegisterStateDriver(frame, "page", pagingConditions)
@@ -5836,9 +5645,8 @@ end
 function EAB_VTABLE.GetEffectiveShowEmpty(key, info, s)
     -- Auto-Compact owns empty-slot visibility while it's actively packing
     -- the bar, without mutating the user's saved Always Show Buttons
-    -- preference. No-op for every bar except MainBar with the toggle on.
-    if EAB_VTABLE.Compact.IsEnabled(key, info, s)
-        and (EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding()) then
+    -- preference. No-op for bars whose toggle is off.
+    if EAB_VTABLE.Compact.IsEnabled(key, info, s) then
         return false
     end
     local showEmpty = s.alwaysShowButtons
@@ -5874,28 +5682,21 @@ function EAB_VTABLE.ButtonHasAction(key, info, btn, index)
     return slot ~= nil and HasAction(slot) or false
 end
 
--- Auto-Compact (Action Bar 1, skyriding only). Kept on the existing vtable
--- to avoid consuming any of this chunk's already-tight Lua 5.1 local-variable
--- budget.
+-- Auto-Compact. Kept on the existing vtable to avoid consuming any of this
+-- chunk's already-tight Lua 5.1 local-variable budget.
 function EAB_VTABLE.Compact.IsEnabled(key, info, s)
     return s and s.autoCompactSlots == true
         and EAB:BarSupportsAutoCompact(key)
 end
 
+-- Item/toy/battlepet drags aren't part of the base spell/macro drag set the
+-- general grid system reacts to, but should still expand a compacted bar so
+-- there's somewhere to drop them.
 EAB_VTABLE.Compact.DragCursorTypes = {
     action = true, ability = true, spell = true, macro = true, item = true,
     petaction = true, mount = true, companion = true,
     flyout = true, equipmentset = true, outfit = true,
     toy = true, battlepet = true,
-}
-
--- Item/toy/battlepet drags need compact slots expanded, but should not raise
--- every action bar above bag windows. Presentation strata stay limited to the
--- action/spell-style cursor types that historically surface the bars.
-EAB_VTABLE.Compact.PresentationCursorTypes = {
-    action = true, ability = true, spell = true, macro = true,
-    petaction = true, mount = true, companion = true,
-    flyout = true, equipmentset = true, outfit = true,
 }
 
 function EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType)
@@ -5904,32 +5705,11 @@ function EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType)
         and EAB_VTABLE.Compact.DragCursorTypes[cursorType] == true
 end
 
-function EAB_VTABLE.Compact.IsPresentationDragCursor(cursorType)
-    if cursorType == nil then cursorType = GetCursorInfo() end
-    return cursorType ~= nil
-        and EAB_VTABLE.Compact.PresentationCursorTypes[cursorType] == true
-end
-
 function EAB_VTABLE.Compact.IsExpanded(key, info, s)
     if not EAB_VTABLE.Compact.IsEnabled(key, info, s) then return true end
-    -- Skyriding is mandatory, not an optional sub-toggle: this scoped-down
-    -- Auto-Compact only ever exists for Action Bar 1, and only while the
-    -- player is actually airborne on a skyriding mount or Flight Form.
-    if not (EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding()) then
-        return true
-    end
-    -- A /reload entered while already in combat cannot run LayoutBar, so the
-    -- restricted refs/scalars do not exist yet. Keep only that uninitialized
-    -- bootstrap layout canonical; normal initialized combat stays packed.
-    local frame = barFrames[key]
-    if InCombatLockdown()
-        and (not frame or frame:GetAttribute("eab-auto-compact") ~= 1) then
-        return true
-    end
     -- Quick Keybind, Unlock Mode, and a real cursor drag need every drop/mover
-    -- slot. Combat itself is not an expansion reason: the restricted layout
-    -- method keeps the occupied buttons packed until secure showgrid is active.
-    return _gridState.shown or _dragState.compactActive
+    -- slot.
+    return _gridState.shown
         or _quickKeybindState.open
         or EAB_VTABLE.Compact.unlockExpanded
         or (EllesmereUI and EllesmereUI._unlockActive)
@@ -5962,19 +5742,6 @@ function EAB_VTABLE.Compact.GetEffectiveNumIcons(key, info, s, buttons, numIcons
         end
     end
     return numIcons
-end
-
-function EAB_VTABLE.Compact.SyncGridAttribute(show)
-    if InCombatLockdown() then return end
-    local value = show and 1 or 0
-    for _, info in ipairs(BAR_CONFIG) do
-        if EAB:BarSupportsAutoCompact(info.key) then
-            local frame = barFrames[info.key]
-            if frame and frame:GetAttribute("eab-compact-grid") ~= value then
-                frame:SetAttributeNoHandler("eab-compact-grid", value)
-            end
-        end
-    end
 end
 
 -- Compute layout for a bar and return a table of per-button data.
@@ -6476,65 +6243,7 @@ local function LayoutBar(key)
     compactFD.autoCompactMask = compactMask
     compactFD.autoCompactNumIcons = numIcons
 
-    local compactSupported = EAB:BarSupportsAutoCompact(key)
     local useBlizzardStyle = EAB.db.profile.useBlizzardStyle and true or false
-    local nativeW = base and base.w or 45
-    local nativeH = base and base.h or 45
-    local rawExtraW = s._matchExtraPixels or 0
-    local rawExtraH = s._matchExtraPixelsH or 0
-    local compactGeometryChanged = compactSupported and (
-        compactFD.autoCompactGeometryCount ~= numIcons
-        or compactFD.autoCompactGeometryRows ~= configuredRows
-        or compactFD.autoCompactGeometryBtnW ~= btnW
-        or compactFD.autoCompactGeometryBtnH ~= btnH
-        or compactFD.autoCompactGeometryPadding ~= padding
-        or compactFD.autoCompactGeometryOnePx ~= onePx
-        or compactFD.autoCompactGeometryVertical ~= isVertical
-        or compactFD.autoCompactGeometryRowsUpward ~= rowsUpward
-        or compactFD.autoCompactGeometryColFlip ~= colFlip
-        or compactFD.autoCompactGeometryRowFlip ~= rowFlip
-        or compactFD.autoCompactGeometryCornerFill ~= cornerFill
-        or compactFD.autoCompactGeometryExtraW ~= rawExtraW
-        or compactFD.autoCompactGeometryExtraH ~= rawExtraH
-        or compactFD.autoCompactGeometryBlizzStyle ~= useBlizzardStyle
-        or compactFD.autoCompactGeometryNativeW ~= nativeW
-        or compactFD.autoCompactGeometryNativeH ~= nativeH
-    )
-    if compactGeometryChanged then
-        compactFD.autoCompactGeometryCount = numIcons
-        compactFD.autoCompactGeometryRows = configuredRows
-        compactFD.autoCompactGeometryBtnW = btnW
-        compactFD.autoCompactGeometryBtnH = btnH
-        compactFD.autoCompactGeometryPadding = padding
-        compactFD.autoCompactGeometryOnePx = onePx
-        compactFD.autoCompactGeometryVertical = isVertical
-        compactFD.autoCompactGeometryRowsUpward = rowsUpward
-        compactFD.autoCompactGeometryColFlip = colFlip
-        compactFD.autoCompactGeometryRowFlip = rowFlip
-        compactFD.autoCompactGeometryCornerFill = cornerFill
-        compactFD.autoCompactGeometryExtraW = rawExtraW
-        compactFD.autoCompactGeometryExtraH = rawExtraH
-        compactFD.autoCompactGeometryBlizzStyle = useBlizzardStyle
-        compactFD.autoCompactGeometryNativeW = nativeW
-        compactFD.autoCompactGeometryNativeH = nativeH
-
-        frame:SetAttributeNoHandler("eab-layout-count", numIcons)
-        frame:SetAttributeNoHandler("eab-layout-rows", configuredRows)
-        frame:SetAttributeNoHandler("eab-layout-btn-w", btnW)
-        frame:SetAttributeNoHandler("eab-layout-btn-h", btnH)
-        frame:SetAttributeNoHandler("eab-layout-padding", padding)
-        frame:SetAttributeNoHandler("eab-layout-one-px", onePx)
-        frame:SetAttributeNoHandler("eab-layout-vertical", isVertical and 1 or 0)
-        frame:SetAttributeNoHandler("eab-layout-rows-upward", rowsUpward and 1 or 0)
-        frame:SetAttributeNoHandler("eab-layout-col-flip", colFlip and 1 or 0)
-        frame:SetAttributeNoHandler("eab-layout-row-flip", rowFlip and 1 or 0)
-        frame:SetAttributeNoHandler("eab-layout-corner-fill", cornerFill and 1 or 0)
-        frame:SetAttributeNoHandler("eab-layout-extra-w", rawExtraW)
-        frame:SetAttributeNoHandler("eab-layout-extra-h", rawExtraH)
-        frame:SetAttributeNoHandler("eab-layout-blizz-style", useBlizzardStyle and 1 or 0)
-        frame:SetAttributeNoHandler("eab-layout-native-w", nativeW)
-        frame:SetAttributeNoHandler("eab-layout-native-h", nativeH)
-    end
 
     local packedIndex = 0
 
@@ -6545,11 +6254,6 @@ local function LayoutBar(key)
         if i > numIcons then
             btn:Hide()
             btn:SetAlpha(0)
-            if compactSupported then
-                if not compactFD.autoCompactRefsReady then
-                    frame:SetFrameRef("eab-compact-btn-" .. i, btn)
-                end
-            end
         else
             -- Always keep buttons within the icon range shown. Visibility
             -- is controlled purely through alpha so page swaps during
@@ -6613,11 +6317,6 @@ local function LayoutBar(key)
             end
             EFD(btn).barKey = key
 
-            if compactSupported then
-                if not compactFD.autoCompactRefsReady then
-                    frame:SetFrameRef("eab-compact-btn-" .. i, btn)
-                end
-            end
             if EAB.db.profile.useBlizzardStyle then
                 local base = barBaseSize[key]
                 local nativeW = base and base.w or 45
@@ -6703,48 +6402,6 @@ local function LayoutBar(key)
         end
     end
 
-    if compactSupported then
-        if not compactFD.autoCompactRefsReady then
-            frame:SetAttributeNoHandler("eab-full-count", info.count)
-            if frame:GetAttribute("eab-compact-grid") == nil then
-                frame:SetAttributeNoHandler("eab-compact-grid", 0)
-            end
-            compactFD.autoCompactRefsReady = true
-        end
-
-        local secureBase = compactEnabled and 1 or 0
-        if compactFD.autoCompactSecureBase ~= secureBase then
-            compactFD.autoCompactSecureBase = secureBase
-            frame:SetAttributeNoHandler("eab-auto-compact-base", secureBase)
-        end
-        -- Skyriding is mandatory here, not an optional sub-flag: the secure
-        -- eab-auto-compact flag is only ever 1 while base is on AND the
-        -- player is currently flying. The eabcompactsky state driver keeps
-        -- this current on its own for a live flying edge; this direct write
-        -- covers settings changes that don't also flip the flying state.
-        local skyGateOk = EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding()
-        local secureEnabled = (compactEnabled and skyGateOk) and 1 or 0
-        if compactFD.autoCompactSecureEnabled ~= secureEnabled then
-            compactFD.autoCompactSecureEnabled = secureEnabled
-            frame:SetAttributeNoHandler("eab-auto-compact", secureEnabled)
-        end
-        local secureMouseMode = (not s.clickThrough) and 2
-            or (s.mouseoverEnabled and 1 or 0)
-        if compactFD.autoCompactSecureMouseMode ~= secureMouseMode then
-            compactFD.autoCompactSecureMouseMode = secureMouseMode
-            frame:SetAttributeNoHandler("eab-layout-mouse-mode", secureMouseMode)
-        end
-
-        -- Secure showgrid owns eab-compact-grid. This separate flag covers
-        -- editor/regen expansion without clobbering an in-combat grid state.
-        local forceFull = compactExpanded and not _gridState.shown and 1 or 0
-        if compactFD.autoCompactSecureForceFull ~= forceFull then
-            compactFD.autoCompactSecureForceFull = forceFull
-            frame:SetAttributeNoHandler("eab-compact-force-full", forceFull)
-        end
-        frame:SetAttributeNoHandler("eab-compact-secure-expanded", compactExpanded and 1 or 0)
-    end
-
     -- Size the bar frame to encompass all visible buttons (including extra px)
     local frameW = totalCols * btnW + (totalCols - 1) * padding + extraW * onePx
     local frameH = totalRows * btnH + (totalRows - 1) * padding + extraH * onePx
@@ -6813,8 +6470,6 @@ local function LayoutBar(key)
         local newH = max(frameH, 1)
         local prevW = frame._eabPrevLayoutW
         local prevH = frame._eabPrevLayoutH
-        local secureCompactReflow = compactSupported
-            and frame:GetAttribute("eab-compact-secure-reflow") == 1
         frame._eabPrevLayoutW = newW
         frame._eabPrevLayoutH = newH
         -- Self-validating gate: the dw/2 compensation is only correct when the
@@ -6829,7 +6484,7 @@ local function LayoutBar(key)
         if (prevW or prevH)
            and not EllesmereUI._unlockActive
            and not EllesmereUI._abAnchorSuppressed
-           and (secureCompactReflow or not _isApplyingAll) then
+           and not _isApplyingAll then
             local s = EAB.db.profile.bars[key]
             local grow = s and s.growDirection
             if grow then
@@ -6883,18 +6538,6 @@ local function LayoutBar(key)
                         end
                     end
                 end
-            end
-        end
-
-        if compactSupported then
-            if frame:GetAttribute("eab-compact-current-w") ~= newW then
-                frame:SetAttributeNoHandler("eab-compact-current-w", newW)
-            end
-            if frame:GetAttribute("eab-compact-current-h") ~= newH then
-                frame:SetAttributeNoHandler("eab-compact-current-h", newH)
-            end
-            if secureCompactReflow then
-                frame:SetAttributeNoHandler("eab-compact-secure-reflow", 0)
             end
         end
     end
@@ -7046,9 +6689,7 @@ function EAB:RefreshAutoCompactLayouts(force)
                     or fd.autoCompactEnabled ~= enabled
                     or fd.autoCompactExpanded ~= expanded
                     or fd.autoCompactMask ~= mask
-                    or fd.autoCompactNumIcons ~= numIcons
-                    or (enabled and not expanded
-                        and frame:GetAttribute("eab-compact-secure-expanded") == 1) then
+                    or fd.autoCompactNumIcons ~= numIcons then
                     LayoutBar(key)
                     -- Layout first, then visibility: newly surfaced drop slots
                     -- must never flash at their old compact coordinates.
@@ -9536,10 +9177,50 @@ do
         skyEvt:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
     end
     skyEvt:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
-    skyEvt:SetScript("OnEvent", function()
+    skyEvt:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    skyEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
+    local function SkyEvtRefresh()
         if EAB.RefreshMouseover then EAB:RefreshMouseover() end
+        if EAB.UpdateSkyridingVisOverride then EAB:UpdateSkyridingVisOverride() end
         if EAB.RefreshAutoCompactLayouts then EAB:RefreshAutoCompactLayouts() end
+    end
+    skyEvt:SetScript("OnEvent", function(_, event)
+        SkyEvtRefresh()
+        if event == "PLAYER_ENTERING_WORLD" then
+            -- Zone transitions (instance entry/exit) can change mount and
+            -- bonusbar state before GetBonusBarOffset()/IsFlying() settle on
+            -- the same frame this event fires. Re-check one tick later too.
+            C_Timer_After(0, SkyEvtRefresh)
+        end
     end)
+end
+
+-- "Always Show While Skyriding" (visShowSkyriding) on Action Bar 1: while the
+-- skyriding bonus action bar (bonusbar 5) is showing, switch Bar 1's
+-- effective visibility to "always" -- as if the Visibility dropdown itself
+-- were set to Always -- without touching the saved barVisibility/mouseover
+-- settings. Reuses the same runtime-only _visOverride slot the Toggle Action
+-- Bar keybind and Show During Drag features already use, so nothing here is
+-- ever persisted and it plays nicely with those (never clobbers an override
+-- it didn't set itself).
+function EAB:UpdateSkyridingVisOverride()
+    local s = self.db and self.db.profile and self.db.profile.bars["MainBar"]
+    local active = s and s.visShowSkyriding and GetBonusBarOffset() == 5
+    if active then
+        EAB._skyridingVisForced = true
+        EAB._visOverride = EAB._visOverride or {}
+        if EAB._visOverride["MainBar"] ~= "always" then
+            EAB._visOverride["MainBar"] = "always"
+            self:RefreshRuntimeVisibility()
+        end
+    elseif EAB._skyridingVisForced then
+        EAB._skyridingVisForced = nil
+        if EAB._visOverride and EAB._visOverride["MainBar"] == "always" then
+            EAB._visOverride["MainBar"] = nil
+            self:RefreshRuntimeVisibility()
+        end
+    end
+    if self.RefreshMouseover then self:RefreshMouseover() end
 end
 
 function EAB:RefreshMouseover()
@@ -9561,6 +9242,16 @@ function EAB:RefreshMouseover()
                     -- force full opacity regardless of stale mouseover settings.
                     StopFade(frame)
                     frame:SetAlpha(1)
+                elseif key == "MainBar" and EAB._skyridingVisForced then
+                    -- Bonusbar-5 visibility override active ("Always Show
+                    -- While Skyriding"): show fully, bypassing whatever the
+                    -- saved mouseover/visibility setting says.
+                    StopFade(frame)
+                    local skyAlpha = s._savedBarAlpha or s.mouseoverAlpha or 1
+                    frame:SetAlpha(skyAlpha)
+                    local state = hoverStates[key]
+                    if state then state.fadeDir = "in" end
+                    SyncPagingAlpha(skyAlpha)
                 elseif s.mouseoverEnabled then
                     if info.isDataBar then
                         AttachDataBarHoverHooks(key)
@@ -10495,15 +10186,6 @@ function EAB:ApplyClickThroughForBar(barKey)
     -- Bar frame only needs mouse motion (for hover detection); clicks pass through
     -- to the buttons or to frames behind the bar.
     SafeEnableMouseMotionOnly(frame, enable or motionOnly)
-    local secureMouseMode = (not s.clickThrough) and 2
-        or (s.mouseoverEnabled and 1 or 0)
-    if EAB:BarSupportsAutoCompact(barKey) and not InCombatLockdown() then
-        local frameFD = EFD(frame)
-        if frameFD.autoCompactSecureMouseMode ~= secureMouseMode then
-            frameFD.autoCompactSecureMouseMode = secureMouseMode
-            frame:SetAttributeNoHandler("eab-layout-mouse-mode", secureMouseMode)
-        end
-    end
     local info = BAR_LOOKUP[barKey]
     local showEmpty = info
         and EAB_VTABLE.GetEffectiveShowEmpty(barKey, info, s)
@@ -12425,7 +12107,6 @@ local function OnGridChange()
     if _gridState.shown and _gridState._lastTime and (now - _gridState._lastTime) < 0.1 then return end
     _gridState._lastTime = now
     _gridState.shown = true
-    EAB_VTABLE.Compact.SyncGridAttribute(true)
     EAB:RefreshAutoCompactLayouts()
 
     -- Propagate showgrid to the controller so the secure environment
@@ -12525,10 +12206,8 @@ local function ApplyAll()
     -- PLAYER_REGEN_ENABLED rebuild). Only stale drag state restores strata;
     -- otherwise LayoutBar must remain expanded until the actual drop.
     local liveCursorType = GetCursorInfo()
-    local liveCompactDrag = EAB_VTABLE.Compact.IsSupportedDragCursor(liveCursorType)
     local livePresentationDrag = liveCursorType ~= nil
         and _dragState.presentationTypes[liveCursorType] == true
-    _dragState.compactActive = liveCompactDrag
     if livePresentationDrag then
         _dragState.visible = true
     elseif _dragState.visible then
@@ -13960,7 +13639,6 @@ function EAB:FinishSetup()
         EAB._RestoreDragNeverBars()
         -- Force-restore all strata and clear drag visibility without the
         -- guard check, so stale state from spec changes etc. is always cleaned.
-        _dragState.compactActive = false
         _dragState.visible = false
         -- Skip the restore if in combat; the strata cache entries survive
         -- and will be restored on the next PLAYER_REGEN_ENABLED call.
@@ -13970,7 +13648,6 @@ function EAB:FinishSetup()
         end
         wipe(_dragState.strataCache)
         _gridState.shown = false
-        EAB_VTABLE.Compact.SyncGridAttribute(false)
     end
     local function SetDragVisible(show, force)
         if _dragState.visible == show and not force then return end
@@ -14038,9 +13715,7 @@ function EAB:FinishSetup()
 
     self:RegisterEvent("CURSOR_CHANGED", function()
         local cursorType = GetCursorInfo()
-        local compactDrag = EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType)
-        _dragState.compactActive = compactDrag
-        if compactDrag then
+        if EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType) then
             EAB:RefreshAutoCompactLayouts()
         end
         if cursorType and DRAG_TYPES[cursorType] then
@@ -14067,9 +13742,8 @@ function EAB:FinishSetup()
             -- during a drag (the mouseover forcing above, conditional
             -- drivers). Reuses the runtime _visOverride slot (never
             -- persisted) and skips bars the toggle keybind already
-            -- overrides. Secure driver swaps are combat-blocked, so
-            -- combat drags leave Never bars hidden.
-            if not InCombatLockdown() and not _gridState._dragNeverForced then
+            -- overrides.
+            if not _gridState._dragNeverForced then
                 local forced
                 for _, info in ipairs(BAR_CONFIG) do
                     local s = EAB.db.profile.bars[info.key]
@@ -14087,7 +13761,7 @@ function EAB:FinishSetup()
                     EAB:RefreshRuntimeVisibility()
                 end
             end
-        elseif compactDrag then
+        elseif EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType) then
             -- Compact-only cursor types (item/toy/battlepet/etc.) don't
             -- surface the classic mouseover/Never-bar behavior, but still
             -- need the grid held open so newly-expanded slots stay visible.
@@ -14096,10 +13770,9 @@ function EAB:FinishSetup()
             end
         else
             -- No cursor, or a cursor type neither system cares about: treat
-            -- it as a drag end so stale Never-bar/strata/compact state never
+            -- it as a drag end so stale Never-bar/strata state never
             -- lingers until the next supported drag happens to start.
             SetDragVisible(false)
-            EAB_VTABLE.Compact.SyncGridAttribute(false)
             EAB._RestoreDragNeverBars()
             if _gridState.shown then
                 _gridState.shown = false
@@ -14130,12 +13803,8 @@ function EAB:FinishSetup()
             ApplyAll()
         end
         local cursorType = GetCursorInfo()
-        if EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType) then
-            -- A drag can begin in combat, where strata and insecure grid work
-            -- are forbidden. Reassert both now without collapsing the layout.
-            _dragState.compactActive = true
-            SetDragVisible(
-                EAB_VTABLE.Compact.IsPresentationDragCursor(cursorType), true)
+        if cursorType and DRAG_TYPES[cursorType] then
+            SetDragVisible(true, true)
             if not _gridState.shown then OnGridChange() end
         else
             -- Restore any stale strata changes that couldn't be done in combat.
@@ -14368,7 +14037,6 @@ function EAB:FinishSetup()
     -- Grid hide: restore empty slot visibility
     local function OnGridHide()
         _gridState.shown = false
-        EAB_VTABLE.Compact.SyncGridAttribute(false)
 
         -- Clear the game event showgrid flag on all managed buttons
         if not InCombatLockdown() then
@@ -16554,6 +16222,7 @@ local function SetupExtraBars()
     -- RefreshMouseover ran at OnEnable before holders were created, so
     -- bars with mouseoverEnabled never got their alpha set to 0.
     EAB:RefreshMouseover()
+    if EAB.UpdateSkyridingVisOverride then EAB:UpdateSkyridingVisOverride() end
 end
 
 -- Setup extra bars after a short delay to ensure frames exist
