@@ -703,6 +703,9 @@ for _, info in ipairs(BAR_CONFIG) do
         showPagingArrows = false,
         pagingArrowsRight = false,
         paging = {},
+        -- Auto-paging opt-outs (MainBar only; see BuildPagingConditions).
+        disableFormPaging = false,
+        disableSkyridingPaging = false,
         bgEnabled = false,
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
         bgBorderColor = { r = 0, g = 0, b = 0, a = 1 },
@@ -2264,10 +2267,25 @@ EAB_VTABLE.PAGING_STATES = {
     },
 }
 
+-- Auto-paging opt-outs for MainBar. Returns noForm, noSky: whether to suppress
+-- the implicit bonusbar swaps for forms/stealth/stance (bonusbar 1-4) and for
+-- skyriding (bonusbar 5). Deliberately does NOT cover vehicle/override/possess:
+-- those replace the player's abilities outright, so suppressing them would leave
+-- no way to use the vehicle at all. Only ever true for MainBar -- it is the only
+-- bar the engine drives off bonusbar, and the only one the options panel offers
+-- these toggles for.
+function EAB_VTABLE.GetAutoPagingOptOuts(barKey)
+    if barKey ~= "MainBar" then return false, false end
+    local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars.MainBar
+    if not bs then return false, false end
+    return bs.disableFormPaging and true or false, bs.disableSkyridingPaging and true or false
+end
+
 function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
     if not pagingConfig or not next(pagingConfig) then return nil end
     local PG = EAB_VTABLE.PAGING_STATES
     local _, class = UnitClass("player")
+    local noForm, noSky = EAB_VTABLE.GetAutoPagingOptOuts(barKey)
     local parts = {}
     if barKey == "MainBar" then
         if EAB_VTABLE.GetOverrideBarIndex then
@@ -2292,7 +2310,11 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
     }
     local classStates = PG.class[class]
     if classStates then
-        local defs = barKey == "MainBar" and CLASS_DEFAULTS[class]
+        -- noForm drops only the implicit fallback. A page the user picked for a
+        -- specific form in the dropdowns is an explicit request, not auto-paging,
+        -- so it still applies -- that combination is how you keep every form on
+        -- page 1 except the one you actually want to swap.
+        local defs = (barKey == "MainBar" and not noForm) and CLASS_DEFAULTS[class]
         for _, state in ipairs(classStates) do
             local page = pagingConfig[state.id]
             if page then
@@ -2304,7 +2326,9 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
         end
     end
     if barKey == "MainBar" then
-        parts[#parts + 1] = "[bonusbar:5] 11"
+        if not noSky then
+            parts[#parts + 1] = "[bonusbar:5] 11"
+        end
         for i = 2, NUM_AB_PAGES do
             parts[#parts + 1] = "[bar:" .. i .. "] " .. i
         end
@@ -2331,6 +2355,7 @@ end
 -------------------------------------------------------------------------------
 local function GetClassPagingConditions()
     local _, class = UnitClass("player")
+    local noForm, noSky = EAB_VTABLE.GetAutoPagingOptOuts("MainBar")
     local conditions = ""
 
     -- Override bar (soft vehicle / quest abilities) and possess bar: remap bar 1
@@ -2343,7 +2368,9 @@ local function GetClassPagingConditions()
     end
 
     -- Dragonriding (all classes)
-    conditions = conditions .. "[bonusbar:5] 11; "
+    if not noSky then
+        conditions = conditions .. "[bonusbar:5] 11; "
+    end
 
     -- Manual page switching (pages 2-6)
     -- [bar:N] responds to WoW's internal page set by ChangeActionBarPage().
@@ -2353,15 +2380,20 @@ local function GetClassPagingConditions()
     -- applies on page 1). MainBar keybinds are native ACTIONBUTTONn commands,
     -- so the displayed page must resolve exactly like the engine's or a
     -- form + manual-page combination shows one ability and fires another.
+    -- (The auto-paging opt-outs are the one exception: they deliberately break
+    -- from the engine's resolution, which is exactly why they force the keys off
+    -- ACTIONBUTTONn and onto the click route -- see UpdateKeybinds pass 1.)
     for i = 2, NUM_AB_PAGES do
         conditions = conditions .. "[bar:" .. i .. "] " .. i .. "; "
     end
 
     -- Class-specific form paging (page 1 only, per the ordering above)
-    if class == "DRUID" then
-        conditions = conditions .. "[bonusbar:1,stealth] 7; [bonusbar:1] 7; [bonusbar:3] 9; [bonusbar:4] 10; "
-    elseif class == "ROGUE" then
-        conditions = conditions .. "[bonusbar:1] 7; "
+    if not noForm then
+        if class == "DRUID" then
+            conditions = conditions .. "[bonusbar:1,stealth] 7; [bonusbar:1] 7; [bonusbar:3] 9; [bonusbar:4] 10; "
+        elseif class == "ROGUE" then
+            conditions = conditions .. "[bonusbar:1] 7; "
+        end
     end
 
     -- Default: page 1
@@ -2864,6 +2896,15 @@ function ns.RebuildBarPaging(barKey)
             frame:Execute(("self:SetAttribute('actionpage', %d)"):format(defaultPage))
         end
     end
+
+    -- Keybind routing is derived from the paging config (UpdateKeybinds pass 1):
+    -- custom paging and the auto-paging opt-outs both force click-routed keys.
+    -- Rebuild now so a settings change takes effect immediately instead of
+    -- waiting for the next UPDATE_BINDINGS, which may never come -- toggling a
+    -- paging setting fires no binding event of its own. The signature diff makes
+    -- this a no-op when routing did not actually change, and UpdateKeybinds
+    -- re-arms itself out of combat, so calling it unconditionally is safe.
+    if _G._EAB_UpdateKeybinds then _G._EAB_UpdateKeybinds() end
 end
 
 
@@ -10651,6 +10692,20 @@ local function UpdateKeybinds()
             -- paging (bs.paging) needs the click route.
             local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[info.key]
             local barHasCustomPaging = (bs and bs.paging and next(bs.paging) ~= nil) and true or false
+            -- The auto-paging opt-outs need the click route for the mirror-image
+            -- reason: bonusbar stays a native engine concept whether or not we
+            -- page off it, so ACTIONBUTTONn still resolves to the form/skyriding
+            -- slot after we have deliberately STOPPED the icon from following it.
+            -- Left native, a stealthed keypress would cast the page-7 ability the
+            -- button no longer shows -- the show-one/fire-another split the
+            -- ordering comment in GetClassPagingConditions warns about. Click
+            -- routing reads our explicit "action" attr, so key and icon agree in
+            -- every form; the cost is press-and-hold repeat on MainBar while the
+            -- opt-out is on, same trade custom paging already makes.
+            if info.key == "MainBar" and bs
+               and (bs.disableFormPaging or bs.disableSkyridingPaging) then
+                barHasCustomPaging = true
+            end
             for i, btn in ipairs(btns) do
                 if btn then
                     local cmd = prefix .. i
