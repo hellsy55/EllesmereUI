@@ -9628,6 +9628,17 @@ ns._ApplyTierOffset = function()
     if not x then return end
     containerFrame:ClearAllPoints()
     containerFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", PixelSnap(x), PixelSnap(y))
+    -- Hidden container (frames not shown -- solo, party, or just left the
+    -- raid): LayoutGroups no longer runs for it, so re-derive the SIZE here
+    -- too. Left alone, the dormant container keeps the LAST raid tier's
+    -- footprint, and unlock mode's mover reads live container geometry: the
+    -- control appears at a stale spot with a stale box, and a drag-save
+    -- there stores a center measured on the wrong footprint (off by half
+    -- the width delta -- the "whole layout drifted left after a raid"
+    -- corruption). While shown, LayoutGroups owns the size as before.
+    if not containerFrame:IsShown() then
+        containerFrame:SetSize(tw, th)
+    end
 end
 
 -- TEMP DEBUG (read-only, prints only): diagnose the vertical-group-growth
@@ -10181,10 +10192,13 @@ local function OnEvent(self, event, arg1, ...)
                     LayoutGroups()
                     if t0 > 0 then ns.ProfEnd("LayoutGroups:REGEN", t0) end
                 end
-                -- Same-dimension tier changes take the LayoutGroups branch;
-                -- reapply offset so the container lands at the correct tier.
-                if ns._ApplyTierOffset then ns._ApplyTierOffset() end
             end
+            -- Same-dimension tier changes take the LayoutGroups branch;
+            -- reapply offset so the container lands at the correct tier.
+            -- Outside the framesVisible gate for the same reason as the
+            -- roster path: a raid left mid-combat must still re-base the
+            -- now-hidden container once combat ends.
+            if ns._ApplyTierOffset then ns._ApplyTierOffset() end
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
             end
@@ -10349,16 +10363,21 @@ local function OnEvent(self, event, arg1, ...)
                     LayoutGroups()
                     if t0 > 0 then ns.ProfEnd("LayoutGroups:ROSTER", t0) end
                 end
-                -- Re-derive the growth-corner anchor after any roster-driven
-                -- layout. tierChanged above compares frame DIMENSIONS, so two
-                -- tiers sharing a size (fresh tiers copy the base 20-man size)
-                -- take the bare-LayoutGroups branches even when their offsets
-                -- or growth differ -- without this, a roster that refined from
-                -- an early undercount (streaming subgroup data at join) left
-                -- the container stuck on the small-tier position until the
-                -- next full reload. Cheap, idempotent, self-gates on combat.
-                if ns._ApplyTierOffset then ns._ApplyTierOffset() end
             end
+            -- Re-derive the growth-corner anchor after any roster-driven
+            -- layout. tierChanged above compares frame DIMENSIONS, so two
+            -- tiers sharing a size (fresh tiers copy the base 20-man size)
+            -- take the bare-LayoutGroups branches even when their offsets
+            -- or growth differ -- without this, a roster that refined from
+            -- an early undercount (streaming subgroup data at join) left
+            -- the container stuck on the small-tier position until the
+            -- next full reload. Cheap, idempotent, self-gates on combat.
+            -- Deliberately OUTSIDE the framesVisible gate: leaving the raid
+            -- hides the frames, and the dormant container must still be
+            -- re-based off the raid tier's position/size (it re-derives the
+            -- size itself while hidden) or unlock mode shows and saves
+            -- against the stale raid-tier geometry.
+            if ns._ApplyTierOffset then ns._ApplyTierOffset() end
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
             end
