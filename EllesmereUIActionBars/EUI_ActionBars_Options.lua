@@ -48,6 +48,16 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
+    -- Auto-Compact is intentionally limited to the standard action bars. Keep
+    -- this list driven by the runtime capability check so the options page,
+    -- Apply All, and Apply to Multiple can never drift from runtime support.
+    local AUTO_COMPACT_BAR_ORDER = {}
+    for _, key in ipairs(GROUP_BAR_ORDER) do
+        if EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(key) then
+            AUTO_COMPACT_BAR_ORDER[#AUTO_COMPACT_BAR_ORDER + 1] = key
+        end
+    end
+
     -- Check if a bar is enabled (we control all bars now, always enabled)
     local function IsBarEnabled(barKey)
         if not EAB or not EAB.db then return true end
@@ -1881,6 +1891,7 @@ initFrame:SetScript("OnEvent", function(self)
                           EAB:RefreshRuntimeVisibility()
                           EAB:RefreshMouseover()
                           EAB:ApplyCombatVisibility()
+                          if EAB.UpdateSkyridingVisOverride then EAB:UpdateSkyridingVisOverride() end
                       end }
                 end
                 local _, visCogShow = EllesmereUI.BuildCogPopup({
@@ -2686,17 +2697,19 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
 
-            -- Auto-Compact Bar (Action Bar 1 only, skyriding only). Own row,
-            -- placed last in Layout: intentionally scoped to a single bar, so
-            -- no per-bar Apply All / Apply to Multiple sync is offered here.
+            -- Auto-Compact Bar (own row, placed last in Layout). Automatically
+            -- hides unused action slots and resizes the bar to fit its
+            -- assigned actions. Empty slots return while dragging an action
+            -- so you can place it anywhere.
             do
-                _, h = W:DualRow(parent, y,
-                    { type="toggle", text="Auto-Compact Bar 1 (Skyriding)",
-                      tooltip="Automatically hides unused action slots and resizes Action Bar 1 to fit its assigned actions while you're flying on a skyriding mount (or Druid Flight Form). Empty slots return while dragging an action so you can place it anywhere, and the bar returns to normal whenever you're grounded.",
+                local autoCompactRow
+                autoCompactRow, h = W:DualRow(parent, y,
+                    { type="toggle", text="Auto-Compact Bar",
+                      tooltip="Automatically hides unused action slots and resizes the bar to fit its assigned actions. Empty slots return while dragging an action so you can place it anywhere.",
                       disabled=function()
                           return not (EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(SelectedKey()))
                       end,
-                      disabledTooltip="Auto-Compact is only available for Action Bar 1.",
+                      disabledTooltip="Auto-Compact Bar is only available for the standard action bars.",
                       rawTooltip=true,
                       labelOnlyTooltip=true,
                       getValue=function() return SVal("autoCompactSlots", false) end,
@@ -2706,6 +2719,50 @@ initFrame:SetScript("OnEvent", function(self)
                           SUpdatePreviewAndResize()
                       end },
                     { type="label", text="" });  y = y - h
+
+                -- Standard per-bar synchronization for Auto-Compact. Apply All
+                -- and Apply to Multiple only offer bars supported by the
+                -- runtime.
+                do
+                    local rgn = autoCompactRow._leftRegion
+                    EllesmereUI.BuildSyncIcon({
+                        region  = rgn,
+                        tooltip = "Apply Auto-Compact Bar to all Bars",
+                        onClick = function()
+                            local v = SVal("autoCompactSlots", false)
+                            for _, key in ipairs(AUTO_COMPACT_BAR_ORDER) do
+                                EAB.db.profile.bars[key].autoCompactSlots = v
+                                EAB:ApplyIconRowOverrides(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                        isSynced = function()
+                            local v = SVal("autoCompactSlots", false)
+                            for _, key in ipairs(AUTO_COMPACT_BAR_ORDER) do
+                                if (EAB.db.profile.bars[key].autoCompactSlots or false) ~= v then
+                                    return false
+                                end
+                            end
+                            return true
+                        end,
+                        flashTargets = function() return { rgn } end,
+                        multiApply = {
+                            elementKeys   = AUTO_COMPACT_BAR_ORDER,
+                            elementLabels = SHORT_LABELS,
+                            getCurrentKey = function() return SelectedKey() end,
+                            onApply       = function(checkedKeys)
+                                local v = SVal("autoCompactSlots", false)
+                                for _, key in ipairs(checkedKeys) do
+                                    if EAB.BarSupportsAutoCompact and EAB:BarSupportsAutoCompact(key) then
+                                        EAB.db.profile.bars[key].autoCompactSlots = v
+                                        EAB:ApplyIconRowOverrides(key)
+                                    end
+                                end
+                                EllesmereUI:RefreshPage()
+                            end,
+                        },
+                    })
+                end
             end
 
             -- Built later, directly below ICON EFFECTS. Keeping the builder
