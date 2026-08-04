@@ -970,7 +970,7 @@ local BUILD_BUDGET_MS = 8
 -- lands in a handful of frames during the world fade-in (the user-stated
 -- contract: "spread over a few frames on reload/login"), and the gentle
 -- budget resumes for everything mid-session.
-local BUILD_BUDGET_LOGIN_MS = 250
+local BUILD_BUDGET_LOGIN_MS = 120
 local LOGIN_WINDOW_S = 15
 local loginStamp = -LOGIN_WINDOW_S
 -- ONE queue, every job combat-runnable: 68914 made container creation

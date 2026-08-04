@@ -1295,25 +1295,50 @@ end
 -- pool-build time leave their skeleton shell UNCONSUMED in b.shells, so a
 -- later enable is a combat-legal group add onto that shell; only a bundle
 -- whose shell for the row is already gone holds until regen.
+-- Stepped, NOT one gulp: this used to build up to three full containers
+-- (each its own ~4-6ms engine batch, same cost the pool-build split above
+-- exists to avoid) plus the NPF record pass in a single synchronous job.
+-- Under login/reload CPU contention that single call could outrun the
+-- client's script watchdog outright -- and unlike a budget check between
+-- QUEUE jobs, nothing inside one job's own body can be interrupted, so the
+-- pcall in RunJob never got a chance to catch anything. Each atom below is
+-- one engine batch at most; returning "again" front-requeues the job and
+-- lets the scheduler's per-frame budget check land between atoms, same as
+-- any other multi-atom stepper.
 local function QueueBundleEnsure(b)
     if b.npcEnsurePending then return end
     b.npcEnsurePending = true
+
+    local step, ds, bs, cs = 1
+    -- Combat-legal since 68914: AddBundle* consume a pre-born shell when
+    -- one exists and create fresh otherwise, in any combat state.
+    local function ensure(kind, slot, add)
+        if not (slot and slot ~= "none") or b.containers[kind] then return end
+        add(b)
+    end
     AK.QueueBuildJob(function()
-        local ds, bs, cs = ns.GetAuraSlots()
-        -- Combat-legal since 68914: AddBundle* consume a pre-born shell when
-        -- one exists and create fresh otherwise, in any combat state.
-        local function ensure(kind, slot, add)
-            if not (slot and slot ~= "none") or b.containers[kind] then return end
-            add(b)
+        if step == 1 then
+            ds, bs, cs = ns.GetAuraSlots()
+        elseif step == 2 then
+            ensure("debuffs", ds, AddBundleDebuffs)
+        elseif step == 3 then
+            ensure("buffs", bs, AddBundleBuffs)
+        elseif step == 4 then
+            ensure("cc", cs, AddBundleCC)
+        elseif step == 5 then
+            -- NPF record groups (Edit Filters): declare missing variants,
+            -- park stale ones, drive the np groups' counts by the configs.
+            NPF_ApplyContainer(b.containers.debuffs, NPF_DebuffKind(), "np:debuffs",
+                PVal("maxDebuffs") or 5)
+        elseif step == 6 then
+            NPF_ApplyContainer(b.containers.cc, "cc", "np:cc", 2)
+        else
+            NpEnsureWireSoon()
+            b.npcEnsurePending = nil
+            return
         end
-        ensure("debuffs", ds, AddBundleDebuffs)
-        ensure("buffs", bs, AddBundleBuffs)
-        ensure("cc", cs, AddBundleCC)
-        -- NPF record groups (Edit Filters): declare missing variants,
-        -- park stale ones, drive the np groups' counts by the configs.
-        NPF_EnsureRecords(b)
-        NpEnsureWireSoon()
-        b.npcEnsurePending = nil
+        step = step + 1
+        return "again"
     end, "np:ensure")
 end
 
