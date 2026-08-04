@@ -1388,11 +1388,36 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Quality Strip",
               tooltip="Adds a strip down the left edge of a loot toast in the item's quality color. The flat skin drops Blizzard's quality ring around the icon, so this puts that rarity cue back.",
               getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.lootToastQualityStrip == true
+                  return not EllesmereUIDB or EllesmereUIDB.lootToastQualityStrip ~= false
               end,
               setValue=function(v)
                   if not EllesmereUIDB then EllesmereUIDB = {} end
                   EllesmereUIDB.lootToastQualityStrip = v
+                  if EllesmereUI._LootToast_Refresh then EllesmereUI._LootToast_Refresh() end
+              end },
+            { type="toggle", text="Gold Toast Strip",
+              tooltip="Also show the strip on gold toasts, in the header's gold color. Gold has no rarity to signal, so this is off by default.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lootToastQualityStripMoney == true
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lootToastQualityStripMoney = v
+                  if EllesmereUI._LootToast_Refresh then EllesmereUI._LootToast_Refresh() end
+              end }
+        ); y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Toast Scale",
+              tooltip="Scales the loot and gold toasts.",
+              min=0.5, max=1.5, step=0.05, format="%.0f%%",
+              displayMul=100,
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.lootToastScale or 1.0
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.lootToastScale = v
                   if EllesmereUI._LootToast_Refresh then EllesmereUI._LootToast_Refresh() end
               end },
             { type="label", text="" }
@@ -2527,7 +2552,19 @@ initFrame:SetScript("OnEvent", function(self)
         -- Breathing room between the global settings and the window cards.
         y = y - 30
 
+        -- Cards with their own settings content (buildContent) sit at the top
+        -- of the list, keeping their relative order; plain style-only cards
+        -- follow in theirs. WINDOWS itself stays in its defined order -- the
+        -- apply-all and reset loops don't care, and new entries keep being
+        -- added by category there.
+        local ordered = {}
         for _, win in ipairs(WINDOWS) do
+            if win.buildContent then ordered[#ordered + 1] = win end
+        end
+        for _, win in ipairs(WINDOWS) do
+            if not win.buildContent then ordered[#ordered + 1] = win end
+        end
+        for _, win in ipairs(ordered) do
             y = BuildWindowCard(parent, y, win)
         end
 
@@ -2557,34 +2594,8 @@ initFrame:SetScript("OnEvent", function(self)
     --  Bar texture dropdown tables (shared media path, same as ERB)
     -------------------------------------------------------------------
     local EDR_BAR_TEXTURES = ns.EDR_BAR_TEXTURES
-    local EDR_BAR_TEXTURE_ORDER = {
-        "none", "melli", "atrocity",
-        "fade", "fade-right",
-        "thin-line-top", "thin-line-bottom",
-        "beautiful", "plating",
-        "divide", "glass",
-        "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
-        "matte", "sheer",
-    }
-    local EDR_BAR_TEXTURE_NAMES = {
-        ["none"]        = "None",
-        ["melli"]       = "Melli (ElvUI)",
-        ["beautiful"]   = "Beautiful",
-        ["plating"]     = "Plating",
-        ["atrocity"]    = "Atrocity",
-        ["divide"]      = "Divide",
-        ["glass"]       = "Glass",
-        ["fade-right"]  = "Fade Right",
-        ["thin-line-top"]    = "Thin Line Top",
-        ["thin-line-bottom"] = "Thin Line Bottom",
-        ["fade"]        = "Fade",
-        ["gradient-lr"] = "Gradient Right",
-        ["gradient-rl"] = "Gradient Left",
-        ["gradient-bt"] = "Gradient Up",
-        ["gradient-tb"] = "Gradient Down",
-        ["matte"]       = "Matte",
-        ["sheer"]       = "Sheer",
-    }
+    local _, EDR_BAR_TEXTURE_NAMES, EDR_BAR_TEXTURE_ORDER =
+        EllesmereUI.BuildBarTextureTables()
 
     local function BuildDragonRidingPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
@@ -2897,6 +2908,8 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinLoot = nil
                 EllesmereUIDB.reskinLootToast = nil
                 EllesmereUIDB.lootToastQualityStrip = nil
+                EllesmereUIDB.lootToastQualityStripMoney = nil
+                EllesmereUIDB.lootToastScale = nil
                 EllesmereUIDB.reskinLootRoll = nil
                 EllesmereUIDB.reskinLootHistory = nil
                 EllesmereUIDB.reskinGroupInvite = nil

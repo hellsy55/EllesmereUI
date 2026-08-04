@@ -283,8 +283,10 @@ do
                 })
                 local cogBtn = CreateFrame("Button", nil, spinRow)
                 cogBtn:SetSize(26, 26)
-                -- The Toggle row's control sits at RIGHT -20; clear it plus a gap.
-                cogBtn:SetPoint("RIGHT", spinRow, "RIGHT", -20 - 32 - 9, 0)
+                -- Canonical inline-cog spacing: the toggle control is 40 wide
+                -- at RIGHT -20, and cogs sit 9px left of the control's edge
+                -- (same as the General options rows).
+                cogBtn:SetPoint("RIGHT", spinRow, "RIGHT", -20 - 40 - 9, 0)
                 cogBtn:SetFrameLevel(spinRow:GetFrameLevel() + 5)
                 cogBtn:SetAlpha(0.4)
                 local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")

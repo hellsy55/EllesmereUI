@@ -497,9 +497,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Disable WoW's automatic pixel snapping on a texture
-        local function UnsnapTex(tex)
-            if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false); tex:SetTexelSnappingBias(0) end
-        end
+        local UnsnapTex = EllesmereUI.PP.DisablePixelSnap
 
         -- Pre-create per-button sub-frames and textures -----------------------
         -- We allocate for all 12, then show/hide based on numButtonsShowable
@@ -3948,9 +3946,19 @@ initFrame:SetScript("OnEvent", function(self)
             local dtRow
             dtRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Desaturate on Cooldown",
+                  -- setValue runs the one-shot catch-up sweep: the cooldown
+                  -- machinery repaints on edges only, so without it an icon
+                  -- grey at uncheck time stays grey until its next edge.
                   tooltip="Desaturates (grays out) action button icons while the ability is on cooldown. GCD-only cooldowns are excluded.",
                   getValue=function() return EAB.db.profile.desaturateOnCooldown or false end,
-                  setValue=function(v) EAB.db.profile.desaturateOnCooldown = v end },
+                  setValue=function(v)
+                      local p = EAB.db.profile
+                      local was = p.desaturateOnCooldown or false
+                      p.desaturateOnCooldown = v
+                      if was ~= (v or false) and EAB._DesatSettingChanged then
+                          EAB._DesatSettingChanged(v and true or false)
+                      end
+                  end },
                 { type="toggle", text="Disable Tooltips",
                   getValue=function()
                       return SGet("disableTooltips") or false
