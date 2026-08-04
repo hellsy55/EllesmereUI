@@ -1812,6 +1812,7 @@ do
         "reskinProfessions", "reskinWorldMap", "reskinGuild", "reskinCalendar",
         "reskinAchievements", "reskinMail", "reskinCatalyst", "reskinSocket",
         "reskinItemUpgrade", "reskinLoot", "reskinLootToast", "lootToastQualityStrip",
+        "reskinLootRoll", "reskinLootHistory", "reskinGroupInvite",
         "reskinMicroMenu", "reskinHousing", "reskinDressUp", "reskinTransmog",
         "reskinMerchant", "reskinAuctionHouse", "reskinMacros",
         "reskinSettings", "reskinAddonList", "reskinCraftOrders",

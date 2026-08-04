@@ -11620,3 +11620,493 @@ WSkin.RegisterWindow({
     apply = SP.Apply,
 })
 end
+
+---------
+--  Loot rolls and group invites.
+--
+--  Three small packs sharing one block:
+--    lootroll     -- the group loot roll popups (need / greed / DE / pass)
+--    loothistory  -- the "Loot Rolls" window (GroupLootHistoryFrame)
+--    groupinvite  -- "You have been invited to a group" (both invite dialogs)
+--
+--  ONE file-scope local for all three, same rule as the Social UI pack above:
+--  this file's main chunk sits at Lua 5.1's hard 200-local ceiling, and going
+--  over is a compile error that kills the addon rather than a warning. Helpers
+--  and constants hang off LP; a do...end block does not buy headroom on its own.
+-------------------------------------------------------------------------------
+do
+local LP = {
+    FLAT = "Interface\\Buttons\\WHITE8X8",
+
+    -- Plate / border art that lives one level down from a frame's own regions,
+    -- so the shell's region fade never reaches it.
+    ART_KEYS = {
+        "NameFrame", "Border", "BorderFrame", "Background", "Bg",
+        "Decoration", "Frame", "Backdrop",
+    },
+    ICON_ART_KEYS = { "IconBorder", "NormalTexture", "Border", "IconQuestTexture" },
+    ROW_ART_KEYS  = {
+        "NameFrame", "BorderFrame", "HighlightNameFrame", "PushedNameFrame",
+        "IconQuestTexture",
+    },
+    INVITE_BTN_KEYS = { "AcceptButton", "DeclineButton", "AcknowledgeButton" },
+
+    -- Progress fills that are a TEXTURE rather than a StatusBar (the loot
+    -- history roll timer is one) cannot go through WSkin.ApplyBarFill, which
+    -- drives SetStatusBarColor. Same behaviour, one shared looks callback.
+    vertexFills = setmetatable({}, { __mode = "k" }),
+}
+
+-- Popup shell: the full window treatment minus the title row. Style-aware
+-- backdrop (modern_blizz atlas on "eui", the flat user color on "modern",
+-- swapping live) plus WSkin.AtlasBorder -- the same soft-edged window frame the
+-- Loot Rolls window and the loot toasts carry, so a roll popup and the window
+-- it feeds read as the same family. Only the 25px title bar is skipped, since
+-- none of these frames has a title of its own.
+--
+-- Idempotent: Shell re-runs its region fade on every call but builds its
+-- textures once, so re-calling it doubles as the repaint catch-up.
+function LP.Shell(winKey, frame)
+    WSkin.Shell(winKey, frame, { noTopBar = true })
+end
+
+-- Alpha a list of named art keys. TEXTURES ONLY, and the type test is
+-- load-bearing: several of these names are a Texture on one template and a
+-- FRAME on another ("Border" is a NineSlice on portrait windows), and
+-- SetAlpha(0) on a frame takes its whole subtree with it -- on the invite
+-- dialog that would blank the role icon and the buttons.
+function LP.FadeKeys(frame, keys)
+    if not frame then return end
+    for i = 1, #keys do
+        local t = frame[keys[i]]
+        if t and t.IsObjectType then
+            if t:IsObjectType("Texture") then
+                t:SetAlpha(0)
+            elseif t.TopEdge or t.TopLeftCorner then
+                -- The frame IS a NineSlice, i.e. pure border art, so fading it
+                -- whole is right. Only this shape: WSkin.FadeNineSlice ends by
+                -- alpha-ing the frame it was handed, which would blank the
+                -- subtree of anything that merely CONTAINS one.
+                WSkin.FadeNineSlice(t)
+            end
+        end
+    end
+end
+
+-- Re-font a frame's own FontString regions, leaving their COLOR alone: item
+-- names and roll results are quality/state colored by Blizzard, and that is the
+-- one thing the packs never overwrite. `skip` is a stack COUNT, an outlined
+-- number font drawn over an icon that becomes unreadable in the panel face.
+function LP.FontRegions(frame, skip)
+    if not frame or not frame.GetRegions then return end
+    for i = 1, select("#", frame:GetRegions()) do
+        local r = select(i, frame:GetRegions())
+        if r and r ~= skip and r.IsObjectType and r:IsObjectType("FontString") then WSkin.Font(r) end
+    end
+end
+
+function LP.ApplyVertexFill(tex)
+    if not tex or not tex.SetVertexColor then return end
+    LP.vertexFills[tex] = true
+    local r, g, b, a = WSkin.BarFillColor()
+    tex:SetVertexColor(r, g, b, a)
+end
+WSkin.OnLooksChanged(function()
+    local r, g, b, a = WSkin.BarFillColor()
+    for tex in pairs(LP.vertexFills) do
+        if tex.SetVertexColor then tex:SetVertexColor(r, g, b, a) end
+    end
+end)
+
+-- Run fn(frame) as soon as a named Blizzard frame exists: immediately when it
+-- already does, otherwise on the ADDON_LOADED that creates it. Which of these
+-- dialogs is base UI and which ships inside a load-on-demand addon has moved
+-- between expansions, so none of them is assumed present at login.
+function LP.WhenFrameExists(name, fn)
+    if _G[name] then fn(_G[name]); return end
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("ADDON_LOADED")
+    ev:SetScript("OnEvent", function(self)
+        local fr = _G[name]
+        if fr then
+            self:UnregisterAllEvents()
+            fn(fr)
+        end
+    end)
+end
+
+-- Any StatusBar -> flat fill in the user's bar-fill color over a near-black
+-- trough. The fill texture is re-asserted on every pass because Blizzard
+-- re-applies the bar's own art when a pooled frame is reused.
+function LP.Bar(bar)
+    if not bar or bar:IsForbidden() or not bar.SetStatusBarTexture then return end
+    local d = GetFFD(bar)
+    bar:SetStatusBarTexture(LP.FLAT)
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    if fill and fill ~= d.fill then
+        d.fill = fill
+        -- Fade the bar's frame art, never the fill itself: GetRegions() on a
+        -- StatusBar includes the fill, so an unguarded FadeRegions blanks it.
+        WSkin.FadeRegions(bar, { [fill] = true })
+        WSkin.Register(bar, { [fill] = true })
+    end
+    if not d.bg then
+        local bg = SolidTex(bar, "BACKGROUND", 0, 0, 0, 0.55)
+        bg:SetAllPoints(bar)
+        d.bg = bg
+    end
+    WSkin.ApplyBarFill(bar)
+end
+
+-------------------------------------------------------------------------------
+--  Loot roll popups (GroupLootFrame1..N inside GroupLootContainer).
+--  The CONTAINER is deliberately untouched: it is a UIParent managed frame and
+--  EllesmereUIQoL's Shifter already owns its position. Writing its layout flags
+--  from here would taint the secure managed-layout pass.
+-------------------------------------------------------------------------------
+function LP.SkinRollFrame(f)
+    if not f or f:IsForbidden() then return end
+    LP.Shell("lootroll", f)
+    LP.FadeKeys(f, LP.ART_KEYS)
+
+    -- Item icon: squared + 1px black frame, the treatment every list icon in
+    -- the suite gets. The roll BUTTONS (dice / coin / transmog / pass) keep
+    -- Blizzard's glyphs -- they are the identity of the popup, and there is no
+    -- house equivalent that reads as fast.
+    local host = f.IconFrame or f.Item
+    local icon = (host and (host.Icon or host.icon)) or f.Icon
+    if host then
+        LP.FadeKeys(host, LP.ICON_ART_KEYS)
+        local nt = host.GetNormalTexture and host:GetNormalTexture()
+        if nt and nt.SetAlpha then nt:SetAlpha(0) end
+    end
+    if icon and icon.SetTexCoord then WSkin.SquareIcon(icon, host or f) end
+
+    LP.Bar(f.Timer or f.Bar or f.StatusBar)
+
+    -- Name keeps its item-quality color; only the face changes.
+    if f.Name then WSkin.Font(f.Name) end
+end
+
+function LP.SkinAllRolls()
+    local c = _G.GroupLootContainer
+    local maxN = (c and c.maxIndex) or 4
+    if type(maxN) ~= "number" or maxN < 4 then maxN = 4 end
+    for i = 1, maxN do LP.SkinRollFrame(_G["GroupLootFrame" .. i]) end
+    if c and type(c.rollFrames) == "table" then
+        for _, rf in pairs(c.rollFrames) do LP.SkinRollFrame(rf) end
+    end
+end
+
+function LP.ApplyLootRoll()
+    -- Every hook lands on the NEXT frame rather than inside Blizzard's own
+    -- call: GroupLootContainer_Update runs as part of the managed-layout pass,
+    -- and creating textures from inside it puts our code in that stack.
+    local resweep = WSkin.Debounce(LP.SkinAllRolls)
+
+    if type(_G.GroupLootContainer_AddFrame) == "function" then
+        hooksecurefunc("GroupLootContainer_AddFrame", resweep)
+    end
+    if type(_G.GroupLootContainer_Update) == "function" then
+        hooksecurefunc("GroupLootContainer_Update", resweep)
+    end
+
+    local c = _G.GroupLootContainer
+    if c then WSkin.HookShow(c, resweep) end
+
+    -- Belt and braces for clients where those two globals have gone: the roll
+    -- event itself is what actually puts a frame on screen.
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("START_LOOT_ROLL")
+    ev:SetScript("OnEvent", resweep)
+
+    LP.SkinAllRolls()
+end
+
+WSkin.RegisterWindow({
+    key = "lootroll",
+    apply = LP.ApplyLootRoll,
+})
+
+-------------------------------------------------------------------------------
+--  The Loot Rolls window (GroupLootHistoryFrame).
+--
+--  DOCTRINE: a skin must never be the thing that triggers a ScrollBox-backed
+--  frame's FIRST layout. Touching this window's geometry from the load pass
+--  poisons ScrollBox.updateLock, which ScrollBoxListMixin:Update reads on its
+--  first line -- from then on every Update taints its own execution and
+--  re-stamps the lock, invisibly to taintLog because no global is ever
+--  involved. The cure is purely about TIMING: arm the frame's first OnShow and
+--  skin there.
+--
+--  This pack is also ENUMERATIVE on purpose -- no CommonChrome, no ControlsIn /
+--  ButtonsIn sweeps. Those walk the whole tree, and the tree here is pooled
+--  loot rows.
+-------------------------------------------------------------------------------
+function LP.SkinHistoryRow(row)
+    if not row or row:IsForbidden() then return end
+
+    -- Housing drops ride a wooden frame overlay that fights the flat look.
+    -- Checked every pass (pooled rows change item between shows) and read
+    -- through WSkin.TexHay, which is secret-value safe.
+    local ov = row.IconOverlay
+    if ov then
+        local hay = WSkin.TexHay(ov)
+        ov:SetAlpha((hay and hay:find("housing-item-wood-frame", 1, true)) and 0 or 1)
+    end
+
+    local d = GetFFD(row)
+    if d.rowSkinned then return end
+    d.rowSkinned = true
+
+    if row.BackgroundArtFrame then
+        WSkin.FadeRegions(row.BackgroundArtFrame)
+        WSkin.Register(row.BackgroundArtFrame, true)
+        local wash = SolidTex(row.BackgroundArtFrame, "BACKGROUND", 1, 1, 1, 0.02)
+        wash:SetAllPoints(row.BackgroundArtFrame)
+        GetFFD(row.BackgroundArtFrame).bg = wash
+    end
+    LP.FadeKeys(row, LP.ROW_ART_KEYS)
+
+    local item = row.Item
+    if item then
+        LP.FadeKeys(item, LP.ICON_ART_KEYS)
+        local nt = item.GetNormalTexture and item:GetNormalTexture()
+        if nt and nt.SetAlpha then nt:SetAlpha(0) end
+        local icon = item.icon or item.Icon
+        if icon and icon.SetTexCoord then WSkin.SquareIcon(icon, item) end
+    end
+
+    -- Item name and winner line: face only, colors are Blizzard's (quality on
+    -- the name, green on the "won / passed" state).
+    local countFS = row.Count or row.count or (item and (item.Count or item.count))
+    LP.FontRegions(row, countFS)
+    for _, k in ipairs({ "Text", "PlayerName", "Name", "RollResult" }) do
+        local fs = row[k]
+        if fs and fs ~= countFS and fs.GetFont then WSkin.Font(fs) end
+    end
+end
+
+function LP.SkinHistoryRows(f)
+    local box = f.ScrollBox
+    if not (box and box.ForEachFrame) then return end
+    pcall(box.ForEachFrame, box, LP.SkinHistoryRow)
+    local bd = GetFFD(box)
+    if box.Update and not bd.rowHook then
+        bd.rowHook = true
+        hooksecurefunc(box, "Update", function(b)
+            pcall(b.ForEachFrame, b, LP.SkinHistoryRow)
+        end)
+    end
+end
+
+-- The resize grab at the window's foot: Blizzard's gold grip flattened to
+-- three house rules. Left where Blizzard put it -- re-anchoring it is a layout
+-- rework, not a reskin.
+function LP.SkinResizeGrip(rb)
+    if not rb or rb:IsForbidden() then return end
+    local d = GetFFD(rb)
+    if d.grip then return end
+    d.grip = true
+    for _, g in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture" }) do
+        local fn = rb[g]
+        local t = fn and fn(rb)
+        if t and t.SetAlpha then t:SetAlpha(0) end
+    end
+    WSkin.FadeRegions(rb)
+    local w = 10
+    for i = 1, 3 do
+        local line = SolidTex(rb, "OVERLAY", 1, 1, 1, 0.3)
+        line:SetSize(w, 1)
+        line:SetPoint("CENTER", rb, "CENTER", 0, 2 - (i - 1) * 2)
+        w = w - 3
+    end
+    local hover = SolidTex(rb, "HIGHLIGHT", 1, 1, 1, 0.1)
+    hover:SetAllPoints(rb)
+end
+
+function LP.ApplyHistory()
+    local f = _G.GroupLootHistoryFrame
+    if not f or f:IsForbidden() then return end
+
+    WSkin.Shell("loothistory", f)
+
+    local d = GetFFD(f)
+    if d.histSkinned then
+        LP.SkinHistoryRows(f)
+        return
+    end
+    d.histSkinned = true
+
+    if f.NineSlice then WSkin.FadeNineSlice(f.NineSlice) end
+    LP.FadeKeys(f, { "Bg", "Background", "Border" })
+    WSkin.FadeKeyedArt(f)
+
+    local close = f.ClosePanelButton or f.CloseButton
+        or (f.TitleContainer and f.TitleContainer.CloseButton)
+    if close then WSkin.CloseButton(close) end
+
+    local title = (f.TitleContainer and f.TitleContainer.TitleText) or f.TitleText
+    if title then
+        WSkin.Font(title)
+        WSkin.White(title)
+        -- Centered on the shell's top bar rather than the frame: the portrait
+        -- template anchors the title relative to art we just removed.
+        if d.topBar and title.ClearAllPoints then
+            title:ClearAllPoints()
+            title:SetPoint("CENTER", d.topBar, "CENTER", 0, 0)
+            if title.SetJustifyH then title:SetJustifyH("CENTER") end
+        end
+    end
+
+    if f.EncounterDropdown then WSkin.Dropdown(f.EncounterDropdown) end
+
+    -- Roll timer. Its Fill is a TEXTURE, not a status bar, so it needs the
+    -- vertex-color path and has to survive the frame's own region fade.
+    local timer = f.Timer
+    if timer then
+        local td = GetFFD(timer)
+        local fill = timer.Fill
+        local keep = fill and { [fill] = true } or nil
+        WSkin.FadeRegions(timer, keep)
+        WSkin.Register(timer, keep)
+        if not td.bg then
+            local bg = SolidTex(timer, "BACKGROUND", 0, 0, 0, 0.55)
+            bg:SetAllPoints(timer)
+            td.bg = bg
+            WSkin.AddBorder(timer)
+        end
+        if fill then
+            td.fill = fill
+            fill:SetTexture(LP.FLAT)
+            LP.ApplyVertexFill(fill)
+        end
+    end
+
+    -- WowTrimScrollBar, not Blizzard's MinimalScrollBar: its trough and arrow
+    -- caps live on child frames WSkin.ScrollBar never reaches, so the addon
+    -- engine's deep-fading variant is the right primitive here.
+    local sb = f.ScrollBar
+    if sb then
+        if ns.ASkin and ns.ASkin.ScrollBar then ns.ASkin.ScrollBar(sb) else WSkin.ScrollBar(sb) end
+    end
+
+    LP.SkinResizeGrip(f.ResizeButton)
+    LP.SkinHistoryRows(f)
+end
+
+WSkin.RegisterWindow({
+    key = "loothistory",
+    apply = function()
+        LP.WhenFrameExists("GroupLootHistoryFrame", function(f)
+            WSkin.HookShow(f, LP.ApplyHistory)
+            -- Should never be up at login, but if it is, skinning now is the
+            -- same post-hoc moment the OnShow path gives us.
+            if f:IsShown() then LP.ApplyHistory() end
+        end)
+    end,
+})
+
+-------------------------------------------------------------------------------
+--  Group invite popups. Two frames, one setting, because they are one thing to
+--  the player:
+--    LFGListInviteDialog -- a premade-group leader accepted your application
+--                           (group title, activity, your role, Accept/Decline)
+--    LFGInvitePopup      -- invited to a group finder party, with role checks
+--
+--  NOTE: EllesmereUIBlizzardSkin.lua also carries a skin for LFGListInviteDialog
+--  gated on EllesmereUIDB.reskinQueuePopup. That gate is a plain truthiness test
+--  (`not EllesmereUIDB.reskinQueuePopup`), unlike the Queue Popup's own
+--  `~= false`, so it only runs for users who have toggled that option ON at
+--  least once. When it does run it lays a flat BACKGROUND texture at sublevel 0,
+--  which would sit over this shell's backdrop (sublevels -8/-7/-6).
+--  WSkin.Shell's region fade clears it: this OnShow hook is installed later so
+--  it runs second, and the older skin is one-shot.
+-------------------------------------------------------------------------------
+function LP.SkinInvite(fr, roleChecks)
+    if not fr or fr:IsForbidden() then return end
+    local d = GetFFD(fr)
+
+    -- The role glyph ("Your Role: Damage") is a REGION OF THE DIALOG, sitting
+    -- in the same region list as the border art the shell blanket-fades -- so
+    -- without this it disappears along with the frame.
+    --
+    -- Found by INSPECTING each texture rather than by key name: which key holds
+    -- the glyph has moved between templates (RoleIcon / Icon / an anonymous
+    -- region), and a wrong guess fails silently. Survivors are parked on two of
+    -- WSkin's PROTECT_KEYS slots (caret / arrow, unused by these frames), which
+    -- is the engine's own supported "keep this texture" list -- honored both by
+    -- Shell's initial fade and by every later Restrip pass.
+    if not d.caret then
+        d.caret = fr.RoleIcon or fr.Icon or fr.PortraitTexture
+        if fr.GetRegions then
+            for i = 1, select("#", fr:GetRegions()) do
+                local r = select(i, fr:GetRegions())
+                if r and r ~= d.caret and r.IsObjectType and r:IsObjectType("Texture") then
+                    local hay = WSkin.TexHay(r)
+                    if hay and (WSkin.TexIsIcon(hay)
+                        or hay:find("role", 1, true) or hay:find("icon", 1, true)) then
+                        if not d.caret then d.caret = r
+                        elseif not d.arrow then d.arrow = r end
+                    end
+                end
+            end
+        end
+    end
+
+    LP.Shell("groupinvite", fr)
+
+    if fr.NineSlice then WSkin.FadeNineSlice(fr.NineSlice) end
+    LP.FadeKeys(fr, { "Bg", "BG", "Background", "Border" })
+    WSkin.FadeKeyedArt(fr)
+
+    for _, k in ipairs(LP.INVITE_BTN_KEYS) do
+        local b = fr[k]
+        if b then
+            WSkin.Button(b)
+            WSkin.StateButtonLabel(b)
+        end
+    end
+    -- Templates that name their buttons globally instead of hanging them off
+    -- the frame (LFGInvitePopupAcceptButton / ...DeclineButton).
+    local n = fr.GetName and fr:GetName()
+    if n then
+        for _, k in ipairs(LP.INVITE_BTN_KEYS) do
+            local b = _G[n .. k]
+            if b then
+                WSkin.Button(b)
+                WSkin.StateButtonLabel(b)
+            end
+        end
+    end
+    -- Anything else 3-slice the two lists missed. Depth-capped and
+    -- foreign-frame gated by the primitive itself.
+    WSkin.ButtonsIn(fr)
+
+    if roleChecks then
+        for _, role in ipairs({ "Tank", "Healer", "DPS" }) do
+            local rb = _G["LFGInvitePopupRoleButton" .. role] or fr[role .. "Button"]
+            local cb = rb and (rb.checkButton or rb.CheckButton)
+            if cb then WSkin.Checkbox(cb, { borderInset = 4 }) end
+        end
+    end
+
+    LP.FontRegions(fr)
+    if n and _G[n .. "Text"] then WSkin.Font(_G[n .. "Text"]) end
+end
+
+WSkin.RegisterWindow({
+    key = "groupinvite",
+    apply = function()
+        local function Wire(name, roleChecks)
+            LP.WhenFrameExists(name, function(fr)
+                local function apply() LP.SkinInvite(fr, roleChecks) end
+                WSkin.HookShow(fr, apply)
+                if fr:IsShown() then apply() end
+            end)
+        end
+        Wire("LFGListInviteDialog", false)
+        Wire("LFGInvitePopup", true)
+    end,
+})
+end
