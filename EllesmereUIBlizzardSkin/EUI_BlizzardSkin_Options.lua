@@ -1733,6 +1733,36 @@ initFrame:SetScript("OnEvent", function(self)
             buildContent = BuildLootToastContent,
         },
         {
+            key   = "lootroll",
+            title = "Loot Roll Popups",
+            desc  = "The need / greed / pass roll popups, with a squared icon and a flat roll timer.",
+            reloadMsg = "Changing the Loot Roll Popups reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinLootRoll = v
+            end,
+        },
+        {
+            key   = "loothistory",
+            title = "Loot Rolls Window",
+            desc  = "The pending-rolls window: encounter picker, roll timer, and the result rows.",
+            reloadMsg = "Changing the Loot Rolls Window reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinLootHistory = v
+            end,
+        },
+        {
+            key   = "groupinvite",
+            title = "Group Invite Popup",
+            desc  = "The \"you have been invited to a group\" dialogs, with your role and Accept / Decline.",
+            reloadMsg = "Changing the Group Invite Popup reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
+            setEnabled = function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.reskinGroupInvite = v
+            end,
+        },
+        {
             key   = "housing",
             title = "Housing Dashboard",
             desc  = "The housing dashboard window background, border, and title bar.",
@@ -2769,7 +2799,7 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterModule("EllesmereUIBlizzardSkin", {
         title       = "Blizz UI Enhanced",
         description = "Themed Blizzard frames: window skins, tooltips, menus, popups, Dragon Riding HUD.",
-        searchTerms = "blizzard skin character sheet tooltip menu popup dragon riding skyriding window skins lfg group finder premade queue pause game menu great vault inspect collections mounts pets toys spellbook talents adventure guide encounter journal professions guild communities calendar achievements mail catalyst gem socket item upgrade upgrades crest loot window loot toast you received popup micro menu modern delves companion brann",
+        searchTerms = "blizzard skin character sheet tooltip menu popup dragon riding skyriding window skins lfg group finder premade queue pause game menu great vault inspect collections mounts pets toys spellbook talents adventure guide encounter journal professions guild communities calendar achievements mail catalyst gem socket item upgrade upgrades crest loot window loot toast you received popup micro menu modern delves companion brann loot roll need greed pass disenchant loot rolls pending rolls group invite invited to a group role",
         pages       = { PAGE_WINDOWSKINS, PAGE_TOOLTIPS, PAGE_DRAGONRIDING },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_WINDOWSKINS then
@@ -2867,6 +2897,9 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinLoot = nil
                 EllesmereUIDB.reskinLootToast = nil
                 EllesmereUIDB.lootToastQualityStrip = nil
+                EllesmereUIDB.reskinLootRoll = nil
+                EllesmereUIDB.reskinLootHistory = nil
+                EllesmereUIDB.reskinGroupInvite = nil
                 EllesmereUIDB.reskinMicroMenu = nil
                 EllesmereUIDB.reskinHousing = nil
                 EllesmereUIDB.reskinProfessions = nil
