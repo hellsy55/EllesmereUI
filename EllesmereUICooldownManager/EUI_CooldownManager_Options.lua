@@ -17769,8 +17769,16 @@ initFrame:SetScript("OnEvent", function(self)
                 -- "47528"). Give it a NAME but deliberately do NOT add it to
                 -- spellOrder -- it must not appear as a selectable option on a
                 -- bar that no longer holds it.
+                --
+                -- Label it ONLY when this character can actually cast it. The
+                -- id is profile-level and the spellbook behind it is per-spec,
+                -- so a spec that shares the profile but not the spell inherits
+                -- a pick it can never use -- field-reported as a Holy Paladin
+                -- being shown "Rebuke". Leaving it unlabelled is what makes
+                -- getValue below fall back to the bar's own contents.
                 local selSid = BD and BD() and BD().focusKickInterruptSpellID
-                if selSid then
+                if selSid and (not ns.PlayerKnowsInterrupt
+                    or ns.PlayerKnowsInterrupt(selSid)) then
                     local selKey = tostring(selSid)
                     if not spellValues[selKey] then
                         local selInfo = C_Spell and C_Spell.GetSpellInfo
@@ -17793,7 +17801,13 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue = function()
                       local sid = BD().focusKickInterruptSpellID
                       if not sid then return spellOrder[1] end
-                      return tostring(sid)
+                      -- No label means RebuildSpellOptions rejected it: either
+                      -- this character cannot cast it, or it is not on the bar
+                      -- and not castable. Show what the bar actually holds
+                      -- rather than a selection the player never made.
+                      local key = tostring(sid)
+                      if not spellValues[key] then return spellOrder[1] end
+                      return key
                   end,
                   setValue = function(v)
                       if v == "__none" then

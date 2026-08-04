@@ -6565,6 +6565,35 @@ local function RefreshFocusCastProxyUnit()
     _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
 end
 ns.RefreshFocusCastProxyUnit = RefreshFocusCastProxyUnit
+
+-- Can THIS character actually cast the stored interrupt?
+--
+-- focusKickInterruptSpellID lives on the bar definition, which is
+-- profile-level: every spec and every character sharing the profile reads the
+-- same id, while the spell it names is per-spec spellbook content. Nothing
+-- reconciled the two, so a Ret Paladin's Rebuke rode the profile onto a Holy
+-- Paladin, who has no interrupt at all. The same leak produced the earlier
+-- report of a bare "47528" (a Death Knight's Mind Freeze) in the dropdown.
+--
+-- Validate on READ and never write: the id is still correct for the spec that
+-- set it, so clearing it here would destroy that spec's setting the first time
+-- the player logged in on another one.
+--
+-- Pet-bank interrupts (a Warlock's Axe Toss, a Hunter's pet kick) are
+-- legitimate picks and IsPlayerSpell does not see them, so check both banks.
+function ns.PlayerKnowsInterrupt(sid)
+    if type(sid) ~= "number" or sid <= 0 then return false end
+    if IsPlayerSpell and IsPlayerSpell(sid) then return true end
+    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
+        if C_SpellBook.IsSpellKnownOrInSpellBook(sid) then return true end
+        if Enum and Enum.SpellBookSpellBank
+            and C_SpellBook.IsSpellKnownOrInSpellBook(sid, Enum.SpellBookSpellBank.Pet) then
+            return true
+        end
+    end
+    return false
+end
+
 local function EnsureFocusCastProxy()
     if _focusCastProxy then
         -- Demand-gate re-activation: re-register (idempotent; re-applying
@@ -6584,6 +6613,19 @@ local function EnsureFocusCastProxy()
         local soundKey = bd.focusCastSoundKey or "none"
         if soundKey == "none" then return end
         local spellID = bd.focusKickInterruptSpellID
+        -- An explicit pick is only trusted while this character can cast it.
+        -- A stale profile-level id sails through the cooldown gate below
+        -- forever -- a spell you do not know is never on cooldown -- so a Holy
+        -- Paladin inheriting a Ret Paladin's Rebuke would be pinged for every
+        -- focus cast to interrupt something they have no interrupt for.
+        --
+        -- Deliberately checked HERE and not at arming time: arming runs during
+        -- loading screens, when the spellbook reads empty for reasons that have
+        -- nothing to do with the player's spec, and folding "not loaded yet"
+        -- into "cannot cast it" is what silently unregistered a working proxy
+        -- in the first place. This handler only runs on a live cast, by which
+        -- point the spellbook is settled.
+        if spellID and not ns.PlayerKnowsInterrupt(spellID) then spellID = nil end
         -- Auto-fallback: if user hasn't explicitly picked a spell, use the
         -- first positive spell on the bar. The picker exists for users who
         -- want a specific spell when multiple are on the bar.
