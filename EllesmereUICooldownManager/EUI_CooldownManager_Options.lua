@@ -17777,8 +17777,8 @@ initFrame:SetScript("OnEvent", function(self)
                 -- being shown "Rebuke". Leaving it unlabelled is what makes
                 -- getValue below fall back to the bar's own contents.
                 local selSid = BD and BD() and BD().focusKickInterruptSpellID
-                if selSid and (not ns.PlayerKnowsInterrupt
-                    or ns.PlayerKnowsInterrupt(selSid)) then
+                if selSid and (not ns.ResolveCastableInterrupt
+                    or ns.ResolveCastableInterrupt(selSid)) then
                     local selKey = tostring(selSid)
                     if not spellValues[selKey] then
                         local selInfo = C_Spell and C_Spell.GetSpellInfo

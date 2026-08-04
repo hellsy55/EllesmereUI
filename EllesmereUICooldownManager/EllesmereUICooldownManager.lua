@@ -6579,19 +6579,49 @@ ns.RefreshFocusCastProxyUnit = RefreshFocusCastProxyUnit
 -- set it, so clearing it here would destroy that spec's setting the first time
 -- the player logged in on another one.
 --
+-- Asks the SPELLBOOK, never a class/spec table. Which specs carry an interrupt
+-- is Blizzard's to change (Preservation has Quell, Mistweaver has Spear Hand
+-- Strike, most other healers have nothing), and any hardcoded list of that goes
+-- stale on a patch and starts lying in one direction or the other.
+--
 -- Pet-bank interrupts (a Warlock's Axe Toss, a Hunter's pet kick) are
 -- legitimate picks and IsPlayerSpell does not see them, so check both banks.
-function ns.PlayerKnowsInterrupt(sid)
-    if type(sid) ~= "number" or sid <= 0 then return false end
-    if IsPlayerSpell and IsPlayerSpell(sid) then return true end
-    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
-        if C_SpellBook.IsSpellKnownOrInSpellBook(sid) then return true end
-        if Enum and Enum.SpellBookSpellBank
-            and C_SpellBook.IsSpellKnownOrInSpellBook(sid, Enum.SpellBookSpellBank.Pet) then
+--
+-- Returns the id the player can ACTUALLY cast, or nil. Returning the resolved
+-- id rather than a boolean matters: the caller feeds it to a cooldown check,
+-- and a talent swap moves an interrupt between its base and override forms
+-- while the stored id stays put. Answering "yes, known" but leaving the caller
+-- holding the un-castable form would put an id that is never on cooldown into
+-- the readiness gate -- the same always-ready failure this whole fix is about,
+-- just reached from the other side.
+function ns.ResolveCastableInterrupt(sid)
+    if type(sid) ~= "number" or sid <= 0 then return nil end
+    local function knownInBook(id)
+        if IsPlayerSpell and IsPlayerSpell(id) then return true end
+        if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+            and C_SpellBook.IsSpellKnownOrInSpellBook(id) then
             return true
         end
+        return false
     end
-    return false
+    if knownInBook(sid) then return sid end
+    -- Talented into a replacement, stored id is the base form.
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        local ovr = C_SpellBook.FindSpellOverrideByID(sid)
+        if ovr and ovr > 0 and ovr ~= sid and knownInBook(ovr) then return ovr end
+    end
+    -- Talented back out, stored id is the replacement form.
+    if C_Spell and C_Spell.GetBaseSpell then
+        local base = C_Spell.GetBaseSpell(sid)
+        if base and base > 0 and base ~= sid and knownInBook(base) then return base end
+    end
+    -- Pet bank last: it has no override/base indirection to walk.
+    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+        and Enum and Enum.SpellBookSpellBank
+        and C_SpellBook.IsSpellKnownOrInSpellBook(sid, Enum.SpellBookSpellBank.Pet) then
+        return sid
+    end
+    return nil
 end
 
 local function EnsureFocusCastProxy()
@@ -6625,7 +6655,7 @@ local function EnsureFocusCastProxy()
         -- into "cannot cast it" is what silently unregistered a working proxy
         -- in the first place. This handler only runs on a live cast, by which
         -- point the spellbook is settled.
-        if spellID and not ns.PlayerKnowsInterrupt(spellID) then spellID = nil end
+        if spellID then spellID = ns.ResolveCastableInterrupt(spellID) end
         -- Auto-fallback: if user hasn't explicitly picked a spell, use the
         -- first CASTABLE positive spell on the bar. The picker exists for users
         -- who want a specific spell when multiple are on the bar.
@@ -6641,10 +6671,12 @@ local function EnsureFocusCastProxy()
             local sd = ns.GetBarSpellData and ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
-                    if type(sid) == "number" and sid > 0
-                        and ns.PlayerKnowsInterrupt(sid) then
-                        spellID = sid
-                        break
+                    if type(sid) == "number" and sid > 0 then
+                        local castable = ns.ResolveCastableInterrupt(sid)
+                        if castable then
+                            spellID = castable
+                            break
+                        end
                     end
                 end
             end
