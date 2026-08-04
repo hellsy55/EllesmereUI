@@ -74,8 +74,13 @@ local BISECT_TEX_SHIFT_OFF = false      -- 8: CLEARED (this cycle) -- textures
 local _tabHostClip
 local function GetTabHostClip()
     if _tabHostClip then return _tabHostClip end
+    -- MEDIUM, not DIALOG: the chrome only has to beat the chat tabs and dock
+    -- (ChatTabTemplate / DockManagerTemplate are both LOW), and DIALOG kept the
+    -- 1px tab underline on top of MEDIUM Blizzard panels that Raise() over the
+    -- UI, such as the maximized world map. Do NOT drop this to LOW -- that
+    -- washes out the active-tab underline. Levels carry all of the ordering.
     local clip = CreateFrame("Frame", nil, UIParent)
-    clip:SetFrameStrata("DIALOG")
+    clip:SetFrameStrata("MEDIUM")
     clip:EnableMouse(false)
     clip:SetClipsChildren(true)
     local gdm = _G.GeneralDockManager
@@ -388,59 +393,8 @@ end
 -- Chat background texture catalogue: the same set as the Unit Frames bar
 -- texture dropdown (same shared media files), with SharedMedia statusbar
 -- textures appended through the shared EllesmereUI helper.
-local CHAT_TEX_BASE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\"
-ns.chatBgTextures = {
-    ["none"]          = nil,
-    ["melli"]         = CHAT_TEX_BASE .. "melli.tga",
-    ["beautiful"]     = CHAT_TEX_BASE .. "beautiful.tga",
-    ["plating"]       = CHAT_TEX_BASE .. "plating.tga",
-    ["atrocity"]      = CHAT_TEX_BASE .. "atrocity.tga",
-    ["divide"]        = CHAT_TEX_BASE .. "divide.tga",
-    ["glass"]         = CHAT_TEX_BASE .. "glass.tga",
-    ["fade-right"]    = CHAT_TEX_BASE .. "fade-right.tga",
-    ["thin-line-top"]    = CHAT_TEX_BASE .. "thin-line-top.tga",
-    ["thin-line-bottom"] = CHAT_TEX_BASE .. "thin-line-bottom.tga",
-    ["fade"]          = CHAT_TEX_BASE .. "fade.tga",
-    ["gradient-lr"]   = CHAT_TEX_BASE .. "gradient-lr.tga",
-    ["gradient-rl"]   = CHAT_TEX_BASE .. "gradient-rl.tga",
-    ["gradient-bt"]   = CHAT_TEX_BASE .. "gradient-bt.tga",
-    ["gradient-tb"]   = CHAT_TEX_BASE .. "gradient-tb.tga",
-    ["matte"]         = CHAT_TEX_BASE .. "matte.tga",
-    ["sheer"]         = CHAT_TEX_BASE .. "sheer.tga",
-    ["blinkii-diamonds"] = CHAT_TEX_BASE .. "blinkii-diamonds.tga",
-    ["kringel-window"]   = CHAT_TEX_BASE .. "kringel-window.tga",
-}
-ns.chatBgTextureOrder = {
-    "none", "melli", "atrocity",
-    "fade", "fade-right",
-    "thin-line-top", "thin-line-bottom",
-    "beautiful", "plating",
-    "divide", "glass",
-    "gradient-lr", "gradient-rl", "gradient-bt", "gradient-tb",
-    "matte", "sheer",
-    "blinkii-diamonds", "kringel-window",
-}
-ns.chatBgTextureNames = {
-    ["none"]        = "None",
-    ["melli"]       = "Melli (ElvUI)",
-    ["beautiful"]   = "Beautiful",
-    ["plating"]     = "Plating",
-    ["atrocity"]    = "Atrocity",
-    ["divide"]      = "Divide",
-    ["glass"]       = "Glass",
-    ["fade-right"]  = "Fade Right",
-    ["thin-line-top"]    = "Thin Line Top",
-    ["thin-line-bottom"] = "Thin Line Bottom",
-    ["fade"]        = "Fade",
-    ["gradient-lr"] = "Gradient Right",
-    ["gradient-rl"] = "Gradient Left",
-    ["gradient-bt"] = "Gradient Up",
-    ["gradient-tb"] = "Gradient Down",
-    ["matte"]       = "Matte",
-    ["sheer"]       = "Sheer",
-    ["blinkii-diamonds"] = "Blinkii Diamonds",
-    ["kringel-window"]   = "Kringel Window",
-}
+ns.chatBgTextures, ns.chatBgTextureNames, ns.chatBgTextureOrder =
+    EllesmereUI.BuildBarTextureTables(true)
 
 -- Refresh the catalogue from SharedMedia (idempotent; registers the
 -- late-registration callback on first call, same as the other modules).
@@ -645,11 +599,11 @@ function ECHAT.ApplyExtendedBackground()
         -- fill covers its inward half and only the outward half frames the
         -- panel.
         local showBehind = cfg.panelBorderBehind == true
-        border:SetFrameStrata(showBehind and "BACKGROUND" or "DIALOG")
+        border:SetFrameStrata(showBehind and "BACKGROUND" or "MEDIUM")
         -- Solid borders use a child at host + 1, while textured borders render
         -- directly at host level. In behind mode both stay at 0, under the
-        -- extended strip (level 1) and the chat bg. Cap below 100: the options
-        -- window sits at DIALOG level 100 and must draw over the chat border.
+        -- extended strip (level 1) and the chat bg. Cap below 100: the per-tab
+        -- border hosts sit at level 100 and must draw over the chat border.
         local borderLevel = showBehind and 0 or max(96, min(98, cf1:GetFrameLevel() + 20))
         border:SetFrameLevel(borderLevel)
 
@@ -696,7 +650,7 @@ function ECHAT.ApplyExtendedBackground()
                     sbBorder:ClearAllPoints()
                     sbBorder:SetPoint("TOPLEFT", sb, "TOPLEFT", 0, sbTop)
                     sbBorder:SetPoint("BOTTOMRIGHT", sb, "BOTTOMRIGHT", 0, 0)
-                    sbBorder:SetFrameStrata(showBehind and "BACKGROUND" or "DIALOG")
+                    sbBorder:SetFrameStrata(showBehind and "BACKGROUND" or "MEDIUM")
                     sbBorder:SetFrameLevel(borderLevel)
                     EllesmereUI.ApplyBorderStyle(sbBorder, sizes[thicknessKey] or 1,
                         color.r, color.g, color.b, alpha, cfg.panelBorderTexture or "solid",
@@ -3175,8 +3129,8 @@ function ECHAT.ApplyTabBorders()
             if host:GetParent() ~= wantedParent then
                 host:SetParent(wantedParent)
             end
-            host:SetFrameStrata("DIALOG")
-            -- Constant level: hosts render on our clip at DIALOG strata,
+            host:SetFrameStrata("MEDIUM")
+            -- Constant level: hosts render on our clip at MEDIUM strata,
             -- so a tab-derived level is meaningless -- and tab:GetFrameLevel
             -- was an un-exonerated tab getter in this (dirty-tested) pass.
             local level = 100
@@ -3252,7 +3206,7 @@ function ECHAT.ApplyTabSeparators()
         end
         if not ns._tabPanelSepHost then
             local host = CreateFrame("Frame", nil, clip)
-            host:SetFrameStrata("DIALOG")
+            host:SetFrameStrata("MEDIUM")
             host:SetFrameLevel(90)
             host:EnableMouse(false)
             host:SetHeight((PP and PP.mult) or 1)
@@ -3338,7 +3292,7 @@ local function SkinTab(cf)
 
     local separatorHost = CreateFrame("Frame", nil, hostParent)
     separatorHost:Hide()
-    separatorHost:SetFrameStrata("DIALOG")
+    separatorHost:SetFrameStrata("MEDIUM")
     separatorHost:SetFrameLevel(90)
     separatorHost:EnableMouse(false)
     local onePx = (PP and PP.mult) or 1
@@ -3363,7 +3317,7 @@ local function SkinTab(cf)
 
     local underlineHost = CreateFrame("Frame", nil, hostParent)
     underlineHost:Hide()
-    underlineHost:SetFrameStrata("DIALOG")
+    underlineHost:SetFrameStrata("MEDIUM")
     underlineHost:SetFrameLevel(95)
     underlineHost:EnableMouse(false)
     local activeUnderline = underlineHost:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -4882,50 +4836,8 @@ initFrame:SetScript("OnEvent", function(self)
         --     event frame (not a message filter) for zero taint risk.
         ---------------------------------------------------------------------------
         do
-            local _SOUNDS_DIR = "Interface\\AddOns\\EllesmereUI\\media\\sounds\\"
-            local WHISPER_SOUND_PATHS = {
-                ["none"]      = nil,
-                ["airhorn"]   = _SOUNDS_DIR .. "AirHorn.ogg",
-                ["banana"]    = _SOUNDS_DIR .. "BananaPeelSlip.ogg",
-                ["bikehorn"]  = _SOUNDS_DIR .. "BikeHorn.ogg",
-                ["bite"]      = _SOUNDS_DIR .. "Bite.ogg",
-                ["boxing"]    = _SOUNDS_DIR .. "BoxingArenaSound.ogg",
-                ["catmeow"]   = _SOUNDS_DIR .. "CatMeow.ogg",
-                ["catmeow2"]  = _SOUNDS_DIR .. "CatMeow2.ogg",
-                ["gunshot"]   = _SOUNDS_DIR .. "FrontalsGunshot.wav",
-                ["glass"]     = _SOUNDS_DIR .. "Glass.mp3",
-                ["kaching"]   = _SOUNDS_DIR .. "Kaching.ogg",
-                ["phone"]     = _SOUNDS_DIR .. "Phone.ogg",
-                ["robotblip"] = _SOUNDS_DIR .. "RobotBlip.ogg",
-                ["sonar"]     = _SOUNDS_DIR .. "Sonar.ogg",
-                ["siren"]     = _SOUNDS_DIR .. "WarningSiren.ogg",
-                ["water"]     = _SOUNDS_DIR .. "WaterDrop.ogg",
-                ["wilhelm"]   = _SOUNDS_DIR .. "Wilhelm.ogg",
-            }
-            local WHISPER_SOUND_NAMES = {
-                ["none"]      = "None",
-                ["airhorn"]   = "Air Horn",
-                ["banana"]    = "Banana Peel Slip",
-                ["bikehorn"]  = "Bike Horn",
-                ["bite"]      = "Bite",
-                ["boxing"]    = "Boxing Arena",
-                ["catmeow"]   = "Cat Meow",
-                ["catmeow2"]  = "Cat Meow 2",
-                ["gunshot"]   = "Frontals Gunshot",
-                ["glass"]     = "Glass",
-                ["kaching"]   = "Kaching",
-                ["phone"]     = "Phone",
-                ["robotblip"] = "Robot Blip",
-                ["sonar"]     = "Sonar",
-                ["siren"]     = "Warning Siren",
-                ["water"]     = "Water Drop",
-                ["wilhelm"]   = "Wilhelm",
-            }
-            local WHISPER_SOUND_ORDER = {
-                "none", "airhorn", "banana", "bikehorn", "bite", "boxing", "catmeow",
-                "catmeow2", "gunshot", "glass", "kaching", "phone", "robotblip", "sonar",
-                "siren", "water", "wilhelm",
-            }
+            local WHISPER_SOUND_PATHS, WHISPER_SOUND_NAMES, WHISPER_SOUND_ORDER =
+                EllesmereUI.BuildAlertSoundTables()
             ECHAT.WHISPER_SOUND_PATHS = WHISPER_SOUND_PATHS
             ECHAT.WHISPER_SOUND_NAMES = WHISPER_SOUND_NAMES
             ECHAT.WHISPER_SOUND_ORDER = WHISPER_SOUND_ORDER

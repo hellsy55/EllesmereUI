@@ -478,12 +478,14 @@ local DB_DEFAULTS = {
         -- BACKGROUND/LOW/MEDIUM/HIGH/DIALOG. Same "one value, everything the
         -- feature draws" convention as scale and visibility.
         strata        = "MEDIUM",
-        -- "downRight" (default) | "downLeft" | "upRight" | "upLeft". Which
+        -- "downright" (default) | "downleft" | "upright" | "upleft". Which
         -- corner of a shell rides the collapsed icon's position -- that
         -- shared corner stays fixed on expand/collapse, so it is also the
         -- direction the panel visually opens (and where the close button
-        -- lands). See AnchorCorner/DefaultPos.
-        openDirection = "downRight",
+        -- lands). See AnchorCorner/DefaultPos. Named growDir to match the
+        -- upstream "Menu Grow Direction" option (formerly a separate
+        -- openDirection setting on this branch; merged into one).
+        growDir = "downright",
         -- Auto-Minimize: once the full windows have sat expanded, cursor
         -- off them, for autoMinimizeDelay seconds straight, they collapse
         -- back to the icon on their own -- the exact effect the corner
@@ -601,23 +603,23 @@ ns.AutoMinimizeDelay = AutoMinimizeDelay
 --   TOPRIGHT    -> extends left and down   (downLeft)
 --   BOTTOMLEFT  -> extends right and up    (upRight)
 --   BOTTOMRIGHT -> extends left and up     (upLeft)
-local OPEN_DIRECTION_CORNER = {
-    downRight = "TOPLEFT",
-    downLeft  = "TOPRIGHT",
-    upRight   = "BOTTOMLEFT",
-    upLeft    = "BOTTOMRIGHT",
+local GROW_DIRECTION_CORNER = {
+    downright = "TOPLEFT",
+    downleft  = "TOPRIGHT",
+    upright   = "BOTTOMLEFT",
+    upleft    = "BOTTOMRIGHT",
 }
 
-local function OpenDirection()
+local function GrowDirection()
     local p = P()
-    local v = p and p.openDirection
-    if not OPEN_DIRECTION_CORNER[v] then v = "downRight" end
+    local v = p and p.growDir
+    if not GROW_DIRECTION_CORNER[v] then v = "downright" end
     return v
 end
-ns.OpenDirection = OpenDirection
+ns.GrowDirection = GrowDirection
 
 local function AnchorCorner()
-    return OPEN_DIRECTION_CORNER[OpenDirection()]
+    return GROW_DIRECTION_CORNER[GrowDirection()]
 end
 
 -------------------------------------------------------------------------------
@@ -1571,6 +1573,14 @@ end
 --  Layout / position / mode
 -------------------------------------------------------------------------------
 
+-- Menu Grow Direction -> which corner of the primary shell the collapsed
+-- icon occupies. The icon is the piece the user parks, so the corner it
+-- rides decides which way the windows appear to grow from it on expand:
+-- icon at TOPLEFT = windows extend down-right (the original behaviour),
+-- icon at BOTTOMLEFT = up-right, and so on. See GROW_DIRECTION_CORNER /
+-- AnchorCorner above -- title insets, the collapse buttons, the Raid
+-- Groups cog and the Raid Check button all share this same corner.
+
 -- Show-as arrangement. OOC only (Apply gates); the holders are plain frames,
 -- so the re-parent is an ordinary SetParent.
 local function ApplyLayout()
@@ -1675,8 +1685,8 @@ local function ApplyLayout()
 
     -- The collapsed icon rides the shell the mode actually shows -- Markers-
     -- only anchors (and scales, see Apply) to the Markers shell, everything
-    -- else to Group & Pull -- at whichever corner Open Direction names, the
-    -- same corner its shell's collapse button just took.
+    -- else to Group & Pull -- at whichever corner Menu Grow Direction (growDir)
+    -- names, the same corner its shell's collapse button just took.
     local hostShell = (showAs == "markers") and winMarkers or winGroup
     iconBtn:ClearAllPoints()
     iconBtn:SetPoint(corner, hostShell, corner, 0, 0)

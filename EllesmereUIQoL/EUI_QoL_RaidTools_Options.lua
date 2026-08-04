@@ -296,15 +296,15 @@ initFrame:SetScript("OnEvent", function(self)
         -- and where the close button lands -- paired with Window Scale,
         -- the other setting that touches every shown form of the feature.
         _, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Open Direction",
-              tooltip = "Which way the panel opens from the button that shows it. The close button always lands at that same corner.",
+            { type = "dropdown", text = "Menu Grow Direction",
+              tooltip = "Which way the windows extend from the collapsed icon when they open. The close button always lands at that same corner.",
               disabled = Disabled,
-              values = { downRight = "Down and Right", downLeft = "Down and Left",
-                         upRight = "Up and Right", upLeft = "Up and Left" },
-              order = { "downRight", "downLeft", "upRight", "upLeft" },
-              getValue = function() return Cfg("openDirection") or "downRight" end,
+              values = { downright = "Down Right", upright = "Up Right",
+                         downleft = "Down Left", upleft = "Up Left" },
+              order = { "downright", "upright", "downleft", "upleft" },
+              getValue = function() return Cfg("growDir") or "downright" end,
               setValue = function(v)
-                  Set("openDirection", v)
+                  Set("growDir", v)
                   Refresh()
               end },
             -- One scale for the whole feature -- both shells and the
