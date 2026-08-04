@@ -6706,6 +6706,14 @@ initFrame:SetScript("OnEvent", function(self)
                         local cat = ns.EnumerateCDMSettingsCatalog()
                         if cat then
                             catalogSet = {}
+                            local gciC = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+                            local function AddCatalogVariant(v)
+                                if type(v) == "number"
+                                   and not (issecretvalue and issecretvalue(v))
+                                   and v > 0 then
+                                    catalogSet[v] = true
+                                end
+                            end
                             for _, ce in ipairs(cat) do
                                 local s = ce.sid
                                 if type(s) == "number" and s > 0 then
@@ -6713,6 +6721,23 @@ initFrame:SetScript("OnEvent", function(self)
                                     catalogSet[NormalizeToBase(s)] = true
                                     local ov = ResolveToLive(s)
                                     if ov then catalogSet[ov] = true end
+                                end
+                                -- Also index every id the entry itself links
+                                -- (spellID/overrideSpellID/linkedSpellIDs) -- the
+                                -- same bridge the runtime router uses. A stored
+                                -- BASE id (e.g. Whirlwind saved for the Cleave
+                                -- entry) only matches the catalog through the
+                                -- entry's own linked set once the override talent
+                                -- is dropped and the spellbook link goes with it.
+                                local infoC = gciC and ce.cdID and gciC(ce.cdID)
+                                if infoC then
+                                    AddCatalogVariant(infoC.spellID)
+                                    AddCatalogVariant(infoC.overrideSpellID)
+                                    if infoC.linkedSpellIDs then
+                                        for _, lidC in ipairs(infoC.linkedSpellIDs) do
+                                            AddCatalogVariant(lidC)
+                                        end
+                                    end
                                 end
                             end
                         end
@@ -6762,7 +6787,7 @@ initFrame:SetScript("OnEvent", function(self)
                             -- Blizzard-layout position later (the "jumps to a random
                             -- spot after a talent swap" bug). Only a spell the player
                             -- still OWNS but removed from Blizzard's CDM tracking
-                            -- (known-but-not-displayed) is genuinely user-cleared -> drop.
+                            -- (gone from the catalog too) is genuinely user-cleared -> drop.
                             local shown = displayed[id] or displayed[NormalizeToBase(id)]
                                           or displayed[ResolveToLive(id)]
                             -- IsPlayerSpell is guarded (nil in some contexts): if it is
@@ -6773,18 +6798,29 @@ initFrame:SetScript("OnEvent", function(self)
                                          or IsPlayerSpell(ResolveToLive(id)))
                             if shown then
                                 keep = true
+                            elseif catalogSet and not importPending
+                                   and (catalogSet[id] or catalogSet[NormalizeToBase(id)]
+                                        or catalogSet[ResolveToLive(id)]) then
+                                -- Still tracked in Blizzard's catalog, just not
+                                -- displayed right now: untalented, conditionally
+                                -- pooled, or a BASE id whose tracked cooldown is a
+                                -- talent override the player dropped (Whirlwind
+                                -- stored for the Cleave entry -- IsPlayerSpell
+                                -- vouches for the base while the actual cooldown
+                                -- is untalented, so the owned->drop below would
+                                -- wrongly delete the assignment). Hold rank.
+                                keep = true
                             elseif have then
-                                -- Owned but no longer in the displayed viewer: the user
-                                -- cleared it from Blizzard's CDM tracking -> drop.
+                                -- Owned but no longer tracked: the user cleared it
+                                -- from Blizzard's CDM tracking -> drop.
                                 keep = false
                             elseif catalogSet and not importPending then
                                 -- Untalented. It only reached the preview by being
                                 -- materialized from the settings catalog, so it must
-                                -- also LEAVE when removed from tracking: keep only while
-                                -- it is still in the catalog. An untalented spell moved
-                                -- to Not Displayed is gone from the catalog -> drop.
-                                keep = (catalogSet[id] or catalogSet[NormalizeToBase(id)]
-                                        or catalogSet[ResolveToLive(id)]) and true or false
+                                -- also LEAVE when removed from tracking. An untalented
+                                -- spell moved to Not Displayed is gone from the
+                                -- catalog -> drop.
+                                keep = false
                             else
                                 -- Untalented with no catalog signal (provider down, or
                                 -- mid-import): hold rank -- the safe fallback, so a
