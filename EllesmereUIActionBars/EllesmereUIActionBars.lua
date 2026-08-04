@@ -5218,6 +5218,138 @@ local function HideSlotArt(btn)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Party Mode: spinning action bars
+--
+--  Orbits each button around its own bar's centre while Party Mode is active.
+--  The buttons are re-anchored, not rotated -- WoW frames have no rotation
+--  transform -- so every button stays upright and square, and clicking,
+--  cooldowns and keybinds are unaffected.
+--
+--  Re-anchoring a button is SetPoint on a PROTECTED frame, which the client
+--  blocks in combat, so the orbit holds position there and resumes when the
+--  lockdown lifts. The OnUpdate keeps running through combat (only the SetPoint
+--  is blocked, not the script), so no combat-end event is needed.
+--
+--  Resting offsets are captured from the LIVE layout, so the orbit inherits
+--  whatever LayoutBar produced. They are measured through screen space
+--  (GetCenter x GetEffectiveScale) because GetCenter reports in each frame's
+--  own units while SetPoint offsets are in the MOVING frame's units -- those
+--  differ under Blizzard style's per-button SetScale.
+--
+--  Zero cost when off, matching Party Mode's own rule: the driver frame is only
+--  shown while Party Mode is active AND the option is on, so the OnUpdate does
+--  not fire otherwise.
+--
+--  Scope block: this file sits at Lua 5.1's 200-local cap for the main chunk,
+--  so none of this may take a main-chunk slot. Inside do/end the registers free
+--  at the block close while the closure published on ns keeps them alive as
+--  upvalues -- same pattern as FB in EllesmereUIRaidFrames.
+-------------------------------------------------------------------------------
+do
+local spinDriver, spinAngle = nil, 0
+-- Flat list, rebuilt on claim: { btn, frame, dx, dy } where dx/dy is the
+-- button's resting offset from its bar's centre.
+local spinOrbit = {}
+
+local function SpinSpeed()
+    local v = EllesmereUIDB and EllesmereUIDB.partyModeSpinSpeed
+    if v == nil then v = 120 end
+    return v
+end
+
+-- Put every orbiting button back on its resting offset. Any path that is about
+-- to re-capture must call this first: measuring while the buttons sit mid-orbit
+-- would bake the rotated position in as the new rest, and the bar would walk
+-- away from its anchor a little further every time.
+local function SpinRestore()
+    if InCombatLockdown() then return end
+    for i = 1, #spinOrbit do
+        local o = spinOrbit[i]
+        o.btn:ClearAllPoints()
+        o.btn:SetPoint("CENTER", o.frame, "CENTER", o.dx, o.dy)
+    end
+end
+
+local function SpinClaim()
+    SpinRestore()
+    wipe(spinOrbit)
+    for _, info in ipairs(BAR_CONFIG) do
+        local buttons, frame = barButtons[info.key], barFrames[info.key]
+        if buttons and frame then
+            for i = 1, #buttons do
+                local btn = buttons[i]
+                if btn and btn:IsShown() then
+                    local bcx, bcy = btn:GetCenter()
+                    local fcx, fcy = frame:GetCenter()
+                    if bcx and fcx then
+                        local bs, fs = btn:GetEffectiveScale(), frame:GetEffectiveScale()
+                        if bs > 0 then
+                            spinOrbit[#spinOrbit + 1] = {
+                                btn = btn, frame = frame,
+                                dx = (bcx * bs - fcx * fs) / bs,
+                                dy = (bcy * bs - fcy * fs) / bs,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function ns.PartySpin_Refresh()
+    local on = EllesmereUIDB and EllesmereUIDB.partyMode
+        and EllesmereUIDB.partyModeSpinBars and true or false
+    if not on then
+        if spinDriver then spinDriver:Hide() end
+        spinAngle = 0
+        SpinRestore()
+        wipe(spinOrbit)
+        return
+    end
+    if not spinDriver then
+        spinDriver = CreateFrame("Frame")
+        spinDriver:Hide()
+        spinDriver:SetScript("OnUpdate", function(_, elapsed)
+            -- Re-check every tick: Party Mode can also be toggled by keybind,
+            -- by its random trigger or by Bloodlust, none of which route
+            -- through the options page.
+            if not (EllesmereUIDB and EllesmereUIDB.partyMode and EllesmereUIDB.partyModeSpinBars) then
+                ns.PartySpin_Refresh()
+                return
+            end
+            spinAngle = (spinAngle + math.rad(SpinSpeed()) * elapsed) % (math.pi * 2)
+            if #spinOrbit > 0 and not InCombatLockdown() then
+                local c, s = math.cos(spinAngle), math.sin(spinAngle)
+                for i = 1, #spinOrbit do
+                    local o = spinOrbit[i]
+                    o.btn:ClearAllPoints()
+                    o.btn:SetPoint("CENTER", o.frame, "CENTER",
+                        o.dx * c - o.dy * s,
+                        o.dx * s + o.dy * c)
+                end
+            end
+        end)
+    end
+    SpinClaim()
+    spinDriver:Show()
+end
+-- Published on the shared table so the Party Mode options page, which lives in
+-- the core addon and cannot see this private ns, can apply the toggle live.
+EllesmereUI.PartySpin_Refresh = ns.PartySpin_Refresh
+
+-- Party Mode is owned by the core addon and can be started from the options
+-- page, a keybind, a random timer or the Bloodlust listener. Hooking its two
+-- public entry points catches all of them.
+if EllesmereUI_StartPartyMode then
+    hooksecurefunc("EllesmereUI_StartPartyMode", function() ns.PartySpin_Refresh() end)
+end
+if EllesmereUI_StopPartyMode then
+    hooksecurefunc("EllesmereUI_StopPartyMode", function() ns.PartySpin_Refresh() end)
+end
+end
+
 -- Declared here (before LayoutBar) so it's in scope as an upvalue.
 -- ApplyAll sets this to true during full rebuilds to prevent LayoutBar's
 -- edge preservation from saving stale positions into the new profile.
@@ -11152,6 +11284,11 @@ local function ApplyAll()
         local f = barFrames[info.key]
         if f then ns.ApplyBarDormancy(info.key, not f:IsVisible()) end
     end
+
+    -- A rebuild re-anchors every button, so the Party Mode orbit re-captures
+    -- its resting offsets here. Party Mode may also have been started (login,
+    -- keybind, Bloodlust) before these buttons existed for it to claim.
+    if ns.PartySpin_Refresh then ns.PartySpin_Refresh() end
 
     _isApplyingAll = false
 end
