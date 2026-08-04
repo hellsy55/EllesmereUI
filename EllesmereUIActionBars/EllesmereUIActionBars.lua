@@ -703,6 +703,9 @@ for _, info in ipairs(BAR_CONFIG) do
         showPagingArrows = false,
         pagingArrowsRight = false,
         paging = {},
+        -- Auto-paging opt-outs (MainBar only; see BuildPagingConditions).
+        disableFormPaging = false,
+        disableSkyridingPaging = false,
         bgEnabled = false,
         bgColor = { r = 0, g = 0, b = 0, a = 0.5 },
         bgBorderColor = { r = 0, g = 0, b = 0, a = 1 },
@@ -2264,10 +2267,25 @@ EAB_VTABLE.PAGING_STATES = {
     },
 }
 
+-- Auto-paging opt-outs for MainBar. Returns noForm, noSky: whether to suppress
+-- the implicit bonusbar swaps for forms/stealth/stance (bonusbar 1-4) and for
+-- skyriding (bonusbar 5). Deliberately does NOT cover vehicle/override/possess:
+-- those replace the player's abilities outright, so suppressing them would leave
+-- no way to use the vehicle at all. Only ever true for MainBar -- it is the only
+-- bar the engine drives off bonusbar, and the only one the options panel offers
+-- these toggles for.
+function EAB_VTABLE.GetAutoPagingOptOuts(barKey)
+    if barKey ~= "MainBar" then return false, false end
+    local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars.MainBar
+    if not bs then return false, false end
+    return bs.disableFormPaging and true or false, bs.disableSkyridingPaging and true or false
+end
+
 function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
     if not pagingConfig or not next(pagingConfig) then return nil end
     local PG = EAB_VTABLE.PAGING_STATES
     local _, class = UnitClass("player")
+    local noForm, noSky = EAB_VTABLE.GetAutoPagingOptOuts(barKey)
     local parts = {}
     if barKey == "MainBar" then
         if EAB_VTABLE.GetOverrideBarIndex then
@@ -2292,7 +2310,11 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
     }
     local classStates = PG.class[class]
     if classStates then
-        local defs = barKey == "MainBar" and CLASS_DEFAULTS[class]
+        -- noForm drops only the implicit fallback. A page the user picked for a
+        -- specific form in the dropdowns is an explicit request, not auto-paging,
+        -- so it still applies -- that combination is how you keep every form on
+        -- page 1 except the one you actually want to swap.
+        local defs = (barKey == "MainBar" and not noForm) and CLASS_DEFAULTS[class]
         for _, state in ipairs(classStates) do
             local page = pagingConfig[state.id]
             if page then
@@ -2304,7 +2326,9 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
         end
     end
     if barKey == "MainBar" then
-        parts[#parts + 1] = "[bonusbar:5] 11"
+        if not noSky then
+            parts[#parts + 1] = "[bonusbar:5] 11"
+        end
         for i = 2, NUM_AB_PAGES do
             parts[#parts + 1] = "[bar:" .. i .. "] " .. i
         end
@@ -2331,6 +2355,7 @@ end
 -------------------------------------------------------------------------------
 local function GetClassPagingConditions()
     local _, class = UnitClass("player")
+    local noForm, noSky = EAB_VTABLE.GetAutoPagingOptOuts("MainBar")
     local conditions = ""
 
     -- Override bar (soft vehicle / quest abilities) and possess bar: remap bar 1
@@ -2343,7 +2368,9 @@ local function GetClassPagingConditions()
     end
 
     -- Dragonriding (all classes)
-    conditions = conditions .. "[bonusbar:5] 11; "
+    if not noSky then
+        conditions = conditions .. "[bonusbar:5] 11; "
+    end
 
     -- Manual page switching (pages 2-6)
     -- [bar:N] responds to WoW's internal page set by ChangeActionBarPage().
@@ -2353,15 +2380,20 @@ local function GetClassPagingConditions()
     -- applies on page 1). MainBar keybinds are native ACTIONBUTTONn commands,
     -- so the displayed page must resolve exactly like the engine's or a
     -- form + manual-page combination shows one ability and fires another.
+    -- (The auto-paging opt-outs are the one exception: they deliberately break
+    -- from the engine's resolution, which is exactly why they force the keys off
+    -- ACTIONBUTTONn and onto the click route -- see UpdateKeybinds pass 1.)
     for i = 2, NUM_AB_PAGES do
         conditions = conditions .. "[bar:" .. i .. "] " .. i .. "; "
     end
 
     -- Class-specific form paging (page 1 only, per the ordering above)
-    if class == "DRUID" then
-        conditions = conditions .. "[bonusbar:1,stealth] 7; [bonusbar:1] 7; [bonusbar:3] 9; [bonusbar:4] 10; "
-    elseif class == "ROGUE" then
-        conditions = conditions .. "[bonusbar:1] 7; "
+    if not noForm then
+        if class == "DRUID" then
+            conditions = conditions .. "[bonusbar:1,stealth] 7; [bonusbar:1] 7; [bonusbar:3] 9; [bonusbar:4] 10; "
+        elseif class == "ROGUE" then
+            conditions = conditions .. "[bonusbar:1] 7; "
+        end
     end
 
     -- Default: page 1
@@ -2864,6 +2896,15 @@ function ns.RebuildBarPaging(barKey)
             frame:Execute(("self:SetAttribute('actionpage', %d)"):format(defaultPage))
         end
     end
+
+    -- Keybind routing is derived from the paging config (UpdateKeybinds pass 1):
+    -- custom paging and the auto-paging opt-outs both force click-routed keys.
+    -- Rebuild now so a settings change takes effect immediately instead of
+    -- waiting for the next UPDATE_BINDINGS, which may never come -- toggling a
+    -- paging setting fires no binding event of its own. The signature diff makes
+    -- this a no-op when routing did not actually change, and UpdateKeybinds
+    -- re-arms itself out of combat, so calling it unconditionally is safe.
+    if _G._EAB_UpdateKeybinds then _G._EAB_UpdateKeybinds() end
 end
 
 
@@ -5216,6 +5257,138 @@ local function HideSlotArt(btn)
         btn.SlotArt:Hide()
         btn.SlotArt:SetAlpha(0)
     end
+end
+
+-------------------------------------------------------------------------------
+--  Party Mode: spinning action bars
+--
+--  Orbits each button around its own bar's centre while Party Mode is active.
+--  The buttons are re-anchored, not rotated -- WoW frames have no rotation
+--  transform -- so every button stays upright and square, and clicking,
+--  cooldowns and keybinds are unaffected.
+--
+--  Re-anchoring a button is SetPoint on a PROTECTED frame, which the client
+--  blocks in combat, so the orbit holds position there and resumes when the
+--  lockdown lifts. The OnUpdate keeps running through combat (only the SetPoint
+--  is blocked, not the script), so no combat-end event is needed.
+--
+--  Resting offsets are captured from the LIVE layout, so the orbit inherits
+--  whatever LayoutBar produced. They are measured through screen space
+--  (GetCenter x GetEffectiveScale) because GetCenter reports in each frame's
+--  own units while SetPoint offsets are in the MOVING frame's units -- those
+--  differ under Blizzard style's per-button SetScale.
+--
+--  Zero cost when off, matching Party Mode's own rule: the driver frame is only
+--  shown while Party Mode is active AND the option is on, so the OnUpdate does
+--  not fire otherwise.
+--
+--  Scope block: this file sits at Lua 5.1's 200-local cap for the main chunk,
+--  so none of this may take a main-chunk slot. Inside do/end the registers free
+--  at the block close while the closure published on ns keeps them alive as
+--  upvalues -- same pattern as FB in EllesmereUIRaidFrames.
+-------------------------------------------------------------------------------
+do
+local spinDriver, spinAngle = nil, 0
+-- Flat list, rebuilt on claim: { btn, frame, dx, dy } where dx/dy is the
+-- button's resting offset from its bar's centre.
+local spinOrbit = {}
+
+local function SpinSpeed()
+    local v = EllesmereUIDB and EllesmereUIDB.partyModeSpinSpeed
+    if v == nil then v = 120 end
+    return v
+end
+
+-- Put every orbiting button back on its resting offset. Any path that is about
+-- to re-capture must call this first: measuring while the buttons sit mid-orbit
+-- would bake the rotated position in as the new rest, and the bar would walk
+-- away from its anchor a little further every time.
+local function SpinRestore()
+    if InCombatLockdown() then return end
+    for i = 1, #spinOrbit do
+        local o = spinOrbit[i]
+        o.btn:ClearAllPoints()
+        o.btn:SetPoint("CENTER", o.frame, "CENTER", o.dx, o.dy)
+    end
+end
+
+local function SpinClaim()
+    SpinRestore()
+    wipe(spinOrbit)
+    for _, info in ipairs(BAR_CONFIG) do
+        local buttons, frame = barButtons[info.key], barFrames[info.key]
+        if buttons and frame then
+            for i = 1, #buttons do
+                local btn = buttons[i]
+                if btn and btn:IsShown() then
+                    local bcx, bcy = btn:GetCenter()
+                    local fcx, fcy = frame:GetCenter()
+                    if bcx and fcx then
+                        local bs, fs = btn:GetEffectiveScale(), frame:GetEffectiveScale()
+                        if bs > 0 then
+                            spinOrbit[#spinOrbit + 1] = {
+                                btn = btn, frame = frame,
+                                dx = (bcx * bs - fcx * fs) / bs,
+                                dy = (bcy * bs - fcy * fs) / bs,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function ns.PartySpin_Refresh()
+    local on = EllesmereUIDB and EllesmereUIDB.partyMode
+        and EllesmereUIDB.partyModeSpinBars and true or false
+    if not on then
+        if spinDriver then spinDriver:Hide() end
+        spinAngle = 0
+        SpinRestore()
+        wipe(spinOrbit)
+        return
+    end
+    if not spinDriver then
+        spinDriver = CreateFrame("Frame")
+        spinDriver:Hide()
+        spinDriver:SetScript("OnUpdate", function(_, elapsed)
+            -- Re-check every tick: Party Mode can also be toggled by keybind,
+            -- by its random trigger or by Bloodlust, none of which route
+            -- through the options page.
+            if not (EllesmereUIDB and EllesmereUIDB.partyMode and EllesmereUIDB.partyModeSpinBars) then
+                ns.PartySpin_Refresh()
+                return
+            end
+            spinAngle = (spinAngle + math.rad(SpinSpeed()) * elapsed) % (math.pi * 2)
+            if #spinOrbit > 0 and not InCombatLockdown() then
+                local c, s = math.cos(spinAngle), math.sin(spinAngle)
+                for i = 1, #spinOrbit do
+                    local o = spinOrbit[i]
+                    o.btn:ClearAllPoints()
+                    o.btn:SetPoint("CENTER", o.frame, "CENTER",
+                        o.dx * c - o.dy * s,
+                        o.dx * s + o.dy * c)
+                end
+            end
+        end)
+    end
+    SpinClaim()
+    spinDriver:Show()
+end
+-- Published on the shared table so the Party Mode options page, which lives in
+-- the core addon and cannot see this private ns, can apply the toggle live.
+EllesmereUI.PartySpin_Refresh = ns.PartySpin_Refresh
+
+-- Party Mode is owned by the core addon and can be started from the options
+-- page, a keybind, a random timer or the Bloodlust listener. Hooking its two
+-- public entry points catches all of them.
+if EllesmereUI_StartPartyMode then
+    hooksecurefunc("EllesmereUI_StartPartyMode", function() ns.PartySpin_Refresh() end)
+end
+if EllesmereUI_StopPartyMode then
+    hooksecurefunc("EllesmereUI_StopPartyMode", function() ns.PartySpin_Refresh() end)
+end
 end
 
 -- Declared here (before LayoutBar) so it's in scope as an upvalue.
@@ -10651,6 +10824,20 @@ local function UpdateKeybinds()
             -- paging (bs.paging) needs the click route.
             local bs = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[info.key]
             local barHasCustomPaging = (bs and bs.paging and next(bs.paging) ~= nil) and true or false
+            -- The auto-paging opt-outs need the click route for the mirror-image
+            -- reason: bonusbar stays a native engine concept whether or not we
+            -- page off it, so ACTIONBUTTONn still resolves to the form/skyriding
+            -- slot after we have deliberately STOPPED the icon from following it.
+            -- Left native, a stealthed keypress would cast the page-7 ability the
+            -- button no longer shows -- the show-one/fire-another split the
+            -- ordering comment in GetClassPagingConditions warns about. Click
+            -- routing reads our explicit "action" attr, so key and icon agree in
+            -- every form; the cost is press-and-hold repeat on MainBar while the
+            -- opt-out is on, same trade custom paging already makes.
+            if info.key == "MainBar" and bs
+               and (bs.disableFormPaging or bs.disableSkyridingPaging) then
+                barHasCustomPaging = true
+            end
             for i, btn in ipairs(btns) do
                 if btn then
                     local cmd = prefix .. i
@@ -11152,6 +11339,11 @@ local function ApplyAll()
         local f = barFrames[info.key]
         if f then ns.ApplyBarDormancy(info.key, not f:IsVisible()) end
     end
+
+    -- A rebuild re-anchors every button, so the Party Mode orbit re-captures
+    -- its resting offsets here. Party Mode may also have been started (login,
+    -- keybind, Bloodlust) before these buttons existed for it to claim.
+    if ns.PartySpin_Refresh then ns.PartySpin_Refresh() end
 
     _isApplyingAll = false
 end

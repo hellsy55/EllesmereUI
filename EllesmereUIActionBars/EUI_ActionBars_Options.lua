@@ -4263,6 +4263,27 @@ initFrame:SetScript("OnEvent", function(self)
                         if ns.RebuildBarPaging then ns.RebuildBarPaging(selKey) end
                     end
 
+                    -- Row 0: Auto-paging opt-outs (MainBar only -- it is the only
+                    -- bar the engine pages off bonusbar). These suppress the
+                    -- implicit swaps only; an explicit page picked for a form in
+                    -- the dropdowns below still applies.
+                    if selKey == "MainBar" then
+                        local function SetAutoPageOptOut(key, v)
+                            SSet(key, v, function(k)
+                                if ns.RebuildBarPaging then ns.RebuildBarPaging(k) end
+                            end)
+                        end
+                        _, h = W:DualRow(parent, y,
+                            { type="toggle", text="Disable Form Paging",
+                              getValue=function() return SGet("disableFormPaging") or false end,
+                              setValue=function(v) SetAutoPageOptOut("disableFormPaging", v) end,
+                              tooltip="Keep Action Bar 1 on its current page when you shapeshift, stealth, or change stance, instead of swapping to that form's bar.\n\nKeybinds follow what the bar shows, so the key always casts the icon you see. Press-and-hold repeat casting is turned off on Action Bar 1 while this is enabled." },
+                            { type="toggle", text="Disable Skyriding Paging",
+                              getValue=function() return SGet("disableSkyridingPaging") or false end,
+                              setValue=function(v) SetAutoPageOptOut("disableSkyridingPaging", v) end,
+                              tooltip="Keep Action Bar 1 on its current page while skyriding, instead of swapping to the skyriding bar.\n\nYour skyriding abilities live on that bar, so put them on another bar before enabling this. Press-and-hold repeat casting is turned off on Action Bar 1 while this is enabled." });  y = y - h
+                    end
+
                     -- Row 1: Show Paging Arrows (+ inline cog) | Shift Modifier
                     local pagingArrowsWidget
                     if selKey == "MainBar" then
