@@ -6566,44 +6566,36 @@ local function RefreshFocusCastProxyUnit()
 end
 ns.RefreshFocusCastProxyUnit = RefreshFocusCastProxyUnit
 
--- Can THIS character actually cast the stored interrupt?
+function ns.IsSpellInPlayerBook(id)
+    if IsPlayerSpell and IsPlayerSpell(id) then return true end
+    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+        and C_SpellBook.IsSpellKnownOrInSpellBook(id) then
+        return true
+    end
+    return false
+end
+
+-- Returns the id of the stored interrupt in the form this character can
+-- actually cast, or nil.
 --
--- focusKickInterruptSpellID lives on the bar definition, which is
--- profile-level: every spec and every character sharing the profile reads the
--- same id, while the spell it names is per-spec spellbook content. Nothing
--- reconciled the two, so a Ret Paladin's Rebuke rode the profile onto a Holy
--- Paladin, who has no interrupt at all. The same leak produced the earlier
--- report of a bare "47528" (a Death Knight's Mind Freeze) in the dropdown.
---
--- Validate on READ and never write: the id is still correct for the spec that
--- set it, so clearing it here would destroy that spec's setting the first time
--- the player logged in on another one.
+-- Validate on READ and never write: focusKickInterruptSpellID is profile-level
+-- while the spellbook behind it is per-spec, so the id stays correct for the
+-- spec that set it. Clearing it here would destroy that spec's setting the
+-- first time the player logged in on another one.
 --
 -- Asks the SPELLBOOK, never a class/spec table. Which specs carry an interrupt
--- is Blizzard's to change (Preservation has Quell, Mistweaver has Spear Hand
--- Strike, most other healers have nothing), and any hardcoded list of that goes
--- stale on a patch and starts lying in one direction or the other.
---
+-- is Blizzard's to change, and a hardcoded list of that goes stale on a patch.
 -- Pet-bank interrupts (a Warlock's Axe Toss, a Hunter's pet kick) are
--- legitimate picks and IsPlayerSpell does not see them, so check both banks.
+-- legitimate picks that IsPlayerSpell cannot see, so check both banks.
 --
--- Returns the id the player can ACTUALLY cast, or nil. Returning the resolved
--- id rather than a boolean matters: the caller feeds it to a cooldown check,
--- and a talent swap moves an interrupt between its base and override forms
--- while the stored id stays put. Answering "yes, known" but leaving the caller
--- holding the un-castable form would put an id that is never on cooldown into
--- the readiness gate -- the same always-ready failure this whole fix is about,
--- just reached from the other side.
+-- Returning the resolved id rather than a boolean is the point: the caller
+-- feeds it to a cooldown check, and a talent swap moves an interrupt between
+-- its base and override forms while the stored id stays put. Answering "yes,
+-- known" but leaving the caller holding the un-castable form would put an id
+-- that is never on cooldown into the readiness gate.
 function ns.ResolveCastableInterrupt(sid)
     if type(sid) ~= "number" or sid <= 0 then return nil end
-    local function knownInBook(id)
-        if IsPlayerSpell and IsPlayerSpell(id) then return true end
-        if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
-            and C_SpellBook.IsSpellKnownOrInSpellBook(id) then
-            return true
-        end
-        return false
-    end
+    local knownInBook = ns.IsSpellInPlayerBook
     if knownInBook(sid) then return sid end
     -- Talented into a replacement, stored id is the base form.
     if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
