@@ -6627,13 +6627,22 @@ local function EnsureFocusCastProxy()
         -- point the spellbook is settled.
         if spellID and not ns.PlayerKnowsInterrupt(spellID) then spellID = nil end
         -- Auto-fallback: if user hasn't explicitly picked a spell, use the
-        -- first positive spell on the bar. The picker exists for users who
-        -- want a specific spell when multiple are on the bar.
+        -- first CASTABLE positive spell on the bar. The picker exists for users
+        -- who want a specific spell when multiple are on the bar.
+        --
+        -- The bar's own list needs the same check as the explicit pick, not
+        -- because it crosses specs (assignedSpells is per-spec) but because it
+        -- can hold spells this spec no longer has: importing a shared profile
+        -- with "Include CDM Spell Layout" writes another character's layout
+        -- into these spec keys wholesale, and talent changes strand entries the
+        -- same way. Whichever list supplies the id, an interrupt this character
+        -- cannot cast reads as permanently ready to the cooldown gate below.
         if not spellID or spellID <= 0 then
             local sd = ns.GetBarSpellData and ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
-                    if type(sid) == "number" and sid > 0 then
+                    if type(sid) == "number" and sid > 0
+                        and ns.PlayerKnowsInterrupt(sid) then
                         spellID = sid
                         break
                     end
