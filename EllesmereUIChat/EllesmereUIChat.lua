@@ -4371,15 +4371,20 @@ local function SkinChatFrame(cf)
 
     -- Restyle Blizzard's resize button to align with our bg (all chat frames).
     local resizeBtn = _G[name .. "ResizeButton"]
-    if resizeBtn and CFD(cf).bg then
+    if resizeBtn then
         resizeBtn:SetSize(18, 18)
         resizeBtn:ClearAllPoints()
-        -- While the temp (11+) edit box stays Blizzard-anchored, its
-        -- native chain includes this button; anchoring to our bg (which
-        -- wraps the eb) would be an anchor cycle there.
-        local rbIdx = tonumber(name:match("ChatFrame(%d+)"))
-        local rbAnchor = CFD(cf).bg
-        resizeBtn:SetPoint("BOTTOMRIGHT", rbAnchor, "BOTTOMRIGHT", -2, 2)
+        -- Anchored to the CHAT FRAME, never to our panel.
+        --
+        -- Blizzard anchors the chat frame's own ScrollBar to this button
+        -- (FCF_UpdateScrollbarAnchors), so pointing it at our panel pulls an
+        -- addon frame into Blizzard's chat layout chain. Edit Mode then could
+        -- not commit a move of the chat frame: the drag released with the
+        -- frame unanchored, UpdateSystemAnchorInfo read no point, and wrote a
+        -- nil one back -- chat could be neither moved nor resized. The
+        -- existing note here already warned that anchoring to our bg "would
+        -- be an anchor cycle"; it was true for ChatFrame1 as well.
+        resizeBtn:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", -2, 2)
         resizeBtn:SetFrameStrata("HIGH")
         if resizeBtn.GetRegions then
             for ri = 1, select("#", resizeBtn:GetRegions()) do
