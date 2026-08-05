@@ -3532,6 +3532,13 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
         end
     end
     if not noMark then hasChanges = true end
+    -- Post-apply hook. An anchored element's position is owned by this
+    -- function, so an addon that also has something to add to that position
+    -- (RaidFrames' per-tier offset) has no safe moment to apply it: every
+    -- anchor pass would overwrite it. Registering here gives it one, and the
+    -- callback runs after the child is fully placed.
+    local post = EllesmereUI._anchorPostApply and EllesmereUI._anchorPostApply[childKey]
+    if post then post(childKey, targetKey, side) end
 end
 
 -- Re-apply all saved anchor positions (called on open and after target moves)

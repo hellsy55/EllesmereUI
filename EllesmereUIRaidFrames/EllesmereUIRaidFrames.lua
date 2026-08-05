@@ -9394,14 +9394,54 @@ end
 -- were rebased once per scheme by _NormalizeTierOffsetAnchors). For the
 -- base tier or no overrides every corner term cancels, reproducing the
 -- plain base top-left -- identical behavior for no-override profiles.
+-- Per-tier offset for an ANCHORED container.
+--
+-- The anchor owns the container's base position, so the tier offset is applied
+-- as a delta on top of it: read the point the anchor just set, subtract the
+-- offset we added last time, add the offset this tier wants. Re-running is
+-- therefore idempotent, and an anchor pass that repositions the container
+-- (which drops our delta) is corrected by the post-apply hook below.
+local _rfAnchoredOffset = { x = 0, y = 0 }
+ns._RFApplyAnchoredTierOffset = function()
+    if not containerFrame or InCombatLockdown() then return end
+    local point, rel, relPoint, cx, cy = containerFrame:GetPoint(1)
+    if not point or not cx then return end
+    local _, ov = ns._RFResolveTierOverride(ns._GetEffectiveRaidSize())
+    local ox = (ov and ov.offsetX) or 0
+    local oy = (ov and ov.offsetY) or 0
+    local dx = ox - _rfAnchoredOffset.x
+    local dy = oy - _rfAnchoredOffset.y
+    if dx == 0 and dy == 0 then return end
+    _rfAnchoredOffset.x, _rfAnchoredOffset.y = ox, oy
+    containerFrame:ClearAllPoints()
+    containerFrame:SetPoint(point, rel, relPoint, PixelSnap(cx + dx), PixelSnap(cy + dy))
+end
+
+-- The anchor system re-places the container on its own schedule (target moved,
+-- resized, login settle). Each of those passes writes the anchor's own
+-- coordinates and so drops our delta, which is why the offset has to be
+-- re-applied from here rather than only on roster/tier changes.
+EllesmereUI._anchorPostApply = EllesmereUI._anchorPostApply or {}
+EllesmereUI._anchorPostApply["RF_RaidFrames"] = function()
+    _rfAnchoredOffset.x, _rfAnchoredOffset.y = 0, 0
+    ns._RFApplyAnchoredTierOffset()
+end
+
 ns._ApplyTierOffset = function()
     if not containerFrame or InCombatLockdown() then return end
-    -- Element-anchored container: the unlock anchor system owns the position
+    -- Element-anchored container: the unlock anchor system owns the POSITION
     -- (absolute coords recomputed from the anchor target), so repositioning
-    -- from unlockPos here would clobber it on every roster/tier pass. The
-    -- anchor's edge-to-edge offsets keep the near edge flush across tier
-    -- size changes; per-tier offsets do not apply while anchored.
-    if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("RF_RaidFrames") then return end
+    -- from unlockPos here would clobber it on every roster/tier pass.
+    --
+    -- The per-tier offset still applies, though: it is added ON TOP of
+    -- whatever the anchor computed, rather than replacing it. Skipping it
+    -- outright is what made the per-tier offset fields silently inert for
+    -- anyone who anchored the raid frames to another element -- the setting
+    -- was saved, shown in the options, and did nothing.
+    if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("RF_RaidFrames") then
+        ns._RFApplyAnchoredTierOffset()
+        return
+    end
     local s = db.profile
     if not s.unlockPos then return end
     local _, ov = ns._RFResolveTierOverride(ns._GetEffectiveRaidSize())
