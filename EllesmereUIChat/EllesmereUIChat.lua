@@ -5476,8 +5476,17 @@ initFrame:SetScript("OnEvent", function(self)
     chatContainer:SetAllPoints(UIParent)
     chatContainer:EnableMouse(false)
     ChatFrame1:SetParent(chatContainer)
-    if ChatFrame1.Selection then ChatFrame1.Selection:SetParent(_hiddenParent) end
-    if ChatFrame1.EditModeResizeButton then ChatFrame1.EditModeResizeButton:SetParent(_hiddenParent) end
+    -- Edit Mode's own Selection overlay and resize handle are LEFT ALONE.
+    -- They used to be parented onto a hidden frame to keep them out of the
+    -- way, but Edit Mode keeps driving them: the resize handle is what you
+    -- grab to size the chat, and Edit Mode derives the frame's new anchor
+    -- from it on drag stop. On a hidden parent it has no resolvable rect, so
+    -- that anchor came back nil and Edit Mode wrote it straight back --
+    -- `ChatFrame1:SetPoint()` usage errors, and a chat frame left with no
+    -- points at all, which cannot then be moved or resized. Blizzard already
+    -- keeps both widgets hidden outside Edit Mode, so hiding them was never
+    -- needed. (Same rule as the conversation icon and the button frame:
+    -- never reparent a region its owner still operates on.)
 
     -- SetParent called once above. No reactive hook -- hooksecurefunc on
     -- SetParent taints HistoryKeeper during whisper event processing.
