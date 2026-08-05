@@ -1506,6 +1506,9 @@ L["Icon Outset"] = "图标外边距"
 L["Hide Charge Count at 0"] = "充能为0时隐藏文字"
 L["Cooldown Text"] = "冷却数字"
 L["Fit Size to Button"] = "自适应按钮尺寸"
+L["Disable Form Paging"] = "禁用形态切换"
+L["Disable Skyriding Paging"] = "禁用驭龙术切换"
+
 
 -- 动作条鼠标提示 (tooltip)
 L["Toggling action bar visibility is only available out of combat"] = "切换动作条可见性仅在脱离战斗时可用"
@@ -1576,7 +1579,8 @@ L["Shows the rotation-helper ring on the button holding the One Button Assist ac
 L["Controls the opacity of the flat color background behind action button icons."] = "控制动作按钮图标后方纯色背景的不透明度。"
 L["Hide the charge number on action buttons when it reaches 0, instead of showing a 0. The number returns as soon as a charge or item comes back."] = "当充能次数变为0时，在动作按钮上隐藏充能数字，而不是显示0。一旦充能或物品恢复，数字即会重新显示。"
 L["Caps the countdown size so it cannot spill outside small buttons."] = "限制倒计时大小，防止溢出小按钮。"
-
+L["Keep Action Bar 1 on its current page when you shapeshift, stealth, or change stance, instead of swapping to that form's bar.\n\nKeybinds follow what the bar shows, so the key always casts the icon you see. Press-and-hold repeat casting is turned off on Action Bar 1 while this is enabled."] = "在变形、潜行或切换姿态时，保持动作条1停留在当前页面，而不是切换到对应形态的专用条。\n\n按键绑定跟随条上显示的技能，因此按键始终施放你看到的图标。启用此选项后，动作条1上的长按重复施法将被关闭。"
+L["Keep Action Bar 1 on its current page while skyriding, instead of swapping to the skyriding bar.\n\nYour skyriding abilities live on that bar, so put them on another bar before enabling this. Press-and-hold repeat casting is turned off on Action Bar 1 while this is enabled."] = "在驭龙术飞行时，保持动作条1停留在当前页面，而不是切换到驭龙术专用条。\n\n你的驭龙术技能位于该专用条上，因此启用此选项前，请先将它们移动到其他动作条上。启用此选项后，动作条1上的长按重复施法将被关闭。"
 
 -- == 姓名版 (Nameplates) =====================================================
 --标题
@@ -2135,9 +2139,13 @@ L["Unit Frame"] = "单位框架"
 L["Main Frames Buffs & Debuffs"] = "主框架增益与减益"
 L["Boss Frames Buffs & Debuffs"] = "首领框架增益与减益"
 L["Always Show Pet Frame"] = "始终显示宠物框架"
+L["Elite/Rare Indicator"] = "精英/稀有指示器"
+L["Show in Instances"] = "在副本中显示"
+L["Elite Icon Size"] = "精英图标大小"
+L["Elite/Rare Indicator Settings"] = "精英/稀有指示器设置"
 
 
---鼠标提示 (tooltip)
+--单位框架鼠标提示 (tooltip)
 L["Apply Absorb Style to all Frames"] = "将吸收样式应用于所有框架"
 L["Apply Art Style to all Frames"] = "将艺术风格应用于所有框架"
 L["Apply Bar Background to all Frames"] = "将条背景应用于所有框架"
@@ -2283,7 +2291,7 @@ L["Show the unit's tooltip when hovering the frame itself."] = "悬停框架本�
 L["Show aura tooltips when hovering buff and debuff icons on all unit frames except boss frames."] = "悬停除首领框架外的所有单位框架上的增益和减益图标时显示光环提示框。"
 L["Show aura tooltips when hovering buff and debuff icons on boss frames."] = "悬停首领框架上的增益和减益图标时显示光环提示框。"
 L["Show the pet frame whenever you have a pet, ignoring the Player frame's visibility settings."] = "无论何时拥有宠物时都显示宠物框架，忽略玩家框架的可见性设置。"
-
+L["Shows the nameplate-style dragon badge on elite, rare elite, and rare targets."] = "在精英、稀有精英和稀有目标上显示姓名板风格的龙形徽章。"
 
 -- == 团队框架 (RaidFrames) ==================================================
 --标题
@@ -2876,7 +2884,9 @@ L["When you are solo, center the player frame on the party frame instead of anch
 L["When you are solo, center the player frame on the party frame instead of anchoring it at the top."] = "当您单人时，将玩家框架在小队框架上居中，而不是锚定在顶部。"
 L["Widens or narrows the boss frames relative to the raid frame size."] = "相对于团队框架大小加宽或收窄首领框架。"
 L["Widens or narrows the extra frames relative to the raid frame size."] = "相对于团队框架大小加宽或收窄额外框架。"
-
+L["Visibility When Missing"] = "缺失时的可见性"
+L["Desaturated"] = "去饱和"
+L["Hidden (Shift Icons)"] = "隐藏（Shift图标）"
 
 -- == 冷却管理器 (CooldownManager) =============================================
 --标题
@@ -4215,6 +4225,12 @@ L["Cataclysm\n(Cursor)"] = "大灾变\n(指向)"
 L["Pummel\n(Focus)"] = "拳击\n(焦点)"
 L["Intervene\n(Focus)"] = "援护\n(焦点)"
 L["Heroic Leap\n(Cursor)"] = "英勇跳跃\n(指向)"
+L["Menu Grow Direction"] = "菜单增长方向"
+L["Down Right"] = "右下"
+L["Up Right"] = "右上"
+L["Down Left"] = "左下"
+L["Up Left"] = "左上"
+
 
 -- 体验优化鼠标提示 (QoL Tooltip)
 L["Adds a 'Train All' button next to the Train button at profession trainers, allowing you to learn all available skills with one click."] = "在专业训练师处的训练按钮旁添加“全部训练”按钮，让您一键学习所有可用技能。"
@@ -4312,6 +4328,8 @@ L["Raid Tools cannot be toggled by slash command in combat -- use the keybind."]
 L["In-game countdown unavailable in combat; the boss mod pull timer still started."] = "战斗中无法使用游戏内倒计时；首领模组的开怪倒计时仍已启动。"
 L["Always show the crosshair."] = "始终显示准星。"
 L["Disable Class Color to pick a custom color."] = "禁用职业颜色以选择自定义颜色。"
+L["Which way the windows extend from the collapsed icon when they open."] = "窗口从折叠图标展开时的延伸方向。"
+
 
 -- == 暴雪界面增强 (BlizzardSkin) ================================================
 --标题
@@ -4611,6 +4629,9 @@ L["Removing third-party addon skins requires a UI reload."] = "移除第三方�
 L["Show Icon ID"] = "显示图标ID"
 L["Show Item ID"] = "显示物品ID"
 L["Cursor Tooltip Position"] = "光标提示框位置"
+L["Toast Scale"] = "通知缩放"
+L["Gold Toast Strip"] = "金币通知条"
+
 
 -- 暴雪界面增强鼠标提示 (BlizzardSkin Tooltip)
 L["Appends the spell or item ID to tooltips. The same setting as Global Settings > Developer."] = "在提示中附加法术或物品 ID。与全局设置 > 开发者中的设置相同。"
@@ -4705,6 +4726,9 @@ L["Adds a strip down the left edge of a loot toast in the item's quality color. 
 L["Adds a Targeting line showing who the hovered player or NPC is targeting, in green when it's you."] = "添加一行目标信息，显示鼠标悬停的玩家或 NPC 正在指向谁（若目标是你则显示为绿色）。"
 L["Adds the mount a player is riding to their tooltip, with a green check if you own it or a red X if you don't."] = "在玩家提示框中显示其当前骑乘坐骑的信息，若你拥有该坐骑则显示绿色对勾，否则显示红色叉号。"
 L["Makes the game tooltip follow your mouse cursor instead of showing at its fixed screen position (drag the Tooltip box in Unlock Mode to change that). Use the arrows icon to pick the position relative to the cursor and fine-tune the X/Y offset."] = "使游戏提示框跟随鼠标光标，而不是显示在固定的屏幕位置（可在解锁模式下拖动提示框来更改）。使用箭头图标选择相对于光标的位置，并微调X/Y偏移量。"
+L["Also show the strip on gold toasts, in the header's gold color. Gold has no rarity to signal, so this is off by default."] = "也在金币通知上显示此条，使用标题的金色。金币没有稀有度可标识，因此默认关闭。"
+L["Scales the loot and gold toasts."] = "缩放拾取和金币通知。"
+
 
 -- == 好友列表 (Friends) =======================================================
 --主要
@@ -5228,7 +5252,6 @@ L["Mouseover Icons"] = "悬停图标"
 L["New Window"] = "新建窗口"
 L["No death recap available"] = "无死亡回顾可用"
 L["Overall"] = "总体"
-L["Overall "] = "总体 "
 L["Refresh Rate"] = "刷新率"
 L["Reset Data"] = "重置数据"
 L["Reset Data Keybind"] = "重置数据快捷键"
@@ -5318,7 +5341,8 @@ L["Include Icon in Bar Border"] = "在条边框中包含图标"
 L["Above Hovered Row"] = "悬停行上方"
 L["Left of Window"] = "窗口左侧"
 L["Right of Window"] = "窗口右侧"
-
+L["Hide in Delves"] = "在地下堡中隐藏"
+L["Hide in PvP"] = "在PvP中隐藏"
 
 -- 伤害统计鼠标提示 (DamageMeters Tooltip)
 L["Set your window to this Meter Type on dungeon start"] = "在地下城开始时将窗口设为此统计类型"
@@ -6442,10 +6466,13 @@ L["Raid Finder Boss Kill"] = "团队查找器首领击杀"
 L["Mythic 0 Completion"] = "史诗 0 层完成"
 L["Auto Celebration Duration"] = "自动庆祝持续时间"
 L["Random Celebrations Minimum Cooldown"] = "随机庆祝最小冷却时间"
+L["Spin"] = "旋转"
+L["Spinning Action Bars"] = "旋转动作条"
 
 --派对模式鼠标指向
 L["at least one Celebration Trigger"] = "至少一个庆祝触发器"
 L["the Randomly trigger"] = "随机触发"
+L["Slowly orbits your action bar buttons around each bar's centre while Party Mode is active. The buttons stay upright, so clicking, cooldowns and keybinds are unaffected. Pauses in combat, where moving a button is blocked."] = "在派对模式激活时，缓慢地围绕每个动作条的中心旋转动作条按钮。按钮保持直立，因此点击、冷却和按键绑定不受影响。在战斗中暂停，因为移动按钮会被阻止。"
 
 -- == Restored entries ====================================================
 -- The 8.5.2 retranslation (PR #888) dropped these keys; 109 are still live
