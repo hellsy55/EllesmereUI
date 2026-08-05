@@ -4372,6 +4372,12 @@ local function SkinChatFrame(cf)
     -- Restyle Blizzard's resize button to align with our bg (all chat frames).
     local resizeBtn = _G[name .. "ResizeButton"]
     if resizeBtn then
+        -- DEFERRED, for the same reason the panel placement is (see
+        -- PositionChatPanel). This runs from the skin pass, which fires while
+        -- a temp whisper window is being opened, and re-anchoring this button
+        -- resolves geometry against the chat frame -- inside Blizzard's dock
+        -- pass, which then runs tainted. One tick later it is outside it.
+        C_Timer.After(0, function()
         resizeBtn:SetSize(18, 18)
         resizeBtn:ClearAllPoints()
         -- Anchored to the CHAT FRAME, never to our panel.
@@ -4400,6 +4406,7 @@ local function SkinChatFrame(cf)
         resizeBtn:SetAlpha(0.2)
         resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
         resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
+        end)
     end
 
     -- Custom resize grip removed: Blizzard is sole authority for chat sizing.
