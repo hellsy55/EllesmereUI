@@ -4753,8 +4753,15 @@ initFrame:SetScript("OnEvent", function(self)
                 if shown ~= lastShown[i] then
                     lastShown[i] = shown
                     dirty = true
-                    if shown and cf and not _skinned[cf] then needSkin = true end
                 end
+                -- Skin on EXISTENCE, not on becoming shown. A new whisper
+                -- window is docked but not selected, so its frame stays
+                -- hidden while its TAB is already on the dock -- waiting for
+                -- shown left that tab unskinned until the user clicked it.
+                -- Still safe: this ticker never runs inside
+                -- FCF_OpenTemporaryWindow, which is the window that must stay
+                -- untouched (see PositionChatPanel).
+                if cf and not _skinned[cf] then needSkin = true end
             end
             if needSkin then SkinPass() end
             if dirty then
