@@ -6565,6 +6565,57 @@ local function RefreshFocusCastProxyUnit()
     _focusCastProxy:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", unit)
 end
 ns.RefreshFocusCastProxyUnit = RefreshFocusCastProxyUnit
+
+function ns.IsSpellInPlayerBook(id)
+    if IsPlayerSpell and IsPlayerSpell(id) then return true end
+    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+        and C_SpellBook.IsSpellKnownOrInSpellBook(id) then
+        return true
+    end
+    return false
+end
+
+-- Returns the id of the stored interrupt in the form this character can
+-- actually cast, or nil.
+--
+-- Validate on READ and never write: focusKickInterruptSpellID is profile-level
+-- while the spellbook behind it is per-spec, so the id stays correct for the
+-- spec that set it. Clearing it here would destroy that spec's setting the
+-- first time the player logged in on another one.
+--
+-- Asks the SPELLBOOK, never a class/spec table. Which specs carry an interrupt
+-- is Blizzard's to change, and a hardcoded list of that goes stale on a patch.
+-- Pet-bank interrupts (a Warlock's Axe Toss, a Hunter's pet kick) are
+-- legitimate picks that IsPlayerSpell cannot see, so check both banks.
+--
+-- Returning the resolved id rather than a boolean is the point: the caller
+-- feeds it to a cooldown check, and a talent swap moves an interrupt between
+-- its base and override forms while the stored id stays put. Answering "yes,
+-- known" but leaving the caller holding the un-castable form would put an id
+-- that is never on cooldown into the readiness gate.
+function ns.ResolveCastableInterrupt(sid)
+    if type(sid) ~= "number" or sid <= 0 then return nil end
+    local knownInBook = ns.IsSpellInPlayerBook
+    if knownInBook(sid) then return sid end
+    -- Talented into a replacement, stored id is the base form.
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        local ovr = C_SpellBook.FindSpellOverrideByID(sid)
+        if ovr and ovr > 0 and ovr ~= sid and knownInBook(ovr) then return ovr end
+    end
+    -- Talented back out, stored id is the replacement form.
+    if C_Spell and C_Spell.GetBaseSpell then
+        local base = C_Spell.GetBaseSpell(sid)
+        if base and base > 0 and base ~= sid and knownInBook(base) then return base end
+    end
+    -- Pet bank last: it has no override/base indirection to walk.
+    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+        and Enum and Enum.SpellBookSpellBank
+        and C_SpellBook.IsSpellKnownOrInSpellBook(sid, Enum.SpellBookSpellBank.Pet) then
+        return sid
+    end
+    return nil
+end
+
 local function EnsureFocusCastProxy()
     if _focusCastProxy then
         -- Demand-gate re-activation: re-register (idempotent; re-applying
@@ -6584,16 +6635,40 @@ local function EnsureFocusCastProxy()
         local soundKey = bd.focusCastSoundKey or "none"
         if soundKey == "none" then return end
         local spellID = bd.focusKickInterruptSpellID
+        -- An explicit pick is only trusted while this character can cast it.
+        -- A stale profile-level id sails through the cooldown gate below
+        -- forever -- a spell you do not know is never on cooldown -- so a Holy
+        -- Paladin inheriting a Ret Paladin's Rebuke would be pinged for every
+        -- focus cast to interrupt something they have no interrupt for.
+        --
+        -- Deliberately checked HERE and not at arming time: arming runs during
+        -- loading screens, when the spellbook reads empty for reasons that have
+        -- nothing to do with the player's spec, and folding "not loaded yet"
+        -- into "cannot cast it" is what silently unregistered a working proxy
+        -- in the first place. This handler only runs on a live cast, by which
+        -- point the spellbook is settled.
+        if spellID then spellID = ns.ResolveCastableInterrupt(spellID) end
         -- Auto-fallback: if user hasn't explicitly picked a spell, use the
-        -- first positive spell on the bar. The picker exists for users who
-        -- want a specific spell when multiple are on the bar.
+        -- first CASTABLE positive spell on the bar. The picker exists for users
+        -- who want a specific spell when multiple are on the bar.
+        --
+        -- The bar's own list needs the same check as the explicit pick, not
+        -- because it crosses specs (assignedSpells is per-spec) but because it
+        -- can hold spells this spec no longer has: importing a shared profile
+        -- with "Include CDM Spell Layout" writes another character's layout
+        -- into these spec keys wholesale, and talent changes strand entries the
+        -- same way. Whichever list supplies the id, an interrupt this character
+        -- cannot cast reads as permanently ready to the cooldown gate below.
         if not spellID or spellID <= 0 then
             local sd = ns.GetBarSpellData and ns.GetBarSpellData(FOCUSKICK_BAR_KEY)
             if sd and sd.assignedSpells then
                 for _, sid in ipairs(sd.assignedSpells) do
                     if type(sid) == "number" and sid > 0 then
-                        spellID = sid
-                        break
+                        local castable = ns.ResolveCastableInterrupt(sid)
+                        if castable then
+                            spellID = castable
+                            break
+                        end
                     end
                 end
             end
