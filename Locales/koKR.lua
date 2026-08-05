@@ -4466,6 +4466,10 @@ L["Turns off ALL window skinning for this profile. Requires a reload."] = "이 �
 L["The Social window frame, border, title bar, Battle.net bar, search boxes, filter dropdowns and buttons. List contents and the side tab icons stay untouched."] = "소셜 창의 프레임, 테두리, 제목 표시줄, 배틀넷 바, 검색창, 필터 드롭다운 및 버튼입니다. 목록 내용과 측면 탭 아이콘은 변경되지 않습니다."
 L["Adds a strip down the left edge of a loot toast in the item's quality color. The flat skin drops Blizzard's quality ring around the icon, so this puts that rarity cue back."] = "전리품 획득 알림의 왼쪽 가장자리에 아이템 등급 색상의 띠를 추가합니다. 단색 스킨은 아이콘 주변의 블리자드 기본 등급 테두리를 제거하므로, 이 기능으로 희귀도 표시를 다시 활성화합니다."
 -- 2026-07-27 업뎃분 (기본 UI 개선: 아이템 강화/전리품 창/전리품 팝업 모듈)
+L["Also show the strip on gold toasts, in the header's gold color. Gold has no rarity to signal, so this is off by default."] = "골드 획득 알림창에도 헤더의 골드 색상으로 테두리 선을 표시합니다. 골드는 등급(희귀도)이 없기 때문에 이 기능은 기본적으로 비활성화되어 있습니다."
+L["Gold Toast Strip"] = "골드 알림창 테두리 선"
+L["Toast Scale"] = "알림창 크기 비율"
+L["Scales the loot and gold toasts."] = "전리품 및 골드 획득 알림창의 크기를 조절합니다."
 L["Item Upgrades"] = "아이템 강화"
 L["The item upgrade window: upgrade slot, track selector, cost, and the currency strip."] = "아이템 강화 창: 강화 슬롯, 단계 선택기, 비용, 화폐 띠."
 L["Changing the Item Upgrades reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles."] = "아이템 강화 모양 변경은 블리자드와 Ellesmere 모양을 완전히 전환하려면 UI 리로드가 필요합니다."
