@@ -9396,35 +9396,15 @@ end
 -- plain base top-left -- identical behavior for no-override profiles.
 -- Per-tier offset for an ANCHORED container.
 --
--- The anchor owns the container's base position, so the tier offset is applied
--- as a delta on top of it: read the point the anchor just set, subtract the
--- offset we added last time, add the offset this tier wants. Re-running is
--- therefore idempotent, and an anchor pass that repositions the container
--- (which drops our delta) is corrected by the post-apply hook below.
-local _rfAnchoredOffset = { x = 0, y = 0 }
-ns._RFApplyAnchoredTierOffset = function()
-    if not containerFrame or InCombatLockdown() then return end
-    local point, rel, relPoint, cx, cy = containerFrame:GetPoint(1)
-    if not point or not cx then return end
+-- While anchored, the unlock anchor system owns the container's position, so
+-- the tier offset is contributed to the position IT computes rather than
+-- applied on top afterwards. Applying it afterwards would sit outside the
+-- anchor's idempotent guard, which would then never be satisfied and would
+-- reposition on every pass forever.
+EllesmereUI._anchorExtraOffset = EllesmereUI._anchorExtraOffset or {}
+EllesmereUI._anchorExtraOffset["RF_RaidFrames"] = function()
     local _, ov = ns._RFResolveTierOverride(ns._GetEffectiveRaidSize())
-    local ox = (ov and ov.offsetX) or 0
-    local oy = (ov and ov.offsetY) or 0
-    local dx = ox - _rfAnchoredOffset.x
-    local dy = oy - _rfAnchoredOffset.y
-    if dx == 0 and dy == 0 then return end
-    _rfAnchoredOffset.x, _rfAnchoredOffset.y = ox, oy
-    containerFrame:ClearAllPoints()
-    containerFrame:SetPoint(point, rel, relPoint, PixelSnap(cx + dx), PixelSnap(cy + dy))
-end
-
--- The anchor system re-places the container on its own schedule (target moved,
--- resized, login settle). Each of those passes writes the anchor's own
--- coordinates and so drops our delta, which is why the offset has to be
--- re-applied from here rather than only on roster/tier changes.
-EllesmereUI._anchorPostApply = EllesmereUI._anchorPostApply or {}
-EllesmereUI._anchorPostApply["RF_RaidFrames"] = function()
-    _rfAnchoredOffset.x, _rfAnchoredOffset.y = 0, 0
-    ns._RFApplyAnchoredTierOffset()
+    return (ov and ov.offsetX) or 0, (ov and ov.offsetY) or 0
 end
 
 ns._ApplyTierOffset = function()
@@ -9439,7 +9419,12 @@ ns._ApplyTierOffset = function()
     -- anyone who anchored the raid frames to another element -- the setting
     -- was saved, shown in the options, and did nothing.
     if EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("RF_RaidFrames") then
-        ns._RFApplyAnchoredTierOffset()
+        -- The anchor owns the position and now folds the tier offset into it
+        -- (see _anchorExtraOffset above), so a tier change just needs the
+        -- anchor re-run; moving the container from here would fight it.
+        if EllesmereUI.ReapplyUnlockAnchor then
+            EllesmereUI.ReapplyUnlockAnchor("RF_RaidFrames")
+        end
         return
     end
     local s = db.profile

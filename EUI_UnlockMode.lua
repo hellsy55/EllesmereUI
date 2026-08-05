@@ -2830,6 +2830,21 @@ EllesmereUI._unlockCaptureGrowPin = function(childKey, ai, side)
     return true
 end
 
+-- An anchored element's position is owned by ApplyAnchorPosition, which
+-- leaves an element with its own positional contribution (RaidFrames' per-tier
+-- offset) nowhere to apply it. Registering a getter here lets that
+-- contribution be folded into the position this function computes, rather
+-- than corrected afterwards -- which would defeat the idempotent guard below
+-- and leave the anchor repositioning on every pass forever.
+local function ExtraAnchorOffset(childKey)
+    local t = EllesmereUI._anchorExtraOffset
+    local fn = t and t[childKey]
+    if not fn then return 0, 0 end
+    local ok, dx, dy = pcall(fn, childKey)
+    if not ok or type(dx) ~= "number" or type(dy) ~= "number" then return 0, 0 end
+    return dx, dy
+end
+
 ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCascade)
     local childBar = GetBarFrame(childKey)
     local targetBar = GetBarFrame(targetKey)
@@ -3380,6 +3395,12 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
                         or PPa.SnapForES(bEdgeX, cS)
                 end
             end
+            -- Element-contributed offset (RaidFrames' per-tier offset).
+            -- Folded in BEFORE the idempotent guard below, so the guard still
+            -- converges: the offset is part of the position this function is
+            -- aiming for, not a correction applied after it settles.
+            local exDX, exDY = ExtraAnchorOffset(childKey)
+            bEdgeX, bEdgeY = bEdgeX + exDX, bEdgeY + exDY
             local skip = false
             local okPt, point, relTo, relPoint, curX, curY = pcall(childBar.GetPoint, childBar, 1)
             if okPt and point == cdmEdgeAnchor and relPoint == "CENTER" and relTo == UIParent then
@@ -3425,6 +3446,8 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
                 bCenterX = PPa.SnapCenterForDim(bCenterX, childW, cS)
                 bCenterY = PPa.SnapCenterForDim(bCenterY, childH, cS)
             end
+            local exCX, exCY = ExtraAnchorOffset(childKey)
+            bCenterX, bCenterY = bCenterX + exCX, bCenterY + exCY
             -- Idempotent guard: if the bar is already at this exact position
             -- (within sub-physical-pixel tolerance), skip the SetPoint. This
             -- eliminates visible flicker when multiple cascade passes compute
@@ -3532,13 +3555,6 @@ ApplyAnchorPosition = function(childKey, targetKey, side, noMark, noMove, fromCa
         end
     end
     if not noMark then hasChanges = true end
-    -- Post-apply hook. An anchored element's position is owned by this
-    -- function, so an addon that also has something to add to that position
-    -- (RaidFrames' per-tier offset) has no safe moment to apply it: every
-    -- anchor pass would overwrite it. Registering here gives it one, and the
-    -- callback runs after the child is fully placed.
-    local post = EllesmereUI._anchorPostApply and EllesmereUI._anchorPostApply[childKey]
-    if post then post(childKey, targetKey, side) end
 end
 
 -- Re-apply all saved anchor positions (called on open and after target moves)
@@ -4423,6 +4439,16 @@ function EllesmereUI.IsUnlockAnchored(unlockKey)
     local adb = GetAnchorDB()
     local ai = adb and adb[unlockKey]
     return ai and ai.target and true or false
+end
+
+-- Re-run an element's anchor. For an element whose own state feeds the anchored
+-- position (see _anchorExtraOffset), a change in that state has to be pushed
+-- through the anchor rather than applied to the frame directly.
+function EllesmereUI.ReapplyUnlockAnchor(unlockKey)
+    local adb = GetAnchorDB()
+    local ai = adb and adb[unlockKey]
+    if not (ai and ai.target) then return end
+    ApplyAnchorPosition(unlockKey, ai.target, ai.side)
 end
 
 
