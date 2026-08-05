@@ -4390,34 +4390,34 @@ local function SkinChatFrame(cf)
         -- resolves geometry against the chat frame -- inside Blizzard's dock
         -- pass, which then runs tainted. One tick later it is outside it.
         C_Timer.After(0, function()
-        resizeBtn:SetSize(18, 18)
-        resizeBtn:ClearAllPoints()
-        -- Anchored to the CHAT FRAME, never to our panel.
-        --
-        -- Blizzard anchors the chat frame's own ScrollBar to this button
-        -- (FCF_UpdateScrollbarAnchors), so pointing it at our panel pulls an
-        -- addon frame into Blizzard's chat layout chain. Edit Mode then could
-        -- not commit a move of the chat frame: the drag released with the
-        -- frame unanchored, UpdateSystemAnchorInfo read no point, and wrote a
-        -- nil one back -- chat could be neither moved nor resized. The
-        -- existing note here already warned that anchoring to our bg "would
-        -- be an anchor cycle"; it was true for ChatFrame1 as well.
-        resizeBtn:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", -2, 2)
-        resizeBtn:SetFrameStrata("HIGH")
-        if resizeBtn.GetRegions then
-            for ri = 1, select("#", resizeBtn:GetRegions()) do
-                local region = select(ri, resizeBtn:GetRegions())
-                if region and region:IsObjectType("Texture") then
-                    region:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
-                    region:SetDesaturated(true)
-                    region:SetVertexColor(1, 1, 1)
-                    region:SetAllPoints()
+            resizeBtn:SetSize(18, 18)
+            resizeBtn:ClearAllPoints()
+            -- Anchored to the CHAT FRAME, never to our panel.
+            --
+            -- Blizzard anchors the chat frame's own ScrollBar to this button
+            -- (FCF_UpdateScrollbarAnchors), so pointing it at our panel pulls an
+            -- addon frame into Blizzard's chat layout chain. Edit Mode then could
+            -- not commit a move of the chat frame: the drag released with the
+            -- frame unanchored, UpdateSystemAnchorInfo read no point, and wrote a
+            -- nil one back -- chat could be neither moved nor resized. The
+            -- existing note here already warned that anchoring to our bg "would
+            -- be an anchor cycle"; it was true for ChatFrame1 as well.
+            resizeBtn:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", -2, 2)
+            resizeBtn:SetFrameStrata("HIGH")
+            if resizeBtn.GetRegions then
+                for ri = 1, select("#", resizeBtn:GetRegions()) do
+                    local region = select(ri, resizeBtn:GetRegions())
+                    if region and region:IsObjectType("Texture") then
+                        region:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png")
+                        region:SetDesaturated(true)
+                        region:SetVertexColor(1, 1, 1)
+                        region:SetAllPoints()
+                    end
                 end
             end
-        end
-        resizeBtn:SetAlpha(0.2)
-        resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-        resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
+            resizeBtn:SetAlpha(0.2)
+            resizeBtn:HookScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            resizeBtn:HookScript("OnLeave", function(self) self:SetAlpha(0.2) end)
         end)
     end
 
