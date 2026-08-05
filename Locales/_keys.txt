@@ -5,6 +5,7 @@
 # the complete runtime set.
  (Raid)
  (guild bank)
+ Enemy Forces
 %1$d Death  -%2$s
 %1$d Deaths  -%2$s
 %1$s (max %2$s)
@@ -242,6 +243,7 @@ Enable
 Enable hash lines first
 Enable/Disable Bar per Form
 Enable/Disable per Form
+Enemy Forces
 Enemy Name Text
 Enhance 5 Bar minimum is %d (if you want less just change 5 bar color)
 Enter a name for the new preset:
@@ -415,6 +417,7 @@ Overrides
 Overwrite Existing Settings
 Overwrite Window & Tooltip Settings?
 PER-SPELL OPTIONS
+PREVIEW
 Page
 Party Keystones
 Paste Interrupted

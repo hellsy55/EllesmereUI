@@ -482,7 +482,7 @@ local function FormatEnemyForcesText(enemyObj, formatId, compact)
     local rawTotal = enemyObj.rawTotalQuantity or enemyObj.totalQuantity or 100
     local percent = enemyObj.percent or enemyObj.quantity or 0
     local remaining = max(0, rawTotal - rawCurrent)
-    local suffix = compact and "" or " Enemy Forces"
+    local suffix = compact and "" or EllesmereUI.L(" Enemy Forces")
 
     if formatId == "COUNT" then
         return format("%d/%d%s", RoundToInt(rawCurrent), RoundToInt(rawTotal), suffix)
@@ -896,6 +896,24 @@ local PREVIEW_RUN = {
         { name = "Enemy Forces",            completed = false, elapsed = 0,    quantity = 78.42, totalQuantity = 100, rawQuantity = 188, rawTotalQuantity = 240, percent = 78.42, isWeighted = true },
     },
 }
+
+-- The preview is a hardcoded dummy run, so its dungeon and affix names would
+-- stay English on every client. Both carry an ID and the live-run path already
+-- resolves names from those same IDs, so do the same here. When an ID is not in
+-- the current season the API returns nil, so the hardcoded English falls back
+-- through L() instead.
+local function LocalizePreview()
+    local run = PREVIEW_RUN
+    if C_ChallengeMode and C_ChallengeMode.GetMapUIInfo then
+        run.mapName = C_ChallengeMode.GetMapUIInfo(run.mapID) or EllesmereUI.L(run.mapName)
+    end
+    if run._previewAffixIDs and C_ChallengeMode and C_ChallengeMode.GetAffixInfo then
+        for i, id in ipairs(run._previewAffixIDs) do
+            local name = C_ChallengeMode.GetAffixInfo(id)
+            run._previewAffixNames[i] = name or EllesmereUI.L(run._previewAffixNames[i])
+        end
+    end
+end
 
 _G._EMT_Apply = function()
     -- Render before CENTER re-apply so height is known (placeholder is 200px).
@@ -1426,6 +1444,7 @@ local function RenderStandalone()
     if not run.active and not run.completed then
         if p.showPreview or unlockLayoutActive then
             run = PREVIEW_RUN
+            LocalizePreview()
             isPreview = true
         else
             if standaloneFrame then standaloneFrame:Hide() end
@@ -1915,7 +1934,7 @@ local function RenderStandalone()
         elseif hideLabel then
             label = ""
         else
-            label = "Enemy Forces"
+            label = EllesmereUI.L("Enemy Forces")
         end
 
         local enemyTextSize = p.enemyForcesTextSize or p.objectivesSize or 12
@@ -2422,6 +2441,8 @@ local function RenderStandalone()
                 ApplyShadow(timeFS)
 
                 local displayName = StripDefeated(obj.name) or ("Objective " .. i)
+                -- Preview only: a real run gets its objective names from the game.
+                if isPreview then displayName = EllesmereUI.L(displayName) end
                 if obj.totalQuantity and obj.totalQuantity > 1 then
                     displayName = format("%d/%d %s", obj.quantity or 0, obj.totalQuantity, displayName)
                 end
@@ -2537,7 +2558,7 @@ local function RenderStandalone()
     if isPreview and p.showPreview then
         SetFS(f._previewFS, 8)
         f._previewFS:SetTextColor(0.5, 0.5, 0.5, 0.6)
-        f._previewFS:SetText("PREVIEW")
+        f._previewFS:SetText(EllesmereUI.L("PREVIEW"))
         f._previewFS:ClearAllPoints()
         f._previewFS:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PAD, 4)
         f._previewFS:Show()
