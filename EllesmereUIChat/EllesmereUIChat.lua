@@ -5468,14 +5468,18 @@ initFrame:SetScript("OnEvent", function(self)
         end)
     end
     ---------------------------------------------------------------------------
-    --  10. Reparent ChatFrame1 to our own container
-    --      Breaks it out of Blizzard's Edit Mode hierarchy so we can call
-    --      SetSize without tainting. Hides Edit Mode overlay + resize button.
+    --  10. ChatFrame1 stays a UIParent child, in Blizzard's Edit Mode
+    --      hierarchy.
+    --
+    --      It used to be reparented onto a container of ours to "break it
+    --      out of Edit Mode". Edit Mode does not let go: on drag stop it
+    --      re-derives the frame's anchor (EditModeManager UpdateSystemAnchorInfo),
+    --      and its no-relativeTo path assumes a UIParent child. Off that
+    --      hierarchy the derived anchor came back nil and was written back,
+    --      so ChatFrame1:SetPoint() threw and the frame was left with no
+    --      anchor points at all -- after which it could be neither moved nor
+    --      resized in Edit Mode.
     ---------------------------------------------------------------------------
-    local chatContainer = CreateFrame("Frame", nil, UIParent)
-    chatContainer:SetAllPoints(UIParent)
-    chatContainer:EnableMouse(false)
-    ChatFrame1:SetParent(chatContainer)
     -- Edit Mode's own Selection overlay and resize handle are LEFT ALONE.
     -- They used to be parented onto a hidden frame to keep them out of the
     -- way, but Edit Mode keeps driving them: the resize handle is what you
