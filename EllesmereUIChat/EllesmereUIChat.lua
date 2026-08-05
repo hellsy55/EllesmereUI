@@ -3531,10 +3531,22 @@ function ECHAT.ApplyTabLayout()
                 -- record above (2893).
                 if not (issecretvalue and (issecretvalue(pt) or issecretvalue(relPt)
                         or issecretvalue(x) or issecretvalue(y)))
-                    and pt == "LEFT" and relPt == "LEFT" and y and y ~= 0 then
+                    and pt == "LEFT" and relPt == "LEFT"
+                    and CFD(tab).seatX ~= x then
+                    -- Nudge x only. This used to rewrite y to 0 as well, which
+                    -- lifted dynamic whisper tabs one pixel above the permanent
+                    -- tabs (those never pass through here, so they keep the
+                    -- seat Blizzard gave them) -- visible as a whisper tab
+                    -- whose label floats above the rest of the row.
+                    -- Idempotent by remembering the x we wrote: the next pass
+                    -- reads that same x back and skips, but if Blizzard
+                    -- re-anchors the tab (pool reuse for a new conversation)
+                    -- x differs again and the nudge re-applies.
                     local es = tab:GetEffectiveScale()
                     local onePhys = PP and PP.SnapForES and PP.SnapForES(1, es) or 1
-                    tab:SetPoint(pt, rel, relPt, (x or 0) + onePhys, 0)
+                    local newX = (x or 0) + onePhys
+                    CFD(tab).seatX = newX
+                    tab:SetPoint(pt, rel, relPt, newX, y or 0)
                 end
             end
         end
