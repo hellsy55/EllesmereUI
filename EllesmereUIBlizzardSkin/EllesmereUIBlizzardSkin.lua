@@ -401,6 +401,17 @@ end
         if not UnitExists(unit) or not UnitIsPlayer(unit) then return nil end
         if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
         if not (C_MountJournal and C_MountJournal.GetMountFromSpell) then return nil end
+        -- In combat, aura data can be a Secret Value and GetAuraDataByIndex
+        -- hard-errors for tainted callers instead of returning nil -- unlike
+        -- every other guard in this function, checking issecretvalue() on the
+        -- result comes too late here. This is a cosmetic tooltip addition, so
+        -- skip it outright rather than risk the taint error. Protected
+        -- instances (active M+ key, rated PvP) keep secret-value restrictions
+        -- in force between pulls too, so the combat check alone is not enough.
+        if InCombatLockdown()
+            or (EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance()) then
+            return nil
+        end
 
         for i = 1, 255 do
             local aura = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
