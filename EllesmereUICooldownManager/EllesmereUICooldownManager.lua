@@ -241,7 +241,6 @@ local StartNativeGlow, StopNativeGlow
 -- Keybind cache: built once out-of-combat, looked up per tick
 local _cdmKeybindCache       = {}   -- [spellID] -> formatted key string
 local _cdmKeybindFromMacro   = {}   -- [key] -> true if the cached bind came from a macro
-local _cdmSlotBinding        = {}   -- [actionSlot] -> binding command name (press mirror)
 local _keybindCacheReady     = false  -- true after first successful build
 local _keybindDebounceTimer  = nil   -- cancellable timer for debounced keybind updates
 
@@ -7582,7 +7581,6 @@ end
 local function RebuildKeybindCache()
     wipe(_cdmKeybindCache)
     wipe(_cdmKeybindFromMacro)
-    wipe(_cdmSlotBinding)
     for _, def in ipairs(_barBindingDefs) do
         for i = 1, 12 do
             local bindName = def.prefix .. i
@@ -7608,13 +7606,6 @@ local function RebuildKeybindCache()
                     end
                     slot = i + (pg - 1) * 12
                 end
-                -- Reverse map for the press mirror, which starts from a button
-                -- (so a slot) and needs the binding back to poll IsKeyDown for
-                -- the release. Built here rather than separately so it shares
-                -- this loop's page resolution and priority order and cannot
-                -- drift from the keybind cache. First writer wins, same as
-                -- _SetKeybind: the more specific bar is listed first.
-                if _cdmSlotBinding[slot] == nil then _cdmSlotBinding[slot] = bindName end
                 local slotType, id, subType = GetActionInfo(slot)
                 local spellID
                 local fromMacro = false
@@ -7750,8 +7741,6 @@ ns.UpdateCDMKeybinds = UpdateCDMKeybinds
 -- Expose apply-only for the tick loop (new spellID assigned to an icon mid-session)
 ns.ApplyCachedKeybinds = ApplyCachedKeybinds
 ns.CDMKeybindCache = _cdmKeybindCache
--- [actionSlot] -> binding command, for the press mirror in EllesmereUICdmHooks
-ns.CDMSlotBinding = _cdmSlotBinding
 
 BuildAllCDMBars = function()
     ns._spellOrderDirty = true  -- force spell order cache rebuild

@@ -8995,28 +8995,23 @@ do
     --  spell-targets-item path). Same taint posture as the native hooks below,
     --  which likewise run after TryUseActionButton has fully returned.
     ---------------------------------------------------------------------------
-    _G._EUI_OnActionButtonPress = function(btn, down)
+    _G._EUI_OnActionButtonPress = function(btn, down, bindCmd)
         -- Paint at the physical press, not the release: buttons register for
         -- both edges, and in key-up mode the key is already gone by the up
-        -- click, which the IsKeyDown gate below would then read as a mouse
-        -- click.
-        if not down or not btn or not _anyPressMirror then return end
-        -- tonumber, not the raw attr: SetAttribute preserves whatever type was
-        -- written, and the slot map is keyed numerically, so a string "13"
-        -- would miss every lookup without erroring.
-        local slot = tonumber(btn.action or (btn.GetAttribute and btn:GetAttribute("action")))
-        if not slot then return end
-        local map = ns.CDMSlotBinding
-        local bindCmd = map and map[slot]
-        if not bindCmd then return end
-        -- Keyboard only, matching the native path. A click-routed keybind and a
-        -- mouse click are indistinguishable by this point (Blizzard's own note
-        -- in SecureTemplates: an addon's key press and mouse click look the
-        -- same), so use the binding itself as the discriminator. On the down
-        -- edge a real keypress always still has the key held.
+        -- click, which the held-key test below would then misread.
+        if not down or not btn or not bindCmd or not _anyPressMirror then return end
+        -- Keyboard only, matching the native path. By PostClick a click-routed
+        -- keybind and a real mouse click are indistinguishable (Blizzard says
+        -- as much in SecureActionButton_OnClick), so this needs two tests, not
+        -- one. A held binding key proves keyboard, but cannot: mouse WHEEL
+        -- binds are never IsKeyDown, and gating on that alone would silently
+        -- drop every wheel-bound button, which the native path still mirrors.
+        -- The cursor-rect test covers those. Together they only miss a wheel
+        -- bind pressed while the cursor happens to rest on its own button.
         local k1, k2 = GetBindingKey(bindCmd)
         local b1, b2 = BaseKey(k1), BaseKey(k2)
-        if not ((b1 and IsKeyDown(b1)) or (b2 and IsKeyDown(b2))) then return end
+        local keyHeld = (b1 and IsKeyDown(b1)) or (b2 and IsKeyDown(b2))
+        if not keyHeld and btn.IsUnderMouse and btn:IsUnderMouse() then return end
         OnPress(btn, bindCmd)
     end
 

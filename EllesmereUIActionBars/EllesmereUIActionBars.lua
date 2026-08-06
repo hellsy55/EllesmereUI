@@ -2039,6 +2039,14 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- and HookScript stacks.
         if not EFD(btn).cdClickHooked then
             EFD(btn).cdClickHooked = true
+            -- The binding command this button answers to, captured once. It is
+            -- a property of the BUTTON, not of the slot it currently shows, so
+            -- it stays correct across every page swap. A subscriber deriving it
+            -- from the live action slot instead would be ambiguous exactly
+            -- where it matters: Bar 9 is action page 2, so its slots collide
+            -- with MainBar's whenever MainBar is paged there.
+            local pressBindCmd = BINDING_MAP[info.key]
+            pressBindCmd = pressBindCmd and (pressBindCmd .. index) or nil
             btn:HookScript("PostClick", function(self, _, down)
                 if ns._EABPressPush then ns._EABPressPush(self) end
                 -- Publish the press for other EUI modules (the CDM press
@@ -2049,7 +2057,7 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
                 -- rather than ns because the subscriber is a separate addon,
                 -- matching _EAB_UpdateKeybinds. Nil when that module is off.
                 local onPress = _G._EUI_OnActionButtonPress
-                if onPress then onPress(self, down) end
+                if onPress then onPress(self, down, pressBindCmd) end
             end)
         end
         -- When the pickup modifier is held (shift-click to move abilities),
