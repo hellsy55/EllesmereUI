@@ -5509,6 +5509,10 @@ local _scratch_spellOrder = {}  -- CD/utility: spellID -> sort index
 local _scratch_activeFrames = {}
 local _scratch_usedFrames = {}
 local _scratch_cdFrames = {}    -- CD/utility: barKey -> {frame, frame, ...}
+-- CD/utility frames that routed to one of our bars but whose spell could not be
+-- resolved this pass (see the collect loop). "Unknown", NOT "rejected": the
+-- Phase 4 sweep must leave these alone rather than park them offscreen.
+local _scratch_unresolved = {}
 
 local function _sortByLayoutIndex(a, b)
     return (a.layoutIndex or 0) < (b.layoutIndex or 0)
@@ -5568,8 +5572,10 @@ local function CollectAndReanchor()
 
     wipe(_scratch_usedFrames)
     wipe(_scratch_activeFrames)
+    wipe(_scratch_unresolved)
     local allActiveFrames = _scratch_activeFrames
     local usedFrames = _scratch_usedFrames
+    local unresolvedFrames = _scratch_unresolved
 
     -- Always Show Buffs: hide every placeholder up front; the routing path below
     -- re-shows only the placeholders it injects this pass, so stale ones (buff
@@ -5850,6 +5856,18 @@ local function CollectAndReanchor()
                                     fc.barKey = barKey
                                     fc.spellID = baseSID or displaySID
                                     fc.isHostedBuff = nil
+                                else
+                                    -- Routed to one of our bars, but the spell
+                                    -- would not resolve: GetCooldownViewerCooldownInfo
+                                    -- returns nil for a cooldownID while Blizzard is
+                                    -- mid-rebuild (zone-in, PvP talents activating,
+                                    -- a spec swap that just wiped the resolve memos).
+                                    -- This frame is OURS and merely unidentified, so
+                                    -- Phase 4 must not treat it like a deliberately
+                                    -- unrouted one and park it at -10000 -- that is
+                                    -- what empties the bars until a reload, since
+                                    -- nothing re-collects afterwards.
+                                    unresolvedFrames[frame] = true
                                 end
                             end
                         end
@@ -7203,9 +7221,21 @@ local function CollectAndReanchor()
     end
     local buffViewer = _G["BuffIconCooldownViewer"]
     local barViewer  = _G["BuffBarCooldownViewer"]
+    -- Only protect unresolved frames while the retry budget below still has
+    -- passes left. Once it is spent, a frame that still will not resolve is no
+    -- longer plausibly transient (a stale pool entry with a dead cooldownID),
+    -- and parking it is right again -- otherwise it would sit at Blizzard's own
+    -- Edit Mode position forever, which is the "CDM looks scrambled" face of
+    -- this bug rather than the "CDM is empty" one.
+    local protectUnresolved = (ns._cdmUnresolvedRetries or 0) < 3
     for frame in pairs(allActiveFrames) do
         if usedFrames[frame] then
             -- Claimed: leave alone
+        elseif unresolvedFrames[frame] and protectUnresolved then
+            -- Unknown, not rejected: identification failed this pass, so we
+            -- have no basis to park it. Leave it exactly as it is and let the
+            -- re-collect scheduled at the end of this function claim it once
+            -- the cooldown-viewer API answers again.
         elseif frame._isRacialFrame or frame._isTrinketFrame
                or frame._isPresetFrame or frame._isItemPresetFrame
                or frame._isCustomSpellFrame then
@@ -7419,6 +7449,29 @@ local function CollectAndReanchor()
         local pv = EllesmereUI._contentHeaderPreview
         if pv and pv.Update then pv:Update() end
     end
+    -- Frames we could not identify this pass were skipped by the Phase 4 sweep
+    -- and are still sitting wherever Blizzard left them. Re-collect shortly so
+    -- they claim as soon as the cooldown-viewer API answers again -- this is
+    -- what makes the recovery timing-independent instead of racing a fixed
+    -- delay against the loading screen. Bounded and self-resetting: a clean
+    -- pass restores the budget, and an id that never resolves falls back to the
+    -- park path above once the budget is spent, so this can never spin.
+    if next(unresolvedFrames) then
+        local tries = ns._cdmUnresolvedRetries or 0
+        if tries < 3 and not ns._cdmUnresolvedPending then
+            ns._cdmUnresolvedRetries = tries + 1
+            ns._cdmUnresolvedPending = true
+            -- Backoff 0.5s / 1.5s / 2.5s: covers a loading-screen settle
+            -- without a poll, since each retry is one queued reanchor.
+            C_Timer.After(0.5 + tries, function()
+                ns._cdmUnresolvedPending = nil
+                if ns.QueueReanchor then ns.QueueReanchor() end
+            end)
+        end
+    elseif ns._cdmUnresolvedRetries then
+        ns._cdmUnresolvedRetries = 0
+    end
+
     -- Claims just settled: retire the proc-alert child map so the next alert
     -- rebuilds it against the fresh claim set.
     if ns._cdmClaimGen then ns._cdmClaimGen = ns._cdmClaimGen + 1 end
