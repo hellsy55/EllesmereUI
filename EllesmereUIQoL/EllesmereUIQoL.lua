@@ -236,6 +236,18 @@ qolFrame:SetScript("OnEvent", function(self)
         local function IsEnabled()
             return EllesmereUIDB and EllesmereUIDB.autoOpenContainers == true
         end
+        -- This payout can award this capped currency; hold only the known pair.
+        local ARTISAN_PAYOUT_ITEM_ID = 246585
+        local SHARD_OF_DUNDUN_CURRENCY_ID = 3376
+        local function ShouldHoldCappedArtisanPayout(itemID)
+            if itemID ~= ARTISAN_PAYOUT_ITEM_ID
+                or not (EllesmereUIDB
+                    and EllesmereUIDB.autoOpenContainersHoldCappedArtisanPayouts == true) then
+                return false
+            end
+            return C_CurrencyInfo and C_CurrencyInfo.PlayerHasMaxQuantity
+                and C_CurrencyInfo.PlayerHasMaxQuantity(SHARD_OF_DUNDUN_CURRENCY_ID) or false
+        end
         -- A merchant being open turns UseContainerItem into a SELL (Blizzard
         -- routes "use item" to the vendor), so auto-open must pause while any
         -- merchant frame is shown -- otherwise freshly-bought containers get
@@ -362,6 +374,12 @@ qolFrame:SetScript("OnEvent", function(self)
                 -- linger in the bag) aren't opened over / re-opened while looting.
                 containerFrame:RegisterEvent("LOOT_OPENED")
                 containerFrame:RegisterEvent("LOOT_CLOSED")
+                if EllesmereUIDB.autoOpenContainersHoldCappedArtisanPayouts == true
+                    and C_CurrencyInfo and C_CurrencyInfo.PlayerHasMaxQuantity then
+                    containerFrame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+                else
+                    containerFrame:UnregisterEvent("CURRENCY_DISPLAY_UPDATE")
+                end
                 -- Resume opens deferred while the player was casting. Without
                 -- these the deferral would stall until the next bag update.
                 containerFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
@@ -371,6 +389,8 @@ qolFrame:SetScript("OnEvent", function(self)
                     _scanBag = BACKPACK_CONTAINER
                     _scanSlot = 1
                     scanFrame:Show()
+                elseif RequestScan then
+                    RequestScan()
                 end
             else
                 containerFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
@@ -382,6 +402,7 @@ qolFrame:SetScript("OnEvent", function(self)
                 end
                 containerFrame:UnregisterEvent("LOOT_OPENED")
                 containerFrame:UnregisterEvent("LOOT_CLOSED")
+                containerFrame:UnregisterEvent("CURRENCY_DISPLAY_UPDATE")
                 containerFrame:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
                 containerFrame:UnregisterEvent("UNIT_SPELLCAST_STOP")
                 containerFrame:UnregisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
@@ -501,7 +522,8 @@ qolFrame:SetScript("OnEvent", function(self)
                 -- (set synchronously below) or Blizzard's isLocked. Re-using a
                 -- container that's still resolving a previous open strands it.
                 if info and info.itemID and not info.isLocked and not _openInProgress[key] then
-                    if IsWarboundExcluded(item.bag, item.slot) then
+                    if IsWarboundExcluded(item.bag, item.slot)
+                        or ShouldHoldCappedArtisanPayout(info.itemID) then
                         return step(idx + 1)
                     end
                     if _openableCache[info.itemID] and not _failedItems[info.itemID] then
@@ -632,6 +654,12 @@ qolFrame:SetScript("OnEvent", function(self)
             end
             if event == "BAG_UPDATE_DELAYED" then
                 RequestScan()
+                return
+            end
+            if event == "CURRENCY_DISPLAY_UPDATE" then
+                if not ShouldHoldCappedArtisanPayout(ARTISAN_PAYOUT_ITEM_ID) then
+                    RequestScan()
+                end
                 return
             end
             if event == "UNIT_SPELLCAST_SUCCEEDED" or event == "UNIT_SPELLCAST_STOP"
