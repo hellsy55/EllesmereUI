@@ -6777,6 +6777,13 @@ local function CollectAndReanchor()
                         if key then
                             fc.sortOrder = key
                         else
+                            -- Remember where this frame last sorted before the
+                            -- marker overwrites it. The interpolation below needs
+                            -- a fallback that holds position rather than guessing
+                            -- when Blizzard has not laid the viewer out yet.
+                            if type(fc.sortOrder) == "number" then
+                                fc._lastSortOrder = fc.sortOrder
+                            end
                             fc.sortOrder = false  -- spillover marker, resolved below
                             hasSpill = true
                         end
@@ -6856,8 +6863,9 @@ local function CollectAndReanchor()
                     for _, frame in ipairs(frames) do
                         local fc = _ecmeFC[frame]
                         if fc and fc.sortOrder == false then
-                            if anchorKeys and frame.cooldownID ~= nil then
-                                local L = frame.layoutIndex or 0
+                            if anchorKeys and frame.cooldownID ~= nil
+                               and frame.layoutIndex then
+                                local L = frame.layoutIndex
                                 local predIdx, predLI
                                 for i = 1, #anchorKeys do
                                     local li = anchorLIs[i]
@@ -6871,6 +6879,19 @@ local function CollectAndReanchor()
                                 -- slots and never ties its predecessor.
                                 local baseIdx = predIdx or ((minAnchorIdx or 1) - 1)
                                 fc.sortOrder = baseIdx + ((L + 1) / 1e6)
+                            elseif frame.cooldownID ~= nil and not frame.layoutIndex then
+                                -- Blizzard has not assigned this frame a layout
+                                -- position yet: it re-lays the viewer out on a
+                                -- preset switch, an addon update and at login,
+                                -- which is exactly when this was reported.
+                                -- `layoutIndex or 0` used to stand in here, and 0
+                                -- is below every real layoutIndex, so the frame
+                                -- landed before every anchor -- a tracked spell
+                                -- silently jumping to FIRST place while
+                                -- Blizzard's own order was never wrong.
+                                -- Hold the last known position instead; the next
+                                -- pass, once the layout exists, places it properly.
+                                fc.sortOrder = fc._lastSortOrder or 99999
                             else
                                 fc.sortOrder = 99999
                             end
