@@ -13505,6 +13505,76 @@ function InitializeFrames()
         end
     end
 
+    ---------------------------------------------------------------------------
+    --  Boss castbar safety net: force-clear any boss castbar (and its
+    --  cancelled/interrupted outcome overlay) whenever that boss frame's
+    --  unit no longer exists. Boss frame Show/Hide is driven by oUF's
+    --  RegisterUnitWatch state driver, which normally hides the frame the
+    --  instant the boss unit disappears (kill, wipe, or leaving the
+    --  instance). That state-driver update can occasionally lag or miss the
+    --  transition on an instance exit, leaving the frame -- and any castbar
+    --  mid-cast or mid-outcome-message -- visibly stuck on screen even
+    --  though the unit is gone. This sweep is belt-and-suspenders: it runs
+    --  on the same triggers that already drive general visibility and
+    --  force-hides anything left over.
+    ---------------------------------------------------------------------------
+    local function EUI_ClearBossCastbar(f)
+        local castbar = f and f.Castbar
+        if not castbar then return end
+        castbar._eufCastActive = nil
+        castbar._eufOutcomeVisible = nil
+        castbar._eufOutcomeToken = (castbar._eufOutcomeToken or 0) + 1
+        if castbar._outcomeFrame then castbar._outcomeFrame:Hide() end
+        if castbar._outcomeIconFrame then castbar._outcomeIconFrame:Hide() end
+        castbar:Hide()
+        if castbar._iconFrame then castbar._iconFrame:Hide() end
+        local bg = castbar:GetParent()
+        if bg then bg:Hide() end
+    end
+    ns.EUI_ClearBossCastbar = EUI_ClearBossCastbar
+
+    local function EUI_GuardBossCastbars()
+        for i = 1, 5 do
+            local bossUnit = "boss" .. i
+            local f = frames[bossUnit]
+            if f and f.Castbar and not UnitExists(bossUnit) then
+                -- Unit is gone: hard-hide the frame itself (belt) and scrub
+                -- every piece of castbar/outcome state (suspenders) so
+                -- nothing can reappear or flash stale text when the frame
+                -- is reused for a later encounter.
+                if f:IsShown() then f:Hide() end
+                EUI_ClearBossCastbar(f)
+            end
+        end
+    end
+    ns.EUI_GuardBossCastbars = EUI_GuardBossCastbars
+
+    if not frames._bossCastbarGuard then
+        frames._bossCastbarGuard = CreateFrame("Frame")
+        frames._bossCastbarGuard:RegisterEvent("PLAYER_ENTERING_WORLD")
+        frames._bossCastbarGuard:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+        frames._bossCastbarGuard:RegisterEvent("INSTANCE_ENCOUNTER_ENGAGE_UNIT")
+        frames._bossCastbarGuard:RegisterEvent("PLAYER_REGEN_ENABLED")
+        frames._bossCastbarGuard:RegisterEvent("GROUP_ROSTER_UPDATE")
+    end
+    frames._bossCastbarGuard:SetScript("OnEvent", function()
+        -- Small delay so oUF's own unit-watch gets first crack at hiding the
+        -- frame normally; this only mops up whatever it missed.
+        C_Timer.After(0.2, EUI_GuardBossCastbars)
+    end)
+    EUI_GuardBossCastbars()
+
+    -- Extra immediate net: whenever a boss frame is hidden by any means
+    -- (state driver, this guard, or anything else), scrub its castbar state
+    -- right away rather than waiting for the next guard sweep.
+    for i = 1, 5 do
+        local f = frames["boss" .. i]
+        if f and not f._eufCastbarHideHooked then
+            f._eufCastbarHideHooked = true
+            f:HookScript("OnHide", EUI_ClearBossCastbar)
+        end
+    end
+
     -- Apply user-selected frame strata to all unit frames
     local ufStrata = db.profile.frameStrata or "MEDIUM"
     for unitKey, frame in pairs(frames) do
