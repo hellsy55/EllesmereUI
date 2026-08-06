@@ -12923,7 +12923,12 @@ function EAB:FinishSetup()
         if locked == nil and C_CVar and C_CVar.GetCVarBool then
             locked = C_CVar.GetCVarBool("lockActionBars") and true or false
         end
-        ActionButtonController:SetAttribute("eab-barslocked", locked and 1 or 0)
+        local v = locked and 1 or 0
+        -- Guarded: SetAttribute re-runs the controller's _onattributechanged
+        -- snippet, and CVAR_UPDATE is a firehose at login.
+        if ActionButtonController:GetAttribute("eab-barslocked") ~= v then
+            ActionButtonController:SetAttribute("eab-barslocked", v)
+        end
     end
 
     -- 12.1: registering events on a frame stamps it with the EventRegistrations
@@ -12931,7 +12936,7 @@ function EAB:FinishSetup()
     -- any aspect. The controller wraps buttons and executes snippets, so its
     -- events must live on a plain sidecar listener, never on the controller.
     EAB._abcEvents = ns.TakeShell()
-    EAB._abcEvents:SetScript("OnEvent", function(_, event)
+    EAB._abcEvents:SetScript("OnEvent", function(_, event, arg1)
         if event == "ACTIONBAR_SHOWGRID" then
             -- Cancel any pending restore (swap case: drop + immediate pickup)
             _gridRestorePending = false
@@ -12979,8 +12984,11 @@ function EAB:FinishSetup()
                 end
             end
         elseif event == "CVAR_UPDATE" then
-            -- Lock toggled in Blizzard's settings: re-sync so the drag wrapper
-            -- stops (or starts) revealing on a plain left-drag immediately.
+            -- Name-filtered: CVAR_UPDATE fires for every cvar, dozens of times
+            -- at login. Only the lock matters to the drag wrapper.
+            if arg1 == "lockActionBars" then ns.EABSyncBarsLocked() end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            -- A lock toggled during combat deferred; pick it up on regen.
             ns.EABSyncBarsLocked()
         elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" then
             ns.EABSyncBarsLocked()
@@ -13010,6 +13018,7 @@ function EAB:FinishSetup()
     EAB._abcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
     EAB._abcEvents:RegisterEvent("SPELLS_CHANGED")
     EAB._abcEvents:RegisterEvent("CVAR_UPDATE")
+    EAB._abcEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
     -- Seed before the first drag: PLAYER_ENTERING_WORLD may already be past.
     ns.EABSyncBarsLocked()
 
