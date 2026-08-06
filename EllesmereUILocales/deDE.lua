@@ -5424,3 +5424,13 @@ L["Stop"] = "Stopp"
 -- QoL: Raid Tools -- hidden in a raid without leader or assist
 L["A raid control panel with ready check, pull timer and raid markers. In a raid it only shows while you are the leader or an assistant, since none of its buttons work without that; in a party it always shows."] = "Ein Kontrollfeld für Schlachtzüge mit Bereitschaftsprüfung, Pull-Timer und Schlachtzugsmarkierungen. Im Schlachtzug wird es nur angezeigt, solange Ihr Anführer oder Assistent seid, da ohne diese Rechte keine seiner Schaltflächen funktioniert; in einer Gruppe wird es immer angezeigt."
 L["Raid Tools is hidden in a raid without leader or assist -- none of its buttons work there."] = "Die Raid-Tools werden im Schlachtzug ohne Anführer- oder Assistentenrechte ausgeblendet -- dort funktioniert keine ihrer Schaltflächen."
+
+-- QoL: Raid Tools -- per-button switches and the 0-second pull slots
+L["GROUP BUTTONS"] = "GRUPPENSCHALTFLÄCHEN"
+L["Show Role Check"] = "Rollenüberprüfung anzeigen"
+L["Shows the Role Check button. Turn it off and the remaining buttons close the gap."] = "Zeigt die Schaltfläche 'Rollenüberprüfung'. Ist sie ausgeschaltet, rücken die übrigen Schaltflächen nach."
+L["Show Convert to Raid"] = "'In Schlachtzug umwandeln' anzeigen"
+L["Shows the Convert to Raid button, which reads Convert to Party while you are in a raid."] = "Zeigt die Schaltfläche 'In Schlachtzug umwandeln', die im Schlachtzug 'In Gruppe umwandeln' heißt."
+L["Show Disband"] = "'Auflösen' anzeigen"
+L["Shows the Disband button. It always asks before disbanding, but hiding it puts it out of misclick range for good."] = "Zeigt die Schaltfläche 'Auflösen'. Sie fragt immer nach, bevor die Gruppe aufgelöst wird -- ausgeblendet ist sie jedoch endgültig außer Reichweite von Fehlklicks."
+L["Countdown length of this pull button, in seconds. Set it to 0 to hide the button; with all three at 0 the whole pull row disappears, Stop included."] = "Countdown-Dauer dieser Pull-Schaltfläche in Sekunden. Auf 0 gesetzt wird die Schaltfläche ausgeblendet; stehen alle drei auf 0, verschwindet die gesamte Pull-Zeile samt 'Stopp'."
