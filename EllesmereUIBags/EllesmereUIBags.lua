@@ -844,18 +844,37 @@ local function CreateHeader()
                 whereIs[idx] = d.pos
             end
 
+            -- Sorted item i normally targets slot i, filling the bags from the
+            -- first slot down. With Sort to Bottom it targets slot i + offset
+            -- instead, so the block lands in the LAST #items slots and the free
+            -- slots float to the top of the grid. The order inside the block is
+            -- identical either way -- only where it starts changes.
+            --
+            -- The walk has to run toward the free slots (forwards for top,
+            -- backwards for bottom): that way the item displaced by a swap
+            -- always lands in a slot this pass has yet to visit, so it gets
+            -- placed in the same pass. Walking the wrong way strands displaced
+            -- items behind the cursor -- still correct, but it needs a BAG_UPDATE
+            -- retry per stranding and blew past the 15-retry cap on a full bag.
+            local offset, first, last, step = 0, 1, #items, 1
+            if BP().bagSortToBottom then
+                offset = total - #items
+                first, last, step = #items, 1, -1
+            end
+
             local moves = {}
-            for t = 1, #items do
-                local s = whereIs[t]
+            for i = first, last, step do
+                local t = i + offset
+                local s = whereIs[i]
                 if s ~= t then
                     local displaced = atPos[t]
                     if displaced and sID[s] and sID[t] and sID[s] == sID[t] then
                         -- Same itemID: skip to avoid merge, retry will resolve
                     else
                         moves[#moves + 1] = { sBag[s], sSlot[s], sBag[t], sSlot[t] }
-                        whereIs[t] = t
+                        whereIs[i] = t
                         if displaced then whereIs[displaced] = s end
-                        atPos[t] = t
+                        atPos[t] = i
                         atPos[s] = displaced
                         sID[s], sID[t] = sID[t], sID[s]
                         sKey[s], sKey[t] = sKey[t], sKey[s]
@@ -985,8 +1004,19 @@ local function CreateHeader()
 
     -- MultiBag sort: defer to Blizzard's native bag sort. Insecure-callable, no
     -- taint; the resulting BAG_UPDATE storm drives the module's normal refresh.
+    -- Sort to Bottom rides Blizzard's own fill direction: right-to-left means
+    -- "start at the backpack" (it sits at the right end of the default bag bar),
+    -- which is our top, so clearing it fills from the last bag back and leaves
+    -- the free slots in the sections at the top of the view. Only written while
+    -- the option is on -- it is a real Blizzard setting that also drives their
+    -- Clean Up button, so with the option off we leave whatever the player set.
+    -- (Re-asserted per sort rather than once at enable time: the player, or a
+    -- profile switch, can move it out from under us between sorts.)
     local function DoBlizzardSort()
         LockSort()
+        if BP().bagSortToBottom and C_Container.SetSortBagsRightToLeft then
+            C_Container.SetSortBagsRightToLeft(false)
+        end
         C_Container.SortBags()
         C_Timer.After(3, UnlockSort)
     end
