@@ -7221,21 +7221,35 @@ local function CollectAndReanchor()
     end
     local buffViewer = _G["BuffIconCooldownViewer"]
     local barViewer  = _G["BuffBarCooldownViewer"]
-    -- Only protect unresolved frames while the retry budget below still has
-    -- passes left. Once it is spent, a frame that still will not resolve is no
-    -- longer plausibly transient (a stale pool entry with a dead cooldownID),
-    -- and parking it is right again -- otherwise it would sit at Blizzard's own
-    -- Edit Mode position forever, which is the "CDM looks scrambled" face of
-    -- this bug rather than the "CDM is empty" one.
+    -- Only protect NEVER-CLAIMED unresolved frames while the retry budget below
+    -- still has passes left. Once it is spent, a frame that has never been ours
+    -- and still will not resolve is no longer plausibly transient (a stale pool
+    -- entry with a dead cooldownID), and parking it is right again -- otherwise
+    -- it would sit at Blizzard's own Edit Mode position forever, which is the
+    -- "CDM looks scrambled" face of this bug rather than the "CDM is empty" one.
     local protectUnresolved = (ns._cdmUnresolvedRetries or 0) < 3
     for frame in pairs(allActiveFrames) do
         if usedFrames[frame] then
             -- Claimed: leave alone
-        elseif unresolvedFrames[frame] and protectUnresolved then
+        elseif unresolvedFrames[frame]
+               and (protectUnresolved
+                    or (_ecmeFC[frame] and _ecmeFC[frame].barKey)) then
             -- Unknown, not rejected: identification failed this pass, so we
             -- have no basis to park it. Leave it exactly as it is and let the
             -- re-collect scheduled at the end of this function claim it once
             -- the cooldown-viewer API answers again.
+            --
+            -- fc.barKey means we HAVE claimed this frame before, and that
+            -- exemption never expires. ScheduleTalentRebuild wipes resolvedSid
+            -- and cachedCdID but deliberately not barKey, so it survives the
+            -- exact rebuild that strips the resolve memos -- which is the zone
+            -- transition where the API answers nil for longer than any fixed
+            -- retry budget can cover. A frame that was on a bar a moment ago
+            -- and is momentarily unidentifiable is transient by definition, and
+            -- parking it is what turns a working CDM blank. Note this cannot
+            -- strand a genuinely retired frame: one whose spell was unassigned
+            -- or ghosted RESOLVES fine and simply routes nowhere, so it never
+            -- reaches this branch at all.
         elseif frame._isRacialFrame or frame._isTrinketFrame
                or frame._isPresetFrame or frame._isItemPresetFrame
                or frame._isCustomSpellFrame then
