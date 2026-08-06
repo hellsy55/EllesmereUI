@@ -4981,6 +4981,81 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
+        local function AddTBBTextSwatch(row, region, prefix)
+            local ctrl = region._control
+            local function GetColor()
+                local bd = SelectedTBB()
+                if not bd then return 1, 1, 1, 0.9 end
+                local r = bd[prefix .. "TextR"]
+                local g = bd[prefix .. "TextG"]
+                local b = bd[prefix .. "TextB"]
+                local a = bd[prefix .. "TextA"]
+                if r == nil then r = 1 end
+                if g == nil then g = 1 end
+                if b == nil then b = 1 end
+                if a == nil then a = 0.9 end
+                return r, g, b, a
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                region, row:GetFrameLevel() + 3, GetColor,
+                function(r, g, b, a)
+                    local bd = SelectedTBB(); if not bd then return end
+                    bd[prefix .. "TextR"] = r
+                    bd[prefix .. "TextG"] = g
+                    bd[prefix .. "TextB"] = b
+                    bd[prefix .. "TextA"] = a
+                    RefreshTBB()
+                end,
+                true, 20)
+            PP.Point(swatch, "RIGHT", ctrl, "LEFT", -12, 0)
+            region._lastInline = swatch
+
+            local block = CreateFrame("Frame", nil, swatch)
+            block:SetAllPoints()
+            block:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            block:EnableMouse(true)
+            block:SetScript("OnEnter", function()
+                local bd = SelectedTBB()
+                local tip
+                if prefix == "name" and bd and bd.verticalOrientation then
+                    tip = "Horizontal Orientation (name text is not shown on vertical bars)"
+                else
+                    local label = prefix == "timer" and "Duration Text"
+                        or (prefix == "stacks" and "Stacks Text" or "Name Text")
+                    tip = "This option requires a " .. label .. " position other than None"
+                end
+                EllesmereUI.ShowWidgetTooltip(swatch, EllesmereUI.DisabledTooltip(tip))
+            end)
+            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function UpdateSwatchState()
+                local bd = SelectedTBB()
+                local position
+                if bd then
+                    position = bd[prefix .. "Position"]
+                    if not position then
+                        if prefix == "name" then
+                            position = (bd.showName ~= false) and "left" or "none"
+                        elseif prefix == "timer" then
+                            position = bd.showTimer and "right" or "none"
+                        else
+                            position = "center"
+                        end
+                    end
+                end
+                local enabled = position ~= nil and position ~= "none"
+                if prefix == "name" and bd and bd.verticalOrientation then enabled = false end
+                swatch:SetAlpha(enabled and 1 or 0.3)
+                if enabled then block:Hide() else block:Show() end
+            end
+
+            EllesmereUI.RegisterWidgetRefresh(function()
+                updateSwatch()
+                UpdateSwatchState()
+            end)
+            UpdateSwatchState()
+        end
+
         local nameRow
         nameRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Name Text",
@@ -5017,6 +5092,8 @@ initFrame:SetScript("OnEvent", function(self)
                   RefreshTBB(); EllesmereUI:RefreshPage()
               end }
         );  y = y - h
+        AddTBBTextSwatch(nameRow, nameRow._leftRegion, "name")
+        AddTBBTextSwatch(nameRow, nameRow._rightRegion, "timer")
         -- Cog on Name Text: text size + x/y
         do
             local rgn = nameRow._leftRegion
@@ -5218,6 +5295,7 @@ initFrame:SetScript("OnEvent", function(self)
                   bd.reverseFill = v; RefreshTBB()
               end }
         );  y = y - h
+        AddTBBTextSwatch(stacksRow, stacksRow._leftRegion, "stacks")
         do
             local rgn = stacksRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
