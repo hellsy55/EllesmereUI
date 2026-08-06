@@ -2039,8 +2039,17 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- and HookScript stacks.
         if not EFD(btn).cdClickHooked then
             EFD(btn).cdClickHooked = true
-            btn:HookScript("PostClick", function(self)
+            btn:HookScript("PostClick", function(self, _, down)
                 if ns._EABPressPush then ns._EABPressPush(self) end
+                -- Publish the press for other EUI modules (the CDM press
+                -- mirror). Same reason this hook exists at all: a click-routed
+                -- keybind never reaches ActionButtonDown/MultiActionButtonDown,
+                -- so a subscriber watching those native commands cannot see
+                -- Bars 9/10, empower spells, or any custom-paged bar. Global
+                -- rather than ns because the subscriber is a separate addon,
+                -- matching _EAB_UpdateKeybinds. Nil when that module is off.
+                local onPress = _G._EUI_OnActionButtonPress
+                if onPress then onPress(self, down) end
             end)
         end
         -- When the pickup modifier is held (shift-click to move abilities),

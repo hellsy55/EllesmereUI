@@ -8978,6 +8978,49 @@ do
     end
 
     ---------------------------------------------------------------------------
+    --  Click-routed keybinds.
+    --  ActionButtonDown/MultiActionButtonDown below only fire for bars that
+    --  own a NATIVE binding command. EllesmereUI's action bars route a key
+    --  through the button with SetOverrideBindingClick whenever the native
+    --  command cannot resolve what the button actually shows: Bars 9 and 10
+    --  (no native command exists at all), every empower spell, and any bar
+    --  with user-configured or opted-out paging. Those presses never reach the
+    --  native handlers, so the mirror never saw them.
+    --
+    --  The action bars module already hooks PostClick on every button for its
+    --  own press-time GCD paint and publishes the press to us there, which is
+    --  the safe place to sit: PostClick runs after Blizzard's click handler has
+    --  finished, so this stays downstream of the protected calls that
+    --  OnActionButtonClick makes (UseContainerItem/SpellTargetItem on the
+    --  spell-targets-item path). Same taint posture as the native hooks below,
+    --  which likewise run after TryUseActionButton has fully returned.
+    ---------------------------------------------------------------------------
+    _G._EUI_OnActionButtonPress = function(btn, down)
+        -- Paint at the physical press, not the release: buttons register for
+        -- both edges, and in key-up mode the key is already gone by the up
+        -- click, which the IsKeyDown gate below would then read as a mouse
+        -- click.
+        if not down or not btn or not _anyPressMirror then return end
+        -- tonumber, not the raw attr: SetAttribute preserves whatever type was
+        -- written, and the slot map is keyed numerically, so a string "13"
+        -- would miss every lookup without erroring.
+        local slot = tonumber(btn.action or (btn.GetAttribute and btn:GetAttribute("action")))
+        if not slot then return end
+        local map = ns.CDMSlotBinding
+        local bindCmd = map and map[slot]
+        if not bindCmd then return end
+        -- Keyboard only, matching the native path. A click-routed keybind and a
+        -- mouse click are indistinguishable by this point (Blizzard's own note
+        -- in SecureTemplates: an addon's key press and mouse click look the
+        -- same), so use the binding itself as the discriminator. On the down
+        -- edge a real keypress always still has the key held.
+        local k1, k2 = GetBindingKey(bindCmd)
+        local b1, b2 = BaseKey(k1), BaseKey(k2)
+        if not ((b1 and IsKeyDown(b1)) or (b2 and IsKeyDown(b2))) then return end
+        OnPress(btn, bindCmd)
+    end
+
+    ---------------------------------------------------------------------------
     --  Hook the action-button key-down path (fires on press, even on cooldown)
     ---------------------------------------------------------------------------
     local MULTIBAR_BINDING = {
