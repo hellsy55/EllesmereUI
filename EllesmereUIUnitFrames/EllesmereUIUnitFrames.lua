@@ -11983,6 +11983,11 @@ function InitializeFrames()
         if not bar or not frames.player then return end
         bar:ClearAllPoints()
         local style = db.profile.player.classPowerStyle or "none"
+        -- Seed the built-style marker from the init build too, not just from
+        -- _toggleClassPower. Without this the first reload of a session sees a
+        -- nil marker, assumes a change, and pays a pointless teardown/rebuild
+        -- for users who have no override at all.
+        frames._classPowerBuiltStyle = style
         local position = db.profile.player.classPowerPosition or "top"
         local offsetX = db.profile.player.classPowerBarX or 0
         local offsetY = db.profile.player.classPowerBarY or 0
@@ -12208,6 +12213,10 @@ function InitializeFrames()
         -- default frame (or hidden), there is no EUI frame to attach it to.
         if not frames.player then return end
         style = style or db.profile.player.classPowerStyle or "none"
+        -- What is actually BUILT right now. Read by the reload pass below to
+        -- notice a style that changed through a path which never calls this
+        -- function (see the reload hook).
+        frames._classPowerBuiltStyle = style
         -- Keep showClassPowerBar in sync with style
         db.profile.player.showClassPowerBar = (style ~= "none")
         db.profile.player.classPowerStyle = style
@@ -13555,6 +13564,21 @@ function SetupOptionsPanel()
         -- Player private auras re-register with fresh geometry (one boolean
         -- check + return when disabled).
         if ns.PlayerPA_Apply then ns.PlayerPA_Apply() end
+        -- Class power: _toggleClassPower is the ONLY thing that honours a
+        -- classPowerStyle change, and it had exactly two callers -- the options
+        -- dropdown and the PLAYER_SPECIALIZATION_CHANGED watcher. Any other
+        -- path that changes the style left the live bar stale: a Spec Override
+        -- applying at login, a profile switch, an import. That is why the
+        -- reported workaround was to switch spec away and back, which is the
+        -- one event that does call it.
+        -- Gated on an actual change because the toggle is a full teardown and
+        -- rebuild; running it every reload would thrash the bar.
+        if frames._toggleClassPower then
+            local wantCP = db.profile.player.classPowerStyle or "none"
+            if wantCP ~= frames._classPowerBuiltStyle then
+                frames._toggleClassPower(wantCP)
+            end
+        end
     end)
     ns.ReloadFrames = function()
         if not reloadPending then
