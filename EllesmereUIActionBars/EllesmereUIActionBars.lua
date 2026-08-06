@@ -1270,7 +1270,9 @@ local function RegisterButtonWithController(btn)
     -- ActionButton1 showgrid monitor (which depends on Blizzard's retained
     -- MainActionBar event chain staying secure end to end). The pre-wrap
     -- returns nothing, so the native drag proceeds untouched; the matching
-    -- grid-off arrives via the monitor or, failing that, the regen apply.
+    -- grid-off arrives via the monitor or, failing that, the regen apply --
+    -- but only when a pickup actually happens, which is what the guard below
+    -- is for.
     -- OnDragStart fires on the GESTURE, not on a successful pickup. Blizzard's
     -- own handler no-ops when the bars are locked and the PICKUPACTION modifier
     -- is not held, so an unconditional reveal here lit every empty slot on a
@@ -12914,11 +12916,16 @@ function EAB:FinishSetup()
     -- chunk local: this file is at Lua 5.1's 200-local cap, and the snippet
     -- can only read attributes anyway.
     ns.EABSyncBarsLocked = function()
-        if InCombatLockdown() then ns._eabApplyDeferred = true return end
+        -- No _eabApplyDeferred here, unlike the widget-writing guards: nothing
+        -- else needs re-applying, and PLAYER_REGEN_ENABLED re-syncs this.
+        if InCombatLockdown() then return end
         local locked
         if Settings and Settings.GetValue then
             local ok, v = pcall(Settings.GetValue, "lockActionBars")
-            if ok then locked = v and true or false end
+            -- v ~= nil, not just ok: this seeds during FinishSetup, which can
+            -- run before the setting is registered. Accepting nil as "false"
+            -- would skip the CVar fallback and seed a LOCKED bar as unlocked.
+            if ok and v ~= nil then locked = v and true or false end
         end
         if locked == nil and C_CVar and C_CVar.GetCVarBool then
             locked = C_CVar.GetCVarBool("lockActionBars") and true or false
@@ -12991,7 +12998,7 @@ function EAB:FinishSetup()
             -- A lock toggled during combat deferred; pick it up on regen.
             ns.EABSyncBarsLocked()
         elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" then
-            ns.EABSyncBarsLocked()
+            if event == "PLAYER_ENTERING_WORLD" then ns.EABSyncBarsLocked() end
             -- Spec/talent swaps refill slots: retire the filled-slot fast
             -- lists (see the dispatcher's repaint walks) AND the curated-set
             -- memo (talents change what the viewer curates).
