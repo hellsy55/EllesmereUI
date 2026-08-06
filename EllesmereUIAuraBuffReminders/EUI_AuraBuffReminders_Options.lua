@@ -189,7 +189,7 @@ initFrame:SetScript("OnEvent", function(self)
             if co and co.enabled and co.enabled.weapon_enchant then
                 local WEI = _G._EABR_WEAPON_ENCHANT_ITEMS or {}
                 if #WEI > 0 then
-                    icons[#icons+1] = { texture = WEI[1].icon or 134400, label = "Weapon", cat = "consumable", itemKey = "weapon_enchant" }
+                    icons[#icons+1] = { texture = WEI[1].icon or 134400, label = EllesmereUI.L("Weapon"), cat = "consumable", itemKey = "weapon_enchant" }
                 end
             end
         end
