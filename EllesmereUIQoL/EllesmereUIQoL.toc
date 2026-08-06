@@ -22,6 +22,7 @@ EllesmereUIQoL_MovementAlert.lua
 EllesmereUIQoL_RaidGroups.lua
 EllesmereUIQoL_RaidTools.lua
 EllesmereUIQoL_RaidCheck.lua
+EllesmereUIQoL_FailedCastAlert.lua
 EUI_UpgradeCalc.lua
 
 # Options
@@ -32,4 +33,5 @@ EUI_QoL_AutoLogging_Options.lua
 EUI_QoL_Shifter_Options.lua
 EUI_QoL_MovementAlert_Options.lua
 EUI_QoL_RaidTools_Options.lua
+EUI_QoL_FailedCastAlert_Options.lua
 EUI_UpgradeCalc_Options.lua
