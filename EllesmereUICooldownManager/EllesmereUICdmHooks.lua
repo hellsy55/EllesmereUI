@@ -6782,7 +6782,7 @@ local function CollectAndReanchor()
                             -- a fallback that holds position rather than guessing
                             -- when Blizzard has not laid the viewer out yet.
                             if type(fc.sortOrder) == "number" then
-                                fc._lastSortOrder = fc.sortOrder
+                                fc.lastSortOrder = fc.sortOrder
                             end
                             fc.sortOrder = false  -- spillover marker, resolved below
                             hasSpill = true
@@ -6808,10 +6808,20 @@ local function CollectAndReanchor()
                     for _, frame in ipairs(frames) do
                         local fc = _ecmeFC[frame]
                         local k = fc and fc.sortOrder
-                        if type(k) == "number" and frame.cooldownID ~= nil then
+                        -- layoutIndex must be REAL to anchor anything. It used to
+                        -- fall back to 0, which is below every true layoutIndex, so
+                        -- an anchor that had not been laid out yet became a valid
+                        -- predecessor for every spillover -- and during a full
+                        -- relayout, when they all collapse to 0, the interpolation
+                        -- degenerates to "after whichever anchor came first". An
+                        -- anchor we cannot place is not an anchor; dropping it just
+                        -- narrows the anchor set, and an empty set already has a
+                        -- defined meaning (spillovers fall to the tail).
+                        if type(k) == "number" and frame.cooldownID ~= nil
+                           and frame.layoutIndex then
                             blizzKeys = blizzKeys or {}; blizzLIs = blizzLIs or {}
                             blizzKeys[#blizzKeys + 1] = k
-                            blizzLIs[#blizzKeys] = frame.layoutIndex or 0
+                            blizzLIs[#blizzKeys] = frame.layoutIndex
                         end
                     end
                     -- Full anchor set = Blizzard anchors + preset anchors (interpolated
@@ -6891,7 +6901,7 @@ local function CollectAndReanchor()
                                 -- Blizzard's own order was never wrong.
                                 -- Hold the last known position instead; the next
                                 -- pass, once the layout exists, places it properly.
-                                fc.sortOrder = fc._lastSortOrder or 99999
+                                fc.sortOrder = fc.lastSortOrder or 99999
                             else
                                 fc.sortOrder = 99999
                             end
